@@ -1,0 +1,12 @@
+{
+  "task_id": "task-jwt-service",
+  "status": "blocked",
+  "files_created": [],
+  "files_modified": [],
+  "files_read": ["pom.xml"],
+  "self_review": null,
+  "blockers": "Cannot complete task: task-auth-model has not been completed yet. The User entity is missing.",
+  "notes_for_reviewer": null,
+  "input_tokens": 1200,
+  "output_tokens": 150
+}

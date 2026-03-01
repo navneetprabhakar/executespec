@@ -1,0 +1,185 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:agentteam}
+    driver-class-name: org.postgresql.Driver
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate        # Hibernate only validates — Flyway manages all schema
+    show-sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true   # Safe for existing databases
+    baseline-version: 0         # Baseline before V1
+    locations: classpath:db/migration
+
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY}
+      chat:
+        options:
+          model: claude-sonnet-4-5-20250929     # cheap default; worker tasks override via assigned_model
+          max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o-mini
+          max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}          # set GEMINI_API_KEY env var to enable Gemini fallback
+        chat:
+          options:
+            model: gemini-2.0-flash          # default; overridden per-call by LlmRouter chains
+
+agent:
+  workspace: ./workspace
+  roles:
+    planner: anthropic
+    worker: anthropic
+    reviewer: anthropic
+  token-budget:
+    max-tokens: 16000        # Must match spring.ai.*.chat.options.max-tokens
+    low-pct: 0.25            # 4,000 tokens — LOW complexity soft limit
+    medium-pct: 0.50         # 8,000 tokens — MEDIUM complexity soft limit
+    high-pct: 0.75           # 12,000 tokens — HIGH complexity soft limit
+    hard-ceiling-pct: 0.90   # 14,400 tokens — absolute max, forces FORCE_REPORT
+  compaction:
+    warn-pct: 0.65
+    compact-pct: 0.75
+    hard-stop-pct: 0.90
+  concurrency:
+    max-runs: 3
+  github:
+    pat: ${GITHUB_PAT}
+    default-owner: ${GITHUB_OWNER}
+  shell:
+    sandbox-enabled: true
+    timeout-seconds: 300
+    additional-allowed-commands: []
+    additional-blocked-patterns: []
+  recovery:
+    enabled: true
+    warn-threshold-minutes: 5
+    act-threshold-minutes: 10
+    max-task-retries: 1
+    evaluator-log-window: 20
+    loop-repeat-threshold: 3
+    require-restart-approval: false
+    max-transient-retries: 3
+    rate-limit-backoff-seconds: 30
+    server-error-backoff-seconds: 10
+    max-auto-restarts: 3
+    auto-restart-backoff-seconds: 60
+    default-provider: anthropic
+    capable-models:
+      anthropic: claude-sonnet-4-5-20250929
+      openai: gpt-4o
+      gemini: gemini-3-pro
+    alternate-provider:
+      anthropic: openai
+      openai: gemini
+      gemini: anthropic
+  context:
+    enabled: true
+    model: claude-haiku-4-5-20251001      # The Scout: text summarization, no code generation
+    provider: anthropic
+    run-interval: 1
+  optimiser:
+    enabled: true
+    run-interval: 10
+    analysis-window-runs: 20
+    failure-rate-threshold: 0.20
+    pattern-min-occurrences: 2
+    model: claude-haiku-4-5-20251001      # The Scout: pattern analysis, text edits only
+    provider: anthropic
+  deployment:
+    enabled: true
+    gcp-project: ${GCP_PROJECT:my-gcp-project}
+    gcp-region: us-central1
+    artifact-registry:
+      repository: agent-demos
+      host: us-central1-docker.pkg.dev
+    cloud-run:
+      cpu: "1"
+      memory: 512Mi
+      max-instances: 1
+      allow-unauthenticated: true
+    ttl-days: 7
+    cleanup-cron: "0 3 * * * *"
+    docker:
+      build-timeout-seconds: 300
+    static-site:
+      nginx-image: nginx:1.25-alpine
+    spring-boot:
+      base-image: eclipse-temurin:21-jre-alpine
+    workspace:
+      retention-days: 30
+
+  # ── Tier 8: Compile agent, API spec generator, frontend preview ──────────────
+  compiler:
+    enabled: true
+    max-attempts: 3
+    timeout-seconds: 300
+    model: claude-sonnet-4-5-20250929    # sonnet required: complex multi-file error analysis + fixing
+    provider: anthropic
+  api-test-suite:
+    enabled: true
+    model: claude-sonnet-4-5-20250929    # sonnet required: quality OpenAPI 3.0 spec generation
+    provider: anthropic
+  preview:
+    enabled: true
+
+  # ── Tier 7: External Integrations (all disabled by default) ─────────────────
+  integrations:
+    enabled: false            # Master switch — set true to register /api/integrations/* endpoints
+    jira:
+      enabled: false
+      base-url: ${JIRA_BASE_URL:https://your-org.atlassian.net}
+      email: ${JIRA_EMAIL:}
+      api-token: ${JIRA_API_TOKEN:}
+      webhook-secret: ${JIRA_WEBHOOK_SECRET:}
+      trigger-status: "Ready for Coding"   # issue status name that fires the pipeline
+      in-progress-status: "In Progress"    # transition to on run start (null = skip)
+      in-review-status: "In Review"        # transition to on run complete (null = skip)
+      reopen-status: "Backlog"             # transition to on run failed (null = skip)
+      dashboard-url: http://localhost:8080
+      skip-approval: false
+    confluence:
+      enabled: false
+      base-url: ${CONFLUENCE_BASE_URL:https://your-org.atlassian.net}
+      email: ${CONFLUENCE_EMAIL:}
+      api-token: ${CONFLUENCE_API_TOKEN:}
+      trigger-label: "agent-run"           # page label that fires the pipeline
+      space-key: "ENG"                     # default space for child pages
+      dashboard-url: http://localhost:8080
+      skip-approval: false
+    servicenow:
+      enabled: false
+      base-url: ${SNOW_BASE_URL:https://your-instance.service-now.com}
+      username: ${SNOW_USERNAME:}
+      password: ${SNOW_PASSWORD:}
+      trigger-categories:
+        - "application"
+        - "database"
+      auto-resolve: false
+      dashboard-url: http://localhost:8080
+      skip-approval: false
+    pagerduty:
+      enabled: false
+      api-token: ${PD_API_TOKEN:}
+      webhook-secret: ${PD_WEBHOOK_SECRET:}
+      from-email: ${PD_FROM_EMAIL:}        # required for PATCH requests
+      trigger-types:
+        - "incident.trigger"
+      auto-resolve: false
+      dashboard-url: http://localhost:8080
+      skip-approval: false
+
+logging:
+  level:
+    com.navneet.agentteam: DEBUG
+    org.springframework.ai: WARN

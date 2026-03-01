@@ -1,0 +1,26 @@
+{
+  "overall_confidence": "LOW",
+  "recommendation": "REWORK",
+  "summary": "Critical security issue found: passwords stored in plain text. Must be fixed before merge.",
+  "task_reviews": [
+    {
+      "task_id": "task-auth-model",
+      "verdict": "FAIL",
+      "confidence": "HIGH",
+      "summary": "Password field stores plain text — critical security vulnerability",
+      "issues": [
+        {
+          "severity": "HIGH",
+          "file": "User.java",
+          "line_hint": "22",
+          "description": "Password stored as plain text. Must use BCrypt or similar hashing."
+        }
+      ]
+    }
+  ],
+  "merge_blockers": [
+    "Plain text password storage is a critical security vulnerability (CWE-256)"
+  ],
+  "post_merge_suggestions": [],
+  "readme_updated": false
+}

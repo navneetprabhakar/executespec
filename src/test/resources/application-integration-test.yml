@@ -1,0 +1,43 @@
+# Overrides for Testcontainers integration tests.
+# DataSource URL/credentials are set via @DynamicPropertySource in PostgresIntegrationBase.
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Flyway manages schema; Hibernate only validates
+    show-sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+
+  # Disable Spring AI auto-configuration that needs real API keys
+  ai:
+    anthropic:
+      chat:
+        options:
+          model: claude-haiku-4-5-20251001   # cheapest; tests mock LLM anyway
+
+agent:
+  workspace: ${java.io.tmpdir}/it-workspace
+  recovery:
+    enabled: false   # avoid background scheduled jobs interfering with tests
+  context:
+    enabled: false
+  optimiser:
+    enabled: false
+  deployment:
+    enabled: false
+  integrations:
+    jira:
+      enabled: false
+    confluence:
+      enabled: false
+    servicenow:
+      enabled: false
+    pagerduty:
+      enabled: false
+
+logging:
+  level:
+    com.navneet.agentteam: WARN
+    org.flywaydb: INFO
