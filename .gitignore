@@ -1,0 +1,35 @@
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.project
+.classpath
+.settings/
+
+# Local development secrets — NEVER commit
+application-local.yml
+application-local.yaml
+.env
+.env.local
+.env.production
+*.env
+
+# Workspace (agent-generated files)
+workspace/
+
+workspace/*
+
+# OS
+.DS_Store
+Thumbs.db

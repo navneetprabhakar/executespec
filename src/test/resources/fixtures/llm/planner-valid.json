@@ -1,0 +1,38 @@
+{
+  "plan_summary": "Implement user authentication with JWT tokens across 3 tasks",
+  "tasks": [
+    {
+      "task_id": "task-auth-model",
+      "title": "Create User entity and repository",
+      "objective": "Define the User JPA entity and Spring Data repository for authentication",
+      "boundaries": "Only create the model layer — no service or controller code",
+      "output_format": "Java source files",
+      "acceptance_criteria": "User entity has id, email, passwordHash, createdAt fields. UserRepository extends JpaRepository.",
+      "depends_on": [],
+      "complexity": "LOW",
+      "assigned_model": null
+    },
+    {
+      "task_id": "task-jwt-service",
+      "title": "Implement JwtService for token generation and validation",
+      "objective": "Create a service that generates and validates JWT access tokens",
+      "boundaries": "Use io.jsonwebtoken (JJWT) library only. No controller code.",
+      "output_format": "Java source files",
+      "acceptance_criteria": "generateToken(user) returns valid JWT. validateToken(token) returns true for valid tokens.",
+      "depends_on": ["task-auth-model"],
+      "complexity": "MEDIUM",
+      "assigned_model": null
+    },
+    {
+      "task_id": "task-auth-controller",
+      "title": "Create AuthController with /api/auth/login endpoint",
+      "objective": "Expose a REST endpoint that accepts credentials and returns a JWT",
+      "boundaries": "POST /api/auth/login only. No registration endpoint in this task.",
+      "output_format": "Java source files + integration test",
+      "acceptance_criteria": "POST /api/auth/login with valid credentials returns 200 with token. Invalid credentials return 401.",
+      "depends_on": ["task-auth-model", "task-jwt-service"],
+      "complexity": "MEDIUM",
+      "assigned_model": null
+    }
+  ]
+}

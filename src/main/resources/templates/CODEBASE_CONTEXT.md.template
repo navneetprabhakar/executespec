@@ -1,0 +1,127 @@
+# Codebase Context
+<!--
+  This file is injected into every agent on every run.
+  Keep it under 500 lines. Be precise. Update it when conventions change.
+  Last updated: YYYY-MM-DD
+-->
+
+## Project Overview
+<!-- One paragraph. What this project is, what it does, who uses it. -->
+DESCRIBE YOUR PROJECT HERE
+
+## Technology Stack
+- **Language**: Java 21
+- **Framework**: Spring Boot 3.x
+- **Build**: Maven (use `mvn` commands, not `./mvnw` unless wrapper is present)
+- **Test framework**: JUnit 5 + Mockito + Spring Boot Test
+- **Database**: PostgreSQL via Spring Data JPA
+- **Other key dependencies**: Lombok, Jackson
+
+## Package Structure
+```
+src/main/java/com/{your-group}/{your-artifact}/
+├── controller/     — @RestController classes only, no business logic
+├── service/        — Interfaces + implementations, business logic lives here
+├── repository/     — Spring Data JPA repositories
+├── model/          — JPA entities
+├── dto/            — Request/response DTOs (use Java records)
+├── config/         — @Configuration classes
+└── exception/      — Custom exception classes + @ControllerAdvice
+```
+
+The test structure mirrors src/main:
+```
+src/test/java/com/{your-group}/{your-artifact}/
+├── controller/     — MockMvc-based controller tests
+├── service/        — Unit tests with Mockito
+└── integration/    — @SpringBootTest integration tests (use sparingly)
+```
+
+## Naming Conventions
+- Controllers: `{Entity}Controller.java` — e.g. `ItemController.java`
+- Services: `{Entity}Service.java` (interface) + `{Entity}ServiceImpl.java` (impl)
+- Repositories: `{Entity}Repository.java`
+- Entities: singular noun — `Item`, not `Items`
+- DTOs: `{Entity}CreateRequest`, `{Entity}UpdateRequest`, `{Entity}Response`
+- Test classes: `{ClassName}Test.java` — mirrors the class under test exactly
+- Test methods: `{methodName}_when{Condition}_should{ExpectedBehaviour}()`
+
+## Coding Standards
+
+### Required on all new code
+- `@Slf4j` on every class that logs (use `log.info/warn/error`, never `System.out`)
+- `@RequiredArgsConstructor` for constructor injection (never `@Autowired` on fields)
+- `@Transactional` on service methods that write to the database
+- `@Valid` on all `@RequestBody` parameters in controllers
+- `@NotNull`, `@NotBlank` etc. on DTO fields that are required
+
+### Error handling pattern
+```java
+// Throw domain exceptions from service layer
+throw new ResourceNotFoundException("Item not found: " + id);
+
+// Handle in a single @ControllerAdvice (already exists at exception/GlobalExceptionHandler.java)
+// Do NOT add try-catch in controllers — let the advice handle it
+```
+
+### Response patterns
+```java
+// Use ResponseEntity with explicit status codes
+return ResponseEntity.ok(itemService.findAll());
+return ResponseEntity.status(HttpStatus.CREATED).body(itemService.create(request));
+return ResponseEntity.noContent().build();  // for DELETE
+
+// Never return null from a controller method
+// Never return Optional from a controller method — resolve it in the service
+```
+
+### DTO pattern (Java records)
+```java
+// Request DTO
+public record ItemCreateRequest(
+    @NotBlank String name,
+    @NotNull @Positive BigDecimal price
+) {}
+
+// Response DTO
+public record ItemResponse(
+    Long id,
+    String name,
+    BigDecimal price,
+    Instant createdAt
+) {}
+```
+
+### Test pattern
+```java
+@WebMvcTest(ItemController.class)  // for controller tests
+@ExtendWith(MockitoExtension.class) // for unit tests
+@SpringBootTest                     // for integration tests only (slow — use sparingly)
+
+// Use @MockBean in controller tests, @Mock in unit tests
+// Always assert response status AND response body
+// Test both happy path AND the most common error case minimum
+```
+
+## Files Agents Must NOT Modify
+- `pom.xml` — no dependency changes without human review
+- `src/main/resources/application.yml` — no config changes
+- Any file with `// DO NOT MODIFY` in the first 5 lines
+
+## Files Agents Should Read for Context
+Before writing any new class, read:
+- The interface the new class implements (if any)
+- One existing example of the same type (e.g. read `OrderController.java` before writing `ItemController.java`)
+- The relevant entity/model class
+
+## Build Commands
+```bash
+mvn compile -q                          # compile only, quiet
+mvn test -q                             # all tests
+mvn test -Dtest=ItemControllerTest -q   # single test class
+mvn verify -q                           # compile + test + package
+```
+
+## Known Issues / Gotchas
+<!-- Update this section as you discover things agents repeatedly get wrong -->
+- Add entries here when an agent produces code that breaks something in a non-obvious way

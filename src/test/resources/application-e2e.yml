@@ -1,0 +1,45 @@
+# ── E2E test profile overrides ────────────────────────────────────────────────
+# Applied when @ActiveProfiles("e2e") is set on the test class.
+# Uses the same PostgreSQL instance as the app; a separate DB is recommended
+# but not required — tests use unique runIds and do not conflict.
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/agentteam
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  jpa:
+    show-sql: false
+
+agent:
+  workspace: ./workspace-e2e     # isolated from normal ./workspace
+
+  roles:
+    planner: anthropic
+    worker: anthropic
+    reviewer: anthropic
+
+  token-budget:
+    low: 1024
+    medium: 2048
+    high: 4096
+
+  concurrency:
+    max-runs: 2
+
+  recovery:
+    enabled: false               # prevent stuck-run monitor from interfering with test timing
+
+  context:
+    enabled: false               # post-merge context agent not needed in tests
+
+  optimiser:
+    enabled: false               # prompt optimiser not needed in tests
+
+  integrations:
+    enabled: false               # no integrations needed for pipeline E2E tests
+
+logging:
+  level:
+    com.navneet.agentteam: INFO   # less noise during test runs; change to DEBUG if debugging
+    org.springframework.ai: WARN

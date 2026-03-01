@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(java -version)",
+      "Bash(mvn -version)",
+      "Bash(pg_isready)",
+      "Bash(echo \"$ANTHROPIC_API_KEY:0:12...\")",
+      "Bash(psql -U postgres -lqt)",
+      "Bash(JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q)",
+      "Bash(find /Users/navneetprabhakar/Documents/antigravity/executespec/src -type f \\\\\\( -name \"*.java\" -o -name \"*.xml\" -o -name \"*.yml\" -o -name \"*.yaml\" \\\\\\) -exec sed -i '' 's/com\\\\.personal\\\\.agentteam/com.navneet.agentteam/g' {} +)",
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(git -C /Users/navneetprabhakar/Documents/antigravity/executespec/workspace log --oneline --all)",
+      "Bash(git -C /Users/navneetprabhakar/Documents/antigravity/executespec/workspace tag)",
+      "Bash(git -C /Users/navneetprabhakar/Documents/antigravity/executespec/workspace branch --all)",
+      "Bash(git -C /Users/navneetprabhakar/Documents/antigravity/executespec/workspace ls-tree -r --name-only agent-run/2bef445a)",
+      "Bash(PGPASSWORD=postgres psql -U postgres -d agentteam -c \"SELECT run_id, status, user_request, repo_mode, repo_url, failure_reason FROM pipeline_run WHERE run_id = ''2bef445a-c8ec-462b-8515-d46698b35896'';\")",
+      "Bash(/Applications/Postgres.app/Contents/Versions/18/bin/psql -U postgres -d agentteam -c \":*)",
+      "Bash(/Applications/Postgres.app/Contents/Versions/18/bin/psql -U postgres -d agentteam -c \"\\\\d pipeline_run\")",
+      "Bash(python3 -c \" import json with open\\(''/Users/navneetprabhakar/.claude/projects/-Users-navneetprabhakar-Documents-antigravity-executespec/c4671534-5d33-4f74-892c-a0fb6d695931/tool-results/toolu_01RFo4TPuwaaeZr5T4rjQtN6.json''\\) as f: data = json.load\\(f\\) text = data[0][''text''] print\\(text\\) \")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://api.anthropic.com/v1/messages -H \"x-api-key: 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\" -H \"anthropic-version: 2023-06-01\" -H \"content-type: application/json\" -d '{\"\"model\"\":\"\"claude-sonnet-4-5\"\",\"\"max_tokens\"\":10,\"\"messages\"\":[{\"\"role\"\":\"\"user\"\",\"\"content\"\":\"\"hi\"\"}]}')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://api.anthropic.com/v1/messages -H \"x-api-key: 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\" -H \"anthropic-version: 2023-06-01\" -H \"content-type: application/json\" -d '{\"\"model\"\":\"\"claude-sonnet-4-5-20250929\"\",\"\"max_tokens\"\":10,\"\"messages\"\":[{\"\"role\"\":\"\"user\"\",\"\"content\"\":\"\"hi\"\"}]}')",
+      "Bash(xargs ls -lh)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(python3 -c \"import openpyxl; print\\(''openpyxl available''\\)\")",
+      "Bash(python3 -c \"import pandas; print\\(''pandas available''\\)\")",
+      "Bash(pip3 install openpyxl pandas --quiet)",
+      "Bash(python3:*)"
+    ]
+  }
+}

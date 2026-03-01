@@ -1,0 +1,18 @@
+```json
+{
+  "plan_summary": "Add dark mode toggle to the settings page",
+  "tasks": [
+    {
+      "task_id": "task-dark-toggle",
+      "title": "Add dark mode CSS variables and toggle",
+      "objective": "Implement CSS custom properties for dark mode and a JS toggle button",
+      "boundaries": "Frontend only — no backend changes required",
+      "output_format": "HTML/CSS/JS files",
+      "acceptance_criteria": "Toggle button switches between light and dark mode. Preference persisted in localStorage.",
+      "depends_on": [],
+      "complexity": "LOW",
+      "assigned_model": null
+    }
+  ]
+}
+```
