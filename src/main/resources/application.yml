@@ -17,23 +17,17 @@ spring:
 
   ai:
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY}
+      api-key: ${ANTHROPIC_API_KEY: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}
       chat:
         options:
-          model: claude-sonnet-4-5-20250929     # cheap default; worker tasks override via assigned_model
+          model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
           max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
     openai:
-      api-key: ${OPENAI_API_KEY}
+      api-key: ${OPENAI_API_KEY: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}
       chat:
         options:
           model: gpt-4o-mini
           max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
-    google:
-      genai:
-        api-key: ${GEMINI_API_KEY}          # set GEMINI_API_KEY env var to enable Gemini fallback
-        chat:
-          options:
-            model: gemini-2.0-flash          # default; overridden per-call by LlmRouter chains
 
 agent:
   workspace: ./workspace
@@ -43,19 +37,19 @@ agent:
     reviewer: anthropic
   token-budget:
     max-tokens: 16000        # Must match spring.ai.*.chat.options.max-tokens
-    low-pct: 0.25            # 4,000 tokens — LOW complexity soft limit
-    medium-pct: 0.50         # 8,000 tokens — MEDIUM complexity soft limit
-    high-pct: 0.75           # 12,000 tokens — HIGH complexity soft limit
+    low: 2048                # LOW complexity output-token limit
+    medium: 4096             # MEDIUM complexity output-token limit
+    high: 8192               # HIGH complexity output-token limit
     hard-ceiling-pct: 0.90   # 14,400 tokens — absolute max, forces FORCE_REPORT
   compaction:
-    warn-pct: 0.65
-    compact-pct: 0.75
-    hard-stop-pct: 0.90
+    warn-pct: 0.25     # warn at 50k tokens input (was 0.65 = 130k — too late)
+    compact-pct: 0.35  # compact at 70k tokens input (was 0.75 = 150k — accumulated too much history)
+    hard-stop-pct: 0.55 # hard-stop at 110k (was 0.90 = 180k)
   concurrency:
-    max-runs: 3
+    max-runs: 5
   github:
-    pat: ${GITHUB_PAT}
-    default-owner: ${GITHUB_OWNER}
+    pat: ${GITHUB_PAT:REDACTED_FOR_PUBLIC_RELEASE}
+    default-owner: ${GITHUB_OWNER:navneetprabhakar}
   shell:
     sandbox-enabled: true
     timeout-seconds: 300
@@ -63,8 +57,8 @@ agent:
     additional-blocked-patterns: []
   recovery:
     enabled: true
-    warn-threshold-minutes: 5
-    act-threshold-minutes: 10
+    warn-threshold-minutes: 15
+    act-threshold-minutes: 30
     max-task-retries: 1
     evaluator-log-window: 20
     loop-repeat-threshold: 3
@@ -76,16 +70,14 @@ agent:
     auto-restart-backoff-seconds: 60
     default-provider: anthropic
     capable-models:
-      anthropic: claude-sonnet-4-5-20250929
+      anthropic: claude-haiku-4-5-20251001
       openai: gpt-4o
-      gemini: gemini-3-pro
     alternate-provider:
       anthropic: openai
-      openai: gemini
-      gemini: anthropic
+      openai: anthropic
   context:
     enabled: true
-    model: claude-haiku-4-5-20251001      # The Scout: text summarization, no code generation
+    model: claude-haiku-4-5-20251001   # The Scout: text summarization, no code generation
     provider: anthropic
     run-interval: 1
   optimiser:
@@ -94,7 +86,7 @@ agent:
     analysis-window-runs: 20
     failure-rate-threshold: 0.20
     pattern-min-occurrences: 2
-    model: claude-haiku-4-5-20251001      # The Scout: pattern analysis, text edits only
+    model: claude-haiku-4-5-20251001   # The Scout: pattern analysis, text edits only
     provider: anthropic
   deployment:
     enabled: true
@@ -124,12 +116,13 @@ agent:
     enabled: true
     max-attempts: 3
     timeout-seconds: 300
-    model: claude-sonnet-4-5-20250929    # sonnet required: complex multi-file error analysis + fixing
+    model: claude-haiku-4-5-20251001    # haiku: fast, budget-friendly compiler error analysis
     provider: anthropic
   api-test-suite:
     enabled: true
-    model: claude-sonnet-4-5-20250929    # sonnet required: quality OpenAPI 3.0 spec generation
+    model: claude-haiku-4-5-20251001    # haiku: fast, budget-friendly OpenAPI spec generation
     provider: anthropic
+
   preview:
     enabled: true
 

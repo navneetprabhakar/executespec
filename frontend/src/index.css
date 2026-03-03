@@ -1,6 +1,3 @@
-@import url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/style.css');
-@import url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-mono/style.css');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -14,7 +11,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Geist Sans', system-ui, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

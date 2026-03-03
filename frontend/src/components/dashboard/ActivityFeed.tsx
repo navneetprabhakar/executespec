@@ -26,7 +26,7 @@ interface ActivityFeedProps {
 
 export default function ActivityFeed({ runs }: ActivityFeedProps) {
   const events = [...runs]
-    .sort((a, b) => new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime())
+    .sort((a, b) => new Date(b.completedAt ?? b.startedAt).getTime() - new Date(a.completedAt ?? a.startedAt).getTime())
     .slice(0, 20);
 
   return (
@@ -51,7 +51,7 @@ export default function ActivityFeed({ runs }: ActivityFeedProps) {
                 <p className="text-xs text-zinc-300 truncate">
                   {run.userRequest.slice(0, 60)}
                 </p>
-                <p className="text-xs text-zinc-600">{run.status} · {relativeTime(run.updatedAt ?? run.createdAt)}</p>
+                <p className="text-xs text-zinc-600">{run.status} · {relativeTime(run.completedAt ?? run.startedAt)}</p>
               </div>
             </motion.div>
           );

@@ -1,0 +1,178 @@
+package com.navneet.agentteam.deployment;
+
+import com.navneet.agentteam.config.AgentProperties;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Manages local Docker previews for completed pipeline runs.
+ *
+ * <p>For each run a Docker image is built from the workspace and started on a
+ * free local port. The resulting URL is served to the UI which embeds it in an
+ * iframe. Containers are named {@code exec-<runId8>} and tagged identically so
+ * a second call cleans up any leftover container automatically.
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class LocalPreviewService {
+
+    private final AgentProperties agentProps;
+    private final DockerfileGenerator dockerfileGenerator;
+
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    public enum PreviewStatus { IDLE, BUILDING, RUNNING, FAILED, STOPPED }
+
+    public record PreviewState(
+        String runId,
+        PreviewStatus status,
+        String url,
+        String projectType,
+        String errorMessage,
+        String containerName
+    ) {}
+
+    private final ConcurrentHashMap<String, PreviewState> states = new ConcurrentHashMap<>();
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    public PreviewState getStatus(String runId) {
+        return states.getOrDefault(runId,
+            new PreviewState(runId, PreviewStatus.IDLE, null, detectProjectType(runId), null, null));
+    }
+
+    /**
+     * Kick off an async Docker build + run for the given run's workspace.
+     * Returns immediately; poll {@link #getStatus} to track progress.
+     */
+    public void startAsync(String runId) {
+        String projectType = detectProjectType(runId);
+        states.put(runId,
+            new PreviewState(runId, PreviewStatus.BUILDING, null, projectType, null, null));
+
+        Thread.ofVirtual().start(() -> {
+            String tag = containerTag(runId);
+            try {
+                Path workspace = workspaceRoot(runId);
+
+                // Generate Dockerfile + support files if not already present
+                dockerfileGenerator.detectAndGenerate(workspace);
+
+                // Remove any stale container with the same name
+                silentRun(workspace, "docker", "rm", "-f", tag);
+
+                // Build image
+                log.info("[preview] Building Docker image {} for run {}", tag, runId);
+                runCommand(workspace, "docker", "build", "-t", tag, ".");
+
+                // Find a free local port and start the container
+                int port = findFreePort();
+                log.info("[preview] Starting container {} on port {}", tag, port);
+                runCommand(workspace,
+                    "docker", "run", "-d",
+                    "-p", port + ":8080",
+                    "--name", tag,
+                    tag);
+
+                String url = "http://localhost:" + port;
+                log.info("[preview] Container running: {} → {}", tag, url);
+                states.put(runId,
+                    new PreviewState(runId, PreviewStatus.RUNNING, url, projectType, null, tag));
+
+            } catch (Exception e) {
+                log.error("[preview] Failed to start preview for run {}: {}", runId, e.getMessage(), e);
+                states.put(runId,
+                    new PreviewState(runId, PreviewStatus.FAILED, null, projectType, e.getMessage(), null));
+            }
+        });
+    }
+
+    /** Stop the running container for a run (no-op if nothing is running). */
+    public void stop(String runId) {
+        PreviewState state = states.get(runId);
+        String tag = containerTag(runId);
+        try {
+            silentRun(workspaceRoot(runId), "docker", "stop", tag);
+            silentRun(workspaceRoot(runId), "docker", "rm", "-f", tag);
+            log.info("[preview] Stopped container {} for run {}", tag, runId);
+        } catch (Exception e) {
+            log.warn("[preview] Error stopping container {}: {}", tag, e.getMessage());
+        }
+        String projectType = state != null ? state.projectType() : detectProjectType(runId);
+        states.put(runId,
+            new PreviewState(runId, PreviewStatus.STOPPED, null, projectType, null, null));
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private String detectProjectType(String runId) {
+        Path workspace = workspaceRoot(runId);
+        boolean hasPom       = Files.exists(workspace.resolve("pom.xml"));
+        boolean hasRootPkg   = Files.exists(workspace.resolve("package.json"));
+        boolean hasNestedPkg = Files.exists(workspace.resolve("frontend/package.json"));
+        boolean hasNode      = hasRootPkg || hasNestedPkg;
+        boolean hasPython    = Files.exists(workspace.resolve("requirements.txt"))
+                            || Files.exists(workspace.resolve("setup.py"))
+                            || Files.exists(workspace.resolve("pyproject.toml"))
+                            || Files.exists(workspace.resolve("Pipfile"));
+        boolean hasGo        = Files.exists(workspace.resolve("go.mod"));
+        boolean hasRuby      = Files.exists(workspace.resolve("Gemfile"));
+        boolean hasPhp       = Files.exists(workspace.resolve("composer.json"));
+        if (hasPom && hasNode) return "FULLSTACK";
+        if (hasPom)            return "SPRING_BOOT";
+        if (hasNode)           return "STATIC";
+        if (hasPython)         return "PYTHON";
+        if (hasGo)             return "GO";
+        if (hasRuby)           return "RUBY";
+        if (hasPhp)            return "PHP";
+        return "UNKNOWN";
+    }
+
+    private Path workspaceRoot(String runId) {
+        return Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    }
+
+    private static String containerTag(String runId) {
+        return "executespec-" + runId.substring(0, Math.min(8, runId.length()));
+    }
+
+    private static int findFreePort() throws IOException {
+        try (ServerSocket s = new ServerSocket(0)) {
+            return s.getLocalPort();
+        }
+    }
+
+    /** Run a Docker command and throw if exit code != 0. */
+    private static void runCommand(Path workDir, String... command) throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder(command)
+            .directory(workDir.toFile())
+            .redirectErrorStream(true);
+        Process p = pb.start();
+        String output = new String(p.getInputStream().readAllBytes());
+        int exit = p.waitFor();
+        log.debug("[preview] $ {} → exit {}: {}", String.join(" ", command), exit, output.trim());
+        if (exit != 0) {
+            throw new IllegalStateException(
+                "Command failed (exit " + exit + "): " + String.join(" ", command) + "\n" + output);
+        }
+    }
+
+    /** Run a Docker command silently — ignores errors (used for cleanup). */
+    private static void silentRun(Path workDir, String... command) {
+        try {
+            new ProcessBuilder(command)
+                .directory(workDir.toFile())
+                .redirectErrorStream(true)
+                .start()
+                .waitFor();
+        } catch (Exception ignored) {}
+    }
+}

@@ -6,6 +6,6 @@ public record FeasibilityRequest(
     Double budgetUsd,
     /** Provider for the workers (e.g. "anthropic"). */
     String provider,
-    /** Specific model name (e.g. "claude-sonnet-4-5-20250929"). */
+    /** Specific model name (e.g. "claude-sonnet-4-5"). */
     String model
 ) {}

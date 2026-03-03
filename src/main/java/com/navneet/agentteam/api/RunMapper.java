@@ -9,6 +9,7 @@ import com.navneet.agentteam.state.repository.IntegrationRunRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.Comparator;
 import java.util.List;
 
 @Component
@@ -61,13 +62,32 @@ public class RunMapper {
             .failureReason(r.getFailureReason())
             .planJson(r.getPlanJson())
             .reviewJson(r.getReviewJson())
-            .tasks(tasks.stream().map(this::toTaskSummary).toList())
+            .tasks(tasks.stream()
+                .sorted(Comparator.comparingInt((AgentTask t) -> taskStatusOrder(t.getStatus())))
+                .map(this::toTaskSummary)
+                .toList())
             .integrationSource(integrationSource)
             // Tier 8: compile / API spec / preview
             .hasFrontend(r.isHasFrontend())
             .hasApiSpec(r.isHasApiSpec())
             .previewStatus(r.getPreviewStatus())
             .build();
+    }
+
+    /**
+     * Sort order for tasks in the detail view:
+     * WORKING first (in-flight), then PENDING/LOCKED (queued), then
+     * PARTIAL/BLOCKED (stalled), then FAILED, and finally COMPLETE at the bottom.
+     */
+    private static int taskStatusOrder(String status) {
+        return switch (status != null ? status : "") {
+            case "WORKING"          -> 0;
+            case "PENDING", "LOCKED"-> 1;
+            case "PARTIAL", "BLOCKED"-> 2;
+            case "FAILED"           -> 3;
+            case "COMPLETE"         -> 4;
+            default                 -> 5;
+        };
     }
 
     public TaskSummary toTaskSummary(AgentTask t) {

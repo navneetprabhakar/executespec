@@ -10,9 +10,10 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string; glow: st
   FAILED:            { dot: 'bg-accent-rose',      text: 'text-accent-rose',   glow: 'shadow-glow-rose',    bg: 'bg-accent-rose/10' },
   CANCELLED:         { dot: 'bg-zinc-600',         text: 'text-zinc-500',   glow: '',                        bg: 'bg-zinc-600/10' },
   PARTIAL:           { dot: 'bg-accent-amber',     text: 'text-accent-amber',  glow: 'shadow-glow-amber',   bg: 'bg-accent-amber/10' },
+  STUCK:             { dot: 'bg-accent-rose',      text: 'text-accent-rose',   glow: 'shadow-glow-rose',    bg: 'bg-accent-rose/10'  },
 };
 
-export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'REVIEWING', 'MERGING']);
+export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'REVIEWING', 'MERGING']);
 export const GATE_STATUSES   = new Set(['AWAITING_APPROVAL', 'AWAITING_MERGE']);
 
 export const PIPELINE_STEPS = [

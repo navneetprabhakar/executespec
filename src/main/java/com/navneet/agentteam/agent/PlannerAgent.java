@@ -11,6 +11,9 @@ import com.navneet.agentteam.tool.FileSystemTool;
 import com.navneet.agentteam.tool.ToolResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -42,57 +45,78 @@ public class PlannerAgent {
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
 
-    public TaskPlan plan(String userRequest, String runId) {
+    public TaskPlan plan(String userRequest, String runId, String modelOverride) {
         log.info("Planner starting for run {}", runId);
 
-        String systemPrompt   = loadPrompt();
+        String systemPrompt = loadPrompt();
         String contextSummary = buildWorkspaceContext(runId);
-        String provider       = props.getRoles().getPlanner();
-        String model          = resolveModelName(provider);
+        String model = (modelOverride != null && !modelOverride.isBlank())
+                ? modelOverride
+                : resolveModelName(props.getRoles().getPlanner());
+        String provider = resolveProviderFromModel(model);
+        log.info("[Planner] Using model={} provider={} (override={})", model, provider, modelOverride);
 
         String userMessage = """
-            User request: %s
+                User request: %s
 
-            Current workspace context:
-            %s
-            """.formatted(userRequest, contextSummary);
+                Current workspace context:
+                %s
+                """.formatted(userRequest, contextSummary);
 
         stateStore.logMessage(runId, "harness", "planner",
-            "TASK_ASSIGNMENT", "Plan: " + userRequest, 0);
+                "TASK_ASSIGNMENT", "Plan: " + userRequest, 0);
 
         // Retry loop — planner must return valid JSON
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                String msg = attempt == 1 ? userMessage :
-                    userMessage + "\n\nIMPORTANT: Your previous response was not valid JSON. " +
-                    "Respond ONLY with a valid JSON object. No markdown, no explanation.";
+                String msg = attempt == 1 ? userMessage
+                        : userMessage + "\n\nIMPORTANT: Your previous response was not valid JSON. " +
+                                "Respond ONLY with a valid JSON object. No markdown, no explanation.";
 
-                // Step 7: Use LlmRouter with IMMEDIATE mode
-                Prompt prompt = new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(msg)));
+                // Step 7: Use LlmRouter with IMMEDIATE mode.
+                // Enable SYSTEM_ONLY caching — system prompt is identical on every retry
+                // attempt.
+                AnthropicChatOptions plannerOpts = AnthropicChatOptions.builder()
+                        .cacheOptions(AnthropicCacheOptions.builder()
+                                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                                .build())
+                        .build();
+                Prompt prompt = new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(msg)),
+                        plannerOpts);
                 ChatResponse response = llmRouter.callWithFallback(provider, model, prompt,
-                    runId, "planner", FallbackMode.IMMEDIATE, 0, false);
+                        runId, "planner", FallbackMode.IMMEDIATE, 0, false);
 
                 String responseContent = response.getResult().getOutput().getText();
 
+                // Track actual token usage for cost accounting
+                try {
+                    int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
+                    int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
+                    stateStore.addTokensToRun(runId, inTok, outTok);
+                } catch (Exception ex) {
+                    log.warn("[Planner] Could not extract token counts: {}", ex.getMessage());
+                }
+
                 log.debug("Planner raw response (attempt {}): {}", attempt,
-                    responseContent.length() > 200 ? responseContent.substring(0, 200) + "..." : responseContent);
+                        responseContent.length() > 200 ? responseContent.substring(0, 200) + "..." : responseContent);
 
                 TaskPlan plan = outputParser.parse(responseContent, TaskPlan.class);
 
                 stateStore.logMessage(runId, "planner", "harness",
-                    "COMPLETION_REPORT",
-                    "Plan ready: " + plan.getPlanSummary() + " (" + plan.getTasks().size() + " tasks)",
-                    0);
+                        "COMPLETION_REPORT",
+                        "Plan ready: " + plan.getPlanSummary() + " (" + plan.getTasks().size() + " tasks)",
+                        0);
 
                 log.info("Planner produced {} tasks: {}",
-                    plan.getTasks().size(),
-                    plan.getTasks().stream().map(TaskDefinition::getTaskId).toList());
+                        plan.getTasks().size(),
+                        plan.getTasks().stream().map(TaskDefinition::getTaskId).toList());
 
                 return plan;
 
             } catch (JsonProcessingException e) {
                 log.warn("Planner returned invalid JSON on attempt {}: {}", attempt, e.getMessage());
-                if (attempt == 3) throw new RuntimeException("Planner failed 3 times to return valid JSON", e);
+                if (attempt == 3)
+                    throw new RuntimeException("Planner failed 3 times to return valid JSON", e);
             }
         }
         throw new RuntimeException("Should not reach here");
@@ -106,49 +130,49 @@ public class PlannerAgent {
     public TaskPlan planWithEstimates(String goal) {
         log.info("Planner starting feasibility mode for goal: {}", goal);
 
-        String basePrompt    = loadPrompt();
+        String basePrompt = loadPrompt();
         String feasibilityAppendix = """
 
-            ══════════════════════════════════════════════════════
-            FEASIBILITY MODE — ADDITIONAL REQUIREMENTS
-            ══════════════════════════════════════════════════════
+                ══════════════════════════════════════════════════════
+                FEASIBILITY MODE — ADDITIONAL REQUIREMENTS
+                ══════════════════════════════════════════════════════
 
-            You are running in FEASIBILITY mode. In addition to the normal task plan JSON,
-            each task object MUST include two extra fields:
+                You are running in FEASIBILITY mode. In addition to the normal task plan JSON,
+                each task object MUST include two extra fields:
 
-              "estimated_iterations": {"min": <int>, "max": <int>}
-              "estimated_tokens_per_iteration": <int>
+                  "estimated_iterations": {"min": <int>, "max": <int>}
+                  "estimated_tokens_per_iteration": <int>
 
-            Guidelines:
-            - LOW complexity  → iterations: {min:1, max:2},  tokens: ~10000
-            - MEDIUM complexity → iterations: {min:2, max:4},  tokens: ~25000
-            - HIGH complexity → iterations: {min:3, max:6},  tokens: ~60000
+                Guidelines:
+                - LOW complexity  → iterations: {min:1, max:2},  tokens: ~10000
+                - MEDIUM complexity → iterations: {min:2, max:4},  tokens: ~25000
+                - HIGH complexity → iterations: {min:3, max:6},  tokens: ~60000
 
-            Be conservative — users rely on these estimates to make a budget decision.
-            Output ONLY the JSON plan. No text before or after.
-            """;
+                Be conservative — users rely on these estimates to make a budget decision.
+                Output ONLY the JSON plan. No text before or after.
+                """;
 
-        String systemPrompt  = basePrompt + feasibilityAppendix;
+        String systemPrompt = basePrompt + feasibilityAppendix;
         String contextSummary = buildWorkspaceContext(null); // feasibility — no per-run workspace
-        String provider      = props.getRoles().getPlanner();
-        String model         = resolveModelName(provider);
+        String provider = props.getRoles().getPlanner();
+        String model = resolveModelName(provider);
 
         String userMessage = """
-            User request: %s
+                User request: %s
 
-            Current workspace context:
-            %s
-            """.formatted(goal, contextSummary);
+                Current workspace context:
+                %s
+                """.formatted(goal, contextSummary);
 
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                String msg = attempt == 1 ? userMessage :
-                    userMessage + "\n\nIMPORTANT: Your previous response was not valid JSON. " +
-                    "Respond ONLY with a valid JSON object including estimated_iterations fields.";
+                String msg = attempt == 1 ? userMessage
+                        : userMessage + "\n\nIMPORTANT: Your previous response was not valid JSON. " +
+                                "Respond ONLY with a valid JSON object including estimated_iterations fields.";
 
                 Prompt prompt = new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(msg)));
                 ChatResponse response = llmRouter.callWithFallback(provider, model, prompt,
-                    "feasibility", "planner", FallbackMode.IMMEDIATE, 0, false);
+                        "feasibility", "planner", FallbackMode.IMMEDIATE, 0, false);
 
                 String raw = response.getResult().getOutput().getText();
                 TaskPlan plan = outputParser.parse(raw, TaskPlan.class);
@@ -157,7 +181,8 @@ public class PlannerAgent {
 
             } catch (JsonProcessingException e) {
                 log.warn("Feasibility planner invalid JSON (attempt {}): {}", attempt, e.getMessage());
-                if (attempt == 3) throw new RuntimeException("Feasibility planner failed 3 times", e);
+                if (attempt == 3)
+                    throw new RuntimeException("Feasibility planner failed 3 times", e);
             }
         }
         throw new RuntimeException("Should not reach here");
@@ -166,21 +191,24 @@ public class PlannerAgent {
     /**
      * Summarises the workspace context for the LLM.
      *
-     * <p>Each run has its own isolated workspace ({@code workspace/<runId>/}), so the
-     * directory is always clean at planning time — no cross-run contamination possible.
+     * <p>
+     * Each run has its own isolated workspace ({@code workspace/<runId>/}), so the
+     * directory is always clean at planning time — no cross-run contamination
+     * possible.
      *
-     * @param runId the run ID, or {@code null} for feasibility-mode calls (no workspace)
+     * @param runId the run ID, or {@code null} for feasibility-mode calls (no
+     *              workspace)
      */
     private String buildWorkspaceContext(String runId) {
         if (runId == null) {
             return "No workspace context (feasibility mode — no run directory exists yet).";
         }
 
-        ToolResult listing = fsTool.listDirectory(runId, ".");
-        ToolResult context = fsTool.readFile(runId, ".agent-context/CODEBASE_CONTEXT.md");
+        String listing = fsTool.listFiles(runId, ".");
+        String context = fsTool.readFile(runId, ".agent-context/CODEBASE_CONTEXT.md");
 
-        String dirSection = "Directory listing (this run's isolated workspace):\n" + listing.value();
-        String ctxSection = context.isOk() ? "\n\nCodebase context:\n" + context.value() : "";
+        String dirSection = "Directory listing (this run's isolated workspace):\n" + listing;
+        String ctxSection = !context.startsWith("ERROR") ? "\n\nCodebase context:\n" + context : "";
 
         return dirSection + ctxSection;
     }
@@ -193,13 +221,29 @@ public class PlannerAgent {
         }
     }
 
-    /** Map provider name to model string for IMMEDIATE (planner) calls.
-     *  The Planner is The Architect — complex task decomposition requires Opus. */
+    /**
+     * Maps provider name → default model for IMMEDIATE (planner) calls.
+     * Used only when the UI sends no model override.
+     */
     private String resolveModelName(String provider) {
         return switch (provider.toLowerCase()) {
-            case "openai"  -> "gpt-4o";
-            case "gemini"  -> "gemini-2.5-pro";
-            default        -> "claude-opus-4-5-20251101"; // anthropic — The Architect
+            case "openai" -> "gpt-4o";
+            default -> "claude-sonnet-4-6"; // anthropic — strong reasoning at lower cost
         };
+    }
+
+    /**
+     * Infers the provider from a concrete model name so the LlmRouter chain is
+     * correct
+     * when a UI model-override replaces the config default.
+     */
+    private String resolveProviderFromModel(String model) {
+        if (model == null)
+            return props.getRoles().getPlanner();
+        if (model.startsWith("claude-"))
+            return "anthropic";
+        if (model.startsWith("gpt-"))
+            return "openai";
+        return props.getRoles().getPlanner(); // safe fallback
     }
 }

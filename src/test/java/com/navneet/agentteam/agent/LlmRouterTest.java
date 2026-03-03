@@ -39,20 +39,20 @@ class LlmRouterTest {
     class ChainResolution {
 
         @Test
-        @DisplayName("claude-opus-4-5-20251101 uses ARCHITECT chain")
+        @DisplayName("claude-opus-4-6 uses ARCHITECT chain")
         void opusUsesArchitectChain() {
             when(ctx.getBean(AnthropicChatModel.class)).thenReturn(anthropicChatModel);
             when(anthropicChatModel.call(any(Prompt.class))).thenReturn(chatResponse);
 
             var result = router.callWithFallbackTracked(
-                "anthropic", "claude-opus-4-5-20251101",
+                "anthropic", "claude-opus-4-6",
                 new Prompt("test"),
                 "run-1", "planner",
                 LlmRouter.FallbackMode.IMMEDIATE, 0, false
             );
 
             assertThat(result.provider()).isEqualTo("anthropic");
-            assertThat(result.model()).isEqualTo("claude-opus-4-5-20251101");
+            assertThat(result.model()).isEqualTo("claude-opus-4-6");
         }
 
         @Test
@@ -62,7 +62,7 @@ class LlmRouterTest {
             when(anthropicChatModel.call(any(Prompt.class))).thenReturn(chatResponse);
 
             var result = router.callWithFallbackTracked(
-                "anthropic", "claude-sonnet-4-5-20250929",
+                "anthropic", "claude-sonnet-4-5",
                 new Prompt("test"),
                 "run-1", "worker",
                 LlmRouter.FallbackMode.TASK_BOUNDARY, 0, false
@@ -80,7 +80,7 @@ class LlmRouterTest {
             .thenThrow(new RuntimeException("service down"));
 
         assertThatThrownBy(() -> router.callWithFallback(
-            "anthropic", "claude-opus-4-5-20251101",
+            "anthropic", "claude-opus-4-5",
             new Prompt("test"),
             "run-x", "planner",
             LlmRouter.FallbackMode.IMMEDIATE, 0, false

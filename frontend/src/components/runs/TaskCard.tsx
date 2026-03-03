@@ -5,12 +5,6 @@ import { fmtTokens, fmtMs, cn } from '@/lib/utils';
 import { useRunStore } from '@/stores/useRunStore';
 import type { TaskSummary } from '@/lib/api';
 
-const COMPLEXITY_COLORS: Record<string, string> = {
-  LOW:    'text-accent-emerald bg-accent-emerald/10',
-  MEDIUM: 'text-accent-amber bg-accent-amber/10',
-  HIGH:   'text-accent-rose bg-accent-rose/10',
-};
-
 interface TaskCardProps {
   task: TaskSummary;
   runId: string;
@@ -31,18 +25,16 @@ export default function TaskCard({ task, runId }: TaskCardProps) {
           <p className="text-sm text-zinc-200 truncate">{task.title}</p>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-zinc-500 font-mono">{task.taskId.slice(0, 8)}</span>
-            {task.complexity && (
-              <span className={cn('text-xs px-1.5 py-0.5 rounded font-medium', COMPLEXITY_COLORS[task.complexity] ?? 'text-zinc-500 bg-zinc-500/10')}>
-                {task.complexity}
-              </span>
+            {task.branchName && (
+              <span className="text-xs text-zinc-600 font-mono">{task.branchName}</span>
             )}
-            {task.modelName && (
-              <span className="text-xs text-zinc-600">{task.modelName}</span>
+            {task.assignedModel && (
+              <span className="text-xs text-zinc-600">{task.assignedModel}</span>
             )}
           </div>
         </div>
         <div className="flex items-center gap-3 text-right flex-shrink-0">
-          {task.tokensUsed > 0 && <span className="text-xs text-zinc-600">{fmtTokens(task.tokensUsed)}</span>}
+          {(task.inputTokens + task.outputTokens) > 0 && <span className="text-xs text-zinc-600">{fmtTokens(task.inputTokens + task.outputTokens)}</span>}
           {task.durationMs > 0 && <span className="text-xs text-zinc-600">{fmtMs(task.durationMs)}</span>}
           {task.readmeUpdated && <span title="README updated"><BookOpen className="h-3.5 w-3.5 text-accent-emerald" /></span>}
           <ChevronDown className={cn('h-4 w-4 text-zinc-600 transition-transform', expanded && 'rotate-180')} />
@@ -51,11 +43,6 @@ export default function TaskCard({ task, runId }: TaskCardProps) {
 
       {expanded && (
         <div className="px-4 py-3 border-t border-white/[0.06] space-y-2">
-          {task.dependencies.length > 0 && (
-            <p className="text-xs text-zinc-500">
-              Depends on: {task.dependencies.join(', ')}
-            </p>
-          )}
           {task.status === 'PARTIAL' && (
             <button
               onClick={() => retryTask(runId, task.taskId)}

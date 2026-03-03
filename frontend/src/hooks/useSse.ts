@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useSseStore } from '@/stores/useSseStore';
 import { useRunStore } from '@/stores/useRunStore';
+import { getMessages } from '@/lib/api';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -23,6 +24,18 @@ export function useSse(runId: string | null) {
     clearEntries();
     setRunId(runId);
     attemptRef.current = 0;
+
+    // Pre-populate with historical messages so revisiting a completed run shows its log.
+    getMessages(runId).then((msgs) => {
+      msgs.forEach((msg, i) => {
+        addEntry({
+          id: `hist-${i}-${msg.sentAt}`,
+          type: 'log',
+          data: { message: `[${msg.fromAgent}] ${msg.contentSummary}` },
+          timestamp: new Date(msg.sentAt).getTime(),
+        });
+      });
+    }).catch(() => { /* non-fatal */ });
 
     function connect() {
       esRef.current?.close();
@@ -52,6 +65,10 @@ export function useSse(runId: string | null) {
             if (['COMPLETE', 'FAILED', 'CANCELLED'].includes(data.status)) {
               fetchRun(runId!);
             }
+          }
+          // Refresh task list whenever any task changes state
+          if (data.type === 'taskStatus') {
+            fetchRun(runId!);
           }
           if (data.type === 'complete' || data.type === 'runRestarted') {
             fetchRun(runId!);

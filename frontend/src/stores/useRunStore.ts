@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as api from '@/lib/api';
+import { useUiStore } from '@/stores/useUiStore';
 
 interface RunStore {
   runs: api.RunSummary[];
@@ -13,11 +14,12 @@ interface RunStore {
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
-  createRun: (req: { userRequest: string; provider?: string; modelName?: string; skipApproval?: boolean }) => Promise<string>;
+  createRun: (req: { userRequest: string; skipApproval?: boolean; modelName?: string }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   approveRun: (id: string, approved: boolean) => Promise<void>;
   mergeRun: (id: string, merge: boolean) => Promise<void>;
   retryTask: (runId: string, taskId: string) => Promise<void>;
+  retryRun: (runId: string) => Promise<string>;
   patchRunStatus: (runId: string, status: string) => void;
 }
 
@@ -33,6 +35,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   setActiveRunId: (id) => {
     set({ activeRunId: id, activeRun: null });
+    useUiStore.getState().setActiveTab('overview');
     if (id) get().fetchRun(id);
   },
 
@@ -83,6 +86,14 @@ export const useRunStore = create<RunStore>((set, get) => ({
   retryTask: async (runId, taskId) => {
     await api.retryTask(runId, taskId);
     await get().fetchRun(runId);
+  },
+
+  retryRun: async (runId) => {
+    const newRun = await api.retryRun(runId);
+    await get().fetchRuns();
+    // Switch focus to the new run
+    get().setActiveRunId(newRun.runId);
+    return newRun.runId;
   },
 
   patchRunStatus: (runId, status) => {

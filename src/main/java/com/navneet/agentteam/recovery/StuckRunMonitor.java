@@ -45,6 +45,7 @@ public class StuckRunMonitor {
                     task.getTaskId(), idle.toMinutes());
 
                 stateStore.markStuckDetected(task.getTaskId());
+                stateStore.markRunStuck(task.getRunId());
                 List<String> events = stateStore.getTaskEventLog(
                     task.getTaskId(), props.getEvaluatorLogWindow()
                 );
