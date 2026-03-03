@@ -2,12 +2,16 @@ package com.navneet.agentteam.harness;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.agentteam.agent.CostEstimator;
 import com.navneet.agentteam.agent.PlannerAgent;
 import com.navneet.agentteam.agent.ReviewerAgent;
+import com.navneet.agentteam.agent.model.ReviewIssue;
 import com.navneet.agentteam.agent.model.ReviewReport;
 import com.navneet.agentteam.agent.model.TaskPlan;
+import com.navneet.agentteam.agent.model.TaskReview;
 import com.navneet.agentteam.agent.model.WorkerReport;
 import com.navneet.agentteam.config.AgentProperties;
+import com.navneet.agentteam.deployment.PreviewAgent;
 import com.navneet.agentteam.harness.event.PipelineEvent;
 import com.navneet.agentteam.recovery.RecoveryProperties;
 import com.navneet.agentteam.recovery.RunRecoveryService;
@@ -27,10 +31,12 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Scanner;
+import java.util.Set;
 import java.util.concurrent.*;
 
 @Service
@@ -41,6 +47,7 @@ public class PipelineHarness {
     private final PlannerAgent plannerAgent;
     private final WorkerPool workerPool;
     private final ReviewerAgent reviewerAgent;
+    private final CostEstimator costEstimator;
     private final ApprovalGate approvalGate;
     private final GitMergeService mergeService;
     private final StateStore stateStore;
@@ -57,8 +64,9 @@ public class PipelineHarness {
     private final RunRecoveryService recoveryService;
     private final ApplicationEventPublisher eventPublisher;
 
-    // ── Tier 8: Compile agent ─────────────────────────────────────────────────
+    // ── Tier 8: Compile agent + Preview agent ─────────────────────────────────
     private final com.navneet.agentteam.compiler.CompilerAgent compilerAgent;
+    private final PreviewAgent previewAgent;
 
     // ── Async infrastructure ──────────────────────────────────────────────────
 
@@ -115,7 +123,7 @@ public class PipelineHarness {
         log.info("Starting CLI run {}", run.getRunId());
 
         try {
-            TaskPlan plan = plannerAgent.plan(userRequest, run.getRunId());
+            TaskPlan plan = plannerAgent.plan(userRequest, run.getRunId(), run.getPlannerModel());
             stateStore.savePlan(run.getRunId(), plan);
 
             boolean approved = approvalGate.requestApproval(plan, run);
@@ -223,7 +231,19 @@ public class PipelineHarness {
      */
     public boolean resolvePlanGate(String runId, boolean approved, String comment) {
         CompletableFuture<Boolean> gate = planGates.remove(runId);
-        if (gate == null) return false;
+        if (gate == null) {
+            // No live gate — server may have restarted and lost in-memory state.
+            // If the run is still stuck in AWAITING_APPROVAL, mark it FAILED so the
+            // user can resubmit, then signal the controller to return 409 (not 404).
+            stateStore.findRun(runId).ifPresent(run -> {
+                if ("AWAITING_APPROVAL".equals(run.getStatus())) {
+                    log.warn("[Gate] Plan gate lost for run {} (server restart?); auto-failing stuck run", runId);
+                    stateStore.markFailed(runId, "Plan-approval gate lost after server restart — please resubmit");
+                    broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
+                }
+            });
+            return false;
+        }
         String gateEventId = planGateEventIds.remove(runId);
         if (gateEventId != null) stateStore.recordGateResolved(gateEventId, approved);
         // Clear currentGate immediately so the UI banner disappears on next poll.
@@ -245,7 +265,16 @@ public class PipelineHarness {
      */
     public boolean resolveMergeGate(String runId, boolean approved, String comment) {
         CompletableFuture<Boolean> gate = mergeGates.remove(runId);
-        if (gate == null) return false;
+        if (gate == null) {
+            stateStore.findRun(runId).ifPresent(run -> {
+                if ("AWAITING_MERGE".equals(run.getStatus())) {
+                    log.warn("[Gate] Merge gate lost for run {} (server restart?); auto-failing stuck run", runId);
+                    stateStore.markFailed(runId, "Merge gate lost after server restart — please resubmit");
+                    broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
+                }
+            });
+            return false;
+        }
         String gateEventId = mergeGateEventIds.remove(runId);
         if (gateEventId != null) stateStore.recordGateResolved(gateEventId, approved);
         // Clear currentGate immediately — same race-condition fix as resolvePlanGate.
@@ -289,7 +318,9 @@ public class PipelineHarness {
 
         try {
             // ── 1. Plan ────────────────────────────────────────────────────
-            TaskPlan plan = plannerAgent.plan(userRequest, runId);
+            // Pass the stored plannerModel so UI model-overrides are honoured.
+            // run was already fetched from DB above, no extra DB call needed.
+            TaskPlan plan = plannerAgent.plan(userRequest, runId, run.getPlannerModel());
             stateStore.savePlan(runId, plan);
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_APPROVAL"));
 
@@ -334,49 +365,137 @@ public class PipelineHarness {
                 throw new RuntimeException("Cannot serialize plan", e);
             }
 
-            List<WorkerReport> reports = workerPool.runAll(tasks, runId,
+            // Filter out generate_preview — PreviewAgent handles it deterministically
+            // after all worker tasks complete, so workers never see this task.
+            List<AgentTask> workerTasks = tasks.stream()
+                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .toList();
+
+            List<WorkerReport> reports = workerPool.runAll(workerTasks, runId,
                 props.getRoles().getWorker());
+
+            // ── Preview Agent (generates Dockerfile, docker-compose.yml, etc.) ──
+            WorkerReport previewReport = previewAgent.run(runId, tasks);
+            List<WorkerReport> allReports = new ArrayList<>(reports);
+            allReports.add(previewReport);
 
             // ── Tier 8: Compile & Fix (non-fatal, sync before reviewer) ───
             compilerAgent.runCompileAndFix(runId);
 
-            // ── 4. Review ──────────────────────────────────────────────────
-            stateStore.markReviewing(runId);
-            broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
-            run = stateStore.findRun(runId).orElse(run);
-            ReviewReport review = reviewerAgent.review(run, reports);
-            stateStore.saveReview(runId, review);
+            // ── Merge-gate eligibility: only open when all WORKER tasks complete ──
+            // Worker tasks = all tasks except the preview task (its BLOCKED status
+            // must not block the merge gate since it is non-fatal).
+            List<AgentTask> workerTasksNow = stateStore.getAllTasks(runId).stream()
+                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .toList();
 
-            // ── Auto-fail guard ────────────────────────────────────────────
-            // Auto-fail ONLY when all tasks are BLOCKED/FAILED — there is nothing
-            // to merge so opening the gate would be meaningless.
-            // REWORK recommendations are intentionally NOT auto-failed: we open the
-            // merge gate and let the human decide (approve = override reviewer and
-            // merge anyway; reject = fail the run).  The reviewer's full feedback is
-            // visible in the run detail panel.
-            String recommendation = review.getRecommendation();
-            boolean reviewerRework = "REWORK".equalsIgnoreCase(recommendation);
-            boolean allTasksBlocked = stateStore.getAllTasks(runId).stream()
+            boolean allWorkerTasksBlocked = workerTasksNow.stream()
                 .allMatch(t -> "BLOCKED".equals(t.getStatus()) || "FAILED".equals(t.getStatus()));
 
-            if (allTasksBlocked) {
+            if (allWorkerTasksBlocked) {
                 String reason = "All tasks blocked or failed — nothing to merge";
                 log.warn("Auto-failing run {} — {}", runId, reason);
                 stateStore.markFailed(runId, reason);
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
                 PipelineRun failedRun = stateStore.findRun(runId).orElse(run);
-                recoveryService.autoRestartIfTransient(failedRun, reports);
+                recoveryService.autoRestartIfTransient(failedRun, allReports);
                 return;
             }
 
-            // If the reviewer recommends REWORK, surface a clear warning in the log
-            // stream before the merge gate opens so the human knows what to review.
-            if (reviewerRework) {
-                log.warn("Run {} — reviewer recommends REWORK: {}", runId, review.getSummary());
-                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                    "⚠️ Reviewer recommends REWORK: " + review.getSummary()
-                    + "\nOpening merge gate — approve to override, reject to cancel."));
+            boolean allWorkerTasksComplete = workerTasksNow.stream()
+                .allMatch(t -> "COMPLETE".equals(t.getStatus()));
+
+            if (!allWorkerTasksComplete) {
+                // Some tasks did not reach COMPLETE — mark run PARTIAL so the user
+                // can retry individual tasks. The merge gate does NOT open here;
+                // it opens after a successful retry that completes all remaining tasks.
+                List<String> incompleteTitles = workerTasksNow.stream()
+                    .filter(t -> !"COMPLETE".equals(t.getStatus()))
+                    .map(t -> t.getTitle() + " [" + t.getStatus() + "]")
+                    .toList();
+                String partialReason = "Incomplete tasks: " + String.join("; ", incompleteTitles);
+                log.warn("Run {} — {} — marking PARTIAL (no merge gate)", runId, partialReason);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "⚠️ Some tasks did not complete:\n  • " + String.join("\n  • ", incompleteTitles)
+                    + "\n\nRun marked PARTIAL. Use 'Retry Task' on each incomplete task — "
+                    + "the merge gate will open once all tasks are COMPLETE."));
+                stateStore.markPartial(runId, partialReason);
+                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, partialReason));
+                return;
+            }
+
+            // ── 4. Review + Auto-Remediation (up to 3 REWORK cycles) ──────
+            // If the reviewer returns REWORK, automatically re-run all worker tasks
+            // with the reviewer's issues injected into each task description so workers
+            // know exactly what to fix. After MAX_REWORK_CYCLES exhausted, open the
+            // merge gate so a human can approve or reject.
+            final int MAX_REWORK_CYCLES = 3;
+            int reworkCycle = 0;
+            ReviewReport review = null;
+            boolean reviewerRework = false;
+            List<WorkerReport> currentReports = new ArrayList<>(allReports);
+            PipelineRun currentRun = run;
+
+            while (true) {
+                stateStore.markReviewing(runId);
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+                currentRun = stateStore.findRun(runId).orElse(currentRun);
+                review = reviewerAgent.review(currentRun, currentReports);
+                stateStore.saveReview(runId, review);
+
+                reviewerRework = "REWORK".equalsIgnoreCase(review.getRecommendation());
+                if (!reviewerRework) break; // MERGE or PARTIAL_MERGE — proceed to merge gate
+
+                reworkCycle++;
+                if (reworkCycle > MAX_REWORK_CYCLES) {
+                    // Auto-remediation exhausted; open merge gate and let human decide
+                    log.warn("Run {} — REWORK after {} auto-remediation cycles; opening merge gate",
+                        runId, MAX_REWORK_CYCLES);
+                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                        "⚠️ Auto-remediation exhausted after " + MAX_REWORK_CYCLES + " cycles. "
+                        + "Reviewer still recommends REWORK: " + review.getSummary()
+                        + "\nOpening merge gate — approve to override, reject to cancel."));
+                    break;
+                }
+
+                // Inject reviewer feedback and re-run ONLY the tasks the reviewer flagged.
+                // Tasks that passed are left untouched — targeted remediation, not a full re-run.
+                Set<String> failedTaskIds = getFailedTaskIds(review);
+                log.info("Run {} — auto-remediation cycle {}/{}: REWORK — {} — failing tasks: {}",
+                    runId, reworkCycle, MAX_REWORK_CYCLES, review.getSummary(), failedTaskIds);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "🔄 Auto-remediation cycle " + reworkCycle + "/" + MAX_REWORK_CYCLES
+                    + " — Reviewer: " + review.getSummary()
+                    + "\nApplying targeted fixes to tasks: " + failedTaskIds));
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+
+                List<AgentTask> workerTasksForRework = stateStore.getAllTasks(runId).stream()
+                    .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                    .filter(t -> failedTaskIds.isEmpty() || failedTaskIds.contains(t.getTaskId()))
+                    .toList();
+                for (AgentTask t : workerTasksForRework) {
+                    String feedback = buildRemediationFeedback(review, t.getTaskId());
+                    stateStore.markRetryingWithFeedback(runId, t.getTaskId(), feedback);
+                    broadcaster.emit(runId, RunEvent.taskStatus(runId, t.getTaskId(), "PENDING"));
+                }
+                // Reload refreshed task objects (markRetryingWithFeedback resets status fields)
+                List<AgentTask> toRerun = workerTasksForRework.stream()
+                    .map(t -> stateStore.getTask(t.getTaskId()))
+                    .toList();
+                workerPool.runAll(toRerun, runId, props.getRoles().getWorker());
+                compilerAgent.runCompileAndFix(runId);
+
+                // Re-collect worker reports for the next review cycle
+                currentReports = stateStore.getAllTasks(runId).stream()
+                    .filter(t -> t.getWorkerReportJson() != null)
+                    .map(t -> {
+                        try { return mapper.readValue(t.getWorkerReportJson(), WorkerReport.class); }
+                        catch (Exception ex) { return null; }
+                    })
+                    .filter(java.util.Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toList());
             }
 
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
@@ -393,29 +512,67 @@ public class PipelineHarness {
             boolean mergeApproved = mergeGate.get();
 
             if (mergeApproved) {
+                // Bug fix: merge first, then mark COMPLETE immediately so that any
+                // subsequent failure (GitHub push, cost save) does NOT revert the run
+                // to FAILED — the code IS successfully merged at this point.
                 mergeService.mergeAll(runId, tasks);
-                pushToGitHubIfConfigured(run);
                 lockTool.releaseAll(runId);
                 stateStore.markComplete(runId);
+                saveActualCost(runId);
                 broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
                 log.info("Async run {} complete — merged to main", runId);
 
+                // GitHub push is non-blocking — failure does not revert COMPLETE status
+                try {
+                    pushToGitHubIfConfigured(currentRun);
+                } catch (Exception pushEx) {
+                    log.warn("GitHub push failed for run {} (run is COMPLETE): {}", runId, pushEx.getMessage());
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        "⚠️ GitHub push failed (run is COMPLETE, code was merged locally): "
+                        + pushEx.getMessage()));
+                }
+
                 // Publish MergeCompleted — PostMergeOrchestrator handles post-merge agents
-                final PipelineRun completedRun = stateStore.findRun(runId).orElse(run);
-                boolean hadFailures = reports.stream()
+                final PipelineRun completedRun = stateStore.findRun(runId).orElse(currentRun);
+                boolean hadFailures = currentReports.stream()
                     .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
                                    "partial".equalsIgnoreCase(r.getStatus()));
                 eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                    runId, completedRun, reports, review, hadFailures));
+                    runId, completedRun, currentReports, review, hadFailures));
                 // Publish RunCompleted for integration outbound adapters
                 eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
             } else {
-                stateStore.markFailed(runId, "Merge declined by user");
-                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Merge declined by user"));
-                log.info("Async run {} — merge declined", runId);
+                // Bug fix: when the reviewer recommended REWORK and the user declines
+                // the merge, keep the run as PARTIAL so tasks can be retried.
+                // A plain rejection (reviewer said APPROVE but user chose not to merge)
+                // still fails the run.
+                if (reviewerRework) {
+                    String reason = "Merge declined after REWORK review — retry individual tasks to address reviewer concerns";
+                    log.info("Async run {} — merge declined after REWORK; marking PARTIAL", runId);
+                    stateStore.markPartial(runId, reason);
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        "ℹ️ Run marked PARTIAL. Reviewer recommended REWORK. "
+                        + "Use 'Retry Task' on each incomplete task to address the issues, then the merge gate will reopen."));
+                    broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
+                } else {
+                    stateStore.markFailed(runId, "Merge declined by user");
+                    broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Merge declined by user"));
+                    log.info("Async run {} — merge declined", runId);
+                }
             }
 
+        } catch (MergeBlockedException e) {
+            // README.md was not updated by one of the worker branches — this is a
+            // recoverable condition. Keep the run as PARTIAL so the user can retry
+            // the specific task that missed the README update.
+            log.warn("Merge blocked for run {}: {}", runId, e.getMessage());
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "⛔ " + e.getMessage()
+                + "\n\nRun marked PARTIAL — retry the task that missed the README update."));
+            stateStore.markPartial(runId, e.getMessage());
+            broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             String reason = "Interrupted: " + e.getMessage();
@@ -482,6 +639,23 @@ public class PipelineHarness {
         }
     }
 
+    // ── Actual cost computation ───────────────────────────────────────────────
+
+    /**
+     * Computes the cache-aware actual cost for a completed run and persists it.
+     * Uses per-task provider/model pricing with Anthropic cache multipliers.
+     * Non-fatal: a failure here does not affect run status.
+     */
+    private void saveActualCost(String runId) {
+        try {
+            double cost = costEstimator.computeCostForRun(runId);
+            stateStore.setActualCost(runId, cost);
+            log.info("[PipelineHarness] Actual cost for run {}: ${}", runId, String.format("%.4f", cost));
+        } catch (Exception e) {
+            log.warn("[PipelineHarness] Could not compute actual cost for run {}: {}", runId, e.getMessage());
+        }
+    }
+
     // ── GitHub push ───────────────────────────────────────────────────────────
 
     /**
@@ -542,12 +716,16 @@ public class PipelineHarness {
             throw new IllegalArgumentException("Task " + taskId + " does not belong to run " + runId);
         }
         String ts = task.getStatus();
-        if (!"PARTIAL".equals(ts) && !"BLOCKED".equals(ts)) {
-            throw new IllegalStateException("Task " + taskId + " is not retryable (status: " + ts + ")");
+        if (!"PARTIAL".equals(ts) && !"BLOCKED".equals(ts) && !"FAILED".equals(ts)) {
+            throw new IllegalStateException(
+                "Task " + taskId + " is not retryable (status: " + ts
+                + "). Only PARTIAL, BLOCKED, or FAILED tasks can be retried.");
         }
         String rs = run.getStatus();
         if (!"PARTIAL".equals(rs) && !"FAILED".equals(rs)) {
-            throw new IllegalStateException("Run " + runId + " cannot be retried in state " + rs);
+            throw new IllegalStateException(
+                "Run " + runId + " cannot be retried in state " + rs
+                + ". Run must be PARTIAL or FAILED before retrying individual tasks.");
         }
 
         log.info("Force-retrying task [{}] in run {}", taskId, runId);
@@ -567,15 +745,45 @@ public class PipelineHarness {
         String runId  = run.getRunId();
         String taskId = task.getTaskId();
         try {
-            // ── 1. Lock + run worker ───────────────────────────────────────
+            // ── 1. Lock + run the retried worker task ──────────────────────
             String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
             stateStore.lockTask(taskId, props.getRoles().getWorker(), branchName);
-            WorkerReport report = workerPool.executeTask(task);
+            WorkerReport retryReport = workerPool.executeTask(task);
 
             broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId,
-                "complete".equalsIgnoreCase(report.getStatus()) ? "COMPLETE" : report.getStatus().toUpperCase()));
+                "complete".equalsIgnoreCase(retryReport.getStatus())
+                    ? "COMPLETE" : retryReport.getStatus().toUpperCase()));
 
-            // ── 2. Collect all task reports ────────────────────────────────
+            // ── 2. Auto-run any other PARTIAL/BLOCKED worker tasks ─────────
+            // After one task is retried, check whether other worker tasks are
+            // still incomplete. If so, reset and run them all before proceeding
+            // to reviewer — otherwise the merge gate would open prematurely again.
+            List<AgentTask> otherIncomplete = stateStore.getAllTasks(runId).stream()
+                .filter(t -> !taskId.equals(t.getTaskId()))
+                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .filter(t -> "PARTIAL".equals(t.getStatus()) || "BLOCKED".equals(t.getStatus())
+                             || "FAILED".equals(t.getStatus()))
+                .toList();
+
+            if (!otherIncomplete.isEmpty()) {
+                log.info("[Harness] {} additional incomplete task(s) found after retry — re-running: {}",
+                    otherIncomplete.size(),
+                    otherIncomplete.stream().map(AgentTask::getTaskId).toList());
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "⟳ Running " + otherIncomplete.size() + " remaining incomplete task(s)..."));
+                // Reset each to PENDING so the worker pool can pick them up
+                for (AgentTask t : otherIncomplete) {
+                    stateStore.markRetrying(runId, t.getTaskId());
+                    broadcaster.emit(runId, RunEvent.taskStatus(runId, t.getTaskId(), "PENDING"));
+                }
+                // Reload refreshed task objects (markRetrying clears fields)
+                List<AgentTask> toRerun = otherIncomplete.stream()
+                    .map(t -> stateStore.getTask(t.getTaskId()))
+                    .toList();
+                workerPool.runAll(toRerun, runId, props.getRoles().getWorker());
+            }
+
+            // ── 3. Collect all task reports ────────────────────────────────
             List<AgentTask> allTasks = stateStore.getAllTasks(runId);
             List<WorkerReport> allReports = allTasks.stream()
                 .filter(t -> t.getWorkerReportJson() != null)
@@ -589,14 +797,12 @@ public class PipelineHarness {
             // ── Tier 8: Compile & Fix (non-fatal, sync before reviewer) ───
             compilerAgent.runCompileAndFix(runId);
 
-            // ── 3. Reviewer ────────────────────────────────────────────────
-            stateStore.markReviewing(runId);
-            broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
-            PipelineRun freshRun = stateStore.findRun(runId).orElse(run);
-            ReviewReport review = reviewerAgent.review(freshRun, allReports);
-            stateStore.saveReview(runId, review);
+            // ── 4. Merge-gate eligibility check ────────────────────────────
+            List<AgentTask> workerTasksNow = allTasks.stream()
+                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .toList();
 
-            boolean allBlocked = allTasks.stream()
+            boolean allBlocked = workerTasksNow.stream()
                 .allMatch(t -> "BLOCKED".equals(t.getStatus()) || "FAILED".equals(t.getStatus()));
             if (allBlocked) {
                 stateStore.markFailed(runId, "All tasks blocked after force-retry");
@@ -604,13 +810,92 @@ public class PipelineHarness {
                 broadcaster.complete(runId);
                 return;
             }
-            if ("REWORK".equalsIgnoreCase(review.getRecommendation())) {
-                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                    "⚠️ Reviewer recommends REWORK: " + review.getSummary()
-                    + "\nOpening merge gate — approve to override, reject to cancel."));
+
+            boolean allComplete = workerTasksNow.stream()
+                .allMatch(t -> "COMPLETE".equals(t.getStatus()));
+            if (!allComplete) {
+                List<String> stillIncomplete = workerTasksNow.stream()
+                    .filter(t -> !"COMPLETE".equals(t.getStatus()))
+                    .map(t -> t.getTitle() + " [" + t.getStatus() + "]")
+                    .toList();
+                String partialReason = "Incomplete tasks: " + String.join("; ", stillIncomplete);
+                log.warn("Run {} still has incomplete tasks after retry — {}", runId, partialReason);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "⚠️ Some tasks still incomplete:\n  • " + String.join("\n  • ", stillIncomplete)
+                    + "\n\nRun marked PARTIAL. Use 'Retry Task' on remaining incomplete tasks."));
+                stateStore.markPartial(runId, partialReason);
+                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+                broadcaster.complete(runId);
+                return;
             }
 
-            // ── 4. Merge gate ──────────────────────────────────────────────
+            // ── 5. Reviewer + Auto-Remediation (up to 3 REWORK cycles) ────
+            // Same loop as executeRunAsync: auto-retry all tasks with reviewer feedback
+            // injected, repeating up to MAX_REWORK_CYCLES before opening the merge gate.
+            final int MAX_RETRY_REWORK_CYCLES = 3;
+            int retryReworkCycle = 0;
+            ReviewReport review = null;
+            boolean retryRework = false;
+            List<WorkerReport> currentRetryReports = new ArrayList<>(allReports);
+            PipelineRun freshRun = stateStore.findRun(runId).orElse(run);
+
+            while (true) {
+                stateStore.markReviewing(runId);
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+                freshRun = stateStore.findRun(runId).orElse(freshRun);
+                review = reviewerAgent.review(freshRun, currentRetryReports);
+                stateStore.saveReview(runId, review);
+
+                retryRework = "REWORK".equalsIgnoreCase(review.getRecommendation());
+                if (!retryRework) break; // MERGE or PARTIAL_MERGE — proceed to merge gate
+
+                retryReworkCycle++;
+                if (retryReworkCycle > MAX_RETRY_REWORK_CYCLES) {
+                    log.warn("Force-retry run {} — REWORK after {} cycles; opening merge gate",
+                        runId, MAX_RETRY_REWORK_CYCLES);
+                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                        "⚠️ Auto-remediation exhausted after " + MAX_RETRY_REWORK_CYCLES + " cycles. "
+                        + "Reviewer still recommends REWORK: " + review.getSummary()
+                        + "\nOpening merge gate — approve to override, reject to re-queue tasks."));
+                    break;
+                }
+
+                // Same targeted approach: only re-run tasks the reviewer actually flagged.
+                Set<String> failedRetryTaskIds = getFailedTaskIds(review);
+                log.info("Force-retry run {} — auto-remediation cycle {}/{}: REWORK — {} — failing tasks: {}",
+                    runId, retryReworkCycle, MAX_RETRY_REWORK_CYCLES, review.getSummary(), failedRetryTaskIds);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "🔄 Auto-remediation cycle " + retryReworkCycle + "/" + MAX_RETRY_REWORK_CYCLES
+                    + " — Reviewer: " + review.getSummary()
+                    + "\nApplying targeted fixes to tasks: " + failedRetryTaskIds));
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+
+                List<AgentTask> workerTasksForRework = stateStore.getAllTasks(runId).stream()
+                    .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                    .filter(t -> failedRetryTaskIds.isEmpty() || failedRetryTaskIds.contains(t.getTaskId()))
+                    .toList();
+                for (AgentTask t : workerTasksForRework) {
+                    String feedback = buildRemediationFeedback(review, t.getTaskId());
+                    stateStore.markRetryingWithFeedback(runId, t.getTaskId(), feedback);
+                    broadcaster.emit(runId, RunEvent.taskStatus(runId, t.getTaskId(), "PENDING"));
+                }
+                List<AgentTask> toRerun = workerTasksForRework.stream()
+                    .map(t -> stateStore.getTask(t.getTaskId()))
+                    .toList();
+                workerPool.runAll(toRerun, runId, props.getRoles().getWorker());
+                compilerAgent.runCompileAndFix(runId);
+
+                currentRetryReports = stateStore.getAllTasks(runId).stream()
+                    .filter(t -> t.getWorkerReportJson() != null)
+                    .map(t -> {
+                        try { return mapper.readValue(t.getWorkerReportJson(), WorkerReport.class); }
+                        catch (Exception ex) { return null; }
+                    })
+                    .filter(java.util.Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toList());
+            }
+
+            // ── 6. Merge gate ──────────────────────────────────────────────
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
             String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
             mergeGateEventIds.put(runId, mergeGateId);
@@ -621,29 +906,53 @@ public class PipelineHarness {
             boolean mergeApproved = mergeGate.get();
 
             if (mergeApproved) {
+                // Mark COMPLETE immediately after merge — GitHub push is non-blocking
                 mergeService.mergeAll(runId, allTasks);
-                pushToGitHubIfConfigured(freshRun);
                 lockTool.releaseAll(runId);
                 stateStore.markComplete(runId);
-                String finalStatus = stateStore.findRun(runId)
-                    .map(PipelineRun::getStatus).orElse("COMPLETE");
-                broadcaster.emit(runId, RunEvent.complete(runId, finalStatus));
-                log.info("Force-retry run {} complete — final status {}", runId, finalStatus);
+                saveActualCost(runId);
+                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
+                log.info("Force-retry run {} complete — merged to main", runId);
+
+                try {
+                    pushToGitHubIfConfigured(freshRun);
+                } catch (Exception pushEx) {
+                    log.warn("GitHub push failed for run {} (run is COMPLETE): {}", runId, pushEx.getMessage());
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        "⚠️ GitHub push failed (run is COMPLETE): " + pushEx.getMessage()));
+                }
 
                 // Publish events — PostMergeOrchestrator and integration adapters handle the rest
                 final PipelineRun completedRun = stateStore.findRun(runId).orElse(freshRun);
-                boolean hadFailures = allReports.stream()
+                boolean hadFailures = currentRetryReports.stream()
                     .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
                                    "partial".equalsIgnoreCase(r.getStatus()));
                 eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                    runId, completedRun, allReports, review, hadFailures));
+                    runId, completedRun, currentRetryReports, review, hadFailures));
                 eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
             } else {
-                stateStore.markFailed(runId, "Merge declined by user");
-                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Merge declined by user"));
+                // REWORK rejection after exhausting auto-remediation → PARTIAL; plain rejection → FAILED
+                if (retryRework) {
+                    String reason = "Merge declined after REWORK — retry tasks to address reviewer concerns";
+                    stateStore.markPartial(runId, reason);
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        "ℹ️ Run marked PARTIAL. Use 'Retry Task' on each task to fix the reviewer's concerns."));
+                    broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
+                } else {
+                    stateStore.markFailed(runId, "Merge declined by user");
+                    broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Merge declined by user"));
+                }
             }
 
+        } catch (MergeBlockedException e) {
+            log.warn("Merge blocked for force-retry run {}: {}", runId, e.getMessage());
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "⛔ " + e.getMessage()
+                + "\n\nRun marked PARTIAL — retry the task that missed the README update."));
+            stateStore.markPartial(runId, e.getMessage());
+            broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             stateStore.markFailed(runId, "Force-retry interrupted: " + e.getMessage());
@@ -754,6 +1063,40 @@ public class PipelineHarness {
         fsTool.writeFile(runId, ".agent-context/task-assignments.json", planJson);
         fsTool.writeFile(runId, ".agent-context/file-locks.json", "{}");
         fsTool.writeFile(runId, ".agent-context/shared-contracts.json", "{}");
+        fsTool.writeFile(runId, ".agent-context/CODEBASE_CONTEXT.md", """
+            # Workspace Context
+
+            This is a **fresh, isolated workspace** for this agent run. No project exists yet —
+            create all files from scratch unless the task says otherwise.
+
+            ## Environment
+
+            - Git is initialised on branch `main` with one empty commit.
+            - You are on your own feature branch (shown in your task assignment).
+            - The git identity is pre-configured — `git_commit` will work immediately.
+            - Available build tools: `mvn` (Maven 3.x), `npm`, `python`.
+            - Java version: 21. Spring Boot: 3.3.x (use for Java/Spring projects).
+
+            ## Coding conventions (Java / Spring Boot)
+
+            - Package root: `com.example` (match pom.xml groupId if one exists).
+            - Use Java 21 features: records, sealed classes, pattern matching, `var`.
+            - Use Lombok: `@Data`, `@Builder`, `@RequiredArgsConstructor`, `@Slf4j`.
+            - SLF4J for all logging — no `System.out.println`.
+            - REST controllers: `@RestController`, `@RequestMapping`.
+            - Tests: JUnit 5 + `@SpringBootTest`.
+
+            ## Git workflow
+
+            - Commit after every file write: git_commit with message "feat(task_id): ..."
+            - Do NOT run `git push` — the harness handles pushing.
+
+            ## Constraints
+
+            - Do NOT touch files owned by other tasks (check file-locks.json).
+            - Do NOT add dependencies unless the task explicitly requires it.
+            - Updating README.md is mandatory before reporting DONE.
+            """);
         log.info("Agent context initialized for run {} (.agent-context/)", runId);
     }
 
@@ -775,5 +1118,65 @@ public class PipelineHarness {
     private int countQueued() {
         return (int) stateStore.listRuns("QUEUED",
             org.springframework.data.domain.PageRequest.of(0, 1000)).getTotalElements();
+    }
+
+    /**
+     * Returns the set of task IDs that the reviewer flagged with unmet acceptance criteria
+     * or at least one HIGH severity issue. Only these tasks need to be re-run during
+     * auto-remediation — tasks that passed are left untouched.
+     *
+     * Returns an empty set when the review contains no per-task data (caller falls back
+     * to re-running all tasks so we never silently skip a broken run).
+     */
+    private Set<String> getFailedTaskIds(ReviewReport review) {
+        if (review.getTaskReviews() == null || review.getTaskReviews().isEmpty()) {
+            return Set.of(); // empty → caller falls back to all tasks
+        }
+        return review.getTaskReviews().stream()
+            .filter(tr -> !tr.isAcceptanceCriteriaMet() ||
+                          (tr.getIssues() != null && tr.getIssues().stream()
+                               .anyMatch(i -> "HIGH".equalsIgnoreCase(i.getSeverity()))))
+            .map(TaskReview::getTaskId)
+            .collect(java.util.stream.Collectors.toSet());
+    }
+
+    /**
+     * Builds a human-readable remediation feedback string from a REWORK ReviewReport,
+     * scoped to a specific task. Injected into the task's TaskDefinition JSON so the
+     * worker knows exactly what to fix in the next auto-remediation attempt.
+     */
+    private String buildRemediationFeedback(ReviewReport review, String taskId) {
+        StringBuilder sb = new StringBuilder();
+
+        if (review.getSummary() != null && !review.getSummary().isBlank()) {
+            sb.append("Overall: ").append(review.getSummary()).append("\n");
+        }
+
+        if (review.getMergeBlockers() != null && !review.getMergeBlockers().isEmpty()) {
+            sb.append("\nMerge blockers (MUST FIX):\n");
+            review.getMergeBlockers().forEach(b -> sb.append("  - ").append(b).append("\n"));
+        }
+
+        if (review.getTaskReviews() != null) {
+            review.getTaskReviews().stream()
+                .filter(tr -> taskId.equals(tr.getTaskId()))
+                .findFirst()
+                .ifPresent(tr -> {
+                    if (tr.getIssues() != null && !tr.getIssues().isEmpty()) {
+                        sb.append("\nIssues in this task:\n");
+                        for (ReviewIssue issue : tr.getIssues()) {
+                            String loc = (issue.getFile() != null ? " [" + issue.getFile() + "]" : "");
+                            sb.append("  - [").append(issue.getSeverity()).append("]")
+                              .append(loc).append(" ").append(issue.getDescription()).append("\n");
+                        }
+                    }
+                    if (tr.getBoundaryViolations() != null && !tr.getBoundaryViolations().isEmpty()) {
+                        sb.append("\nBoundary violations:\n");
+                        tr.getBoundaryViolations().forEach(v -> sb.append("  - ").append(v).append("\n"));
+                    }
+                });
+        }
+
+        return sb.toString().trim();
     }
 }

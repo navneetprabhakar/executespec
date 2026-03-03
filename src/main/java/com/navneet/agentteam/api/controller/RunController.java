@@ -59,6 +59,21 @@ public class RunController {
             req.repoUrl(),
             req.repoMode()
         );
+        // Apply optional overrides that the front-end may send
+        boolean dirty = false;
+        if (Boolean.TRUE.equals(req.skipApproval())) {
+            run.setSkipApproval(true);
+            dirty = true;
+        }
+        if (req.modelName() != null && !req.modelName().isBlank()) {
+            run.setPlannerModel(req.modelName());
+            run.setWorkerModel(req.modelName());
+            run.setReviewerModel(req.modelName());
+            dirty = true;
+        }
+        if (dirty) {
+            run = stateStore.save(run);
+        }
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));
     }
 
@@ -87,7 +102,14 @@ public class RunController {
         log.info("POST /api/runs/{}/approve — approved={}", runId, req.approved());
         boolean resolved = harness.resolvePlanGate(runId, req.approved(),
             req.comment() != null ? req.comment() : "");
-        return resolved ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
+        if (resolved) return ResponseEntity.ok().build();
+        // Gate was lost (server restart). If the harness auto-failed the run, return 409
+        // so the UI can show a helpful "resubmit" message rather than a generic 404.
+        boolean stuckFailed = stateStore.findRun(runId)
+            .map(r -> "FAILED".equals(r.getStatus())).orElse(false);
+        return stuckFailed
+            ? ResponseEntity.<Void>status(HttpStatus.CONFLICT).build()
+            : ResponseEntity.<Void>notFound().build();
     }
 
     /** Approve or reject the merge-approval gate. */
@@ -97,7 +119,30 @@ public class RunController {
         log.info("POST /api/runs/{}/merge — approved={}", runId, req.approved());
         boolean resolved = harness.resolveMergeGate(runId, req.approved(),
             req.comment() != null ? req.comment() : "");
-        return resolved ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
+        if (resolved) return ResponseEntity.ok().build();
+        boolean stuckFailed = stateStore.findRun(runId)
+            .map(r -> "FAILED".equals(r.getStatus())).orElse(false);
+        return stuckFailed
+            ? ResponseEntity.<Void>status(HttpStatus.CONFLICT).build()
+            : ResponseEntity.<Void>notFound().build();
+    }
+
+    /**
+     * Retry a failed or cancelled run by resubmitting the same goal as a fresh run.
+     * Returns 202 Accepted with the new run's summary in the body.
+     */
+    @PostMapping("/{runId}/retry")
+    public ResponseEntity<RunSummary> retryRun(@PathVariable String runId) {
+        log.info("POST /api/runs/{}/retry", runId);
+        PipelineRun original = stateStore.findRun(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (!List.of("FAILED", "CANCELLED", "REJECTED").contains(original.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Only FAILED, CANCELLED or REJECTED runs can be retried");
+        }
+        String newRunId = harness.restartRun(original);
+        PipelineRun newRun = stateStore.findRun(newRunId).orElseThrow();
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(newRun));
     }
 
     /** Cancel a run. */

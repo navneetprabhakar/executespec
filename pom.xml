@@ -22,6 +22,10 @@
   <properties>
     <java.version>21</java.version>
     <spring-ai.version>1.1.0</spring-ai.version>
+    <!-- Override Spring Boot 3.3's Mockito 5.11 → 5.17 for Java 25 compatibility -->
+    <mockito.version>5.17.0</mockito.version>
+    <!-- Override ByteBuddy 1.14 → 1.16 (officially supports Java 25, class file version 69) -->
+    <byte-buddy.version>1.16.1</byte-buddy.version>
   </properties>
 
   <dependencyManagement>
@@ -51,10 +55,6 @@
     <dependency>
       <groupId>org.springframework.ai</groupId>
       <artifactId>spring-ai-starter-model-openai</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.ai</groupId>
-      <artifactId>spring-ai-starter-model-google-genai</artifactId>
     </dependency>
 
     <!-- JPA + PostgreSQL -->
@@ -135,6 +135,14 @@
               <artifactId>lombok</artifactId>
             </exclude>
           </excludes>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- e2e and integration tests require live DB + real API keys; run via -Pintegration -->
+          <excludedGroups>e2e,integration</excludedGroups>
         </configuration>
       </plugin>
     </plugins>

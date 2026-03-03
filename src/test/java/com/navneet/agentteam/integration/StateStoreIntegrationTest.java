@@ -32,7 +32,7 @@ class StateStoreIntegrationTest extends PostgresIntegrationBase {
             "Fix the login bug",
             "MANUAL", null, null,
             "claude-opus-4-6",
-            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-5",
             "claude-opus-4-6"
         );
     }
@@ -95,7 +95,7 @@ class StateStoreIntegrationTest extends PostgresIntegrationBase {
         @DisplayName("lockTask marks task as WORKING")
         void lockTask() {
             // Insert a task the same way WorkerPool does
-            boolean locked = stateStore.lockTask(taskId, "claude-sonnet-4-5-20250929",
+            boolean locked = stateStore.lockTask(taskId, "claude-sonnet-4-5",
                 "agent/test/branch");
             // Task doesn't exist yet → lockTask should handle gracefully (create or return false)
             // In the actual implementation, tasks are created via savePlan; lockTask just updates

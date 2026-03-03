@@ -14,6 +14,9 @@ import com.navneet.agentteam.state.entity.PipelineRun;
 import com.navneet.agentteam.tool.GitTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -49,17 +52,33 @@ public class ReviewerAgent {
     public ReviewReport review(PipelineRun run, List<WorkerReport> workerReports) {
         log.info("Reviewer starting for run {}", run.getRunId());
 
-        String provider = props.getRoles().getReviewer();
-        String model    = resolveModelName(provider);
+        String model = (run.getReviewerModel() != null && !run.getReviewerModel().isBlank())
+                       ? run.getReviewerModel()
+                       : resolveModelName(props.getRoles().getReviewer());
+        String provider = resolveProviderFromModel(model);
+        log.info("[Reviewer] Using model={} provider={} (stored={})", model, provider, run.getReviewerModel());
 
-        // Gather all diffs from all worker branches
+        // Gather all diffs from all worker branches — cap each diff to avoid OOM on large codebases.
+        // 80k chars ≈ 20k tokens; well within Haiku's 100k context, but prevents heap exhaustion
+        // when many large files change across 6+ worker branches simultaneously.
+        final int MAX_DIFF_CHARS = 80_000;
         List<AgentTask> tasks = stateStore.getAllTasks(run.getRunId());
         StringBuilder allDiffs = new StringBuilder();
         for (AgentTask task : tasks) {
             if (task.getBranchName() != null) {
                 String diff = gitTool.getFullDiff(run.getRunId(), "main", task.getBranchName());
+                String safeDiff = diff.length() > MAX_DIFF_CHARS
+                    ? diff.substring(0, MAX_DIFF_CHARS) +
+                      "\n... [diff truncated at " + MAX_DIFF_CHARS + " chars to prevent OOM]"
+                    : diff;
                 allDiffs.append("=== Branch: ").append(task.getBranchName()).append(" ===\n")
-                        .append(diff).append("\n\n");
+                        .append(safeDiff).append("\n\n");
+                if (allDiffs.length() > MAX_DIFF_CHARS * 2) {
+                    allDiffs.append("... [further diffs omitted — combined size exceeded safe limit]\n");
+                    log.warn("[Reviewer] Combined diff exceeded {}k chars — remaining branches omitted",
+                        MAX_DIFF_CHARS * 2 / 1000);
+                    break;
+                }
             }
         }
 
@@ -88,14 +107,29 @@ public class ReviewerAgent {
                 String msg = attempt == 1 ? userMessage :
                     userMessage + "\n\nIMPORTANT: Return ONLY valid JSON.";
 
-                // Step 7: Use LlmRouter with IMMEDIATE mode (reviewer — single call)
+                // Step 7: Use LlmRouter with IMMEDIATE mode (reviewer — single call).
+                // SYSTEM_ONLY caching: reviewer system prompt is constant across retry attempts.
+                AnthropicChatOptions reviewerOpts = AnthropicChatOptions.builder()
+                    .cacheOptions(AnthropicCacheOptions.builder()
+                        .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                        .build())
+                    .build();
                 Prompt prompt = new Prompt(List.of(
                     new SystemMessage(loadPrompt()),
-                    new UserMessage(msg)));
+                    new UserMessage(msg)), reviewerOpts);
                 ChatResponse response = llmRouter.callWithFallback(provider, model, prompt,
                     run.getRunId(), "reviewer", FallbackMode.IMMEDIATE, 0, false);
 
                 String responseContent = response.getResult().getOutput().getText();
+
+                // Track actual token usage for cost accounting
+                try {
+                    int inTok  = response.getMetadata().getUsage().getPromptTokens().intValue();
+                    int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
+                    stateStore.addTokensToRun(run.getRunId(), inTok, outTok);
+                } catch (Exception ex) {
+                    log.warn("[Reviewer] Could not extract token counts: {}", ex.getMessage());
+                }
 
                 ReviewReport review = outputParser.parse(responseContent, ReviewReport.class);
 
@@ -158,13 +192,21 @@ public class ReviewerAgent {
         }
     }
 
-    /** Map provider name to model string for IMMEDIATE (reviewer) calls.
-     *  The Reviewer uses the UTILITY chain (Haiku) — verification is fast and cheap. */
+    /** Maps provider name → default model for IMMEDIATE (reviewer) calls.
+     *  Used only when the UI sends no model override. */
     private String resolveModelName(String provider) {
         return switch (provider.toLowerCase()) {
             case "openai"  -> "gpt-4o-mini";
-            case "gemini"  -> "gemini-2.0-flash";
-            default        -> "claude-haiku-4-5-20251022"; // anthropic — UTILITY chain
+            default        -> "claude-haiku-4-5-20251001"; // anthropic — UTILITY chain
         };
+    }
+
+    /** Infers the provider from a concrete model name so the LlmRouter chain is correct
+     *  when a UI model-override replaces the config default. */
+    private String resolveProviderFromModel(String model) {
+        if (model == null) return props.getRoles().getReviewer();
+        if (model.startsWith("claude-")) return "anthropic";
+        if (model.startsWith("gpt-"))    return "openai";
+        return props.getRoles().getReviewer();
     }
 }

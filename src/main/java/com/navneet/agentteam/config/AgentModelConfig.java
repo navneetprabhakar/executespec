@@ -1,6 +1,7 @@
 package com.navneet.agentteam.config;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -8,7 +9,12 @@ import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
+
+@Slf4j
 @Configuration
 @RequiredArgsConstructor
 public class AgentModelConfig {
@@ -16,28 +22,27 @@ public class AgentModelConfig {
     private final AgentProperties props;
     private final ApplicationContext ctx;
 
-    // ── Prompt caching ────────────────────────────────────────────────────────
-
     /**
-     * Registers {@link AnthropicCacheInterceptor} on every {@link org.springframework.web.client.RestClient}
-     * built from the Spring Boot auto-configured {@code RestClient.Builder}.
+     * Replaces the default (no-timeout) JDK HTTP client factory with one that has an
+     * explicit 5-minute read timeout and forces HTTP/1.1.
      *
-     * <p>Spring AI 1.0's {@code AnthropicAutoConfiguration} injects the shared
-     * {@code RestClient.Builder} to construct its internal {@code AnthropicApi} HTTP client.
-     * Spring Boot applies all {@code RestClientCustomizer} beans to that builder before it is
-     * injected, so our interceptor is transparently present on every Anthropic API call.
-     *
-     * <p>The interceptor is URL-aware: it only modifies requests to {@code anthropic.com}
-     * (adds the {@code anthropic-beta} header + cache_control block). Requests to other
-     * providers (OpenAI etc.) are passed through unchanged.
-     *
-     * <p>Effect: {@code worker.txt} (~1 800 tokens) is cached after the first iteration of
-     * each task. Subsequent iterations (typically 4–14 more per task) receive cache reads —
-     * ~85 % lower latency and ~90 % lower token cost on the system-prompt prefix.
+     * <p>Why needed: LLM responses for large tasks routinely take 30–90 seconds.
+     * The JDK HTTP client's HTTP/2 ALPN negotiation can also stall silently.
+     * HTTP/1.1 is simpler, always supported by Anthropic/OpenAI, and avoids
+     * any ALPN-related connection hangs.
      */
     @Bean
-    public RestClientCustomizer anthropicPromptCachingCustomizer() {
-        return builder -> builder.requestInterceptor(new AnthropicCacheInterceptor());
+    public RestClientCustomizer llmHttpClientCustomizer() {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)          // avoid HTTP/2 ALPN stalls
+                .connectTimeout(Duration.ofSeconds(30))
+                .build();
+
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofSeconds(300));       // 5 min — long enough for any LLM call
+
+        log.info("[AgentModelConfig] HTTP client: HTTP/1.1, connect=30s, read=300s");
+        return builder -> builder.requestFactory(factory);
     }
 
     // ── Model bean resolution ─────────────────────────────────────────────────

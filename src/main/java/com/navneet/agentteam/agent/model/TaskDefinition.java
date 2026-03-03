@@ -31,4 +31,9 @@ public class TaskDefinition {
     // ── Tier 3 nullable fields (only set in FEASIBILITY mode) ────────────────
     private IterationEstimate estimatedIterations;       // null unless feasibility mode
     private Integer estimatedTokensPerIteration;         // null unless feasibility mode
+
+    // ── Auto-remediation feedback ─────────────────────────────────────────────
+    // Injected by PipelineHarness during REWORK remediation cycles so the worker
+    // knows exactly what the reviewer flagged. Null on first attempt.
+    private String reworkFeedback;
 }

@@ -22,9 +22,9 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
 
     long countByStatus(String status);
 
-    @Query("SELECT SUM(r.totalInputTokens) FROM PipelineRun r WHERE r.status = 'COMPLETE'")
+    @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r")
     Long sumInputTokens();
 
-    @Query("SELECT SUM(r.totalOutputTokens) FROM PipelineRun r WHERE r.status = 'COMPLETE'")
+    @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r")
     Long sumOutputTokens();
 }

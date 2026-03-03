@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Search, Zap } from 'lucide-react';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
@@ -9,8 +8,11 @@ import { cn } from '@/lib/utils';
 export default function Header() {
   const { setCommandPaletteOpen } = useUiStore();
   const runs = useRunStore((s) => s.runs);
+  const activeRunId = useRunStore((s) => s.activeRunId);
   const sseStatus = useSseStore((s) => s.status);
   const activeCount = runs.filter((r) => ACTIVE_STATUSES.has(r.status)).length;
+  // SSE connects per-run; show "Standby" when no run is selected rather than "Offline"
+  const displayStatus = sseStatus === 'DISCONNECTED' && !activeRunId ? 'STANDBY' : sseStatus;
 
   return (
     <header className="flex items-center h-12 px-4 gap-3 bg-surface-1 border-b border-white/[0.06] flex-shrink-0 z-10">
@@ -18,24 +20,25 @@ export default function Header() {
       <div className="flex items-center gap-1.5 text-xs">
         <span className={cn(
           'relative flex h-1.5 w-1.5',
-          sseStatus === 'CONNECTED' ? '' : 'opacity-60'
+          displayStatus === 'CONNECTED' ? '' : 'opacity-60'
         )}>
-          {sseStatus === 'CONNECTED' && (
+          {displayStatus === 'CONNECTED' && (
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75" />
           )}
           <span className={cn(
             'relative inline-flex rounded-full h-1.5 w-1.5',
-            sseStatus === 'CONNECTED' ? 'bg-accent-emerald' :
-            sseStatus === 'RECONNECTING' ? 'bg-accent-amber' : 'bg-zinc-600'
+            displayStatus === 'CONNECTED' ? 'bg-accent-emerald' :
+            displayStatus === 'RECONNECTING' ? 'bg-accent-amber' : 'bg-zinc-600'
           )} />
         </span>
         <span className={cn(
           'text-xs hidden sm:block',
-          sseStatus === 'CONNECTED' ? 'text-accent-emerald' :
-          sseStatus === 'RECONNECTING' ? 'text-accent-amber' : 'text-zinc-600'
+          displayStatus === 'CONNECTED' ? 'text-accent-emerald' :
+          displayStatus === 'RECONNECTING' ? 'text-accent-amber' : 'text-zinc-600'
         )}>
-          {sseStatus === 'CONNECTED' ? 'Live' :
-           sseStatus === 'RECONNECTING' ? 'Reconnecting' : 'Offline'}
+          {displayStatus === 'CONNECTED' ? 'Live' :
+           displayStatus === 'RECONNECTING' ? 'Reconnecting' :
+           displayStatus === 'STANDBY' ? 'Standby' : 'Offline'}
         </span>
       </div>
 

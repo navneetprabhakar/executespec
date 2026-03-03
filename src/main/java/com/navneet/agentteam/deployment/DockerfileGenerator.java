@@ -35,7 +35,8 @@ public class DockerfileGenerator {
             .findFirst()
             .orElseThrow(() -> new IllegalStateException(
                 "No deployment strategy matches workspace at " + workspacePath
-                + ". Expected pom.xml (Spring Boot) or index.html (static site)."));
+                + ". Supported signals: pom.xml (Spring Boot), requirements.txt/pyproject.toml/Pipfile (Python), "
+                + "go.mod (Go), Gemfile (Ruby), composer.json (PHP), index.html (static site)."));
 
         log.info("Strategy: {}", matched.detectionSummary(workspacePath));
 

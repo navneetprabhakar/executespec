@@ -12,7 +12,20 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
     throw new Error(`${res.status}: ${msg}`);
   }
   if (res.status === 204) return undefined as unknown as T;
-  return res.json();
+  // Handle Spring returning 200 OK with an empty body (e.g. approve/merge endpoints)
+  const text = await res.text();
+  if (!text.trim()) return undefined as unknown as T;
+  return JSON.parse(text);
+}
+
+/** Fetch a plain-text endpoint (e.g. file content served as text/plain). */
+async function reqText(url: string): Promise<string> {
+  const res = await fetch(BASE + url);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`${res.status}: ${msg}`);
+  }
+  return res.text();
 }
 
 // ── Run types ───────────────────────────────────────────────────────────────
@@ -21,25 +34,26 @@ export interface RunSummary {
   runId: string;
   status: string;
   userRequest: string;
-  provider: string;
-  modelName: string;
-  totalTokens: number;
-  totalCostUsd: number;
-  createdAt: string;
-  updatedAt: string;
-  skipApproval: boolean;
+  plannerModel: string;
+  workerModel: string;
+  reviewerModel: string;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  startedAt: string;
+  completedAt: string | null;
 }
 
 export interface TaskSummary {
   taskId: string;
   title: string;
   status: string;
-  provider: string;
-  modelName: string;
-  tokensUsed: number;
+  assignedModel: string;
+  inputTokens: number;
+  outputTokens: number;
   durationMs: number;
-  complexity: string;
-  dependencies: string[];
+  branchName: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
   readmeUpdated: boolean;
 }
 
@@ -55,29 +69,36 @@ export interface MetricsResponse {
   completedRuns: number;
   failedRuns: number;
   activeRuns: number;
-  totalTokens: number;
-  totalCostUsd: number;
-  avgCostPerRun: number;
-  avgTokensPerRun: number;
-  runsByStatus: Record<string, number>;
-  recentCompletedRuns: RunSummary[];
+  queuedRuns: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
 }
 
 export interface PricingRow {
   provider: string;
   model: string;
-  inputCostPer1k: number;
-  outputCostPer1k: number;
-  active: boolean;
+  inputCostPer1m: number;
+  outputCostPer1m: number;
+  notes: string | null;
+  updatedAt: string | null;
+}
+
+export interface TaskFeasibility {
+  taskId: string;
+  title: string;
+  complexity: string;
+  minIterations: number;
+  maxIterations: number;
+  estimatedLowUsd: number;
+  estimatedHighUsd: number;
 }
 
 export interface FeasibilityReport {
-  feasible: boolean;
-  estimatedCostUsd: number;
-  estimatedTokens: number;
-  complexity: string;
-  taskBreakdown: Array<{ title: string; complexity: string; estimatedTokens: number; estimatedCostUsd: number }>;
-  warnings: string[];
+  verdict: string;  // "FEASIBLE" | "MARGINAL" | "INFEASIBLE" | "ESTIMATED"
+  budgetUsd: number | null;
+  estimatedLowUsd: number;
+  estimatedHighUsd: number;
+  tasks: TaskFeasibility[];
 }
 
 export interface DeploymentSummary {
@@ -91,11 +112,11 @@ export interface DeploymentSummary {
 }
 
 export interface TimelineData {
-  tasks: Array<{ taskId: string; title: string; startTime: string; endTime: string; status: string }>;
+  tasks: Array<{ taskId: string; title: string; startedAt: string; completedAt: string; status: string }>;
 }
 
 export interface ModelComparisonData {
-  models: Array<{ provider: string; model: string; totalRuns: number; totalTokens: number; totalCostUsd: number; avgDurationMs: number }>;
+  models: Array<{ provider: string; model: string; taskCount: number; totalInputTokens: number; totalOutputTokens: number; avgDurationMs: number }>;
 }
 
 // ── Runs ────────────────────────────────────────────────────────────────────
@@ -106,7 +127,7 @@ export const getRuns = (status?: string) =>
 export const getRun = (id: string) =>
   req<RunDetail>(`/runs/${id}`);
 
-export const createRun = (body: { userRequest: string; provider?: string; modelName?: string; skipApproval?: boolean }) =>
+export const createRun = (body: { userRequest: string; skipApproval?: boolean; modelName?: string }) =>
   req<{ runId: string }>('/runs', { method: 'POST', body: JSON.stringify(body) });
 
 export const approveRun = (id: string, approved: boolean) =>
@@ -120,6 +141,9 @@ export const cancelRun = (id: string) =>
 
 export const retryTask = (runId: string, taskId: string) =>
   req<void>(`/runs/${runId}/tasks/${taskId}/retry`, { method: 'POST' });
+
+export const retryRun = (runId: string) =>
+  req<RunSummary>(`/runs/${runId}/retry`, { method: 'POST' });
 
 // ── Metrics ─────────────────────────────────────────────────────────────────
 
@@ -137,7 +161,7 @@ export const updatePricing = (provider: string, model: string, body: Partial<Pri
 
 // ── Feasibility ──────────────────────────────────────────────────────────────
 
-export const feasibility = (body: { userRequest: string; provider?: string; modelName?: string; budgetUsd?: number }) =>
+export const feasibility = (body: { goal: string; provider?: string; model?: string; budgetUsd?: number }) =>
   req<FeasibilityReport>('/feasibility', { method: 'POST', body: JSON.stringify(body) });
 
 // ── Deployments ──────────────────────────────────────────────────────────────
@@ -173,5 +197,68 @@ export const getTimeline = (runId: string) =>
 export const getFiles = (runId: string) =>
   req<string[]>(`/runs/${runId}/files`);
 
+/**
+ * Trigger a browser download of the workspace zip.
+ * Uses a hidden anchor so the browser handles the Content-Disposition header.
+ */
+export function downloadWorkspace(runId: string): void {
+  const a = document.createElement('a');
+  a.href = `${BASE}/runs/${runId}/download`;
+  a.download = `workspace-${runId.slice(0, 8)}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/** File content is served as text/plain — must NOT use res.json(). */
 export const getFile = (runId: string, filePath: string) =>
-  req<{ content: string }>(`/runs/${runId}/files/${encodeURIComponent(filePath)}`);
+  reqText(`/runs/${runId}/file?path=${encodeURIComponent(filePath)}`);
+
+// ── Messages (historical log) ────────────────────────────────────────────────
+
+export interface MessageResponse {
+  fromAgent: string;
+  contentSummary: string;
+  sentAt: string;
+}
+
+export const getMessages = (runId: string) =>
+  req<MessageResponse[]>(`/runs/${runId}/messages`);
+
+// ── OpenAPI spec ─────────────────────────────────────────────────────────────
+
+/** Fetch the generated OpenAPI YAML for a run (served as text/plain). */
+export const getOpenApiSpec = (runId: string) =>
+  reqText(`/runs/${runId}/openapi.yaml`);
+
+// ── Local Docker Preview ──────────────────────────────────────────────────────
+
+export interface LocalPreviewStatus {
+  runId: string;
+  status: 'IDLE' | 'BUILDING' | 'RUNNING' | 'FAILED' | 'STOPPED';
+  url: string | null;
+  projectType: string | null;
+  errorMessage: string | null;
+}
+
+export const getPreviewStatus = (runId: string) =>
+  req<LocalPreviewStatus>(`/runs/${runId}/preview`);
+
+export const startPreview = (runId: string) =>
+  req<LocalPreviewStatus>(`/runs/${runId}/preview/start`, { method: 'POST' });
+
+export const stopPreview = (runId: string) =>
+  req<void>(`/runs/${runId}/preview/stop`, { method: 'DELETE' });
+
+// ── Conversation (pre-flight chat) ────────────────────────────────────────────
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export const conversationChat = (messages: ConversationMessage[]) =>
+  req<{ reply: string }>('/conversation', {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
+  });

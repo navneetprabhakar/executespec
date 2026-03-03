@@ -53,6 +53,10 @@ public class WorkspaceInitService {
 
             runGit(workspace, "git", "init", "-b", "main");
 
+            // Configure identity so JGit commits work in all environments
+            runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
+            runGit(workspace, "git", "config", "user.name", "ExecuteSpec Agent");
+
             // Standard build-artifact exclusions
             Files.writeString(workspace.resolve(".gitignore"),
                 "target/\nbuild/\nnode_modules/\n.gradle/\n__pycache__/\n*.class\n*.pyc\n*.log\n");

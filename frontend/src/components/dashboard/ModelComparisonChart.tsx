@@ -8,7 +8,7 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
 
   useEffect(() => {
     if (!data || !svgRef.current || data.models.length === 0) return;
-    const models = [...data.models].sort((a, b) => b.totalTokens - a.totalTokens).slice(0, 8);
+    const models = [...data.models].sort((a, b) => (b.totalInputTokens + b.totalOutputTokens) - (a.totalInputTokens + a.totalOutputTokens)).slice(0, 8);
 
     const margin = { top: 16, right: 60, bottom: 24, left: 130 };
     const width = svgRef.current.clientWidth - margin.left - margin.right;
@@ -20,7 +20,7 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
       .attr('height', height + margin.top + margin.bottom)
       .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-    const x = d3.scaleLinear().domain([0, d3.max(models, (d) => d.totalTokens) ?? 1]).range([0, width]).nice();
+    const x = d3.scaleLinear().domain([0, d3.max(models, (d) => d.totalInputTokens + d.totalOutputTokens) ?? 1]).range([0, width]).nice();
     const y = d3.scaleBand().domain(models.map((d) => d.model)).range([0, height]).padding(0.3);
 
     const grad = svg.append('defs').append('linearGradient').attr('id', 'bar-grad').attr('x1', '0%').attr('x2', '100%');
@@ -29,7 +29,7 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
 
     svg.selectAll('.bar').data(models).join('rect')
       .attr('x', 0).attr('y', (d) => y(d.model)!).attr('height', y.bandwidth())
-      .attr('width', (d) => x(d.totalTokens)).attr('fill', 'url(#bar-grad)').attr('rx', 3).attr('opacity', 0.85);
+      .attr('width', (d) => x(d.totalInputTokens + d.totalOutputTokens)).attr('fill', 'url(#bar-grad)').attr('rx', 3).attr('opacity', 0.85);
 
     svg.selectAll('.label').data(models).join('text')
       .attr('x', -6).attr('y', (d) => y(d.model)! + y.bandwidth() / 2)
@@ -38,9 +38,9 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
       .text((d) => d.model.replace('claude-', '').slice(0, 16));
 
     svg.selectAll('.value').data(models).join('text')
-      .attr('x', (d) => x(d.totalTokens) + 4).attr('y', (d) => y(d.model)! + y.bandwidth() / 2)
+      .attr('x', (d) => x(d.totalInputTokens + d.totalOutputTokens) + 4).attr('y', (d) => y(d.model)! + y.bandwidth() / 2)
       .attr('dominant-baseline', 'middle').attr('fill', 'rgba(255,255,255,0.35)').attr('font-size', 10)
-      .text((d) => d.totalTokens > 999 ? `${(d.totalTokens / 1000).toFixed(0)}k` : String(d.totalTokens));
+      .text((d) => { const t = d.totalInputTokens + d.totalOutputTokens; return t > 999 ? `${(t / 1000).toFixed(0)}k` : String(t); });
 
     svg.append('g').attr('transform', `translate(0,${height})`)
       .call(d3.axisBottom(x).ticks(4).tickSize(0))

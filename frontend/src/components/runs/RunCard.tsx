@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { ChevronRight, Cpu } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
-import { fmtTokens, fmtCost, relativeTime, truncate } from '@/lib/utils';
+import { fmtTokens, relativeTime, truncate } from '@/lib/utils';
 import type { RunSummary } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -42,7 +42,7 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="font-mono text-xs text-zinc-400">{run.runId.slice(0, 12)}</span>
-            <span className="text-xs text-zinc-600">{relativeTime(run.createdAt)}</span>
+            <span className="text-xs text-zinc-600">{relativeTime(run.startedAt)}</span>
           </div>
           <p className="text-sm text-zinc-200 line-clamp-2 leading-snug">
             {truncate(run.userRequest, 120)}
@@ -50,13 +50,10 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
               <Cpu className="h-3 w-3" />
-              {run.modelName}
+              {run.plannerModel}
             </span>
-            {run.totalTokens > 0 && (
-              <span className="text-xs text-zinc-600">{fmtTokens(run.totalTokens)} tok</span>
-            )}
-            {run.totalCostUsd > 0 && (
-              <span className="text-xs text-zinc-600">{fmtCost(run.totalCostUsd)}</span>
+            {(run.totalInputTokens + run.totalOutputTokens) > 0 && (
+              <span className="text-xs text-zinc-600">{fmtTokens(run.totalInputTokens + run.totalOutputTokens)} tok</span>
             )}
           </div>
         </div>

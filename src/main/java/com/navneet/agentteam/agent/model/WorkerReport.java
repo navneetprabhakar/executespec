@@ -28,6 +28,8 @@ public class WorkerReport {
     private String notesForReviewer;
     private int inputTokens;
     private int outputTokens;
+    private int cacheReadTokens;    // Anthropic cache_read_input_tokens  (billed at 0.10x input rate)
+    private int cacheWriteTokens;   // Anthropic cache_creation_input_tokens (billed at 1.25x input rate)
 
     /** Convenience factory for tasks that hit a token/iteration limit. */
     public static WorkerReport partial(String taskId, String reason,

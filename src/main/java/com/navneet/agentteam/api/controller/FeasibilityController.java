@@ -83,8 +83,7 @@ public class FeasibilityController {
     private String defaultModel(String provider) {
         return switch (provider.toLowerCase()) {
             case "openai"  -> "gpt-4o-mini";
-            case "gemini"  -> "gemini-2.0-flash";
-            default        -> "claude-sonnet-4-5-20250929";
+            default        -> "claude-haiku-4-5-20251001";
         };
     }
 }

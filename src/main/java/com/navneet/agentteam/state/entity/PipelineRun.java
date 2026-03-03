@@ -50,6 +50,8 @@ public class PipelineRun {
     private Integer totalInputTokens;   // accumulated across all agents
     private Integer totalOutputTokens;
 
+    private Double actualCostUsd;       // computed post-run with cache-aware pricing (null until complete)
+
     @Column(columnDefinition = "TEXT")
     private String failureReason;       // set on FAILED state
 

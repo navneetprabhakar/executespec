@@ -25,21 +25,15 @@ public class AgentProperties {
     public static class TokenBudget {
         /** Must match spring.ai.*.chat.options.max-tokens */
         private int maxTokens = 16000;
-        /** Percentage of maxTokens for LOW complexity tasks */
-        private double lowPct = 0.25;
-        /** Percentage of maxTokens for MEDIUM complexity tasks */
-        private double mediumPct = 0.50;
-        /** Percentage of maxTokens for HIGH complexity tasks */
-        private double highPct = 0.75;
-        /** Absolute max — worker forced to report when exceeded */
+        /** Output-token limit for LOW complexity tasks. */
+        private int low = 2048;
+        /** Output-token limit for MEDIUM complexity tasks. */
+        private int medium = 4096;
+        /** Output-token limit for HIGH complexity tasks. */
+        private int high = 8192;
+        /** Absolute max percentage — worker forced to report when exceeded */
         private double hardCeilingPct = 0.90;
 
-        /** Computed output-token limit for LOW complexity tasks. */
-        public int getLow()    { return (int) (maxTokens * lowPct); }
-        /** Computed output-token limit for MEDIUM complexity tasks. */
-        public int getMedium() { return (int) (maxTokens * mediumPct); }
-        /** Computed output-token limit for HIGH complexity tasks. */
-        public int getHigh()   { return (int) (maxTokens * highPct); }
         /** Computed hard-ceiling token count. */
         public int getHardCeiling() { return (int) (maxTokens * hardCeilingPct); }
     }
@@ -83,7 +77,7 @@ public class AgentProperties {
         private boolean enabled      = true;
         private int maxAttempts      = 3;
         private int timeoutSeconds   = 300;
-        private String model         = "claude-sonnet-4-5-20250929";
+        private String model         = "claude-haiku-4-5-20251001";
         private String provider      = "anthropic";
     }
 
@@ -93,7 +87,7 @@ public class AgentProperties {
     @Data
     public static class ApiTestSuite {
         private boolean enabled = true;
-        private String model    = "claude-sonnet-4-5-20250929";
+        private String model    = "claude-haiku-4-5-20251001";
         private String provider = "anthropic";
     }
 
