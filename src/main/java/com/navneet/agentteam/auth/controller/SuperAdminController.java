@@ -12,6 +12,7 @@ import com.navneet.agentteam.auth.repository.OrgMemberRepository;
 import com.navneet.agentteam.auth.repository.TierConfigRepository;
 import com.navneet.agentteam.auth.security.AppUserDetails;
 import com.navneet.agentteam.auth.service.InvitationService;
+import com.navneet.agentteam.auth.service.MailService;
 import com.navneet.agentteam.auth.service.OrgService;
 import com.navneet.agentteam.auth.service.PaymentAuditService;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,7 @@ public class SuperAdminController {
     private final InvitationService invitationService;
     private final PaymentAuditService paymentAuditService;
     private final TierConfigRepository tierConfigRepo;
+    private final MailService mailService;
 
     // ── Users ─────────────────────────────────────────────────────────────────
 
@@ -217,5 +219,22 @@ public class SuperAdminController {
             @PathVariable String id) {
         invitationService.rejectEscalation(id, adminDetails.getUser().getId());
         return ResponseEntity.ok(Map.of("message", "Invitation rejected"));
+    }
+
+    // ── Test Email ────────────────────────────────────────────────────────────
+
+    /**
+     * Sends a quick test email to verify that Gmail OAuth is configured correctly.
+     * Body: {"to": "someone@example.com"}
+     */
+    @PostMapping("/test-email")
+    public ResponseEntity<Map<String, String>> sendTestEmail(
+            @RequestBody Map<String, String> body) {
+        String to = body.get("to");
+        if (to == null || to.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Field 'to' is required"));
+        }
+        mailService.sendNewUserAlertToAdmin(to, "test-trigger@executespec.local");
+        return ResponseEntity.ok(Map.of("message", "Test email dispatched to " + to));
     }
 }

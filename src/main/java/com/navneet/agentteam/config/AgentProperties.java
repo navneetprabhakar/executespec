@@ -51,6 +51,8 @@ public class AgentProperties {
     @Data
     public static class Concurrency {
         private int maxRuns = 3;
+        /** Maximum agentic loop iterations per worker task. Raise for complex tasks. */
+        private int maxIterations = 80;
     }
 
     @Data

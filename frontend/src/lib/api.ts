@@ -539,3 +539,15 @@ export const adminInviteUser = (body: AdminInviteRequest) =>
 // Org member suspend
 export const orgSuspendMember = (userId: string, suspended: boolean) =>
   req<void>(`/org/me/members/${userId}/suspend`, { method: 'PUT', body: JSON.stringify({ suspended }) });
+
+// Task execution graph
+export interface TaskGraphNode {
+  taskId: string;
+  title: string;
+  status: string;
+  complexity: string | null;
+  assignedModel: string | null;
+  dependsOn: string[];
+  level: number;
+}
+export const getTaskGraph = (runId: string) => req<TaskGraphNode[]>(`/runs/${runId}/task-graph`);

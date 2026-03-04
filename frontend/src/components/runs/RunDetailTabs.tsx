@@ -13,6 +13,7 @@ import GlowDot from '@/components/shared/GlowDot';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
 import RunConversation from './RunConversation';
+import TaskGraph from './TaskGraph';
 import { PIPELINE_STEPS } from '@/lib/constants';
 import { fmtTokens, relativeTime, cn } from '@/lib/utils';
 import {
@@ -57,7 +58,11 @@ export default function RunDetailTabs() {
 
   /** The Chat tab is only shown for terminal (COMPLETE / PARTIAL) runs. */
   const showChatTab = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
-  const TABS = showChatTab ? [...BASE_TABS, { value: 'chat', label: 'Chat' }] : BASE_TABS;
+  const TABS = [
+    ...BASE_TABS,
+    { value: 'graph', label: 'Graph' },
+    ...(showChatTab ? [{ value: 'chat', label: 'Chat' }] : []),
+  ];
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
@@ -115,6 +120,10 @@ export default function RunDetailTabs() {
 
         <Tabs.Content value="preview" className="h-full overflow-hidden">
           <PreviewTab runId={activeRun.runId} files={files} filesLoading={filesLoading} />
+        </Tabs.Content>
+
+        <Tabs.Content value="graph" className="h-full overflow-auto p-4">
+          <TaskGraph runId={activeRun.runId} />
         </Tabs.Content>
 
         {showChatTab && (
