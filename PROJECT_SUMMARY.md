@@ -1,8 +1,9 @@
 # ExecuteSpec — Project Summary
 
-> Multi-agent autonomous coding system built on Spring Boot 3.3 + Spring AI 1.0 + PostgreSQL.
+> Multi-agent autonomous coding system built on Spring Boot 3.3 + Spring AI 1.1.0 + PostgreSQL.
 > A human-in-the-loop pipeline that takes a natural-language goal, decomposes it into parallel tasks,
 > executes them with LLM worker agents, reviews the result, and optionally deploys to GCP Cloud Run.
+> Full auth/multi-tenancy (JWT, orgs, projects, tiers). Per-user GitHub PAT. 10-language deployment.
 
 ---
 
@@ -12,13 +13,16 @@
 2. [Tech Stack](#2-tech-stack)
 3. [Architecture — Tier by Tier](#3-architecture--tier-by-tier)
 4. [LLM Model Configuration](#4-llm-model-configuration)
-5. [Package Structure](#5-package-structure)
-6. [REST API Reference](#6-rest-api-reference)
-7. [Database Entities](#7-database-entities)
-8. [Web UI](#8-web-ui)
-9. [LLM Prompts](#9-llm-prompts)
-10. [Configuration Reference](#10-configuration-reference)
-11. [Running the Application](#11-running-the-application)
+5. [Auth & Multi-Tenancy](#5-auth--multi-tenancy)
+6. [Per-User GitHub Integration](#6-per-user-github-integration)
+7. [10-Language Deployment](#7-10-language-deployment)
+8. [Package Structure](#8-package-structure)
+9. [REST API Reference](#9-rest-api-reference)
+10. [Database Entities](#10-database-entities)
+11. [Web UI](#11-web-ui)
+12. [LLM Prompts](#12-llm-prompts)
+13. [Configuration Reference](#13-configuration-reference)
+14. [Running the Application](#14-running-the-application)
 
 ---
 
@@ -26,16 +30,16 @@
 
 ExecuteSpec is a fully autonomous multi-agent software engineering system. Given a natural-language specification, it:
 
-1. **Plans** — A Planner agent decomposes the goal into 1–6 independent, parallelisable tasks, each assigned an appropriate LLM model based on complexity.
-2. **Human approves** — The plan is held at a gate until a human approves or rejects it via the REST API or dashboard UI.
+1. **Plans** — A Planner agent decomposes the goal into 1–6 parallelisable tasks using `claude-sonnet-4-6`.
+2. **Human approves** — The plan is held at a gate until a human approves or rejects it via REST API or dashboard.
 3. **Executes** — Worker agents run tasks in parallel, using file-system and shell tools to write real code.
 4. **Compiles** — A Compiler agent checks the output; if errors are found, it iteratively fixes them (up to 3 attempts).
 5. **Reviews** — A Reviewer agent inspects the full output for correctness, completeness, and README coverage.
 6. **Human merges** — A second gate waits for human approval before committing to the target repository.
-7. **Post-merge** — An API spec agent generates OpenAPI 3.0 YAML; a Preview service builds frontend output.
-8. **Deploys** *(optional)* — The run can be deployed to GCP Cloud Run (Spring Boot) or served via nginx (static).
+7. **Post-merge** — An API spec agent generates OpenAPI 3.0 YAML; a Preview service builds frontend output; optional GitHub push.
+8. **Deploys** *(optional)* — 10 language strategies auto-detect project type, generate an optimised Dockerfile, and deploy to GCP Cloud Run.
 
-The pipeline is fully observable via **Server-Sent Events (SSE)**, a **D3.js Gantt timeline**, a **force-directed comms graph**, and a real-time log viewer — all in a single-page Alpine.js dashboard.
+The pipeline is fully observable via **Server-Sent Events (SSE)**, a **D3.js Gantt timeline**, a **force-directed comms graph**, and a real-time log viewer — all in a React 18 SPA dashboard.
 
 ---
 
@@ -46,33 +50,37 @@ The pipeline is fully observable via **Server-Sent Events (SSE)**, a **D3.js Gan
 | Language | Java 21 |
 | Framework | Spring Boot 3.3.0 |
 | AI / LLM | Spring AI 1.1.0 |
-| Primary LLM | Claude (Anthropic) — Haiku 4.5 + Sonnet 4.6 |
-| Fallback LLM | OpenAI GPT-4o |
+| Primary LLM | Claude (Anthropic) — Haiku 4.5 (workers) + Sonnet 4.6 (planner) |
+| Fallback LLM | OpenAI GPT-4o / GPT-4o-mini |
 | Database | PostgreSQL 15+ (`jdbc:postgresql://localhost:5432/agentteam`) |
 | ORM | Spring Data JPA + Hibernate |
+| Migrations | Flyway V1–V8 |
 | Git | JGit 6.9.0 |
+| Auth | JWT (Spring Security) — 24h access + 7d refresh tokens |
 | Code generation | Lombok |
 | JSON | Jackson |
-| Frontend | React 18 + Vite 5 + Tailwind 3.4 + shadcn/ui + Zustand + Recharts/D3 |
+| Frontend | React 18 + Vite 5 + Tailwind 3.4 + shadcn/ui + Zustand + Recharts/D3.js |
 | Deployment | GCP Cloud Run + Artifact Registry |
 | Build | Maven (JAVA_HOME=/opt/homebrew/opt/openjdk@21) |
+| Maven artifactId | `executespec` |
 
 ---
 
 ## 3. Architecture — Tier by Tier
 
-### Tier 1 — Core Agents
+### Tier 1 — Core Loop
 Single-threaded pipeline: Planner → Worker → Reviewer.
 Spring singleton agents, XML tool-call protocol (`<tool_call>{...}</tool_call>`), file-system and shell tools.
 
 ### Tier 2 — Persistence + State Store
 All DB access centralised in `StateStore`. Entities: `PipelineRun`, `AgentTask`, `AgentMessage`, `FileLock`, `AgentInbox`.
 
-### Tier 3 — Async REST + Human Gates
-- `PipelineHarness.submitRun()` — async with `Semaphore(maxRuns=3)`
+### Tier 3 — Async REST + React SPA + SSE
+- `PipelineHarness.submitRun()` — async with `Semaphore(maxRuns=5)`
 - `CompletableFuture` plan gate → resolved by `POST /api/runs/{id}/approve`
 - `CompletableFuture` merge gate → resolved by `POST /api/runs/{id}/merge`
-- SSE broadcaster (`SseBroadcaster`) emits `RunEvent` records at every state transition
+- SSE broadcaster (`SseBroadcaster`) emits `RunEvent` records; event types are `SCREAMING_SNAKE_CASE`; payload field is `payload`
+- React 18 + Vite 5 + Tailwind 3.4 + shadcn/ui SPA dashboard
 
 ### Tier 4 — Observability
 - **Gantt timeline** — D3.js Gantt with gate events (`GET /api/runs/{id}/timeline`)
@@ -85,29 +93,35 @@ All DB access centralised in `StateStore`. Entities: `PipelineRun`, `AgentTask`,
 - **`StuckRunMonitor`** — `@Scheduled` every 2 min; detects inactive tasks
 - **`RunRecoveryService`** — classifies failures, retries tasks, escalates to different model/provider
 - **`LlmCallGuard`** — wraps ChatModel; retries rate-limit + server errors; classifies permanent failures (AuthFailure, BudgetExhausted, ContextTooLong)
-- **`ContextAgent`** — virtual thread; scans runs for patterns
-- **`PromptOptimiserAgent`** — virtual thread; analyses failed prompts and proposes improvements
+- **`ContextAgent`** — virtual thread; post-merge; scans runs for patterns; updates `CODEBASE_CONTEXT.md`
+- **`PromptOptimiserAgent`** — virtual thread; every 10 runs; analyses failed prompts and proposes improvements
 
-### Tier 6 — GCP Deployments
-- **`DeploymentService`** — builds Docker image, pushes to Artifact Registry, deploys to Cloud Run
-- Two strategies: `SpringBootDeploymentStrategy` (eclipse-temurin base) + `StaticDeploymentStrategy` (nginx)
-- **`WorkspaceExportService`** — zips workspace for download
-- **`DeploymentCleanupJob`** — deletes deployments older than `ttl-days` (default 7)
+### Tier 6 — GCP Deployments + 10-Language Support
+Docker build → Artifact Registry → Cloud Run.
+**10 deployment strategies** auto-detect project type via `@Order`-sorted beans:
+Spring Boot (1), Gradle (2), Node.js (3), Python (4), Go (5), Ruby (6), PHP (7), Rust (8), .NET (9), Static (10).
+Versioned revisions, 7-day TTL cleanup, workspace zip download, `WorkspaceFileService` with path traversal protection.
 
 ### Tier 7 — External Integrations
-Webhook-driven pipeline triggers from:
-- **Jira** — status transition fires run; transitions updated on start/complete/fail
-- **Confluence** — page label trigger; results written back as child page
-- **ServiceNow** — incident categories trigger run; auto-resolve on completion
-- **PagerDuty** — incident trigger types; auto-resolve support
-
-All integrations: `skipApproval` flag bypasses the plan gate for fully automated pipelines.
+Webhook-driven pipeline triggers from Jira, Confluence, ServiceNow, PagerDuty.
+Pattern: `InboundAdapter → normalise to RunRequest → pipeline → OutboundAdapter → write back`.
+`skipApproval` flag for fully automated pipelines. Idempotency via `integration_event_log`.
 
 ### Tier 8 — Compile, API Spec, Preview
-- **`CompilerAgent`** — detects build tool (Maven/Gradle/npm), compiles, sends errors to LLM in JSON-patch format, applies fixes (max 3 attempts); always non-fatal
-- **`ApiTestSuiteAgent`** — post-merge; reads `*Controller.java` files, generates `api-docs/openapi.yaml` (OpenAPI 3.0)
-- **`PreviewService`** — post-merge; detects frontend files, runs `npm install && npm run build`, marks run `hasFrontend=true`
-- **`PreviewController`** — serves `GET /api/runs/{runId}/preview/**` with SPA fallback + path traversal protection
+- **`CompilerAgent`**: detects build tool (pom.xml/build.gradle/package.json), compiles, sends errors to LLM in JSON-patch format, applies fixes iteratively (max 3 attempts); always non-fatal
+- **`ApiTestSuiteAgent`**: post-merge; reads `*Controller.java` files; generates `api-docs/openapi.yaml` (OpenAPI 3.0)
+- **`PreviewService`**: post-merge; detects frontend files; runs `npm install && npm build`; marks run `hasFrontend=true`
+- **`HealthController`**: `GET /api/health` — DB ping, uptime formatted, run counts
+
+### Auth & Multi-Tenancy
+Full JWT-based authentication with multi-org support, project membership, and tier enforcement.
+Flyway V4–V8. Roles: SUPER_ADMIN, ORG_ADMIN, BILLING_ADMIN, DEVELOPER. Tiers: FREE (5/mo), PRO (50/mo), ENTERPRISE (unlimited). Default admin: `admin@executespec.ai` / `REDACTED_FOR_PUBLIC_RELEASE`.
+
+### Per-User GitHub PAT (V8)
+Each user stores their own GitHub PAT in Settings. PAT stamped onto `pipeline_run` at submission. Run modes: `NEW` (create repo), `EXISTING` (clone → modify → push). `WorkspaceInitService.cloneFromRepo()` handles EXISTING workspaces.
+
+### 🔲 Tier 9 — Playground (planned)
+Interactive environment for loading, previewing, and testing generated projects without leaving the dashboard.
 
 ---
 
@@ -119,23 +133,19 @@ All integrations: `skipApproval` flag bypasses the plan gate for fully automated
 |---|---|---|---|
 | Planner | `claude-sonnet-4-6` | Anthropic | Task decomposition |
 | Reviewer | `claude-haiku-4-5-20251001` | Anthropic | Review after all workers complete |
-| LOW workers | `claude-haiku-4-5-20251001` | Anthropic | < 100 lines, thin controllers, configs |
-| MEDIUM workers | `claude-haiku-4-5-20251001` | Anthropic | 100–300 lines, service + business logic |
-| HIGH workers | `claude-haiku-4-5-20251001` | Anthropic | 300+ lines, complex multi-component |
-| Compiler agent | `claude-haiku-4-5-20251001` | Anthropic | Error analysis + multi-file fix |
-| API spec agent | `claude-haiku-4-5-20251001` | Anthropic | OpenAPI 3.0 spec generation |
-| Context agent | `claude-haiku-4-5-20251001` | Anthropic | Run pattern scanning |
-| Optimiser | `claude-haiku-4-5-20251001` | Anthropic | Prompt pattern analysis |
+| Workers (all complexities) | `claude-haiku-4-5-20251001` | Anthropic | Code writing, compilation, API spec |
+| Context/Optimiser | `claude-haiku-4-5-20251001` | Anthropic | Post-merge scanning + prompt analysis |
 | Recovery escalation | `claude-sonnet-4-6` | Anthropic | Stuck/failed task retry |
 
-### Fallback Chain
+### Fallback Chains
 
 ```
-anthropic/claude-sonnet-4-6  →  openai/gpt-4o      (CAPABLE_CHAIN — planner/recovery)
-anthropic/claude-haiku-4-5-20251001  →  openai/gpt-4o  (CHEAP_CHAIN — workers/reviewer)
+ARCHITECT_CHAIN: anthropic/claude-opus-4-6           →  openai/gpt-4o
+CAPABLE_CHAIN:   anthropic/claude-sonnet-4-6         →  openai/gpt-4o
+UTILITY_CHAIN:   anthropic/claude-haiku-4-5-20251001 →  openai/gpt-4o-mini
 ```
 
-`LlmRouter` selects chain based on primary model name; falls back to `gpt-4o` on rate-limit (15 s sleep) or any non-transient Anthropic error.
+`LlmRouter` selects chain based on primary model name; falls back on rate-limit (15 s sleep) or any non-transient Anthropic error. Gemini fully removed.
 
 ### Token Limits
 
@@ -146,10 +156,95 @@ anthropic/claude-haiku-4-5-20251001  →  openai/gpt-4o  (CHEAP_CHAIN — worker
 | Token budget LOW | 2 048 |
 | Token budget MEDIUM | 4 096 |
 | Token budget HIGH | 8 192 |
+| Compaction warn-pct | 0.25 |
+| Compaction compact-pct | 0.35 |
+| Compaction hard-stop-pct | 0.55 |
 
 ---
 
-## 5. Package Structure
+## 5. Auth & Multi-Tenancy
+
+### JWT Configuration
+- Access token: 1440 minutes (24 hours)
+- Refresh token: 7 days
+
+### Tiers
+
+| Tier | Runs/Month | Notes |
+|---|---|---|
+| FREE | 5 (fixed) | Own runs only, no project access |
+| PRO | 50 (org-overridable via `monthlyRunLimitOverride`) | Full project access |
+| ENTERPRISE | Unlimited* | `api_keys_provided=true` → unlimited; else 5000/month |
+
+### Roles
+
+**Org-level** (`org_member.role`): `SUPER_ADMIN`, `ORG_ADMIN`, `BILLING_ADMIN`, `DEVELOPER`
+
+**Project-level** (`project_member.project_role`): `PROJECT_ADMIN`, `PROJECT_DEVELOPER`
+
+### RunVisibilitySpec
+- `SUPER_ADMIN` → all runs
+- `ORG_ADMIN` / `BILLING_ADMIN` → all runs in org
+- `DEVELOPER` → runs in projects they belong to
+- `FREE` → own runs only
+
+### Flyway Migrations
+
+| Version | Description |
+|---|---|
+| V1 | Core pipeline schema |
+| V2–V3 | Feature additions |
+| V4 | Auth schema: `app_user`, `org`, `org_member`, `project`, `project_member` |
+| V5 | Seed admin user (`admin@executespec.ai` / `REDACTED_FOR_PUBLIC_RELEASE`) |
+| V6 | `tier_config` table + org run-limit overrides |
+| V7 | Fix admin password hash (BCrypt correction) |
+| V8 | `github_pat` + `github_owner` on `app_user` + `pipeline_run` |
+
+---
+
+## 6. Per-User GitHub Integration
+
+### Settings → GitHub Integration
+Users enter their GitHub PAT + owner (username or org) in the Settings page. Saved via `PUT /api/auth/settings/github`.
+
+### Run Modes
+In the New Run modal, users can select:
+- **None** — no GitHub interaction
+- **Create new repo** — `repoMode=NEW`: auto-create private GitHub repo after merge, push code; `run.repoUrl` populated
+- **Start from existing** — `repoMode=EXISTING`: clone specified URL at workspace init, modify, push back
+
+### PAT Priority
+Run-level PAT (from user account) > System-level PAT (from `application.yml`).
+
+### UI
+- **NewRunModal.tsx**: GitHub collapsible section with 3 radio options; animated URL input for EXISTING mode; warning shown when no PAT configured
+- **RunCard.tsx**: shows GitHub link chip (with GitHub icon) when `run.repoUrl` is set
+- **SettingsPage.tsx**: PAT password input (show/hide toggle) + owner field + save button + status badge
+
+---
+
+## 7. 10-Language Deployment
+
+Strategies are Spring `@Component` beans collected as `List<DeploymentStrategy>` — `@Order` determines detection priority.
+
+| Priority | Strategy | Detection | Container |
+|---|---|---|---|
+| 1 | SpringBootDeploymentStrategy | `pom.xml` | `eclipse-temurin:21-jdk` → `eclipse-temurin:21-jre-alpine` |
+| 2 | GradleDeploymentStrategy | `build.gradle` / `build.gradle.kts` | `gradle:8-jdk21` → `eclipse-temurin:21-jre-alpine` |
+| 3 | NodeDeploymentStrategy | `package.json` | Server→`node:20-slim`; SPA build→multi-stage nginx |
+| 4 | PythonDeploymentStrategy | `requirements.txt` / `pyproject.toml` / `Pipfile` | `python:3.11-slim`; Django/FastAPI/Flask auto-detected |
+| 5 | GoDeploymentStrategy | `go.mod` | `golang:1.22-alpine` → `alpine:3.19` |
+| 6 | RubyDeploymentStrategy | `Gemfile` | `ruby:3.3-slim`; Rails/Sinatra/Rack auto-detected |
+| 7 | PhpDeploymentStrategy | `composer.json` | `php:8.2-apache` |
+| 8 | RustDeploymentStrategy | `Cargo.toml` | `rust:1.77-slim` → `debian:bookworm-slim` |
+| 9 | DotNetDeploymentStrategy | `*.csproj` / `*.sln` | `dotnet/sdk:8.0` → `dotnet/aspnet:8.0` |
+| 10 | StaticDeploymentStrategy | `index.html` | `nginx:1.25-alpine` |
+
+All containers expose port 8080. `LocalPreviewService.detectProjectType()` mirrors the same priority order.
+
+---
+
+## 8. Package Structure
 
 ```
 com.navneet.agentteam
@@ -161,34 +256,50 @@ com.navneet.agentteam
 │   ├── WorkerAgent.java                   # XML tool-call protocol; per-task state in params
 │   ├── ReviewerAgent.java                 # Quality + README gate check
 │   ├── TokenBudgetMonitor.java
-│   ├── LlmRouter.java                     # Provider fallback with CHEAP/CAPABLE chains
+│   ├── LlmRouter.java                     # ARCHITECT/CAPABLE/UTILITY chains; provider fallback
 │   └── CostEstimator.java                 # DB-backed cost estimate
 │
 ├── api/
 │   ├── controller/                        # RunController, SseController, MetricsController,
 │   │                                      # PricingController, FeasibilityController,
 │   │                                      # TimelineController, DeploymentController,
-│   │                                      # HealthController
+│   │                                      # LocalPreviewController, IntegrationController,
+│   │                                      # IntegrationStatusController
 │   ├── dto/                               # All request/response DTOs
 │   └── RunMapper.java
 │
 ├── apitests/                              # ApiTestSuiteAgent, ApiTestSuiteProperties
+│
+├── auth/
+│   ├── entity/                            # AppUser (+githubPat/githubOwner), Org, OrgMember,
+│   │                                      # Project, ProjectMember, TierConfig
+│   ├── repository/                        # Auth entity repositories
+│   ├── service/                           # AuthService, OrgService, ProjectService,
+│   │                                      # TierEnforcementService, InvitationService
+│   ├── controller/                        # AuthController, OrgController, ProjectController,
+│   │                                      # SuperAdminController
+│   ├── dto/                               # UserDto (+githubOwner, hasGithubPat), OrgDto,
+│   │                                      # ProjectDto, OrgMemberDto, ProjectMemberDto
+│   └── security/                          # JwtTokenProvider, AppUserDetails, SecurityConfig
+│
 ├── compiler/                             # CompilerAgent, CompileResult, CompilerProperties
 │
 ├── config/
 │   ├── AgentProperties.java              # @ConfigurationProperties(prefix="agent")
-│   ├── AgentModelConfig.java             # Spring AI ChatModel beans
-│   ├── ModelPricingInitializer.java      # @PostConstruct — upserts 7 pricing rows
+│   ├── AgentModelConfig.java             # Spring AI ChatModel beans; NO AnthropicCacheInterceptor
+│   ├── ModelPricingInitializer.java      # @PostConstruct — upserts canonical pricing rows
 │   └── WebConfig.java
 │
 ├── context/                              # ContextAgent, ContextAgentScanner, ContextAgentProperties
 │
 ├── deployment/
-│   ├── strategy/                         # DeploymentStrategy, SpringBootDeploymentStrategy,
-│   │                                     # StaticDeploymentStrategy
+│   ├── strategy/                         # DeploymentStrategy interface + 10 implementations
+│   │                                     # (@Order 1–10: Spring Boot through Static)
+│   ├── PreviewAgent.java                 # Deterministic Dockerfile + docker-compose.yml gen
 │   ├── DeploymentService.java
 │   ├── DeploymentProperties.java
-│   ├── DockerfileGenerator.java
+│   ├── DockerfileGenerator.java          # Routes to strategy; findFirst() on @Order-sorted list
+│   ├── LocalPreviewService.java          # detectProjectType() mirrors @Order priority
 │   ├── ArtifactRegistryClient.java
 │   ├── CloudRunClient.java
 │   ├── WorkspaceExportService.java
@@ -196,11 +307,12 @@ com.navneet.agentteam
 │   └── DeploymentCleanupJob.java
 │
 ├── harness/
-│   ├── PipelineHarness.java              # Orchestrator; Semaphore gates, CompletableFutures
+│   ├── PipelineHarness.java              # Orchestrator; clone-vs-init branch; run-level PAT push
 │   ├── WorkerPool.java                   # Concurrent task execution + cancel/retry
 │   ├── ApprovalGate.java                 # CompletableFuture gate wrapper
 │   ├── GitMergeService.java              # README enforcement hard gate
-│   ├── WorkspaceInitService.java
+│   ├── WorkspaceInitService.java         # ensureRunWorkspace() + cloneFromRepo()
+│   ├── event/                            # PipelineEvent, PostMergeOrchestrator
 │   └── MergeBlockedException.java
 │
 ├── integration/
@@ -209,17 +321,10 @@ com.navneet.agentteam
 │   ├── servicenow/                       # ServiceNowAdapter, ServiceNowClient, …
 │   ├── pagerduty/                        # PagerDutyAdapter, PagerDutyClient, …
 │   ├── IntegrationManager.java           # setHarness() breaks circular dep
-│   ├── IntegrationController.java
-│   ├── IntegrationProperties.java
-│   ├── IntegrationConfig.java
 │   └── IntegrationEventLogCleanupJob.java
 │
 ├── optimiser/                            # PromptOptimiserAgent, PromptPatternAnalyser,
 │                                         # PromptAuditService, PromptOptimiserProperties
-│
-├── preview/                              # PreviewService, PreviewController, PreviewProperties
-│
-├── pricing/                              # ModelPricing, ModelPricingId, ModelPricingRepository
 │
 ├── recovery/
 │   ├── LlmCallGuard.java                 # Retry + failure classification
@@ -227,53 +332,80 @@ com.navneet.agentteam
 │   ├── RunRecoveryService.java           # setPipelineHarness() circular dep break
 │   ├── StuckRunEvaluator.java
 │   ├── EscalationService.java
-│   ├── RecoveryProperties.java
-│   └── StuckClassification.java          # Enum: CONTEXT_LIMIT, RATE_LIMIT, …
+│   └── RecoveryProperties.java
 │
 ├── repo/
-│   └── GitHubRepoService.java
+│   └── GitHubRepoService.java            # createRepo() with per-call PAT/owner override
 │
 ├── sse/
-│   ├── RunEvent.java                     # Record + 20+ factory methods
-│   └── SseBroadcaster.java              # ConcurrentHashMap<runId, CopyOnWriteArrayList<SseEmitter>>
+│   ├── RunEvent.java                     # Record + factory methods; SCREAMING_SNAKE_CASE types
+│   └── SseBroadcaster.java
 │
 ├── state/
-│   ├── StateStore.java                   # All DB access; inner records for metrics/timeline
+│   ├── StateStore.java                   # All DB access; listRuns() accepts optional projectId
 │   ├── InboxService.java                 # Per-agent inbox
-│   ├── entity/                           # 14 JPA entities
+│   ├── entity/                           # 13 JPA entities
 │   └── repository/                       # 13 JPA repositories
+│
+├── tenant/
+│   └── TenantInterceptor.java            # JPA EntityListeners — injects tenantId on save
 │
 └── tool/
     ├── FileSystemTool.java               # .normalize() prevents path traversal
     ├── ShellTool.java
-    ├── GitTool.java
+    ├── GitTool.java                      # commitIfDirty() — silent no-op if clean
     └── FileLockTool.java                 # releaseAllLocksForTask / releaseAllLocksForRun
 ```
 
 ---
 
-## 6. REST API Reference
+## 9. REST API Reference
 
 ### Runs
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/runs` | Submit new run — returns 202 with `runId` |
-| `GET` | `/api/runs` | List runs; filter by `?status=` |
+| `GET` | `/api/runs?status=&projectId=` | List runs with filters |
 | `GET` | `/api/runs/{runId}` | Full run detail with tasks |
 | `POST` | `/api/runs/{runId}/approve` | Resolve plan gate (approve/reject) |
 | `POST` | `/api/runs/{runId}/merge` | Resolve merge gate (approve/reject) |
 | `DELETE` | `/api/runs/{runId}` | Cancel in-progress run |
-| `POST` | `/api/runs/{runId}/tasks/{taskId}/retry` | Force-retry a specific task |
+| `POST` | `/api/runs/{runId}/tasks/{taskId}/retry` | Retry PARTIAL/BLOCKED/FAILED/PENDING/LOCKED task |
 | `GET` | `/api/runs/{runId}/events` | **SSE stream** — live `RunEvent` feed |
-| `GET` | `/api/runs/{runId}/recovery` | Recovery attempt history |
-| `GET` | `/api/runs/{runId}/messages` | Agent message log (max 200) |
 | `GET` | `/api/runs/{runId}/timeline` | Gantt + gate event data for D3.js |
 | `GET` | `/api/runs/{runId}/download` | Download workspace as `.zip` |
 | `GET` | `/api/runs/{runId}/files` | List workspace files |
 | `GET` | `/api/runs/{runId}/file?path=` | Read single workspace file |
-| `GET` | `/api/runs/{runId}/openapi.yaml` | Generated OpenAPI 3.0 spec |
-| `GET` | `/api/runs/{runId}/preview/**` | Serve live frontend preview (SPA fallback) |
+| `POST` | `/api/runs/{runId}/preview/start` | Start local preview |
+| `DELETE` | `/api/runs/{runId}/preview/stop` | Stop local preview |
+
+### Auth & Org
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register new user |
+| `POST` | `/api/auth/login` | Login → JWT tokens |
+| `POST` | `/api/auth/refresh` | Refresh access token |
+| `POST` | `/api/auth/logout` | Invalidate refresh token |
+| `PUT` | `/api/auth/settings/github` | Save GitHub PAT + owner for current user |
+| `GET` | `/api/org/me` | My org details |
+| `GET` | `/api/org/me/members` | Org member list |
+| `PUT` | `/api/org/me/members/{id}/suspend` | Suspend member |
+| `DELETE` | `/api/org/me/members/{id}` | Remove member |
+
+### Projects
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects` | List projects (visibility-controlled) |
+| `POST` | `/api/projects` | Create project (ORG_ADMIN+) |
+| `GET` | `/api/projects/{id}` | Project detail |
+| `PUT` | `/api/projects/{id}` | Update project |
+| `PUT` | `/api/projects/{id}/archive` | Archive project |
+| `GET` | `/api/projects/{id}/members` | Project members |
+| `POST` | `/api/projects/{id}/members` | Add member |
+| `DELETE` | `/api/projects/{id}/members/{userId}` | Remove member |
 
 ### Metrics & Comparison
 
@@ -281,20 +413,10 @@ com.navneet.agentteam
 |---|---|---|
 | `GET` | `/api/metrics` | Global run/token/cost statistics |
 | `GET` | `/api/model-comparison?days=30` | Per-model performance stats |
-
-### Pricing
-
-| Method | Endpoint | Description |
-|---|---|---|
 | `GET` | `/api/pricing` | All model pricing rows |
-| `GET` | `/api/pricing/{provider}/{model}` | Single model pricing |
 | `PUT` | `/api/pricing/{provider}/{model}` | Upsert pricing |
-
-### Feasibility
-
-| Method | Endpoint | Description |
-|---|---|---|
 | `POST` | `/api/feasibility` | Estimate cost+complexity without running workers |
+| `GET` | `/api/health` | DB ping, uptime, run counts |
 
 ### Deployments
 
@@ -307,50 +429,56 @@ com.navneet.agentteam
 | `POST` | `/api/deployments/{id}/rollback` | Rollback to previous version |
 | `GET` | `/api/deployments/live` | List LIVE deployments only |
 
-### Integrations
+### Integrations & Admin
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/integrations/{source}/webhook` | Inbound webhook (jira, confluence, servicenow, pagerduty) |
-| `POST` | `/api/integrations/confluence/trigger` | Manual Confluence page trigger |
-| `GET` | `/api/integrations/runs?source=` | List integration-triggered runs |
+| `POST` | `/api/integrations/{source}/webhook` | Inbound webhook (jira/confluence/servicenow/pagerduty) |
 | `GET` | `/api/integrations/status` | Enabled integration sources |
-
-### Health
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/health` | DB status, uptime, active/queued/total runs |
+| `GET` | `/api/admin/users` | All users (SUPER_ADMIN) |
+| `PUT` | `/api/admin/users/{id}/tier` | Change user tier |
+| `PUT` | `/api/admin/orgs/{id}/run-limit` | Override org run limit |
 
 ---
 
-## 7. Database Entities
+## 10. Database Entities
 
 | Entity | Table | Purpose |
 |---|---|---|
-| `PipelineRun` | `pipeline_run` | Top-level run record; `skipApproval` flag for integrations |
-| `AgentTask` | `agent_task` | One row per task; tracks `assignedModel`, `stuckDetectedAt`, `recoveryAttempt` |
-| `AgentMessage` | `agent_message` | Per-task activity log; `taskId` FK |
-| `FileLock` | `file_lock` | Concurrent file access control across workers |
-| `AgentInbox` | `agent_inbox` | Per-agent message inbox for provider-fallback notifications |
-| `GateEvent` | `gate_event` | Plan/merge gate transition history (Tier 4 Gantt) |
-| `CompactionEvent` | `compaction_event` | Context compaction checkpoints (Tier 4) |
-| `RunRecovery` | `run_recovery` | Recovery attempt log per run (Tier 5) |
-| `PromptAuditEntry` | `prompt_audit_entry` | Prompt pattern audit trail (Tier 5) |
-| `Deployment` | `deployment` | GCP deployment record with status + URL (Tier 6) |
-| `RunRepo` | `run_repo` | Git repo info per run (Tier 6) |
-| `IntegrationRun` | `integration_run` | Maps integration source → pipeline run (Tier 7) |
-| `IntegrationEventLog` | `integration_event_log` | Raw webhook event history (Tier 7) |
-| `ModelPricing` | `model_pricing` | Input/output cost per million tokens, seeded on startup |
+| `PipelineRun` | `pipeline_run` | Top-level run record; `skipApproval`, `projectId`, `orgId`, `createdByUserId`, `repoMode`, `repoUrl`, `githubPat` (V8), `githubOwner` (V8) |
+| `AgentTask` | `agent_task` | Per-task status; `assignedModel`, `stuckDetectedAt`, `recoveryAttempt` |
+| `AgentMessage` | `agent_message` | Per-task activity log |
+| `FileLock` | `file_lock` | Concurrent file access control |
+| `AgentInbox` | `agent_inbox` | Per-agent message inbox |
+| `GateEvent` | `gate_event` | Plan/merge gate transition history |
+| `CompactionEvent` | `compaction_event` | Context compaction checkpoints |
+| `RunRecovery` | `run_recovery` | Recovery attempt log per run |
+| `PromptAuditEntry` | `prompt_audit_entry` | Prompt pattern audit trail |
+| `Deployment` | `deployment` | GCP deployment record; 10-strategy `DeployStrategy` enum |
+| `RunRepo` | `run_repo` | Git repo info per run |
+| `IntegrationRun` | `integration_run` | Maps integration source → pipeline run |
+| `IntegrationEventLog` | `integration_event_log` | Raw webhook event history (7-day TTL) |
+| `ModelPricing` | `model_pricing` | Input/output cost per million tokens |
+| `AppUser` | `app_user` | Users; `githubPat`, `githubOwner` (V8) |
+| `Org` | `org` | Organisations; tier, run-limit overrides |
+| `OrgMember` | `org_member` | User ↔ org with role |
+| `Project` | `project` | Projects within org |
+| `ProjectMember` | `project_member` | User ↔ project with projectRole |
+| `TierConfig` | `tier_config` | Per-tier limits (seeded V6) |
 
-Schema is auto-managed via `spring.jpa.hibernate.ddl-auto: update` — safe to restart.
+Schema managed via **Flyway V1–V8** (not hibernate DDL auto).
+
+Run status flow: `QUEUED → PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → COMPLETE/FAILED`
+Task status flow: `PENDING → LOCKED → WORKING → COMPLETE / PARTIAL / FAILED / BLOCKED`
 
 ---
 
-## 8. Web UI
+## 11. Web UI
 
-React 18 SPA (`frontend/` directory) — built with **Vite 5**, **Tailwind 3.4**, **shadcn/ui** components, **Zustand** stores, **Recharts** + **D3.js v7** for charts.
-Production build output goes to `src/main/resources/static/` via `npm run build`. Dev server: `npm --prefix frontend run dev` → `:5173` (proxies `/api` → `:8080`).
+React 18 SPA (`frontend/` directory) built with **Vite 5**, **Tailwind 3.4**, **shadcn/ui**, **Zustand**, **Recharts + D3.js v7**, **Framer Motion**.
+
+- Dev: `npm --prefix frontend run dev` → `:5173` (proxies `/api` → `:8080`)
+- Build: `npm --prefix frontend run build` → `src/main/resources/static/`
 
 ### Pages
 
@@ -361,69 +489,79 @@ Production build output goes to `src/main/resources/static/` via `npm run build`
 | **Pricing** | `/pricing` | Model pricing table + FeasibilityEstimator |
 | **Deployments** | `/deployments` | GCP deployment list + status |
 | **Integrations** | `/integrations` | Integration source status + manual trigger |
-| **Settings** | `/settings` | Application configuration |
+| **Settings** | `/settings` | App config + **GitHub Integration** (PAT + owner + status badge) |
+| **Org Projects** | `/org/projects` | Project management — expandable cards + member management (ORG_ADMIN) |
+| **Admin Panel** | `/admin` | User/org/tier management — 4 tabs (SUPER_ADMIN) |
 
 ### Run Detail Tabs
 
 | Tab | Description |
 |---|---|
 | Overview | Status, timing, model, cost, approve/merge buttons |
-| Tasks | Per-task status card (TaskCard), assigned model, retry button |
-| Log | SSE-powered live log viewer (useSse hook + RunDetailTabs) |
+| Tasks | TaskCard per task: assigned model, retry button for PARTIAL/FAILED/BLOCKED/PENDING/LOCKED |
+| Log | SSE-powered live log with milestone banners + file-op rows (useSse hook) |
 | Timeline | D3.js Gantt of task durations + gate events |
 | Files | Workspace file browser |
-| Preview | Embedded iframe for frontend previews (`hasFrontend=true`) |
+| Preview | Embedded iframe (`hasFrontend=true`) |
 | API Docs | Swagger UI from generated `openapi.yaml` (`hasApiSpec=true`) |
 
 ### Key Frontend Files
 
 | Path | Purpose |
 |---|---|
-| `frontend/src/lib/api.ts` | All typed fetch wrappers (20+ endpoints) |
-| `frontend/src/stores/` | useRunStore, useMetricsStore, useSseStore, useUiStore (Zustand) |
-| `frontend/src/hooks/useSse.ts` | SSE EventSource with exponential backoff reconnect |
-| `frontend/src/components/layout/` | Sidebar (Framer Motion), Header, AppLayout |
-| `frontend/src/components/runs/` | RunCard, RunList, RunDetail, RunDetailTabs, TaskCard, NewRunModal |
-| `frontend/src/components/dashboard/` | MetricCard (Recharts sparkline), TokenBubbleChart, ModelComparisonChart (D3), ActivityFeed |
+| `frontend/src/lib/api.ts` | Typed fetch wrappers; `AuthUser` has `githubOwner`, `hasGithubPat`; `RunSummary` has `repoUrl`; `updateGithubSettings()` |
+| `frontend/src/stores/` | useRunStore, useAuthStore, useMetricsStore, useSseStore, useUiStore |
+| `frontend/src/hooks/useSse.ts` | SSE EventSource; SCREAMING_SNAKE_CASE event types; reads `data.payload`; 5s polling fallback |
+| `frontend/src/components/runs/NewRunModal.tsx` | GitHub collapsible section: None / Create new / Start from existing |
+| `frontend/src/components/runs/RunCard.tsx` | GitHub link chip when `run.repoUrl` set |
+| `frontend/src/components/runs/RunList.tsx` | Run list with project filter bar; 5s polling |
+| `frontend/src/components/runs/TaskCard.tsx` | Task status + retry button for retryable states |
+| `frontend/src/components/runs/LiveLog.tsx` | SSE log with milestone banners + file-op rows |
+| `frontend/src/pages/SettingsPage.tsx` | GitHub PAT input (show/hide) + owner + save |
+| `frontend/src/pages/OrgProjectsPage.tsx` | Expandable project cards + member management |
 
 ---
 
-## 9. LLM Prompts
+## 12. LLM Prompts
 
 All prompts in `src/main/resources/prompts/`:
 
 | File | Agent | Key Rules |
 |---|---|---|
-| `planner.txt` | PlannerAgent | 6 hard rules; `assigned_model` routing (Sonnet=HIGH/MEDIUM, Haiku=LOW); 1–6 tasks |
-| `worker.txt` | WorkerAgent | 7 steps; step 7 = **UPDATE README.md** (hard requirement); XML tool-call format |
-| `worker-openai.txt` | WorkerAgent (OpenAI) | OpenAI-compatible variant |
-| `worker-gemini.txt` | WorkerAgent (Gemini) | Gemini-compatible variant |
-| `reviewer.txt` | ReviewerAgent | 5 checks; step 5 = **README UPDATE CHECK** |
-| `context-agent.txt` | ContextAgent | Lightweight run pattern analysis |
-| `compiler.txt` | CompilerAgent | Compile error analysis; JSON-patch fix format |
-| `api-test-suite.txt` | ApiTestSuiteAgent | OpenAPI 3.0 YAML spec from controller code |
+| `planner.txt` | PlannerAgent | `assigned_model` = haiku; `project_setup` first; always add `generate_preview` task; 1–6 tasks max |
+| `worker.txt` | WorkerAgent | 7 steps; step 7 = **UPDATE README.md** (hard requirement); XML `<tool_call>` format |
+| `reviewer.txt` | ReviewerAgent | 5 checks; step 5 = **README UPDATE CHECK** (blocks merge) |
+| `context-agent.txt` | ContextAgent | Lightweight run pattern analysis; update `CODEBASE_CONTEXT.md` |
+| `compiler.txt` | CompilerAgent | Compile error analysis; JSON-patch `[{path, content}]` fix format |
+| `api-test-suite.txt` | ApiTestSuiteAgent | OpenAPI 3.0 YAML spec from `*Controller.java` files |
 
 ---
 
-## 10. Configuration Reference
+## 13. Configuration Reference
 
 ### `application.yml` — Key Sections
 
 ```yaml
-spring.ai.anthropic.chat.options:
-  model: claude-haiku-4-5-20251001    # default; agents override per-call
-  max-tokens: 16000
-
-spring.ai.openai.chat.options:
-  model: gpt-4o
-  max-tokens: 16000
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/agentteam
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  ai.anthropic.chat.options:
+    model: claude-haiku-4-5-20251001    # default; agents override per-call
+    max-tokens: 16000
+  ai.openai.chat.options:
+    model: gpt-4o
+    max-tokens: 16000
 
 agent:
   workspace: ./workspace
-  concurrency.max-runs: 5              # max simultaneous pipeline runs
+  concurrency.max-runs: 5
   token-budget: {low: 2048, medium: 4096, high: 8192}
-  compaction: {warn-pct: 0.65, compact-pct: 0.75, hard-stop-pct: 0.90}
-
+  compaction: {warn-pct: 0.25, compact-pct: 0.35, hard-stop-pct: 0.55}
+  github:
+    pat: ${GITHUB_PAT:}
+    default-owner: ${GITHUB_OWNER:navneetprabhakar}
   recovery:
     enabled: true
     warn-threshold-minutes: 15
@@ -432,31 +570,30 @@ agent:
     capable-models:
       anthropic: claude-sonnet-4-6
       openai: gpt-4o
-
   context:  {enabled: true, model: claude-haiku-4-5-20251001, run-interval: 1}
   optimiser: {enabled: true, run-interval: 10, analysis-window-runs: 20}
-
   compiler:
     enabled: true
     max-attempts: 3
     timeout-seconds: 300
     model: claude-haiku-4-5-20251001
-
   api-test-suite:
     enabled: true
     model: claude-haiku-4-5-20251001
-
   deployment:
     enabled: true
     gcp-project: ${GCP_PROJECT:my-gcp-project}
     gcp-region: us-central1
     ttl-days: 7
-
   integrations:
-    jira:       {enabled: false, …}
-    confluence: {enabled: false, …}
-    servicenow: {enabled: false, …}
-    pagerduty:  {enabled: false, …}
+    jira:       {enabled: false}
+    confluence: {enabled: false}
+    servicenow: {enabled: false}
+    pagerduty:  {enabled: false}
+
+security.jwt:
+  access-token-expiration-minutes: 1440
+  refresh-token-expiration-days: 7
 ```
 
 ### Environment Variables
@@ -467,65 +604,57 @@ agent:
 | `OPENAI_API_KEY` | *(required for fallback)* | OpenAI API key |
 | `POSTGRES_USER` | `postgres` | DB username |
 | `POSTGRES_PASSWORD` | `postgres` | DB password |
-| `GITHUB_PAT` | *(empty)* | GitHub personal access token |
-| `GITHUB_OWNER` | `navneetprabhakar` | Default GitHub org/user |
+| `GITHUB_PAT` | *(empty)* | System-level GitHub PAT fallback |
+| `GITHUB_OWNER` | `navneetprabhakar` | System-level GitHub owner fallback |
 | `GCP_PROJECT` | `my-gcp-project` | GCP project ID for deployments |
 
 ---
 
-## 11. Running the Application
+## 14. Running the Application
 
 ### Prerequisites
 
 - Java 21 (`/opt/homebrew/opt/openjdk@21`)
 - PostgreSQL running on `localhost:5432` with database `agentteam`
-- Anthropic API key configured in `application.yml`
+- Node.js 18+ (for frontend build)
+- Anthropic API key in environment
+
+### Start with Supervisor (Recommended)
+
+```bash
+./supervisor.sh start     # build + start with health monitoring + auto-restart
+./supervisor.sh status    # check state
+./supervisor.sh logs      # tail app logs
+./supervisor.sh restart   # graceful restart
+./supervisor.sh stop      # graceful stop
+./supervisor.sh build     # build only
+```
+
+Supervisor features:
+- States: `STARTING → RUNNING → RESTARTING → UNHEALTHY → CRASHED → FAILED → STOPPED`
+- Exponential backoff: 5 s → 10 s → … → 120 s cap (max 10 crashes)
+- Health check via `GET /api/health` every 20 s
 
 ### Start (Manual)
 
 ```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -DskipTests
 ```
 
-### Start with Supervisor (Recommended)
-
-The `supervisor.sh` script at the project root provides a full state-machine supervisor:
+### Frontend Dev Mode
 
 ```bash
-# Start (builds + starts, monitors health, auto-restarts on crash)
-./supervisor.sh start
-
-# Check status
-./supervisor.sh status
-
-# View logs
-./supervisor.sh logs
-
-# Restart
-./supervisor.sh restart
-
-# Stop
-./supervisor.sh stop
-
-# Build only
-./supervisor.sh build
+npm --prefix frontend run dev    # → http://localhost:5173 (proxies /api → :8080)
 ```
-
-**Supervisor features:**
-- States: `STARTING → RUNNING → RESTARTING → UNHEALTHY → CRASHED → FAILED → STOPPED`
-- Exponential backoff: 5 s → 10 s → 20 s → … → 120 s cap
-- Max crashes before FAILED: 10
-- Health check via `GET /api/health` every 20 s, startup wait up to 120 s
-- PID tracking in `.supervisor/app.pid`
-- Logs at `.supervisor/app.log` + `.supervisor/monitor.log`
 
 ### Compile Check
 
 ```bash
 JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q
+npm --prefix frontend run build
 ```
 
-### Access the Dashboard
+### Dashboard
 
 ```
 http://localhost:8080
@@ -535,7 +664,7 @@ http://localhost:8080
 
 ## Build Status
 
-`mvn compile` — ✅ passes clean (Tiers 1–8 complete)
-`mvn test` — ✅ 104 unit tests pass; `@Tag("e2e")` and `@Tag("integration")` excluded (require live DB + Docker)
+`mvn compile -q` — ✅ passes clean
+`npm --prefix frontend run build` — ✅ passes clean
 
-**Total:** ~150 Java source files · 33 REST endpoints · 14 DB entities · 8 LLM prompts · React 18 SPA frontend
+**Total:** ~165 Java source files · 45+ REST endpoints · 20 DB entities (V1–V8) · 6 LLM prompts · React 18 SPA frontend

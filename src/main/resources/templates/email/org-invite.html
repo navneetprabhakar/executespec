@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>You've been invited to an org on executespec</title></head>
+<body style="font-family:sans-serif;background:#0f1117;color:#e2e8f0;padding:40px">
+  <div style="max-width:480px;margin:0 auto;background:#1a1f2e;border-radius:12px;padding:32px">
+    <h1 style="color:#8b5cf6;margin:0 0 8px">executespec</h1>
+    <h2 style="margin:0 0 24px;font-size:20px">You've been invited</h2>
+    <p>You've been invited to join <strong th:text="${orgName}">your org</strong> on executespec.</p>
+    <a th:href="${acceptUrl}" href="#"
+       style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;
+              padding:12px 28px;border-radius:8px;font-weight:600;margin:16px 0">
+      Accept Invitation
+    </a>
+    <p style="color:#64748b;font-size:13px">This invitation expires in 7 days.</p>
+    <hr style="border:1px solid #2d3748;margin:24px 0"/>
+    <p style="color:#64748b;font-size:12px">© 2026 executespec</p>
+  </div>
+</body>
+</html>
