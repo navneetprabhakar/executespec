@@ -16,18 +16,18 @@ import java.nio.file.Path;
  *
  * <p>Detection signals (both must be present):
  * <ul>
- *   <li>{@code backend/pom.xml} (Maven) <b>or</b> {@code backend/build.gradle[.kts]} (Gradle)</li>
- *   <li>{@code frontend/package.json}</li>
+ *   <li>Java backend: {@code backend/pom.xml} (Maven) <b>or</b> {@code backend/build.gradle[.kts]} (Gradle)</li>
+ *   <li>Node.js backend: {@code backend/package.json} (Express/Fastify/NestJS etc.)</li>
+ *   <li>Frontend: {@code frontend/package.json} (Vite/CRA/Angular/Vue)</li>
  * </ul>
  *
- * <p>Three-stage Dockerfile:
- * <ol>
- *   <li>Build frontend ({@code node:20-slim}) → produces {@code dist/} or {@code build/}</li>
- *   <li>Build backend ({@code maven:3.9-eclipse-temurin-21} or {@code gradle:8-jdk21}),
- *       copying the frontend output into {@code src/main/resources/static/} so Spring Boot
- *       serves it at the root path.</li>
- *   <li>Slim runtime ({@code eclipse-temurin:21-jre-alpine}), runs the fat JAR.</li>
- * </ol>
+ * <p>Dockerfile variants:
+ * <ul>
+ *   <li><b>Java backend (Maven/Gradle)</b>: 3-stage — node:20-slim → maven/gradle builder → eclipse-temurin runtime.
+ *       Frontend {@code dist/} is embedded in Spring Boot's {@code src/main/resources/static/}.</li>
+ *   <li><b>Node.js backend</b>: 2-stage — node:20-slim builds frontend, then a combined image
+ *       runs nginx (serves SPA at {@code /}) and the Node backend (proxied at {@code /api/}).</li>
+ * </ul>
  *
  * <p>This strategy has {@code @Order(0)} — highest priority — so it is checked before the
  * individual {@code SpringBootDeploymentStrategy} and {@code NodeDeploymentStrategy} which
@@ -45,19 +45,25 @@ public class FullStackDeploymentStrategy implements DeploymentStrategy {
 
     @Override
     public boolean applies(Path workspacePath) {
-        boolean hasBackend = Files.exists(workspacePath.resolve("backend/pom.xml"))
+        boolean hasJavaBackend = Files.exists(workspacePath.resolve("backend/pom.xml"))
             || Files.exists(workspacePath.resolve("backend/build.gradle"))
             || Files.exists(workspacePath.resolve("backend/build.gradle.kts"));
-        boolean hasFrontend = Files.exists(workspacePath.resolve("frontend/package.json"));
-        return hasBackend && hasFrontend;
+        boolean hasNodeBackend = Files.exists(workspacePath.resolve("backend/package.json"));
+        boolean hasFrontend    = Files.exists(workspacePath.resolve("frontend/package.json"));
+        return (hasJavaBackend || hasNodeBackend) && hasFrontend;
     }
 
     @Override
     public String generateDockerfile(Path workspacePath, DeploymentProperties props) {
-        boolean isMaven = Files.exists(workspacePath.resolve("backend/pom.xml"));
-        String frontendDist = detectFrontendDist(workspacePath);
+        boolean isMaven      = Files.exists(workspacePath.resolve("backend/pom.xml"));
+        boolean isGradle     = Files.exists(workspacePath.resolve("backend/build.gradle"))
+                            || Files.exists(workspacePath.resolve("backend/build.gradle.kts"));
+        boolean isNodeBackend = !isMaven && !isGradle
+                             && Files.exists(workspacePath.resolve("backend/package.json"));
+        String frontendDist  = detectFrontendDist(workspacePath);
+
         log.info("[FullStackStrategy] backend={}, frontendDist={}",
-            isMaven ? "Maven" : "Gradle", frontendDist);
+            isMaven ? "Maven" : isGradle ? "Gradle" : "Node.js", frontendDist);
 
         if (isMaven) {
             return """
@@ -85,7 +91,7 @@ public class FullStackDeploymentStrategy implements DeploymentStrategy {
                     ENV PORT=8080
                     ENTRYPOINT ["java", "-jar", "app.jar"]
                     """.formatted(frontendDist);
-        } else {
+        } else if (isGradle) {
             return """
                     # ── Stage 1: Build frontend ───────────────────────────────────────────────
                     FROM node:20-slim AS frontend-build
@@ -111,15 +117,70 @@ public class FullStackDeploymentStrategy implements DeploymentStrategy {
                     ENV PORT=8080
                     ENTRYPOINT ["java", "-jar", "app.jar"]
                     """.formatted(frontendDist);
+        } else {
+            // Node.js backend + React/Vite frontend
+            // nginx serves the SPA at / and proxies /api/ calls to the Node backend on port 3001.
+            return """
+                    # ── Stage 1: Build frontend ───────────────────────────────────────────────
+                    FROM node:20-slim AS frontend-build
+                    WORKDIR /frontend
+                    COPY frontend/package*.json ./
+                    RUN npm ci --legacy-peer-deps || npm ci
+                    COPY frontend/ .
+                    RUN npm run build
+
+                    # ── Stage 2: Node backend + nginx (serves SPA + proxies /api) ─────────────
+                    FROM node:20-slim
+                    RUN apt-get update && apt-get install -y --no-install-recommends nginx \\
+                        && rm -rf /var/lib/apt/lists/*
+
+                    # Install backend dependencies
+                    WORKDIR /app
+                    COPY backend/package*.json ./
+                    RUN npm ci --omit=dev
+                    COPY backend/ .
+
+                    # Place built frontend where nginx can serve it
+                    COPY --from=frontend-build /frontend/%s /var/www/html
+
+                    # nginx: SPA at /, /api proxied to Node on port 3001
+                    RUN printf 'server {\\n\\
+                        listen 8080;\\n\\
+                        server_name _;\\n\\
+                        root /var/www/html;\\n\\
+                        index index.html;\\n\\
+                        location / { try_files $uri $uri/ /index.html; }\\n\\
+                        location /api/ {\\n\\
+                            proxy_pass http://127.0.0.1:3001;\\n\\
+                            proxy_http_version 1.1;\\n\\
+                            proxy_set_header Host $host;\\n\\
+                            proxy_set_header X-Real-IP $remote_addr;\\n\\
+                            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\\n\\
+                        }\\n\\
+                    }\\n' > /etc/nginx/sites-available/default
+
+                    # Startup: nginx serves frontend; Node backend handles API
+                    RUN printf '#!/bin/sh\\nnginx -g "daemon off;" &\\nexec npm start\\n' \\
+                        > /start.sh && chmod +x /start.sh
+
+                    EXPOSE 8080
+                    ENV NODE_ENV=production
+                    CMD ["/start.sh"]
+                    """.formatted(frontendDist);
         }
     }
 
     @Override
     public String detectionSummary(Path workspacePath) {
-        boolean isMaven = Files.exists(workspacePath.resolve("backend/pom.xml"));
+        boolean isMaven  = Files.exists(workspacePath.resolve("backend/pom.xml"));
+        boolean isGradle = Files.exists(workspacePath.resolve("backend/build.gradle"))
+                        || Files.exists(workspacePath.resolve("backend/build.gradle.kts"));
         String frontendDist = detectFrontendDist(workspacePath);
+        String backendLabel = isMaven  ? "Maven/Spring Boot"
+                            : isGradle ? "Gradle/Spring Boot"
+                            : "Node.js/Express";
         return "Full-stack project detected (backend: %s, frontend: package.json → %s)"
-            .formatted(isMaven ? "Maven/Spring Boot" : "Gradle/Spring Boot", frontendDist);
+            .formatted(backendLabel, frontendDist);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

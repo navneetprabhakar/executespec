@@ -130,6 +130,7 @@ public class LocalPreviewService {
         boolean hasBackendPom  = Files.exists(workspace.resolve("backend/pom.xml"));
         boolean hasBackendGradle = Files.exists(workspace.resolve("backend/build.gradle"))
                               || Files.exists(workspace.resolve("backend/build.gradle.kts"));
+        boolean hasBackendNode = Files.exists(workspace.resolve("backend/package.json"));
         boolean hasFrontendPkg = Files.exists(workspace.resolve("frontend/package.json"));
         boolean hasNode        = hasRootPkg || hasFrontendPkg;
         boolean hasPython      = Files.exists(workspace.resolve("requirements.txt"))
@@ -143,7 +144,7 @@ public class LocalPreviewService {
         boolean hasDotNet      = hasCsprojOrSln(workspace);
         boolean hasStatic      = Files.exists(workspace.resolve("index.html"));
         // Priority mirrors the @Order annotations on the strategy beans
-        if ((hasBackendPom || hasBackendGradle) && hasFrontendPkg) return "FULLSTACK";
+        if ((hasBackendPom || hasBackendGradle || hasBackendNode) && hasFrontendPkg) return "FULLSTACK";
         if (hasPom && hasNode)  return "FULLSTACK";
         if (hasPom)             return "SPRING_BOOT";
         if (hasGradle)          return "GRADLE";
