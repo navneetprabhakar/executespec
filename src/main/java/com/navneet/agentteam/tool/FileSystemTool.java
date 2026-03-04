@@ -36,8 +36,14 @@ public class FileSystemTool {
     private static final Set<String> BLOCKED_DIRECTORIES = Set.of(
             ".ssh", ".gnupg", ".aws", ".gcloud", ".config");
 
-    /** Per-run isolated workspace: baseWorkspace/{runId}/ */
+    /**
+     * Returns the working directory for this task.
+     * If a worktree override is active on this thread (set by WorkspaceContext),
+     * returns that path; otherwise falls back to the shared run workspace root.
+     */
     private Path workspace(String runId) {
+        String override = WorkspaceContext.getWorkDir(runId);
+        if (override != null) return Path.of(override).toAbsolutePath().normalize();
         return Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
     }
 

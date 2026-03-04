@@ -16,6 +16,7 @@ import com.navneet.agentteam.tool.FileSystemTool;
 import com.navneet.agentteam.tool.GitTool;
 import com.navneet.agentteam.tool.ShellTool;
 import com.navneet.agentteam.tool.ToolResult;
+import com.navneet.agentteam.tool.WorkspaceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -82,33 +83,26 @@ public class WorkerAgent {
 
         log.info("Worker starting task [{}] on branch {} ({}:{})", taskId, branchName, provider, model);
 
-        // Create branch inside this run's isolated workspace
-        String branchResult = gitTool.createBranch(runId, branchName);
-        if (branchResult.startsWith("ERROR")) {
-            log.error("Branch creation FAILED for task {} on branch {}: {}",
-                    taskId, branchName, branchResult);
-            return WorkerReport.blocked(taskId,
-                    "Cannot create git branch '" + branchName + "': " + branchResult,
-                    0, 0);
-        }
-        log.debug("Branch created: {}", branchName);
         stateStore.logMessage(runId, "harness", agentId,
                 "TASK_ASSIGNMENT", "Starting: " + task.getTitle(), 0);
 
         // Load task definition
         TaskDefinition taskDef = parseTask(task.getTaskJson());
 
-        // Merge completed dependency branches so this task can read their output files.
-        // WorkerPool's dependsOn ordering guarantees those branches are fully committed
-        // before this task starts its agentic loop.
-        if (taskDef.getDependsOn() != null && !taskDef.getDependsOn().isEmpty()) {
-            for (String depId : taskDef.getDependsOn()) {
-                String depBranch = "agent/" + runId.substring(0, 8) + "/" + depId;
-                String mergeOut = gitTool.mergeBranchIntoCurrent(runId, depBranch);
-                log.info("[Worker {}] Merged dependency '{}': {}", taskId, depBranch, mergeOut);
-                stateStore.appendTaskLog(taskId, "DEP_MERGE:" + depId + " → " + mergeOut);
-            }
+        // Build the list of dep branches so the worktree can merge them in
+        List<String> depBranches = new ArrayList<>();
+        if (taskDef.getDependsOn() != null) {
+            taskDef.getDependsOn().forEach(depId ->
+                depBranches.add("agent/" + runId.substring(0, 8) + "/" + depId));
         }
+
+        // Create an isolated git worktree for this task.  Each task now has its
+        // own working directory so concurrent tasks can no longer clobber each
+        // other via git checkout / working-tree state.
+        String worktreePath = gitTool.createWorktree(runId, taskId, branchName, depBranches);
+        WorkspaceContext.set(runId, worktreePath);
+        log.info("Worker starting task [{}] on branch {} in worktree {} ({}:{})",
+                taskId, branchName, worktreePath, provider, model);
 
         // Per-task conversation history (WorkerAgent is a Spring singleton — no
         // instance fields)
@@ -124,8 +118,10 @@ public class WorkerAgent {
         boolean justCompacted = false;
 
         // ── AGENTIC LOOP ──────────────────────────────────────────────────────
+        try { // outer try: always clear WorkspaceContext on exit
         try {
-            while (iteration < 50) {
+            int maxIterations = props.getConcurrency().getMaxIterations();
+            while (iteration < maxIterations) {
 
                 // Drain inbox at start of each iteration; inject as user turn if non-null
                 String inboxContent = inboxService.drainInbox(agentId, runId);
@@ -263,8 +259,12 @@ public class WorkerAgent {
 
         log.warn("Worker for task {} hit iteration cap without completing", taskId);
         return WorkerReport.partial(taskId,
-                "Hit 50-iteration cap without producing completion report.",
+                "Hit " + props.getConcurrency().getMaxIterations() + "-iteration cap without producing completion report.",
                 totalInputTokens, totalOutputTokens);
+        } finally {
+            // Always clear the thread-local worktree context, even on exception.
+            WorkspaceContext.clear();
+        }
     }
 
     // ── XML Tool-Call Parsing & Dispatch ──────────────────────────────────────

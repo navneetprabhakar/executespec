@@ -28,9 +28,101 @@ public class GitTool {
     @Value("${agent.workspace}")
     private String workspaceRoot;
 
-    /** Opens the git repo for the given run's isolated workspace. */
+    /**
+     * Opens the git repo for this task's working directory.
+     * If a worktree override is active (set by WorkspaceContext), opens that path;
+     * otherwise falls back to the shared workspace root.
+     */
     private Git openRepo(String runId) throws IOException {
+        String override = WorkspaceContext.getWorkDir(runId);
+        if (override != null) return Git.open(Path.of(override).toFile());
         return Git.open(Path.of(workspaceRoot, runId).toFile());
+    }
+
+    // ── Worktree lifecycle (called by WorkerAgent, not exposed as @Tool) ──────
+
+    /**
+     * Creates a git worktree for a task so it gets its own isolated working
+     * directory. The worktree is branched from 'main' and dependency branches
+     * are merged in before the agentic loop starts.
+     *
+     * @return absolute path to the worktree directory, or the repo root on failure
+     */
+    public String createWorktree(String runId, String taskId, String branchName,
+                                  java.util.List<String> depBranches) {
+        Path repoRoot = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
+        Path worktreeDir = repoRoot.resolve("worktrees").resolve(taskId);
+        try {
+            // Reuse existing worktree on retry
+            if (java.nio.file.Files.exists(worktreeDir.resolve(".git"))) {
+                log.info("[GitTool] Worktree '{}' already exists — reusing", taskId);
+                return worktreeDir.toString();
+            }
+            java.nio.file.Files.createDirectories(repoRoot.resolve("worktrees"));
+
+            boolean branchExists;
+            try (Git git = Git.open(repoRoot.toFile())) {
+                branchExists = git.getRepository().findRef(branchName) != null;
+            }
+
+            java.util.List<String> cmd = new java.util.ArrayList<>(java.util.List.of(
+                    "git", "worktree", "add", worktreeDir.toString()));
+            if (!branchExists) { cmd.add("-b"); cmd.add(branchName); }
+            else { cmd.add(branchName); }
+            cmd.add("main");
+
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.directory(repoRoot.toFile());
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            int exit = p.waitFor();
+            if (exit != 0) {
+                log.error("[GitTool] git worktree add failed for '{}': {}", taskId, out);
+                return repoRoot.toString(); // fallback
+            }
+            log.info("[GitTool] Created worktree '{}' at {}", taskId, worktreeDir);
+
+            // Merge dep branches
+            if (depBranches != null && !depBranches.isEmpty()) {
+                try (Git wt = Git.open(worktreeDir.toFile())) {
+                    for (String dep : depBranches) {
+                        var ref = wt.getRepository().findRef(dep);
+                        if (ref == null) {
+                            log.warn("[GitTool] Dep '{}' not found for worktree '{}'", dep, taskId);
+                            continue;
+                        }
+                        MergeResult mr = wt.merge().include(ref)
+                                .setFastForward(MergeCommand.FastForwardMode.FF)
+                                .setCommit(true)
+                                .setMessage("chore: merge dep " + dep).call();
+                        log.info("[GitTool] Worktree {}: merged '{}' — {}", taskId, dep, mr.getMergeStatus());
+                    }
+                }
+            }
+            return worktreeDir.toString();
+        } catch (Exception e) {
+            log.error("[GitTool] createWorktree failed for '{}': {}", taskId, e.getMessage(), e);
+            return repoRoot.toString();
+        }
+    }
+
+    /** Prunes the git worktree for a task after its branch is merged. Non-fatal. */
+    public void removeWorktree(String runId, String taskId) {
+        Path repoRoot = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
+        Path worktreeDir = repoRoot.resolve("worktrees").resolve(taskId);
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "git", "worktree", "remove", "--force", worktreeDir.toString());
+            pb.directory(repoRoot.toFile());
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            int exit = p.waitFor();
+            if (exit == 0) log.info("[GitTool] Removed worktree '{}'", taskId);
+            else log.warn("[GitTool] worktree remove exited {} for '{}'", exit, taskId);
+        } catch (Exception e) {
+            log.warn("[GitTool] removeWorktree failed for '{}': {}", taskId, e.getMessage());
+        }
     }
 
     // ── Worker-safe operations ────────────────────────────────────────────────

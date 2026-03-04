@@ -44,7 +44,11 @@ public class ShellTool {
             @ToolParam(description = "runId", required = true) String runId,
             @ToolParam(description = "Shell command to execute", required = true) String command,
             @ToolParam(description = "Timeout in seconds (e.g. 120 for normal, 300 for builds)", required = true) int timeoutSeconds) {
-        Path workspaceDir = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
+        // Use worktree path if one is active for this task thread; else fall back to run root.
+        String worktreeOverride = WorkspaceContext.getWorkDir(runId);
+        Path workspaceDir = worktreeOverride != null
+                ? Path.of(worktreeOverride).toAbsolutePath().normalize()
+                : Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
 
         // 1. Sandbox validation — reject before even creating a process
         ShellSandboxPolicy.ValidationResult validation = sandboxPolicy.validate(command, workspaceDir.toString());

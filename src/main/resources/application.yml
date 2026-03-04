@@ -47,6 +47,7 @@ agent:
     hard-stop-pct: 0.55 # hard-stop at 110k (was 0.90 = 180k)
   concurrency:
     max-runs: 5
+    max-iterations: 80  # Agentic loop cap per worker task (raise for complex tasks)
   github:
     pat: ${GITHUB_PAT:REDACTED_FOR_PUBLIC_RELEASE}
     default-owner: ${GITHUB_OWNER:navneetprabhakar}

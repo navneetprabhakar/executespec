@@ -36,7 +36,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -319,6 +321,88 @@ public class RunController {
                 "Failed to read file: " + e.getMessage());
         }
     }
+
+    // ── Task Execution Graph ──────────────────────────────────────────────────
+
+    /**
+     * Returns the task dependency graph for a run.
+     * Each node includes taskId, title, status, complexity, assignedModel,
+     * dependsOn list, and a computed topological level (0 = root tasks).
+     */
+    @GetMapping("/{runId}/task-graph")
+    public ResponseEntity<List<TaskGraphNode>> getTaskGraph(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        PipelineRun run = stateStore.findRun(runId).orElse(null);
+        if (run == null) return ResponseEntity.notFound().build();
+
+        var tasks = stateStore.getAllTasks(runId);
+        if (tasks.isEmpty()) return ResponseEntity.ok(List.of());
+
+        // Parse dependsOn from each task's JSON
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+        record TaskMeta(String taskId, String title, String status, String complexity,
+                        String assignedModel, List<String> dependsOn) {}
+
+        List<TaskMeta> metas = tasks.stream().map(t -> {
+            List<String> deps = List.of();
+            try {
+                var node = om.readTree(t.getTaskJson());
+                var depsNode = node.get("dependsOn");
+                if (depsNode != null && depsNode.isArray()) {
+                    List<String> d = new ArrayList<>();
+                    depsNode.forEach(n -> d.add(n.asText()));
+                    deps = d;
+                }
+            } catch (Exception ignored) {}
+            return new TaskMeta(t.getTaskId(), t.getTitle(), t.getStatus(),
+                    t.getComplexity(), t.getAssignedModel(), deps);
+        }).toList();
+
+        // Compute topological levels via Kahn's-style BFS
+        Map<String, Integer> levels = new java.util.HashMap<>();
+        Map<String, TaskMeta> byId = metas.stream()
+                .collect(Collectors.toMap(TaskMeta::taskId, m -> m));
+
+        // roots = tasks with no deps
+        metas.stream().filter(m -> m.dependsOn().isEmpty())
+                .forEach(m -> levels.put(m.taskId(), 0));
+
+        // propagate levels
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (TaskMeta m : metas) {
+                if (levels.containsKey(m.taskId())) continue;
+                if (m.dependsOn().stream().allMatch(levels::containsKey)) {
+                    int level = m.dependsOn().stream()
+                            .mapToInt(d -> levels.getOrDefault(d, 0)).max().orElse(-1) + 1;
+                    levels.put(m.taskId(), level);
+                    changed = true;
+                }
+            }
+        }
+
+        List<TaskGraphNode> nodes = metas.stream()
+                .map(m -> new TaskGraphNode(
+                        m.taskId(), m.title(), m.status(), m.complexity(),
+                        m.assignedModel(), m.dependsOn(), levels.getOrDefault(m.taskId(), 0)))
+                .sorted(java.util.Comparator.comparingInt(TaskGraphNode::level)
+                        .thenComparing(TaskGraphNode::taskId))
+                .toList();
+
+        return ResponseEntity.ok(nodes);
+    }
+
+    public record TaskGraphNode(
+            String taskId,
+            String title,
+            String status,
+            String complexity,
+            String assignedModel,
+            List<String> dependsOn,
+            int level
+    ) {}
 
     public record MessageResponse(String fromAgent, String contentSummary, Instant sentAt) {}
 
