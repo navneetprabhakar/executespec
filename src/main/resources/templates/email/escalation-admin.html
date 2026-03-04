@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Cross-domain invite requires approval</title></head>
+<body style="font-family:sans-serif;background:#0f1117;color:#e2e8f0;padding:40px">
+  <div style="max-width:520px;margin:0 auto;background:#1a1f2e;border-radius:12px;padding:32px">
+    <h1 style="color:#f59e0b;margin:0 0 8px">executespec Admin</h1>
+    <h2 style="margin:0 0 24px;font-size:20px">Cross-domain invite approval required</h2>
+    <p>Org <strong th:text="${orgName}">Org</strong> wants to invite
+       <strong th:text="${invitedEmail}">email@example.com</strong>,
+       who is outside their registered email domains.</p>
+    <p>Please review and take action:</p>
+    <div style="display:flex;gap:12px;margin:20px 0">
+      <a th:href="${approveUrl}" href="#"
+         style="display:inline-block;background:#10b981;color:#fff;text-decoration:none;
+                padding:10px 24px;border-radius:8px;font-weight:600">
+        Approve
+      </a>
+      <a th:href="${rejectUrl}" href="#"
+         style="display:inline-block;background:#ef4444;color:#fff;text-decoration:none;
+                padding:10px 24px;border-radius:8px;font-weight:600">
+        Reject
+      </a>
+    </div>
+    <p style="color:#64748b;font-size:13px">Or use the <a th:href="${baseUrl + '/admin/invitations'}" style="color:#8b5cf6" href="#">Admin UI</a> to manage escalated invitations.</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,1172 @@
+openapi: 3.1.0
+info:
+  title: ExecuteSpec — Multi-Agent Pipeline API
+  description: |
+    REST API for the ExecuteSpec multi-agent coding pipeline.
+
+    The system orchestrates a Planner → Workers → Reviewer pipeline
+    with human approval gates. Runs are asynchronous; use the SSE stream
+    (`GET /api/runs/{runId}/events`) for live progress updates.
+
+    All timestamps are ISO-8601 UTC strings (e.g. `2026-03-01T17:13:26.279461Z`).
+    Costs are in USD. Tokens are integer counts.
+  version: "1.0.0"
+  contact:
+    name: Navneet Prabhakar
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: runs
+    description: Pipeline run lifecycle — submit, monitor, approve, cancel
+  - name: metrics
+    description: Aggregate statistics across all runs
+  - name: pricing
+    description: Per-model token pricing ($/1M tokens)
+  - name: feasibility
+    description: Pre-flight cost estimation without executing workers
+  - name: timeline
+    description: Gantt / model-comparison data for visualisation
+  - name: deployments
+    description: GCP Cloud Run deployments of completed run workspaces
+  - name: integrations
+    description: External triggers (Jira, Confluence, ServiceNow, PagerDuty)
+  - name: sse
+    description: Server-Sent Events stream per run
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PATHS
+# ──────────────────────────────────────────────────────────────────────────────
+
+paths:
+
+  # ── Runs ────────────────────────────────────────────────────────────────────
+
+  /api/runs:
+    post:
+      tags: [runs]
+      summary: Submit a new pipeline run
+      description: |
+        Creates a new run and starts the Planner asynchronously.
+        Returns 202 Accepted immediately with the initial run summary.
+        The run transitions through: QUEUED → PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → COMPLETE (or FAILED).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunRequest'
+            example:
+              userRequest: "Create a Spring Boot REST API for managing todos"
+              source: "REST"
+      responses:
+        '202':
+          description: Run accepted and queued/started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSummary'
+        '429':
+          description: Max concurrent runs reached (default 3)
+
+    get:
+      tags: [runs]
+      summary: List runs (paginated)
+      description: Returns a paginated list of runs, optionally filtered by status.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [QUEUED, PLANNING, AWAITING_APPROVAL, WORKING, REVIEWING, AWAITING_MERGE, MERGING, COMPLETE, FAILED, CANCELLED, REJECTED, PARTIAL]
+          description: Filter by run status
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Zero-based page number
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+          description: Page size
+      responses:
+        '200':
+          description: List of run summaries (most recent first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RunSummary'
+
+  /api/runs/{runId}:
+    get:
+      tags: [runs]
+      summary: Get run detail (with tasks)
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Full run detail including task list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetail'
+        '404':
+          description: Run not found
+
+    delete:
+      tags: [runs]
+      summary: Cancel a run
+      description: Cancels the run and all in-flight tasks. No-op if already terminal.
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Run cancelled successfully
+        '404':
+          description: Run not found
+
+  /api/runs/{runId}/approve:
+    post:
+      tags: [runs]
+      summary: Approve or reject the plan gate
+      description: |
+        Resolves the AWAITING_APPROVAL gate.
+        - `approved: true` → proceeds to worker execution
+        - `approved: false` → transitions run to REJECTED
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+            example:
+              approved: true
+              comment: "Plan looks good, proceed"
+      responses:
+        '200':
+          description: Gate resolved
+        '404':
+          description: Run not found or gate already resolved
+        '409':
+          description: Run already failed (server restart lost the gate)
+
+  /api/runs/{runId}/merge:
+    post:
+      tags: [runs]
+      summary: Approve or reject the merge gate
+      description: |
+        Resolves the AWAITING_MERGE gate.
+        - `approved: true` → merges agent branch to main
+        - `approved: false` → transitions run to REJECTED
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+            example:
+              approved: false
+              comment: "README not updated, declining merge"
+      responses:
+        '200':
+          description: Gate resolved
+        '404':
+          description: Run not found or gate already resolved
+        '409':
+          description: Run already failed
+
+  /api/runs/{runId}/retry:
+    post:
+      tags: [runs]
+      summary: Retry a failed/cancelled/rejected run
+      description: Creates a new run with the same userRequest. Only works if the original run is in FAILED, CANCELLED, or REJECTED state.
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '202':
+          description: New run started; response is the new run's summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSummary'
+        '404':
+          description: Original run not found
+        '409':
+          description: Run is not in a retryable state
+
+  /api/runs/{runId}/tasks/{taskId}/retry:
+    post:
+      tags: [runs]
+      summary: Retry a single task
+      description: Force-retries a PARTIAL or BLOCKED task within a PARTIAL/FAILED run. Asynchronous — returns 202 immediately.
+      parameters:
+        - $ref: '#/components/parameters/runId'
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Task retry initiated
+
+  /api/runs/{runId}/recovery:
+    get:
+      tags: [runs]
+      summary: Get recovery history for a run
+      description: Returns all stuck-detection and recovery attempts for a run.
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: List of recovery records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RunRecovery'
+
+  /api/runs/{runId}/timeline:
+    get:
+      tags: [timeline]
+      summary: Get Gantt timeline data for a run
+      description: Returns task start/end times, gate events, compaction events, and agent messages for D3.js Gantt chart rendering.
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Timeline data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelineData'
+        '404':
+          description: Run not found
+
+  /api/runs/{runId}/events:
+    get:
+      tags: [sse]
+      summary: SSE stream — live run events
+      description: |
+        Server-Sent Events stream for a single run. Emits events for every
+        state transition, log line, gate open/close, cost update, and more.
+
+        Event types:
+        - `runStatus` — run status changed (`{ type, runId, status }`)
+        - `taskStatus` — task status changed (`{ type, runId, taskId, status }`)
+        - `log` — log line (`{ type, runId, message, level }`)
+        - `gateOpened` — approval gate opened (`{ type, runId, gate }`)
+        - `gateResolved` — gate resolved (`{ type, runId, gate, approved }`)
+        - `costUpdate` — token cost updated (`{ type, runId, inputTokens, outputTokens, costUsd }`)
+        - `complete` — run finished (`{ type, runId, status }`)
+        - `recoveryAttempted` — stuck run recovery triggered
+        - `runRestarted` — run restarted after recovery
+        - `deployStarted` / `deployLive` / `deployFailed` — GCP deploy events
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE events
+
+  /api/runs/{runId}/download:
+    get:
+      tags: [runs]
+      summary: Download workspace as ZIP
+      description: Exports the run's workspace directory as a ZIP archive.
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: ZIP archive of workspace
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Run or workspace not found
+
+  /api/runs/{runId}/files:
+    get:
+      tags: [runs]
+      summary: List files in workspace
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: List of relative file paths
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: ["src/main/Main.java", "pom.xml", "README.md"]
+
+  /api/runs/{runId}/files/{filePath}:
+    get:
+      tags: [runs]
+      summary: Get file content
+      parameters:
+        - $ref: '#/components/parameters/runId'
+        - name: filePath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: URL-encoded relative path within workspace
+      responses:
+        '200':
+          description: File content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: string
+        '404':
+          description: File not found
+
+  # ── Metrics ─────────────────────────────────────────────────────────────────
+
+  /api/metrics:
+    get:
+      tags: [metrics]
+      summary: Aggregate run statistics
+      description: Returns overall counts and token totals. Does not include cost (cost must be computed client-side from pricing data).
+      responses:
+        '200':
+          description: Metrics summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+              example:
+                totalRuns: 16
+                completedRuns: 0
+                failedRuns: 16
+                activeRuns: 0
+                queuedRuns: 0
+                totalInputTokens: 0
+                totalOutputTokens: 0
+
+  /api/model-comparison:
+    get:
+      tags: [timeline]
+      summary: Per-model task statistics
+      description: Returns per-model aggregated token usage for the last N days. Used by the model-comparison bar chart.
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 30
+      responses:
+        '200':
+          description: Model comparison data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelComparisonData'
+
+  # ── Pricing ─────────────────────────────────────────────────────────────────
+
+  /api/pricing:
+    get:
+      tags: [pricing]
+      summary: List all model pricing entries
+      responses:
+        '200':
+          description: All pricing rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PricingRow'
+              example:
+                - provider: anthropic
+                  model: claude-sonnet-4-5
+                  inputCostPer1m: 3.0
+                  outputCostPer1m: 15.0
+                  notes: "✅ ACTIVE — ALL workers"
+                  updatedAt: "2026-03-01T17:33:07.009372Z"
+
+  /api/pricing/{provider}/{model}:
+    get:
+      tags: [pricing]
+      summary: Get pricing for a specific model
+      parameters:
+        - $ref: '#/components/parameters/provider'
+        - $ref: '#/components/parameters/model'
+      responses:
+        '200':
+          description: Pricing row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricingRow'
+        '404':
+          description: Model not found
+
+    put:
+      tags: [pricing]
+      summary: Create or update pricing for a model
+      parameters:
+        - $ref: '#/components/parameters/provider'
+        - $ref: '#/components/parameters/model'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PricingUpdateRequest'
+            example:
+              inputCostPer1m: 3.0
+              outputCostPer1m: 15.0
+              notes: "Active workhorse"
+      responses:
+        '200':
+          description: Updated pricing row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricingRow'
+
+  # ── Feasibility ──────────────────────────────────────────────────────────────
+
+  /api/feasibility:
+    post:
+      tags: [feasibility]
+      summary: Estimate cost without running workers
+      description: |
+        Runs the Planner in "feasibility mode" to decompose the request into tasks
+        and estimates token cost for each task. Workers are NOT executed.
+
+        The `verdict` field:
+        - `ESTIMATED` — no budget provided, just cost ranges
+        - `FEASIBLE` — high estimate ≤ budget
+        - `MARGINAL` — low estimate ≤ budget < high estimate
+        - `INFEASIBLE` — low estimate > budget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeasibilityRequest'
+            example:
+              goal: "Create a REST API for todo management"
+              budgetUsd: 0.50
+              provider: anthropic
+      responses:
+        '200':
+          description: Feasibility report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeasibilityReport'
+              example:
+                verdict: FEASIBLE
+                budgetUsd: 0.50
+                estimatedLowUsd: 0.06
+                estimatedHighUsd: 0.19
+                tasks:
+                  - taskId: create_api
+                    title: Create REST API
+                    complexity: LOW
+                    estimatedIterationsMin: 1
+                    estimatedIterationsMax: 3
+                    estimatedCostLow: 0.06
+                    estimatedCostHigh: 0.19
+
+  # ── Deployments ──────────────────────────────────────────────────────────────
+
+  /api/deployments:
+    get:
+      tags: [deployments]
+      summary: List all deployments
+      responses:
+        '200':
+          description: List of deployments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeploymentSummary'
+
+    post:
+      tags: [deployments]
+      summary: Deploy a completed run to GCP Cloud Run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [runId]
+              properties:
+                runId:
+                  type: string
+                  description: ID of a COMPLETE run to deploy
+                strategy:
+                  type: string
+                  enum: [SPRING_BOOT, STATIC]
+                  description: Deployment strategy (auto-detected if omitted)
+      responses:
+        '200':
+          description: Deployment initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentSummary'
+        '400':
+          description: Run not in COMPLETE state
+
+  /api/deployments/{id}:
+    delete:
+      tags: [deployments]
+      summary: Delete a deployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Deployment deleted
+        '404':
+          description: Deployment not found
+
+  /api/deployments/{id}/rollback:
+    post:
+      tags: [deployments]
+      summary: Roll back a deployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentSummary'
+
+  # ── Integrations ─────────────────────────────────────────────────────────────
+
+  /api/integrations/status:
+    get:
+      tags: [integrations]
+      summary: Get enabled integration sources
+      responses:
+        '200':
+          description: List of enabled integration source names
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabledSources:
+                    type: array
+                    items:
+                      type: string
+                      enum: [JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY]
+              example:
+                enabledSources: [JIRA]
+
+  /api/integrations/{source}/webhook:
+    post:
+      tags: [integrations]
+      summary: Receive inbound webhook from external system
+      description: |
+        Receives webhook events from external tools. The request is verified
+        against the configured HMAC secret for the source.
+        On a matching trigger condition, a new pipeline run is created automatically.
+      parameters:
+        - name: source
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [jira, confluence, servicenow, pagerduty]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Source-specific webhook payload
+      responses:
+        '200':
+          description: Webhook received and processed
+        '401':
+          description: Invalid webhook signature
+
+  /api/integrations/confluence/trigger:
+    post:
+      tags: [integrations]
+      summary: Manually trigger a run from a Confluence page
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pageId, goal]
+              properties:
+                pageId:
+                  type: string
+                goal:
+                  type: string
+      responses:
+        '200':
+          description: Run triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId:
+                    type: string
+
+  /api/integrations/runs:
+    get:
+      tags: [integrations]
+      summary: List runs triggered by integrations
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY]
+      responses:
+        '200':
+          description: List of integration-triggered run summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RunSummary'
+
+# ──────────────────────────────────────────────────────────────────────────────
+# COMPONENTS
+# ──────────────────────────────────────────────────────────────────────────────
+
+components:
+
+  parameters:
+    runId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Pipeline run UUID
+    provider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [anthropic, openai, gemini]
+    model:
+      name: model
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Model identifier (e.g. claude-sonnet-4-5)
+
+  schemas:
+
+    # ── Request bodies ───────────────────────────────────────────────────────
+
+    RunRequest:
+      type: object
+      required: [userRequest]
+      properties:
+        userRequest:
+          type: string
+          description: Natural-language description of what to build
+          example: "Create a Spring Boot REST API with CRUD for todos"
+        source:
+          type: string
+          description: Origin of the request
+          enum: [REST, JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY]
+          default: REST
+        repoUrl:
+          type: string
+          description: HTTPS URL of an existing GitHub repo (for GITHUB_EXISTING mode)
+          nullable: true
+          example: "https://github.com/myorg/myrepo"
+        repoMode:
+          type: string
+          description: Repository mode
+          enum: [NEW, EXISTING]
+          nullable: true
+
+    ApprovalRequest:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+          description: true = approve, false = reject
+        comment:
+          type: string
+          nullable: true
+          description: Optional human feedback
+
+    FeasibilityRequest:
+      type: object
+      required: [goal]
+      properties:
+        goal:
+          type: string
+          description: What to estimate cost for
+          example: "Build a REST API for managing todos with PostgreSQL"
+        budgetUsd:
+          type: number
+          format: double
+          nullable: true
+          description: Optional budget cap in USD; omit for cost-estimate-only mode
+        provider:
+          type: string
+          enum: [anthropic, openai, gemini]
+          default: anthropic
+        model:
+          type: string
+          nullable: true
+          description: Specific model name; defaults to provider's capable model
+
+    PricingUpdateRequest:
+      type: object
+      required: [inputCostPer1m, outputCostPer1m]
+      properties:
+        inputCostPer1m:
+          type: number
+          format: double
+          description: Input token cost per 1 million tokens (USD)
+        outputCostPer1m:
+          type: number
+          format: double
+          description: Output token cost per 1 million tokens (USD)
+        notes:
+          type: string
+          nullable: true
+
+    # ── Response bodies ──────────────────────────────────────────────────────
+
+    RunSummary:
+      type: object
+      description: Lightweight run summary returned in list endpoints and after submit/retry
+      properties:
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, PLANNING, AWAITING_APPROVAL, WORKING, REVIEWING, AWAITING_MERGE, MERGING, COMPLETE, FAILED, CANCELLED, REJECTED, PARTIAL]
+        userRequest:
+          type: string
+        currentGate:
+          type: string
+          nullable: true
+          enum: [PLAN_APPROVAL, MERGE_APPROVAL, null]
+        queuePosition:
+          type: integer
+          description: Position in the semaphore queue (0 = running)
+        plannerModel:
+          type: string
+          description: Provider used for the Planner (e.g. "anthropic")
+        workerModel:
+          type: string
+          description: Provider used for Workers
+        reviewerModel:
+          type: string
+          description: Provider used for the Reviewer
+        totalInputTokens:
+          type: integer
+          nullable: true
+          description: Cumulative input tokens across all agents
+        totalOutputTokens:
+          type: integer
+          nullable: true
+          description: Cumulative output tokens across all agents
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        repoUrl:
+          type: string
+          nullable: true
+        repoMode:
+          type: string
+          nullable: true
+
+    RunDetail:
+      allOf:
+        - $ref: '#/components/schemas/RunSummary'
+        - type: object
+          properties:
+            failureReason:
+              type: string
+              nullable: true
+            planJson:
+              type: string
+              nullable: true
+              description: Raw JSON of the TaskPlan produced by the Planner
+            reviewJson:
+              type: string
+              nullable: true
+              description: Raw JSON of the ReviewReport produced by the Reviewer
+            tasks:
+              type: array
+              items:
+                $ref: '#/components/schemas/TaskSummary'
+            integrationSource:
+              $ref: '#/components/schemas/IntegrationSource'
+              nullable: true
+            hasFrontend:
+              type: boolean
+              nullable: true
+              description: true once PreviewService builds the frontend
+            hasApiSpec:
+              type: boolean
+              nullable: true
+              description: true once ApiTestSuiteAgent writes openapi.yaml
+            previewStatus:
+              type: string
+              nullable: true
+              enum: [READY, FAILED, null]
+
+    TaskSummary:
+      type: object
+      properties:
+        taskId:
+          type: string
+        title:
+          type: string
+        complexity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        status:
+          type: string
+          enum: [PENDING, WORKING, PARTIAL, COMPLETE, BLOCKED, CANCELLED]
+        assignedModel:
+          type: string
+          nullable: true
+          description: Model ID used for this task (e.g. "claude-sonnet-4-5")
+        branchName:
+          type: string
+          nullable: true
+          description: Git branch created for this task (e.g. "agent/run-id/task-id")
+        readmeUpdated:
+          type: boolean
+          nullable: true
+          description: Reviewer verdict on whether README.md was updated
+        inputTokens:
+          type: integer
+          nullable: true
+        outputTokens:
+          type: integer
+          nullable: true
+        durationMs:
+          type: integer
+          format: int64
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    MetricsResponse:
+      type: object
+      properties:
+        totalRuns:
+          type: integer
+          format: int64
+        completedRuns:
+          type: integer
+          format: int64
+        failedRuns:
+          type: integer
+          format: int64
+        activeRuns:
+          type: integer
+          format: int64
+        queuedRuns:
+          type: integer
+          format: int64
+        totalInputTokens:
+          type: integer
+          format: int64
+        totalOutputTokens:
+          type: integer
+          format: int64
+
+    PricingRow:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [anthropic, openai, gemini]
+        model:
+          type: string
+          example: claude-sonnet-4-5
+        inputCostPer1m:
+          type: number
+          format: double
+          description: USD per 1 million input tokens
+        outputCostPer1m:
+          type: number
+          format: double
+          description: USD per 1 million output tokens
+        notes:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+
+    FeasibilityReport:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: [FEASIBLE, MARGINAL, INFEASIBLE, ESTIMATED]
+          description: |
+            FEASIBLE = high estimate ≤ budget
+            MARGINAL = low estimate ≤ budget < high estimate
+            INFEASIBLE = low estimate > budget
+            ESTIMATED = no budget provided
+        budgetUsd:
+          type: number
+          format: double
+          nullable: true
+        estimatedLowUsd:
+          type: number
+          format: double
+          description: Optimistic (minimum iterations) cost estimate
+        estimatedHighUsd:
+          type: number
+          format: double
+          description: Pessimistic (maximum iterations) cost estimate
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskFeasibility'
+
+    TaskFeasibility:
+      type: object
+      properties:
+        taskId:
+          type: string
+        title:
+          type: string
+        complexity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        estimatedIterationsMin:
+          type: integer
+        estimatedIterationsMax:
+          type: integer
+        estimatedCostLow:
+          type: number
+          format: double
+        estimatedCostHigh:
+          type: number
+          format: double
+
+    DeploymentSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, BUILDING, PUSHING, LIVE, FAILED, DELETED]
+        strategy:
+          type: string
+          enum: [SPRING_BOOT, STATIC]
+        serviceUrl:
+          type: string
+          nullable: true
+          description: Public Cloud Run URL when status = LIVE
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: Auto-cleanup time (TTL days after creation)
+
+    TimelineData:
+      type: object
+      description: Raw data for Gantt chart and agent-communication graph
+      properties:
+        run:
+          $ref: '#/components/schemas/RunDetail'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSummary'
+        gateEvents:
+          type: array
+          items:
+            type: object
+            properties:
+              gateType:
+                type: string
+              openedAt:
+                type: string
+                format: date-time
+              resolvedAt:
+                type: string
+                format: date-time
+                nullable: true
+              approved:
+                type: boolean
+                nullable: true
+        compactionEvents:
+          type: array
+          items:
+            type: object
+            properties:
+              taskId:
+                type: string
+              occurredAt:
+                type: string
+                format: date-time
+        messages:
+          type: array
+          description: Agent-to-agent messages (for communication graph)
+          items:
+            type: object
+            properties:
+              fromAgent:
+                type: string
+              toAgent:
+                type: string
+              messageType:
+                type: string
+              content:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+
+    ModelComparisonData:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              provider:
+                type: string
+              model:
+                type: string
+              taskCount:
+                type: integer
+              totalInputTokens:
+                type: integer
+                format: int64
+              totalOutputTokens:
+                type: integer
+                format: int64
+              avgInputTokensPerTask:
+                type: number
+                format: double
+              avgOutputTokensPerTask:
+                type: number
+                format: double
+              compactionCount:
+                type: integer
+
+    RunRecovery:
+      type: object
+      properties:
+        id:
+          type: integer
+        runId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          nullable: true
+        classification:
+          type: string
+          enum: [STUCK_NO_PROGRESS, STUCK_LOOPING, STUCK_TOOL_FAILURE, STUCK_LLM_ERROR, STUCK_CONTEXT_LIMIT]
+        action:
+          type: string
+          enum: [ESCALATE, RESUBMIT_TASK, SWITCH_MODEL, ABORT]
+        attemptNumber:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          type: string
+          nullable: true
+
+    IntegrationSource:
+      type: object
+      nullable: true
+      properties:
+        sourceType:
+          type: string
+          enum: [JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY]
+        sourceId:
+          type: string
+          description: ID of the triggering entity (e.g. Jira issue key)
+        sourceUrl:
+          type: string
+          nullable: true
+          description: Link back to the source entity
