@@ -46,7 +46,10 @@ export function useSse(runId: string | null) {
 
       es.onopen = () => {
         setStatus('CONNECTED');
+        const wasReconnect = attemptRef.current > 0;
         attemptRef.current = 0;
+        // On reconnect, do a full fetch to catch any events missed during the gap.
+        if (wasReconnect) fetchRun(runId!);
       };
 
       es.onmessage = (ev) => {
@@ -54,23 +57,29 @@ export function useSse(runId: string | null) {
           const data = JSON.parse(ev.data);
           const entry = {
             id: `${Date.now()}-${Math.random()}`,
-            type: data.type ?? 'log',
+            type: data.type ?? 'LOG',
             data,
             timestamp: Date.now(),
           };
           addEntry(entry);
 
-          if (data.type === 'runStatus' && data.status) {
-            patchRunStatus(runId!, data.status);
-            if (['COMPLETE', 'FAILED', 'CANCELLED'].includes(data.status)) {
+          // Backend emits type as SCREAMING_SNAKE_CASE; payload carries the status string.
+          if (data.type === 'RUN_STATUS' && data.payload) {
+            patchRunStatus(runId!, data.payload);
+            // For terminal states or transitions that add tasks, do a full refetch.
+            if (['COMPLETE', 'FAILED', 'CANCELLED', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'PARTIAL'].includes(data.payload)) {
               fetchRun(runId!);
             }
           }
           // Refresh task list whenever any task changes state
-          if (data.type === 'taskStatus') {
+          if (data.type === 'TASK_STATUS') {
             fetchRun(runId!);
           }
-          if (data.type === 'complete' || data.type === 'runRestarted') {
+          // Gate opened = plan tasks are now saved; refresh so the detail panel shows them
+          if (data.type === 'GATE_OPENED') {
+            fetchRun(runId!);
+          }
+          if (data.type === 'COMPLETE' || data.type === 'RUN_RESTARTED') {
             fetchRun(runId!);
           }
         } catch {}

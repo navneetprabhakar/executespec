@@ -166,6 +166,29 @@ public class GitTool {
         }
     }
 
+    /**
+     * Stage and commit any pending changes on the current branch.
+     * No-ops silently if the working tree is already clean (nothing to commit).
+     * Used by post-merge agents (e.g. ApiTestSuiteAgent) to persist generated
+     * files into git so they are not accidentally picked up by a retried worker's
+     * {@code git add .}.
+     */
+    public void commitIfDirty(String runId, String message) {
+        try (Git git = openRepo(runId)) {
+            Status s = git.status().call();
+            boolean dirty = !s.getUntracked().isEmpty()
+                         || !s.getModified().isEmpty()
+                         || !s.getMissing().isEmpty()
+                         || !s.getAdded().isEmpty();
+            if (!dirty) return;
+            git.add().addFilepattern(".").call();
+            git.commit().setMessage(message).call();
+            log.debug("commitIfDirty: committed on run {} — {}", runId, message);
+        } catch (Exception e) {
+            log.warn("commitIfDirty failed for run {}: {}", runId, e.getMessage());
+        }
+    }
+
     public String getFullDiff(String runId, String baseBranch, String featureBranch) {
         try (Git git = openRepo(runId)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();

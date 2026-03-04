@@ -32,7 +32,7 @@ import java.nio.file.Path;
  * The generated app must bind to {@code 0.0.0.0:8080} (or read {@code $PORT}).
  */
 @Component
-@Order(2) // after SpringBootDeploymentStrategy(implicit 0), before StaticDeploymentStrategy
+@Order(4)
 @Slf4j
 public class PythonDeploymentStrategy implements DeploymentStrategy {
 

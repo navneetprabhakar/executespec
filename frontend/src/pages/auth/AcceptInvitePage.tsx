@@ -1,0 +1,79 @@
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useAuthStore } from '@/stores/useAuthStore';
+import * as api from '@/lib/api';
+
+export default function AcceptInvitePage() {
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') ?? '';
+  const { isAuthenticated, loadMe } = useAuthStore();
+  const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'needsAuth'>('loading');
+  const [error, setError] = useState('');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!token) { setStatus('error'); setError('Missing invitation token.'); return; }
+
+    api.acceptInvite(token)
+      .then(async () => {
+        await loadMe();
+        setStatus('success');
+        setTimeout(() => navigate('/'), 2000);
+      })
+      .catch((err: any) => {
+        if (err.message?.includes('401') || err.message?.includes('403')) {
+          setStatus('needsAuth');
+        } else {
+          setStatus('error');
+          setError(err.message ?? 'Failed to accept invitation.');
+        }
+      });
+  }, [token]);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#1a1f2e] p-8 text-center shadow-2xl">
+        {status === 'loading' && (
+          <>
+            <div className="mb-4 flex justify-center">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
+            </div>
+            <p className="text-slate-400">Accepting invitation…</p>
+          </>
+        )}
+        {status === 'success' && (
+          <>
+            <div className="mb-4 text-5xl">🎉</div>
+            <h2 className="mb-2 text-xl font-bold text-white">Welcome to the team!</h2>
+            <p className="text-slate-400">You've joined the org. Redirecting…</p>
+          </>
+        )}
+        {status === 'needsAuth' && (
+          <>
+            <div className="mb-4 text-4xl">🔐</div>
+            <h2 className="mb-2 text-xl font-bold text-white">Sign in to accept</h2>
+            <p className="mb-6 text-slate-400">You need to be logged in to accept this invitation.</p>
+            <Link to={`/login?invite=${token}`}
+              className="inline-block rounded-lg bg-purple-600 px-6 py-2.5 font-semibold text-white hover:bg-purple-500">
+              Sign in
+            </Link>
+            <p className="mt-3 text-sm text-slate-400">
+              No account?{' '}
+              <Link to={`/register?invite=${token}`} className="text-purple-400 hover:text-purple-300">
+                Register
+              </Link>
+            </p>
+          </>
+        )}
+        {status === 'error' && (
+          <>
+            <div className="mb-4 text-5xl">❌</div>
+            <h2 className="mb-2 text-xl font-bold text-white">Invitation error</h2>
+            <p className="mb-4 text-slate-400">{error}</p>
+            <Link to="/" className="text-purple-400 hover:text-purple-300 text-sm">Go home</Link>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

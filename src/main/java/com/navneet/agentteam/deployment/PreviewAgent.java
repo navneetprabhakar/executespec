@@ -202,6 +202,52 @@ public class PreviewAgent {
                       - APP_ENV=production
                     restart: unless-stopped
                 """;
+            case GRADLE -> """
+                version: '3.8'
+                services:
+                  app:
+                    build: .
+                    ports:
+                      - "18080:8080"
+                    environment:
+                      - PORT=8080
+                    restart: unless-stopped
+                """;
+            case NODE -> """
+                version: '3.8'
+                services:
+                  app:
+                    build: .
+                    ports:
+                      - "18080:8080"
+                    environment:
+                      - PORT=8080
+                      - NODE_ENV=production
+                    restart: unless-stopped
+                """;
+            case RUST -> """
+                version: '3.8'
+                services:
+                  app:
+                    build: .
+                    ports:
+                      - "18080:8080"
+                    environment:
+                      - PORT=8080
+                    restart: unless-stopped
+                """;
+            case DOTNET -> """
+                version: '3.8'
+                services:
+                  app:
+                    build: .
+                    ports:
+                      - "18080:8080"
+                    environment:
+                      - PORT=8080
+                      - ASPNETCORE_URLS=http://+:8080
+                    restart: unless-stopped
+                """;
         };
         Files.writeString(workspace.resolve("docker-compose.yml"), content);
     }

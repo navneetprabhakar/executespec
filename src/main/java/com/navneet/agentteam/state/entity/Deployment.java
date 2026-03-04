@@ -88,7 +88,7 @@ public class Deployment {
     private String tenantId = "default";
 
 
-    public enum DeployStrategy { SPRING_BOOT, STATIC, PYTHON, GO, RUBY, PHP }
+    public enum DeployStrategy { SPRING_BOOT, GRADLE, NODE, PYTHON, GO, RUBY, PHP, RUST, DOTNET, STATIC }
 
     public enum DeployStatus {
         PENDING, BUILDING, PUSHING, DEPLOYING, LIVE,

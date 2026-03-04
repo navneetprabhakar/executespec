@@ -25,7 +25,7 @@ import java.nio.file.Path;
  * <p>All containers expose port 8080 for consistency with the other strategies.
  */
 @Component
-@Order(5)
+@Order(7)
 @Slf4j
 public class PhpDeploymentStrategy implements DeploymentStrategy {
 

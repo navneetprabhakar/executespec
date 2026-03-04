@@ -56,7 +56,9 @@ public class PlannerAgent {
         String provider = resolveProviderFromModel(model);
         log.info("[Planner] Using model={} provider={} (override={})", model, provider, modelOverride);
 
-        String userMessage = """
+        // Prepend existing-codebase context when the workspace was cloned from a real repo
+        String existingCodebaseHeader = buildExistingCodebaseHeader(runId);
+        String userMessage = existingCodebaseHeader + """
                 User request: %s
 
                 Current workspace context:
@@ -230,6 +232,26 @@ public class PlannerAgent {
             case "openai" -> "gpt-4o";
             default -> "claude-sonnet-4-6"; // anthropic — strong reasoning at lower cost
         };
+    }
+
+    /**
+     * Returns a context header block when the run starts from an existing GitHub repo.
+     * Empty string otherwise so normal runs are unaffected.
+     */
+    private String buildExistingCodebaseHeader(String runId) {
+        if (runId == null) return "";
+        return stateStore.findRun(runId)
+                .filter(r -> "EXISTING".equals(r.getRepoMode()) && r.getRepoUrl() != null)
+                .map(r -> """
+                        [EXISTING CODEBASE MODE]
+                        This run starts from an existing repository: %s
+                        The workspace already contains the full cloned codebase.
+                        Your FIRST task MUST analyze the existing project structure and key files.
+                        Plan changes and extensions ON TOP OF the existing code — do not recreate files that already exist.
+                        When the run is complete, all changes will be pushed back to the source repository.
+
+                        """.formatted(r.getRepoUrl()))
+                .orElse("");
     }
 
     /**

@@ -4,12 +4,13 @@ import com.navneet.agentteam.state.entity.PipelineRun;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
 
-public interface PipelineRunRepository extends JpaRepository<PipelineRun, String> {
+public interface PipelineRunRepository extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
 
     List<PipelineRun> findByStatusIn(List<String> statuses);
 

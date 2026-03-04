@@ -4,6 +4,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { ACTIVE_STATUSES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import UserMenu from '@/components/auth/UserMenu';
 
 export default function Header() {
   const { setCommandPaletteOpen } = useUiStore();
@@ -62,6 +63,9 @@ export default function Header() {
           <span className="text-xs font-medium text-accent-violet">{activeCount} active</span>
         </div>
       )}
+
+      {/* User menu */}
+      <UserMenu />
     </header>
   );
 }

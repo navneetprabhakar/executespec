@@ -9,12 +9,14 @@ interface RunStore {
   loading: boolean;
   error: string | null;
   statusFilter: string;
+  projectFilter: string | null;
 
   setStatusFilter: (s: string) => void;
+  setProjectFilter: (projectId: string | null) => void;
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
-  createRun: (req: { userRequest: string; skipApproval?: boolean; modelName?: string }) => Promise<string>;
+  createRun: (req: { userRequest: string; skipApproval?: boolean; modelName?: string; projectId?: string; repoMode?: string | null; repoUrl?: string | null }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   approveRun: (id: string, approved: boolean) => Promise<void>;
   mergeRun: (id: string, merge: boolean) => Promise<void>;
@@ -30,8 +32,10 @@ export const useRunStore = create<RunStore>((set, get) => ({
   loading: false,
   error: null,
   statusFilter: 'ALL',
+  projectFilter: null,
 
   setStatusFilter: (s) => set({ statusFilter: s }),
+  setProjectFilter: (projectId) => set({ projectFilter: projectId }),
 
   setActiveRunId: (id) => {
     set({ activeRunId: id, activeRun: null });
@@ -42,8 +46,11 @@ export const useRunStore = create<RunStore>((set, get) => ({
   fetchRuns: async () => {
     set({ loading: true, error: null });
     try {
-      const filter = get().statusFilter;
-      const runs = await api.getRuns(filter === 'ALL' ? undefined : filter);
+      const { statusFilter, projectFilter } = get();
+      const runs = await api.getRuns({
+        status: statusFilter === 'ALL' ? undefined : statusFilter,
+        projectId: projectFilter ?? undefined,
+      });
       set({ runs, loading: false });
     } catch (e: any) {
       set({ loading: false, error: e.message });
@@ -73,14 +80,14 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   approveRun: async (id, approved) => {
     await api.approveRun(id, approved);
+    // fetchRun refreshes the detail; the runs list is kept current by SSE patchRunStatus.
     await get().fetchRun(id);
-    await get().fetchRuns();
   },
 
   mergeRun: async (id, merge) => {
     await api.mergeRun(id, merge);
+    // fetchRun refreshes the detail; the runs list is kept current by SSE patchRunStatus.
     await get().fetchRun(id);
-    await get().fetchRuns();
   },
 
   retryTask: async (runId, taskId) => {

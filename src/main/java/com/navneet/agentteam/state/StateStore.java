@@ -13,6 +13,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -96,12 +97,7 @@ public class StateStore {
     }
 
     public void markRejected(String runId, String reason) {
-        PipelineRun run = runRepo.findById(runId).orElseThrow();
-        run.setStatus("FAILED");
-        run.setFailureReason("Rejected by user: " + reason);
-        run.setCurrentGate(null);
-        run.setCompletedAt(Instant.now());
-        runRepo.save(run);
+        finaliseRun(runRepo.findById(runId).orElseThrow(), "FAILED", "Rejected by user: " + reason);
     }
 
     public void markReviewing(String runId) {
@@ -124,22 +120,13 @@ public class StateStore {
         PipelineRun run = runRepo.findById(runId).orElseThrow();
         boolean hasIncomplete = taskRepo.findByRunId(runId).stream()
             .anyMatch(t -> "BLOCKED".equals(t.getStatus()) || "PARTIAL".equals(t.getStatus()));
-        run.setStatus(hasIncomplete ? "PARTIAL" : "COMPLETE");
-        run.setCurrentGate(null);
-        run.setCompletedAt(Instant.now());
-        if (hasIncomplete) {
-            run.setFailureReason("Merged with incomplete tasks (BLOCKED/PARTIAL)");
-        }
-        runRepo.save(run);
+        finaliseRun(run,
+            hasIncomplete ? "PARTIAL" : "COMPLETE",
+            hasIncomplete ? "Merged with incomplete tasks (BLOCKED/PARTIAL)" : null);
     }
 
     public void markFailed(String runId, String reason) {
-        PipelineRun run = runRepo.findById(runId).orElseThrow();
-        run.setStatus("FAILED");
-        run.setFailureReason(reason);
-        run.setCurrentGate(null);
-        run.setCompletedAt(Instant.now());
-        runRepo.save(run);
+        finaliseRun(runRepo.findById(runId).orElseThrow(), "FAILED", reason);
         // Fail all non-terminal tasks so UI does not show stale WORKING/LOCKED state
         taskRepo.findByRunId(runId).forEach(task -> {
             String s = task.getStatus();
@@ -156,12 +143,7 @@ public class StateStore {
      * finish all tasks. The UI uses this to offer per-task retry buttons.
      */
     public void markPartial(String runId, String reason) {
-        PipelineRun run = runRepo.findById(runId).orElseThrow();
-        run.setStatus("PARTIAL");
-        run.setFailureReason(reason);
-        run.setCurrentGate(null);
-        run.setCompletedAt(Instant.now());
-        runRepo.save(run);
+        finaliseRun(runRepo.findById(runId).orElseThrow(), "PARTIAL", reason);
     }
 
     // ── Tier 8: API spec + preview markers ───────────────────────────────────
@@ -351,6 +333,34 @@ public class StateStore {
         return runRepo.findAllByOrderByStartedAtDesc(pageable);
     }
 
+    /** Visibility-filtered variant — applies a per-user Specification on top of the status filter. */
+    public Page<PipelineRun> listRuns(String status, Pageable pageable,
+                                      Specification<PipelineRun> visSpec) {
+        return listRuns(status, null, pageable, visSpec);
+    }
+
+    /**
+     * Visibility-filtered + project-filtered variant.
+     * Stacks status, projectId, and visibility predicates.
+     */
+    public Page<PipelineRun> listRuns(String status, String projectId, Pageable pageable,
+                                      Specification<PipelineRun> visSpec) {
+        Specification<PipelineRun> combined = visSpec != null
+                ? Specification.where(visSpec)
+                : Specification.<PipelineRun>where(null);
+        if (status != null && !status.isBlank()) {
+            final String s = status;
+            combined = combined.and((root, q, cb) -> cb.equal(root.get("status"), s));
+        }
+        if (projectId != null && !projectId.isBlank()) {
+            final String pid = projectId;
+            combined = combined.and((root, q, cb) -> cb.equal(root.get("projectId"), pid));
+        }
+        Pageable sorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                Sort.by(Sort.Direction.DESC, "startedAt"));
+        return runRepo.findAll(combined, sorted);
+    }
+
     public Optional<PipelineRun> findRun(String runId) {
         return runRepo.findById(runId);
     }
@@ -358,11 +368,7 @@ public class StateStore {
     public boolean cancelRun(String runId) {
         return runRepo.findById(runId).map(run -> {
             if (List.of("COMPLETE", "FAILED").contains(run.getStatus())) return false;
-            run.setStatus("FAILED");
-            run.setFailureReason("Cancelled by user");
-            run.setCurrentGate(null);
-            run.setCompletedAt(Instant.now());
-            runRepo.save(run);
+            finaliseRun(run, "FAILED", "Cancelled by user");
             taskRepo.findByRunId(runId).forEach(task -> {
                 String s = task.getStatus();
                 if (!"COMPLETE".equals(s) && !"FAILED".equals(s) && !"PARTIAL".equals(s)) {
@@ -621,6 +627,19 @@ public class StateStore {
     }
 
     // ── Helpers ───────────────────────────────────────────────
+
+    /**
+     * Common terminal-state mutation: sets status, clears the approval gate, stamps
+     * completedAt, and optionally sets a failure/partial reason. Used by markFailed,
+     * markComplete, markPartial, markRejected, and cancelRun to avoid boilerplate duplication.
+     */
+    private void finaliseRun(PipelineRun run, String status, String reason) {
+        run.setStatus(status);
+        run.setCurrentGate(null);
+        run.setCompletedAt(Instant.now());
+        if (reason != null) run.setFailureReason(reason);
+        runRepo.save(run);
+    }
 
     private void updateRunStatus(String runId, String status) {
         PipelineRun run = runRepo.findById(runId).orElseThrow();

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ChevronRight, Cpu } from 'lucide-react';
+import { ChevronRight, Cpu, Github } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import { fmtTokens, relativeTime, truncate } from '@/lib/utils';
 import type { RunSummary } from '@/lib/api';
@@ -54,6 +54,18 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
             </span>
             {(run.totalInputTokens + run.totalOutputTokens) > 0 && (
               <span className="text-xs text-zinc-600">{fmtTokens(run.totalInputTokens + run.totalOutputTokens)} tok</span>
+            )}
+            {run.repoUrl && (
+              <a
+                href={run.repoUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
+              >
+                <Github className="h-3 w-3" />
+                GitHub
+              </a>
             )}
           </div>
         </div>

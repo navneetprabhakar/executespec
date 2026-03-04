@@ -15,8 +15,11 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchMetrics();
     fetchModelComparison();
+    // fetchRuns once on mount — the list stays current via SSE patchRunStatus;
+    // no need to re-poll it here (RunList has its own 10s poll when visible).
     fetchRuns();
-    const interval = setInterval(() => { fetchMetrics(); fetchRuns(); }, 30000);
+    // Only re-poll metrics — they're server-side aggregates that don't come via SSE.
+    const interval = setInterval(() => { fetchMetrics(); }, 30000);
     return () => clearInterval(interval);
   }, []);
 
