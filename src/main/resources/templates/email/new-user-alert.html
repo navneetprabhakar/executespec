@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>New user registered</title></head>
+<body style="font-family:sans-serif;background:#0f1117;color:#e2e8f0;padding:40px">
+  <div style="max-width:480px;margin:0 auto;background:#1a1f2e;border-radius:12px;padding:32px">
+    <h1 style="color:#8b5cf6;margin:0 0 8px">executespec Admin</h1>
+    <h2 style="margin:0 0 24px;font-size:20px">New user registered</h2>
+    <p>A new FREE user has registered: <strong th:text="${newUserEmail}">email@example.com</strong></p>
+    <a th:href="${baseUrl + '/admin/users'}" href="#"
+       style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;
+              padding:10px 24px;border-radius:8px;font-weight:600;margin:16px 0">
+      View in Admin UI
+    </a>
+  </div>
+</body>
+</html>
