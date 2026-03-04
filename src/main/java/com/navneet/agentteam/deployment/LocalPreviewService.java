@@ -121,34 +121,40 @@ public class LocalPreviewService {
 
     private String detectProjectType(String runId) {
         Path workspace = workspaceRoot(runId);
-        boolean hasPom       = Files.exists(workspace.resolve("pom.xml"));
-        boolean hasGradle    = Files.exists(workspace.resolve("build.gradle"))
-                            || Files.exists(workspace.resolve("build.gradle.kts"));
-        boolean hasRootPkg   = Files.exists(workspace.resolve("package.json"));
-        boolean hasNestedPkg = Files.exists(workspace.resolve("frontend/package.json"));
-        boolean hasNode      = hasRootPkg || hasNestedPkg;
-        boolean hasPython    = Files.exists(workspace.resolve("requirements.txt"))
-                            || Files.exists(workspace.resolve("setup.py"))
-                            || Files.exists(workspace.resolve("pyproject.toml"))
-                            || Files.exists(workspace.resolve("Pipfile"));
-        boolean hasGo        = Files.exists(workspace.resolve("go.mod"));
-        boolean hasRuby      = Files.exists(workspace.resolve("Gemfile"));
-        boolean hasPhp       = Files.exists(workspace.resolve("composer.json"));
-        boolean hasRust      = Files.exists(workspace.resolve("Cargo.toml"));
-        boolean hasDotNet    = hasCsprojOrSln(workspace);
-        boolean hasStatic    = Files.exists(workspace.resolve("index.html"));
+        // Root-level signals
+        boolean hasPom         = Files.exists(workspace.resolve("pom.xml"));
+        boolean hasGradle      = Files.exists(workspace.resolve("build.gradle"))
+                              || Files.exists(workspace.resolve("build.gradle.kts"));
+        boolean hasRootPkg     = Files.exists(workspace.resolve("package.json"));
+        // Monorepo / full-stack signals (backend/ + frontend/ subdirectories)
+        boolean hasBackendPom  = Files.exists(workspace.resolve("backend/pom.xml"));
+        boolean hasBackendGradle = Files.exists(workspace.resolve("backend/build.gradle"))
+                              || Files.exists(workspace.resolve("backend/build.gradle.kts"));
+        boolean hasFrontendPkg = Files.exists(workspace.resolve("frontend/package.json"));
+        boolean hasNode        = hasRootPkg || hasFrontendPkg;
+        boolean hasPython      = Files.exists(workspace.resolve("requirements.txt"))
+                              || Files.exists(workspace.resolve("setup.py"))
+                              || Files.exists(workspace.resolve("pyproject.toml"))
+                              || Files.exists(workspace.resolve("Pipfile"));
+        boolean hasGo          = Files.exists(workspace.resolve("go.mod"));
+        boolean hasRuby        = Files.exists(workspace.resolve("Gemfile"));
+        boolean hasPhp         = Files.exists(workspace.resolve("composer.json"));
+        boolean hasRust        = Files.exists(workspace.resolve("Cargo.toml"));
+        boolean hasDotNet      = hasCsprojOrSln(workspace);
+        boolean hasStatic      = Files.exists(workspace.resolve("index.html"));
         // Priority mirrors the @Order annotations on the strategy beans
-        if (hasPom && hasNode) return "FULLSTACK";
-        if (hasPom)            return "SPRING_BOOT";
-        if (hasGradle)         return "GRADLE";
-        if (hasRootPkg)        return "NODE";
-        if (hasPython)         return "PYTHON";
-        if (hasGo)             return "GO";
-        if (hasRuby)           return "RUBY";
-        if (hasPhp)            return "PHP";
-        if (hasRust)           return "RUST";
-        if (hasDotNet)         return "DOTNET";
-        if (hasStatic)         return "STATIC";
+        if ((hasBackendPom || hasBackendGradle) && hasFrontendPkg) return "FULLSTACK";
+        if (hasPom && hasNode)  return "FULLSTACK";
+        if (hasPom)             return "SPRING_BOOT";
+        if (hasGradle)          return "GRADLE";
+        if (hasRootPkg)         return "NODE";
+        if (hasPython)          return "PYTHON";
+        if (hasGo)              return "GO";
+        if (hasRuby)            return "RUBY";
+        if (hasPhp)             return "PHP";
+        if (hasRust)            return "RUST";
+        if (hasDotNet)          return "DOTNET";
+        if (hasStatic)          return "STATIC";
         return "UNKNOWN";
     }
 

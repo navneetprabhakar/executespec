@@ -136,6 +136,17 @@ public class PreviewAgent {
         // runs on port 8080 during development. The container still listens internally on
         // 8080; only the host-side mapping is shifted to avoid the conflict.
         String content = switch (type) {
+            case FULLSTACK -> """
+                version: '3.8'
+                services:
+                  app:
+                    build: .
+                    ports:
+                      - "18080:8080"
+                    environment:
+                      - SPRING_PROFILES_ACTIVE=docker
+                    restart: unless-stopped
+                """;
             case SPRING_BOOT -> """
                 version: '3.8'
                 services:

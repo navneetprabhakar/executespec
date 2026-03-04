@@ -35,7 +35,8 @@ public class DockerfileGenerator {
             .findFirst()
             .orElseThrow(() -> new IllegalStateException(
                 "No deployment strategy matches workspace at " + workspacePath
-                + ". Supported signals: pom.xml (Spring Boot), build.gradle (Gradle/Java/Kotlin), "
+                + ". Supported signals: backend/pom.xml + frontend/package.json (Full-stack), "
+                + "pom.xml (Spring Boot), build.gradle (Gradle/Java/Kotlin), "
                 + "package.json (Node.js/Express/Next.js/Vite), "
                 + "requirements.txt/pyproject.toml/Pipfile (Python), go.mod (Go), "
                 + "Gemfile (Ruby), composer.json (PHP), Cargo.toml (Rust), "
