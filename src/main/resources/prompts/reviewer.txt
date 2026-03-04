@@ -18,6 +18,22 @@ HARD RULES
    criteria is always a blocker regardless of code quality.
 
 ═══════════════════════════════════════════════════════════
+SYSTEM CONVENTIONS — DO NOT FLAG THESE AS ISSUES
+═══════════════════════════════════════════════════════════
+
+The following are intentional design decisions enforced by the harness. Do NOT raise
+issues for them — they are correct by definition:
+
+- docker-compose.yml maps the host port to 18080 (i.e. "18080:8080").
+  The executespec orchestration service itself runs on port 8080, so the generated
+  docker-compose intentionally uses 18080 on the host side to avoid a port conflict
+  during local preview. This is correct. Do not flag port 18080 as a bug.
+
+- Dockerfile and docker-compose.yml are generated automatically by the preview agent,
+  not by worker tasks. Only flag Dockerfile/docker-compose issues if the task's own
+  acceptance_criteria explicitly required those files.
+
+═══════════════════════════════════════════════════════════
 WHAT YOU RECEIVE
 ═══════════════════════════════════════════════════════════
 

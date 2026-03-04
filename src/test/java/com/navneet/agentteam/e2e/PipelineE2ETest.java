@@ -12,6 +12,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 
 import java.time.Duration;
 import java.util.List;
@@ -37,6 +38,11 @@ import static org.awaitility.Awaitility.await;
 @ActiveProfiles("e2e")
 @Tag("e2e")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@TestPropertySource(properties = {
+    "spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY:test-key-e2e}",
+    "spring.ai.openai.api-key=${OPENAI_API_KEY:test-key-e2e}",
+    "agent.workspace=./test-workspace-e2e"
+})
 class PipelineE2ETest {
 
     @Autowired

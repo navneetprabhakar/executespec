@@ -6,7 +6,7 @@ import ModelComparisonChart from '@/components/dashboard/ModelComparisonChart';
 import ActivityFeed from '@/components/dashboard/ActivityFeed';
 import { useMetricsStore } from '@/stores/useMetricsStore';
 import { useRunStore } from '@/stores/useRunStore';
-import { fmtTokens, fmtCost } from '@/lib/utils';
+import { fmtTokens } from '@/lib/utils';
 
 export default function DashboardPage() {
   const { metrics, modelComparison, fetchMetrics, fetchModelComparison } = useMetricsStore();
@@ -15,8 +15,11 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchMetrics();
     fetchModelComparison();
+    // fetchRuns once on mount — the list stays current via SSE patchRunStatus;
+    // no need to re-poll it here (RunList has its own 10s poll when visible).
     fetchRuns();
-    const interval = setInterval(() => { fetchMetrics(); fetchRuns(); }, 30000);
+    // Only re-poll metrics — they're server-side aggregates that don't come via SSE.
+    const interval = setInterval(() => { fetchMetrics(); }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -36,14 +39,13 @@ export default function DashboardPage() {
         />
         <MetricCard
           label="Total Tokens"
-          value={metrics?.totalTokens ?? 0}
+          value={(metrics?.totalInputTokens ?? 0) + (metrics?.totalOutputTokens ?? 0)}
           format={fmtTokens}
           accent="#06B6D4"
         />
         <MetricCard
-          label="Total Cost"
-          value={metrics?.totalCostUsd ?? 0}
-          format={fmtCost}
+          label="Completed"
+          value={metrics?.completedRuns ?? 0}
           accent="#10B981"
         />
       </div>

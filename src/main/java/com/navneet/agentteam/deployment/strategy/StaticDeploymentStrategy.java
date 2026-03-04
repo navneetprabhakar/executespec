@@ -2,12 +2,14 @@ package com.navneet.agentteam.deployment.strategy;
 
 import com.navneet.agentteam.deployment.DeploymentProperties;
 import com.navneet.agentteam.state.entity.Deployment;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 @Component
+@Order(10)
 public class StaticDeploymentStrategy implements DeploymentStrategy {
 
     @Override

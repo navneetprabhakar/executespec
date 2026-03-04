@@ -23,6 +23,6 @@ public class PromptOptimiserProperties {
     /** Minimum occurrences of a pattern before it is acted on */
     private int patternMinOccurrences = 2;
 
-    private String model = "claude-sonnet-4-5-20250929";
+    private String model = "claude-haiku-4-5-20251001";
     private String provider = "anthropic";
 }

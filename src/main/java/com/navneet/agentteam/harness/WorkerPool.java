@@ -101,7 +101,11 @@ public class WorkerPool {
                         taskThreads.put(task.getTaskId(), Thread.currentThread());
                         try {
                             String branchName = "agent/" + runId.substring(0, 8) + "/" + task.getTaskId();
-                            if (!stateStore.lockTask(task.getTaskId(), model, branchName)) {
+                            // Use the planner-assigned model (not the provider role name) so
+                            // the DB record reflects the actual model the worker will use.
+                            String taskModel = task.getAssignedModel() != null
+                                ? task.getAssignedModel() : model;
+                            if (!stateStore.lockTask(task.getTaskId(), taskModel, branchName)) {
                                 log.warn("Task {} already locked -- skipping", task.getTaskId());
                                 // Mark as completed so dependents are not blocked forever
                                 completedTaskIds.add(task.getTaskId());

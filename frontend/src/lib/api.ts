@@ -2,9 +2,16 @@
 
 const BASE = '/api';
 
+/** Returns the stored access token for authenticated requests. */
+function authHeader(): Record<string, string> {
+  const token = localStorage.getItem('access_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, {
-    headers: { 'Content-Type': 'application/json', ...opts?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...opts?.headers },
+    credentials: 'include',  // send refresh_token cookie
     ...opts,
   });
   if (!res.ok) {
@@ -12,7 +19,23 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
     throw new Error(`${res.status}: ${msg}`);
   }
   if (res.status === 204) return undefined as unknown as T;
-  return res.json();
+  // Handle Spring returning 200 OK with an empty body (e.g. approve/merge endpoints)
+  const text = await res.text();
+  if (!text.trim()) return undefined as unknown as T;
+  return JSON.parse(text);
+}
+
+/** Fetch a plain-text endpoint (e.g. file content served as text/plain). */
+async function reqText(url: string): Promise<string> {
+  const res = await fetch(BASE + url, {
+    headers: { ...authHeader() },  // include JWT so protected endpoints return 200 not 403
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`${res.status}: ${msg}`);
+  }
+  return res.text();
 }
 
 // ── Run types ───────────────────────────────────────────────────────────────
@@ -21,26 +44,35 @@ export interface RunSummary {
   runId: string;
   status: string;
   userRequest: string;
-  provider: string;
-  modelName: string;
-  totalTokens: number;
-  totalCostUsd: number;
-  createdAt: string;
-  updatedAt: string;
-  skipApproval: boolean;
+  plannerModel: string;
+  workerModel: string;
+  reviewerModel: string;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  startedAt: string;
+  completedAt: string | null;
+  /** Project this run belongs to, or null for un-grouped runs. */
+  projectId?: string | null;
+  /** GitHub repo URL populated after a successful post-merge push; null otherwise. */
+  repoUrl?: string | null;
+  /** Whether this run was started by cloning an existing repo. */
+  repoMode?: string | null;
 }
 
 export interface TaskSummary {
   taskId: string;
   title: string;
   status: string;
-  provider: string;
-  modelName: string;
-  tokensUsed: number;
+  assignedModel: string;
+  inputTokens: number;
+  outputTokens: number;
   durationMs: number;
-  complexity: string;
-  dependencies: string[];
+  branchName: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
   readmeUpdated: boolean;
+  /** Present when the task ended in PARTIAL / BLOCKED / FAILED — explains why. */
+  failureReason?: string | null;
 }
 
 export interface RunDetail extends RunSummary {
@@ -55,29 +87,36 @@ export interface MetricsResponse {
   completedRuns: number;
   failedRuns: number;
   activeRuns: number;
-  totalTokens: number;
-  totalCostUsd: number;
-  avgCostPerRun: number;
-  avgTokensPerRun: number;
-  runsByStatus: Record<string, number>;
-  recentCompletedRuns: RunSummary[];
+  queuedRuns: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
 }
 
 export interface PricingRow {
   provider: string;
   model: string;
-  inputCostPer1k: number;
-  outputCostPer1k: number;
-  active: boolean;
+  inputCostPer1m: number;
+  outputCostPer1m: number;
+  notes: string | null;
+  updatedAt: string | null;
+}
+
+export interface TaskFeasibility {
+  taskId: string;
+  title: string;
+  complexity: string;
+  minIterations: number;
+  maxIterations: number;
+  estimatedLowUsd: number;
+  estimatedHighUsd: number;
 }
 
 export interface FeasibilityReport {
-  feasible: boolean;
-  estimatedCostUsd: number;
-  estimatedTokens: number;
-  complexity: string;
-  taskBreakdown: Array<{ title: string; complexity: string; estimatedTokens: number; estimatedCostUsd: number }>;
-  warnings: string[];
+  verdict: string;  // "FEASIBLE" | "MARGINAL" | "INFEASIBLE" | "ESTIMATED"
+  budgetUsd: number | null;
+  estimatedLowUsd: number;
+  estimatedHighUsd: number;
+  tasks: TaskFeasibility[];
 }
 
 export interface DeploymentSummary {
@@ -91,22 +130,34 @@ export interface DeploymentSummary {
 }
 
 export interface TimelineData {
-  tasks: Array<{ taskId: string; title: string; startTime: string; endTime: string; status: string }>;
+  tasks: Array<{ taskId: string; title: string; startedAt: string; completedAt: string; status: string }>;
 }
 
 export interface ModelComparisonData {
-  models: Array<{ provider: string; model: string; totalRuns: number; totalTokens: number; totalCostUsd: number; avgDurationMs: number }>;
+  models: Array<{ provider: string; model: string; taskCount: number; totalInputTokens: number; totalOutputTokens: number; avgDurationMs: number }>;
 }
 
 // ── Runs ────────────────────────────────────────────────────────────────────
 
-export const getRuns = (status?: string) =>
-  req<RunSummary[]>(`/runs${status ? `?status=${status}` : ''}`);
+export const getRuns = (params?: { status?: string; projectId?: string }) => {
+  const qs = new URLSearchParams();
+  if (params?.status)    qs.set('status',    params.status);
+  if (params?.projectId) qs.set('projectId', params.projectId);
+  const q = qs.toString();
+  return req<RunSummary[]>(`/runs${q ? `?${q}` : ''}`);
+};
 
 export const getRun = (id: string) =>
   req<RunDetail>(`/runs/${id}`);
 
-export const createRun = (body: { userRequest: string; provider?: string; modelName?: string; skipApproval?: boolean }) =>
+export const createRun = (body: {
+  userRequest: string;
+  skipApproval?: boolean;
+  modelName?: string;
+  projectId?: string;
+  repoMode?: string | null;
+  repoUrl?: string | null;
+}) =>
   req<{ runId: string }>('/runs', { method: 'POST', body: JSON.stringify(body) });
 
 export const approveRun = (id: string, approved: boolean) =>
@@ -120,6 +171,9 @@ export const cancelRun = (id: string) =>
 
 export const retryTask = (runId: string, taskId: string) =>
   req<void>(`/runs/${runId}/tasks/${taskId}/retry`, { method: 'POST' });
+
+export const retryRun = (runId: string) =>
+  req<RunSummary>(`/runs/${runId}/retry`, { method: 'POST' });
 
 // ── Metrics ─────────────────────────────────────────────────────────────────
 
@@ -137,7 +191,7 @@ export const updatePricing = (provider: string, model: string, body: Partial<Pri
 
 // ── Feasibility ──────────────────────────────────────────────────────────────
 
-export const feasibility = (body: { userRequest: string; provider?: string; modelName?: string; budgetUsd?: number }) =>
+export const feasibility = (body: { goal: string; provider?: string; model?: string; budgetUsd?: number }) =>
   req<FeasibilityReport>('/feasibility', { method: 'POST', body: JSON.stringify(body) });
 
 // ── Deployments ──────────────────────────────────────────────────────────────
@@ -173,5 +227,280 @@ export const getTimeline = (runId: string) =>
 export const getFiles = (runId: string) =>
   req<string[]>(`/runs/${runId}/files`);
 
+/**
+ * Trigger a browser download of the workspace zip.
+ * Uses a hidden anchor so the browser handles the Content-Disposition header.
+ */
+export function downloadWorkspace(runId: string): void {
+  const a = document.createElement('a');
+  a.href = `${BASE}/runs/${runId}/download`;
+  a.download = `workspace-${runId.slice(0, 8)}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/** File content is served as text/plain — must NOT use res.json(). */
 export const getFile = (runId: string, filePath: string) =>
-  req<{ content: string }>(`/runs/${runId}/files/${encodeURIComponent(filePath)}`);
+  reqText(`/runs/${runId}/file?path=${encodeURIComponent(filePath)}`);
+
+// ── Messages (historical log) ────────────────────────────────────────────────
+
+export interface MessageResponse {
+  fromAgent: string;
+  contentSummary: string;
+  sentAt: string;
+}
+
+export const getMessages = (runId: string) =>
+  req<MessageResponse[]>(`/runs/${runId}/messages`);
+
+// ── OpenAPI spec ─────────────────────────────────────────────────────────────
+
+/** Fetch the generated OpenAPI YAML for a run (served as text/plain). */
+export const getOpenApiSpec = (runId: string) =>
+  reqText(`/runs/${runId}/openapi.yaml`);
+
+// ── Local Docker Preview ──────────────────────────────────────────────────────
+
+export interface LocalPreviewStatus {
+  runId: string;
+  status: 'IDLE' | 'BUILDING' | 'RUNNING' | 'FAILED' | 'STOPPED';
+  url: string | null;
+  projectType: string | null;
+  errorMessage: string | null;
+}
+
+export const getPreviewStatus = (runId: string) =>
+  req<LocalPreviewStatus>(`/runs/${runId}/preview`);
+
+export const startPreview = (runId: string) =>
+  req<LocalPreviewStatus>(`/runs/${runId}/preview/start`, { method: 'POST' });
+
+export const stopPreview = (runId: string) =>
+  req<void>(`/runs/${runId}/preview/stop`, { method: 'DELETE' });
+
+// ── Conversation (pre-flight chat) ────────────────────────────────────────────
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export const conversationChat = (messages: ConversationMessage[]) =>
+  req<{ reply: string }>('/conversation', {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
+  });
+
+// ── Auth types & endpoints ────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  globalRole: 'SUPER_ADMIN' | 'USER';
+  tier: 'FREE' | 'PRO' | 'ENTERPRISE';
+  status: string;
+  mustChangePassword: boolean;
+  emailVerified: boolean;
+  orgId: string | null;
+  orgRole: 'ORG_ADMIN' | 'DEVELOPER' | 'BILLING_ADMIN' | null;
+  /** GitHub username or org name the user wants repos pushed under. */
+  githubOwner?: string | null;
+  /** True if the user has a GitHub PAT saved (raw PAT is never returned). */
+  hasGithubPat?: boolean;
+}
+
+export interface LoginResponse {
+  accessToken: string;
+  user: AuthUser;
+}
+
+export const authRegister = (body: { email: string; firstName: string; lastName: string; password: string }) =>
+  req<AuthUser>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
+
+export const authLogin = (body: { email: string; password: string }) =>
+  req<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
+
+export const authRefresh = () =>
+  req<LoginResponse>('/auth/refresh', { method: 'POST' });
+
+export const authLogout = () =>
+  req<void>('/auth/logout', { method: 'DELETE' });
+
+export const authMe = () =>
+  req<AuthUser>('/auth/me');
+
+export const authVerifyEmail = (token: string) =>
+  req<{ message: string }>(`/auth/verify-email?token=${token}`);
+
+export const authResendVerification = (email: string) =>
+  req<{ message: string }>('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
+
+export const authForgotPassword = (email: string) =>
+  req<{ message: string }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+
+export const authResetPassword = (token: string, newPassword: string) =>
+  req<{ message: string }>('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) });
+
+export const authChangePassword = (currentPassword: string | null, newPassword: string) =>
+  req<{ message: string }>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+
+/**
+ * Saves the user's GitHub PAT and owner (username or org).
+ * Pass empty strings to clear the credentials.
+ */
+export const updateGithubSettings = (githubPat: string, githubOwner: string) =>
+  req<AuthUser>('/auth/settings/github', {
+    method: 'PUT',
+    body: JSON.stringify({ githubPat, githubOwner }),
+  });
+
+// ── Org endpoints ─────────────────────────────────────────────────────────────
+
+export interface OrgDto {
+  id: string;
+  name: string;
+  domainPatterns: string;
+  tier: string;
+  status: string;
+  monthlyRunCount: number;
+  isPaymentVerified: boolean;
+  monthlyRunLimitOverride: number | null;
+  apiKeysProvided: boolean;
+  planExpiresAt: string | null;
+  createdAt: string;
+}
+
+export interface OrgMemberDto {
+  userId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  orgRole: string;
+  joinedAt: string;
+}
+
+export interface OrgInvitation {
+  id: string;
+  orgId: string;
+  invitedEmail: string;
+  orgRole: string;
+  status: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export const getMyOrg = () => req<OrgDto>('/org/me');
+
+export const createOrg = (body: { name: string; domains: string[] }) =>
+  req<OrgDto>('/org', { method: 'POST', body: JSON.stringify(body) });
+
+export const updateOrg = (body: { name?: string; domains?: string[] }) =>
+  req<OrgDto>('/org/me', { method: 'PUT', body: JSON.stringify(body) });
+
+export const getOrgMembers = () => req<OrgMemberDto[]>('/org/me/members');
+
+export const removeMember = (userId: string) =>
+  req<void>(`/org/me/members/${userId}`, { method: 'DELETE' });
+
+export const changeMemberRole = (userId: string, role: string) =>
+  req<void>(`/org/me/members/${userId}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
+
+export const inviteMember = (body: { email: string; orgRole?: string; projectIds?: string[] }) =>
+  req<{ message: string; status: string }>('/org/invite', { method: 'POST', body: JSON.stringify(body) });
+
+export const getOrgInvitations = () => req<OrgInvitation[]>('/org/me/invitations');
+
+export const acceptInvite = (token: string) =>
+  req<{ message: string }>(`/org/accept-invite?token=${token}`, { method: 'POST' });
+
+// ── Project endpoints ─────────────────────────────────────────────────────────
+
+export interface ProjectDto {
+  id: string;
+  orgId: string;
+  name: string;
+  description: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface ProjectMemberDto {
+  userId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  projectRole: string;
+  assignedAt: string;
+}
+
+export const getProjects = () => req<ProjectDto[]>('/projects');
+
+export const createProject = (body: { name: string; description?: string }) =>
+  req<ProjectDto>('/projects', { method: 'POST', body: JSON.stringify(body) });
+
+export const archiveProject = (id: string) =>
+  req<ProjectDto>(`/projects/${id}/archive`, { method: 'PUT' });
+
+export const getProjectMembers = (projectId: string) =>
+  req<ProjectMemberDto[]>(`/projects/${projectId}/members`);
+
+export const addProjectMember = (projectId: string, userId: string, role: string) =>
+  req<void>(`/projects/${projectId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ userId, role }),
+  });
+
+export const removeProjectMember = (projectId: string, userId: string) =>
+  req<void>(`/projects/${projectId}/members/${userId}`, { method: 'DELETE' });
+
+// ── Admin endpoints ───────────────────────────────────────────────────────────
+
+export const adminListUsers = () => req<AuthUser[]>('/admin/users');
+export const adminGetUser = (id: string) => req<AuthUser>(`/admin/users/${id}`);
+export const adminUpdateUserStatus = (id: string, status: string) =>
+  req<AuthUser>(`/admin/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+export const adminUpdateUserTier = (id: string, tier: string) =>
+  req<AuthUser>(`/admin/users/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
+
+export const adminListOrgs = () => req<OrgDto[]>('/admin/orgs');
+export const adminUpdateOrgTier = (id: string, tier: string) =>
+  req<OrgDto>(`/admin/orgs/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
+export const adminUpdateOrgStatus = (id: string, status: string) =>
+  req<OrgDto>(`/admin/orgs/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+
+export const adminListEscalated = () => req<OrgInvitation[]>('/admin/invitations/escalated');
+export const adminApproveInvite = (id: string) =>
+  req<{ message: string }>(`/admin/invitations/${id}/approve`, { method: 'POST' });
+export const adminRejectInvite = (id: string) =>
+  req<{ message: string }>(`/admin/invitations/${id}/reject`, { method: 'POST' });
+
+// Tier config
+export interface TierConfig { tier: string; monthlyRunLimit: number; isFixed: boolean; description: string; }
+export const adminGetTierConfig = () => req<TierConfig[]>('/admin/tier-config');
+export const adminUpdateTierConfig = (tier: string, monthlyRunLimit: number) =>
+  req<TierConfig>(`/admin/tier-config/${tier}`, { method: 'PUT', body: JSON.stringify({ monthlyRunLimit }) });
+
+// Per-org overrides
+export const adminUpdateOrgRunLimit = (id: string, limit: number | null) =>
+  req<OrgDto>(`/admin/orgs/${id}/run-limit`, { method: 'PUT', body: JSON.stringify({ limit }) });
+export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
+  req<OrgDto>(`/admin/orgs/${id}/api-keys`, { method: 'PUT', body: JSON.stringify({ provided }) });
+
+// Admin invite
+export interface AdminInviteRequest {
+  email: string; firstName: string; lastName: string;
+  tier: string; orgId?: string; newOrgName?: string; orgRole?: string;
+}
+export const adminInviteUser = (body: AdminInviteRequest) =>
+  req<{ message: string }>('/admin/invite', { method: 'POST', body: JSON.stringify(body) });
+
+// Org member suspend
+export const orgSuspendMember = (userId: string, suspended: boolean) =>
+  req<void>(`/org/me/members/${userId}/suspend`, { method: 'PUT', body: JSON.stringify({ suspended }) });

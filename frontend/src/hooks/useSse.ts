@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useSseStore } from '@/stores/useSseStore';
 import { useRunStore } from '@/stores/useRunStore';
+import { getMessages } from '@/lib/api';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -24,6 +25,18 @@ export function useSse(runId: string | null) {
     setRunId(runId);
     attemptRef.current = 0;
 
+    // Pre-populate with historical messages so revisiting a completed run shows its log.
+    getMessages(runId).then((msgs) => {
+      msgs.forEach((msg, i) => {
+        addEntry({
+          id: `hist-${i}-${msg.sentAt}`,
+          type: 'log',
+          data: { message: `[${msg.fromAgent}] ${msg.contentSummary}` },
+          timestamp: new Date(msg.sentAt).getTime(),
+        });
+      });
+    }).catch(() => { /* non-fatal */ });
+
     function connect() {
       esRef.current?.close();
       setStatus(attemptRef.current === 0 ? 'CONNECTING' : 'RECONNECTING');
@@ -33,7 +46,10 @@ export function useSse(runId: string | null) {
 
       es.onopen = () => {
         setStatus('CONNECTED');
+        const wasReconnect = attemptRef.current > 0;
         attemptRef.current = 0;
+        // On reconnect, do a full fetch to catch any events missed during the gap.
+        if (wasReconnect) fetchRun(runId!);
       };
 
       es.onmessage = (ev) => {
@@ -41,19 +57,29 @@ export function useSse(runId: string | null) {
           const data = JSON.parse(ev.data);
           const entry = {
             id: `${Date.now()}-${Math.random()}`,
-            type: data.type ?? 'log',
+            type: data.type ?? 'LOG',
             data,
             timestamp: Date.now(),
           };
           addEntry(entry);
 
-          if (data.type === 'runStatus' && data.status) {
-            patchRunStatus(runId!, data.status);
-            if (['COMPLETE', 'FAILED', 'CANCELLED'].includes(data.status)) {
+          // Backend emits type as SCREAMING_SNAKE_CASE; payload carries the status string.
+          if (data.type === 'RUN_STATUS' && data.payload) {
+            patchRunStatus(runId!, data.payload);
+            // For terminal states or transitions that add tasks, do a full refetch.
+            if (['COMPLETE', 'FAILED', 'CANCELLED', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'PARTIAL'].includes(data.payload)) {
               fetchRun(runId!);
             }
           }
-          if (data.type === 'complete' || data.type === 'runRestarted') {
+          // Refresh task list whenever any task changes state
+          if (data.type === 'TASK_STATUS') {
+            fetchRun(runId!);
+          }
+          // Gate opened = plan tasks are now saved; refresh so the detail panel shows them
+          if (data.type === 'GATE_OPENED') {
+            fetchRun(runId!);
+          }
+          if (data.type === 'COMPLETE' || data.type === 'RUN_RESTARTED') {
             fetchRun(runId!);
           }
         } catch {}

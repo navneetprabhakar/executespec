@@ -1,7 +1,7 @@
 package com.navneet.agentteam.agent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.agentteam.agent.LlmRouter.FallbackMode;
 import com.navneet.agentteam.agent.LlmRouter.MidTaskProviderFailureException;
@@ -12,7 +12,6 @@ import com.navneet.agentteam.config.AgentProperties;
 import com.navneet.agentteam.state.InboxService;
 import com.navneet.agentteam.state.StateStore;
 import com.navneet.agentteam.state.entity.AgentTask;
-import com.navneet.agentteam.tool.FileLockTool;
 import com.navneet.agentteam.tool.FileSystemTool;
 import com.navneet.agentteam.tool.GitTool;
 import com.navneet.agentteam.tool.ShellTool;
@@ -20,15 +19,15 @@ import com.navneet.agentteam.tool.ToolResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -40,7 +39,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -52,7 +52,6 @@ public class WorkerAgent {
     private final FileSystemTool fsTool;
     private final ShellTool shellTool;
     private final GitTool gitTool;
-    private final FileLockTool lockTool;
     private final StateStore stateStore;
     private final ObjectMapper mapper;
     private final AgentProperties props;
@@ -60,50 +59,73 @@ public class WorkerAgent {
     private final TokenBudgetMonitor budgetMonitor;
     private final LlmRouter llmRouter;
     private final ResourceLoader resourceLoader;
-    private final WorkerToolCallbacks toolCallbacksFactory;
     private final LlmOutputParser outputParser;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
 
+    /**
+     * Parsed representation of a single <tool_call> extracted from assistant text.
+     */
+    private record ParsedToolCall(String name, String argsJson) {
+    }
+
+    private static final Pattern TOOL_CALL_PATTERN = Pattern.compile("<tool_call>(.*?)</tool_call>", Pattern.DOTALL);
+
     public WorkerReport execute(AgentTask task, String runId) {
-        String taskId     = task.getTaskId();
-        String model      = task.getAssignedModel() != null ? task.getAssignedModel() : "claude-sonnet-4-5-20250929";
-        String provider   = resolveProvider(model);
-        String agentId    = "worker-" + taskId;
+        String taskId = task.getTaskId();
+        String model = task.getAssignedModel() != null ? task.getAssignedModel() : "claude-haiku-4-5-20251001";
+        String provider = resolveProvider(model);
+        String agentId = "worker-" + taskId;
         String complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
         String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
 
         log.info("Worker starting task [{}] on branch {} ({}:{})", taskId, branchName, provider, model);
 
         // Create branch inside this run's isolated workspace
-        ToolResult branchResult = gitTool.createBranch(runId, branchName);
-        if (!branchResult.isOk()) {
-            log.warn("Branch creation warning for {}: {}", branchName, branchResult.value());
+        String branchResult = gitTool.createBranch(runId, branchName);
+        if (branchResult.startsWith("ERROR")) {
+            log.error("Branch creation FAILED for task {} on branch {}: {}",
+                    taskId, branchName, branchResult);
+            return WorkerReport.blocked(taskId,
+                    "Cannot create git branch '" + branchName + "': " + branchResult,
+                    0, 0);
         }
+        log.debug("Branch created: {}", branchName);
         stateStore.logMessage(runId, "harness", agentId,
-            "TASK_ASSIGNMENT", "Starting: " + task.getTitle(), 0);
+                "TASK_ASSIGNMENT", "Starting: " + task.getTitle(), 0);
 
         // Load task definition
         TaskDefinition taskDef = parseTask(task.getTaskJson());
 
-        // Build tool callbacks for this task (closed over runId + taskId)
-        List<ToolCallback> toolCallbacks = toolCallbacksFactory.createCallbacks(
-            runId, taskId, fsTool, shellTool, gitTool, lockTool, inboxService, stateStore);
+        // Merge completed dependency branches so this task can read their output files.
+        // WorkerPool's dependsOn ordering guarantees those branches are fully committed
+        // before this task starts its agentic loop.
+        if (taskDef.getDependsOn() != null && !taskDef.getDependsOn().isEmpty()) {
+            for (String depId : taskDef.getDependsOn()) {
+                String depBranch = "agent/" + runId.substring(0, 8) + "/" + depId;
+                String mergeOut = gitTool.mergeBranchIntoCurrent(runId, depBranch);
+                log.info("[Worker {}] Merged dependency '{}': {}", taskId, depBranch, mergeOut);
+                stateStore.appendTaskLog(taskId, "DEP_MERGE:" + depId + " → " + mergeOut);
+            }
+        }
 
-        // Per-task conversation history (WorkerAgent is a Spring singleton — no instance fields)
+        // Per-task conversation history (WorkerAgent is a Spring singleton — no
+        // instance fields)
         List<Message> messages = new ArrayList<>();
         messages.add(new UserMessage(buildInitialUserMessage(taskDef, branchName)));
 
-        int     totalInputTokens    = 0;
-        int     totalOutputTokens   = 0;
-        int     iteration           = 0;
-        int     lastCallInputTokens = 0;
-        boolean justCompacted       = false;
+        int totalInputTokens = 0;
+        int totalOutputTokens = 0;
+        int totalCacheReadTokens = 0; // Anthropic cache_read_input_tokens (billed at 0.10x)
+        int totalCacheWriteTokens = 0; // Anthropic cache_creation_input_tokens (billed at 1.25x)
+        int iteration = 0;
+        int lastCallInputTokens = 0;
+        boolean justCompacted = false;
 
         // ── AGENTIC LOOP ──────────────────────────────────────────────────────
         try {
-            while (iteration < 50) {  // hard cap on iterations
+            while (iteration < 50) {
 
                 // Drain inbox at start of each iteration; inject as user turn if non-null
                 String inboxContent = inboxService.drainInbox(agentId, runId);
@@ -116,228 +138,274 @@ public class WorkerAgent {
                 stateStore.updateLastActivity(taskId);
                 stateStore.appendTaskLog(taskId, "LLM_REQUEST_SENT");
 
-                LlmRouter.LlmResponse lr = callModel(messages, toolCallbacks, provider, model,
-                    runId, agentId, iteration, justCompacted, complexity);
-                // Track the provider that actually succeeded so future iterations
-                // start from the working provider instead of retrying a rate-limited one.
-                provider = lr.provider();
+                LlmRouter.LlmResponse lr = callModel(messages, provider, model,
+                        runId, agentId, iteration, justCompacted, complexity);
+                provider = lr.provider(); // track the provider that actually succeeded
 
                 iteration++;
 
                 AssistantMessage assistantMsg = (AssistantMessage) lr.response().getResult().getOutput();
+                String assistantText = assistantMsg.getText();
                 messages.add(assistantMsg);
 
-                int inputTok  = extractInputTokens(lr.response());
+                int inputTok = extractInputTokens(lr.response());
                 int outputTok = extractOutputTokens(lr.response());
+                int cacheReadTok = extractCacheReadTokens(lr.response());
+                int cacheWriteTok = extractCacheWriteTokens(lr.response());
 
-                lastCallInputTokens  = inputTok;
-                totalInputTokens    += inputTok;
-                totalOutputTokens   += outputTok;
-                justCompacted        = false;
+                lastCallInputTokens = inputTok;
+                totalInputTokens += inputTok;
+                totalOutputTokens += outputTok;
+                totalCacheReadTokens += cacheReadTok;
+                totalCacheWriteTokens += cacheWriteTok;
+                justCompacted = false;
 
+                String cacheNote = buildCacheNote(lr.response());
                 stateStore.logMessage(runId, agentId, "state",
-                    "TOOL_CALL", "Iteration " + iteration +
-                    " (" + inputTok + "/" + outputTok + " tokens)" +
-                    buildCacheNote(lr.response()), inputTok + outputTok);
+                        "TOOL_CALL", "Iteration " + iteration +
+                                " (" + inputTok + "/" + outputTok + " tokens)" + cacheNote,
+                        inputTok + outputTok);
 
-                // Check for native tool calls
-                List<AssistantMessage.ToolCall> toolCalls = assistantMsg.getToolCalls();
-
-                if (toolCalls == null || toolCalls.isEmpty()) {
-                    // No tool calls — check if it's a completion report
-                    String assistantContent = assistantMsg.getText();
-                    if (assistantContent != null &&
-                        assistantContent.contains("\"task_id\"") &&
-                        assistantContent.contains("\"status\"")) {
-                        return parseCompletionReport(assistantContent, taskId,
-                            totalInputTokens, totalOutputTokens);
-                    }
-                    messages.add(new UserMessage(
-                        "Continue working on the task. Use tools to make progress, " +
-                        "or output your completion JSON report if done."));
-                    continue;
+                // Running cache effectiveness summary every 5 iterations
+                if (iteration % 5 == 0 && totalCacheReadTokens > 0) {
+                    double cacheSavingPct = totalCacheReadTokens * 100.0
+                            / Math.max(1, totalInputTokens + totalCacheReadTokens);
+                    log.info("[Cache][{}] After {} iter — cacheRead={} tok, cacheWrite={} tok, " +
+                            "normalIn={} tok, out={} tok | ~{}% of input served from cache",
+                            taskId, iteration,
+                            totalCacheReadTokens, totalCacheWriteTokens,
+                            totalInputTokens, totalOutputTokens,
+                            String.format("%.1f", cacheSavingPct));
                 }
 
-                // Execute native tool calls and collect responses
-                List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
-                for (AssistantMessage.ToolCall tc : toolCalls) {
-                    log.debug("  Tool: {}", tc.name());
-                    stateStore.updateLastActivity(taskId);
-                    stateStore.appendTaskLog(taskId, "TOOL_CALL:" + tc.name());
-                    ToolResult result = dispatchNativeTool(tc, taskId, runId);
-                    toolResponses.add(new ToolResponseMessage.ToolResponse(
-                        tc.id(), tc.name(), result.value()));
+                // ── Execute native tool calls or final output ─────────────────────────
+                // Spring AI 1.1.0 with internalToolExecutionEnabled=true will actually loop
+                // internally
+                // until it returns the final text response. However, we want to maintain the
+                // outer observable loop in WorkerAgent to log iterations, budget monitors, etc.
+                // Since we are returning the raw Tool response to the LLM, we just need to
+                // detect
+                // if it's a completion report vs an intermediate thought.
 
-                    // Auto-commit after file writes to preserve progress
-                    if ("write_file".equals(tc.name()) || "edit_file".equals(tc.name())) {
-                        try {
-                            Map<String, Object> argMap = mapper.readValue(
-                                tc.arguments(), new TypeReference<>() {});
-                            String path = argMap.get("path") != null
-                                ? argMap.get("path").toString() : "file";
-                            gitTool.commit(runId, "wip(" + taskId + "): " + tc.name() + " " + path);
-                        } catch (Exception e) {
-                            log.debug("Auto-commit skipped: {}", e.getMessage());
+                // When using Spring AI's automatic internal tool execution, the final output
+                // returned here implies the LLM has finished its chain of thought/tool-usage
+                // for this single call.
+
+                if (assistantText != null && !assistantText.isBlank()) {
+                    log.info("[Worker {}] Iteration {} — output ({} chars)",
+                            taskId, iteration, assistantText.length());
+
+                    // 1. Parse and dispatch XML <tool_call> blocks
+                    List<ParsedToolCall> toolCalls = parseXmlToolCalls(assistantText);
+                    if (!toolCalls.isEmpty()) {
+                        StringBuilder results = new StringBuilder();
+                        for (ParsedToolCall tc : toolCalls) {
+                            stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
+                            String result = dispatchTool(tc, runId, taskId);
+                            results.append("[").append(tc.name()).append(" result]\n<output>\n")
+                                   .append(result).append("\n</output>\n\n");
                         }
+                        messages.add(new UserMessage(results.toString().trim()));
+                        continue; // next iteration — do NOT add the "continue" prompt below
+                    }
+
+                    // 2. Strict completion detection: JSON must be the entire response
+                    if (looksLikeCompletionReport(assistantText)) {
+                        return parseCompletionReport(assistantText, taskId,
+                                totalInputTokens, totalOutputTokens,
+                                totalCacheReadTokens, totalCacheWriteTokens);
                     }
                 }
-                messages.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+                // No tool calls and no completion report — prompt to continue
+                messages.add(new UserMessage(
+                        "If you have finished all your work, output ONLY your completion JSON report now. " +
+                        "Otherwise, use <tool_call>{\"name\": \"...\", \"args\": {...}}</tool_call> XML to call the next tool."));
 
                 // Budget monitoring (compaction / hard-stop)
                 BudgetStatus budget = budgetMonitor.check(model, complexity, lastCallInputTokens);
                 switch (budget.status()) {
                     case HARD_STOP -> {
                         log.warn("Hard stop threshold reached for task {} ({}% context)",
-                            taskId, (int)(budget.usagePct() * 100));
+                                taskId, (int) (budget.usagePct() * 100));
                         stateStore.recordCompaction(taskId, "hard-stop");
                         return WorkerReport.partial(taskId,
-                            "Hard stopped at " + (int)(budget.usagePct() * 100) + "% context usage. Resume required.",
-                            totalInputTokens, totalOutputTokens);
+                                "Hard stopped at " + (int) (budget.usagePct() * 100)
+                                        + "% context usage. Resume required.",
+                                totalInputTokens, totalOutputTokens);
                     }
                     case COMPACT -> {
                         log.info("Compacting context for task {} at {}% usage", taskId,
-                            (int)(budget.usagePct() * 100));
-                        String[] compactProvider = {provider};
+                                (int) (budget.usagePct() * 100));
+                        String[] compactProvider = { provider };
                         messages = compact(messages, taskDef, taskId, runId,
-                            compactProvider, model, agentId, complexity);
-                        provider = compactProvider[0]; // track effective provider from compaction
+                                compactProvider, model, agentId, complexity);
+                        provider = compactProvider[0];
                         lastCallInputTokens = 0;
                         justCompacted = true;
                     }
                     case WARN ->
                         log.warn("Context at {}% for task {} — compaction approaching",
-                            (int)(budget.usagePct() * 100), taskId);
-                    case OK -> { /* nothing */ }
+                                (int) (budget.usagePct() * 100), taskId);
+                    case OK -> {
+                        /* nothing */ }
                 }
             }
         } catch (MidTaskProviderFailureException e) {
-            // Kept for safety; with the new guardrail-free design this should not be thrown.
             log.error("Mid-task provider failure for task {}: {}", taskId, e.getMessage());
             return WorkerReport.blocked(taskId, e.getMessage(), totalInputTokens, totalOutputTokens);
         } catch (LlmRouter.ProviderUnavailableException e) {
-            // All providers in the chain exhausted (e.g. both anthropic and openai rate-limited
-            // even after the 15 s sleep). Block the task so recovery can resubmit it later.
             log.error("All providers exhausted for task {}: {}", taskId, e.getMessage());
             return WorkerReport.blocked(taskId, "All providers exhausted: " + e.getMessage(),
-                totalInputTokens, totalOutputTokens);
+                    totalInputTokens, totalOutputTokens);
         }
         // ── END AGENTIC LOOP ──────────────────────────────────────────────────
 
         log.warn("Worker for task {} hit iteration cap without completing", taskId);
         return WorkerReport.partial(taskId,
-            "Hit 50-iteration cap without producing completion report.",
-            totalInputTokens, totalOutputTokens);
+                "Hit 50-iteration cap without producing completion report.",
+                totalInputTokens, totalOutputTokens);
     }
 
-    // ── Tool Dispatch (native tool call format) ───────────────────────────────
+    // ── XML Tool-Call Parsing & Dispatch ──────────────────────────────────────
 
-    private ToolResult dispatchNativeTool(AssistantMessage.ToolCall tc, String taskId, String runId) {
+    private List<ParsedToolCall> parseXmlToolCalls(String text) {
+        if (text == null || text.isBlank()) return List.of();
+        List<ParsedToolCall> calls = new ArrayList<>();
+        Matcher m = TOOL_CALL_PATTERN.matcher(text);
+        while (m.find()) {
+            String json = m.group(1).trim();
+            try {
+                JsonNode node = mapper.readTree(json);
+                String name = node.has("name") ? node.get("name").asText() : null;
+                String argsJson = node.has("args") ? node.get("args").toString() : "{}";
+                if (name != null && !name.isBlank()) {
+                    calls.add(new ParsedToolCall(name, argsJson));
+                }
+            } catch (Exception e) {
+                log.warn("[Worker] Could not parse tool_call JSON: {} — {}", json, e.getMessage());
+            }
+        }
+        return calls;
+    }
+
+    private String dispatchTool(ParsedToolCall tc, String runId, String taskId) {
         try {
-            Map<String, Object> args = (tc.arguments() != null && !tc.arguments().isBlank())
-                ? mapper.readValue(tc.arguments(), new TypeReference<>() {})
-                : Map.of();
-
-            return switch (tc.name()) {
-                case "read_file" -> fsTool.readFile(runId, str(args, "path"));
-
-                case "write_file" -> {
-                    String path = str(args, "path");
-                    boolean claimed = lockTool.claim(path, runId, taskId);
-                    if (!claimed) {
-                        String owner = lockTool.getOwner(path).orElse("unknown");
-                        inboxService.sendFileLockConflict(runId,
-                            "worker-" + taskId, "worker-" + owner, path);
-                        stateStore.logMessage(runId, "worker-" + taskId, "worker-" + owner,
-                            "COORDINATION", "Conflict on " + path + " -- owner: " + owner, 0);
-                        yield ToolResult.err("File " + path + " is locked by worker-" + owner +
-                            ". Coordination message sent. Choose a different file or wait.");
-                    }
-                    yield fsTool.writeFile(runId, path, str(args, "content"));
+            JsonNode args = mapper.readTree(tc.argsJson());
+            String result = switch (tc.name()) {
+                case "readFile", "read_file" -> {
+                    String path = args.path("path").asText("");
+                    yield fsTool.readFile(runId, path);
                 }
-
-                case "edit_file" -> {
-                    String path = str(args, "path");
-                    boolean claimed = lockTool.claim(path, runId, taskId);
-                    if (!claimed) yield ToolResult.err("File locked: " + path);
-                    yield fsTool.editFile(runId, path, str(args, "old_str"), str(args, "new_str"));
+                case "writeFile", "write_file" -> {
+                    String path = args.path("path").asText("");
+                    String content = args.path("content").asText("");
+                    yield fsTool.writeFile(runId, path, content);
                 }
-
-                case "list_files" -> fsTool.listDirectory(runId,
-                    args.containsKey("path") ? str(args, "path") : ".");
-                case "search_files"   -> fsTool.searchFiles(runId, str(args, "pattern"),
-                    args.containsKey("directory") ? str(args, "directory") : ".");
-                case "run_command"    -> shellTool.run(runId, str(args, "command"), 120);
-                case "run_build"      -> shellTool.run(runId, str(args, "command"), 300);
-                case "run_tests"      -> shellTool.run(runId, str(args, "command"), 300);
-                case "git_status"     -> gitTool.status(runId);
-                case "git_diff"       -> gitTool.diff(runId);
-                case "git_commit"     -> gitTool.commit(runId,
-                    args.containsKey("message") ? str(args, "message") : "wip");
-
-                default -> ToolResult.err("Unknown tool: " + tc.name());
+                case "editFile", "edit_file" -> {
+                    String path = args.path("path").asText("");
+                    String oldStr = args.path("oldStr").asText(args.path("old_str").asText(""));
+                    String newStr = args.path("newStr").asText(args.path("new_str").asText(""));
+                    yield fsTool.editFile(runId, path, oldStr, newStr);
+                }
+                case "listFiles", "list_files" -> {
+                    String path = args.path("path").asText(".");
+                    yield fsTool.listFiles(runId, path);
+                }
+                case "searchFiles", "search_files" -> {
+                    String pattern = args.path("pattern").asText("");
+                    String directory = args.path("directory").asText(".");
+                    yield fsTool.searchFiles(runId, pattern, directory);
+                }
+                case "run", "run_command", "run_build", "run_tests" -> {
+                    String command = args.path("command").asText("");
+                    int timeout = args.path("timeoutSeconds").asInt(
+                            args.path("timeout_seconds").asInt(120));
+                    yield shellTool.run(runId, command, timeout);
+                }
+                case "status", "git_status" -> gitTool.status(runId);
+                case "diff", "git_diff" -> gitTool.diff(runId);
+                case "commit", "git_commit" -> {
+                    String message = args.path("message").asText("");
+                    yield gitTool.commit(runId, message);
+                }
+                default -> "Unknown tool: " + tc.name();
             };
+            String truncated = truncateResult(tc.name(), result);
+            log.debug("[Worker {}] Tool '{}' → {} chars", taskId, tc.name(),
+                    truncated != null ? truncated.length() : 0);
+            return truncated != null ? truncated : "(no output)";
         } catch (Exception e) {
-            return ToolResult.err("Tool dispatch error for " + tc.name() + ": " + e.getMessage());
+            log.warn("[Worker {}] Tool dispatch error for '{}': {}", taskId, tc.name(), e.getMessage());
+            return "Tool error: " + e.getMessage();
         }
     }
 
-    private String str(Map<String, Object> args, String key) {
-        Object val = args.get(key);
-        return val != null ? val.toString() : null;
+    /**
+     * Strict completion check: the response must start with '{' (after stripping markdown
+     * fences). This prevents false positives when the model discusses field names in prose.
+     */
+    private boolean looksLikeCompletionReport(String text) {
+        if (text == null || text.isBlank()) return false;
+        String trimmed = text.trim();
+        if (trimmed.startsWith("```")) {
+            trimmed = trimmed.replaceFirst("^```json\\s*", "").replaceFirst("^```\\s*", "").trim();
+        }
+        return trimmed.startsWith("{") &&
+               trimmed.contains("\"task_id\"") &&
+               trimmed.contains("\"status\"");
     }
 
     // ── Compaction ────────────────────────────────────────────────────────────
 
     private List<Message> compact(List<Message> messages,
-                                   TaskDefinition task, String taskId, String runId,
-                                   String[] effectiveProvider, String model, String agentId,
-                                   String complexity) {
+            TaskDefinition task, String taskId, String runId,
+            String[] effectiveProvider, String model, String agentId,
+            String complexity) {
         String provider = effectiveProvider[0];
         String summaryPrompt = """
-            Summarize this coding session precisely for resumption. Be specific — vague summaries
-            cause the worker to repeat work or miss context.
+                Summarize this coding session precisely for resumption. Be specific — vague summaries
+                cause the worker to repeat work or miss context.
 
-            Include exactly:
+                Include exactly:
 
-            1. ACCOMPLISHED
-               List every file written or edited with its path and a one-sentence description.
+                1. ACCOMPLISHED
+                   List every file written or edited with its path and a one-sentence description.
 
-            2. BUILD AND TEST STATUS
-               Did the build pass? Did tests pass? If either failed, what was the last error message?
+                2. BUILD AND TEST STATUS
+                   Did the build pass? Did tests pass? If either failed, what was the last error message?
 
-            3. REMAINING WORK
-               What still needs to be done to satisfy the acceptance criteria?
+                3. REMAINING WORK
+                   What still needs to be done to satisfy the acceptance criteria?
 
-            4. DECISIONS MADE
-               Any choices made that aren't obvious from the code.
+                4. DECISIONS MADE
+                   Any choices made that aren't obvious from the code.
 
-            5. EXACTLY WHERE I LEFT OFF
-               The last tool call made and what I was about to do next.
+                5. EXACTLY WHERE I LEFT OFF
+                   The last tool call made and what I was about to do next.
 
-            Respond in plain text — not JSON.
-            """;
+                Respond in plain text — not JSON.
+                """;
 
         List<Message> summaryMessages = new ArrayList<>(messages);
         summaryMessages.add(new UserMessage(summaryPrompt));
 
-        // No tools needed for the compaction summary call — pass empty callbacks
-        LlmRouter.LlmResponse summaryLr = callModel(summaryMessages, List.of(), provider, model,
-            runId, agentId, 0, false, complexity);
-        effectiveProvider[0] = summaryLr.provider(); // propagate effective provider to caller
+        LlmRouter.LlmResponse summaryLr = callModel(summaryMessages, provider, model,
+                runId, agentId, 0, false, complexity);
+        effectiveProvider[0] = summaryLr.provider();
         String summary = summaryLr.response().getResult().getOutput().getText();
 
-        // Write checkpoint to the run's workspace
-        String checkpointPath    = ".agent-context/worker-" + taskId + "-checkpoint.md";
+        String checkpointPath = ".agent-context/worker-" + taskId + "-checkpoint.md";
         String checkpointContent = """
-            # Checkpoint: %s
-            Generated: %s
+                # Checkpoint: %s
+                Generated: %s
 
-            ## Task
-            %s
+                ## Task
+                %s
 
-            ## Session Summary
-            %s
-            """.formatted(taskId, Instant.now(), safeJson(task), summary);
+                ## Session Summary
+                %s
+                """.formatted(taskId, Instant.now(), safeJson(task), summary);
 
         fsTool.writeFile(runId, checkpointPath, checkpointContent);
         stateStore.recordCompaction(taskId, checkpointPath);
@@ -346,105 +414,163 @@ public class WorkerAgent {
 
         List<Message> fresh = new ArrayList<>();
         fresh.add(new UserMessage("""
-            You are resuming a task after a context compaction.
+                You are resuming a task after a context compaction.
 
-            Original task:
-            %s
+                Original task:
+                %s
 
-            What happened so far (session summary):
-            %s
+                What happened so far (session summary):
+                %s
 
-            Current state of files you have written:
-            %s
+                Current state of files you have written:
+                %s
 
-            Continue from where you left off. Use tools to complete the remaining work.
-            """.formatted(safeJson(task), summary, fileContext)));
+                Continue from where you left off. Use <tool_call> XML calls to complete the remaining work.
+                """.formatted(safeJson(task), summary, fileContext)));
 
         log.info("Context compacted for task {}. Checkpoint: {}", taskId, checkpointPath);
         return fresh;
     }
 
     private String rebuildFileContext(String runId) {
-        ToolResult listing = fsTool.searchFiles(runId, "", "src");
-        return "Current src/ structure:\n" + listing.value();
+        return "Current src/ structure:\n" + fsTool.searchFiles(runId, "", "src");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private String buildInitialUserMessage(TaskDefinition task, String branchName) {
+        // REWORK mode: apply ONLY the specific reviewer fixes — do not redo the whole task.
+        // The harness injects reworkFeedback when a reviewer returned REWORK so the worker
+        // knows exactly which files and lines to touch without re-generating everything.
+        if (task.getReworkFeedback() != null && !task.getReworkFeedback().isBlank()) {
+            return """
+                    You are in REWORK mode for task [%s].
+                    Your ONLY job is to apply the specific fixes listed below.
+                    DO NOT rewrite or regenerate existing code from scratch.
+                    DO NOT redo work that is already correct.
+                    DO NOT modify files that are not mentioned in the issues.
+
+                    SPECIFIC FIXES TO APPLY:
+                    %s
+
+                    Instructions:
+                    1. Use readFile to examine the specific files mentioned in the issues above.
+                    2. Apply only the minimal targeted changes needed to fix each issue.
+                    3. Commit your changes with message: "fix(rework): address reviewer feedback"
+                    4. Report DONE with a WorkerReport JSON summarising only the changes made.
+
+                    You are on branch: %s
+                    """.formatted(task.getTaskId(), task.getReworkFeedback(), branchName);
+        }
+
+        // Normal first-attempt task assignment
         String deps = (task.getDependsOn() == null || task.getDependsOn().isEmpty())
-            ? "none" : String.join(", ", task.getDependsOn());
+                ? "none"
+                : String.join(", ", task.getDependsOn());
+
         return """
-            Your task assignment:
+                Your task assignment:
 
-            TASK ID: %s
-            TITLE: %s
-            OBJECTIVE: %s
-            BOUNDARIES: %s
-            OUTPUT FORMAT: %s
-            ACCEPTANCE CRITERIA: %s
-            DEPENDS ON: %s
-            COMPLEXITY: %s
+                TASK ID: %s
+                TITLE: %s
+                OBJECTIVE: %s
+                BOUNDARIES: %s
+                OUTPUT FORMAT: %s
+                ACCEPTANCE CRITERIA: %s
+                DEPENDS ON: %s
+                COMPLEXITY: %s
 
-            You are on branch: %s
-            Other workers are running in parallel. Check .agent-context/file-locks.json before writing any file.
-            """.formatted(task.getTaskId(), task.getTitle(), task.getObjective(),
+                You are on branch: %s
+                Other workers are running in parallel. Check .agent-context/file-locks.json before writing any file.
+                """.formatted(task.getTaskId(), task.getTitle(), task.getObjective(),
                 task.getBoundaries(), task.getOutputFormat(), task.getAcceptanceCriteria(),
                 deps, task.getComplexity(), branchName);
     }
 
     /**
-     * Calls the LLM via LlmRouter with native tool-use options.
-     * Tool callbacks are registered as JSON-schema definitions (internalToolExecutionEnabled=false
-     * so the agentic loop receives tool calls and dispatches them manually).
+     * Calls the LLM via LlmRouter with plain options (no tool callbacks).
+     * Tools are described in the system prompt; the model outputs XML tool calls
+     * which the agentic loop parses and executes manually.
      */
-    private LlmRouter.LlmResponse callModel(List<Message> messages, List<ToolCallback> toolCallbacks,
-                                             String provider, String model,
-                                             String runId, String agentId,
-                                             int iteration, boolean justCompacted,
-                                             String complexity) {
+    private LlmRouter.LlmResponse callModel(List<Message> messages,
+            String provider, String model,
+            String runId, String agentId,
+            int iteration, boolean justCompacted,
+            String complexity) {
         String systemPrompt = loadPrompt(provider);
         int maxOut = budgetMonitor.maxOutputTokens(complexity);
 
-        var optBuilder = AnthropicChatOptions.builder()
-            .maxTokens(maxOut)
-            .internalToolExecutionEnabled(false);
-        if (!toolCallbacks.isEmpty()) {
-            optBuilder.toolCallbacks(toolCallbacks);
+        log.info("[Worker callModel] provider={} model={} complexity={} maxOut={}",
+                provider, model, complexity, maxOut);
+
+        // Enable Anthropic prompt caching on the system prompt.
+        AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
+
+        AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .maxTokens(maxOut)
+                .cacheOptions(cacheOpts)
+                .build();
+
+        // Sliding window: always send the first 2 messages (task assignment + initial
+        // context)
+        // and the most-recent HISTORY_WINDOW messages. This bounds input tokens per
+        // call
+        // regardless of iteration count, while compaction handles summarising the full
+        // history.
+        // The full `messages` list is preserved in memory for the compact() summariser.
+        final int HISTORY_WINDOW = 18;
+        List<Message> windowed;
+        if (messages.size() <= HISTORY_WINDOW + 2) {
+            windowed = messages;
+        } else {
+            windowed = new ArrayList<>(messages.subList(0, 2));
+            windowed.addAll(messages.subList(messages.size() - HISTORY_WINDOW, messages.size()));
+            log.debug("[Worker callModel] Sliding window: kept first 2 + last {} of {} messages",
+                    HISTORY_WINDOW, messages.size());
         }
 
         List<Message> allMessages = new ArrayList<>();
         allMessages.add(new SystemMessage(systemPrompt));
-        allMessages.addAll(messages);
+        allMessages.addAll(windowed);
 
-        Prompt prompt = new Prompt(allMessages, optBuilder.build());
+        Prompt prompt = new Prompt(allMessages, opts);
         return llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,
-            FallbackMode.TASK_BOUNDARY, iteration, justCompacted);
+                FallbackMode.TASK_BOUNDARY, iteration, justCompacted);
     }
 
     private WorkerReport parseCompletionReport(String raw, String taskId,
-                                                int inputTokens, int outputTokens) {
+            int inputTokens, int outputTokens,
+            int cacheReadTokens, int cacheWriteTokens) {
         try {
             WorkerReport report = outputParser.parse(raw, WorkerReport.class);
+            String status = report.getStatus();
+            if (status == null || status.isBlank()) {
+                status = "partial";
+            }
             return WorkerReport.builder()
-                .taskId(report.getTaskId())
-                .status(report.getStatus())
-                .filesCreated(report.getFilesCreated())
-                .filesModified(report.getFilesModified())
-                .filesRead(report.getFilesRead())
-                .selfReview(report.getSelfReview())
-                .blockers(report.getBlockers())
-                .notesForReviewer(report.getNotesForReviewer())
-                .inputTokens(inputTokens)
-                .outputTokens(outputTokens)
-                .build();
+                    .taskId(report.getTaskId() != null ? report.getTaskId() : taskId)
+                    .status(status)
+                    .filesCreated(report.getFilesCreated())
+                    .filesModified(report.getFilesModified())
+                    .filesRead(report.getFilesRead())
+                    .selfReview(report.getSelfReview())
+                    .blockers(report.getBlockers())
+                    .notesForReviewer(report.getNotesForReviewer())
+                    .inputTokens(inputTokens)
+                    .outputTokens(outputTokens)
+                    .cacheReadTokens(cacheReadTokens)
+                    .cacheWriteTokens(cacheWriteTokens)
+                    .build();
         } catch (JsonProcessingException e) {
             log.error("Failed to parse completion report: {}", e.getMessage());
             return WorkerReport.builder()
-                .taskId(taskId).status("partial")
-                .selfReview("Could not parse completion report: " + e.getMessage())
-                .inputTokens(inputTokens).outputTokens(outputTokens)
-                .build();
+                    .taskId(taskId).status("partial")
+                    .selfReview("Could not parse completion report: " + e.getMessage())
+                    .inputTokens(inputTokens).outputTokens(outputTokens)
+                    .cacheReadTokens(cacheReadTokens).cacheWriteTokens(cacheWriteTokens)
+                    .build();
         }
     }
 
@@ -474,12 +600,62 @@ public class WorkerAgent {
         }
     }
 
+    /** Anthropic cache_creation_input_tokens — billed at 1.25× input rate. */
+    private int extractCacheWriteTokens(ChatResponse response) {
+        try {
+            Object val = response.getMetadata().get("cache_creation_input_tokens");
+            return val instanceof Number n ? n.intValue() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** Anthropic cache_read_input_tokens — billed at 0.10× input rate. */
+    private int extractCacheReadTokens(ChatResponse response) {
+        try {
+            Object val = response.getMetadata().get("cache_read_input_tokens");
+            return val instanceof Number n ? n.intValue() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     private String safeJson(Object obj) {
         try {
             return mapper.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
             return obj.toString();
         }
+    }
+
+    /**
+     * Caps tool result text to avoid ballooning message history.
+     * read_file and shell commands can produce 50k+ char outputs; keeping them
+     * full in the message list wastes tokens on every subsequent API call.
+     * The model can always re-read the file if it needs the full content.
+     */
+    private static final int MAX_RESULT_CHARS_FILE = 8_000; // read_file / list_files
+    private static final int MAX_RESULT_CHARS_SHELL = 6_000; // run_command / run_build / run_tests
+    private static final int MAX_RESULT_CHARS_DIFF = 5_000; // git_diff
+
+    private String truncateResult(String toolName, String result) {
+        if (result == null)
+            return result;
+        int limit = switch (toolName) {
+            case "read_file", "list_files", "search_files" -> MAX_RESULT_CHARS_FILE;
+            case "run_command", "run_build", "run_tests" -> MAX_RESULT_CHARS_SHELL;
+            case "git_diff" -> MAX_RESULT_CHARS_DIFF;
+            default -> Integer.MAX_VALUE; // write_file, git_commit etc. are always short
+        };
+        if (result.length() <= limit)
+            return result;
+        int tail = Math.min(1_500, limit / 4); // keep a tail snippet for context
+        String head = result.substring(0, limit - tail);
+        String end = result.substring(result.length() - tail);
+        log.debug("[Worker] Truncated {} result: {} → {} chars (head={}+tail={})",
+                toolName, result.length(), limit, limit - tail, tail);
+        return head + "\n...[" + (result.length() - limit) +
+                " chars omitted — use read_file for full content]...\n" + end;
     }
 
     /** Provider-aware prompt loading via ResourceLoader; fallback to worker.txt */
@@ -498,45 +674,46 @@ public class WorkerAgent {
 
     /** Derive provider from model name; fall back to configured role provider. */
     private String resolveProvider(String model) {
-        if (model == null) return props.getRoles().getWorker();
+        if (model == null)
+            return props.getRoles().getWorker();
         String m = model.toLowerCase();
-        if (m.contains("claude"))  return "anthropic";
-        if (m.contains("gpt"))     return "openai";
-        if (m.contains("gemini"))  return "gemini";
+        if (m.contains("claude"))
+            return "anthropic";
+        if (m.contains("gpt"))
+            return "openai";
         return props.getRoles().getWorker();
     }
 
     /**
-     * Extracts Anthropic prompt-cache statistics from the response metadata and returns
+     * Extracts Anthropic prompt-cache statistics from response metadata and returns
      * a human-readable note appended to the iteration log line.
-     *
-     * <p>Anthropic returns {@code cache_creation_input_tokens} (first call — cache write)
-     * and {@code cache_read_input_tokens} (subsequent calls — cache hit) in the usage block.
-     * Spring AI 1.0 surfaces these as entries in the generic {@code ChatResponseMetadata} map.
-     * When absent (e.g. provider was OpenAI) the method returns an empty string silently.
      */
     private String buildCacheNote(ChatResponse response) {
         try {
             var meta = response.getMetadata();
-            if (meta == null) return "";
+            if (meta == null)
+                return "";
 
             Object writeObj = meta.get("cache_creation_input_tokens");
-            Object readObj  = meta.get("cache_read_input_tokens");
+            Object readObj = meta.get("cache_read_input_tokens");
 
             long cacheWrite = writeObj instanceof Number n ? n.longValue() : 0L;
-            long cacheRead  = readObj  instanceof Number n ? n.longValue() : 0L;
+            long cacheRead = readObj instanceof Number n ? n.longValue() : 0L;
 
-            if (cacheWrite == 0 && cacheRead == 0) return "";
+            if (cacheWrite == 0 && cacheRead == 0)
+                return "";
 
-            if (cacheRead > 0) {
-                log.debug("[AnthropicCache] Cache HIT: {} tokens read from cache", cacheRead);
+            if (cacheRead > 0 && cacheWrite > 0) {
+                log.info("[Cache] HIT+WRITE — read={} tok (0.10x) write={} tok (1.25x)", cacheRead, cacheWrite);
+                return " [⚡ cache hit: " + cacheRead + " + write: " + cacheWrite + " tok]";
+            } else if (cacheRead > 0) {
+                log.info("[Cache] HIT — {} tokens read from cache (0.10x billing)", cacheRead);
                 return " [⚡ cache hit: " + cacheRead + " tok]";
             } else {
-                log.debug("[AnthropicCache] Cache WRITE: {} tokens stored in cache", cacheWrite);
+                log.info("[Cache] WRITE — {} tokens stored in cache (1.25x billing, reads will be 0.10x)", cacheWrite);
                 return " [cache write: " + cacheWrite + " tok]";
             }
         } catch (Exception e) {
-            // Non-fatal — never disrupt the worker loop for cache telemetry
             return "";
         }
     }

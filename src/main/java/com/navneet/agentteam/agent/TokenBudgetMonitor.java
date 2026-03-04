@@ -28,7 +28,6 @@ public class TokenBudgetMonitor {
     // Context limits by model (tokens)
     private static final int ANTHROPIC_LIMIT = 200_000;
     private static final int OPENAI_LIMIT     = 128_000;
-    private static final int GEMINI_LIMIT      = 1_000_000;
 
     public BudgetStatus check(String model, String complexity, int lastCallInputTokens) {
         int limit = contextLimitFor(model);
@@ -88,8 +87,6 @@ public class TokenBudgetMonitor {
             return ANTHROPIC_LIMIT;
         } else if (m.contains("gpt") || m.contains("openai")) {
             return OPENAI_LIMIT;
-        } else if (m.contains("gemini")) {
-            return GEMINI_LIMIT;
         }
         return ANTHROPIC_LIMIT; // safe default
     }

@@ -11,19 +11,19 @@ const ROLE_BADGES: Record<string, string> = {
 };
 
 const MODEL_ROLES: Record<string, string> = {
-  'claude-opus-4-5-20251101':    'Architect',
-  'claude-sonnet-4-5-20250929':  'Workhorse',
-  'claude-haiku-4-5-20251022':   'Utility',
-  'gpt-4o':                      'Capable',
-  'gpt-4o-mini':                 'Utility',
-  'gemini-2.5-pro':              'Architect',
-  'gemini-2.0-flash':            'Workhorse',
+  'claude-opus-4-6':           'Architect',
+  'claude-sonnet-4-6':         'Workhorse',
+  'claude-haiku-4-5-20251001': 'Utility',
+  'gpt-4o':                    'Capable',
+  'gpt-4o-mini':               'Utility',
+  'gemini-2.5-pro':            'Architect',
+  'gemini-2.0-flash':          'Workhorse',
 };
 
 interface EditCell {
   provider: string;
   model: string;
-  field: 'inputCostPer1k' | 'outputCostPer1k';
+  field: 'inputCostPer1m' | 'outputCostPer1m';
   value: string;
 }
 
@@ -50,9 +50,9 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
     setEditing(null);
   };
 
-  const EditableCell = ({ row, field }: { row: PricingRow; field: 'inputCostPer1k' | 'outputCostPer1k' }) => {
+  const EditableCell = ({ row, field }: { row: PricingRow; field: 'inputCostPer1m' | 'outputCostPer1m' }) => {
     const isEditing = editing?.provider === row.provider && editing.model === row.model && editing.field === field;
-    const val = row[field];
+    const val = row[field] ?? 0;
 
     if (isEditing) {
       return (
@@ -81,7 +81,7 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-white/[0.06]">
-            {['Provider', 'Model', 'Role', 'Input /1k', 'Output /1k', 'Active'].map((h) => (
+            {['Provider', 'Model', 'Role', 'Input /1M', 'Output /1M'].map((h) => (
               <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">{h}</th>
             ))}
           </tr>
@@ -98,18 +98,8 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
               <td className="px-4 py-2.5">
                 <span className="text-xs text-zinc-500">{MODEL_ROLES[row.model] ?? '—'}</span>
               </td>
-              <td className="px-4 py-2.5"><EditableCell row={row} field="inputCostPer1k" /></td>
-              <td className="px-4 py-2.5"><EditableCell row={row} field="outputCostPer1k" /></td>
-              <td className="px-4 py-2.5">
-                {row.active ? (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-emerald" />
-                  </span>
-                ) : (
-                  <span className="h-2 w-2 rounded-full bg-zinc-700 inline-flex" />
-                )}
-              </td>
+              <td className="px-4 py-2.5"><EditableCell row={row} field="inputCostPer1m" /></td>
+              <td className="px-4 py-2.5"><EditableCell row={row} field="outputCostPer1m" /></td>
             </tr>
           ))}
         </tbody>

@@ -4,12 +4,13 @@ import com.navneet.agentteam.state.entity.PipelineRun;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
 
-public interface PipelineRunRepository extends JpaRepository<PipelineRun, String> {
+public interface PipelineRunRepository extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
 
     List<PipelineRun> findByStatusIn(List<String> statuses);
 
@@ -22,9 +23,9 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
 
     long countByStatus(String status);
 
-    @Query("SELECT SUM(r.totalInputTokens) FROM PipelineRun r WHERE r.status = 'COMPLETE'")
+    @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r")
     Long sumInputTokens();
 
-    @Query("SELECT SUM(r.totalOutputTokens) FROM PipelineRun r WHERE r.status = 'COMPLETE'")
+    @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r")
     Long sumOutputTokens();
 }

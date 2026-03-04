@@ -1,10 +1,14 @@
 package com.navneet.agentteam.tool;
 
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
+
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.MergeResult;
 import org.eclipse.jgit.api.Status;
+import org.eclipse.jgit.api.errors.RefAlreadyExistsException;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectReader;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -31,67 +35,157 @@ public class GitTool {
 
     // ── Worker-safe operations ────────────────────────────────────────────────
 
-    public ToolResult createBranch(String runId, String branchName) {
+    @Tool(description = "Creates and checks out a new git branch in the workspace.")
+    public String createBranch(
+            @ToolParam(description = "runId", required = true) String runId,
+            @ToolParam(description = "Branch name to create", required = true) String branchName) {
         try (Git git = openRepo(runId)) {
+            // If branch already exists (e.g. task retry after recovery), just check it out
+            // rather than failing with RefAlreadyExistsException.
+            boolean exists = git.getRepository().findRef(branchName) != null;
+            if (exists) {
+                git.checkout().setName(branchName).call();
+                log.info("[GitTool] Branch '{}' already exists — checked out (task retry)", branchName);
+                return "Checked out existing branch: " + branchName + " (retry)";
+            }
             git.checkout().setCreateBranch(true).setName(branchName).call();
-            return ToolResult.ok("Created and checked out branch: " + branchName);
+            return "Created and checked out branch: " + branchName;
+        } catch (RefAlreadyExistsException e) {
+            // findRef() missed the branch (race condition or JGit ref-DB quirk after thread
+            // interrupt). Fall back to a plain checkout instead of returning an error.
+            log.warn("[GitTool] RefAlreadyExistsException for '{}' — findRef missed it; checking out directly",
+                    branchName);
+            try (Git git2 = openRepo(runId)) {
+                git2.checkout().setName(branchName).call();
+                log.info("[GitTool] Branch '{}' checked out via fallback path (task retry)", branchName);
+                return "Checked out existing branch: " + branchName + " (retry-fallback)";
+            } catch (Exception ce) {
+                return "Branch creation failed: " + ce.getMessage();
+            }
         } catch (Exception e) {
-            return ToolResult.err("Branch creation failed: " + e.getMessage());
+            return "Branch creation failed: " + e.getMessage();
         }
     }
 
-    public ToolResult commit(String runId, String message) {
+    @Tool(description = "Stage and commit all current changes in the workspace.")
+    public String commit(
+            @ToolParam(description = "runId", required = true) String runId,
+            @ToolParam(description = "Commit message (format: feat(task_id): desc)", required = true) String message) {
         try (Git git = openRepo(runId)) {
             git.add().addFilepattern(".").call();
             RevCommit commit = git.commit().setMessage(message).call();
-            return ToolResult.ok("Committed: " + commit.abbreviate(7).name() + " — " + message);
+            return "Committed: " + commit.abbreviate(7).name() + " — " + message;
         } catch (Exception e) {
-            return ToolResult.err("Commit failed: " + e.getMessage());
+            return "Commit failed: " + e.getMessage();
         }
     }
 
-    public ToolResult status(String runId) {
+    @Tool(description = "Show git working tree status.")
+    public String status(
+            @ToolParam(description = "runId", required = true) String runId) {
         try (Git git = openRepo(runId)) {
             Status s = git.status().call();
             StringBuilder sb = new StringBuilder();
-            if (!s.getAdded().isEmpty())     sb.append("Added: ").append(s.getAdded()).append("\n");
-            if (!s.getModified().isEmpty())  sb.append("Modified: ").append(s.getModified()).append("\n");
-            if (!s.getUntracked().isEmpty()) sb.append("Untracked: ").append(s.getUntracked()).append("\n");
-            return ToolResult.ok(sb.toString().isEmpty() ? "Clean working tree" : sb.toString());
+            if (!s.getAdded().isEmpty())
+                sb.append("Added: ").append(s.getAdded()).append("\n");
+            if (!s.getModified().isEmpty())
+                sb.append("Modified: ").append(s.getModified()).append("\n");
+            if (!s.getUntracked().isEmpty())
+                sb.append("Untracked: ").append(s.getUntracked()).append("\n");
+            return sb.toString().isEmpty() ? "Clean working tree" : sb.toString();
         } catch (Exception e) {
-            return ToolResult.err("Status failed: " + e.getMessage());
+            return "Status failed: " + e.getMessage();
         }
     }
 
-    public ToolResult diff(String runId) {
+    @Tool(description = "Show git diff of changes since last commit.")
+    public String diff(
+            @ToolParam(description = "runId", required = true) String runId) {
         try (Git git = openRepo(runId)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             git.diff().setOutputStream(out).call();
             String diff = out.toString();
-            return ToolResult.ok(diff.isEmpty() ? "(no changes)" : diff);
+            return diff.isEmpty() ? "(no changes)" : diff;
         } catch (Exception e) {
-            return ToolResult.err("Diff failed: " + e.getMessage());
+            return "Diff failed: " + e.getMessage();
+        }
+    }
+
+    // ── Worker-safe: merge a dependency branch into the current branch ───────
+
+    /**
+     * Merges {@code branchName} into the currently-checked-out branch.
+     * Used by WorkerAgent to pull in dependency tasks' committed work before
+     * the dependent task starts its agentic loop. Non-fatal: returns an error
+     * string rather than throwing, so the worker can still proceed.
+     */
+    public String mergeBranchIntoCurrent(String runId, String branchName) {
+        try (Git git = openRepo(runId)) {
+            var ref = git.getRepository().findRef(branchName);
+            if (ref == null) {
+                log.warn("[GitTool] Cannot merge dependency '{}' — branch not found", branchName);
+                return "Branch not found: " + branchName + " (dependency may not have committed yet)";
+            }
+            MergeResult result = git.merge()
+                    .include(ref)
+                    .setFastForward(MergeCommand.FastForwardMode.FF)
+                    .setCommit(true)
+                    .setMessage("chore: merge dependency " + branchName)
+                    .call();
+            if (result.getMergeStatus().isSuccessful()) {
+                log.info("[GitTool] Merged dependency '{}' into current branch", branchName);
+                return "Merged dependency: " + branchName;
+            } else {
+                log.warn("[GitTool] Conflict merging dependency '{}': {}", branchName, result.getMergeStatus());
+                return "Merge conflict on " + branchName + ": " + result.getMergeStatus();
+            }
+        } catch (Exception e) {
+            log.warn("[GitTool] Failed to merge dependency branch '{}': {}", branchName, e.getMessage());
+            return "Merge failed for " + branchName + ": " + e.getMessage();
         }
     }
 
     // ── Harness-only operations ───────────────────────────────────────────────
 
-    public ToolResult mergeBranchToMain(String runId, String branchName) {
+    public String mergeBranchToMain(String runId, String branchName) {
         try (Git git = openRepo(runId)) {
             git.checkout().setName("main").call();
             MergeResult result = git.merge()
-                .include(git.getRepository().findRef(branchName))
-                .setFastForward(MergeCommand.FastForwardMode.NO_FF)
-                .setCommit(true)
-                .setMessage("chore: merge " + branchName)
-                .call();
+                    .include(git.getRepository().findRef(branchName))
+                    .setFastForward(MergeCommand.FastForwardMode.NO_FF)
+                    .setCommit(true)
+                    .setMessage("chore: merge " + branchName)
+                    .call();
             if (result.getMergeStatus().isSuccessful()) {
-                return ToolResult.ok("Merged " + branchName + " -> main");
+                return "Merged " + branchName + " -> main";
             } else {
-                return ToolResult.err("Merge conflict on " + branchName + ": " + result.getMergeStatus());
+                return "ERROR: Merge conflict on " + branchName + ": " + result.getMergeStatus();
             }
         } catch (Exception e) {
-            return ToolResult.err("Merge failed: " + e.getMessage());
+            return "ERROR: Merge failed: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Stage and commit any pending changes on the current branch.
+     * No-ops silently if the working tree is already clean (nothing to commit).
+     * Used by post-merge agents (e.g. ApiTestSuiteAgent) to persist generated
+     * files into git so they are not accidentally picked up by a retried worker's
+     * {@code git add .}.
+     */
+    public void commitIfDirty(String runId, String message) {
+        try (Git git = openRepo(runId)) {
+            Status s = git.status().call();
+            boolean dirty = !s.getUntracked().isEmpty()
+                         || !s.getModified().isEmpty()
+                         || !s.getMissing().isEmpty()
+                         || !s.getAdded().isEmpty();
+            if (!dirty) return;
+            git.add().addFilepattern(".").call();
+            git.commit().setMessage(message).call();
+            log.debug("commitIfDirty: committed on run {} — {}", runId, message);
+        } catch (Exception e) {
+            log.warn("commitIfDirty failed for run {}: {}", runId, e.getMessage());
         }
     }
 
@@ -99,9 +193,9 @@ public class GitTool {
         try (Git git = openRepo(runId)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             git.diff()
-                .setOldTree(getTreeIterator(git, baseBranch))
-                .setNewTree(getTreeIterator(git, featureBranch))
-                .setOutputStream(out).call();
+                    .setOldTree(getTreeIterator(git, baseBranch))
+                    .setNewTree(getTreeIterator(git, featureBranch))
+                    .setOutputStream(out).call();
             return out.toString();
         } catch (Exception e) {
             return "ERROR: " + e.getMessage();
@@ -109,17 +203,18 @@ public class GitTool {
     }
 
     /**
-     * Tags the run's workspace repo with "agent-run/{short-id}" after a successful merge.
+     * Tags the run's workspace repo with "agent-run/{short-id}" after a successful
+     * merge.
      * Useful as a lightweight marker; non-fatal on failure.
      */
     public void tagRun(String runId) {
-        String shortId  = runId.length() >= 8 ? runId.substring(0, 8) : runId;
-        String tagName  = "agent-run/" + shortId;
+        String shortId = runId.length() >= 8 ? runId.substring(0, 8) : runId;
+        String tagName = "agent-run/" + shortId;
         try (Git git = openRepo(runId)) {
             git.tag()
-               .setName(tagName)
-               .setMessage("Agent pipeline run " + runId)
-               .call();
+                    .setName(tagName)
+                    .setMessage("Agent pipeline run " + runId)
+                    .call();
             log.info("[GitTool] Tagged run as '{}'", tagName);
         } catch (Exception e) {
             log.warn("[GitTool] Could not tag run '{}': {}", tagName, e.getMessage());
@@ -132,15 +227,14 @@ public class GitTool {
      */
     public ToolResult pushToRemote(String runId, String repoUrl, String pat) {
         try {
-            String authUrl  = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
-            String wsPath   = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
+            String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
+            String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
             ProcessBuilder pb = new ProcessBuilder(
-                "git", "-C", wsPath, "push", authUrl, "main", "--force"
-            );
+                    "git", "-C", wsPath, "push", authUrl, "main", "--force");
             pb.redirectErrorStream(true);
-            Process p      = pb.start();
-            String  output = new String(p.getInputStream().readAllBytes());
-            int     exit   = p.waitFor();
+            Process p = pb.start();
+            String output = new String(p.getInputStream().readAllBytes());
+            int exit = p.waitFor();
             if (exit == 0) {
                 log.info("[GitTool] Pushed main to remote: {}", repoUrl);
                 return ToolResult.ok("Pushed to " + repoUrl);

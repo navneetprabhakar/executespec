@@ -50,6 +50,8 @@ public class PipelineRun {
     private Integer totalInputTokens;   // accumulated across all agents
     private Integer totalOutputTokens;
 
+    private Double actualCostUsd;       // computed post-run with cache-aware pricing (null until complete)
+
     @Column(columnDefinition = "TEXT")
     private String failureReason;       // set on FAILED state
 
@@ -96,5 +98,28 @@ public class PipelineRun {
     @Column(name = "tenant_id", nullable = false)
     @Builder.Default
     private String tenantId = "default";
+
+    // ── Ownership / RBAC ──────────────────────────────────────────────────────
+    /** ID of the user who submitted this run. */
+    @Column(name = "created_by_user_id")
+    private String createdByUserId;
+
+    /** Org this run belongs to (null for free-tier personal runs). */
+    @Column(name = "org_id")
+    private String orgId;
+
+    /** Project this run belongs to within the org (null for free-tier personal runs). */
+    @Column(name = "project_id")
+    private String projectId;
+
+    // ── GitHub credentials (captured from user at submission) ─────────────────
+
+    /** Submitting user's GitHub PAT — captured at run creation for immutability. */
+    @Column(name = "github_pat")
+    private String githubPat;
+
+    /** GitHub username or org to create/push repos under. */
+    @Column(name = "github_owner")
+    private String githubOwner;
 
 }

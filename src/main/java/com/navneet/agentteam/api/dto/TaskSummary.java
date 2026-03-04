@@ -14,5 +14,7 @@ public record TaskSummary(
     Long outputTokens,
     Long durationMs,
     Instant startedAt,
-    Instant completedAt
+    Instant completedAt,
+    /** Human-readable reason why this task is PARTIAL / BLOCKED / FAILED. */
+    String failureReason
 ) {}

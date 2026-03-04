@@ -1,5 +1,7 @@
 package com.navneet.agentteam.api;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.agentteam.api.dto.RunDetail;
 import com.navneet.agentteam.api.dto.RunSummary;
 import com.navneet.agentteam.api.dto.TaskSummary;
@@ -9,6 +11,7 @@ import com.navneet.agentteam.state.repository.IntegrationRunRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.Comparator;
 import java.util.List;
 
 @Component
@@ -16,6 +19,7 @@ import java.util.List;
 public class RunMapper {
 
     private final IntegrationRunRepository integrationRunRepository;
+    private final ObjectMapper objectMapper;
 
     public RunSummary toSummary(PipelineRun r) {
         return new RunSummary(
@@ -32,7 +36,8 @@ public class RunMapper {
             r.getStartedAt(),
             r.getCompletedAt(),
             r.getRepoUrl(),
-            r.getRepoMode()
+            r.getRepoMode(),
+            r.getProjectId()
         );
     }
 
@@ -61,13 +66,32 @@ public class RunMapper {
             .failureReason(r.getFailureReason())
             .planJson(r.getPlanJson())
             .reviewJson(r.getReviewJson())
-            .tasks(tasks.stream().map(this::toTaskSummary).toList())
+            .tasks(tasks.stream()
+                .sorted(Comparator.comparingInt((AgentTask t) -> taskStatusOrder(t.getStatus())))
+                .map(this::toTaskSummary)
+                .toList())
             .integrationSource(integrationSource)
             // Tier 8: compile / API spec / preview
             .hasFrontend(r.isHasFrontend())
             .hasApiSpec(r.isHasApiSpec())
             .previewStatus(r.getPreviewStatus())
             .build();
+    }
+
+    /**
+     * Sort order for tasks in the detail view:
+     * WORKING first (in-flight), then PENDING/LOCKED (queued), then
+     * PARTIAL/BLOCKED (stalled), then FAILED, and finally COMPLETE at the bottom.
+     */
+    private static int taskStatusOrder(String status) {
+        return switch (status != null ? status : "") {
+            case "WORKING"          -> 0;
+            case "PENDING", "LOCKED"-> 1;
+            case "PARTIAL", "BLOCKED"-> 2;
+            case "FAILED"           -> 3;
+            case "COMPLETE"         -> 4;
+            default                 -> 5;
+        };
     }
 
     public TaskSummary toTaskSummary(AgentTask t) {
@@ -83,7 +107,30 @@ public class RunMapper {
             t.getOutputTokens() != null ? t.getOutputTokens().longValue() : null,
             t.getDurationMs(),
             t.getStartedAt(),
-            t.getCompletedAt()
+            t.getCompletedAt(),
+            extractFailureReason(t)
         );
+    }
+
+    /**
+     * Pulls a human-readable failure reason from the task's stored report JSON
+     * (WorkerReport#blockers for BLOCKED, WorkerReport#selfReview for PARTIAL)
+     * or falls back to the lastLlmFailure flag set by the recovery system.
+     */
+    private String extractFailureReason(AgentTask t) {
+        if (t.getWorkerReportJson() != null && !t.getWorkerReportJson().isBlank()) {
+            try {
+                JsonNode report = objectMapper.readTree(t.getWorkerReportJson());
+                // BLOCKED tasks: "blockers" field
+                String blockers = report.path("blockers").asText("");
+                if (!blockers.isBlank()) return blockers;
+                // PARTIAL tasks: "self_review" (snake_case from WorkerReport)
+                String selfReview = report.path("self_review").asText("");
+                if (!selfReview.isBlank()) return selfReview;
+            } catch (Exception ignored) {}
+        }
+        // Fallback: lastLlmFailure (set by blockTask / recovery)
+        String last = t.getLastLlmFailure();
+        return (last != null && !last.isBlank()) ? last : null;
     }
 }

@@ -2,21 +2,21 @@
 ## Master Reference for New Threads
 
 > Feed this document at the start of any new conversation to restore full project context.
-> Last updated: February 2026. **Tiers 1–8 complete. Tier 9 (Playground) planned. Prompt caching live. Role-anchored model matrix applied. Spring AI upgraded to 1.1.0. Gemini (Google AI Studio) added as 3rd fallback.** `mvn compile` passes clean.
+> Last updated: March 2026. **Tiers 1–8 complete. Tier 9 (Playground) planned. Spring AI 1.1.0. 2-provider fallback (Anthropic → OpenAI). Model matrix: Planner=Sonnet 4.6, Workers/Reviewer/Compiler=Haiku 4.5. React 18 SPA frontend.** `mvn compile` + `mvn test` (104 unit tests) pass clean.
 
 ---
 
 ## What We Are Building
 
-A **personal multi-agent coding system** inspired by Claude Code Agent Teams.
-Runs locally on MacBook Air M4 (24GB RAM). Single user. Not a SaaS product.
+A **multi-agent coding system** 
 
-**Use cases**: personal projects, SaaS prototyping, boilerplate automation, learning.
+
+**Use cases**: internal tool workflows, SaaS prototyping, boilerplate automation, learning.
 **Interfaces**: REST API + Web UI dashboard.
 **Target worker capability**: write/edit files, compile/build, run tests, shell commands, search/grep.
 
 **Tech stack**: Java 21, Spring Boot 3.3.0, Spring AI 1.0.0, PostgreSQL, JGit 6.9.0, Maven.
-**LLM providers**: Anthropic (primary — `claude-sonnet-4-5-20250929`), OpenAI (fallback — `gpt-4o`).
+**LLM providers**: Anthropic (primary), OpenAI (fallback — `gpt-4o`). Gemini removed.
 **Package root**: `com.navneet.agentteam`
 **Build**: `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile`
 
@@ -31,8 +31,8 @@ User request (REST POST /api/runs)
 PipelineHarness  (Semaphore — max 3 concurrent runs)
      │
      ├─ PlannerAgent ─────────────────────── Single API call → TaskPlan JSON
-     │                                       Model: claude-opus-4-6 (The Architect)
-     │                                       Routes: HIGH/MEDIUM/LOW → all Opus
+     │                                       Model: claude-sonnet-4-6
+     │                                       Routes: HIGH/MEDIUM/LOW → haiku-4-5
      │
      ├─ ApprovalGate ─────────────────────── CompletableFuture → POST /api/runs/{id}/approve
      │
@@ -84,35 +84,30 @@ Before compaction: write checkpoint → disk. After: fresh file reads from disk,
 
 ## LLM Model Configuration
 
-### Role-Anchored Model Matrix (applied Feb 2026)
+### Role-Anchored Model Matrix (current)
 
 | Role | Agent(s) | Model | Rationale |
 |---|---|---|---|
-| **The Architect** | PlannerAgent, ReviewerAgent | `claude-opus-4-6` | Complex decomposition + multi-branch verification |
-| **The Workhorse** | WorkerAgent, CompilerAgent, ApiTestSuiteAgent | `claude-sonnet-4-5-20250929` | Code-write-test-fix loop; Sonnet is optimal speed/quality |
-| **The Scout** | ContextAgent, PromptOptimiserAgent | `claude-haiku-4-5-20251001` | Text summarisation + pattern analysis; no code generation |
+| **Planner** | PlannerAgent | `claude-sonnet-4-6` | Strong reasoning for task decomposition |
+| **Workers** | WorkerAgent, CompilerAgent, ApiTestSuiteAgent | `claude-haiku-4-5-20251001` | Fast + cheap for code-write-test-fix loop |
+| **Reviewer** | ReviewerAgent | `claude-haiku-4-5-20251001` | Review + README check |
+| **Scout** | ContextAgent, PromptOptimiserAgent | `claude-haiku-4-5-20251001` | Text summarisation + pattern analysis |
+| **Recovery** | EscalationService | `claude-sonnet-4-6` | Retry with stronger model |
 
 ### How Model Override Works
-- **PlannerAgent / ReviewerAgent**: `resolveModelName()` returns `claude-opus-4-6`; passed to `LlmRouter.callWithFallback()`, which attaches it as `AnthropicChatOptions` on every call (new `callWithModelOptions()` helper in `LlmRouter`).
-- **WorkerAgent / CompilerAgent / ApiTestSuiteAgent**: unchanged — `claude-sonnet-4-5-20250929` via `CAPABLE_CHAIN`.
-- **ContextAgent / PromptOptimiserAgent**: `LlmCallGuard.call(prompt, modelOverride, taskId, runId)` overload attaches `AnthropicChatOptions.model("claude-haiku-4-5-20251001")` before calling the injected `plannerModel` bean. Model value comes from `agent.context.model` / `agent.optimiser.model` in `application.yml`.
+- **PlannerAgent**: `resolveModelName()` returns `claude-sonnet-4-6`; attached as `AnthropicChatOptions` per call via `LlmRouter.callWithModelOptions()`.
+- **WorkerAgent / CompilerAgent / ApiTestSuiteAgent**: use `CHEAP_CHAIN` (`claude-haiku-4-5-20251001`).
+- **ReviewerAgent**: `resolveModelName()` returns `claude-haiku-4-5-20251001`.
+- **ContextAgent / PromptOptimiserAgent**: model value from `agent.context.model` / `agent.optimiser.model` yaml keys.
 
-### Fallback Chains (3-provider: Anthropic → OpenAI → Gemini)
+### Fallback Chains (2-provider: Anthropic → OpenAI)
 
 ```
-ARCHITECT_CHAIN:  anthropic/claude-opus-4-6           →  openai/gpt-4o  →  gemini/gemini-2.5-pro
-CAPABLE_CHAIN:    anthropic/claude-sonnet-4-5-20250929 →  openai/gpt-4o  →  gemini/gemini-2.0-flash
+CAPABLE_CHAIN:  anthropic/claude-sonnet-4-6         →  openai/gpt-4o
+CHEAP_CHAIN:    anthropic/claude-haiku-4-5-20251001  →  openai/gpt-4o
 ```
 
-`LlmRouter` selects chain based on primary model name. Falls back on rate-limit (15 s sleep + retry) or any non-transient provider error. Gemini is optional — only active when `GEMINI_API_KEY` env var is set. If absent, `NoSuchBeanDefinitionException` is caught and chain moves on cleanly.
-
-### Gemini (Google AI Studio) Setup
-- **Dependency**: `spring-ai-starter-model-google-genai` (Spring AI 1.1.0)
-- **ChatModel**: `org.springframework.ai.google.genai.GoogleGenAiChatModel`
-- **ChatOptions**: `org.springframework.ai.google.genai.GoogleGenAiChatOptions`
-- **Config key**: `spring.ai.google.genai.api-key: ${GEMINI_API_KEY:}`
-- **To enable**: export `GEMINI_API_KEY=<your-key>` from [aistudio.google.com](https://aistudio.google.com)
-- **Spring AI version**: upgraded from 1.0.0 → **1.1.0** (`<spring-ai.version>1.1.0</spring-ai.version>`)
+`LlmRouter` selects chain based on primary model name. Falls back on rate-limit (15 s sleep + retry) or any non-transient provider error. **Gemini removed** — no longer in the fallback chain.
 
 ### Token Limits
 
@@ -285,7 +280,7 @@ com.navneet.agentteam/
 │   ├── RunRecoveryService.java       # setPipelineHarness() breaks circular dep
 │   ├── StuckRunEvaluator.java
 │   ├── EscalationService.java
-│   ├── RecoveryProperties.java       # capableModels.anthropic = claude-sonnet-4-5-20250929
+│   ├── RecoveryProperties.java       # capableModels.anthropic = claude-sonnet-4-6
 │   ├── StuckClassification.java      # Enum: CONTEXT_LIMIT, RATE_LIMIT, TOKEN_BUDGET, …
 │   └── LlmCallException.java
 │
@@ -323,7 +318,7 @@ com.navneet.agentteam/
 ```
 src/main/resources/prompts/
 ├── planner.txt           JSON-only, 1–6 tasks, explicit boundaries + acceptance criteria
-│                         Hard Rule 6: assigned_model = claude-sonnet-4-5-20250929 (all complexities)
+│                         Hard Rule 6: assigned_model = claude-haiku-4-5-20251001 (all complexities)
 ├── worker.txt            XML <tool_call> format; Step 7 = UPDATE README.md (hard requirement)
 ├── worker-openai.txt     OpenAI-compatible variant
 ├── worker-gemini.txt     Gemini-compatible variant
@@ -361,17 +356,17 @@ spring:
   ai:
     anthropic:
       chat.options:
-        model: claude-sonnet-4-5-20250929    # all agents use sonnet
+        model: claude-haiku-4-5-20251001    # default; agents override per-call
         max-tokens: 16000
     openai:
       chat.options:
-        model: gpt-4o-mini
+        model: gpt-4o
         max-tokens: 16000
 
 agent:
   workspace: ./workspace
   concurrency:
-    max-runs: 3
+    max-runs: 5
   roles:
     planner: anthropic
     worker: anthropic
@@ -383,15 +378,15 @@ agent:
     default-owner: ${GITHUB_OWNER:navneetprabhakar}
   recovery:
     enabled: true
-    warn-threshold-minutes: 5
-    act-threshold-minutes: 10
+    warn-threshold-minutes: 15
+    act-threshold-minutes: 30
     max-task-retries: 1
     capable-models:
-      anthropic: claude-sonnet-4-5-20250929
+      anthropic: claude-sonnet-4-6
       openai: gpt-4o
   context:
     enabled: true
-    model: claude-sonnet-4-5-20250929
+    model: claude-haiku-4-5-20251001
     provider: anthropic
     run-interval: 1
   optimiser:
@@ -399,17 +394,17 @@ agent:
     run-interval: 10
     analysis-window-runs: 20
     failure-rate-threshold: 0.20
-    model: claude-sonnet-4-5-20250929
+    model: claude-haiku-4-5-20251001
     provider: anthropic
   compiler:
     enabled: true
     max-attempts: 3
     timeout-seconds: 300
-    model: claude-sonnet-4-5-20250929
+    model: claude-haiku-4-5-20251001
     provider: anthropic
   api-test-suite:
     enabled: true
-    model: claude-sonnet-4-5-20250929
+    model: claude-haiku-4-5-20251001
     provider: anthropic
   preview:
     enabled: true
@@ -429,7 +424,7 @@ agent:
     enabled: true
     max-active-sessions: 5
     test-run-timeout-seconds: 120
-    model: claude-sonnet-4-5-20250929
+    model: claude-haiku-4-5-20251001
     provider: anthropic
 ```
 
@@ -437,9 +432,11 @@ agent:
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `ANTHROPIC_API_KEY` | *(required)* | Anthropic API key — no hardcoded fallback |
+| `OPENAI_API_KEY` | *(required for fallback)* | OpenAI API key |
 | `POSTGRES_USER` | `postgres` | DB username |
 | `POSTGRES_PASSWORD` | `postgres` | DB password |
-| `GITHUB_PAT` | *(set in yml)* | GitHub personal access token |
+| `GITHUB_PAT` | *(empty)* | GitHub personal access token |
 | `GITHUB_OWNER` | `navneetprabhakar` | Default GitHub org/user |
 | `GCP_PROJECT` | `my-gcp-project` | GCP project ID for deployments |
 
@@ -529,7 +526,7 @@ Single-page Alpine.js + Tailwind CSS (CDN) app at `http://localhost:8080`.
 |---|---|
 | **Runs** | Submit + live list; click to open detail panel |
 | **Metrics** | Global counters + D3 charts (token bubble, agent comms graph) |
-| **Pricing** | 6-row model pricing table; `✅ active` badge on `claude-sonnet-4-5-20250929` |
+| **Pricing** | 6-row model pricing table; `✅ active` badge on `claude-haiku-4-5-20251001` |
 | **Feasibility** | Cost estimate without executing; model picker (`[sonnet, opus]`) |
 | **Deployments** | GCP deployment panel, deploy form, live status |
 | **Integrations** | Source status; manual Confluence trigger |
@@ -687,9 +684,9 @@ Anthropic prompt caching is enabled via two small classes in `config/`:
 
 ## Key Implementation Rules (Enforce in Every Session)
 
-1. **Package root is `com.navneet.agentteam`** — never `com.personal.*`
+1. **Package root is `com.navneet.agentteam`** — never `com.example.*`
 2. **Database is PostgreSQL** — never H2 or SQLite
-3. **All models are `claude-sonnet-4-5-20250929`** — haiku is gone; no cheap/capable split
+3. **All models are `claude-haiku-4-5-20251001`** — haiku is gone; no cheap/capable split
 4. **Model classes use `@Data @Builder @NoArgsConstructor @AllArgsConstructor`** — not records (for Jackson + builder compat). DTOs that were converted from records use `getXxx()` not `xxx()` accessor style
 5. **All LLM model classes** have `@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)`
 6. **`lombok.config`** has `copyableannotations += @Qualifier`
@@ -711,8 +708,8 @@ Anthropic prompt caching is enabled via two small classes in `config/`:
 
 | Provider | Model | Input $/1M | Output $/1M | Role |
 |---|---|---|---|---|
-| anthropic | `claude-sonnet-4-5-20250929` | $3.00 | $15.00 | ✅ ACTIVE — all agents |
-| anthropic | `claude-opus-4-5-20251101` | $15.00 | $75.00 | Escalation reference |
+| anthropic | `claude-haiku-4-5-20251001` | $3.00 | $15.00 | ✅ ACTIVE — all agents |
+| anthropic | `claude-opus-4-5` | $15.00 | $75.00 | Escalation reference |
 | openai | `gpt-4o-mini` | $0.15 | $0.60 | Fallback |
 | openai | `gpt-4o` | $2.50 | $10.00 | Capable fallback |
 | gemini | `gemini-2.0-flash` | $0.10 | $0.40 | Tertiary fallback |

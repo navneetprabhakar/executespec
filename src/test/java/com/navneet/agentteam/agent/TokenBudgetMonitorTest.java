@@ -16,8 +16,7 @@ class TokenBudgetMonitorTest {
     @BeforeEach
     void setup() {
         props = new AgentProperties();
-        // Use production defaults: maxTokens=16000, low=25%, medium=50%, high=75%
-        // → LOW=4000, MEDIUM=8000, HIGH=12000
+        // Use production defaults: low=2048, medium=4096, high=8192
         monitor = new TokenBudgetMonitor(props);
     }
 
@@ -71,17 +70,11 @@ class TokenBudgetMonitorTest {
     }
 
     @Test
-    void geminiModels_use1MContextLimit() {
-        BudgetStatus status = monitor.check("gemini-2.0-flash", "MEDIUM", 1_000);
-        assertThat(status.contextLimit()).isEqualTo(1_000_000);
-    }
-
-    @Test
     void maxOutputTokens_returnsCorrectTierValues() {
-        // Production defaults: maxTokens=16000, low=25%→4000, medium=50%→8000, high=75%→12000
-        assertThat(monitor.maxOutputTokens("LOW")).isEqualTo(4000);
-        assertThat(monitor.maxOutputTokens("MEDIUM")).isEqualTo(8000);
-        assertThat(monitor.maxOutputTokens("HIGH")).isEqualTo(12000);
-        assertThat(monitor.maxOutputTokens(null)).isEqualTo(8000); // null → MEDIUM
+        // Production defaults: low=2048, medium=4096, high=8192
+        assertThat(monitor.maxOutputTokens("LOW")).isEqualTo(2048);
+        assertThat(monitor.maxOutputTokens("MEDIUM")).isEqualTo(4096);
+        assertThat(monitor.maxOutputTokens("HIGH")).isEqualTo(8192);
+        assertThat(monitor.maxOutputTokens(null)).isEqualTo(4096); // null → MEDIUM
     }
 }
