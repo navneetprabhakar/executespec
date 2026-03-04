@@ -22,11 +22,14 @@ import {
   FileCode2, FileText, File,
   Play, Square, ExternalLink, RefreshCw,
   MessageSquare,
+  ChevronsDownUp, ChevronsUpDown, Copy, Check,
 } from 'lucide-react';
+import hljs from 'highlight.js';
 
 const BASE_TABS = [
   { value: 'overview',  label: 'Overview' },
   { value: 'tasks',     label: 'Tasks' },
+  { value: 'graph',     label: 'Graph' },
   { value: 'log',       label: 'Live Log' },
   { value: 'plan',      label: 'Plan' },
   { value: 'review',    label: 'Review' },
@@ -60,7 +63,6 @@ export default function RunDetailTabs() {
   const showChatTab = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
   const TABS = [
     ...BASE_TABS,
-    { value: 'graph', label: 'Graph' },
     ...(showChatTab ? [{ value: 'chat', label: 'Chat' }] : []),
   ];
 
@@ -548,10 +550,21 @@ interface TreeNodeViewProps {
   selected: string | null;
   onSelect: (path: string) => void;
   depth?: number;
+  /** Increment to force-expand all folders; 0 = initial state */
+  expandSignal?: number;
+  /** Increment to force-collapse all folders; 0 = initial state */
+  collapseSignal?: number;
 }
 
-function TreeNodeView({ node, selected, onSelect, depth = 0 }: TreeNodeViewProps) {
-  const [open, setOpen] = useState(depth < 2); // auto-expand first 2 levels
+function TreeNodeView({
+  node, selected, onSelect,
+  depth = 0, expandSignal = 0, collapseSignal = 0,
+}: TreeNodeViewProps) {
+  const [open, setOpen] = useState(depth < 2);
+
+  // React to expand / collapse all signals
+  useEffect(() => { if (expandSignal > 0) setOpen(true); }, [expandSignal]);
+  useEffect(() => { if (collapseSignal > 0) setOpen(false); }, [collapseSignal]);
 
   const indent = depth * 12 + 8;
 
@@ -597,10 +610,142 @@ function TreeNodeView({ node, selected, onSelect, depth = 0 }: TreeNodeViewProps
               selected={selected}
               onSelect={onSelect}
               depth={depth + 1}
+              expandSignal={expandSignal}
+              collapseSignal={collapseSignal}
             />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── highlight.js language map ─────────────────────────────────────────────────
+const EXT_TO_LANG: Record<string, string> = {
+  ts: 'typescript', tsx: 'typescript',
+  js: 'javascript', jsx: 'javascript',
+  java: 'java', kt: 'kotlin',
+  py: 'python', go: 'go', rs: 'rust',
+  rb: 'ruby', php: 'php', swift: 'swift',
+  cs: 'csharp', cpp: 'cpp', c: 'c', scala: 'scala',
+  css: 'css', scss: 'scss',
+  html: 'xml', xml: 'xml',
+  json: 'json', yaml: 'yaml', yml: 'yaml',
+  md: 'markdown', sql: 'sql',
+  sh: 'bash', bash: 'bash',
+  dockerfile: 'dockerfile',
+  gradle: 'gradle', toml: 'ini',
+  properties: 'properties',
+};
+
+function getLanguage(filePath: string): string {
+  const name = filePath.split('/').pop()?.toLowerCase() ?? '';
+  if (name === 'dockerfile') return 'dockerfile';
+  const ext = name.includes('.') ? name.split('.').pop()! : '';
+  return EXT_TO_LANG[ext] ?? 'plaintext';
+}
+
+function highlightCode(code: string, language: string): string {
+  try {
+    if (language === 'plaintext') return escapeHtml(code);
+    const result = hljs.highlight(code, { language, ignoreIllegals: true });
+    return result.value;
+  } catch {
+    return escapeHtml(code);
+  }
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// ── IDE file viewer ───────────────────────────────────────────────────────────
+function IDEFileViewer({
+  filePath, content, loading,
+}: { filePath: string | null; content: string; loading: boolean }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  if (!filePath) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
+        <FileCode2 className="h-10 w-10 opacity-30" />
+        <span className="text-sm">Select a file to view its contents</span>
+      </div>
+    );
+  }
+
+  const fileName = filePath.split('/').pop()!;
+  const language = getLanguage(filePath);
+  const highlightedHtml = loading ? '' : highlightCode(content, language);
+  const lines = loading ? [] : highlightedHtml.split('\n');
+  // Remove trailing empty line that split often adds
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* ── Tab bar (VS Code style) ── */}
+      <div className="flex items-center border-b border-white/[0.06] bg-[#0d0d14] flex-shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1.5 px-3 py-2 bg-[#13131f] border-r border-white/[0.06] border-t border-t-accent-violet/60 min-w-0">
+          <FileTypeIcon name={fileName} />
+          <span className="text-xs font-mono text-zinc-300 whitespace-nowrap">{fileName}</span>
+        </div>
+        {/* breadcrumb path */}
+        <span className="text-[10px] font-mono text-zinc-600 px-3 truncate flex-1">
+          {filePath.split('/').slice(0, -1).join(' / ')}
+        </span>
+        {/* copy button */}
+        <button
+          onClick={handleCopy}
+          title="Copy file contents"
+          className="flex items-center gap-1 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex-shrink-0"
+        >
+          {copied
+            ? <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">Copied</span></>
+            : <><Copy className="h-3 w-3" /><span>Copy</span></>}
+        </button>
+        {/* language badge */}
+        <span className="px-3 py-2 text-[10px] font-mono text-zinc-600 flex-shrink-0">
+          {language}
+        </span>
+      </div>
+
+      {/* ── Code area ── */}
+      <div className="flex-1 overflow-auto bg-[#0d0d14]">
+        {loading ? (
+          <div className="p-4 text-sm text-zinc-500 animate-pulse">Loading…</div>
+        ) : (
+          <table className="w-full border-collapse text-xs font-mono leading-[1.6]">
+            <tbody>
+              {lines.map((lineHtml, i) => (
+                <tr key={i} className="group hover:bg-white/[0.025]">
+                  {/* line number gutter */}
+                  <td
+                    className="select-none text-right pr-4 pl-4 text-zinc-600 group-hover:text-zinc-500 w-[1%] whitespace-nowrap align-top pt-0"
+                    style={{ userSelect: 'none', minWidth: '2.8rem' }}
+                  >
+                    {i + 1}
+                  </td>
+                  {/* code line */}
+                  <td
+                    className="pl-2 pr-6 text-zinc-200 whitespace-pre align-top"
+                    dangerouslySetInnerHTML={{ __html: lineHtml || '&nbsp;' }}
+                  />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
@@ -619,8 +764,9 @@ function CodeTab({
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
   const [loadingContent, setLoadingContent] = useState(false);
+  const [expandSignal, setExpandSignal] = useState(0);
+  const [collapseSignal, setCollapseSignal] = useState(0);
 
-  // Reset selection when run changes
   useEffect(() => {
     setSelected(null);
     setContent('');
@@ -655,38 +801,50 @@ function CodeTab({
   const tree = buildFileTree(files);
 
   return (
-    <div className="flex h-full">
-      {/* File tree sidebar */}
-      <div className="w-56 flex-shrink-0 border-r border-white/[0.06] overflow-y-auto py-2">
-        {tree.map((node) => (
-          <TreeNodeView
-            key={node.name}
-            node={node}
-            selected={selected}
-            onSelect={openFile}
-          />
-        ))}
+    <div className="flex h-full overflow-hidden">
+      {/* ── File tree sidebar ── */}
+      <div className="w-56 flex-shrink-0 border-r border-white/[0.06] flex flex-col overflow-hidden">
+        {/* Toolbar: Expand All / Collapse All */}
+        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] flex-shrink-0">
+          <span className="text-[10px] text-zinc-600 uppercase tracking-widest flex-1 pl-1">Explorer</span>
+          <button
+            title="Expand all folders"
+            onClick={() => setExpandSignal(s => s + 1)}
+            className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+          >
+            <ChevronsUpDown className="h-3 w-3" />
+          </button>
+          <button
+            title="Collapse all folders"
+            onClick={() => setCollapseSignal(s => s + 1)}
+            className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+          >
+            <ChevronsDownUp className="h-3 w-3" />
+          </button>
+        </div>
+
+        {/* Tree nodes */}
+        <div className="overflow-y-auto flex-1 py-1">
+          {tree.map((node) => (
+            <TreeNodeView
+              key={node.name}
+              node={node}
+              selected={selected}
+              onSelect={openFile}
+              expandSignal={expandSignal}
+              collapseSignal={collapseSignal}
+            />
+          ))}
+        </div>
       </div>
 
-      {/* Content pane */}
-      <div className="flex-1 overflow-auto">
-        {selected ? (
-          <>
-            <div className="px-4 py-2 border-b border-white/[0.06] flex items-center gap-2">
-              <FileTypeIcon name={selected.split('/').pop()!} />
-              <span className="text-xs font-mono text-zinc-400 truncate">{selected}</span>
-            </div>
-            {loadingContent ? (
-              <div className="p-4 text-sm text-zinc-500">Loading…</div>
-            ) : (
-              <pre className="p-4 text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all leading-relaxed">
-                {content}
-              </pre>
-            )}
-          </>
-        ) : (
-          <div className="p-4 text-sm text-zinc-500">Select a file to view its contents.</div>
-        )}
+      {/* ── IDE viewer pane ── */}
+      <div className="flex-1 overflow-hidden">
+        <IDEFileViewer
+          filePath={selected}
+          content={content}
+          loading={loadingContent}
+        />
       </div>
     </div>
   );
