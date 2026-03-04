@@ -273,19 +273,33 @@ public class PipelineHarness {
 
     /**
      * Resolves the merge-approval gate for a REST-submitted run.
-     * @return false if no pending gate exists for the runId
+     *
+     * <p>Two cases:
+     * <ol>
+     *   <li><b>Gate in memory</b> (normal flow): completes the CompletableFuture that the
+     *       pipeline thread is waiting on. Returns {@code true}.</li>
+     *   <li><b>Gate lost</b> (server restarted while run was AWAITING_MERGE): instead of
+     *       auto-failing the run, reconstructs and re-executes the merge directly on a
+     *       virtual thread so the user can merge at any time after a restart.
+     *       Returns {@code true} so the HTTP caller receives 200 OK.</li>
+     * </ol>
+     *
+     * @return false only if the runId is unknown (404)
      */
     public boolean resolveMergeGate(String runId, boolean approved, String comment) {
         CompletableFuture<Boolean> gate = mergeGates.remove(runId);
         if (gate == null) {
-            stateStore.findRun(runId).ifPresent(run -> {
-                if ("AWAITING_MERGE".equals(run.getStatus())) {
-                    log.warn("[Gate] Merge gate lost for run {} (server restart?); auto-failing stuck run", runId);
-                    stateStore.markFailed(runId, "Merge gate lost after server restart — please resubmit");
-                    broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
-                }
-            });
-            return false;
+            Optional<PipelineRun> optRun = stateStore.findRun(runId);
+            if (optRun.isPresent() && "AWAITING_MERGE".equals(optRun.get().getStatus())) {
+                log.info("[Gate] Merge gate not in memory for run {} (server restart?) " +
+                         "— re-executing merge directly (approved={})", runId, approved);
+                // Dispatch to a virtual thread so the HTTP request returns immediately
+                Thread.ofVirtual()
+                      .name("restart-merge-" + runId.substring(0, 8))
+                      .start(() -> performMergeOnRestart(runId, approved, comment));
+                return true; // 200 OK — merge execution has started
+            }
+            return false; // unknown runId → 404
         }
         String gateEventId = mergeGateEventIds.remove(runId);
         if (gateEventId != null) stateStore.recordGateResolved(gateEventId, approved);
@@ -298,6 +312,90 @@ public class PipelineHarness {
         }
         gate.complete(approved);   // must run even if SSE fails
         return true;
+    }
+
+    /**
+     * Performs a full merge for a run whose in-memory gate was lost (server restart).
+     * Reconstructs everything it needs from the database: review JSON, worker reports,
+     * and the run itself.  Mirrors the post-{@code mergeGate.get()} logic in
+     * {@link #executeRunAsync} exactly, including cost save, GitHub push, and
+     * post-merge event publishing.
+     */
+    private void performMergeOnRestart(String runId, boolean approved, String comment) {
+        PipelineRun run = stateStore.findRun(runId).orElse(null);
+        if (run == null) {
+            log.warn("[Gate] performMergeOnRestart: run {} not found in DB", runId);
+            return;
+        }
+
+        // Clear the gate banner immediately so the UI no longer shows AWAITING_MERGE
+        clearGateSync(runId);
+        try {
+            broadcaster.emit(runId, RunEvent.gateResolved(runId, approved, comment));
+        } catch (Exception e) {
+            log.debug("[Gate] SSE emit failed on restart-merge gate resolve for run {}", runId);
+        }
+
+        if (!approved) {
+            stateStore.markFailed(runId, "Merge declined by user");
+            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Merge declined by user"));
+            log.info("[Gate] Restart-merge declined for run {}", runId);
+            broadcaster.complete(runId);
+            return;
+        }
+
+        // Reconstruct review + worker reports from DB
+        List<AgentTask> tasks    = stateStore.getAllTasks(runId);
+        ReviewReport    review   = parseJson(run.getReviewJson(), ReviewReport.class);
+        List<WorkerReport> reports = getWorkerReports(runId);
+
+        try {
+            broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                "⟳ Merge gate resumed after server restart — merging code now…"));
+
+            mergeService.mergeAll(runId, tasks);
+            lockTool.releaseAll(runId);
+            stateStore.markComplete(runId);
+            saveActualCost(runId);
+            broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
+            log.info("[Gate] Restart-merge complete for run {}", runId);
+
+            // GitHub push is non-blocking — failure does not revert COMPLETE
+            try {
+                pushToGitHubIfConfigured(run);
+            } catch (Exception pushEx) {
+                log.warn("[Gate] GitHub push failed for restart-merge of run {} (run is COMPLETE): {}",
+                    runId, pushEx.getMessage());
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "⚠️ GitHub push failed (run is COMPLETE, code was merged locally): "
+                    + pushEx.getMessage()));
+            }
+
+            // Trigger post-merge agents (ContextAgent, PreviewService, ApiTestSuiteAgent)
+            PipelineRun completedRun = stateStore.findRun(runId).orElse(run);
+            boolean hadFailures = reports.stream()
+                .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
+                               "partial".equalsIgnoreCase(r.getStatus()));
+            eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                runId, completedRun, reports, review, hadFailures));
+            eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+
+        } catch (MergeBlockedException e) {
+            log.warn("[Gate] Restart-merge blocked for run {}: {}", runId, e.getMessage());
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "⛔ " + e.getMessage()
+                + "\n\nRun marked PARTIAL — retry the task that missed the README update."));
+            stateStore.markPartial(runId, e.getMessage());
+            broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
+        } catch (Exception e) {
+            log.error("[Gate] Restart-merge failed for run {}: {}", runId, e.getMessage(), e);
+            stateStore.markFailed(runId, "Merge failed after server restart: " + e.getMessage());
+            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
+        } finally {
+            broadcaster.complete(runId);
+        }
     }
 
     /** Cancels a run. Returns false if run is already terminal. */
