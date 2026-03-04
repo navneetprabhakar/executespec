@@ -13,10 +13,10 @@
   </parent>
 
   <groupId>com.navneet</groupId>
-  <artifactId>agentteam</artifactId>
+  <artifactId>executespec</artifactId>
   <version>0.0.1-SNAPSHOT</version>
   <packaging>jar</packaging>
-  <name>agentteam</name>
+  <name>executespec</name>
   <description>Multi-Agent Coding System — Core Loop</description>
 
   <properties>
