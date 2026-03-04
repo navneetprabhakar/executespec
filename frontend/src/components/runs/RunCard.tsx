@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { ChevronRight, Cpu, Github } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
+import TechBadges from '@/components/runs/TechBadges';
 import { fmtTokens, relativeTime, truncate } from '@/lib/utils';
 import type { RunSummary } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -47,6 +48,11 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
           <p className="text-sm text-zinc-200 line-clamp-2 leading-snug">
             {truncate(run.userRequest, 120)}
           </p>
+          <TechBadges
+            userRequest={run.userRequest}
+            runStatus={run.status}
+            className="mt-1.5"
+          />
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
               <Cpu className="h-3 w-3" />
