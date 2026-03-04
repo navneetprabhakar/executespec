@@ -753,6 +753,27 @@ public class PipelineHarness {
                 "Task " + taskId + " is not retryable (status: " + ts
                 + "). Only PARTIAL, BLOCKED, FAILED, PENDING, or LOCKED tasks can be retried.");
         }
+
+        // ── Special case: generate_preview is always handled by PreviewAgent, never WorkerAgent.
+        // Allow retry from AWAITING_MERGE (reviewer already said MERGE, just re-generate the
+        // Dockerfile), PARTIAL, or FAILED. PreviewAgent.run() manages its own task state
+        // (lockTask → WORKING → completeTask → COMPLETE/BLOCKED) so we don't touch run status.
+        if (PreviewAgent.PREVIEW_TASK_ID.equals(taskId)) {
+            String rs = run.getStatus();
+            if (!"PARTIAL".equals(rs) && !"FAILED".equals(rs) && !"AWAITING_MERGE".equals(rs)) {
+                throw new IllegalStateException(
+                    "Run " + runId + " cannot retry generate_preview in state " + rs
+                    + ". Allowed states: PARTIAL, FAILED, AWAITING_MERGE.");
+            }
+            log.info("Retrying generate_preview via PreviewAgent for run {} (run state: {})", runId, rs);
+            broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                "⟳ Re-running deployment file generation via PreviewAgent..."));
+            List<AgentTask> allTasksForPreview = stateStore.getAllTasks(runId);
+            Thread.ofVirtual().name("preview-retry-" + runId.substring(0, 8))
+                .start(() -> previewAgent.run(runId, allTasksForPreview));
+            return true;
+        }
+
         String rs = run.getStatus();
         if (!"PARTIAL".equals(rs) && !"FAILED".equals(rs)) {
             throw new IllegalStateException(
