@@ -339,21 +339,20 @@ public class RunController {
         var tasks = stateStore.getAllTasks(runId);
         if (tasks.isEmpty()) return ResponseEntity.ok(List.of());
 
-        // Parse dependsOn from each task's JSON
-        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+        // Parse dependsOn from each task's JSON.
+        // TaskDefinition uses @JsonNaming(SnakeCaseStrategy) so the stored key is "depends_on".
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper()
+                .setPropertyNamingStrategy(
+                        com.fasterxml.jackson.databind.PropertyNamingStrategies.SNAKE_CASE);
         record TaskMeta(String taskId, String title, String status, String complexity,
                         String assignedModel, List<String> dependsOn) {}
 
         List<TaskMeta> metas = tasks.stream().map(t -> {
             List<String> deps = List.of();
             try {
-                var node = om.readTree(t.getTaskJson());
-                var depsNode = node.get("dependsOn");
-                if (depsNode != null && depsNode.isArray()) {
-                    List<String> d = new ArrayList<>();
-                    depsNode.forEach(n -> d.add(n.asText()));
-                    deps = d;
-                }
+                var def = om.readValue(t.getTaskJson(),
+                        com.navneet.agentteam.agent.model.TaskDefinition.class);
+                if (def.getDependsOn() != null) deps = def.getDependsOn();
             } catch (Exception ignored) {}
             return new TaskMeta(t.getTaskId(), t.getTitle(), t.getStatus(),
                     t.getComplexity(), t.getAssignedModel(), deps);
