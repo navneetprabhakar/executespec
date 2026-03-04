@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.List;
 
 /**
  * Manages per-run workspace lifecycle.
@@ -106,6 +108,105 @@ public class WorkspaceInitService {
         runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
         runGit(workspace, "git", "config", "user.name",  "ExecuteSpec Agent");
         log.info("Cloned workspace ready for run {}", runId);
+    }
+
+    /**
+     * Copies all git-tracked files from a completed source run's workspace into a fresh
+     * workspace for the target run.  Used when the user starts a "conversation iteration"
+     * from a finished run: the new run begins with the exact same codebase so agents can
+     * apply incremental changes rather than building from scratch.
+     *
+     * <p>Steps:
+     * <ol>
+     *   <li>Run {@code git ls-files} in the source workspace to get only tracked files.</li>
+     *   <li>Create the target directory, {@code git init -b main} inside it.</li>
+     *   <li>Copy each tracked file, preserving directory structure.</li>
+     *   <li>Make an initial commit so agents can immediately branch off {@code main}.</li>
+     * </ol>
+     *
+     * <p>Idempotent: no-ops if the target workspace already has a {@code .git} directory.
+     *
+     * @param sourceRunId ID of the completed run to copy from
+     * @param targetRunId ID of the new run whose workspace will receive the copy
+     */
+    public void copyFromRun(String sourceRunId, String targetRunId) throws Exception {
+        Path source = runWorkspacePath(sourceRunId);
+        Path target = runWorkspacePath(targetRunId);
+
+        if (Files.isDirectory(target.resolve(".git"))) {
+            log.debug("Target workspace for run {} already exists: {}", targetRunId, target);
+            return;
+        }
+
+        if (!Files.isDirectory(source)) {
+            log.warn("Source workspace for run {} does not exist at {}; falling back to empty workspace", sourceRunId, source);
+            ensureRunWorkspace(targetRunId);
+            return;
+        }
+
+        // ── 1. Get the list of tracked files from the source workspace ──
+        ProcessBuilder pb = new ProcessBuilder("git", "ls-files")
+            .directory(source.toFile())
+            .redirectErrorStream(true);
+        Process p = pb.start();
+        String trackedFilesOutput = new String(p.getInputStream().readAllBytes());
+        int exit = p.waitFor();
+        if (exit != 0) {
+            log.warn("git ls-files failed for source run {} (exit {}); copying all files instead", sourceRunId, exit);
+        }
+
+        List<String> trackedFiles = trackedFilesOutput.lines()
+            .filter(l -> !l.isBlank())
+            .toList();
+
+        // ── 2. Initialise target workspace ────────────────────────────────
+        Files.createDirectories(target);
+        runGit(target, "git", "init", "-b", "main");
+        runGit(target, "git", "config", "user.email", "agent@executespec.local");
+        runGit(target, "git", "config", "user.name", "ExecuteSpec Agent");
+
+        // ── 3. Copy each tracked file, preserving directory structure ─────
+        if (trackedFiles.isEmpty()) {
+            // Fallback: copy everything that is not under .git/
+            log.info("No tracked files found in source run {} — performing full directory copy", sourceRunId);
+            Files.walkFileTree(source, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    return dir.equals(source.resolve(".git")) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Path rel = source.relativize(file);
+                    Path dst = target.resolve(rel);
+                    Files.createDirectories(dst.getParent());
+                    Files.copy(file, dst, StandardCopyOption.REPLACE_EXISTING);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } else {
+            for (String relPath : trackedFiles) {
+                Path srcFile = source.resolve(relPath);
+                if (!Files.exists(srcFile)) continue;
+                Path dstFile = target.resolve(relPath);
+                Files.createDirectories(dstFile.getParent());
+                Files.copy(srcFile, dstFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+
+        // Copy .gitignore separately (it may not appear in ls-files if it was in the initial commit)
+        Path srcGitignore = source.resolve(".gitignore");
+        if (Files.exists(srcGitignore) && !Files.exists(target.resolve(".gitignore"))) {
+            Files.copy(srcGitignore, target.resolve(".gitignore"));
+        }
+
+        // ── 4. Commit everything in the new workspace ─────────────────────
+        runGit(target, "git", "add", "-A");
+        runGit(target, "git", "commit", "--allow-empty", "-m",
+            "init: copied codebase from run " + sourceRunId.substring(0, 8));
+
+        log.info("Workspace for run {} initialised from source run {} ({} files copied)",
+            targetRunId, sourceRunId, trackedFiles.size());
     }
 
     /** Returns the absolute, normalised path to the per-run workspace directory. */

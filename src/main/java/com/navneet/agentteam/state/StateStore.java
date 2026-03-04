@@ -626,6 +626,86 @@ public class StateStore {
             .orElse(null);
     }
 
+    // ── Post-run conversation ─────────────────────────────────
+
+    /**
+     * Appends a single message to the run's chat history JSON and increments the
+     * chat message counter.
+     *
+     * @param runId   the pipeline run ID
+     * @param role    "user" or "assistant"
+     * @param content message text
+     */
+    public void saveChatMessage(String runId, String role, String content) {
+        runRepo.findById(runId).ifPresent(run -> {
+            List<Map<String, String>> history = parseChatHistory(run.getChatHistoryJson());
+            Map<String, String> message = new LinkedHashMap<>();
+            message.put("role", role);
+            message.put("content", content);
+            history.add(message);
+            run.setChatHistoryJson(toJson(history));
+            run.setChatMessageCount(run.getChatMessageCount() + 1);
+            runRepo.save(run);
+        });
+    }
+
+    /**
+     * Returns the conversation history for a run as an ordered list of
+     * {@code {role, content}} maps. Returns an empty list if none exists.
+     *
+     * @param runId the pipeline run ID
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, String>> getChatHistory(String runId) {
+        return runRepo.findById(runId)
+            .map(run -> parseChatHistory(run.getChatHistoryJson()))
+            .orElse(List.of());
+    }
+
+    /**
+     * Creates a new pipeline run that is an iteration of an existing completed run.
+     * Sets {@code sourceRunId} so the harness will copy the workspace instead of
+     * initialising a fresh one.
+     *
+     * @param sourceRun  the completed run to iterate from
+     * @param newRequest the user's new / refined request
+     * @return the new {@link PipelineRun} entity (status=PLANNING, not yet saved to DB)
+     */
+    public PipelineRun createIterationRun(PipelineRun sourceRun, String newRequest) {
+        PipelineRun newRun = PipelineRun.builder()
+            .runId(UUID.randomUUID().toString())
+            .userRequest(newRequest)
+            .status("PLANNING")
+            .plannerModel(sourceRun.getPlannerModel())
+            .workerModel(sourceRun.getWorkerModel())
+            .reviewerModel(sourceRun.getReviewerModel())
+            .sourceType("MANUAL")
+            .repoUrl(null)        // new run gets its own repo if user has a PAT
+            .repoMode(null)
+            .queuePosition(0)
+            .startedAt(Instant.now())
+            .totalInputTokens(0)
+            .totalOutputTokens(0)
+            .githubPat(sourceRun.getGithubPat())
+            .githubOwner(sourceRun.getGithubOwner())
+            .createdByUserId(sourceRun.getCreatedByUserId())
+            .orgId(sourceRun.getOrgId())
+            .projectId(sourceRun.getProjectId())
+            .sourceRunId(sourceRun.getRunId())     // ← links back to the source
+            .build();
+        return runRepo.save(newRun);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, String>> parseChatHistory(String json) {
+        if (json == null || json.isBlank()) return new ArrayList<>();
+        try {
+            return mapper.readValue(json, List.class);
+        } catch (JsonProcessingException e) {
+            return new ArrayList<>();
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────
 
     /**

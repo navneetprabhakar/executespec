@@ -414,16 +414,77 @@ public class PipelineHarness {
         return cancelled;
     }
 
+    // ── REST async path: iteration run (starts from a completed run's codebase) ──
+
+    /**
+     * Starts a new pipeline run that was created as an iteration of a completed run.
+     * The workspace is populated by copying tracked files from the source run's workspace,
+     * then the standard async pipeline executes as normal.
+     *
+     * @param runId      the new run's ID (already persisted via StateStore.createIterationRun())
+     * @param newRequest the user's refined request
+     */
+    public void startIterationRun(String runId, String newRequest) {
+        PipelineRun run = stateStore.findRun(runId).orElseThrow();
+        if (!runSlots.tryAcquire()) {
+            run.setStatus("QUEUED");
+            run.setQueuePosition(countQueued() + 1);
+            stateStore.save(run);
+            broadcaster.emit(runId, RunEvent.queued(runId, run.getQueuePosition()));
+            log.info("Iteration run {} queued at position {}", runId, run.getQueuePosition());
+            final PipelineRun queuedRun = run;
+            executor.submit(() -> {
+                boolean acquired = false;
+                try {
+                    runSlots.acquire();
+                    acquired = true;
+                    PipelineRun r = stateStore.findRun(runId).orElse(queuedRun);
+                    r.setStatus("PLANNING");
+                    r.setQueuePosition(0);
+                    stateStore.save(r);
+                    executeRunAsync(runId, newRequest);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    stateStore.markFailed(runId, "Interrupted while waiting for run slot");
+                } finally {
+                    if (acquired) runSlots.release();
+                }
+            });
+        } else {
+            executor.submit(() -> {
+                try {
+                    executeRunAsync(runId, newRequest);
+                } finally {
+                    runSlots.release();
+                }
+            });
+        }
+    }
+
     // ── Internal async pipeline execution ────────────────────────────────────
 
     private void executeRunAsync(String runId, String userRequest) {
         log.info("Executing async run {}", runId);
 
         // Initialise this run's isolated workspace (workspace/{runId}/) before doing anything else.
-        // For EXISTING mode: clone the source repo so agents work against real code.
-        // For all other modes: init a fresh empty git workspace.
+        // Priority order:
+        //   1. ITERATION run (sourceRunId set)  — copy the source run's tracked files
+        //   2. EXISTING mode (repoUrl set)      — clone the source GitHub repo
+        //   3. Default                           — init a fresh empty git workspace
         PipelineRun run = stateStore.findRun(runId).orElseThrow();
-        if ("EXISTING".equals(run.getRepoMode())
+
+        if (run.getSourceRunId() != null && !run.getSourceRunId().isBlank()) {
+            try {
+                log.info("Copying workspace from source run {} to iteration run {}",
+                    run.getSourceRunId(), runId);
+                workspaceInitService.copyFromRun(run.getSourceRunId(), runId);
+            } catch (Exception copyEx) {
+                stateStore.markFailed(runId, "Failed to copy source workspace: " + copyEx.getMessage());
+                log.error("Workspace copy failed for iteration run {} (source={}): {}",
+                    runId, run.getSourceRunId(), copyEx.getMessage());
+                return;
+            }
+        } else if ("EXISTING".equals(run.getRepoMode())
                 && run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
             try {
                 workspaceInitService.cloneFromRepo(runId, run.getRepoUrl(), run.getGithubPat());

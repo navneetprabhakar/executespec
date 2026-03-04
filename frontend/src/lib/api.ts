@@ -293,6 +293,41 @@ export const conversationChat = (messages: ConversationMessage[]) =>
     body: JSON.stringify({ messages }),
   });
 
+// ── Post-run conversation & iteration ──────────────────────────────────────────
+
+/** A single message in a post-run conversation. */
+export interface RunChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** Response from POST /api/runs/{id}/chat */
+export interface ChatResponse {
+  reply: string;
+  /** Number of user messages sent so far. */
+  messageCount: number;
+  /** Maximum user messages allowed. */
+  maxMessages: number;
+}
+
+/** Returns the full conversation history for a completed run. */
+export const getRunChat = (runId: string) =>
+  req<RunChatMessage[]>(`/runs/${runId}/chat`);
+
+/** Sends a user message and returns the assistant reply. */
+export const sendRunChatMessage = (runId: string, message: string) =>
+  req<ChatResponse>(`/runs/${runId}/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+
+/** Creates a new iteration run that starts from the source run's codebase. */
+export const iterateRun = (runId: string, userRequest: string) =>
+  req<{ runId: string }>(`/runs/${runId}/iterate`, {
+    method: 'POST',
+    body: JSON.stringify({ userRequest }),
+  });
+
 // ── Auth types & endpoints ────────────────────────────────────────────────────
 
 export interface AuthUser {
