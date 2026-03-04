@@ -34,7 +34,7 @@ const BASE_TABS = [
   { value: 'plan',      label: 'Plan' },
   { value: 'review',    label: 'Review' },
   { value: 'code',      label: 'Code' },
-  { value: 'preview',   label: 'Preview' },
+  { value: 'preview',   label: 'Preview (Beta)' },
 ];
 
 export default function RunDetailTabs() {
