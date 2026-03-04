@@ -122,4 +122,28 @@ public class PipelineRun {
     @Column(name = "github_owner")
     private String githubOwner;
 
+    // ── Post-run conversation ──────────────────────────────────────────────────
+
+    /**
+     * Conversation history as a JSON array of {@code {role, content}} objects.
+     * Roles: "user" | "assistant".  Null until the first message is sent.
+     */
+    @Column(name = "chat_history_json", columnDefinition = "TEXT")
+    private String chatHistoryJson;
+
+    /**
+     * Total number of messages exchanged (user + assistant combined).
+     * Capped at 20 in the conversation controller (10 user + 10 assistant).
+     */
+    @Builder.Default
+    @Column(name = "chat_message_count", columnDefinition = "integer default 0")
+    private int chatMessageCount = 0;
+
+    /**
+     * When this run was created as an iteration of a previous run, this field
+     * holds the source run's ID so the harness can copy the workspace.
+     */
+    @Column(name = "source_run_id")
+    private String sourceRunId;
+
 }

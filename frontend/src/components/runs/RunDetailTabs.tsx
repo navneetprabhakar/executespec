@@ -12,6 +12,7 @@ import type { RunDetail } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
+import RunConversation from './RunConversation';
 import { PIPELINE_STEPS } from '@/lib/constants';
 import { fmtTokens, relativeTime, cn } from '@/lib/utils';
 import {
@@ -19,9 +20,10 @@ import {
   Folder, FolderOpen,
   FileCode2, FileText, File,
   Play, Square, ExternalLink, RefreshCw,
+  MessageSquare,
 } from 'lucide-react';
 
-const TABS = [
+const BASE_TABS = [
   { value: 'overview',  label: 'Overview' },
   { value: 'tasks',     label: 'Tasks' },
   { value: 'log',       label: 'Live Log' },
@@ -53,6 +55,10 @@ export default function RunDetailTabs() {
 
   if (!activeRun) return null;
 
+  /** The Chat tab is only shown for terminal (COMPLETE / PARTIAL) runs. */
+  const showChatTab = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
+  const TABS = showChatTab ? [...BASE_TABS, { value: 'chat', label: 'Chat' }] : BASE_TABS;
+
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
       <Tabs.List className="flex gap-0 border-b border-white/[0.06] flex-shrink-0 px-4 overflow-x-auto">
@@ -67,7 +73,12 @@ export default function RunDetailTabs() {
               'hover:text-zinc-300'
             )}
           >
-            {tab.label}
+            {tab.value === 'chat' ? (
+              <span className="flex items-center gap-1.5">
+                <MessageSquare className="h-3 w-3" />
+                {tab.label}
+              </span>
+            ) : tab.label}
           </Tabs.Trigger>
         ))}
       </Tabs.List>
@@ -105,6 +116,12 @@ export default function RunDetailTabs() {
         <Tabs.Content value="preview" className="h-full overflow-hidden">
           <PreviewTab runId={activeRun.runId} files={files} filesLoading={filesLoading} />
         </Tabs.Content>
+
+        {showChatTab && (
+          <Tabs.Content value="chat" className="h-full overflow-hidden">
+            <RunConversation runId={activeRun.runId} />
+          </Tabs.Content>
+        )}
       </div>
     </Tabs.Root>
   );
