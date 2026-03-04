@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 public class ContextAgentProperties {
 
     private boolean enabled = true;
-    private String model = "claude-sonnet-4-5-20250929";
+    private String model = "claude-haiku-4-5-20251001";
     private String provider = "anthropic";
 
     /** Run after every N completed runs. 1 = every run. */

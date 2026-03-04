@@ -19,7 +19,6 @@ import java.util.List;
 public class StuckRunMonitor {
 
     private final StateStore stateStore;
-    private final StuckRunEvaluator evaluator;
     private final RunRecoveryService recoveryService;
     private final SseBroadcaster sseBroadcaster;
     private final RecoveryProperties props;
@@ -45,10 +44,11 @@ public class StuckRunMonitor {
                     task.getTaskId(), idle.toMinutes());
 
                 stateStore.markStuckDetected(task.getTaskId());
+                stateStore.markRunStuck(task.getRunId());
                 List<String> events = stateStore.getTaskEventLog(
                     task.getTaskId(), props.getEvaluatorLogWindow()
                 );
-                StuckRunEvaluator.EvaluationResult result = evaluator.evaluate(task, events);
+                StuckRunEvaluator.EvaluationResult result = new StuckRunEvaluator(props).evaluate(task, events);
 
                 recoveryService.recover(task, result);
 

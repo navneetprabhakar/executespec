@@ -8,7 +8,13 @@ export default function TokenBubbleChart({ metrics }: { metrics: MetricsResponse
 
   useEffect(() => {
     if (!metrics || !svgRef.current) return;
-    const runsByStatus = Object.entries(metrics.runsByStatus ?? {}).filter(([, v]) => v > 0);
+    // Build runsByStatus from the individual count fields in MetricsResponse
+    const runsByStatus = [
+      ['COMPLETE', metrics.completedRuns],
+      ['FAILED', metrics.failedRuns],
+      ['ACTIVE', metrics.activeRuns],
+      ['QUEUED', metrics.queuedRuns],
+    ].filter(([, v]) => (v as number) > 0) as [string, number][];
     if (!runsByStatus.length) return;
 
     const W = svgRef.current.clientWidth;
@@ -23,7 +29,7 @@ export default function TokenBubbleChart({ metrics }: { metrics: MetricsResponse
       AWAITING_MERGE: '#F59E0B', CANCELLED: '#71717A',
     };
 
-    const data = runsByStatus.map(([status, count]) => ({ status, count }));
+    const data = runsByStatus.map(([status, count]) => ({ status, count: count as number }));
     const pack = d3.pack<typeof data[0]>().size([W, H]).padding(8);
     const root = d3.hierarchy({ children: data } as any).sum((d: any) => d.count ?? 0);
     const nodes = pack(root).leaves();

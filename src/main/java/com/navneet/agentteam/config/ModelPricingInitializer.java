@@ -32,32 +32,27 @@ public class ModelPricingInitializer {
         // Each entry: provider, model, input $/1M, output $/1M, notes
         // Notes describe the role the model plays in this pipeline.
         List<Object[]> defaults = List.of(
-            // ── Anthropic ────────────────────────────────────────────────────
+            // ── Anthropic (prices per 1M tokens, Anthropic public pricing Mar 2026) ──────
             new Object[]{
-                "anthropic", "claude-sonnet-4-5-20250929", 3.00, 15.00,
-                "✅ ACTIVE — ALL workers, planner, reviewer, context agent, optimiser"
+                "anthropic", "claude-sonnet-4-6", 3.00, 15.00,
+                "✅ ACTIVE — Workers (CAPABLE chain). With prompt caching: writes 1.25x, reads 0.10x."
             },
             new Object[]{
-                "anthropic", "claude-opus-4-5-20251101", 15.00, 75.00,
-                "Recovery escalation fallback only (capable-models config)"
+                "anthropic", "claude-opus-4-6", 15.00, 75.00,
+                "✅ ACTIVE — Planner (ARCHITECT chain). With prompt caching: writes 1.25x, reads 0.10x."
+            },
+            new Object[]{
+                "anthropic", "claude-haiku-4-5-20251001", 0.80, 4.00,
+                "✅ ACTIVE — Reviewer + context agent + optimiser (UTILITY chain)."
             },
             // ── OpenAI ───────────────────────────────────────────────────────
             new Object[]{
                 "openai", "gpt-4o-mini", 0.15, 0.60,
-                "OpenAI fallback — provider outage / rate-limit auto-switch"
+                "OpenAI fallback — provider outage / rate-limit auto-switch (UTILITY chain)"
             },
             new Object[]{
                 "openai", "gpt-4o", 2.50, 10.00,
-                "OpenAI capable fallback — provider outage / rate-limit auto-switch"
-            },
-            // ── Google / Gemini ──────────────────────────────────────────────
-            new Object[]{
-                "gemini", "gemini-2.0-flash", 0.10, 0.40,
-                "Cheap chain tertiary fallback (needs spring.ai.google.api-key to activate)"
-            },
-            new Object[]{
-                "gemini", "gemini-2.5-pro", 1.25, 10.00,
-                "Capable chain tertiary fallback (needs spring.ai.google.api-key to activate)"
+                "OpenAI fallback — provider outage / rate-limit auto-switch (CAPABLE + ARCHITECT chains)"
             }
         );
 

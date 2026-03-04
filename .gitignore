@@ -26,12 +26,18 @@ application-local.yaml
 .env.local
 .env.production
 *.env
+credentials.json
 
 # Workspace (agent-generated files)
 workspace/
 workspace-e2e/
 workspace-e2e/*
 workspace/*
+test-workspace-e2e/
+
+# Frontend build outputs (rebuilt by npm run build)
+frontend/dist/
+src/main/resources/static/assets/
 
 
 # OS
@@ -112,6 +118,7 @@ web_modules/
 .env
 .env.*
 !.env.example
+!.env.template
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

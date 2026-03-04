@@ -1,44 +1,226 @@
 import { useEffect, useRef } from 'react';
-import { useSseStore } from '@/stores/useSseStore';
+import { useSseStore, LogEntry } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
+import {
+  CheckCircle2, XCircle, Clock, Zap, GitCommit,
+  FilePlus2, FileEdit, Terminal, PauseCircle, PlayCircle,
+  DollarSign, RotateCcw, Rocket, AlertTriangle,
+} from 'lucide-react';
 
-const TYPE_COLORS: Record<string, string> = {
-  runStatus:         'text-accent-violet',
-  taskStatus:        'text-accent-cyan',
-  log:               'text-zinc-300',
-  gateOpened:        'text-accent-amber',
-  gateResolved:      'text-accent-emerald',
-  costUpdate:        'text-accent-emerald',
-  queued:            'text-zinc-500',
-  complete:          'text-accent-emerald',
-  recoveryAttempted: 'text-accent-amber',
-  runRestarted:      'text-accent-violet',
-  deployStarted:     'text-accent-cyan',
-  deployLive:        'text-accent-emerald',
-  deployFailed:      'text-accent-rose',
-};
+// ── Milestone detection ───────────────────────────────────────────────────────
 
-function formatEntry(type: string, data: Record<string, unknown>): string {
-  if (type === 'log' && data.message) return String(data.message);
-  if (type === 'runStatus') return `Run status → ${data.status}`;
-  if (type === 'taskStatus') return `Task ${data.taskId ?? ''} → ${data.status}`;
-  if (type === 'gateOpened') return `Gate opened: ${data.gateType ?? ''} — waiting for action`;
-  if (type === 'gateResolved') return `Gate resolved: ${data.gateType ?? ''} → ${data.decision}`;
-  if (type === 'costUpdate') return `Cost update: $${Number(data.totalCost ?? 0).toFixed(4)} (${data.totalTokens ?? 0} tokens)`;
-  if (type === 'complete') return `Run complete`;
-  if (type === 'recoveryAttempted') return `Recovery attempt: ${data.strategy}`;
-  if (type === 'runRestarted') return `Run restarted`;
-  if (type === 'deployStarted') return `Deployment started`;
-  if (type === 'deployLive') return `Deployment live at ${data.serviceUrl}`;
-  if (type === 'deployFailed') return `Deployment failed: ${data.error}`;
-  return JSON.stringify(data);
+const MILESTONE_TYPES = new Set([
+  'runStatus', 'taskStatus', 'gateOpened', 'gateResolved',
+  'complete', 'costUpdate', 'queued', 'recoveryAttempted',
+  'runRestarted', 'deployStarted', 'deployBuilding', 'deployPushing',
+  'deployLive', 'deployFailed',
+]);
+
+type FileOp = { kind: 'write' | 'edit' | 'commit' | 'command'; path?: string };
+
+/** Parse a log message for known file / command tool-result markers. */
+function detectFileOp(msg: string): FileOp | null {
+  if (/\[(write_file|writeFile)\s+result\]/i.test(msg)) {
+    // Try to pull the file path from the output ("to src/main/java/Foo.java")
+    const m = msg.match(/(?:\bto\b|\bfile:\b)\s+([\w./\\-]+\.\w+)/i);
+    return { kind: 'write', path: m?.[1] };
+  }
+  if (/\[(edit_file|editFile)\s+result\]/i.test(msg)) {
+    const m = msg.match(/(?:\bin\b|\bfile:\b)\s+([\w./\\-]+\.\w+)/i);
+    return { kind: 'edit', path: m?.[1] };
+  }
+  if (/\[(commit|git_commit)\s+result\]/i.test(msg)) {
+    return { kind: 'commit' };
+  }
+  if (/\[(run|run_command|run_build|run_tests)\s+result\]/i.test(msg)) {
+    return { kind: 'command' };
+  }
+  return null;
 }
+
+/** Convert taskId like "task-1-project_setup" → "Project Setup" */
+function humanizeTaskId(taskId: string): string {
+  const parts = String(taskId).split('-');
+  // taskId format: "task-N-name_part" — take everything after index 1
+  const nameIdx = parts.findIndex((p) => isNaN(Number(p)) && p !== 'task' && p !== 'worker');
+  const name = parts.slice(nameIdx >= 0 ? nameIdx : 2).join(' ');
+  return name
+    ? name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : String(taskId);
+}
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+
+function formatTimestamp(ts: number): string {
+  return new Date(ts).toISOString().split('T')[1].slice(0, 8);
+}
+
+function formatLogMessage(data: Record<string, unknown>): string {
+  return String(data.message ?? data.payload ?? '');
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+/** Full-width banner for pipeline milestones (task transitions, gates, etc.) */
+function MilestoneBanner({ entry }: { entry: LogEntry }) {
+  const { type, data, timestamp } = entry;
+
+  let icon = <Clock className="h-3.5 w-3.5" />;
+  let text = '';
+  let colorClass = 'border-zinc-600 text-zinc-300 bg-white/[0.03]';
+
+  // Task status
+  if (type === 'taskStatus') {
+    const status = String(data.status ?? data.payload ?? '');
+    const label = humanizeTaskId(String(data.taskId ?? ''));
+    if (status === 'IN_PROGRESS' || status === 'RUNNING') {
+      icon = <Zap className="h-3.5 w-3.5" />;
+      text = `Task started: ${label}`;
+      colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
+    } else if (status === 'COMPLETE' || status === 'COMPLETED') {
+      icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+      text = `Task done: ${label}`;
+      colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.06]';
+    } else if (status === 'FAILED') {
+      icon = <XCircle className="h-3.5 w-3.5" />;
+      text = `Task failed: ${label}`;
+      colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+    } else if (status === 'PARTIAL') {
+      icon = <AlertTriangle className="h-3.5 w-3.5" />;
+      text = `Task partial: ${label}`;
+      colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
+    } else {
+      icon = <Clock className="h-3.5 w-3.5" />;
+      text = `Task ${status.toLowerCase()}: ${label}`;
+      colorClass = 'border-zinc-600 text-zinc-400 bg-white/[0.03]';
+    }
+  }
+
+  // Run status
+  else if (type === 'runStatus') {
+    const status = String(data.status ?? data.payload ?? '');
+    icon = <Rocket className="h-3.5 w-3.5" />;
+    text = `Run → ${status}`;
+    colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+  }
+
+  // Gates
+  else if (type === 'gateOpened') {
+    icon = <PauseCircle className="h-3.5 w-3.5" />;
+    text = `Waiting for ${String(data.gateType ?? data.payload ?? 'approval')} approval`;
+    colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
+  } else if (type === 'gateResolved') {
+    const decision = String(data.decision ?? data.payload ?? '');
+    const approved = decision === 'APPROVED';
+    icon = approved ? <PlayCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />;
+    text = `Gate ${decision.toLowerCase()}: ${String(data.gateType ?? '')}`;
+    colorClass = approved
+      ? 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.06]'
+      : 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+  }
+
+  // Cost update
+  else if (type === 'costUpdate') {
+    icon = <DollarSign className="h-3.5 w-3.5" />;
+    const cost = Number(data.totalCost ?? data.payload ?? 0);
+    const tokens = data.totalTokens ?? '';
+    text = `Cost update: $${cost.toFixed(4)}${tokens ? ` · ${tokens} tokens` : ''}`;
+    colorClass = 'border-accent-emerald/30 text-accent-emerald/70 bg-accent-emerald/[0.04]';
+  }
+
+  // Complete
+  else if (type === 'complete') {
+    icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+    text = `Pipeline complete`;
+    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+  }
+
+  // Recovery
+  else if (type === 'recoveryAttempted') {
+    icon = <RotateCcw className="h-3.5 w-3.5" />;
+    text = `Recovery: ${String(data.strategy ?? data.payload ?? '')}`;
+    colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
+  }
+
+  // Deploy events
+  else if (type === 'deployStarted') {
+    icon = <Rocket className="h-3.5 w-3.5" />;
+    text = 'Deployment started';
+    colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
+  } else if (type === 'deployLive') {
+    icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+    text = `Live at ${String(data.serviceUrl ?? data.payload ?? '')}`;
+    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+  } else if (type === 'deployFailed') {
+    icon = <XCircle className="h-3.5 w-3.5" />;
+    text = `Deploy failed: ${String(data.error ?? data.payload ?? '')}`;
+    colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+  }
+
+  if (!text) return null;
+
+  return (
+    <div className={cn(
+      'flex items-center gap-2.5 px-3 py-1.5 rounded-lg border',
+      'text-xs font-medium my-1',
+      colorClass,
+    )}>
+      {icon}
+      <span className="flex-1">{text}</span>
+      <span className="text-[10px] opacity-50 font-mono">{formatTimestamp(timestamp)}</span>
+    </div>
+  );
+}
+
+/** Compact row for detected file / command operations inside log messages. */
+function FileOpRow({ entry, op }: { entry: LogEntry; op: FileOp }) {
+  const { timestamp } = entry;
+
+  const config = {
+    write:   { icon: <FilePlus2 className="h-3 w-3" />, label: 'Created', color: 'text-accent-violet/80' },
+    edit:    { icon: <FileEdit  className="h-3 w-3" />, label: 'Edited',  color: 'text-accent-cyan/80'   },
+    commit:  { icon: <GitCommit className="h-3 w-3" />, label: 'Committed to Git', color: 'text-accent-emerald/80' },
+    command: { icon: <Terminal  className="h-3 w-3" />, label: 'Command run', color: 'text-zinc-400' },
+  }[op.kind];
+
+  return (
+    <div className="flex items-center gap-2 px-2 py-0.5 text-[11px]">
+      <span className="text-zinc-700 flex-shrink-0 font-mono">{formatTimestamp(timestamp)}</span>
+      <span className={cn('flex items-center gap-1.5 flex-shrink-0', config.color)}>
+        {config.icon}
+        <span className="font-medium">{config.label}</span>
+      </span>
+      {op.path && (
+        <span className="text-zinc-400 font-mono truncate">{op.path}</span>
+      )}
+    </div>
+  );
+}
+
+/** Dimmed compact row for regular verbose log lines. */
+function LogRow({ entry }: { entry: LogEntry }) {
+  const msg = formatLogMessage(entry.data);
+  // Skip empty or very short messages
+  if (!msg.trim()) return null;
+  // First line only for multi-line messages (collapse verbose output)
+  const firstLine = msg.split('\n')[0].slice(0, 160);
+
+  return (
+    <div className="flex gap-2 px-2 py-[1px] text-[11px] opacity-60 hover:opacity-100 transition-opacity">
+      <span className="text-zinc-700 flex-shrink-0 font-mono">{formatTimestamp(entry.timestamp)}</span>
+      <span className="text-zinc-500 flex-shrink-0">[log]</span>
+      <span className="text-zinc-400 truncate font-mono">{firstLine}</span>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export default function LiveLog() {
   const { entries, status } = useSseStore();
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const bottomRef   = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isPausedRef = useRef(false);
+  const isPausedRef  = useRef(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -61,29 +243,41 @@ export default function LiveLog() {
     <div className="flex flex-col h-full">
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto terminal-log p-4 space-y-0.5 text-xs"
+        className="flex-1 overflow-y-auto terminal-log px-3 py-3 min-h-0"
       >
         {entries.length === 0 && (
-          <p className="text-zinc-600 italic">Waiting for events...</p>
+          <p className="text-zinc-600 italic text-xs px-2">Waiting for events…</p>
         )}
-        {entries.map((entry) => (
-          <div key={entry.id} className="flex gap-2">
-            <span className="text-zinc-700 flex-shrink-0">
-              {new Date(entry.timestamp).toISOString().split('T')[1].replace('Z', '')}
-            </span>
-            <span className={cn('flex-shrink-0 w-16 truncate', TYPE_COLORS[entry.type] ?? 'text-zinc-500')}>
-              [{entry.type}]
-            </span>
-            <span className={cn(TYPE_COLORS[entry.type] ?? 'text-zinc-300')}>
-              {formatEntry(entry.type, entry.data)}
-            </span>
-          </div>
-        ))}
+
+        {entries.map((entry) => {
+          // ── Milestone events → banner ───────────────────────────────────
+          if (MILESTONE_TYPES.has(entry.type)) {
+            return <MilestoneBanner key={entry.id} entry={entry} />;
+          }
+
+          // ── Log entries: check for file/command operations ──────────────
+          if (entry.type === 'log') {
+            const msg = formatLogMessage(entry.data);
+            const op  = detectFileOp(msg);
+            if (op) return <FileOpRow key={entry.id} entry={entry} op={op} />;
+            return <LogRow key={entry.id} entry={entry} />;
+          }
+
+          // ── Fallback for unknown types ──────────────────────────────────
+          return (
+            <div key={entry.id} className="flex gap-2 px-2 py-[1px] text-[11px] opacity-50">
+              <span className="text-zinc-700 font-mono">{formatTimestamp(entry.timestamp)}</span>
+              <span className="text-zinc-500">[{entry.type}]</span>
+              <span className="text-zinc-400 truncate">{JSON.stringify(entry.data).slice(0, 120)}</span>
+            </div>
+          );
+        })}
+
         <div ref={bottomRef} />
       </div>
 
       {/* Status bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-t border-white/[0.06] bg-surface-1">
+      <div className="flex items-center gap-2 px-4 py-2 border-t border-white/[0.06] bg-surface-1 flex-shrink-0">
         {status === 'CONNECTED' ? (
           <>
             <span className="relative flex h-1.5 w-1.5">
@@ -94,7 +288,7 @@ export default function LiveLog() {
             <span className="animate-pulse text-accent-emerald text-xs">▋</span>
           </>
         ) : status === 'RECONNECTING' ? (
-          <span className="text-xs text-accent-amber">Reconnecting...</span>
+          <span className="text-xs text-accent-amber">Reconnecting…</span>
         ) : (
           <span className="text-xs text-zinc-600">Disconnected · {entries.length} events</span>
         )}

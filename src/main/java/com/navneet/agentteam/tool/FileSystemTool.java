@@ -1,5 +1,8 @@
 package com.navneet.agentteam.tool;
 
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -19,21 +22,19 @@ public class FileSystemTool {
 
     // Config and credential file names that agents must never read
     private static final Set<String> BLOCKED_FILE_NAMES = Set.of(
-        "application.yml", "application.yaml", "application.properties",
-        "application-dev.yml", "application-dev.yaml", "application-dev.properties",
-        "application-prod.yml", "application-prod.yaml", "application-prod.properties",
-        "application-gcp.yml", "application-gcp.yaml",
-        "application-local.yml", "application-local.yaml",
-        ".env", ".env.local", ".env.production",
-        "bootstrap.yml", "bootstrap.yaml", "bootstrap.properties",
-        "secrets.yml", "secrets.yaml", "credentials.json",
-        "service-account.json", "key.json", "keyfile.json"
-    );
+            "application.yml", "application.yaml", "application.properties",
+            "application-dev.yml", "application-dev.yaml", "application-dev.properties",
+            "application-prod.yml", "application-prod.yaml", "application-prod.properties",
+            "application-gcp.yml", "application-gcp.yaml",
+            "application-local.yml", "application-local.yaml",
+            ".env", ".env.local", ".env.production",
+            "bootstrap.yml", "bootstrap.yaml", "bootstrap.properties",
+            "secrets.yml", "secrets.yaml", "credentials.json",
+            "service-account.json", "key.json", "keyfile.json");
 
     // Directory names that agents must never enter
     private static final Set<String> BLOCKED_DIRECTORIES = Set.of(
-        ".ssh", ".gnupg", ".aws", ".gcloud", ".config"
-    );
+            ".ssh", ".gnupg", ".aws", ".gcloud", ".config");
 
     /** Per-run isolated workspace: baseWorkspace/{runId}/ */
     private Path workspace(String runId) {
@@ -42,7 +43,7 @@ public class FileSystemTool {
 
     /** Guard: all paths must stay inside the run's workspace directory. */
     private Path safeResolve(String runId, String relativePath) {
-        Path ws      = workspace(runId);
+        Path ws = workspace(runId);
         Path resolved = ws.resolve(relativePath).normalize();
         if (!resolved.startsWith(ws)) {
             throw new SecurityException("Path escape attempt: " + relativePath);
@@ -56,8 +57,8 @@ public class FileSystemTool {
      */
     private ToolResult checkCredentialBlock(Path resolved) {
         String fileName = resolved.getFileName() != null
-            ? resolved.getFileName().toString().toLowerCase()
-            : "";
+                ? resolved.getFileName().toString().toLowerCase()
+                : "";
 
         if (BLOCKED_FILE_NAMES.contains(fileName)) {
             log.warn("CREDENTIAL ACCESS DENIED: {}", resolved);
@@ -74,80 +75,101 @@ public class FileSystemTool {
         return null; // allowed
     }
 
-    public ToolResult readFile(String runId, String path) {
+    @Tool(description = "Read the full content of a file. Use this before writing or editing any file.")
+    public String readFile(
+            @ToolParam(description = "The pipeline run ID (injected from context, do not supply manually if possible, or use the runId)", required = true) String runId,
+            @ToolParam(description = "The relative path to the file to read", required = true) String path) {
         try {
             Path resolved = safeResolve(runId, path);
             ToolResult blocked = checkCredentialBlock(resolved);
-            if (blocked != null) return blocked;
-            return ToolResult.ok(Files.readString(resolved));
+            if (blocked != null)
+                return blocked.value();
+            return Files.readString(resolved);
         } catch (SecurityException e) {
-            return ToolResult.err("ACCESS DENIED: " + e.getMessage());
+            return "ACCESS DENIED: " + e.getMessage();
         } catch (IOException e) {
-            return ToolResult.err("Cannot read " + path + ": " + e.getMessage());
+            return "Cannot read " + path + ": " + e.getMessage();
         }
     }
 
-    public ToolResult writeFile(String runId, String path, String content) {
+    @Tool(description = "Create or fully overwrite a file. ALWAYS write the complete file — never partial content.")
+    public String writeFile(
+            @ToolParam(description = "runId", required = true) String runId,
+            @ToolParam(description = "Path of the file to write", required = true) String path,
+            @ToolParam(description = "Complete content of the file", required = true) String content) {
         try {
             Path target = safeResolve(runId, path);
             Files.createDirectories(target.getParent());
             Files.writeString(target, content);
-            return ToolResult.ok("Written: " + path + " (" + content.length() + " chars)");
+            return "Written: " + path + " (" + content.length() + " chars)";
         } catch (SecurityException e) {
-            return ToolResult.err("ACCESS DENIED: " + e.getMessage());
+            return "ACCESS DENIED: " + e.getMessage();
         } catch (IOException e) {
-            return ToolResult.err("Cannot write " + path + ": " + e.getMessage());
+            return "Cannot write " + path + ": " + e.getMessage();
         }
     }
 
-    public ToolResult editFile(String runId, String path, String oldStr, String newStr) {
+    @Tool(description = "Replace an exact string in an existing file. oldStr must match exactly.")
+    public String editFile(
+            @ToolParam(description = "runId", required = true) String runId,
+            @ToolParam(description = "Path to the file", required = true) String path,
+            @ToolParam(description = "Exact string to replace", required = true) String oldStr,
+            @ToolParam(description = "New string to insert", required = true) String newStr) {
         try {
-            Path target  = safeResolve(runId, path);
+            Path target = safeResolve(runId, path);
             String current = Files.readString(target);
             if (!current.contains(oldStr)) {
-                return ToolResult.err("String not found in " + path + ". No edit made.");
+                return "String not found in " + path + ". No edit made.";
             }
             Files.writeString(target, current.replace(oldStr, newStr));
-            return ToolResult.ok("Edited: " + path);
+            return "Edited: " + path;
         } catch (SecurityException e) {
-            return ToolResult.err("ACCESS DENIED: " + e.getMessage());
+            return "ACCESS DENIED: " + e.getMessage();
         } catch (IOException e) {
-            return ToolResult.err("Edit failed on " + path + ": " + e.getMessage());
+            return "Edit failed on " + path + ": " + e.getMessage();
         }
     }
 
-    public ToolResult listDirectory(String runId, String path) {
+    @Tool(description = "List directory contents.")
+    public String listFiles(
+            @ToolParam(description = "runId", required = true) String runId,
+            @ToolParam(description = "Path of the directory to list (usually '.')", required = true) String path) {
         try {
             Path resolved = safeResolve(runId, path);
             ToolResult blocked = checkCredentialBlock(resolved);
-            if (blocked != null) return blocked;
+            if (blocked != null)
+                return blocked.value();
             try (var stream = Files.list(resolved)) {
                 Path ws = workspace(runId);
                 String listing = stream
-                    .map(p -> (Files.isDirectory(p) ? "[DIR] " : "      ") + ws.relativize(p))
-                    .collect(Collectors.joining("\n"));
-                return ToolResult.ok(listing.isEmpty() ? "(empty)" : listing);
+                        .map(p -> (Files.isDirectory(p) ? "[DIR] " : "      ") + ws.relativize(p))
+                        .collect(Collectors.joining("\n"));
+                return listing.isEmpty() ? "(empty)" : listing;
             }
         } catch (SecurityException e) {
-            return ToolResult.err("ACCESS DENIED: " + e.getMessage());
+            return "ACCESS DENIED: " + e.getMessage();
         } catch (IOException e) {
-            return ToolResult.err("Cannot list " + path + ": " + e.getMessage());
+            return "Cannot list " + path + ": " + e.getMessage();
         }
     }
 
-    public ToolResult searchFiles(String runId, String pattern, String directory) {
+    @Tool(description = "Recursive grep to find patterns in files.")
+    public String searchFiles(
+            @ToolParam(description = "runId", required = true) String runId,
+            @ToolParam(description = "Regex pattern to search for", required = true) String pattern,
+            @ToolParam(description = "Directory to search in (default: '.')", required = true) String directory) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
-                "grep", "-r", "--include=*", "-n", pattern,
-                safeResolve(runId, directory).toString());
+                    "grep", "-r", "--include=*", "-n", pattern,
+                    safeResolve(runId, directory).toString());
             pb.directory(workspace(runId).toFile());
             pb.redirectErrorStream(true);
             Process p = pb.start();
             String output = new String(p.getInputStream().readAllBytes());
             p.waitFor();
-            return ToolResult.ok(output.isBlank() ? "(no matches)" : output);
+            return output.isBlank() ? "(no matches)" : output;
         } catch (Exception e) {
-            return ToolResult.err("Search failed: " + e.getMessage());
+            return "Search failed: " + e.getMessage();
         }
     }
 }

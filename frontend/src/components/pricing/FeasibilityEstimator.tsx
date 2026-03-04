@@ -2,8 +2,15 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wand2, ChevronRight } from 'lucide-react';
 import { feasibility } from '@/lib/api';
-import { fmtCost, fmtTokens, cn } from '@/lib/utils';
+import { fmtCost, cn } from '@/lib/utils';
 import type { FeasibilityReport } from '@/lib/api';
+
+const VERDICT_COLORS: Record<string, string> = {
+  FEASIBLE:   'text-accent-emerald',
+  MARGINAL:   'text-accent-amber',
+  INFEASIBLE: 'text-accent-rose',
+  ESTIMATED:  'text-accent-cyan',
+};
 
 const COMPLEXITY_COLORS: Record<string, string> = {
   LOW:    'text-accent-emerald bg-accent-emerald/10',
@@ -26,8 +33,8 @@ export default function FeasibilityEstimator() {
     setResult(null);
     try {
       const r = await feasibility({
-        userRequest: goal,
-        ...(model ? { modelName: model } : {}),
+        goal,
+        ...(model ? { model } : {}),
         ...(budget ? { budgetUsd: parseFloat(budget) } : {}),
       });
       setResult(r);
@@ -55,8 +62,9 @@ export default function FeasibilityEstimator() {
             className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none"
           >
             <option value="">Default model</option>
-            <option value="claude-opus-4-5-20251101">Claude Opus</option>
-            <option value="claude-sonnet-4-5-20250929">Claude Sonnet</option>
+            <option value="claude-opus-4-6">Claude Opus 4.6</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
             <option value="gpt-4o">GPT-4o</option>
             <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
           </select>
@@ -94,24 +102,25 @@ export default function FeasibilityEstimator() {
             {/* Summary */}
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
-                <span className={cn('text-sm font-medium', result.feasible ? 'text-accent-emerald' : 'text-accent-rose')}>
-                  {result.feasible ? '✓ Feasible' : '✗ Not feasible'}
-                </span>
-                <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', COMPLEXITY_COLORS[result.complexity] ?? 'text-zinc-500 bg-zinc-500/10')}>
-                  {result.complexity}
+                <span className={cn('text-sm font-medium', VERDICT_COLORS[result.verdict] ?? 'text-zinc-300')}>
+                  {result.verdict === 'FEASIBLE' ? '✓ Feasible' :
+                   result.verdict === 'MARGINAL' ? '⚠ Marginal' :
+                   result.verdict === 'INFEASIBLE' ? '✗ Not feasible' : '~ Estimated'}
                 </span>
               </div>
               <div className="flex items-center gap-4 text-sm text-zinc-300">
-                <span>{fmtTokens(result.estimatedTokens)} tokens</span>
-                <span className="text-accent-emerald font-medium">{fmtCost(result.estimatedCostUsd)}</span>
+                <span>{fmtCost(result.estimatedLowUsd)} – {fmtCost(result.estimatedHighUsd)}</span>
+                {result.budgetUsd && (
+                  <span className="text-zinc-500">Budget: {fmtCost(result.budgetUsd)}</span>
+                )}
               </div>
             </div>
 
             {/* Task breakdown */}
-            {result.taskBreakdown?.length > 0 && (
+            {result.tasks?.length > 0 && (
               <div className="space-y-2">
                 <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Task Breakdown</h4>
-                {result.taskBreakdown.map((t, i) => (
+                {result.tasks.map((t, i) => (
                   <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.06]">
                     <div className="flex items-center gap-2 min-w-0">
                       <ChevronRight className="h-3 w-3 text-zinc-600 flex-shrink-0" />
@@ -120,17 +129,10 @@ export default function FeasibilityEstimator() {
                         {t.complexity}
                       </span>
                     </div>
-                    <span className="text-xs text-zinc-500 flex-shrink-0 ml-2">{fmtCost(t.estimatedCostUsd)}</span>
+                    <span className="text-xs text-zinc-500 flex-shrink-0 ml-2">
+                      {fmtCost(t.estimatedLowUsd)}–{fmtCost(t.estimatedHighUsd)}
+                    </span>
                   </div>
-                ))}
-              </div>
-            )}
-
-            {/* Warnings */}
-            {result.warnings?.length > 0 && (
-              <div className="space-y-1">
-                {result.warnings.map((w, i) => (
-                  <p key={i} className="text-xs text-accent-amber">⚠ {w}</p>
                 ))}
               </div>
             )}

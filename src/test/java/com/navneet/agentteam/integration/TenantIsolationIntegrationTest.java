@@ -34,7 +34,7 @@ class TenantIsolationIntegrationTest extends PostgresIntegrationBase {
 
         PipelineRun run = stateStore.createRun(
             "Build API", "MANUAL", null, null,
-            "claude-opus-4-6", "claude-sonnet-4-5-20250929", "claude-opus-4-6"
+            "claude-opus-4-6", "claude-sonnet-4-5", "claude-opus-4-6"
         );
 
         PipelineRun found = stateStore.findRun(run.getRunId()).get();
@@ -48,7 +48,7 @@ class TenantIsolationIntegrationTest extends PostgresIntegrationBase {
 
         PipelineRun run = stateStore.createRun(
             "Fix bug", "MANUAL", null, null,
-            "claude-opus-4-6", "claude-sonnet-4-5-20250929", "claude-opus-4-6"
+            "claude-opus-4-6", "claude-sonnet-4-5", "claude-opus-4-6"
         );
 
         PipelineRun found = stateStore.findRun(run.getRunId()).get();
@@ -61,13 +61,13 @@ class TenantIsolationIntegrationTest extends PostgresIntegrationBase {
         TenantContext.setTenantId("tenant-a");
         PipelineRun runA = stateStore.createRun(
             "Task A", "MANUAL", null, null,
-            "claude-opus-4-6", "claude-sonnet-4-5-20250929", "claude-opus-4-6"
+            "claude-opus-4-6", "claude-sonnet-4-5", "claude-opus-4-6"
         );
 
         TenantContext.setTenantId("tenant-b");
         PipelineRun runB = stateStore.createRun(
             "Task B", "MANUAL", null, null,
-            "claude-opus-4-6", "claude-sonnet-4-5-20250929", "claude-opus-4-6"
+            "claude-opus-4-6", "claude-sonnet-4-5", "claude-opus-4-6"
         );
 
         assertThat(stateStore.findRun(runA.getRunId()).get().getTenantId()).isEqualTo("tenant-a");

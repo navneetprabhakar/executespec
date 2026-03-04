@@ -5,9 +5,13 @@ import com.navneet.agentteam.agent.model.TaskPlan;
 import com.navneet.agentteam.config.AgentModelConfig;
 import com.navneet.agentteam.config.AgentProperties;
 import com.navneet.agentteam.pricing.ModelPricingRepository;
+import com.navneet.agentteam.state.StateStore;
+import com.navneet.agentteam.state.entity.AgentTask;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * Estimates pipeline cost before plan approval.
@@ -23,6 +27,7 @@ public class CostEstimator {
 
     private final AgentProperties props;
     private final ModelPricingRepository pricingRepo;
+    private final StateStore stateStore;
 
     public record CostBreakdown(double lowUsd, double highUsd) {
         public String formatted() {
@@ -100,6 +105,47 @@ public class CostEstimator {
         return (inputTokens / 1_000_000.0 * rates[0]) + (outputTokens / 1_000_000.0 * rates[1]);
     }
 
+    /**
+     * Compute the actual post-run cost for a completed pipeline run using real token counts
+     * and Anthropic prompt-cache pricing multipliers:
+     * <ul>
+     *   <li>Normal input tokens  → 1.00 × input rate</li>
+     *   <li>Cache-write tokens   → 1.25 × input rate (Anthropic charges extra for cache storage)</li>
+     *   <li>Cache-read tokens    → 0.10 × input rate (90% discount on cached reads)</li>
+     *   <li>Output tokens        → 1.00 × output rate</li>
+     * </ul>
+     * Uses the per-task provider/model for accurate pricing when tasks ran on different models.
+     */
+    public double computeCostForRun(String runId) {
+        List<AgentTask> tasks = stateStore.getAllTasks(runId);
+        double totalCost = 0.0;
+
+        for (AgentTask task : tasks) {
+            if (nvl(task.getInputTokens()) == 0 && nvl(task.getOutputTokens()) == 0) continue;
+
+            // Use the provider/model recorded on the task for accurate per-model pricing.
+            String provider = task.getProvider() != null ? task.getProvider() : props.getRoles().getWorker();
+            String model    = task.getModel()    != null ? task.getModel()    : defaultModel(provider);
+            double[] rates  = dbRatesForModel(provider, model);
+
+            int cacheWrite = nvl(task.getCacheWriteTokens());
+            int cacheRead  = nvl(task.getCacheReadTokens());
+            // normalIn is the portion of input tokens NOT going through cache writes
+            int normalIn   = Math.max(0, nvl(task.getInputTokens()) - cacheWrite);
+            int out        = nvl(task.getOutputTokens());
+
+            totalCost += (normalIn   / 1_000_000.0) * rates[0];         // 1.00x
+            totalCost += (cacheWrite / 1_000_000.0) * rates[0] * 1.25;  // 1.25x
+            totalCost += (cacheRead  / 1_000_000.0) * rates[0] * 0.10;  // 0.10x
+            totalCost += (out        / 1_000_000.0) * rates[1];          // 1.00x
+        }
+
+        log.info("[CostEstimator] Actual cost for run {}: ${}", runId, String.format("%.6f", totalCost));
+        return totalCost;
+    }
+
+    private int nvl(Integer v) { return v != null ? v : 0; }
+
     private double costUsd(int inputTokens, int outputTokens, int iterations, double[] rates) {
         return (inputTokens  / 1_000_000.0) * rates[0] * iterations
              + (outputTokens / 1_000_000.0) * rates[1] * iterations;
@@ -119,7 +165,6 @@ public class CostEstimator {
     private double[] hardcodedFallback(String provider) {
         return switch (provider.toLowerCase()) {
             case "openai"  -> new double[]{0.15, 0.60};
-            case "gemini"  -> new double[]{0.10, 0.40};
             default        -> new double[]{0.80, 4.00};  // anthropic haiku
         };
     }
@@ -127,8 +172,7 @@ public class CostEstimator {
     private String defaultModel(String provider) {
         return switch (provider.toLowerCase()) {
             case "openai"  -> "gpt-4o-mini";
-            case "gemini"  -> "gemini-2.0-flash";
-            default        -> "claude-sonnet-4-5-20250929";
+            default        -> "claude-haiku-4-5-20251001";
         };
     }
 

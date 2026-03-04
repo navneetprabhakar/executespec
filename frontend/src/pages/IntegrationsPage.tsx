@@ -112,7 +112,7 @@ export default function IntegrationsPage() {
                   <td className="px-4 py-2.5 font-mono text-xs text-zinc-400">{r.runId.slice(0, 12)}</td>
                   <td className="px-4 py-2.5 text-xs text-zinc-300">{r.status}</td>
                   <td className="px-4 py-2.5 text-xs text-zinc-400 max-w-xs truncate">{r.userRequest.slice(0, 60)}</td>
-                  <td className="px-4 py-2.5 text-xs text-zinc-600">{relativeTime(r.createdAt)}</td>
+                  <td className="px-4 py-2.5 text-xs text-zinc-600">{relativeTime(r.startedAt)}</td>
                 </tr>
               ))}
             </tbody>

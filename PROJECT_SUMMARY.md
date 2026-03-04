@@ -45,15 +45,15 @@ The pipeline is fully observable via **Server-Sent Events (SSE)**, a **D3.js Gan
 |---|---|
 | Language | Java 21 |
 | Framework | Spring Boot 3.3.0 |
-| AI / LLM | Spring AI 1.0.0 |
-| Primary LLM | Claude (Anthropic) — Haiku 4.5 + Sonnet 4.5 |
-| Fallback LLM | OpenAI GPT-4o-mini / GPT-4o |
+| AI / LLM | Spring AI 1.1.0 |
+| Primary LLM | Claude (Anthropic) — Haiku 4.5 + Sonnet 4.6 |
+| Fallback LLM | OpenAI GPT-4o |
 | Database | PostgreSQL 15+ (`jdbc:postgresql://localhost:5432/agentteam`) |
 | ORM | Spring Data JPA + Hibernate |
 | Git | JGit 6.9.0 |
 | Code generation | Lombok |
 | JSON | Jackson |
-| Frontend | Alpine.js + Tailwind CSS (CDN) + D3.js v7 |
+| Frontend | React 18 + Vite 5 + Tailwind 3.4 + shadcn/ui + Zustand + Recharts/D3 |
 | Deployment | GCP Cloud Run + Artifact Registry |
 | Build | Maven (JAVA_HOME=/opt/homebrew/opt/openjdk@21) |
 
@@ -117,24 +117,25 @@ All integrations: `skipApproval` flag bypasses the plan gate for fully automated
 
 | Role | Model | Provider | When Used |
 |---|---|---|---|
-| Planner | `claude-sonnet-4-5-20250929` | Anthropic | Task decomposition |
-| Reviewer | `claude-sonnet-4-5-20250929` | Anthropic | Review after all workers complete |
-| LOW workers | `claude-sonnet-4-5-20250929` | Anthropic | < 100 lines, thin controllers, configs |
-| MEDIUM workers | `claude-sonnet-4-5-20250929` | Anthropic | 100–300 lines, service + business logic |
-| HIGH workers | `claude-sonnet-4-5-20250929` | Anthropic | 300+ lines, complex multi-component |
-| Compiler agent | `claude-sonnet-4-5-20250929` | Anthropic | Error analysis + multi-file fix |
-| API spec agent | `claude-sonnet-4-5-20250929` | Anthropic | OpenAPI 3.0 spec generation |
-| Context agent | `claude-sonnet-4-5-20250929` | Anthropic | Run pattern scanning |
-| Optimiser | `claude-sonnet-4-5-20250929` | Anthropic | Prompt pattern analysis |
-| Recovery escalation | `claude-sonnet-4-5-20250929` | Anthropic | Stuck/failed task retry |
+| Planner | `claude-sonnet-4-6` | Anthropic | Task decomposition |
+| Reviewer | `claude-haiku-4-5-20251001` | Anthropic | Review after all workers complete |
+| LOW workers | `claude-haiku-4-5-20251001` | Anthropic | < 100 lines, thin controllers, configs |
+| MEDIUM workers | `claude-haiku-4-5-20251001` | Anthropic | 100–300 lines, service + business logic |
+| HIGH workers | `claude-haiku-4-5-20251001` | Anthropic | 300+ lines, complex multi-component |
+| Compiler agent | `claude-haiku-4-5-20251001` | Anthropic | Error analysis + multi-file fix |
+| API spec agent | `claude-haiku-4-5-20251001` | Anthropic | OpenAPI 3.0 spec generation |
+| Context agent | `claude-haiku-4-5-20251001` | Anthropic | Run pattern scanning |
+| Optimiser | `claude-haiku-4-5-20251001` | Anthropic | Prompt pattern analysis |
+| Recovery escalation | `claude-sonnet-4-6` | Anthropic | Stuck/failed task retry |
 
 ### Fallback Chain
 
 ```
-anthropic/claude-sonnet-4-5-20250929  →  openai/gpt-4o
+anthropic/claude-sonnet-4-6  →  openai/gpt-4o      (CAPABLE_CHAIN — planner/recovery)
+anthropic/claude-haiku-4-5-20251001  →  openai/gpt-4o  (CHEAP_CHAIN — workers/reviewer)
 ```
 
-`LlmRouter` uses a single `CAPABLE_CHAIN` for all tasks; falls back to `gpt-4o` on rate-limit (with 15 s sleep) or any non-transient Anthropic error.
+`LlmRouter` selects chain based on primary model name; falls back to `gpt-4o` on rate-limit (15 s sleep) or any non-transient Anthropic error.
 
 ### Token Limits
 
@@ -348,44 +349,42 @@ Schema is auto-managed via `spring.jpa.hibernate.ddl-auto: update` — safe to r
 
 ## 8. Web UI
 
-Single-page application served from `src/main/resources/static/index.html`.
-Built with **Alpine.js** (state/logic) + **Tailwind CSS** (styling) + **D3.js v7** (charts) — all via CDN, no build step.
+React 18 SPA (`frontend/` directory) — built with **Vite 5**, **Tailwind 3.4**, **shadcn/ui** components, **Zustand** stores, **Recharts** + **D3.js v7** for charts.
+Production build output goes to `src/main/resources/static/` via `npm run build`. Dev server: `npm --prefix frontend run dev` → `:5173` (proxies `/api` → `:8080`).
 
-### Dashboard Tabs
+### Pages
 
-| Tab | Component | Description |
+| Page | Route | Description |
 |---|---|---|
-| **Runs** | `runsList()` | Submit new run; live list with status badges; click to open detail panel |
-| **Metrics** | `metricsView()` | Global counters + token bubble chart + agent comms graph |
-| **Pricing** | `pricingView()` | Model pricing table with active-model badges + cost estimates |
-| **Feasibility** | `feasibilityView()` | Cost estimate without executing; model/provider picker |
-| **Deployments** | `deploymentsView()` | GCP deployment panel; deploy form; live status |
-| **Integrations** | `integrationsTabView()` | Integration source status; manual Confluence trigger |
+| **Runs** | `/` | 60/40 split: run list + live detail panel with 7 tabs |
+| **Dashboard** | `/dashboard` | 4 metric cards + TokenBubbleChart + ModelComparisonChart + ActivityFeed |
+| **Pricing** | `/pricing` | Model pricing table + FeasibilityEstimator |
+| **Deployments** | `/deployments` | GCP deployment list + status |
+| **Integrations** | `/integrations` | Integration source status + manual trigger |
+| **Settings** | `/settings` | Application configuration |
 
-### Run Detail Panel
+### Run Detail Tabs
 
-Opens as a slide-over panel. Contains:
-- **Overview** — status, timing, model, cost, approval buttons
-- **Tasks** — per-task status, model used, retry button
-- **Log** — SSE-powered real-time log viewer
-- **Timeline** — D3.js Gantt of task durations + gate events
-- **Preview** *(if `hasFrontend=true`)* — embedded iframe with viewport size controls (📱 / 📟 / 🖥)
-- **API Docs** *(if `hasApiSpec=true`)* — embedded Swagger UI from generated `openapi.yaml`
-
-### Visualization Files (`static/viz/`)
-
-| File | Purpose |
+| Tab | Description |
 |---|---|
-| `log-viewer.js` | SSE `LogViewer` class; renders all `RunEvent` types including deploy + recovery events |
-| `timeline.js` | Gantt chart — tasks + gate bands |
-| `comms-graph.js` | Force-directed graph of agent communications |
-| `bubble.js` | Token scatter/bubble chart per task |
-| `model-compare.js` | Grouped bar chart comparing model stats |
-| `utils.js` | Shared helpers: `STATUS_COLORS`, `fmtMs`, `fmtTokens`, `makeTooltip` |
+| Overview | Status, timing, model, cost, approve/merge buttons |
+| Tasks | Per-task status card (TaskCard), assigned model, retry button |
+| Log | SSE-powered live log viewer (useSse hook + RunDetailTabs) |
+| Timeline | D3.js Gantt of task durations + gate events |
+| Files | Workspace file browser |
+| Preview | Embedded iframe for frontend previews (`hasFrontend=true`) |
+| API Docs | Swagger UI from generated `openapi.yaml` (`hasApiSpec=true`) |
 
-### Header Health Badge
+### Key Frontend Files
 
-`serverHealth()` Alpine component polls `GET /api/health` every 30 s; shows animated ping dot, uptime, and active run count.
+| Path | Purpose |
+|---|---|
+| `frontend/src/lib/api.ts` | All typed fetch wrappers (20+ endpoints) |
+| `frontend/src/stores/` | useRunStore, useMetricsStore, useSseStore, useUiStore (Zustand) |
+| `frontend/src/hooks/useSse.ts` | SSE EventSource with exponential backoff reconnect |
+| `frontend/src/components/layout/` | Sidebar (Framer Motion), Header, AppLayout |
+| `frontend/src/components/runs/` | RunCard, RunList, RunDetail, RunDetailTabs, TaskCard, NewRunModal |
+| `frontend/src/components/dashboard/` | MetricCard (Recharts sparkline), TokenBubbleChart, ModelComparisonChart (D3), ActivityFeed |
 
 ---
 
@@ -412,40 +411,40 @@ All prompts in `src/main/resources/prompts/`:
 
 ```yaml
 spring.ai.anthropic.chat.options:
-  model: claude-sonnet-4-5-20250929    # all agents use sonnet
+  model: claude-haiku-4-5-20251001    # default; agents override per-call
   max-tokens: 16000
 
 spring.ai.openai.chat.options:
-  model: gpt-4o-mini
+  model: gpt-4o
   max-tokens: 16000
 
 agent:
   workspace: ./workspace
-  concurrency.max-runs: 3              # max simultaneous pipeline runs
+  concurrency.max-runs: 5              # max simultaneous pipeline runs
   token-budget: {low: 2048, medium: 4096, high: 8192}
   compaction: {warn-pct: 0.65, compact-pct: 0.75, hard-stop-pct: 0.90}
 
   recovery:
     enabled: true
-    warn-threshold-minutes: 5
-    act-threshold-minutes: 10
+    warn-threshold-minutes: 15
+    act-threshold-minutes: 30
     max-task-retries: 1
     capable-models:
-      anthropic: claude-sonnet-4-5-20250929
+      anthropic: claude-sonnet-4-6
       openai: gpt-4o
 
-  context:  {enabled: true, model: claude-sonnet-4-5-20250929, run-interval: 1}
+  context:  {enabled: true, model: claude-haiku-4-5-20251001, run-interval: 1}
   optimiser: {enabled: true, run-interval: 10, analysis-window-runs: 20}
 
   compiler:
     enabled: true
     max-attempts: 3
     timeout-seconds: 300
-    model: claude-sonnet-4-5-20250929
+    model: claude-haiku-4-5-20251001
 
   api-test-suite:
     enabled: true
-    model: claude-sonnet-4-5-20250929
+    model: claude-haiku-4-5-20251001
 
   deployment:
     enabled: true
@@ -464,9 +463,11 @@ agent:
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `ANTHROPIC_API_KEY` | *(required)* | Anthropic API key |
+| `OPENAI_API_KEY` | *(required for fallback)* | OpenAI API key |
 | `POSTGRES_USER` | `postgres` | DB username |
 | `POSTGRES_PASSWORD` | `postgres` | DB password |
-| `GITHUB_PAT` | *(set in yml)* | GitHub personal access token |
+| `GITHUB_PAT` | *(empty)* | GitHub personal access token |
 | `GITHUB_OWNER` | `navneetprabhakar` | Default GitHub org/user |
 | `GCP_PROJECT` | `my-gcp-project` | GCP project ID for deployments |
 
@@ -535,5 +536,6 @@ http://localhost:8080
 ## Build Status
 
 `mvn compile` — ✅ passes clean (Tiers 1–8 complete)
+`mvn test` — ✅ 104 unit tests pass; `@Tag("e2e")` and `@Tag("integration")` excluded (require live DB + Docker)
 
-**Total:** ~147 Java source files · 33 REST endpoints · 14 DB entities · 8 LLM prompts · 6 D3 visualization scripts
+**Total:** ~150 Java source files · 33 REST endpoints · 14 DB entities · 8 LLM prompts · React 18 SPA frontend

@@ -2,13 +2,11 @@ package com.navneet.agentteam.recovery;
 
 import com.navneet.agentteam.state.entity.AgentTask;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-@Component
 @RequiredArgsConstructor
 public class StuckRunEvaluator {
 

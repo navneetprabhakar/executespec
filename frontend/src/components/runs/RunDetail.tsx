@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, CheckCircle, XCircle, GitMerge, Trash2, RefreshCw, AlertTriangle } from 'lucide-react';
+import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
+import { downloadWorkspace } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function RunDetail() {
@@ -19,7 +20,16 @@ export default function RunDetail() {
       addToast({ type: 'success', message: successMsg });
       setConfirming(null);
     } catch (e: any) {
-      addToast({ type: 'error', message: e.message });
+      // 409 = gate was lost after a server restart; the run has been auto-cancelled
+      if (e.message?.startsWith('409')) {
+        addToast({ type: 'error', message: 'Gate expired (server was restarted). Run has been cancelled — please resubmit.' });
+        setConfirming(null);
+        // Refresh so the UI shows the run as FAILED
+        if (activeRunId) await useRunStore.getState().fetchRun(activeRunId);
+        await useRunStore.getState().fetchRuns();
+      } else {
+        addToast({ type: 'error', message: e.message });
+      }
     }
   };
 
@@ -86,13 +96,23 @@ export default function RunDetail() {
                 Cancel
               </button>
             )}
-            <button
-              onClick={() => { setActiveTab('log'); }}
-              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-cyan transition-colors ml-auto"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Live Log
-            </button>
+            <div className="flex items-center gap-3 ml-auto">
+              <button
+                onClick={() => downloadWorkspace(activeRun.runId)}
+                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
+                title="Download workspace as zip"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download
+              </button>
+              <button
+                onClick={() => { setActiveTab('log'); }}
+                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-cyan transition-colors"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Live Log
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}

@@ -14,5 +14,11 @@ public record RunRequest(
     /** HTTPS URL of an existing repo (optional). */
     String repoUrl,
     /** "NEW" | "EXISTING" (optional). */
-    String repoMode
+    String repoMode,
+    /** When true, automatically approve the plan gate without human review. */
+    Boolean skipApproval,
+    /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
+    String modelName,
+    /** Optional project ID to associate this run with (org members only). */
+    String projectId
 ) {}

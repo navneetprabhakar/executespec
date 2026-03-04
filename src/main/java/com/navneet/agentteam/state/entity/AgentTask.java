@@ -48,13 +48,18 @@ public class AgentTask {
     private Integer outputTokens;
     private Integer compactionCount;    // how many times context was compacted
 
+    @Builder.Default
+    private Integer cacheReadTokens  = 0;  // Anthropic cache_read_input_tokens (billed at 0.10x)
+    @Builder.Default
+    private Integer cacheWriteTokens = 0;  // Anthropic cache_creation_input_tokens (billed at 1.25x)
+
     @Column(columnDefinition = "TEXT")
     private String lastCheckpointPath;  // path to most recent checkpoint file
 
     // ── Tier 3 fields ─────────────────────────────────────────────────────────
     private Boolean readmeUpdated;      // null = not yet reviewed, true/false = reviewer verdict
     private String provider;            // provider used for this task (e.g. "anthropic")
-    private String model;               // model used (e.g. "claude-sonnet-4-5-20250929")
+    private String model;               // model used (e.g. "claude-sonnet-4-5")
 
     // ── Tier 5 fields — stuck detection & recovery ────────────────────────────
     @Column(name = "last_activity_at")
