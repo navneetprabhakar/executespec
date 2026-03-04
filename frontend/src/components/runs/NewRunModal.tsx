@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ChevronDown, Rocket, Send, Sparkles, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ChevronDown, Github, Rocket, Send, Sparkles, X } from 'lucide-react';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { conversationChat, ConversationMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import ProjectSelector from '@/components/auth/ProjectSelector';
+import { MarkdownContent } from '@/components/shared/MarkdownContent';
 
 interface NewRunModalProps {
   onClose: () => void;
@@ -27,9 +30,16 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
   const [goal, setGoal] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showGitHub, setShowGitHub] = useState(false);
   const [skipApproval, setSkipApproval] = useState(false);
   const [model, setModel] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [launching, setLaunching] = useState(false);
+
+  // ── github repo options ───────────────────────────────────────────────────
+  type RepoChoice = 'NONE' | 'NEW' | 'EXISTING';
+  const [repoChoice, setRepoChoice] = useState<RepoChoice>('NONE');
+  const [repoUrl, setRepoUrl] = useState('');
 
   // ── chat mode state ───────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>('compose');
@@ -40,6 +50,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
 
   const { createRun, setActiveRunId } = useRunStore();
   const { addToast } = useUiStore();
+  const { user } = useAuthStore();
   const navigate = useNavigate();
 
   // Auto-scroll to bottom of chat
@@ -99,12 +110,17 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
   // ── launch the pipeline run ───────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!goal.trim()) return;
+    if (repoChoice === 'EXISTING' && !repoUrl.trim()) return;
     setLaunching(true);
     try {
+      const repoMode = repoChoice === 'NONE' ? null : repoChoice;  // 'NEW' | 'EXISTING' | null
       const runId = await createRun({
         userRequest: goal,
         skipApproval,
         ...(model ? { modelName: model } : {}),
+        ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
+        ...(repoMode ? { repoMode } : {}),
+        ...(repoChoice === 'EXISTING' && repoUrl.trim() ? { repoUrl: repoUrl.trim() } : {}),
       });
       addToast({ type: 'success', message: `Run launched: ${runId.slice(0, 8)}` });
       navigate('/');
@@ -120,6 +136,9 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
   const atLimit  = msgCount >= MAX_MESSAGES;
   // User can only send if there's a slot available for both their message AND the AI reply
   const canSend  = !chatLoading && messages.length < MAX_MESSAGES && draft.trim().length > 0;
+
+  // Whether to show the project selector (only for org members)
+  const isOrgMember = !!user?.orgId;
 
   return (
     <div
@@ -189,6 +208,14 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
               )}
             />
 
+            {/* Project selector — visible for org members only */}
+            {isOrgMember && (
+              <ProjectSelector
+                value={selectedProjectId}
+                onChange={setSelectedProjectId}
+              />
+            )}
+
             {/* Refine with AI button */}
             <button
               onClick={enterChat}
@@ -255,9 +282,98 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
               )}
             </AnimatePresence>
 
+            {/* GitHub toggle */}
+            <button
+              onClick={() => setShowGitHub(!showGitHub)}
+              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showGitHub && 'rotate-180')} />
+              GitHub repository
+              {repoChoice !== 'NONE' && (
+                <span className="text-accent-violet">•</span>
+              )}
+            </button>
+
+            <AnimatePresence>
+              {showGitHub && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden space-y-3"
+                >
+                  {/* No-PAT warning */}
+                  {!user?.hasGithubPat && (
+                    <div className="flex items-center gap-1.5 text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-lg px-3 py-2">
+                      <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                      No GitHub PAT configured. Add yours in&nbsp;
+                      <strong>Settings → GitHub Integration</strong>&nbsp;first.
+                    </div>
+                  )}
+
+                  {/* Radio options */}
+                  <div className="space-y-2">
+                    {(
+                      [
+                        { value: 'NONE',     label: 'None',                   desc: "Don't push to GitHub" },
+                        { value: 'NEW',      label: 'Create new repo',        desc: 'Auto-create a private GitHub repo after merge' },
+                        { value: 'EXISTING', label: 'Start from existing repo', desc: 'Clone, modify and push back to the same repo' },
+                      ] as { value: RepoChoice; label: string; desc: string }[]
+                    ).map((opt) => (
+                      <label
+                        key={opt.value}
+                        className={cn(
+                          'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors',
+                          repoChoice === opt.value
+                            ? 'border-accent-violet/40 bg-accent-violet/[0.06]'
+                            : 'border-white/[0.06] hover:border-white/[0.12]',
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="repoChoice"
+                          value={opt.value}
+                          checked={repoChoice === opt.value}
+                          onChange={() => setRepoChoice(opt.value as RepoChoice)}
+                          className="mt-0.5 accent-accent-violet"
+                        />
+                        <div>
+                          <p className="text-sm text-zinc-200 leading-tight">{opt.label}</p>
+                          <p className="text-xs text-zinc-500 mt-0.5">{opt.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Repo URL input — only when EXISTING */}
+                  <AnimatePresence>
+                    {repoChoice === 'EXISTING' && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex items-center gap-2 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 focus-within:border-accent-violet/40">
+                          <Github className="h-3.5 w-3.5 text-zinc-500 flex-shrink-0" />
+                          <input
+                            type="url"
+                            value={repoUrl}
+                            onChange={(e) => setRepoUrl(e.target.value)}
+                            placeholder="https://github.com/owner/repo"
+                            className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <button
               onClick={handleSubmit}
-              disabled={!goal.trim() || launching}
+              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim())}
               className={cn(
                 'w-full py-2.5 rounded-lg font-medium text-sm text-white transition-all',
                 'bg-accent-violet hover:bg-accent-violet/80',
@@ -409,24 +525,33 @@ function ChatBubble({
           ? 'bg-accent-violet/15 text-zinc-200 rounded-tr-sm'
           : 'bg-white/[0.05] border border-white/[0.06] text-zinc-300 rounded-tl-sm',
       )}>
-        {summaryMatch ? (
+        {isUser ? (
+          /* User messages: plain pre-wrap (no markdown) */
+          <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+        ) : summaryMatch ? (
           <>
-            {/* Text before the summary marker */}
+            {/* Text before the REQUIREMENT SUMMARY marker — rendered as markdown */}
             {msg.content.replace(/REQUIREMENT SUMMARY:[\s\S]*/i, '').trim() && (
-              <p className="text-zinc-400 text-xs mb-2 whitespace-pre-wrap">
-                {msg.content.replace(/REQUIREMENT SUMMARY:[\s\S]*/i, '').trim()}
-              </p>
+              <MarkdownContent
+                content={msg.content.replace(/REQUIREMENT SUMMARY:[\s\S]*/i, '').trim()}
+                compact
+                className="mb-2"
+              />
             )}
             {/* Highlighted summary block */}
-            <div className="mt-1 p-2 rounded-lg bg-accent-emerald/10 border border-accent-emerald/20">
-              <p className="text-[10px] uppercase tracking-wider text-accent-emerald/70 mb-1 font-semibold">
+            <div className="mt-1 p-2.5 rounded-lg bg-accent-emerald/10 border border-accent-emerald/20">
+              <p className="text-[10px] uppercase tracking-wider text-accent-emerald/70 mb-1.5 font-semibold">
                 Requirement Summary
               </p>
-              <p className="text-xs text-zinc-200 whitespace-pre-wrap">{summaryMatch[1].trim()}</p>
+              <MarkdownContent
+                content={summaryMatch[1].trim()}
+                compact
+              />
             </div>
           </>
         ) : (
-          <p className="whitespace-pre-wrap">{msg.content}</p>
+          /* Regular AI message — full markdown rendering */
+          <MarkdownContent content={msg.content} compact />
         )}
 
         {/* Use as Goal button on AI messages */}

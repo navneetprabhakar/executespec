@@ -31,13 +31,9 @@ const TABS = [
   { value: 'preview',   label: 'Preview' },
 ];
 
-const TERMINAL_STATUSES = new Set(['COMPLETE', 'FAILED', 'CANCELLED']);
-const POLL_INTERVAL_MS = 5000;
-
 export default function RunDetailTabs() {
   const { activeTab, setActiveTab } = useUiStore();
   const activeRun = useRunStore((s) => s.activeRun);
-  const fetchRun  = useRunStore((s) => s.fetchRun);
 
   // Hoist files so both Code and Preview tabs share them
   const [files, setFiles] = useState<string[]>([]);
@@ -52,21 +48,8 @@ export default function RunDetailTabs() {
       .catch(() => {})
       .finally(() => setFilesLoading(false));
   }, [activeRun?.runId]);
-
-  // Auto-refresh task data every 5 s while on Tasks or Overview tab and run is active.
-  // SSE-driven taskStatus events cover most transitions instantly; this polling is a
-  // belt-and-suspenders fallback (e.g. reconnects, missed events).
-  useEffect(() => {
-    if (!activeRun) return;
-    if (activeTab !== 'tasks' && activeTab !== 'overview') return;
-    if (TERMINAL_STATUSES.has(activeRun.status)) return;
-
-    const id = setInterval(() => {
-      fetchRun(activeRun.runId);
-    }, POLL_INTERVAL_MS);
-
-    return () => clearInterval(id);
-  }, [activeRun?.runId, activeRun?.status, activeTab, fetchRun]);
+  // Note: live task updates are driven entirely by SSE (taskStatus events → fetchRun).
+  // useSse also re-fetches on reconnect to catch any events missed during a gap.
 
   if (!activeRun) return null;
 
@@ -98,7 +81,7 @@ export default function RunDetailTabs() {
           {activeRun.tasks.length === 0
             ? <p className="text-sm text-zinc-500">No tasks yet.</p>
             : activeRun.tasks.map((t) => (
-                <TaskCard key={t.taskId} task={t} runId={activeRun.runId} />
+                <TaskCard key={t.taskId} task={t} runId={activeRun.runId} runStatus={activeRun.status} />
               ))
           }
         </Tabs.Content>

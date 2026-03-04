@@ -6,6 +6,7 @@ import CommandPalette from './CommandPalette';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import Toast from '@/components/shared/Toast';
 import { useUiStore } from '@/stores/useUiStore';
+import ChangePasswordModal from '@/components/auth/ChangePasswordModal';
 
 export default function AppLayout() {
   useKeyboardShortcuts();
@@ -34,6 +35,9 @@ export default function AppLayout() {
       </div>
 
       <CommandPalette />
+
+      {/* Force password change modal (blocks all routes until resolved) */}
+      <ChangePasswordModal />
 
       {/* Toast container */}
       <div className="fixed bottom-4 right-4 z-50 space-y-2">

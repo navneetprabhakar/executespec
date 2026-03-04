@@ -5,6 +5,9 @@ import com.navneet.agentteam.api.dto.ApprovalRequest;
 import com.navneet.agentteam.api.dto.RunDetail;
 import com.navneet.agentteam.api.dto.RunRequest;
 import com.navneet.agentteam.api.dto.RunSummary;
+import com.navneet.agentteam.auth.security.AppUserDetails;
+import com.navneet.agentteam.auth.security.RunVisibilitySpec;
+import com.navneet.agentteam.auth.service.TierEnforcementService;
 import com.navneet.agentteam.deployment.WorkspaceExportService;
 import com.navneet.agentteam.deployment.WorkspaceFileService;
 import com.navneet.agentteam.harness.PipelineHarness;
@@ -25,6 +28,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -48,19 +52,47 @@ public class RunController {
     private final WorkspaceExportService workspaceExportService;
     private final WorkspaceFileService workspaceFileService;
     private final AgentMessageRepository agentMessageRepository;
+    private final TierEnforcementService tierEnforcementService;
+    private final RunVisibilitySpec runVisibilitySpec;
 
     /** Submit a new run. Returns immediately with the run summary (status may be PLANNING or QUEUED). */
     @PostMapping
-    public ResponseEntity<RunSummary> submit(@RequestBody RunRequest req) {
+    public ResponseEntity<RunSummary> submit(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody RunRequest req) {
         log.info("POST /api/runs — goal: {}", req.userRequest());
+
+        // Enforce tier quota (throws 429 if over limit)
+        if (userDetails != null) {
+            tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+        }
+
+        // Extract per-user GitHub credentials to pass into the run
+        String githubPat   = userDetails != null ? userDetails.getUser().getGithubPat()   : null;
+        String githubOwner = userDetails != null ? userDetails.getUser().getGithubOwner() : null;
+
         PipelineRun run = harness.submitRun(
             req.userRequest(),
             req.source() != null ? req.source() : "REST",
             req.repoUrl(),
-            req.repoMode()
+            req.repoMode(),
+            githubPat,
+            githubOwner
         );
-        // Apply optional overrides that the front-end may send
+
+        // Stamp ownership and optional org/project association
         boolean dirty = false;
+        if (userDetails != null) {
+            run.setCreatedByUserId(userDetails.getUser().getId());
+            run.setOrgId(userDetails.getUser().getOrgId());
+            dirty = true;
+        }
+        if (req.projectId() != null && !req.projectId().isBlank()) {
+            run.setProjectId(req.projectId());
+            dirty = true;
+        }
+
+        // Apply optional overrides that the front-end may send
         if (Boolean.TRUE.equals(req.skipApproval())) {
             run.setSkipApproval(true);
             dirty = true;
@@ -74,16 +106,27 @@ public class RunController {
         if (dirty) {
             run = stateStore.save(run);
         }
+
+        // Increment run counter after successful submission
+        if (userDetails != null) {
+            tierEnforcementService.incrementRunCount(userDetails.getUser().getId());
+        }
+
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));
     }
 
-    /** List runs, optionally filtered by status. Paginated (default page=0, size=20). */
+    /** List runs, optionally filtered by status and/or projectId. Paginated (default page=0, size=20). */
     @GetMapping
     public ResponseEntity<List<RunSummary>> list(
+            @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String projectId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        Page<PipelineRun> runs = stateStore.listRuns(status, PageRequest.of(page, size));
+        var visSpec = userDetails != null
+                ? runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember())
+                : null;
+        Page<PipelineRun> runs = stateStore.listRuns(status, projectId, PageRequest.of(page, size), visSpec);
         return ResponseEntity.ok(runs.getContent().stream().map(mapper::toSummary).toList());
     }
 

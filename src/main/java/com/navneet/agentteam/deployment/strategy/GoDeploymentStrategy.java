@@ -17,7 +17,7 @@ import java.nio.file.Path;
  * The compiled binary is expected to bind to {@code 0.0.0.0:$PORT} (defaults to 8080).
  */
 @Component
-@Order(3)
+@Order(5)
 public class GoDeploymentStrategy implements DeploymentStrategy {
 
     @Override

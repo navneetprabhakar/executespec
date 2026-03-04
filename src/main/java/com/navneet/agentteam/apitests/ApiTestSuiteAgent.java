@@ -6,6 +6,7 @@ import com.navneet.agentteam.sse.SseBroadcaster;
 import com.navneet.agentteam.state.StateStore;
 import com.navneet.agentteam.state.entity.PipelineRun;
 import com.navneet.agentteam.tool.FileSystemTool;
+import com.navneet.agentteam.tool.GitTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -46,6 +47,7 @@ import java.util.stream.Stream;
 public class ApiTestSuiteAgent {
 
     private final FileSystemTool fsTool;
+    private final GitTool gitTool;
     private final LlmRouter llmRouter;
     private final SseBroadcaster broadcaster;
     private final StateStore stateStore;
@@ -128,11 +130,18 @@ public class ApiTestSuiteAgent {
             return;
         }
 
-        // Persist spec + update run
+        // Persist spec to filesystem
         fsTool.writeFile(runId, "api-docs/openapi.yaml", yaml);
+
+        // Commit the spec to git on the current branch (main, post-merge).
+        // This prevents a retried worker's `git add .` from accidentally staging
+        // the untracked file onto a task branch, which would cause merge conflicts
+        // or silently overwrite the spec during subsequent retry merges.
+        gitTool.commitIfDirty(runId, "chore: update api-docs/openapi.yaml [auto]");
+
         stateStore.markApiSpecReady(runId);
         broadcaster.emit(runId, RunEvent.apiSpecReady(runId));
-        log.info("ApiTestSuiteAgent: OpenAPI spec written for run {}", runId);
+        log.info("ApiTestSuiteAgent: OpenAPI spec written and committed for run {}", runId);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

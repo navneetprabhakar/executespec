@@ -25,7 +25,7 @@ import java.nio.file.Path;
  * </ol>
  */
 @Component
-@Order(4)
+@Order(6)
 @Slf4j
 public class RubyDeploymentStrategy implements DeploymentStrategy {
 

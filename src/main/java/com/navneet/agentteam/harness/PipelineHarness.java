@@ -176,11 +176,23 @@ public class PipelineHarness {
      * queued (status=QUEUED) and starts as soon as a slot is released.
      */
     public PipelineRun submitRun(String userRequest, String source,
-                                  String repoUrl, String repoMode) {
+                                  String repoUrl, String repoMode,
+                                  String githubPat, String githubOwner) {
         PipelineRun run = stateStore.createRun(userRequest, source, repoUrl, repoMode,
             props.getRoles().getPlanner(),
             props.getRoles().getWorker(),
             props.getRoles().getReviewer());
+
+        // Capture submitting user's GitHub credentials onto the run for later push/clone
+        if (githubPat != null && !githubPat.isBlank()) {
+            run.setGithubPat(githubPat);
+        }
+        if (githubOwner != null && !githubOwner.isBlank()) {
+            run.setGithubOwner(githubOwner);
+        }
+        if ((githubPat != null && !githubPat.isBlank()) || (githubOwner != null && !githubOwner.isBlank())) {
+            stateStore.save(run);
+        }
 
         String runId = run.getRunId();
 
@@ -249,7 +261,7 @@ public class PipelineHarness {
         // Clear currentGate immediately so the UI banner disappears on next poll.
         // (markApproved() also clears it but runs asynchronously on the pipeline thread,
         //  causing a race where the frontend refetch still sees the old gate value.)
-        stateStore.findRun(runId).ifPresent(r -> { r.setCurrentGate(null); stateStore.save(r); });
+        clearGateSync(runId);
         try {
             broadcaster.emit(runId, RunEvent.gateResolved(runId, approved, comment));
         } catch (Exception e) {
@@ -278,7 +290,7 @@ public class PipelineHarness {
         String gateEventId = mergeGateEventIds.remove(runId);
         if (gateEventId != null) stateStore.recordGateResolved(gateEventId, approved);
         // Clear currentGate immediately — same race-condition fix as resolvePlanGate.
-        stateStore.findRun(runId).ifPresent(r -> { r.setCurrentGate(null); stateStore.save(r); });
+        clearGateSync(runId);
         try {
             broadcaster.emit(runId, RunEvent.gateResolved(runId, approved, comment));
         } catch (Exception e) {
@@ -309,10 +321,22 @@ public class PipelineHarness {
     private void executeRunAsync(String runId, String userRequest) {
         log.info("Executing async run {}", runId);
 
-        // Initialise this run's isolated workspace (workspace/{runId}/) before doing anything else
-        workspaceInitService.ensureRunWorkspace(runId);
-
+        // Initialise this run's isolated workspace (workspace/{runId}/) before doing anything else.
+        // For EXISTING mode: clone the source repo so agents work against real code.
+        // For all other modes: init a fresh empty git workspace.
         PipelineRun run = stateStore.findRun(runId).orElseThrow();
+        if ("EXISTING".equals(run.getRepoMode())
+                && run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
+            try {
+                workspaceInitService.cloneFromRepo(runId, run.getRepoUrl(), run.getGithubPat());
+            } catch (Exception cloneEx) {
+                stateStore.markFailed(runId, "Failed to clone source repo: " + cloneEx.getMessage());
+                log.error("Clone failed for run {} from {}: {}", runId, run.getRepoUrl(), cloneEx.getMessage());
+                return;
+            }
+        } else {
+            workspaceInitService.ensureRunWorkspace(runId);
+        }
         broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
         eventPublisher.publishEvent(new PipelineEvent.RunStarted(runId));
 
@@ -671,7 +695,14 @@ public class PipelineHarness {
         // Nothing configured — skip silently
         if ((repoMode == null || "NONE".equals(repoMode)) && repoUrl == null) return;
 
-        String pat = props.getGithub() != null ? props.getGithub().getPat() : null;
+        // Prefer the run's per-user PAT; fall back to system-level PAT
+        String pat = (run.getGithubPat() != null && !run.getGithubPat().isBlank())
+                ? run.getGithubPat()
+                : (props.getGithub() != null ? props.getGithub().getPat() : null);
+        String owner = (run.getGithubOwner() != null && !run.getGithubOwner().isBlank())
+                ? run.getGithubOwner()
+                : (props.getGithub() != null ? props.getGithub().getDefaultOwner() : null);
+
         if (pat == null || pat.isBlank()) {
             log.warn("GitHub PAT not configured — skipping push for run {}", run.getRunId());
             return;
@@ -679,8 +710,8 @@ public class PipelineHarness {
 
         String remote = repoUrl;
         if ("NEW".equals(repoMode) && (repoUrl == null || repoUrl.isBlank())) {
-            log.info("Creating new GitHub repo for run {}", run.getRunId());
-            remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private");
+            log.info("Creating new GitHub repo for run {} (owner={})", run.getRunId(), owner);
+            remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
             if (remote != null) {
                 run.setRepoUrl(remote);
                 stateStore.save(run);
@@ -716,10 +747,11 @@ public class PipelineHarness {
             throw new IllegalArgumentException("Task " + taskId + " does not belong to run " + runId);
         }
         String ts = task.getStatus();
-        if (!"PARTIAL".equals(ts) && !"BLOCKED".equals(ts) && !"FAILED".equals(ts)) {
+        if (!"PARTIAL".equals(ts) && !"BLOCKED".equals(ts) && !"FAILED".equals(ts)
+                && !"PENDING".equals(ts) && !"LOCKED".equals(ts)) {
             throw new IllegalStateException(
                 "Task " + taskId + " is not retryable (status: " + ts
-                + "). Only PARTIAL, BLOCKED, or FAILED tasks can be retried.");
+                + "). Only PARTIAL, BLOCKED, FAILED, PENDING, or LOCKED tasks can be retried.");
         }
         String rs = run.getStatus();
         if (!"PARTIAL".equals(rs) && !"FAILED".equals(rs)) {
@@ -754,15 +786,19 @@ public class PipelineHarness {
                 "complete".equalsIgnoreCase(retryReport.getStatus())
                     ? "COMPLETE" : retryReport.getStatus().toUpperCase()));
 
-            // ── 2. Auto-run any other PARTIAL/BLOCKED worker tasks ─────────
+            // ── 2. Auto-run any other incomplete worker tasks ──────────────
             // After one task is retried, check whether other worker tasks are
-            // still incomplete. If so, reset and run them all before proceeding
-            // to reviewer — otherwise the merge gate would open prematurely again.
+            // still incomplete (PARTIAL, BLOCKED, FAILED, PENDING, or LOCKED).
+            // Reset and run them all before proceeding to reviewer — otherwise
+            // the merge gate would open prematurely with missing work.
             List<AgentTask> otherIncomplete = stateStore.getAllTasks(runId).stream()
                 .filter(t -> !taskId.equals(t.getTaskId()))
                 .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
-                .filter(t -> "PARTIAL".equals(t.getStatus()) || "BLOCKED".equals(t.getStatus())
-                             || "FAILED".equals(t.getStatus()))
+                .filter(t -> {
+                    String s = t.getStatus();
+                    return "PARTIAL".equals(s) || "BLOCKED".equals(s) || "FAILED".equals(s)
+                        || "PENDING".equals(s) || "LOCKED".equals(s);
+                })
                 .toList();
 
             if (!otherIncomplete.isEmpty()) {
@@ -980,7 +1016,8 @@ public class PipelineHarness {
             event.userRequest(),
             event.sourceType(),
             event.repoUrl(),
-            event.repoMode()
+            event.repoMode(),
+            null, null   // github credentials not available for auto-restarts
         );
         if (event.autoRestartCount() > 0) {
             newRun.setAutoRestartCount(event.autoRestartCount());
@@ -1003,7 +1040,8 @@ public class PipelineHarness {
             original.getUserRequest(),
             original.getSourceType() != null ? original.getSourceType() : "RECOVERY",
             original.getRepoUrl(),
-            original.getRepoMode()
+            original.getRepoMode(),
+            original.getGithubPat(), original.getGithubOwner()   // carry credentials forward
         );
         broadcaster.emit(original.getRunId(), RunEvent.log(
             original.getRunId(), null,
@@ -1030,7 +1068,8 @@ public class PipelineHarness {
             original.getUserRequest(),
             original.getSourceType() != null ? original.getSourceType() : "RECOVERY",
             original.getRepoUrl(),
-            original.getRepoMode()
+            original.getRepoMode(),
+            original.getGithubPat(), original.getGithubOwner()   // carry credentials forward
         );
         // Propagate the restart counter so we don't loop forever
         newRun.setAutoRestartCount(newCount);
@@ -1050,7 +1089,7 @@ public class PipelineHarness {
      * Same as submitRun but sets skipApproval and source on the PipelineRun.
      */
     public PipelineRun submitIntegrationRun(String userRequest, String source, boolean skipApproval) {
-        PipelineRun run = submitRun(userRequest, source, null, null);
+        PipelineRun run = submitRun(userRequest, source, null, null, null, null);
         // Set skipApproval flag so executeRunAsync() auto-approves the plan gate
         run.setSkipApproval(skipApproval);
         stateStore.save(run);
@@ -1178,5 +1217,14 @@ public class PipelineHarness {
         }
 
         return sb.toString().trim();
+    }
+
+    /**
+     * Clears {@code currentGate} on a run immediately (synchronously), so the UI
+     * banner disappears on the next poll without waiting for the async pipeline thread.
+     * Both {@link #resolvePlanGate} and {@link #resolveMergeGate} share this fix.
+     */
+    private void clearGateSync(String runId) {
+        stateStore.findRun(runId).ifPresent(r -> { r.setCurrentGate(null); stateStore.save(r); });
     }
 }

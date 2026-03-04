@@ -90,7 +90,7 @@ agent:
     provider: anthropic
   deployment:
     enabled: true
-    gcp-project: ${GCP_PROJECT:my-gcp-project}
+    gcp-project: ${GCP_PROJECT:cs-poc-wndx76juxpe1pups25gw6tj}
     gcp-region: us-central1
     artifact-registry:
       repository: agent-demos
@@ -171,6 +171,36 @@ agent:
       auto-resolve: false
       dashboard-url: http://localhost:8080
       skip-approval: false
+
+app:
+  # Gmail API OAuth2 sender config (replaces SMTP)
+  gmail:
+    enabled: ${GMAIL_ENABLED:true}
+    # Path to the credentials.json downloaded from Google Cloud Console
+    credentials-path: ${GMAIL_CREDENTIALS_PATH:credentials.json}
+    # Where to persist OAuth tokens after the first browser consent (never commit this dir)
+    tokens-dir: ${GMAIL_TOKENS_DIR:${user.home}/.executespec/gmail-tokens}
+    # Gmail address that will appear as From: — must be the authenticated account
+    sender-email: ${GMAIL_SENDER_EMAIL:admin@executespec.ai}
+    app-name: executespec
+  mail:
+    base-url: ${APP_BASE_URL:http://localhost:5173}
+  jwt:
+    secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}
+    access-token-expiry-minutes: 1440
+    refresh-token-expiry-days: 7
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  tiers:
+    free:
+      monthly-run-limit: 10
+      concurrent-run-limit: 1
+    pro:
+      monthly-run-limit: 100
+      concurrent-run-limit: 3
+    enterprise:
+      monthly-run-limit: -1    # -1 = unlimited
+      concurrent-run-limit: 10
 
 logging:
   level:

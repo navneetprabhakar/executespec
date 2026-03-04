@@ -16,5 +16,7 @@ public record RunSummary(
     Instant startedAt,
     Instant completedAt,
     String repoUrl,
-    String repoMode
+    String repoMode,
+    /** Project this run belongs to, or null for un-grouped runs. */
+    String projectId
 ) {}

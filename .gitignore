@@ -26,6 +26,7 @@ application-local.yaml
 .env.local
 .env.production
 *.env
+credentials.json
 
 # Workspace (agent-generated files)
 workspace/

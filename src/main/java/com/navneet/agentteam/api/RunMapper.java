@@ -1,5 +1,7 @@
 package com.navneet.agentteam.api;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.agentteam.api.dto.RunDetail;
 import com.navneet.agentteam.api.dto.RunSummary;
 import com.navneet.agentteam.api.dto.TaskSummary;
@@ -17,6 +19,7 @@ import java.util.List;
 public class RunMapper {
 
     private final IntegrationRunRepository integrationRunRepository;
+    private final ObjectMapper objectMapper;
 
     public RunSummary toSummary(PipelineRun r) {
         return new RunSummary(
@@ -33,7 +36,8 @@ public class RunMapper {
             r.getStartedAt(),
             r.getCompletedAt(),
             r.getRepoUrl(),
-            r.getRepoMode()
+            r.getRepoMode(),
+            r.getProjectId()
         );
     }
 
@@ -103,7 +107,30 @@ public class RunMapper {
             t.getOutputTokens() != null ? t.getOutputTokens().longValue() : null,
             t.getDurationMs(),
             t.getStartedAt(),
-            t.getCompletedAt()
+            t.getCompletedAt(),
+            extractFailureReason(t)
         );
+    }
+
+    /**
+     * Pulls a human-readable failure reason from the task's stored report JSON
+     * (WorkerReport#blockers for BLOCKED, WorkerReport#selfReview for PARTIAL)
+     * or falls back to the lastLlmFailure flag set by the recovery system.
+     */
+    private String extractFailureReason(AgentTask t) {
+        if (t.getWorkerReportJson() != null && !t.getWorkerReportJson().isBlank()) {
+            try {
+                JsonNode report = objectMapper.readTree(t.getWorkerReportJson());
+                // BLOCKED tasks: "blockers" field
+                String blockers = report.path("blockers").asText("");
+                if (!blockers.isBlank()) return blockers;
+                // PARTIAL tasks: "self_review" (snake_case from WorkerReport)
+                String selfReview = report.path("self_review").asText("");
+                if (!selfReview.isBlank()) return selfReview;
+            } catch (Exception ignored) {}
+        }
+        // Fallback: lastLlmFailure (set by blockTask / recovery)
+        String last = t.getLastLlmFailure();
+        return (last != null && !last.isBlank()) ? last : null;
     }
 }

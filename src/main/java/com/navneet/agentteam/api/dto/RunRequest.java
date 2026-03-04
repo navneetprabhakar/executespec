@@ -18,5 +18,7 @@ public record RunRequest(
     /** When true, automatically approve the plan gate without human review. */
     Boolean skipApproval,
     /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
-    String modelName
+    String modelName,
+    /** Optional project ID to associate this run with (org members only). */
+    String projectId
 ) {}
