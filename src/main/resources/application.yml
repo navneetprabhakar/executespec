@@ -8,6 +8,16 @@ management:
       show-details: never   # Don't expose DB credentials in health response
 
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 10
+          min-idle: 2
+
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:agentteam}
     driver-class-name: org.postgresql.Driver
