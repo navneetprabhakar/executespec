@@ -5,6 +5,7 @@ import com.navneet.agentteam.state.StateStore;
 import com.navneet.agentteam.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -45,8 +46,9 @@ public class WorkspaceArchiveJob {
     private final WorkspaceExportService exportService;
     private final GcsWorkspaceStore      gcsStore;
 
-    /** Runs every hour at the top of the hour. */
+    /** Runs every hour at the top of the hour. ShedLock prevents duplicate execution across MIG instances. */
     @Scheduled(cron = "0 0 * * * *")
+    @SchedulerLock(name = "WorkspaceArchiveJob", lockAtMostFor = "50m", lockAtLeastFor = "5m")
     public void archiveOldWorkspaces() {
         String bucket = props.workspace().gcsBucket();
         if (bucket == null || bucket.isBlank()) {
