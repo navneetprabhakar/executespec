@@ -2,9 +2,11 @@ package com.navneet.agentteam.harness;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.agentteam.agent.ApiKeyResolver;
 import com.navneet.agentteam.agent.CostEstimator;
 import com.navneet.agentteam.agent.PlannerAgent;
 import com.navneet.agentteam.agent.ReviewerAgent;
+import com.navneet.agentteam.agent.RunKeyStore;
 import com.navneet.agentteam.agent.model.ReviewIssue;
 import com.navneet.agentteam.agent.model.ReviewReport;
 import com.navneet.agentteam.agent.model.TaskPlan;
@@ -67,6 +69,10 @@ public class PipelineHarness {
     // ── Tier 8: Compile agent + Preview agent ─────────────────────────────────
     private final com.navneet.agentteam.compiler.CompilerAgent compilerAgent;
     private final PreviewAgent previewAgent;
+
+    // ── Multi-tenant API key routing ──────────────────────────────────────────
+    private final ApiKeyResolver apiKeyResolver;
+    private final RunKeyStore runKeyStore;
 
     // ── Async infrastructure ──────────────────────────────────────────────────
 
@@ -654,6 +660,12 @@ public class PipelineHarness {
         //   3. Default                           — init a fresh empty git workspace
         PipelineRun run = stateStore.findRun(runId).orElseThrow();
 
+        // ── Resolve per-user/org API keys and register for this run ──────────
+        // Resolution hierarchy: user key → org key → system key (application.yml).
+        // Keys are stored in RunKeyStore so LlmRouter can use them without any agent
+        // signature changes. Cleaned up in the finally block below.
+        runKeyStore.put(runId, apiKeyResolver.resolve(run.getCreatedByUserId()));
+
         if (run.getSourceRunId() != null && !run.getSourceRunId().isBlank()) {
             try {
                 log.info("Copying workspace from source run {} to iteration run {}",
@@ -990,6 +1002,7 @@ public class PipelineHarness {
             eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
         } finally {
             broadcaster.complete(runId);
+            runKeyStore.remove(runId);  // clean up per-run API keys
         }
     }
 
@@ -1186,6 +1199,10 @@ public class PipelineHarness {
     private void runRetryAsync(PipelineRun run, AgentTask task) {
         String runId  = run.getRunId();
         String taskId = task.getTaskId();
+
+        // Re-resolve API keys so retries pick up any keys the user may have added since the initial run.
+        runKeyStore.put(runId, apiKeyResolver.resolve(run.getCreatedByUserId()));
+
         try {
             // ── 1. Lock + run the retried worker task ──────────────────────
             String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
@@ -1426,6 +1443,7 @@ public class PipelineHarness {
             broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
         } finally {
             broadcaster.complete(runId);
+            runKeyStore.remove(runId);  // clean up per-run API keys
         }
     }
 

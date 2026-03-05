@@ -4,6 +4,9 @@ import com.navneet.agentteam.deployment.DeploymentProperties;
 import com.navneet.agentteam.integration.IntegrationProperties;
 import com.navneet.agentteam.harness.PipelineHarness;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
+import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
+import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
 import org.springframework.boot.Banner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -14,7 +17,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.util.Scanner;
 
-@SpringBootApplication
+@SpringBootApplication(exclude = {
+    GoogleGenAiChatAutoConfiguration.class,
+    GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
+    GoogleGenAiTextEmbeddingAutoConfiguration.class
+})
 @EnableScheduling
 @EnableAsync
 @EnableConfigurationProperties({DeploymentProperties.class, IntegrationProperties.class})

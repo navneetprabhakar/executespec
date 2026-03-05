@@ -1,10 +1,14 @@
 package com.navneet.agentteam.config;
 
+import com.google.genai.Client;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.google.genai.GoogleGenAiChatModel;
+import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -68,5 +72,25 @@ public class AgentModelConfig {
             case "openai"    -> ctx.getBean(OpenAiChatModel.class);
             default -> throw new IllegalArgumentException("Unknown provider: " + provider);
         };
+    }
+
+    /**
+     * System-level Google Gemini bean — only created when GOOGLE_API_KEY is configured.
+     * Used as the 3rd fallback provider in LlmRouter when no user/org key is present.
+     * When absent, LlmRouter gracefully skips Gemini in the fallback chain.
+     */
+    @Bean
+    public GoogleGenAiChatModel googleGenAiChatModel(
+            @Value("${spring.ai.google.genai.api-key:}") String apiKey) {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.info("[AgentModelConfig] No GOOGLE_API_KEY configured — system Gemini fallback disabled");
+            return null;
+        }
+        log.info("[AgentModelConfig] Creating system Gemini bean (gemini-2.0-flash)");
+        Client client = Client.builder().apiKey(apiKey).build();
+        return GoogleGenAiChatModel.builder()
+                .genAiClient(client)
+                .defaultOptions(GoogleGenAiChatOptions.builder().model("gemini-2.0-flash").build())
+                .build();
     }
 }

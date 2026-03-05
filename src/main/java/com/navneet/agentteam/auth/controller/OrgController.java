@@ -133,4 +133,24 @@ public class OrgController {
         invitationService.acceptInvitation(token, userId);
         return ResponseEntity.ok(Map.of("message", "Invitation accepted successfully"));
     }
+
+    // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────
+
+    record OrgAiKeySettingsRequest(String anthropicApiKey, String openAiApiKey, String geminiApiKey) {}
+
+    /**
+     * Saves org-wide AI provider API keys. Used by all org members who have not set a personal
+     * key. Resolution order: user key → org key → system key (application.yml).
+     * Raw keys are never returned — only boolean flags appear in OrgDto.
+     */
+    @PutMapping("/me/settings/ai-keys")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<OrgDto> updateOrgAiKeySettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody OrgAiKeySettingsRequest req) {
+        String orgId = userDetails.getUser().getOrgId();
+        if (orgId == null) return ResponseEntity.badRequest().build();
+        return ResponseEntity.ok(orgService.updateAiKeySettings(
+                orgId, req.anthropicApiKey(), req.openAiApiKey(), req.geminiApiKey()));
+    }
 }
