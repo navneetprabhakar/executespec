@@ -11,13 +11,13 @@ const ROLE_BADGES: Record<string, string> = {
 };
 
 const MODEL_ROLES: Record<string, string> = {
-  'claude-opus-4-6':           'Architect',
-  'claude-sonnet-4-6':         'Workhorse',
-  'claude-haiku-4-5-20251001': 'Utility',
-  'gpt-4o':                    'Capable',
-  'gpt-4o-mini':               'Utility',
-  'gemini-2.5-pro':            'Architect',
-  'gemini-2.0-flash':          'Workhorse',
+  'claude-opus-4-6':                        'Architect',
+  'claude-sonnet-4-6':                      'Workhorse',
+  'claude-haiku-4-5-20251001':              'Utility',
+  'gpt-4o':                                 'Capable (3rd)',
+  'gpt-4o-mini':                            'Utility (3rd)',
+  'gemini-3.1-pro-preview-customtools':     'Architect (2nd)',
+  'gemini-3.1-flash-lite-preview':          'Fast (2nd)',
 };
 
 interface EditCell {

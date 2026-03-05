@@ -31,28 +31,38 @@ public class ModelPricingInitializer {
     public void seed() {
         // Each entry: provider, model, input $/1M, output $/1M, notes
         // Notes describe the role the model plays in this pipeline.
+        // Fallback order: Anthropic (1st) → Google Gemini (2nd) → OpenAI (3rd)
         List<Object[]> defaults = List.of(
-            // ── Anthropic (prices per 1M tokens, Anthropic public pricing Mar 2026) ──────
-            new Object[]{
-                "anthropic", "claude-sonnet-4-6", 3.00, 15.00,
-                "✅ ACTIVE — Workers (CAPABLE chain). With prompt caching: writes 1.25x, reads 0.10x."
-            },
+            // ── Anthropic — primary provider (Anthropic public pricing Mar 2026) ─────────
             new Object[]{
                 "anthropic", "claude-opus-4-6", 15.00, 75.00,
-                "✅ ACTIVE — Planner (ARCHITECT chain). With prompt caching: writes 1.25x, reads 0.10x."
+                "✅ PRIMARY — Planner (ARCHITECT chain). With prompt caching: writes 1.25x, reads 0.10x."
+            },
+            new Object[]{
+                "anthropic", "claude-sonnet-4-6", 3.00, 15.00,
+                "✅ PRIMARY — Workers (CAPABLE chain). With prompt caching: writes 1.25x, reads 0.10x."
             },
             new Object[]{
                 "anthropic", "claude-haiku-4-5-20251001", 0.80, 4.00,
-                "✅ ACTIVE — Reviewer + context agent + optimiser (UTILITY chain)."
+                "✅ PRIMARY — Reviewer + context agent + optimiser (UTILITY chain)."
             },
-            // ── OpenAI ───────────────────────────────────────────────────────
+            // ── Google Gemini — 2nd fallback (Google AI pricing Mar 2026) ────────────────
             new Object[]{
-                "openai", "gpt-4o-mini", 0.15, 0.60,
-                "OpenAI fallback — provider outage / rate-limit auto-switch (UTILITY chain)"
+                "google", "gemini-3.1-pro-preview-customtools", 2.00, 12.00,
+                "2nd fallback — Anthropic outage/rate-limit auto-switch (ARCHITECT chain). 1M ctx, 66K output. Released Feb 2026."
             },
+            new Object[]{
+                "google", "gemini-3.1-flash-lite-preview", 0.25, 1.50,
+                "2nd fallback — Anthropic outage/rate-limit auto-switch (CAPABLE + UTILITY chains). Fastest Gemini 3 model. Released Mar 2026."
+            },
+            // ── OpenAI — 3rd fallback (OpenAI public pricing Mar 2026) ───────────────────
             new Object[]{
                 "openai", "gpt-4o", 2.50, 10.00,
-                "OpenAI fallback — provider outage / rate-limit auto-switch (CAPABLE + ARCHITECT chains)"
+                "3rd fallback — Gemini outage/rate-limit auto-switch (CAPABLE + ARCHITECT chains)"
+            },
+            new Object[]{
+                "openai", "gpt-4o-mini", 0.15, 0.60,
+                "3rd fallback — Gemini outage/rate-limit auto-switch (UTILITY chain)"
             }
         );
 

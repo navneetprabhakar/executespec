@@ -50,37 +50,37 @@ public class LlmRouter {
 
     public enum FallbackMode { IMMEDIATE, TASK_BOUNDARY }
 
-    // ── Provider fallback chains (3-provider: Anthropic → OpenAI → Google Gemini) ─
+    // ── Provider fallback chains (3-provider: Anthropic → Gemini → OpenAI) ──────
 
     private static final List<String[]> ARCHITECT_CHAIN = List.of(
         new String[]{"anthropic", "claude-opus-4-6"},
-        new String[]{"openai",    "gpt-4o"},
-        new String[]{"google",    "gemini-2.5-pro"}
+        new String[]{"google",    "gemini-3.1-pro-preview-customtools"},
+        new String[]{"openai",    "gpt-4o"}
     );
 
     private static final List<String[]> CAPABLE_CHAIN = List.of(
         new String[]{"anthropic", "claude-sonnet-4-6"},
-        new String[]{"openai",    "gpt-4o"},
-        new String[]{"google",    "gemini-2.0-flash"}
+        new String[]{"google",    "gemini-3.1-flash-lite-preview"},
+        new String[]{"openai",    "gpt-4o"}
     );
 
     private static final List<String[]> UTILITY_CHAIN = List.of(
         new String[]{"anthropic", "claude-haiku-4-5-20251001"},
-        new String[]{"openai",    "gpt-4o-mini"},
-        new String[]{"google",    "gemini-2.0-flash"}
+        new String[]{"google",    "gemini-3.1-flash-lite-preview"},
+        new String[]{"openai",    "gpt-4o-mini"}
     );
 
     private static final Map<String, List<String[]>> MODEL_CHAIN = Map.ofEntries(
-        Map.entry("claude-opus-4-6",           ARCHITECT_CHAIN),
-        Map.entry("claude-opus-4-5",           ARCHITECT_CHAIN),  // legacy alias
-        Map.entry("claude-sonnet-4-6",         CAPABLE_CHAIN),
-        Map.entry("claude-sonnet-4-5",         CAPABLE_CHAIN),    // legacy alias
-        Map.entry("claude-haiku-4-5-20251001", UTILITY_CHAIN),
-        Map.entry("claude-haiku-4-5",          UTILITY_CHAIN),    // legacy alias
-        Map.entry("gpt-4o-mini",               UTILITY_CHAIN),
-        Map.entry("gpt-4o",                    CAPABLE_CHAIN),
-        Map.entry("gemini-2.5-pro",            ARCHITECT_CHAIN),
-        Map.entry("gemini-2.0-flash",          CAPABLE_CHAIN)
+        Map.entry("claude-opus-4-6",                        ARCHITECT_CHAIN),
+        Map.entry("claude-opus-4-5",                        ARCHITECT_CHAIN),  // legacy alias
+        Map.entry("claude-sonnet-4-6",                      CAPABLE_CHAIN),
+        Map.entry("claude-sonnet-4-5",                      CAPABLE_CHAIN),    // legacy alias
+        Map.entry("claude-haiku-4-5-20251001",              UTILITY_CHAIN),
+        Map.entry("claude-haiku-4-5",                       UTILITY_CHAIN),    // legacy alias
+        Map.entry("gpt-4o-mini",                            UTILITY_CHAIN),
+        Map.entry("gpt-4o",                                 CAPABLE_CHAIN),
+        Map.entry("gemini-3.1-pro-preview-customtools",     ARCHITECT_CHAIN),
+        Map.entry("gemini-3.1-flash-lite-preview",          CAPABLE_CHAIN)
     );
 
     private final ApplicationContext ctx;
