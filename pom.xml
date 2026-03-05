@@ -147,6 +147,24 @@
       <version>2.40.0</version>
     </dependency>
 
+    <!-- Redis (Lettuce client) — gate signaling across instances + ShedLock provider -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+
+    <!-- ShedLock — distributed scheduled-job locking (prevents duplicate WorkspaceArchiveJob) -->
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-spring</artifactId>
+      <version>5.14.0</version>
+    </dependency>
+    <dependency>
+      <groupId>net.javacrumbs.shedlock</groupId>
+      <artifactId>shedlock-provider-redis-spring</artifactId>
+      <version>5.14.0</version>
+    </dependency>
+
     <!-- Google Gmail API (OAuth2 send — replaces SMTP) -->
     <dependency>
       <groupId>com.google.apis</groupId>
