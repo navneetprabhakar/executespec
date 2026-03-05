@@ -459,7 +459,7 @@ public class PipelineHarness {
                 "Cannot reopen merge gate: some tasks are not COMPLETE. Retry them first.");
 
         final PipelineRun frozenRun = run;
-        executor.submit(() -> doReviewAndMerge(frozenRun));
+        executor.submit(() -> doReviewAndMerge(frozenRun, false));
     }
 
     /**
@@ -490,7 +490,7 @@ public class PipelineHarness {
                 && run.getFailureReason() != null
                 && run.getFailureReason().contains("Suggestions implementation failed")) {
             final PipelineRun frozenRun = run;
-            executor.submit(() -> doReviewAndMerge(frozenRun));
+            executor.submit(() -> doReviewAndMerge(frozenRun, false));
         } else {
             throw new IllegalStateException(
                 "Cannot implement suggestions in status: " + status
@@ -504,7 +504,12 @@ public class PipelineHarness {
      * Used by {@link #reopenMergeGate} and {@link #implementSuggestions} to resume runs.
      * Supports a while-loop to allow the user to click "Implement Suggestions" repeatedly.
      */
-    private void doReviewAndMerge(PipelineRun run) {
+    /**
+     * @param holdsComputeSlot true when called from {@link #executeRunAsync} (which holds a
+     *   semaphore slot); false when called from standalone handlers or {@link #runRetryAsync}
+     *   (which do not hold a slot). The gate wait releases the slot iff this flag is true.
+     */
+    private void doReviewAndMerge(PipelineRun run, boolean holdsComputeSlot) {
         String runId = run.getRunId();
         try {
             broadcaster.emit(runId, RunEvent.log(runId, "harness",
@@ -527,7 +532,21 @@ public class PipelineHarness {
 
                 CompletableFuture<MergeDecision> mergeGate = new CompletableFuture<>();
                 mergeGates.put(runId, mergeGate);
-                MergeDecision decision = mergeGate.get();
+
+                if (holdsComputeSlot) {
+                    log.info("[PipelineHarness] Run {} entering reopen-merge gate — releasing compute slot", runId);
+                    runSlots.release();
+                }
+                MergeDecision decision;
+                try {
+                    decision = mergeGate.get(); // No timeout — blocks until human acts
+                } finally {
+                    if (holdsComputeSlot) {
+                        try { runSlots.acquire(); }
+                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                        log.info("[PipelineHarness] Run {} reopen-merge gate resolved — compute slot reacquired", runId);
+                    }
+                }
 
                 if (decision == MergeDecision.MERGE) {
                     List<String> conflicted = mergeService.mergeAll(runId, stateStore.getAllTasks(runId));
@@ -718,8 +737,17 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-approved (integration run)"));
                 log.info("Plan gate auto-approved for integration run {}", runId);
             } else {
-                // No timeout — run stays AWAITING_APPROVAL until human acts.
-                planApproved = planGate.get();
+                // Release the compute slot while the run is idle at the approval gate.
+                // Gate-waiting runs must not block new submissions from starting.
+                log.info("[PipelineHarness] Run {} entering plan-approval gate — releasing compute slot", runId);
+                runSlots.release();
+                try {
+                    planApproved = planGate.get(); // No timeout — blocks until human acts
+                } finally {
+                    try { runSlots.acquire(); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                }
+                log.info("[PipelineHarness] Run {} plan-approval gate resolved — compute slot reacquired", runId);
             }
 
             if (!planApproved) {
@@ -905,8 +933,18 @@ public class PipelineHarness {
             CompletableFuture<MergeDecision> mergeGate = new CompletableFuture<>();
             mergeGates.put(runId, mergeGate);
 
-            // No timeout — run stays AWAITING_MERGE until human acts.
-            MergeDecision mergeDecision = mergeGate.get();
+            // Release the compute slot while the run is idle at the merge gate.
+            // Gate-waiting runs must not block new submissions from starting.
+            log.info("[PipelineHarness] Run {} entering merge gate — releasing compute slot", runId);
+            runSlots.release();
+            MergeDecision mergeDecision;
+            try {
+                mergeDecision = mergeGate.get(); // No timeout — blocks until human acts
+            } finally {
+                try { runSlots.acquire(); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+            log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
 
             if (mergeDecision == MergeDecision.MERGE) {
                 // Merge first, then mark COMPLETE immediately so that any subsequent failure
@@ -967,9 +1005,10 @@ public class PipelineHarness {
                 // feedback injected, then delegate to doReviewAndMerge for the next gate loop.
                 boolean ok = doSuggestionImplementation(currentRun);
                 if (ok) {
-                    // All workers succeeded — re-review and open a new gate via doReviewAndMerge
+                    // All workers succeeded — re-review and open a new gate via doReviewAndMerge.
+                    // Pass holdsComputeSlot=true: we're inside executeRunAsync which holds the slot.
                     final PipelineRun fr = stateStore.findRun(runId).orElse(currentRun);
-                    doReviewAndMerge(fr);
+                    doReviewAndMerge(fr, true);
                 }
                 // Whether ok or not, execution ends here — doReviewAndMerge handles its own
                 // broadcaster.complete() in its finally; executeRunAsync's finally will also fire
@@ -1413,11 +1452,12 @@ public class PipelineHarness {
                 eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
 
             } else if (retryDecision == MergeDecision.IMPLEMENT_SUGGESTIONS) {
-                // Delegate to doReviewAndMerge which handles the suggestions loop
+                // Delegate to doReviewAndMerge which handles the suggestions loop.
+                // runRetryAsync does NOT hold a semaphore slot — pass holdsComputeSlot=false.
                 boolean ok = doSuggestionImplementation(freshRun);
                 if (ok) {
                     final PipelineRun fr = stateStore.findRun(runId).orElse(freshRun);
-                    doReviewAndMerge(fr);
+                    doReviewAndMerge(fr, false);
                 }
 
             } else {
