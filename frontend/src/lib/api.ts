@@ -478,6 +478,10 @@ export interface OrgDto {
   apiKeysProvided: boolean;
   planExpiresAt: string | null;
   createdAt: string;
+  // Per-org AI provider key flags (raw keys never returned)
+  hasAnthropicKey?: boolean;
+  hasOpenAiKey?: boolean;
+  hasGeminiKey?: boolean;
 }
 
 export interface OrgMemberDto {
@@ -506,6 +510,13 @@ export const createOrg = (body: { name: string; domains: string[] }) =>
 
 export const updateOrg = (body: { name?: string; domains?: string[] }) =>
   req<OrgDto>('/org/me', { method: 'PUT', body: JSON.stringify(body) });
+
+/** Saves org-wide AI provider API keys (ORG_ADMIN only). Pass empty string to clear. */
+export const updateOrgAiKeySettings = (anthropicApiKey: string, openAiApiKey: string, geminiApiKey: string) =>
+  req<OrgDto>('/org/me/settings/ai-keys', {
+    method: 'PUT',
+    body: JSON.stringify({ anthropicApiKey, openAiApiKey, geminiApiKey }),
+  });
 
 export const getOrgMembers = () => req<OrgMemberDto[]>('/org/me/members');
 

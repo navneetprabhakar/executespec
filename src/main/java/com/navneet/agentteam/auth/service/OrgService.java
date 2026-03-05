@@ -210,6 +210,28 @@ public class OrgService {
         return OrgDto.from(orgRepo.save(org));
     }
 
+    // ── Org-level AI provider key management ─────────────────────────────────
+
+    @Transactional
+    public OrgDto updateAiKeySettings(String orgId, String anthropicKey, String openAiKey, String geminiKey) {
+        Org org = orgRepo.findById(orgId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        org.setAnthropicApiKey(blankToNull(anthropicKey));
+        org.setOpenAiApiKey(blankToNull(openAiKey));
+        org.setGeminiApiKey(blankToNull(geminiKey));
+        org.setUpdatedAt(Instant.now());
+        log.info("Org {} updated AI key settings — anthropic={}, openai={}, gemini={}",
+                orgId,
+                org.getAnthropicApiKey() != null,
+                org.getOpenAiApiKey() != null,
+                org.getGeminiApiKey() != null);
+        return OrgDto.from(orgRepo.save(org));
+    }
+
+    private static String blankToNull(String s) {
+        return (s != null && !s.isBlank()) ? s.strip() : null;
+    }
+
     @Transactional
     public void changeOrgTier(String orgId, String newTier, String performedBy) {
         Org org = orgRepo.findById(orgId)

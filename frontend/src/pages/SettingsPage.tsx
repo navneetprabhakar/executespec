@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   Eye, EyeOff, Github, CheckCircle, AlertCircle, Server, Database, Cpu, Clock,
-  ChevronDown, ChevronRight, Key, Layers,
+  ChevronDown, ChevronRight, Key, Layers, Building2,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import { useAuthStore } from '@/stores/useAuthStore';
+import type { OrgDto } from '@/lib/api';
 import * as api from '@/lib/api';
 
 // ── Generic expand/collapse card ──────────────────────────────────────────────
@@ -157,10 +158,19 @@ function SaveBar({
 export default function SettingsPage() {
   const { user, setUser } = useAuthStore();
   const [health, setHealth] = useState<Record<string, unknown> | null>(null);
+  const [org, setOrg] = useState<OrgDto | null>(null);
 
   useEffect(() => {
     fetch('/api/metrics').then((r) => r.json()).then(setHealth).catch(() => {});
   }, []);
+
+  // Load org data for ORG_ADMIN users so we can show org-level key status
+  const isOrgAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
+  useEffect(() => {
+    if (isOrgAdmin) {
+      api.getMyOrg().then(setOrg).catch(() => {});
+    }
+  }, [isOrgAdmin]);
 
   // ── GitHub ───────────────────────────────────────────────────────────────
 
@@ -481,6 +491,9 @@ export default function SettingsPage() {
         </form>
       </IntegrationCard>
 
+      {/* ── Organisation AI Keys (ORG_ADMIN only) ──────────────────────────── */}
+      {isOrgAdmin && <OrgAiKeyCard org={org} onSaved={setOrg} />}
+
       {/* ── System Health ───────────────────────────────────────────────────── */}
       <div>
         <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">System Health</h3>
@@ -505,6 +518,89 @@ export default function SettingsPage() {
         </div>
       </GlassPanel>
     </div>
+  );
+}
+
+// ── Org-level AI key card (ORG_ADMIN only) ───────────────────────────────────
+
+function OrgAiKeyCard({ org, onSaved }: { org: OrgDto | null; onSaved: (o: OrgDto) => void }) {
+  const [orgAnthropicKey, setOrgAnthropicKey] = useState('');
+  const [orgOpenAiKey,    setOrgOpenAiKey]    = useState('');
+  const [orgGeminiKey,    setOrgGeminiKey]    = useState('');
+  const [saving,  setSaving]  = useState(false);
+  const [msg,     setMsg]     = useState<{ ok: boolean; text: string } | null>(null);
+
+  const hasAnyOrgKey = org?.hasAnthropicKey || org?.hasOpenAiKey || org?.hasGeminiKey;
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true); setMsg(null);
+    try {
+      const updated = await api.updateOrgAiKeySettings(orgAnthropicKey, orgOpenAiKey, orgGeminiKey);
+      onSaved(updated);
+      setOrgAnthropicKey(''); setOrgOpenAiKey(''); setOrgGeminiKey('');
+      setMsg({ ok: true, text: 'Organisation AI keys saved.' });
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to save.' });
+    } finally { setSaving(false); }
+  };
+
+  const handleClear = async () => {
+    if (!confirm('Remove all organisation AI keys? Members without personal keys will fall back to system keys.')) return;
+    setSaving(true); setMsg(null);
+    try {
+      const updated = await api.updateOrgAiKeySettings('', '', '');
+      onSaved(updated);
+      setMsg({ ok: true, text: 'Organisation AI keys cleared.' });
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to clear.' });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <IntegrationCard
+      icon={<Building2 className="h-4 w-4 text-zinc-400" />}
+      title="Organisation AI Keys"
+      statusBadge={hasAnyOrgKey
+        ? <ConfiguredBadge label={`Org keys: ${[org?.hasAnthropicKey && 'Anthropic', org?.hasOpenAiKey && 'OpenAI', org?.hasGeminiKey && 'Gemini'].filter(Boolean).join(', ')}`} />
+        : <NotConfiguredBadge label="No org keys" />}
+    >
+      <p className="text-xs text-zinc-500">
+        Org-wide API keys are used by all team members who haven't set personal keys.
+        <br />
+        Resolution order: <span className="text-zinc-400">Personal key → Org key → System key</span>
+      </p>
+      <form onSubmit={handleSave} className="space-y-3">
+        <SecretField
+          label={`Anthropic API Key${org?.hasAnthropicKey ? ' ✓' : ''}`}
+          subLabel={org?.hasAnthropicKey ? '(leave blank to keep existing)' : undefined}
+          value={orgAnthropicKey}
+          onChange={setOrgAnthropicKey}
+          placeholder={org?.hasAnthropicKey ? '••••••••••••••••••••• (saved)' : 'sk-ant-…'}
+        />
+        <SecretField
+          label={`OpenAI API Key${org?.hasOpenAiKey ? ' ✓' : ''}`}
+          subLabel={org?.hasOpenAiKey ? '(leave blank to keep existing)' : undefined}
+          value={orgOpenAiKey}
+          onChange={setOrgOpenAiKey}
+          placeholder={org?.hasOpenAiKey ? '••••••••••••••••••••• (saved)' : 'sk-…'}
+        />
+        <SecretField
+          label={`Gemini API Key${org?.hasGeminiKey ? ' ✓' : ''}`}
+          subLabel={org?.hasGeminiKey ? '(leave blank to keep existing)' : undefined}
+          value={orgGeminiKey}
+          onChange={setOrgGeminiKey}
+          placeholder={org?.hasGeminiKey ? '••••••••••••••••••••• (saved)' : 'AIza…'}
+        />
+        <SaveMessage msg={msg} />
+        <SaveBar
+          saving={saving}
+          disabled={!orgAnthropicKey.trim() && !orgOpenAiKey.trim() && !orgGeminiKey.trim()}
+          onClear={hasAnyOrgKey ? handleClear : undefined}
+          clearLabel="Clear org keys"
+        />
+      </form>
+    </IntegrationCard>
   );
 }
 
