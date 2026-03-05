@@ -1,19 +1,23 @@
 # ExecuteSpec — Multi-Agent Autonomous Coding System
 
-> A human-in-the-loop pipeline that decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, reviews and merges the result, then optionally deploys to GCP Cloud Run.
+> A human-in-the-loop pipeline that decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, reviews and merges the result, then optionally deploys to GCP.
 
 ---
 
 ## Key Features
 
-- **Multi-agent pipeline** — Planner → parallel Workers → Compiler → Reviewer → merge gate
+- **Multi-agent pipeline** — Planner → parallel Workers (up to 10 concurrent) → Compiler → Reviewer → merge gate
 - **Human-in-the-loop** — two approval gates (plan gate + merge gate) with full override support
+- **Multi-instance ready** — Redis-backed gates (no in-memory CompletableFutures); LB cookie affinity for SSE; ShedLock for distributed job locking
+- **GCS workspace archiving** — completed run workspaces auto-archived to GCS after 24 h; downloads redirect to signed GCS URLs (zero server bandwidth)
 - **10-language deployment** — Spring Boot, Gradle, Node.js, Python, Go, Ruby, PHP, Rust, .NET, Static — auto-detected, auto-Dockerfiled
 - **Per-user GitHub integration** — push generated code to users' own GitHub repos; clone existing repos to start from
+- **Per-user AI keys** — users + orgs can supply their own Anthropic/OpenAI/Gemini keys (resolution: user → org → system)
 - **Auth & multi-tenancy** — JWT authentication, orgs, projects, tiers (FREE/PRO/ENTERPRISE), role-based access (ORG_ADMIN, DEVELOPER, BILLING_ADMIN)
 - **External integrations** — Jira, Confluence, ServiceNow, PagerDuty webhooks trigger runs automatically
 - **Real-time observability** — SSE event stream, D3.js Gantt timeline, token bubble chart, agent comms graph
 - **Self-healing** — stuck-run monitor, LLM call guard (rate-limit retry + fallback), prompt optimiser
+- **Post-run AI chat** — iterate on the generated code via a conversation panel
 - **GCP Cloud Run deployment** — Docker build → Artifact Registry → Cloud Run, 7-day TTL cleanup
 
 ---
@@ -27,13 +31,15 @@
 | AI / LLM | Spring AI 1.1.0 |
 | Primary LLM | Claude (Anthropic) — Haiku 4.5 (workers) + Sonnet 4.6 (planner) |
 | Fallback LLM | OpenAI GPT-4o / GPT-4o-mini |
-| Database | PostgreSQL 15+ |
+| Database | PostgreSQL 15+ (Cloud SQL, private IP) |
+| Cache / Gates | Redis — Cloud Memorystore (gate signaling + ShedLock) |
+| Object Store | Google Cloud Storage (workspace archives + CI/CD JARs) |
 | ORM | Spring Data JPA + Hibernate |
-| Migrations | Flyway (V1–V8) |
+| Migrations | Flyway (V1–V12) |
 | Git | JGit 6.9.0 |
 | Auth | JWT (Spring Security) — 24h access + 7d refresh |
 | Frontend | React 18 + Vite 5 + Tailwind 3.4 + shadcn/ui + Zustand + D3.js |
-| Deployment | GCP Cloud Run + Artifact Registry |
+| Infra | GCE MIG (2× n2-standard-4) + Cloud Load Balancer + Cookie Affinity |
 | Build | Maven (`JAVA_HOME=/opt/homebrew/opt/openjdk@21`) |
 
 ---
@@ -45,6 +51,10 @@
 - Java 21 (`/opt/homebrew/opt/openjdk@21`)
 - PostgreSQL running on `localhost:5432` with database `agentteam`
 - Node.js 18+ (for frontend build)
+- Redis running on `localhost:6379` (for gate signaling + ShedLock)
+  ```bash
+  docker run -d -p 6379:6379 redis:7-alpine
+  ```
 
 ### Environment Variables
 
@@ -53,9 +63,11 @@ export ANTHROPIC_API_KEY=sk-ant-...      # required
 export OPENAI_API_KEY=sk-...             # required for fallback
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
+export REDIS_HOST=localhost              # Redis host (default: localhost)
 # Optional
 export GITHUB_PAT=ghp_...               # system-level GitHub PAT fallback
 export GITHUB_OWNER=your-github-username
+export GCS_WORKSPACE_BUCKET=executespec-workspaces   # for workspace archiving
 export GCP_PROJECT=my-gcp-project
 ```
 
@@ -108,11 +120,12 @@ Open **http://localhost:8080** to access the dashboard.
 POST /api/runs
       │
       ▼
-PipelineHarness (Semaphore — max 5 concurrent runs)
+PipelineHarness (Semaphore — max 10 concurrent runs)
       │
       ├─ PlannerAgent ──────────── claude-sonnet-4-6 → TaskPlan JSON (1–6 tasks)
       │
       ├─ ▶ Plan approval gate ──── POST /api/runs/{id}/approve
+      │        (Redis polling — works across any instance in MIG)
       │
       ├─ WorkerPool ──────────────  Virtual threads, parallel by dependsOn
       │    ├─ WorkerAgent [A] ────  XML tool-call format; own git branch
@@ -123,6 +136,7 @@ PipelineHarness (Semaphore — max 5 concurrent runs)
       ├─ ReviewerAgent ─────────── JSON ReviewReport; README check hard gate
       │
       ├─ ▶ Merge approval gate ─── POST /api/runs/{id}/merge
+      │        (Redis polling — works across any instance in MIG)
       │
       ├─ GitMergeService ────────── Topological merge to main
       │
@@ -132,6 +146,28 @@ PipelineHarness (Semaphore — max 5 concurrent runs)
            ├─ PromptOptimiser ──── Every 10 runs: patches prompts
            ├─ PreviewService ───── npm build → hasFrontend flag
            └─ GitHub push ──────── If user has PAT configured
+```
+
+### GCP Production Architecture
+
+```
+Internet
+    │
+    ▼
+Cloud Load Balancer (HTTPS, managed SSL, 600s timeout, cookie affinity)
+    │
+    ▼
+MIG — 2× n2-standard-4 GCE VMs
+    │   ├─ Spring Boot app  :8080
+    │   ├─ /data/workspace/  ← pd-ssd 100 GB (ACTIVE runs only, <24 h)
+    │   └─ ADC service account → GCS, Cloud SQL, Redis
+    │
+    ├──► Cloud SQL PostgreSQL 15  (private IP, same VPC)
+    │
+    ├──► Cloud Memorystore Redis  (1 GB Basic — gate signaling + ShedLock)
+    │
+    └──► GCS  executespec-workspaces  (archived run workspaces, signed URL downloads)
+         GCS  executespec-deploy      (CI/CD JARs keyed by commit SHA)
 ```
 
 ---
@@ -224,7 +260,7 @@ ExecuteSpec auto-detects the project type and generates an optimised Dockerfile:
 | `POST` | `/api/runs/{id}/tasks/{taskId}/retry` | Retry PARTIAL/FAILED/BLOCKED/PENDING/LOCKED task |
 | `GET` | `/api/runs/{id}/events` | **SSE stream** |
 | `GET` | `/api/runs/{id}/timeline` | D3.js Gantt data |
-| `GET` | `/api/runs/{id}/download` | Download workspace as `.zip` |
+| `GET` | `/api/runs/{id}/download` | Download workspace zip (302→GCS signed URL if archived) |
 | `GET` | `/api/runs/{id}/files` | List workspace files |
 | `GET` | `/api/runs/{id}/file?path=` | Read workspace file |
 
@@ -269,7 +305,7 @@ ExecuteSpec auto-detects the project type and generates an optimised Dockerfile:
 | `GET` | `/api/metrics` | Global run/token/cost stats |
 | `POST` | `/api/feasibility` | Estimate cost without running |
 | `GET` | `/api/pricing` | Model pricing table |
-| `GET` | `/api/health` | DB ping, uptime, active runs |
+| `GET` | `/actuator/health` | Spring Boot health (used by LB health check) |
 | `POST` | `/api/integrations/{source}/webhook` | Inbound webhook (jira/confluence/servicenow/pagerduty) |
 
 ---
@@ -283,7 +319,7 @@ ExecuteSpec auto-detects the project type and generates an optimised Dockerfile:
 | **Pricing** | `/pricing` | Model pricing + feasibility estimator |
 | **Deployments** | `/deployments` | GCP deployment management |
 | **Integrations** | `/integrations` | Integration status + manual trigger |
-| **Settings** | `/settings` | App config + GitHub PAT configuration |
+| **Settings** | `/settings` | App config + GitHub PAT + per-user AI keys |
 | **Org Projects** | `/org/projects` | Project management (ORG_ADMIN) |
 | **Admin Panel** | `/admin` | User/org/tier management (SUPER_ADMIN) |
 
@@ -294,12 +330,17 @@ ExecuteSpec auto-detects the project type and generates an optimised Dockerfile:
 | Version | Description |
 |---|---|
 | V1 | Core schema (pipeline_run, agent_task, agent_message, etc.) |
-| V2–V3 | Feature additions |
+| V2 | Add tenant_id |
+| V3 | Cost and cache fields |
 | V4 | Auth schema (app_user, org, project, org_member, project_member) |
 | V5 | Seed admin user (`admin@executespec.ai`) |
 | V6 | Tier config + org run-limit overrides |
 | V7 | Fix admin password hash |
-| V8 | Per-user GitHub settings (`github_pat`, `github_owner` on app_user + pipeline_run) |
+| V8 | Per-user GitHub settings (`github_pat`, `github_owner`) |
+| V9 | Post-run conversation history + iteration run linkage |
+| V10 | Per-user AI provider keys (Anthropic, OpenAI, Gemini) + Jira/Confluence creds |
+| V11 | Org-level AI provider keys (resolution: user → org → system) |
+| V12 | GCS workspace archive columns (`gcs_workspace_key`, `gcs_archived_at`) |
 
 ---
 
@@ -313,22 +354,29 @@ executespec/
 │   ├── apitests/           # ApiTestSuiteAgent
 │   ├── auth/               # AppUser, Org, Project, JWT auth, controllers
 │   ├── compiler/           # CompilerAgent
-│   ├── config/             # AgentProperties, AgentModelConfig, WebConfig
+│   ├── config/             # AgentProperties, AgentModelConfig, WebConfig, SchedulingConfig
 │   ├── context/            # ContextAgent (post-merge codebase scanner)
-│   ├── deployment/         # DeploymentService, 10× strategy classes, DockerfileGenerator
-│   ├── harness/            # PipelineHarness, WorkerPool, ApprovalGate, GitMergeService
+│   ├── deployment/         # DeploymentService, 10× strategy classes, DockerfileGenerator,
+│   │                       #   GcsWorkspaceStore, WorkspaceArchiveJob, WorkspaceExportService
+│   ├── harness/            # PipelineHarness, WorkerPool, ApprovalGate, GitMergeService,
+│   │                       #   GateStore (Redis gate signaling + polling)
 │   ├── integration/        # Jira, Confluence, ServiceNow, PagerDuty adapters
 │   ├── optimiser/          # PromptOptimiserAgent
 │   ├── recovery/           # StuckRunMonitor, RunRecoveryService, LlmCallGuard
 │   ├── repo/               # GitHubRepoService
-│   ├── sse/                # RunEvent, SseBroadcaster
+│   ├── sse/                # RunEvent, SseBroadcaster (in-memory; LB sticky sessions)
 │   ├── state/              # StateStore, JPA entities (pipeline_run, agent_task, …)
 │   ├── tenant/             # TenantInterceptor (multi-tenancy)
 │   └── tool/               # FileSystemTool, ShellTool, GitTool, FileLockTool
 ├── src/main/resources/
 │   ├── prompts/            # planner.txt, worker.txt, reviewer.txt, etc.
-│   ├── db/migration/       # Flyway V1–V8
+│   ├── db/migration/       # Flyway V1–V12
 │   └── application.yml
+├── docs/
+│   ├── DEPLOYMENT.md       # Full GCP deployment guide + checklist
+│   └── PROJECT_CONTEXT.md  # Compressed context for new AI conversation threads
+├── .github/workflows/
+│   └── deploy.yml          # CI/CD: build JAR → GCS (SHA-keyed) → GCE via IAP
 ├── frontend/               # React 18 + Vite 5 + Tailwind 3.4 + shadcn/ui
 │   └── src/
 │       ├── pages/          # RunsPage, DashboardPage, SettingsPage, etc.
@@ -342,6 +390,34 @@ executespec/
 
 ---
 
+## CI/CD & Deployment
+
+The CI/CD pipeline stores every JAR **keyed by commit SHA** in GCS — giving a full rollback history with no rebuilds.
+
+```
+git push main
+    → GitHub Actions
+    → mvn package -DskipTests
+    → gsutil cp target/*.jar gs://executespec-deploy/releases/app-{SHA}.jar
+    → gcloud compute ssh GCE --tunnel-through-iap
+        → symlink app-{SHA}.jar → /opt/app/app.jar
+        → systemctl restart executespec
+        → curl /actuator/health
+```
+
+**Rollback** (~20 seconds, no rebuild):
+```bash
+ROLLBACK_SHA=abc123...
+gcloud compute ssh executespec-prod --tunnel-through-iap --zone=us-central1-a \
+  --command="ln -sf /opt/app/releases/app-${ROLLBACK_SHA}.jar /opt/app/app.jar && \
+             sudo systemctl restart executespec && \
+             echo ${ROLLBACK_SHA} | sudo tee /opt/app/RUNNING_SHA"
+```
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full step-by-step GCP setup guide.
+
+---
+
 ## Build Status
 
 ```
@@ -349,4 +425,4 @@ mvn compile -q                  ✅ passes clean
 npm --prefix frontend run build ✅ passes clean
 ```
 
-**Total:** ~165 Java source files · 45+ REST endpoints · 17 DB entities (V1–V8) · 8 LLM prompts · React 18 SPA
+**Total:** ~170 Java source files · 45+ REST endpoints · 18 DB entities (V1–V12) · 8 LLM prompts · React 18 SPA
