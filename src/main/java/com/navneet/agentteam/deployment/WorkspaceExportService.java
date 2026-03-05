@@ -1,6 +1,7 @@
 package com.navneet.agentteam.deployment;
 
 import com.navneet.agentteam.config.AgentProperties;
+import com.navneet.agentteam.state.StateStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,8 @@ import java.util.zip.ZipOutputStream;
 public class WorkspaceExportService {
 
     private final AgentProperties agentProps;
+    private final StateStore      stateStore;
+    private final GcsWorkspaceStore gcsStore;
 
     /**
      * Excluded patterns — internal agent machinery, build artifacts,
@@ -48,16 +51,32 @@ public class WorkspaceExportService {
      * Builds a zip of the run's workspace and returns the path to the temp file.
      * Caller is responsible for streaming and cleanup.
      *
+     * <p>If the local workspace directory is absent (run was archived to GCS), the
+     * zip is downloaded from GCS and returned as a temp file — same return type,
+     * transparent to the caller.
+     *
      * @param runId the pipeline run ID
-     * @throws IllegalStateException if the workspace directory does not exist
+     * @throws IllegalStateException if the workspace is not found locally or in GCS
      * @throws IOException           on filesystem errors
      */
     public Path exportWorkspace(String runId) throws IOException {
         Path workspacePath = workspaceRoot(runId);
         if (!Files.isDirectory(workspacePath)) {
-            throw new IllegalStateException(
-                "Workspace not found for run " + runId +
-                ". It may still be initialising or has been cleaned up.");
+            // Workspace not on local disk — check GCS archive
+            return stateStore.findRun(runId)
+                .filter(run -> run.getGcsWorkspaceKey() != null)
+                .map(run -> {
+                    try {
+                        log.info("[WorkspaceExportService] Serving run {} from GCS archive: {}",
+                            runId, run.getGcsWorkspaceKey());
+                        return gcsStore.downloadToTemp(run.getGcsWorkspaceKey(), runId);
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to download workspace from GCS: " + e.getMessage(), e);
+                    }
+                })
+                .orElseThrow(() -> new IllegalStateException(
+                    "Workspace not found for run " + runId +
+                    ". It may still be initialising or has been cleaned up."));
         }
 
         String zipName = "workspace-" + runId.substring(0, Math.min(8, runId.length()));

@@ -59,6 +59,20 @@ public class Org {
     @Builder.Default
     private boolean apiKeysProvided = false;
 
+    // ── Per-org AI provider keys ──────────────────────────────────────────────
+    // Used by all org members who have not set a personal key.
+    // Resolution order: user key → org key → system key (application.yml).
+    // Raw values are NEVER returned to the client — only boolean flags.
+
+    @Column(name = "anthropic_api_key")
+    private String anthropicApiKey;
+
+    @Column(name = "openai_api_key")
+    private String openAiApiKey;
+
+    @Column(name = "gemini_api_key")
+    private String geminiApiKey;
+
     @Column(name = "created_by_user_id", nullable = false)
     private String createdByUserId;
 

@@ -8,6 +8,7 @@ import com.navneet.agentteam.api.dto.RunSummary;
 import com.navneet.agentteam.auth.security.AppUserDetails;
 import com.navneet.agentteam.auth.security.RunVisibilitySpec;
 import com.navneet.agentteam.auth.service.TierEnforcementService;
+import com.navneet.agentteam.deployment.GcsWorkspaceStore;
 import com.navneet.agentteam.deployment.WorkspaceExportService;
 import com.navneet.agentteam.deployment.WorkspaceFileService;
 import com.navneet.agentteam.harness.PipelineHarness;
@@ -33,8 +34,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,6 +56,7 @@ public class RunController {
     private final RunRecoveryRepository recoveryRepository;
     private final WorkspaceExportService workspaceExportService;
     private final WorkspaceFileService workspaceFileService;
+    private final GcsWorkspaceStore gcsWorkspaceStore;
     private final AgentMessageRepository agentMessageRepository;
     private final TierEnforcementService tierEnforcementService;
     private final RunVisibilitySpec runVisibilitySpec;
@@ -291,10 +295,32 @@ public class RunController {
         return ResponseEntity.ok(response);
     }
 
-    /** Download the workspace for a run as a zip file. Works for any run status. */
+    /**
+     * Download the workspace for a run as a zip file. Works for any run status.
+     *
+     * <p>Two paths:
+     * <ul>
+     *   <li><b>Local (recent run, &lt;24 h)</b>: builds zip on the fly and streams it directly.</li>
+     *   <li><b>Archived (GCS)</b>: generates a 5-minute signed URL and issues a 302 redirect
+     *       so the client downloads directly from Cloud Storage — zero server bandwidth in
+     *       the data path.</li>
+     * </ul>
+     */
     @GetMapping("/{id}/download")
-    public ResponseEntity<Resource> downloadWorkspace(@PathVariable String id) {
+    public ResponseEntity<?> downloadWorkspace(@PathVariable String id) {
         try {
+            // If the workspace has been archived to GCS, redirect to a signed URL
+            PipelineRun run = stateStore.findRun(id).orElse(null);
+            if (run != null && run.getGcsWorkspaceKey() != null) {
+                URL signedUrl = gcsWorkspaceStore.signedDownloadUrl(
+                    run.getGcsWorkspaceKey(), Duration.ofMinutes(5));
+                log.debug("Redirecting download for run {} to GCS signed URL", id);
+                return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, signedUrl.toString())
+                    .build();
+            }
+
+            // Local workspace: zip on the fly and stream
             Path zipPath = workspaceExportService.exportWorkspace(id);
             String runId8 = id.substring(0, Math.min(8, id.length()));
             String filename = "workspace-" + runId8 + ".zip";

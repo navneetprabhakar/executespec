@@ -719,6 +719,31 @@ public class StateStore {
         }
     }
 
+    // ── GCS workspace archiving ───────────────────────────────
+
+    /**
+     * Returns runs eligible for GCS archiving: terminal state, completed more than
+     * {@code cutoff} hours ago, not yet archived. Processed in batches of 50 to
+     * avoid loading too many records into memory.
+     */
+    public List<PipelineRun> findRunsToArchive(Instant cutoff) {
+        return runRepo.findRunsToArchive(cutoff, PageRequest.of(0, 50));
+    }
+
+    /**
+     * Marks a run as archived to GCS: sets {@code gcsWorkspaceKey} and {@code gcsArchivedAt}.
+     *
+     * @param runId  the run that was archived
+     * @param gcsKey the GCS object key (e.g. {@code workspaces/{runId}.zip})
+     */
+    public void markGcsArchived(String runId, String gcsKey) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setGcsWorkspaceKey(gcsKey);
+            run.setGcsArchivedAt(Instant.now());
+            runRepo.save(run);
+        });
+    }
+
     // ── Helpers ───────────────────────────────────────────────
 
     /**
