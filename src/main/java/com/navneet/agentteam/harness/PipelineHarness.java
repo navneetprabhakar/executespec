@@ -76,18 +76,16 @@ public class PipelineHarness {
 
     // ── Async infrastructure ──────────────────────────────────────────────────
 
+    /**
+     * Redis-backed gate store — replaces in-memory CompletableFuture maps so that
+     * plan/merge approval REST calls work regardless of which MIG instance receives them.
+     */
+    private final GateStore gateStore;
+
     /** Limits simultaneous active pipeline runs. */
     private Semaphore runSlots;
     /** Thread pool for async pipeline execution (unbounded — threads block on semaphore). */
     private ExecutorService executor;
-    /** CompletableFutures awaiting plan-approval REST calls. */
-    private final Map<String, CompletableFuture<Boolean>> planGates    = new ConcurrentHashMap<>();
-    /** CompletableFutures awaiting merge-approval REST calls. */
-    private final Map<String, CompletableFuture<MergeDecision>> mergeGates = new ConcurrentHashMap<>();
-    /** Gate-event IDs for plan approval, used to record resolution. */
-    private final Map<String, String> planGateEventIds  = new ConcurrentHashMap<>();
-    /** Gate-event IDs for merge approval, used to record resolution. */
-    private final Map<String, String> mergeGateEventIds = new ConcurrentHashMap<>();
 
     /** Single scanner for CLI stdin path — avoids buffering issues. */
     private final Scanner stdin = new Scanner(System.in);
@@ -245,25 +243,20 @@ public class PipelineHarness {
 
     /**
      * Resolves the plan-approval gate for a REST-submitted run.
-     * @return false if no pending gate exists for the runId
+     *
+     * <p>Signals via Redis so the pipeline thread's polling loop picks it up within ~500 ms,
+     * regardless of which MIG instance receives this HTTP call.
+     *
+     * @return false if the run is not in AWAITING_APPROVAL (unknown runId or wrong state → 404)
      */
     public boolean resolvePlanGate(String runId, boolean approved, String comment) {
-        CompletableFuture<Boolean> gate = planGates.remove(runId);
-        if (gate == null) {
-            // No live gate — server may have restarted and lost in-memory state.
-            // If the run is still stuck in AWAITING_APPROVAL, mark it FAILED so the
-            // user can resubmit, then signal the controller to return 409 (not 404).
-            stateStore.findRun(runId).ifPresent(run -> {
-                if ("AWAITING_APPROVAL".equals(run.getStatus())) {
-                    log.warn("[Gate] Plan gate lost for run {} (server restart?); auto-failing stuck run", runId);
-                    stateStore.markFailed(runId, "Plan-approval gate lost after server restart — please resubmit");
-                    broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
-                }
-            });
-            return false;
-        }
-        String gateEventId = planGateEventIds.remove(runId);
-        if (gateEventId != null) stateStore.recordGateResolved(gateEventId, approved);
+        Optional<PipelineRun> optRun = stateStore.findRun(runId);
+        if (optRun.isEmpty()) return false;
+        if (!"AWAITING_APPROVAL".equals(optRun.get().getStatus())) return false;
+
+        // Signal via Redis — pipeline thread on ANY instance picks it up within ~500 ms
+        gateStore.setPlanGate(runId, approved);
+
         // Clear currentGate immediately so the UI banner disappears on next poll.
         // (markApproved() also clears it but runs asynchronously on the pipeline thread,
         //  causing a race where the frontend refetch still sees the old gate value.)
@@ -273,42 +266,31 @@ public class PipelineHarness {
         } catch (Exception e) {
             log.debug("SSE emit failed on plan gate resolve for run {} — client likely disconnected", runId);
         }
-        gate.complete(approved);   // must run even if SSE fails
         return true;
     }
 
     /**
      * Resolves the merge-approval gate for a REST-submitted run.
      *
-     * <p>Two cases:
-     * <ol>
-     *   <li><b>Gate in memory</b> (normal flow): completes the CompletableFuture that the
-     *       pipeline thread is waiting on. Returns {@code true}.</li>
-     *   <li><b>Gate lost</b> (server restarted while run was AWAITING_MERGE): instead of
-     *       auto-failing the run, reconstructs and re-executes the merge directly on a
-     *       virtual thread so the user can merge at any time after a restart.
-     *       Returns {@code true} so the HTTP caller receives 200 OK.</li>
-     * </ol>
+     * <p>Signals via Redis so the pipeline thread's polling loop picks it up within ~500 ms,
+     * regardless of which MIG instance receives this HTTP call.
      *
-     * @return false only if the runId is unknown (404)
+     * <p>Note: {@link #performMergeOnRestart} is preserved for the crash-recovery path
+     * (triggered by {@code StuckRunMonitor} when a run is stuck in AWAITING_MERGE after an
+     * instance replacement). It is no longer called from here — the Redis signal is
+     * sufficient for the normal and cross-instance cases.
+     *
+     * @return false only if the runId is unknown or not in AWAITING_MERGE state (→ 404)
      */
     public boolean resolveMergeGate(String runId, boolean approved, String comment) {
-        CompletableFuture<MergeDecision> gate = mergeGates.remove(runId);
-        if (gate == null) {
-            Optional<PipelineRun> optRun = stateStore.findRun(runId);
-            if (optRun.isPresent() && "AWAITING_MERGE".equals(optRun.get().getStatus())) {
-                log.info("[Gate] Merge gate not in memory for run {} (server restart?) " +
-                         "— re-executing merge directly (approved={})", runId, approved);
-                // Dispatch to a virtual thread so the HTTP request returns immediately
-                Thread.ofVirtual()
-                      .name("restart-merge-" + runId.substring(0, 8))
-                      .start(() -> performMergeOnRestart(runId, approved, comment));
-                return true; // 200 OK — merge execution has started
-            }
-            return false; // unknown runId → 404
-        }
-        String gateEventId = mergeGateEventIds.remove(runId);
-        if (gateEventId != null) stateStore.recordGateResolved(gateEventId, approved);
+        Optional<PipelineRun> optRun = stateStore.findRun(runId);
+        if (optRun.isEmpty()) return false;
+        if (!"AWAITING_MERGE".equals(optRun.get().getStatus())) return false;
+
+        MergeDecision decision = approved ? MergeDecision.MERGE : MergeDecision.DECLINE;
+        // Signal via Redis — pipeline thread on ANY instance picks it up within ~500 ms
+        gateStore.setMergeGate(runId, decision);
+
         // Clear currentGate immediately — same race-condition fix as resolvePlanGate.
         clearGateSync(runId);
         try {
@@ -316,7 +298,6 @@ public class PipelineHarness {
         } catch (Exception e) {
             log.debug("SSE emit failed on merge gate resolve for run {} — client likely disconnected", runId);
         }
-        gate.complete(approved ? MergeDecision.MERGE : MergeDecision.DECLINE);  // must run even if SSE fails
         return true;
     }
 
@@ -424,11 +405,10 @@ public class PipelineHarness {
 
     /** Cancels a run. Returns false if run is already terminal. */
     public boolean cancelRun(String runId) {
-        // Complete any open gates with rejection so the pipeline thread unblocks
-        CompletableFuture<Boolean> pg = planGates.remove(runId);
-        if (pg != null) pg.complete(false);
-        CompletableFuture<MergeDecision> mg = mergeGates.remove(runId);
-        if (mg != null) mg.complete(MergeDecision.DECLINE);
+        // Signal open gates via Redis so the pipeline thread's polling loop unblocks.
+        // The pipeline thread will read the rejection value and bail out normally.
+        gateStore.setPlanGate(runId, false);
+        gateStore.setMergeGate(runId, MergeDecision.DECLINE);
 
         boolean cancelled = stateStore.cancelRun(runId);
         if (cancelled) {
@@ -480,12 +460,8 @@ public class PipelineHarness {
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
         String status = run.getStatus();
         if ("AWAITING_MERGE".equals(status)) {
-            CompletableFuture<MergeDecision> gate = mergeGates.get(runId);
-            if (gate == null)
-                throw new IllegalStateException(
-                    "No live merge gate for run " + runId + " — server may have restarted. "
-                    + "Approve or decline via the normal merge action instead.");
-            gate.complete(MergeDecision.IMPLEMENT_SUGGESTIONS);
+            // Signal via Redis so the pipeline thread's polling loop picks it up
+            gateStore.setMergeGate(runId, MergeDecision.IMPLEMENT_SUGGESTIONS);
         } else if ("PARTIAL".equals(status)
                 && run.getFailureReason() != null
                 && run.getFailureReason().contains("Suggestions implementation failed")) {
@@ -526,12 +502,9 @@ public class PipelineHarness {
 
                 // ── Merge gate ────────────────────────────────────────────
                 broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
+                gateStore.clearMergeGate(runId); // discard any stale key from a previous loop iteration
                 String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
-                mergeGateEventIds.put(runId, mergeGateId);
                 broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
-
-                CompletableFuture<MergeDecision> mergeGate = new CompletableFuture<>();
-                mergeGates.put(runId, mergeGate);
 
                 if (holdsComputeSlot) {
                     log.info("[PipelineHarness] Run {} entering reopen-merge gate — releasing compute slot", runId);
@@ -539,7 +512,8 @@ public class PipelineHarness {
                 }
                 MergeDecision decision;
                 try {
-                    decision = mergeGate.get(); // No timeout — blocks until human acts
+                    // Poll Redis every 500 ms — works across any MIG instance
+                    decision = gateStore.awaitMergeGate(runId);  // throws InterruptedException → outer catch
                 } finally {
                     if (holdsComputeSlot) {
                         try { runSlots.acquire(); }
@@ -547,6 +521,8 @@ public class PipelineHarness {
                         log.info("[PipelineHarness] Run {} reopen-merge gate resolved — compute slot reacquired", runId);
                     }
                 }
+                // Record gate resolution on the pipeline thread (it owns the local mergeGateId)
+                stateStore.recordGateResolved(mergeGateId, decision == MergeDecision.MERGE);
 
                 if (decision == MergeDecision.MERGE) {
                     List<String> conflicted = mergeService.mergeAll(runId, stateStore.getAllTasks(runId));
@@ -721,19 +697,13 @@ public class PipelineHarness {
 
             // ── 2. Plan approval gate ──────────────────────────────────────
             String planGateId = stateStore.recordGateOpened(runId, "PLAN_APPROVAL");
-            planGateEventIds.put(runId, planGateId);
             broadcaster.emit(runId, RunEvent.gateOpened(runId, "PLAN_APPROVAL"));
-
-            CompletableFuture<Boolean> planGate = new CompletableFuture<>();
-            planGates.put(runId, planGate);
 
             boolean planApproved;
             // Tier 7: integration-triggered runs may skip the human approval gate
             if (run.isSkipApproval()) {
                 planApproved = true;
-                planGates.remove(runId);
-                String gateEventId = planGateEventIds.remove(runId);
-                if (gateEventId != null) stateStore.recordGateResolved(gateEventId, true);
+                stateStore.recordGateResolved(planGateId, true);
                 broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-approved (integration run)"));
                 log.info("Plan gate auto-approved for integration run {}", runId);
             } else {
@@ -742,12 +712,15 @@ public class PipelineHarness {
                 log.info("[PipelineHarness] Run {} entering plan-approval gate — releasing compute slot", runId);
                 runSlots.release();
                 try {
-                    planApproved = planGate.get(); // No timeout — blocks until human acts
+                    // Poll Redis every 500 ms — works across any MIG instance
+                    planApproved = gateStore.awaitPlanGate(runId);  // throws InterruptedException → outer catch
                 } finally {
                     try { runSlots.acquire(); }
                     catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 }
                 log.info("[PipelineHarness] Run {} plan-approval gate resolved — compute slot reacquired", runId);
+                // Record gate resolution on the pipeline thread (it owns the local planGateId)
+                stateStore.recordGateResolved(planGateId, planApproved);
             }
 
             if (!planApproved) {
@@ -926,12 +899,9 @@ public class PipelineHarness {
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
 
             // ── 5. Merge gate ──────────────────────────────────────────────
+            gateStore.clearMergeGate(runId); // discard any stale key from a previous attempt
             String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
-            mergeGateEventIds.put(runId, mergeGateId);
             broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
-
-            CompletableFuture<MergeDecision> mergeGate = new CompletableFuture<>();
-            mergeGates.put(runId, mergeGate);
 
             // Release the compute slot while the run is idle at the merge gate.
             // Gate-waiting runs must not block new submissions from starting.
@@ -939,12 +909,15 @@ public class PipelineHarness {
             runSlots.release();
             MergeDecision mergeDecision;
             try {
-                mergeDecision = mergeGate.get(); // No timeout — blocks until human acts
+                // Poll Redis every 500 ms — works across any MIG instance
+                mergeDecision = gateStore.awaitMergeGate(runId);  // throws InterruptedException → outer catch
             } finally {
                 try { runSlots.acquire(); }
                 catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
             }
             log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
+            // Record gate resolution on the pipeline thread (it owns the local mergeGateId)
+            stateStore.recordGateResolved(mergeGateId, mergeDecision == MergeDecision.MERGE);
 
             if (mergeDecision == MergeDecision.MERGE) {
                 // Merge first, then mark COMPLETE immediately so that any subsequent failure
@@ -1399,13 +1372,14 @@ public class PipelineHarness {
 
             // ── 6. Merge gate ──────────────────────────────────────────────
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
+            gateStore.clearMergeGate(runId); // discard any stale key from a previous attempt
             String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
-            mergeGateEventIds.put(runId, mergeGateId);
             broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
 
-            CompletableFuture<MergeDecision> mergeGate = new CompletableFuture<>();
-            mergeGates.put(runId, mergeGate);
-            MergeDecision retryDecision = mergeGate.get();
+            // Poll Redis every 500 ms — works across any MIG instance
+            // InterruptedException propagates to the outer catch block of runRetryAsync
+            MergeDecision retryDecision = gateStore.awaitMergeGate(runId);
+            stateStore.recordGateResolved(mergeGateId, retryDecision == MergeDecision.MERGE);
 
             if (retryDecision == MergeDecision.MERGE) {
                 // Mark COMPLETE immediately after merge — GitHub push is non-blocking
