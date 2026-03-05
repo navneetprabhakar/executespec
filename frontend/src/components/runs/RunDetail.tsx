@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2 } from 'lucide-react';
+import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2, RotateCcw } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
@@ -10,9 +10,10 @@ import { downloadWorkspace, type ReviewReport } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function RunDetail() {
-  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions } = useRunStore();
+  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions, createRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [reRunning, setReRunning] = useState(false);
 
   // Parse the reviewJson once whenever the run refreshes
   const review = useMemo<ReviewReport | null>(() => {
@@ -37,6 +38,23 @@ export default function RunDetail() {
       } else {
         addToast({ type: 'error', message: e.message });
       }
+    }
+  };
+
+  const handleReRun = async () => {
+    if (!activeRun) return;
+    setReRunning(true);
+    try {
+      const newRunId = await createRun({
+        userRequest: activeRun.userRequest,
+        ...(activeRun.projectId ? { projectId: activeRun.projectId } : {}),
+      });
+      setActiveRunId(newRunId);
+      addToast({ type: 'success', message: `Re-run launched: ${newRunId.slice(0, 8)}` });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message });
+    } finally {
+      setReRunning(false);
     }
   };
 
@@ -194,6 +212,16 @@ export default function RunDetail() {
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 Cancel
+              </button>
+            )}
+            {['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(activeRun.status) && (
+              <button
+                onClick={handleReRun}
+                disabled={reRunning}
+                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-violet transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
+                {reRunning ? 'Launching…' : 'Re-run'}
               </button>
             )}
             <div className="flex items-center gap-3 ml-auto">
