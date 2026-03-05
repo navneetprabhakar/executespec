@@ -1,3 +1,12 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health     # Required for LB health check: GET /actuator/health
+  endpoint:
+    health:
+      show-details: never   # Don't expose DB credentials in health response
+
 spring:
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:agentteam}
@@ -28,6 +37,12 @@ spring:
         options:
           model: gpt-4o-mini
           max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
+    google:
+      genai:
+        api-key: ${GOOGLE_API_KEY:AIzaSyCjIge3pbAvhejI5vELeDe0AWpmH9-P1UU}          # empty default — Gemini is 3rd fallback only
+        chat:
+          options:
+            model: gemini-3.1-flash-lite-preview         # default; ARCHITECT chain overrides to gemini-2.5-pro
 
 agent:
   workspace: ./workspace
@@ -46,7 +61,7 @@ agent:
     compact-pct: 0.35  # compact at 70k tokens input (was 0.75 = 150k — accumulated too much history)
     hard-stop-pct: 0.55 # hard-stop at 110k (was 0.90 = 180k)
   concurrency:
-    max-runs: 5
+    max-runs: 10   # Gate-waiting runs release their slot; this limits actively computing runs only
     max-iterations: 80  # Agentic loop cap per worker task (raise for complex tasks)
   github:
     pat: ${GITHUB_PAT:REDACTED_FOR_PUBLIC_RELEASE}
@@ -111,6 +126,8 @@ agent:
       base-image: eclipse-temurin:21-jre-alpine
     workspace:
       retention-days: 30
+      gcs-bucket: ${GCS_WORKSPACE_BUCKET:executespec-workspaces}  # GCS bucket for archived workspaces
+      archive-after-hours: 24                                       # hours after completion before archiving to GCS
 
   # ── Tier 8: Compile agent, API spec generator, frontend preview ──────────────
   compiler:

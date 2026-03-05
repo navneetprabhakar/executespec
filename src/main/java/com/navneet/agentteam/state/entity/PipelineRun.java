@@ -146,4 +146,21 @@ public class PipelineRun {
     @Column(name = "source_run_id")
     private String sourceRunId;
 
+    // ── GCS workspace archiving ────────────────────────────────────────────────
+
+    /**
+     * GCS object key for the archived workspace zip, e.g. {@code workspaces/{runId}.zip}.
+     * Null while the workspace is still on local disk (active or recently completed).
+     * Set by {@code WorkspaceArchiveJob} after the zip has been successfully uploaded.
+     */
+    @Column(name = "gcs_workspace_key")
+    private String gcsWorkspaceKey;
+
+    /**
+     * Timestamp when this run's workspace was archived to GCS and the local directory deleted.
+     * Null while local files still exist.
+     */
+    @Column(name = "gcs_archived_at")
+    private Instant gcsArchivedAt;
+
 }
