@@ -67,9 +67,13 @@ public class GitTool {
 
             java.util.List<String> cmd = new java.util.ArrayList<>(java.util.List.of(
                     "git", "worktree", "add", worktreeDir.toString()));
-            if (!branchExists) { cmd.add("-b"); cmd.add(branchName); }
-            else { cmd.add(branchName); }
-            cmd.add("main");
+            if (!branchExists) {
+                // Create a new branch starting from main's HEAD
+                cmd.add("-b"); cmd.add(branchName); cmd.add("main");
+            } else {
+                // Checkout existing branch — no commit-ish argument allowed here
+                cmd.add(branchName);
+            }
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(repoRoot.toFile());
@@ -310,6 +314,24 @@ public class GitTool {
             log.info("[GitTool] Tagged run as '{}'", tagName);
         } catch (Exception e) {
             log.warn("[GitTool] Could not tag run '{}': {}", tagName, e.getMessage());
+        }
+    }
+
+    /**
+     * Aborts an in-progress conflicted merge, restoring the repo to a clean state.
+     * Must be called after {@link #mergeBranchToMain} returns an "ERROR" result before
+     * attempting the next merge. Non-fatal — logs a warning if the abort fails.
+     */
+    public void abortMerge(String runId) {
+        String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
+        try {
+            ProcessBuilder pb = new ProcessBuilder("git", "-C", wsPath, "merge", "--abort");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            p.waitFor();
+            log.info("[GitTool] Aborted conflicted merge for run {}", runId);
+        } catch (Exception e) {
+            log.warn("[GitTool] Could not abort merge for run {}: {}", runId, e.getMessage());
         }
     }
 

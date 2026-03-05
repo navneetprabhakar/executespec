@@ -36,6 +36,12 @@ public class FileSystemTool {
     private static final Set<String> BLOCKED_DIRECTORIES = Set.of(
             ".ssh", ".gnupg", ".aws", ".gcloud", ".config");
 
+    // Directory names that are always hidden from agent file listings.
+    // "worktrees" holds sibling task worktrees; "target" / "build" / "node_modules"
+    // are build artifacts — agents don't need to see them and seeing them causes confusion.
+    private static final Set<String> HIDDEN_DIRECTORIES = Set.of(
+            "worktrees", "target", "build", "node_modules", ".git");
+
     /**
      * Returns the working directory for this task.
      * If a worktree override is active on this thread (set by WorkspaceContext),
@@ -148,6 +154,12 @@ public class FileSystemTool {
             try (var stream = Files.list(resolved)) {
                 Path ws = workspace(runId);
                 String listing = stream
+                        .filter(p -> {
+                            String name = p.getFileName() != null ? p.getFileName().toString() : "";
+                            // Hide worktrees/ (sibling task isolation dirs) and build artifacts
+                            // so agents see a clean project structure.
+                            return !HIDDEN_DIRECTORIES.contains(name);
+                        })
                         .map(p -> (Files.isDirectory(p) ? "[DIR] " : "      ") + ws.relativize(p))
                         .collect(Collectors.joining("\n"));
                 return listing.isEmpty() ? "(empty)" : listing;
@@ -166,8 +178,10 @@ public class FileSystemTool {
             @ToolParam(description = "Directory to search in (default: '.')", required = true) String directory) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
-                    "grep", "-r", "--include=*", "-n", pattern,
-                    safeResolve(runId, directory).toString());
+                    "grep", "-r", "--include=*", "-n",
+                    "--exclude-dir=worktrees", "--exclude-dir=target",
+                    "--exclude-dir=build", "--exclude-dir=node_modules", "--exclude-dir=.git",
+                    pattern, safeResolve(runId, directory).toString());
             pb.directory(workspace(runId).toFile());
             pb.redirectErrorStream(true);
             Process p = pb.start();

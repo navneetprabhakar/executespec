@@ -135,7 +135,66 @@ public class AuthController {
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
 
+    // ── AI provider key settings ─────────────────────────────────────────────
+
+    record AiKeySettingsRequest(String openAiApiKey, String anthropicApiKey, String geminiApiKey) {}
+
+    @PutMapping("/settings/ai-keys")
+    public ResponseEntity<UserDto> updateAiKeySettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody AiKeySettingsRequest req) {
+        AppUser user = userDetails.getUser();
+        user.setOpenAiApiKey(blankToNull(req.openAiApiKey()));
+        user.setAnthropicApiKey(blankToNull(req.anthropicApiKey()));
+        user.setGeminiApiKey(blankToNull(req.geminiApiKey()));
+        userRepo.save(user);
+        log.info("User {} updated AI key settings — openai={}, anthropic={}, gemini={}",
+                user.getId(),
+                user.getOpenAiApiKey() != null,
+                user.getAnthropicApiKey() != null,
+                user.getGeminiApiKey() != null);
+        return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    }
+
+    // ── JIRA settings ─────────────────────────────────────────────────────────
+
+    record JiraSettingsRequest(String jiraBaseUrl, String jiraEmail, String jiraApiToken) {}
+
+    @PutMapping("/settings/jira")
+    public ResponseEntity<UserDto> updateJiraSettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody JiraSettingsRequest req) {
+        AppUser user = userDetails.getUser();
+        user.setJiraBaseUrl(blankToNull(req.jiraBaseUrl()));
+        user.setJiraEmail(blankToNull(req.jiraEmail()));
+        user.setJiraApiToken(blankToNull(req.jiraApiToken()));
+        userRepo.save(user);
+        log.info("User {} updated JIRA settings — url={}, hasToken={}", user.getId(), user.getJiraBaseUrl(), user.getJiraApiToken() != null);
+        return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    }
+
+    // ── Confluence settings ───────────────────────────────────────────────────
+
+    record ConfluenceSettingsRequest(String confluenceBaseUrl, String confluenceEmail, String confluenceApiToken) {}
+
+    @PutMapping("/settings/confluence")
+    public ResponseEntity<UserDto> updateConfluenceSettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody ConfluenceSettingsRequest req) {
+        AppUser user = userDetails.getUser();
+        user.setConfluenceBaseUrl(blankToNull(req.confluenceBaseUrl()));
+        user.setConfluenceEmail(blankToNull(req.confluenceEmail()));
+        user.setConfluenceApiToken(blankToNull(req.confluenceApiToken()));
+        userRepo.save(user);
+        log.info("User {} updated Confluence settings — url={}, hasToken={}", user.getId(), user.getConfluenceBaseUrl(), user.getConfluenceApiToken() != null);
+        return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private static String blankToNull(String s) {
+        return (s != null && !s.isBlank()) ? s.strip() : null;
+    }
 
     private void setRefreshCookie(HttpServletResponse response, String refreshToken) {
         Cookie cookie = new Cookie("refresh_token", refreshToken);

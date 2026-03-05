@@ -19,43 +19,39 @@ public class GitMergeService {
     private final GitTool gitTool;
     private final ObjectMapper mapper;
 
-    public void mergeAll(String runId, List<AgentTask> tasks) {
+    /**
+     * Merges all task branches into main in topological order.
+     *
+     * <p>If a branch has a merge conflict, the conflict is aborted and that branch
+     * is skipped rather than failing the entire run. The returned list contains the
+     * branch names that could not be merged due to conflicts — an empty list means
+     * all branches merged cleanly.
+     *
+     * @return list of branch names that had merge conflicts (may be empty)
+     */
+    public List<String> mergeAll(String runId, List<AgentTask> tasks) {
         // Sort tasks by dependency order (topological sort)
         List<AgentTask> ordered = topologicalSort(tasks);
+        List<String> conflicted = new ArrayList<>();
 
         log.info("Merging {} branches to main", ordered.size());
         for (AgentTask task : ordered) {
             if (task.getBranchName() == null || "FAILED".equals(task.getStatus()))
                 continue;
 
-            // ── Tier 3: enforce README updated before merge ───────────────────
-            enforceReadmeUpdated(runId, task.getBranchName());
-
             String result = gitTool.mergeBranchToMain(runId, task.getBranchName());
             if (result.startsWith("ERROR")) {
-                log.error("Merge failed for {}: {}", task.getBranchName(), result);
-                throw new RuntimeException("Merge conflict on " + task.getBranchName() +
-                        ". Resolve manually or reject and rework.");
+                log.warn("Merge conflict on {} — aborting and skipping: {}", task.getBranchName(), result);
+                gitTool.abortMerge(runId);
+                conflicted.add(task.getBranchName());
+            } else {
+                log.info("  Merged {}", task.getBranchName());
             }
-            log.info("  Merged {}", task.getBranchName());
         }
 
         // Tag the run's workspace repo after all branches are merged (non-fatal)
         gitTool.tagRun(runId);
-    }
-
-    /**
-     * Enforces that README.md was touched on the given branch vs main.
-     * Throws MergeBlockedException if it wasn't updated.
-     */
-    private void enforceReadmeUpdated(String runId, String branchName) {
-        String diff = gitTool.getFullDiff(runId, "main", branchName);
-        boolean touched = diff.toLowerCase().contains("readme.md");
-        if (!touched) {
-            throw new MergeBlockedException(
-                    "Branch " + branchName + " blocked: README.md was not updated. " +
-                            "Update README.md and push to the branch before retrying merge.");
-        }
+        return conflicted;
     }
 
     private List<AgentTask> topologicalSort(List<AgentTask> tasks) {

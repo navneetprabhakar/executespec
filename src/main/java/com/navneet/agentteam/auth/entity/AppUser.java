@@ -79,11 +79,44 @@ public class AppUser {
 
     // ── GitHub integration ────────────────────────────────────────────────────
 
-    /** Personal GitHub PAT — used to create/push repos after merge. Stored encrypted at rest (future). */
+    /** Personal GitHub PAT — used to create/push repos after merge. Stored as plaintext. */
     @Column(name = "github_pat")
     private String githubPat;
 
     /** GitHub username or org name to create repos under (e.g. "navneet" or "mycompany"). */
     @Column(name = "github_owner")
     private String githubOwner;
+
+    // ── AI provider keys ──────────────────────────────────────────────────────
+
+    @Column(name = "openai_api_key")
+    private String openAiApiKey;
+
+    @Column(name = "anthropic_api_key")
+    private String anthropicApiKey;
+
+    @Column(name = "gemini_api_key")
+    private String geminiApiKey;
+
+    // ── JIRA integration ──────────────────────────────────────────────────────
+
+    @Column(name = "jira_base_url")
+    private String jiraBaseUrl;
+
+    @Column(name = "jira_email")
+    private String jiraEmail;
+
+    @Column(name = "jira_api_token")
+    private String jiraApiToken;
+
+    // ── Confluence integration ────────────────────────────────────────────────
+
+    @Column(name = "confluence_base_url")
+    private String confluenceBaseUrl;
+
+    @Column(name = "confluence_email")
+    private String confluenceEmail;
+
+    @Column(name = "confluence_api_token")
+    private String confluenceApiToken;
 }
