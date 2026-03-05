@@ -1,0 +1,91 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  JAVA_VERSION: '21'
+  GCP_PROJECT:  ${{ secrets.GCP_PROJECT }}
+  GCP_REGION:   ${{ secrets.GCP_REGION }}        # e.g. us-central1
+  GCE_INSTANCE: ${{ secrets.GCE_INSTANCE }}      # e.g. executespec-prod
+  GCE_ZONE:     ${{ secrets.GCE_ZONE }}          # e.g. us-central1-a
+  DEPLOY_BUCKET: gs://executespec-deploy
+
+jobs:
+  build-and-deploy:
+    name: Build JAR → GCS → GCE
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Java setup ──────────────────────────────────────────────────────────
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      # ── Build ───────────────────────────────────────────────────────────────
+      - name: Build JAR (skip tests)
+        run: mvn package -DskipTests -q
+
+      # ── Authenticate to GCP ─────────────────────────────────────────────────
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}   # Service account JSON
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      # ── Upload JAR keyed by commit SHA ──────────────────────────────────────
+      # JAR is stored permanently by SHA — never overwritten — full rollback history.
+      - name: Upload JAR to GCS
+        run: |
+          JAR=$(ls target/*.jar | head -1)
+          gsutil cp "$JAR" ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar
+          echo "${{ github.sha }}" | gsutil cp - ${{ env.DEPLOY_BUCKET }}/CURRENT_SHA
+          echo "Uploaded: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
+
+      # ── Deploy to GCE via IAP tunnel ────────────────────────────────────────
+      - name: Deploy to GCE
+        run: |
+          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --command="
+              set -e
+              mkdir -p /opt/app/releases
+              gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar /opt/app/releases/
+              ln -sf /opt/app/releases/app-${{ github.sha }}.jar /opt/app/app.jar
+              echo '${{ github.sha }}' | sudo tee /opt/app/RUNNING_SHA
+              sudo systemctl restart executespec
+              echo 'Waiting for health check...'
+              sleep 20
+              curl -sf http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"' && echo 'Health OK' || (echo 'Health FAILED'; exit 1)
+            "
+
+      # ── Prune old releases (keep last 10) ───────────────────────────────────
+      - name: Prune old JAR releases
+        run: |
+          COUNT=$(gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ | wc -l)
+          if [ "$COUNT" -gt 10 ]; then
+            gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ \
+              | sort \
+              | head -n -10 \
+              | xargs -r gsutil rm
+            echo "Pruned $((COUNT - 10)) old release(s)"
+          else
+            echo "Only $COUNT release(s) — no pruning needed"
+          fi
+
+      # ── Summary ─────────────────────────────────────────────────────────────
+      - name: Deployment summary
+        run: |
+          echo "✅ Deployed commit ${{ github.sha }} to ${{ env.GCE_INSTANCE }}"
+          echo "   JAR: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"

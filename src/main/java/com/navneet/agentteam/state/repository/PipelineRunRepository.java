@@ -6,7 +6,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,4 +30,20 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
 
     @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r")
     Long sumOutputTokens();
+
+    // ── GCS workspace archiving ───────────────────────────────────────────────
+
+    /**
+     * Finds completed/failed runs whose workspace has not yet been archived to GCS,
+     * where the run finished more than {@code cutoff} ago. Processed in batches of 50.
+     */
+    @Query("""
+        SELECT r FROM PipelineRun r
+        WHERE r.status IN ('COMPLETE', 'FAILED', 'PARTIAL', 'CANCELLED')
+          AND r.completedAt < :cutoff
+          AND r.gcsArchivedAt IS NULL
+          AND r.gcsWorkspaceKey IS NULL
+        ORDER BY r.completedAt ASC
+        """)
+    List<PipelineRun> findRunsToArchive(@Param("cutoff") Instant cutoff, Pageable pageable);
 }
