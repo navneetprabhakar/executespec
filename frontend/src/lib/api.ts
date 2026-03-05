@@ -75,11 +75,40 @@ export interface TaskSummary {
   failureReason?: string | null;
 }
 
+// ── Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue) ─────
+
+export interface ReviewIssue {
+  severity: 'HIGH' | 'MEDIUM' | 'LOW';
+  file?: string | null;
+  lineHint?: string | null;
+  description: string;
+}
+
+export interface TaskReview {
+  taskId: string;
+  acceptanceCriteriaMet: boolean;
+  boundaryViolations: string[];
+  issues: ReviewIssue[];
+  positives: string[];
+}
+
+export interface ReviewReport {
+  overallConfidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  recommendation: 'MERGE' | 'REWORK' | 'PARTIAL_MERGE';
+  summary: string;
+  taskReviews: TaskReview[];
+  mergeBlockers: string[];
+  postMergeSuggestions: string[];
+  readmeUpdated: boolean;
+}
+
 export interface RunDetail extends RunSummary {
   tasks: TaskSummary[];
   planJson: string;
   reviewJson: string;
   integrationSource: { sourceType: string; sourceId: string; sourceUrl: string } | null;
+  failureReason?: string | null;
+  currentGate?: string | null;
 }
 
 export interface MetricsResponse {
@@ -174,6 +203,12 @@ export const retryTask = (runId: string, taskId: string) =>
 
 export const retryRun = (runId: string) =>
   req<RunSummary>(`/runs/${runId}/retry`, { method: 'POST' });
+
+export const reopenMergeGate = (runId: string) =>
+  req<void>(`/runs/${runId}/reopen-merge`, { method: 'POST' });
+
+export const implementSuggestions = (runId: string) =>
+  req<void>(`/runs/${runId}/implement-suggestions`, { method: 'POST' });
 
 // ── Metrics ─────────────────────────────────────────────────────────────────
 
@@ -346,6 +381,18 @@ export interface AuthUser {
   githubOwner?: string | null;
   /** True if the user has a GitHub PAT saved (raw PAT is never returned). */
   hasGithubPat?: boolean;
+  // AI provider key flags
+  hasOpenAiKey?: boolean;
+  hasAnthropicKey?: boolean;
+  hasGeminiKey?: boolean;
+  // JIRA
+  jiraBaseUrl?: string | null;
+  jiraEmail?: string | null;
+  hasJiraToken?: boolean;
+  // Confluence
+  confluenceBaseUrl?: string | null;
+  confluenceEmail?: string | null;
+  hasConfluenceToken?: boolean;
 }
 
 export interface LoginResponse {
@@ -394,6 +441,27 @@ export const updateGithubSettings = (githubPat: string, githubOwner: string) =>
   req<AuthUser>('/auth/settings/github', {
     method: 'PUT',
     body: JSON.stringify({ githubPat, githubOwner }),
+  });
+
+/** Saves per-user AI provider API keys. Pass empty string to clear. */
+export const updateAiKeySettings = (openAiApiKey: string, anthropicApiKey: string, geminiApiKey: string) =>
+  req<AuthUser>('/auth/settings/ai-keys', {
+    method: 'PUT',
+    body: JSON.stringify({ openAiApiKey, anthropicApiKey, geminiApiKey }),
+  });
+
+/** Saves per-user JIRA credentials. Pass empty strings to clear. */
+export const updateJiraSettings = (jiraBaseUrl: string, jiraEmail: string, jiraApiToken: string) =>
+  req<AuthUser>('/auth/settings/jira', {
+    method: 'PUT',
+    body: JSON.stringify({ jiraBaseUrl, jiraEmail, jiraApiToken }),
+  });
+
+/** Saves per-user Confluence credentials. Pass empty strings to clear. */
+export const updateConfluenceSettings = (confluenceBaseUrl: string, confluenceEmail: string, confluenceApiToken: string) =>
+  req<AuthUser>('/auth/settings/confluence', {
+    method: 'PUT',
+    body: JSON.stringify({ confluenceBaseUrl, confluenceEmail, confluenceApiToken }),
   });
 
 // ── Org endpoints ─────────────────────────────────────────────────────────────

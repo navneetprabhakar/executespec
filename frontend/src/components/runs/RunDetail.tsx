@@ -1,18 +1,25 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download } from 'lucide-react';
+import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2 } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
-import { downloadWorkspace } from '@/lib/api';
+import { downloadWorkspace, type ReviewReport } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function RunDetail() {
-  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun } = useRunStore();
+  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
   const [confirming, setConfirming] = useState<string | null>(null);
+
+  // Parse the reviewJson once whenever the run refreshes
+  const review = useMemo<ReviewReport | null>(() => {
+    if (!activeRun?.reviewJson) return null;
+    try { return JSON.parse(activeRun.reviewJson) as ReviewReport; }
+    catch { return null; }
+  }, [activeRun?.reviewJson]);
 
   const handle = async (action: () => Promise<void>, successMsg: string) => {
     try {
@@ -73,16 +80,109 @@ export default function RunDetail() {
             />
           )}
           {activeRun.status === 'AWAITING_MERGE' && (
-            <GateBanner
-              message="Review changes and merge to complete"
-              icon={<GitMerge className="h-4 w-4 text-accent-amber" />}
-              onApprove={() => handle(() => mergeRun(activeRun.runId, true), 'Changes merged')}
-              onReject={() => handle(() => mergeRun(activeRun.runId, false), 'Merge rejected')}
-              confirming={confirming}
-              setConfirming={setConfirming}
-              approveLabel="Merge"
-              rejectLabel="Reject"
-            />
+            <div className="mx-4 mt-3 space-y-2">
+              {/* Reviewer summary card */}
+              {review && (
+                <div className="p-3 rounded-lg border border-zinc-700 bg-zinc-800/60 text-xs">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={cn(
+                      'font-semibold',
+                      review.recommendation === 'MERGE' ? 'text-accent-emerald' :
+                      review.recommendation === 'PARTIAL_MERGE' ? 'text-accent-amber' : 'text-accent-rose'
+                    )}>
+                      {review.recommendation.replace('_', ' ')}
+                    </span>
+                    <span className="text-zinc-500">·</span>
+                    <span className={cn(
+                      'text-zinc-400',
+                      review.overallConfidence === 'HIGH' ? 'text-accent-emerald/80' :
+                      review.overallConfidence === 'MEDIUM' ? 'text-accent-amber/80' : 'text-accent-rose/80'
+                    )}>
+                      {review.overallConfidence} confidence
+                    </span>
+                  </div>
+                  <p className="text-zinc-400 leading-relaxed">{review.summary}</p>
+                </div>
+              )}
+
+              {/* Merge blockers */}
+              {review && review.mergeBlockers && review.mergeBlockers.length > 0 && (
+                <div className="p-3 rounded-lg border border-accent-rose/30 bg-accent-rose/5">
+                  <p className="text-xs font-medium text-accent-rose mb-1.5">⛔ Merge Blockers</p>
+                  <ul className="text-xs text-accent-rose/80 space-y-0.5 list-disc list-inside">
+                    {review.mergeBlockers.map((b, i) => <li key={i}>{b}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {/* Post-merge suggestions + Implement Suggestions button */}
+              {review && review.postMergeSuggestions && review.postMergeSuggestions.length > 0 && (
+                <div className="p-3 rounded-lg border border-accent-amber/30 bg-accent-amber/5">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <p className="text-xs font-medium text-accent-amber">
+                      💡 {review.postMergeSuggestions.length} Suggestion{review.postMergeSuggestions.length !== 1 ? 's' : ''}
+                    </p>
+                    <button
+                      onClick={() => handle(() => implementSuggestions(activeRun.runId), 'Implementing suggestions…')}
+                      className="flex items-center gap-1.5 flex-shrink-0 rounded-md bg-accent-amber/20 hover:bg-accent-amber/30 border border-accent-amber/30 px-2.5 py-1 text-xs font-medium text-accent-amber transition-colors"
+                    >
+                      <Wand2 className="h-3 w-3" />
+                      Implement
+                    </button>
+                  </div>
+                  <ul className="text-xs text-accent-amber/80 space-y-0.5 list-disc list-inside">
+                    {review.postMergeSuggestions.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {/* Approve / Decline gate buttons */}
+              <GateBanner
+                message="Review changes and merge to complete"
+                icon={<GitMerge className="h-4 w-4 text-accent-amber" />}
+                onApprove={() => handle(() => mergeRun(activeRun.runId, true), 'Changes merged')}
+                onReject={() => handle(() => mergeRun(activeRun.runId, false), 'Merge declined — run preserved as PARTIAL')}
+                confirming={confirming}
+                setConfirming={setConfirming}
+                approveLabel="Merge"
+                rejectLabel="Decline"
+              />
+            </div>
+          )}
+          {activeRun.status === 'PARTIAL' &&
+           activeRun.tasks?.filter(t => t.taskId !== 'generate_preview').every(t => t.status === 'COMPLETE') && (
+            <div className="mx-4 mt-3 p-3 rounded-lg border border-indigo-500/30 bg-indigo-500/5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <GitMerge className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                <p className="text-xs text-indigo-300 truncate">All tasks complete — ready to merge</p>
+              </div>
+              <button
+                onClick={() => handle(() => reopenMergeGate(activeRun.runId), 'Merge gate reopened')}
+                className="flex-shrink-0 rounded-md bg-indigo-600/80 hover:bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+              >
+                Reopen Merge Gate
+              </button>
+            </div>
+          )}
+          {/* Retry Implementation banner — shown when suggestions impl failed */}
+          {activeRun.status === 'PARTIAL' &&
+           activeRun.failureReason?.includes('Suggestions implementation failed') && (
+            <div className="mx-4 mt-3 p-3 rounded-lg border border-accent-amber/30 bg-accent-amber/5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Wand2 className="h-4 w-4 text-accent-amber flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-accent-amber">Suggestions could not be applied</p>
+                  <p className="text-xs text-accent-amber/70 truncate">{activeRun.failureReason}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => handle(() => implementSuggestions(activeRun.runId), 'Retrying suggestions…')}
+                className="flex-shrink-0 flex items-center gap-1.5 rounded-md bg-accent-amber/20 hover:bg-accent-amber/30 border border-accent-amber/30 px-3 py-1.5 text-xs font-medium text-accent-amber transition-colors"
+              >
+                <Wand2 className="h-3 w-3" />
+                Retry
+              </button>
+            </div>
           )}
 
           {/* Action bar */}

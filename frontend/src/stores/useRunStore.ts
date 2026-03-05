@@ -22,6 +22,8 @@ interface RunStore {
   mergeRun: (id: string, merge: boolean) => Promise<void>;
   retryTask: (runId: string, taskId: string) => Promise<void>;
   retryRun: (runId: string) => Promise<string>;
+  reopenMergeGate: (runId: string) => Promise<void>;
+  implementSuggestions: (runId: string) => Promise<void>;
   patchRunStatus: (runId: string, status: string) => void;
 }
 
@@ -101,6 +103,16 @@ export const useRunStore = create<RunStore>((set, get) => ({
     // Switch focus to the new run
     get().setActiveRunId(newRun.runId);
     return newRun.runId;
+  },
+
+  reopenMergeGate: async (runId) => {
+    await api.reopenMergeGate(runId);
+    await get().fetchRun(runId);
+  },
+
+  implementSuggestions: async (runId) => {
+    await api.implementSuggestions(runId);
+    await get().fetchRun(runId);
   },
 
   patchRunStatus: (runId, status) => {

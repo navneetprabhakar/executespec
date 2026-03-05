@@ -27,7 +27,8 @@ public class WorkspaceFileService {
     private static final long MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 
     private static final List<String> SKIP_DIRS = List.of(
-        ".git", ".agent-context", "target", "build", "node_modules", ".gradle", ".idea", ".vscode"
+        ".git", ".agent-context", "target", "build", "node_modules", ".gradle", ".idea", ".vscode",
+        "worktrees"
     );
     private static final List<String> SKIP_EXTENSIONS = List.of(
         ".class", ".jar", ".zip", ".tar", ".gz", ".png", ".jpg", ".jpeg", ".gif", ".ico",

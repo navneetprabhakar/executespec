@@ -217,6 +217,49 @@ public class RunController {
         }
     }
 
+    /**
+     * Implements post-merge suggestions (MEDIUM/LOW reviewer issues) for a run.
+     *
+     * <p>When the run is AWAITING_MERGE: resolves the live merge gate with the
+     * IMPLEMENT_SUGGESTIONS decision so the pipeline thread re-runs affected workers
+     * with suggestion feedback injected, then re-reviews and re-opens the gate.
+     *
+     * <p>When the run is PARTIAL (after a failed suggestion implementation): re-dispatches
+     * the review+gate cycle so the user can retry.
+     *
+     * <p>Returns 202 Accepted immediately; processing is asynchronous.
+     */
+    @PostMapping("/{runId}/implement-suggestions")
+    public ResponseEntity<Void> implementSuggestions(@PathVariable String runId) {
+        log.info("POST /api/runs/{}/implement-suggestions", runId);
+        try {
+            harness.implementSuggestions(runId);
+            return ResponseEntity.accepted().build();
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
+    /**
+     * Re-runs the reviewer and re-opens the merge gate for a PARTIAL run where all
+     * worker tasks are COMPLETE (e.g., after "Merge declined").
+     * Returns 202 Accepted immediately; reviewer + gate run asynchronously.
+     */
+    @PostMapping("/{runId}/reopen-merge")
+    public ResponseEntity<Void> reopenMerge(@PathVariable String runId) {
+        log.info("POST /api/runs/{}/reopen-merge", runId);
+        try {
+            harness.reopenMergeGate(runId);
+            return ResponseEntity.accepted().build();
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
     /** Get recovery history for a run. */
     @GetMapping("/{runId}/recovery")
     public ResponseEntity<List<RecoveryResponse>> getRecovery(@PathVariable String runId) {

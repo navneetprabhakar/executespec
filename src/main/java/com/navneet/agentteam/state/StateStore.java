@@ -557,6 +557,19 @@ public class StateStore {
         return taskRepo.findById(taskId).orElseThrow();
     }
 
+    /**
+     * Marks a single task as FAILED with a descriptive reason.
+     * Used by PipelineHarness when a task branch has a merge conflict so the
+     * user can retry the task via the TaskCard retry button.
+     */
+    public void failTask(String taskId, String reason) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            task.setStatus("FAILED");
+            task.setLastLlmFailure(reason);
+            taskRepo.save(task);
+        });
+    }
+
     public List<AgentTask> getTasksForRun(String runId) {
         return taskRepo.findByRunId(runId);
     }
