@@ -86,11 +86,11 @@ public class AgentModelConfig {
             log.info("[AgentModelConfig] No GOOGLE_API_KEY configured — system Gemini fallback disabled");
             return null;
         }
-        log.info("[AgentModelConfig] Creating system Gemini bean (gemini-2.0-flash)");
+        log.info("[AgentModelConfig] Creating system Gemini bean (gemini-3.1-flash-lite-preview)");
         Client client = Client.builder().apiKey(apiKey).build();
         return GoogleGenAiChatModel.builder()
                 .genAiClient(client)
-                .defaultOptions(GoogleGenAiChatOptions.builder().model("gemini-2.0-flash").build())
+                .defaultOptions(GoogleGenAiChatOptions.builder().model("gemini-3.1-flash-lite-preview").build())
                 .build();
     }
 }
