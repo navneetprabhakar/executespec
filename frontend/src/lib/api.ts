@@ -212,6 +212,15 @@ export const reopenMergeGate = (runId: string) =>
 export const implementSuggestions = (runId: string) =>
   req<void>(`/runs/${runId}/implement-suggestions`, { method: 'POST' });
 
+export const pauseRun = (runId: string) =>
+  req<void>(`/runs/${runId}/pause`, { method: 'POST' });
+
+export const editAndRestartRun = (runId: string, userRequest: string) =>
+  req<RunSummary>(`/runs/${runId}/edit-and-restart`, {
+    method: 'POST',
+    body: JSON.stringify({ userRequest }),
+  });
+
 // ── Metrics ─────────────────────────────────────────────────────────────────
 
 export const getMetrics = () => req<MetricsResponse>('/metrics');

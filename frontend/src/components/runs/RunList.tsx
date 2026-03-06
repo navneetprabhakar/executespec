@@ -10,7 +10,7 @@ import { useAuthStore, selectIsOrgMember } from '@/stores/useAuthStore';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
 
-const FILTERS = ['ALL', 'PLANNING', 'WORKING', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'COMPLETE', 'FAILED'];
+const FILTERS = ['ALL', 'PLANNING', 'WORKING', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'COMPLETE', 'PAUSED', 'FAILED'];
 
 export default function RunList() {
   const {
