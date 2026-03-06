@@ -6,6 +6,7 @@ import com.navneet.agentteam.agent.LlmRouter.FallbackMode;
 import com.navneet.agentteam.agent.model.TaskDefinition;
 import com.navneet.agentteam.agent.model.TaskPlan;
 import com.navneet.agentteam.config.AgentProperties;
+import com.navneet.agentteam.harness.merge.MergeConflictAnalyser;
 import com.navneet.agentteam.state.StateStore;
 import com.navneet.agentteam.tool.FileSystemTool;
 import com.navneet.agentteam.tool.ToolResult;
@@ -41,6 +42,7 @@ public class PlannerAgent {
     private final AgentProperties props;
     private final LlmRouter llmRouter;
     private final LlmOutputParser outputParser;
+    private final MergeConflictAnalyser conflictAnalyser;
 
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
@@ -48,7 +50,7 @@ public class PlannerAgent {
     public TaskPlan plan(String userRequest, String runId, String modelOverride) {
         log.info("Planner starting for run {}", runId);
 
-        String systemPrompt = loadPrompt();
+        String systemPrompt = loadPrompt() + buildConflictHistoryContext();
         String contextSummary = buildWorkspaceContext(runId);
         String model = (modelOverride != null && !modelOverride.isBlank())
                 ? modelOverride
@@ -220,6 +222,19 @@ public class PlannerAgent {
             return plannerPrompt.getContentAsString(StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new RuntimeException("Cannot load planner prompt", e);
+        }
+    }
+
+    /**
+     * Appends historical merge conflict data to the system prompt so the planner
+     * can avoid patterns that frequently cause conflicts.
+     */
+    private String buildConflictHistoryContext() {
+        try {
+            return conflictAnalyser.buildPlannerContext(5, 20);
+        } catch (Exception e) {
+            log.debug("Could not build conflict history context: {}", e.getMessage());
+            return "";
         }
     }
 

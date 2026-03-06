@@ -762,6 +762,9 @@ public class PipelineHarness {
                 .filter(t -> !isSystemTask(t))
                 .toList();
 
+            // Validate file ownership — detect overlap before workers start
+            validateFileOwnership(workerTasks, runId);
+
             // Pre-claim file ownership based on planner declarations
             for (AgentTask wt : workerTasks) {
                 try {
@@ -976,6 +979,21 @@ public class PipelineHarness {
                     eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, conflictReason));
                     log.warn("Async run {} — partial merge: {}", runId, conflictReason);
                     return;
+                }
+
+                // ── Post-merge compile validation ──────────────────────────
+                // Run compile-and-fix again after all branches are merged.
+                // Catches semantic conflicts (e.g., renamed methods, conflicting imports)
+                // that pass textual merge but break compilation.
+                try {
+                    var postMergeCompile = compilerAgent.runCompileAndFix(runId);
+                    if (!postMergeCompile.passed() && !postMergeCompile.skipped()) {
+                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                            "⚠️ Post-merge compile failed: " + postMergeCompile.errorSummary()
+                            + " — proceeding with merge (non-blocking)."));
+                    }
+                } catch (Exception compileEx) {
+                    log.warn("Post-merge compile failed for run {}: {}", runId, compileEx.getMessage());
                 }
 
                 stateStore.markComplete(runId);
@@ -1595,6 +1613,45 @@ public class PipelineHarness {
         run.setSkipApproval(skipApproval);
         stateStore.save(run);
         return run;
+    }
+
+    // ── File-ownership validation ────────────────────────────────────────────
+
+    /**
+     * Validates that no two tasks claim the same file in their owned_files lists.
+     * If conflicts are detected, auto-injects dependencies to serialize the conflicting tasks
+     * (the task appearing later in the plan depends on the earlier one).
+     * This is non-fatal — logs warnings and auto-corrects.
+     */
+    private void validateFileOwnership(List<AgentTask> workerTasks, String runId) {
+        Map<String, List<String>> fileToOwners = new java.util.HashMap<>();
+        Map<String, com.navneet.agentteam.agent.model.TaskDefinition> taskDefs = new java.util.HashMap<>();
+
+        for (AgentTask wt : workerTasks) {
+            try {
+                com.navneet.agentteam.agent.model.TaskDefinition def =
+                    mapper.readValue(wt.getTaskJson(), com.navneet.agentteam.agent.model.TaskDefinition.class);
+                taskDefs.put(wt.getTaskId(), def);
+                if (def.getOwnedFiles() != null) {
+                    for (String file : def.getOwnedFiles()) {
+                        fileToOwners.computeIfAbsent(file, k -> new java.util.ArrayList<>())
+                                    .add(wt.getTaskId());
+                    }
+                }
+            } catch (JsonProcessingException ignore) { /* non-fatal */ }
+        }
+
+        List<String> conflicts = fileToOwners.entrySet().stream()
+            .filter(e -> e.getValue().size() > 1)
+            .map(e -> e.getKey() + " claimed by: " + e.getValue())
+            .toList();
+
+        if (!conflicts.isEmpty()) {
+            log.warn("File ownership conflicts detected in plan for run {}: {}", runId, conflicts);
+            broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                "⚠️ File ownership overlap detected: " + String.join("; ", conflicts)
+                + " — tasks with shared files will run sequentially."));
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

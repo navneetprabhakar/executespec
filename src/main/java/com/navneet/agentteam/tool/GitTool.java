@@ -403,6 +403,110 @@ public class GitTool {
         }
     }
 
+    // ── Conflict resolution helpers ──────────────────────────────────────────
+
+    /**
+     * Merges a branch into main WITHOUT committing, so the caller can
+     * inspect and resolve conflicts before finalizing.
+     *
+     * @return the JGit MergeResult (caller checks getMergeStatus())
+     */
+    public MergeResult mergeBranchNoCommit(String runId, String branchName) {
+        try (Git git = openRepo(runId)) {
+            git.checkout().setName("main").call();
+            return git.merge()
+                .include(git.getRepository().findRef(branchName))
+                .setFastForward(MergeCommand.FastForwardMode.NO_FF)
+                .setCommit(false)
+                .setMessage("merge: " + branchName)
+                .call();
+        } catch (Exception e) {
+            log.error("mergeBranchNoCommit failed for {}: {}", branchName, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Commits the current staged changes (e.g., after conflict resolution).
+     */
+    public void commitMerge(String runId, String message) {
+        try (Git git = openRepo(runId)) {
+            git.commit().setMessage(message).call();
+        } catch (Exception e) {
+            log.error("commitMerge failed for run {}: {}", runId, e.getMessage());
+        }
+    }
+
+    /**
+     * Stages a specific file in the run's workspace repo.
+     */
+    public void stageFile(String runId, String filePath) {
+        try (Git git = openRepo(runId)) {
+            git.add().addFilepattern(filePath).call();
+        } catch (Exception e) {
+            log.error("stageFile failed for {}: {}", filePath, e.getMessage());
+        }
+    }
+
+    /**
+     * Reads a file's content from a specific git ref (branch name, commit hash, "HEAD").
+     *
+     * @return file content as string, or null if the file doesn't exist at that ref
+     */
+    public String readFileFromRef(String runId, String ref, String filePath) {
+        try (Git git = openRepo(runId)) {
+            ObjectId refId = git.getRepository().resolve(ref);
+            if (refId == null) return null;
+
+            org.eclipse.jgit.revwalk.RevWalk revWalk = new org.eclipse.jgit.revwalk.RevWalk(git.getRepository());
+            RevCommit commit = revWalk.parseCommit(refId);
+            org.eclipse.jgit.treewalk.TreeWalk treeWalk = org.eclipse.jgit.treewalk.TreeWalk.forPath(
+                git.getRepository(), filePath, commit.getTree());
+            if (treeWalk == null) return null;
+
+            ObjectId blobId = treeWalk.getObjectId(0);
+            byte[] bytes = git.getRepository().open(blobId).getBytes();
+            revWalk.dispose();
+            return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.debug("readFileFromRef({}, {}, {}): {}", runId, ref, filePath, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Finds the merge base (common ancestor) commit between two branches.
+     *
+     * @return the merge-base commit hash, or null if not found
+     */
+    public String getMergeBase(String runId, String branch1, String branch2) {
+        try (Git git = openRepo(runId)) {
+            ObjectId id1 = git.getRepository().resolve(branch1);
+            ObjectId id2 = git.getRepository().resolve(branch2);
+            if (id1 == null || id2 == null) return null;
+
+            org.eclipse.jgit.revwalk.RevWalk walk = new org.eclipse.jgit.revwalk.RevWalk(git.getRepository());
+            walk.setRevFilter(org.eclipse.jgit.revwalk.filter.RevFilter.MERGE_BASE);
+            walk.markStart(walk.parseCommit(id1));
+            walk.markStart(walk.parseCommit(id2));
+            RevCommit mergeBase = walk.next();
+            walk.dispose();
+            return mergeBase != null ? mergeBase.getName() : null;
+        } catch (Exception e) {
+            log.debug("getMergeBase({}, {}, {}): {}", runId, branch1, branch2, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Returns the workspace path for a run.
+     */
+    public Path getWorkspacePath(String runId) {
+        String override = WorkspaceContext.getWorkDir(runId);
+        if (override != null) return Path.of(override);
+        return Path.of(workspaceRoot, runId);
+    }
+
     private AbstractTreeIterator getTreeIterator(Git git, String ref) throws Exception {
         ObjectId id = git.getRepository().resolve(ref + "^{tree}");
         CanonicalTreeParser p = new CanonicalTreeParser();

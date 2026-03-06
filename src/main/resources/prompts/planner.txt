@@ -55,6 +55,14 @@ HARD RULES — violating these causes the run to fail
     - Use relative paths from the workspace root (e.g., "src/main/java/com/example/UserService.java").
     - Include ALL files the task will touch, including configuration files and test files.
 
+3c. If two tasks MUST modify the same file, declare the file in "shared_files" for BOTH tasks
+    and make one depend on the other (add to "depends_on") so they run sequentially.
+    Common shared files in code projects:
+      - pom.xml / package.json / build.gradle → always assign to "project_setup" task only
+      - application.yml / .env → create a "config_setup" task if multiple tasks need config changes
+      - Router/route files → if multiple tasks add routes, create a single "routing_setup" task
+    CRITICAL: If a file appears in shared_files for two tasks, one MUST depend on the other.
+
 4. Every task's acceptance_criteria must be verifiable by running a command.
    "Code is well-written" is not verifiable. "mvn test passes" is verifiable.
 
@@ -178,7 +186,8 @@ Respond with exactly this JSON structure:
       "depends_on": [],
       "complexity": "LOW",
       "assigned_model": "claude-haiku-4-5-20251001",
-      "owned_files": ["src/main/java/com/x/ItemController.java"]
+      "owned_files": ["src/main/java/com/x/ItemController.java"],
+      "shared_files": []
     }
   ]
 }
