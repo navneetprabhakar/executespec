@@ -278,6 +278,12 @@ public class WorkerAgent {
 
     // ── XML Tool-Call Parsing & Dispatch ──────────────────────────────────────
 
+    /** Lenient mapper that accepts raw control chars (newlines, tabs) inside JSON strings.
+     *  LLMs frequently emit unescaped newlines in file content — standard Jackson rejects these. */
+    private static final com.fasterxml.jackson.databind.ObjectMapper LENIENT_MAPPER =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
+
     private List<ParsedToolCall> parseXmlToolCalls(String text) {
         if (text == null || text.isBlank()) return List.of();
         List<ParsedToolCall> calls = new ArrayList<>();
@@ -285,7 +291,7 @@ public class WorkerAgent {
         while (m.find()) {
             String json = m.group(1).trim();
             try {
-                JsonNode node = mapper.readTree(json);
+                JsonNode node = LENIENT_MAPPER.readTree(json);
                 String name = node.has("name") ? node.get("name").asText() : null;
                 String argsJson = node.has("args") ? node.get("args").toString() : "{}";
                 if (name != null && !name.isBlank()) {
