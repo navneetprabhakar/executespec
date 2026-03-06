@@ -34,7 +34,7 @@ public interface MergeConflictRepository extends JpaRepository<MergeConflict, Lo
                SUM(CASE WHEN mc.resolution != 'FAILED' THEN 1 ELSE 0 END) as auto_resolved
         FROM merge_conflict mc
         WHERE mc.run_id IN (
-            SELECT DISTINCT run_id FROM merge_conflict ORDER BY created_at DESC LIMIT :runLimit
+            SELECT run_id FROM merge_conflict GROUP BY run_id ORDER BY MAX(created_at) DESC LIMIT :runLimit
         )
         """, nativeQuery = true)
     List<Object[]> getResolutionStats(@Param("runLimit") int runLimit);
