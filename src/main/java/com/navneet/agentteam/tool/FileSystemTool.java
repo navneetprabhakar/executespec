@@ -4,12 +4,14 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -19,6 +21,9 @@ public class FileSystemTool {
 
     @Value("${agent.workspace}")
     private String workspaceRoot;
+
+    @Autowired(required = false)
+    private FileLockTool lockTool;
 
     // Config and credential file names that agents must never read
     private static final Set<String> BLOCKED_FILE_NAMES = Set.of(
@@ -67,6 +72,22 @@ public class FileSystemTool {
      * Checks whether a resolved path refers to a blocked credential or config file.
      * Returns an error ToolResult if blocked, null if allowed.
      */
+    /**
+     * Checks if the current task is allowed to write to the given path.
+     * Returns an error message if blocked by another task's file lock, null if OK.
+     */
+    private String checkFileLock(String path) {
+        String currentTask = WorkspaceContext.getTaskId();
+        if (currentTask != null && lockTool != null) {
+            Optional<String> owner = lockTool.getOwner(path);
+            if (owner.isPresent() && !owner.get().equals(currentTask)) {
+                return "WRITE BLOCKED: File '" + path + "' is owned by task '" + owner.get() + "'. "
+                    + "This task (" + currentTask + ") cannot modify it.";
+            }
+        }
+        return null;
+    }
+
     private ToolResult checkCredentialBlock(Path resolved) {
         String fileName = resolved.getFileName() != null
                 ? resolved.getFileName().toString().toLowerCase()
@@ -110,6 +131,8 @@ public class FileSystemTool {
             @ToolParam(description = "Path of the file to write", required = true) String path,
             @ToolParam(description = "Complete content of the file", required = true) String content) {
         try {
+            String lockBlock = checkFileLock(path);
+            if (lockBlock != null) return lockBlock;
             Path target = safeResolve(runId, path);
             Files.createDirectories(target.getParent());
             Files.writeString(target, content);
@@ -128,6 +151,8 @@ public class FileSystemTool {
             @ToolParam(description = "Exact string to replace", required = true) String oldStr,
             @ToolParam(description = "New string to insert", required = true) String newStr) {
         try {
+            String lockBlock = checkFileLock(path);
+            if (lockBlock != null) return lockBlock;
             Path target = safeResolve(runId, path);
             String current = Files.readString(target);
             if (!current.contains(oldStr)) {

@@ -53,9 +53,39 @@ public class GitTool {
         Path repoRoot = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
         Path worktreeDir = repoRoot.resolve("worktrees").resolve(taskId);
         try {
-            // Reuse existing worktree on retry
+            // On retry: reset worktree to clean state before reuse
             if (java.nio.file.Files.exists(worktreeDir.resolve(".git"))) {
-                log.info("[GitTool] Worktree '{}' already exists — reusing", taskId);
+                log.info("[GitTool] Worktree '{}' already exists — resetting for retry", taskId);
+                // Reset tracked files to branch HEAD
+                new ProcessBuilder("git", "checkout", ".")
+                        .directory(worktreeDir.toFile())
+                        .redirectErrorStream(true)
+                        .start().waitFor();
+                // Remove untracked files and directories
+                new ProcessBuilder("git", "clean", "-fd")
+                        .directory(worktreeDir.toFile())
+                        .redirectErrorStream(true)
+                        .start().waitFor();
+                // Re-merge dependency branches (may have been updated by retried deps)
+                if (depBranches != null && !depBranches.isEmpty()) {
+                    for (String dep : depBranches) {
+                        ProcessBuilder mpb = new ProcessBuilder(
+                                "git", "merge", "--no-edit", "-X", "theirs", dep);
+                        mpb.directory(worktreeDir.toFile());
+                        mpb.redirectErrorStream(true);
+                        Process mp = mpb.start();
+                        String mout = new String(mp.getInputStream().readAllBytes());
+                        int mexit = mp.waitFor();
+                        if (mexit != 0) {
+                            log.warn("[GitTool] Retry re-merge of '{}' failed in worktree {}: {}",
+                                    dep, taskId, mout.trim());
+                            new ProcessBuilder("git", "merge", "--abort")
+                                    .directory(worktreeDir.toFile())
+                                    .redirectErrorStream(true)
+                                    .start().waitFor();
+                        }
+                    }
+                }
                 return worktreeDir.toString();
             }
             java.nio.file.Files.createDirectories(repoRoot.resolve("worktrees"));

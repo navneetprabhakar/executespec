@@ -32,6 +32,11 @@ public class TaskDefinition {
     private IterationEstimate estimatedIterations;       // null unless feasibility mode
     private Integer estimatedTokensPerIteration;         // null unless feasibility mode
 
+    // ── File ownership ──────────────────────────────────────────────────────────
+    // Declared by the planner: list of file paths this task will create or modify.
+    // Used by PipelineHarness to pre-claim file locks before worker execution.
+    private List<String> ownedFiles;
+
     // ── Auto-remediation feedback ─────────────────────────────────────────────
     // Injected by PipelineHarness during REWORK remediation cycles so the worker
     // knows exactly what the reviewer flagged. Null on first attempt.

@@ -182,6 +182,21 @@ public class StateStore {
      */
     public void markRetryingWithFeedback(String runId, String taskId, String reworkFeedback) {
         taskRepo.findById(taskId).ifPresent(task -> {
+            // Subtract old token counts from run totals before resetting (prevents double-counting)
+            int oldIn = task.getInputTokens() != null ? task.getInputTokens() : 0;
+            int oldOut = task.getOutputTokens() != null ? task.getOutputTokens() : 0;
+            if (oldIn > 0 || oldOut > 0) {
+                runRepo.findById(runId).ifPresent(run -> {
+                    run.setTotalInputTokens(Math.max(0, run.getTotalInputTokens() - oldIn));
+                    run.setTotalOutputTokens(Math.max(0, run.getTotalOutputTokens() - oldOut));
+                    runRepo.save(run);
+                });
+            }
+            task.setInputTokens(0);
+            task.setOutputTokens(0);
+            task.setCacheReadTokens(0);
+            task.setCacheWriteTokens(0);
+
             // Inject reviewer feedback into the stored TaskDefinition JSON so
             // WorkerAgent.buildInitialUserMessage() can surface it on the next attempt.
             if (reworkFeedback != null && !reworkFeedback.isBlank() && task.getTaskJson() != null) {
@@ -215,15 +230,7 @@ public class StateStore {
     // ── Task lifecycle ────────────────────────────────────────
 
     public boolean lockTask(String taskId, String model, String branchName) {
-        int updated = taskRepo.lockIfPending(taskId, Instant.now());
-        if (updated == 0) return false;
-
-        AgentTask task = taskRepo.findById(taskId).orElseThrow();
-        task.setAssignedModel(model);
-        task.setBranchName(branchName);
-        task.setStatus("WORKING");
-        taskRepo.save(task);
-        return true;
+        return taskRepo.lockAndStart(taskId, model, branchName, Instant.now()) > 0;
     }
 
     public void completeTask(String taskId, WorkerReport report) {

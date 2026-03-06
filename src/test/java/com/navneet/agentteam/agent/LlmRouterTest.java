@@ -24,6 +24,7 @@ class LlmRouterTest {
 
     @Mock private ApplicationContext ctx;
     @Mock private InboxService inboxService;
+    @Mock private RunKeyStore runKeyStore;
     @Mock private AnthropicChatModel anthropicChatModel;
     @Mock private ChatResponse chatResponse;
 
@@ -31,7 +32,7 @@ class LlmRouterTest {
 
     @BeforeEach
     void setUp() {
-        router = new LlmRouter(ctx, inboxService);
+        router = new LlmRouter(ctx, inboxService, runKeyStore);
     }
 
     @Nested

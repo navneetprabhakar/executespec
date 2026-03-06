@@ -101,6 +101,7 @@ public class WorkerAgent {
         // other via git checkout / working-tree state.
         String worktreePath = gitTool.createWorktree(runId, taskId, branchName, depBranches);
         WorkspaceContext.set(runId, worktreePath);
+        WorkspaceContext.setTaskId(taskId);
         log.info("Worker starting task [{}] on branch {} in worktree {} ({}:{})",
                 taskId, branchName, worktreePath, provider, model);
 

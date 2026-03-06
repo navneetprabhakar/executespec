@@ -154,8 +154,9 @@ public class PipelineHarness {
             List<AgentTask> tasks = stateStore.getPendingTasks(run.getRunId());
             workspaceInitService.ensureRunWorkspace(run.getRunId());
             initAgentContext(run.getRunId(), mapper.writeValueAsString(plan));
-            List<WorkerReport> reports = workerPool.runAll(tasks, run.getRunId(),
+            WorkerPool.WorkerPoolResult poolResult = workerPool.runAll(tasks, run.getRunId(),
                 props.getRoles().getWorker());
+            List<WorkerReport> reports = poolResult.reports();
 
             stateStore.markReviewing(run.getRunId());
             run = stateStore.findRun(run.getRunId()).orElse(run);
@@ -761,8 +762,20 @@ public class PipelineHarness {
                 .filter(t -> !isSystemTask(t))
                 .toList();
 
-            List<WorkerReport> reports = workerPool.runAll(workerTasks, runId,
+            // Pre-claim file ownership based on planner declarations
+            for (AgentTask wt : workerTasks) {
+                try {
+                    com.navneet.agentteam.agent.model.TaskDefinition def =
+                        mapper.readValue(wt.getTaskJson(), com.navneet.agentteam.agent.model.TaskDefinition.class);
+                    if (def.getOwnedFiles() != null && !def.getOwnedFiles().isEmpty()) {
+                        lockTool.preClaimAll(runId, wt.getTaskId(), def.getOwnedFiles());
+                    }
+                } catch (JsonProcessingException ignore) { /* non-fatal */ }
+            }
+
+            WorkerPool.WorkerPoolResult poolResult = workerPool.runAll(workerTasks, runId,
                 props.getRoles().getWorker());
+            List<WorkerReport> reports = poolResult.reports();
 
             // Auto-complete generate_openapi_spec (backwards compat with old plans that still
             // carry this task in the DB).  ApiTestSuiteAgent generates the real spec post-merge.
@@ -1065,8 +1078,9 @@ public class PipelineHarness {
         List<AgentTask> incomplete = stateStore.getIncompleteTasks(run.getRunId());
         workspaceInitService.ensureRunWorkspace(run.getRunId());
         initAgentContext(run.getRunId(), run.getPlanJson());
-        List<WorkerReport> reports = workerPool.runAll(incomplete, run.getRunId(),
+        WorkerPool.WorkerPoolResult poolResult = workerPool.runAll(incomplete, run.getRunId(),
             props.getRoles().getWorker());
+        List<WorkerReport> reports = poolResult.reports();
         stateStore.markReviewing(run.getRunId());
         PipelineRun fresh = stateStore.findRun(run.getRunId()).orElse(run);
         ReviewReport review = reviewerAgent.review(fresh, reports);
@@ -1244,7 +1258,7 @@ public class PipelineHarness {
             // ── 1. Lock + run the retried worker task ──────────────────────
             String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
             stateStore.lockTask(taskId, props.getRoles().getWorker(), branchName);
-            WorkerReport retryReport = workerPool.executeTask(task);
+            WorkerReport retryReport = workerPool.executeTask(task, runId);
 
             broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId,
                 "complete".equalsIgnoreCase(retryReport.getStatus())
@@ -1876,6 +1890,7 @@ public class PipelineHarness {
                     .selfReview("OpenAPI spec is auto-generated post-merge by ApiTestSuiteAgent. No worker action needed.")
                     .build();
                 stateStore.completeTask(t.getTaskId(), report);
+                broadcaster.emit(runId, RunEvent.taskStatus(runId, t.getTaskId(), "COMPLETE"));
                 log.info("[Harness] {} auto-completed for run {} (spec generated post-merge)", OPENAPI_TASK_ID, runId);
             });
     }
