@@ -433,6 +433,61 @@ public class PipelineHarness {
     }
 
     /**
+     * Pauses a run: signals open gates via Redis, cancels in-flight workers,
+     * and marks the run PAUSED. The user can then edit the goal and restart.
+     */
+    public boolean pauseRun(String runId) {
+        gateStore.setPlanGate(runId, false);
+        gateStore.setMergeGate(runId, MergeDecision.DECLINE);
+        workerPool.cancelAllTasksForRun(runId);
+
+        boolean paused = stateStore.pauseRun(runId);
+        if (paused) {
+            broadcaster.emit(runId, RunEvent.runStatus(runId, "PAUSED"));
+            broadcaster.emit(runId, RunEvent.complete(runId, "PAUSED"));
+            broadcaster.complete(runId);
+        }
+        return paused;
+    }
+
+    /**
+     * Creates a fresh run with an edited goal, linking it back to the paused source run.
+     * Carries forward credentials, ownership, org, project, and model settings.
+     */
+    public PipelineRun restartWithNewGoal(PipelineRun pausedRun, String newGoal) {
+        log.info("Restarting paused run {} with new goal", pausedRun.getRunId());
+
+        PipelineRun newRun = submitRun(
+            newGoal,
+            pausedRun.getSourceType() != null ? pausedRun.getSourceType() : "MANUAL",
+            pausedRun.getRepoUrl(),
+            pausedRun.getRepoMode(),
+            pausedRun.getGithubPat(),
+            pausedRun.getGithubOwner()
+        );
+
+        // Carry forward ownership and context
+        newRun.setCreatedByUserId(pausedRun.getCreatedByUserId());
+        newRun.setOrgId(pausedRun.getOrgId());
+        newRun.setProjectId(pausedRun.getProjectId());
+        newRun.setPlannerModel(pausedRun.getPlannerModel());
+        newRun.setReviewerModel(pausedRun.getReviewerModel());
+        newRun.setSourceRunId(pausedRun.getRunId());
+        if (pausedRun.isSkipApproval()) newRun.setSkipApproval(true);
+        stateStore.saveRun(newRun);
+
+        // Update paused run's failure reason with forward link
+        pausedRun.setFailureReason("Paused by user — restarted as " + newRun.getRunId());
+        stateStore.saveRun(pausedRun);
+
+        broadcaster.emit(pausedRun.getRunId(), RunEvent.log(
+            pausedRun.getRunId(), "harness",
+            "🔄 Restarted with edited goal — new run: " + newRun.getRunId()));
+
+        return newRun;
+    }
+
+    /**
      * Re-runs the reviewer and re-opens the merge gate for a PARTIAL run where all
      * worker tasks are already COMPLETE (e.g., after a "Merge declined" action).
      * Executes asynchronously. Validates that the run is PARTIAL and all tasks are COMPLETE
@@ -738,6 +793,12 @@ public class PipelineHarness {
             }
 
             if (!planApproved) {
+                // Guard: if run was paused (not rejected), don't overwrite PAUSED with FAILED
+                PipelineRun currentState = stateStore.findRun(runId).orElse(null);
+                if (currentState != null && "PAUSED".equals(currentState.getStatus())) {
+                    log.info("Run {} was paused during plan gate — exiting cleanly", runId);
+                    return;
+                }
                 stateStore.markRejected(runId, "Rejected at plan approval gate");
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Rejected at plan approval gate"));
@@ -1036,30 +1097,48 @@ public class PipelineHarness {
                 // but broadcaster.complete() is idempotent.
 
             } else {
-                // DECLINE — always mark PARTIAL on decline, preserved for later merge.
-                String reason = reviewerRework
-                    ? "Merge declined after REWORK review — retry individual tasks or use 'Reopen Merge Gate' when ready"
-                    : "Merge declined by user — run preserved. Use 'Reopen Merge Gate' to merge when ready.";
-                stateStore.markPartial(runId, reason);
-                broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                    "ℹ️ Merge declined — run is PARTIAL and preserved. "
-                    + "Use 'Reopen Merge Gate' to merge when ready, or retry individual tasks if needed."));
-                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
-                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
-                log.info("Async run {} — merge declined; marked PARTIAL", runId);
+                // DECLINE — guard: if run was paused, don't overwrite PAUSED with PARTIAL
+                PipelineRun declineState = stateStore.findRun(runId).orElse(null);
+                if (declineState != null && "PAUSED".equals(declineState.getStatus())) {
+                    log.info("Run {} was paused during merge gate — exiting cleanly", runId);
+                } else {
+                    // Normal DECLINE — mark PARTIAL, preserved for later merge.
+                    String reason = reviewerRework
+                        ? "Merge declined after REWORK review — retry individual tasks or use 'Reopen Merge Gate' when ready"
+                        : "Merge declined by user — run preserved. Use 'Reopen Merge Gate' to merge when ready.";
+                    stateStore.markPartial(runId, reason);
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        "ℹ️ Merge declined — run is PARTIAL and preserved. "
+                        + "Use 'Reopen Merge Gate' to merge when ready, or retry individual tasks if needed."));
+                    broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
+                    log.info("Async run {} — merge declined; marked PARTIAL", runId);
+                }
             }
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            String reason = "Interrupted: " + e.getMessage();
-            stateStore.markFailed(runId, reason);
-            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
+            // Guard: don't overwrite PAUSED with FAILED
+            PipelineRun intState = stateStore.findRun(runId).orElse(null);
+            if (intState != null && "PAUSED".equals(intState.getStatus())) {
+                log.info("Run {} was paused (interrupted) — exiting cleanly", runId);
+            } else {
+                String reason = "Interrupted: " + e.getMessage();
+                stateStore.markFailed(runId, reason);
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
+            }
         } catch (Exception e) {
             log.error("Async run {} failed: {}", runId, e.getMessage(), e);
-            stateStore.markFailed(runId, e.getMessage());
-            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
+            // Guard: don't overwrite PAUSED with FAILED
+            PipelineRun exState = stateStore.findRun(runId).orElse(null);
+            if (exState != null && "PAUSED".equals(exState.getStatus())) {
+                log.info("Run {} was paused — suppressing FAILED transition", runId);
+            } else {
+                stateStore.markFailed(runId, e.getMessage());
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
+            }
         } finally {
             broadcaster.complete(runId);
             runKeyStore.remove(runId);  // clean up per-run API keys

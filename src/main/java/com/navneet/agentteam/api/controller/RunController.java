@@ -185,14 +185,53 @@ public class RunController {
         log.info("POST /api/runs/{}/retry", runId);
         PipelineRun original = stateStore.findRun(runId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
-        if (!List.of("FAILED", "CANCELLED", "REJECTED").contains(original.getStatus())) {
+        if (!List.of("FAILED", "CANCELLED", "REJECTED", "PAUSED").contains(original.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Only FAILED, CANCELLED or REJECTED runs can be retried");
+                "Only FAILED, CANCELLED, REJECTED or PAUSED runs can be retried");
         }
         String newRunId = harness.restartRun(original);
         PipelineRun newRun = stateStore.findRun(newRunId).orElseThrow();
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(newRun));
     }
+
+    /**
+     * Pause a running pipeline. Cancels in-flight workers and gates,
+     * sets status to PAUSED for later goal editing and restart.
+     */
+    @PostMapping("/{runId}/pause")
+    public ResponseEntity<Void> pauseRun(@PathVariable String runId) {
+        log.info("POST /api/runs/{}/pause", runId);
+        PipelineRun run = stateStore.findRun(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (List.of("COMPLETE", "FAILED", "CANCELLED", "PAUSED").contains(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Cannot pause a " + run.getStatus() + " run");
+        }
+        boolean paused = harness.pauseRun(runId);
+        return paused ? ResponseEntity.ok().build() : ResponseEntity.status(HttpStatus.CONFLICT).build();
+    }
+
+    /**
+     * Edit the goal of a PAUSED run and restart it as a brand-new pipeline run.
+     * The new run links back via sourceRunId, and the paused run's failureReason is updated
+     * with a forward link to the new run.
+     */
+    @PostMapping("/{runId}/edit-and-restart")
+    public ResponseEntity<RunSummary> editAndRestart(
+            @PathVariable String runId,
+            @RequestBody EditAndRestartRequest body) {
+        log.info("POST /api/runs/{}/edit-and-restart — newGoal: {}", runId, body.userRequest());
+        PipelineRun paused = stateStore.findRun(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (!"PAUSED".equals(paused.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Only PAUSED runs can be edited and restarted (current: " + paused.getStatus() + ")");
+        }
+        PipelineRun newRun = harness.restartWithNewGoal(paused, body.userRequest());
+        return ResponseEntity.status(HttpStatus.CREATED).body(mapper.toSummary(newRun));
+    }
+
+    public record EditAndRestartRequest(String userRequest) {}
 
     /** Cancel a run. */
     @DeleteMapping("/{runId}")

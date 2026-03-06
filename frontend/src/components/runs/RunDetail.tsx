@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2, RotateCcw } from 'lucide-react';
+import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
@@ -10,10 +10,14 @@ import { downloadWorkspace, type ReviewReport } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function RunDetail() {
-  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions, createRun } = useRunStore();
+  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions, createRun, pauseRun, editAndRestartRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [newGoal, setNewGoal] = useState('');
+  const [restarting, setRestarting] = useState(false);
 
   // Parse the reviewJson once whenever the run refreshes
   const review = useMemo<ReviewReport | null>(() => {
@@ -55,6 +59,34 @@ export default function RunDetail() {
       addToast({ type: 'error', message: e.message });
     } finally {
       setReRunning(false);
+    }
+  };
+
+  const handlePause = async () => {
+    if (!activeRun) return;
+    setPausing(true);
+    try {
+      await pauseRun(activeRun.runId);
+      addToast({ type: 'success', message: 'Run paused' });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message });
+    } finally {
+      setPausing(false);
+    }
+  };
+
+  const handleEditAndRestart = async () => {
+    if (!activeRun || !newGoal.trim()) return;
+    setRestarting(true);
+    try {
+      const newRunId = await editAndRestartRun(activeRun.runId, newGoal.trim());
+      addToast({ type: 'success', message: `Restarted with new goal: ${newRunId.slice(0, 8)}` });
+      setEditingGoal(false);
+      setNewGoal('');
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message });
+    } finally {
+      setRestarting(false);
     }
   };
 
@@ -203,18 +235,75 @@ export default function RunDetail() {
             </div>
           )}
 
+          {/* Paused banner — edit goal and restart */}
+          {activeRun.status === 'PAUSED' && (
+            <div className="mx-4 mt-3 p-3 rounded-lg border border-orange-400/30 bg-orange-400/5 space-y-2">
+              <div className="flex items-center gap-2">
+                <Pause className="h-4 w-4 text-orange-400 flex-shrink-0" />
+                <p className="text-xs font-medium text-orange-400">Run paused</p>
+              </div>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                <span className="text-zinc-500">Current goal:</span> {activeRun.userRequest}
+              </p>
+              {!editingGoal ? (
+                <button
+                  onClick={() => { setEditingGoal(true); setNewGoal(activeRun.userRequest); }}
+                  className="flex items-center gap-1.5 rounded-md bg-orange-400/20 hover:bg-orange-400/30 border border-orange-400/30 px-3 py-1.5 text-xs font-medium text-orange-400 transition-colors"
+                >
+                  Edit Goal & Restart
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <textarea
+                    value={newGoal}
+                    onChange={(e) => setNewGoal(e.target.value)}
+                    rows={3}
+                    className="w-full rounded-md bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 p-2 focus:outline-none focus:border-orange-400/50 resize-none"
+                    placeholder="Enter updated goal..."
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleEditAndRestart}
+                      disabled={restarting || !newGoal.trim()}
+                      className="flex items-center gap-1.5 rounded-md bg-orange-500 hover:bg-orange-600 px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                    >
+                      <Play className="h-3 w-3" />
+                      {restarting ? 'Restarting…' : 'Restart with New Goal'}
+                    </button>
+                    <button
+                      onClick={() => { setEditingGoal(false); setNewGoal(''); }}
+                      className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Action bar */}
           <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] flex-shrink-0">
-            {!['COMPLETE', 'FAILED', 'CANCELLED'].includes(activeRun.status) && (
-              <button
-                onClick={() => handle(() => cancelRun(activeRun.runId), 'Run cancelled')}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-rose transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Cancel
-              </button>
+            {!['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED'].includes(activeRun.status) && (
+              <>
+                <button
+                  onClick={handlePause}
+                  disabled={pausing}
+                  className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-orange-400 transition-colors disabled:opacity-50"
+                >
+                  <Pause className="h-3.5 w-3.5" />
+                  {pausing ? 'Pausing…' : 'Pause'}
+                </button>
+                <button
+                  onClick={() => handle(() => cancelRun(activeRun.runId), 'Run cancelled')}
+                  className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-rose transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Cancel
+                </button>
+              </>
             )}
-            {['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(activeRun.status) && (
+            {['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL', 'PAUSED'].includes(activeRun.status) && (
               <button
                 onClick={handleReRun}
                 disabled={reRunning}

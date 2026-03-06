@@ -372,10 +372,34 @@ public class StateStore {
         return runRepo.findById(runId);
     }
 
+    public PipelineRun saveRun(PipelineRun run) {
+        return runRepo.save(run);
+    }
+
     public boolean cancelRun(String runId) {
         return runRepo.findById(runId).map(run -> {
-            if (List.of("COMPLETE", "FAILED").contains(run.getStatus())) return false;
+            if (List.of("COMPLETE", "FAILED", "PAUSED").contains(run.getStatus())) return false;
             finaliseRun(run, "FAILED", "Cancelled by user");
+            taskRepo.findByRunId(runId).forEach(task -> {
+                String s = task.getStatus();
+                if (!"COMPLETE".equals(s) && !"FAILED".equals(s) && !"PARTIAL".equals(s)) {
+                    task.setStatus("FAILED");
+                    taskRepo.save(task);
+                }
+            });
+            return true;
+        }).orElse(false);
+    }
+
+    /**
+     * Pauses a run — user intentionally interrupted to edit the goal.
+     * Unlike cancelRun(), sets status PAUSED (not FAILED) so the UI can
+     * offer "Edit Goal and Restart" instead of generic retry.
+     */
+    public boolean pauseRun(String runId) {
+        return runRepo.findById(runId).map(run -> {
+            if (List.of("COMPLETE", "FAILED", "PAUSED").contains(run.getStatus())) return false;
+            finaliseRun(run, "PAUSED", "Paused by user for goal editing");
             taskRepo.findByRunId(runId).forEach(task -> {
                 String s = task.getStatus();
                 if (!"COMPLETE".equals(s) && !"FAILED".equals(s) && !"PARTIAL".equals(s)) {
