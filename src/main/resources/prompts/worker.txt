@@ -249,6 +249,10 @@ When stuck:
 WHAT NOT TO DO
 ═══════════════════════════════════════════════════════════
 
+Do not navigate to parent directories or the worktrees/ directory.
+  Your working directory already has all dependency code merged from predecessor branches.
+  If a class that should come from a dep task is missing, report BLOCKED — do NOT look
+  in sibling worktrees or parent paths outside your working directory.
 Do not write to files outside your task boundaries (check file-locks.json)
 Do not modify pom.xml, build.gradle, package.json UNLESS your task_id is "project_setup"
   or your objective explicitly states you must create the build file.

@@ -3,16 +3,19 @@ import { getTaskGraph, TaskGraphNode } from '@/lib/api';
 
 interface Props { runId: string }
 
-// ── Status colours ──────────────────────────────────────────────────────────
+// ── Status colours — kept in sync with tailwind.config.ts accent palette ────
+// accent-emerald=#10B981  accent-cyan=#06B6D4  accent-amber=#F59E0B
+// accent-rose=#F43F5E     accent-violet=#8B5CF6
 const STATUS_COLOR: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  COMPLETE:  { bg: '#0d2718', border: '#22c55e', text: '#86efac', dot: '#22c55e' },
-  WORKING:   { bg: '#1a1a0d', border: '#eab308', text: '#fde047', dot: '#eab308' },
-  PENDING:   { bg: '#1a1a2e', border: '#6366f1', text: '#a5b4fc', dot: '#6366f1' },
-  PARTIAL:   { bg: '#1f1209', border: '#f97316', text: '#fdba74', dot: '#f97316' },
-  BLOCKED:   { bg: '#2d0a0a', border: '#ef4444', text: '#fca5a5', dot: '#ef4444' },
-  FAILED:    { bg: '#2d0a0a', border: '#ef4444', text: '#fca5a5', dot: '#ef4444' },
+  COMPLETE:  { bg: '#051a10', border: '#10B981', text: '#6ee7b7', dot: '#10B981' },
+  WORKING:   { bg: '#021619', border: '#06B6D4', text: '#67e8f9', dot: '#06B6D4' },
+  PENDING:   { bg: '#18181b', border: '#71717a', text: '#a1a1aa', dot: '#71717a' },
+  LOCKED:    { bg: '#18181b', border: '#52525b', text: '#a1a1aa', dot: '#52525b' },
+  PARTIAL:   { bg: '#1c1407', border: '#F59E0B', text: '#fcd34d', dot: '#F59E0B' },
+  BLOCKED:   { bg: '#1c1407', border: '#F59E0B', text: '#fcd34d', dot: '#F59E0B' },
+  FAILED:    { bg: '#200510', border: '#F43F5E', text: '#fda4af', dot: '#F43F5E' },
 };
-const DEFAULT_COLOR = { bg: '#111827', border: '#374151', text: '#9ca3af', dot: '#6b7280' };
+const DEFAULT_COLOR = { bg: '#111118', border: '#374151', text: '#9ca3af', dot: '#6b7280' };
 
 function statusColor(s: string) { return STATUS_COLOR[s?.toUpperCase()] ?? DEFAULT_COLOR; }
 

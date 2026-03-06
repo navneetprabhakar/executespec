@@ -140,6 +140,14 @@ public class WorkerAgent {
 
                 iteration++;
 
+                // getResult() can return null when the provider sends an empty completion
+                // (e.g. rate-limit response, content-filter rejection) that LlmRouter
+                // passed through without throwing. Guard here so the loop can retry.
+                if (lr.response().getResult() == null) {
+                    log.warn("[Worker {}] Null ChatResponse.getResult() on iteration {} — skipping, will retry",
+                            taskId, iteration);
+                    continue;
+                }
                 AssistantMessage assistantMsg = (AssistantMessage) lr.response().getResult().getOutput();
                 String assistantText = assistantMsg.getText();
                 messages.add(assistantMsg);

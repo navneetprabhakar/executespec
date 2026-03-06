@@ -73,6 +73,8 @@ export interface TaskSummary {
   readmeUpdated: boolean;
   /** Present when the task ended in PARTIAL / BLOCKED / FAILED — explains why. */
   failureReason?: string | null;
+  /** The planner's objective/description for this task — shown in the expanded card. */
+  objective?: string | null;
 }
 
 // ── Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue) ─────
