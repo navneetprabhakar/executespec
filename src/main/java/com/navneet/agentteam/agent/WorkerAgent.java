@@ -278,20 +278,14 @@ public class WorkerAgent {
 
     // ── XML Tool-Call Parsing & Dispatch ──────────────────────────────────────
 
-    /** Lenient mapper that accepts raw control chars (newlines, tabs) inside JSON strings.
-     *  LLMs frequently emit unescaped newlines in file content — standard Jackson rejects these. */
-    private static final com.fasterxml.jackson.databind.ObjectMapper LENIENT_MAPPER =
-        new com.fasterxml.jackson.databind.ObjectMapper()
-            .configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
-
     private List<ParsedToolCall> parseXmlToolCalls(String text) {
         if (text == null || text.isBlank()) return List.of();
         List<ParsedToolCall> calls = new ArrayList<>();
         Matcher m = TOOL_CALL_PATTERN.matcher(text);
         while (m.find()) {
-            String json = m.group(1).trim();
+            String json = escapeControlCharsInJsonStrings(m.group(1).trim());
             try {
-                JsonNode node = LENIENT_MAPPER.readTree(json);
+                JsonNode node = mapper.readTree(json);
                 String name = node.has("name") ? node.get("name").asText() : null;
                 String argsJson = node.has("args") ? node.get("args").toString() : "{}";
                 if (name != null && !name.isBlank()) {
@@ -302,6 +296,48 @@ public class WorkerAgent {
             }
         }
         return calls;
+    }
+
+    /**
+     * LLMs frequently emit raw control characters (newlines, tabs, carriage returns)
+     * inside JSON string values. Standard JSON requires these to be escaped as \\n, \\t, \\r.
+     * This method walks the JSON text and escapes any raw control chars found inside
+     * quoted strings, leaving structural whitespace (between keys/values) untouched.
+     */
+    static String escapeControlCharsInJsonStrings(String json) {
+        StringBuilder sb = new StringBuilder(json.length() + 64);
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escaped) {
+                sb.append(c);
+                escaped = false;
+                continue;
+            }
+            if (c == '\\' && inString) {
+                sb.append(c);
+                escaped = true;
+                continue;
+            }
+            if (c == '"') {
+                inString = !inString;
+                sb.append(c);
+                continue;
+            }
+            if (inString && c < 0x20) {
+                // Escape raw control characters inside JSON string values
+                switch (c) {
+                    case '\n' -> sb.append("\\n");
+                    case '\r' -> sb.append("\\r");
+                    case '\t' -> sb.append("\\t");
+                    default   -> sb.append(String.format("\\u%04x", (int) c));
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private String dispatchTool(ParsedToolCall tc, String runId, String taskId) {
