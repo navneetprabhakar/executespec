@@ -81,13 +81,28 @@ public class FileLockTool {
         return locks.size();
     }
 
+    /**
+     * Pre-claims a list of files for a task. Used by PipelineHarness to enforce
+     * planner-declared file ownership before workers start.
+     */
+    @Transactional
+    public void preClaimAll(String runId, String taskId, List<String> files) {
+        for (String file : files) {
+            boolean ok = claim(file, runId, taskId);
+            if (!ok) {
+                log.warn("preClaimAll: file '{}' already owned by another task (runId={})", file, runId);
+            }
+        }
+        log.info("Pre-claimed {} files for task {} in run {}", files.size(), taskId, runId);
+    }
+
     // Writes current lock state as a JSON file into the workspace (for agents to read)
     private void writeLockFile(String runId) {
         try {
             List<FileLock> locks = lockRepo.findByRunId(runId);
             Map<String, String> lockMap = locks.stream()
                 .collect(Collectors.toMap(FileLock::getFilePath, FileLock::getTaskId));
-            Path lockPath = Path.of(workspaceRoot, LOCK_FILE);
+            Path lockPath = Path.of(workspaceRoot, runId, LOCK_FILE);
             Files.createDirectories(lockPath.getParent());
             Files.writeString(lockPath, mapper.writeValueAsString(lockMap));
         } catch (IOException e) {

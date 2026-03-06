@@ -16,5 +16,7 @@ public record TaskSummary(
     Instant startedAt,
     Instant completedAt,
     /** Human-readable reason why this task is PARTIAL / BLOCKED / FAILED. */
-    String failureReason
+    String failureReason,
+    /** The objective/description from the planner's TaskDefinition. Shown in the UI when expanded. */
+    String objective
 ) {}

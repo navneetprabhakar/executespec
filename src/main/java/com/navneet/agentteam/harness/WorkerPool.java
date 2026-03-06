@@ -5,17 +5,29 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.agentteam.agent.WorkerAgent;
 import com.navneet.agentteam.agent.model.TaskDefinition;
 import com.navneet.agentteam.agent.model.WorkerReport;
+import com.navneet.agentteam.sse.RunEvent;
+import com.navneet.agentteam.sse.SseBroadcaster;
 import com.navneet.agentteam.state.StateStore;
 import com.navneet.agentteam.state.entity.AgentTask;
+import com.navneet.agentteam.tool.GitTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.*;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Executes worker tasks <b>sequentially</b> in topological (dependency) order.
+ *
+ * <p>After each task completes successfully, its branch is immediately merged to main
+ * (progressive merge) so that:
+ * <ul>
+ *   <li>Subsequent tasks see all prior work on main.</li>
+ *   <li>The Code tab in the UI shows files as soon as each task finishes.</li>
+ *   <li>Merge conflicts are detected early (per-task, not end-of-run).</li>
+ * </ul>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -24,9 +36,18 @@ public class WorkerPool {
     private final WorkerAgent workerAgent;
     private final StateStore stateStore;
     private final ObjectMapper mapper;
+    private final SseBroadcaster broadcaster;
+    private final GitTool gitTool;
 
     // ── Tier 5: Thread registry for cancellation ──────────────────────────────
     private final ConcurrentHashMap<String, Thread> taskThreads = new ConcurrentHashMap<>();
+
+    // ── Return type for runAll ────────────────────────────────────────────────
+    public record WorkerPoolResult(
+        List<WorkerReport> reports,
+        Set<String> mergedTaskIds,
+        Set<String> failedMergeTaskIds
+    ) {}
 
     public void cancelTask(String taskId) {
         Thread t = taskThreads.remove(taskId);
@@ -44,25 +65,31 @@ public class WorkerPool {
      * Runs a single task synchronously on the calling thread and persists the result.
      * Used by the force-retry flow so callers can await completion.
      */
-    public WorkerReport executeTask(AgentTask task) {
+    public WorkerReport executeTask(AgentTask task, String runId) {
         String taskId = task.getTaskId();
         taskThreads.put(taskId, Thread.currentThread());
         try {
+            broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
             WorkerReport report = workerAgent.execute(task, task.getRunId());
             stateStore.completeTask(taskId, report);
+            String st = normalizeStatus(report.getStatus());
+            broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, st));
             return report;
         } finally {
             taskThreads.remove(taskId);
         }
     }
 
-    public void resubmitTask(AgentTask task) {
+    public void resubmitTask(AgentTask task, String runId) {
         Thread t = Thread.ofVirtual()
             .name("worker-retry-" + task.getTaskId())
             .start(() -> {
                 try {
+                    broadcaster.emit(runId, RunEvent.taskStatus(runId, task.getTaskId(), "WORKING"));
                     WorkerReport report = workerAgent.execute(task, task.getRunId());
                     stateStore.completeTask(task.getTaskId(), report);
+                    String st = normalizeStatus(report.getStatus());
+                    broadcaster.emit(runId, RunEvent.taskStatus(runId, task.getTaskId(), st));
                     log.info("Resubmitted task [{}]: {}", task.getTaskId(), report.getStatus());
                 } finally {
                     taskThreads.remove(task.getTaskId());
@@ -71,101 +98,188 @@ public class WorkerPool {
         taskThreads.put(task.getTaskId(), t);
     }
 
-    public List<WorkerReport> runAll(List<AgentTask> tasks, String runId, String model) {
-        List<WorkerReport> reports = new CopyOnWriteArrayList<>();
-        Set<String> completedTaskIds = ConcurrentHashMap.newKeySet();
+    /**
+     * Runs all tasks <b>sequentially</b> in topological order (respecting depends_on).
+     * After each task completes, merges its branch to main immediately.
+     *
+     * @return WorkerPoolResult with reports and merge tracking sets
+     */
+    public WorkerPoolResult runAll(List<AgentTask> tasks, String runId, String model) {
+        List<WorkerReport> reports = new ArrayList<>();
+        Set<String> completedTaskIds = new HashSet<>();
+        Set<String> mergedTaskIds = new HashSet<>();
+        Set<String> failedMergeTaskIds = new HashSet<>();
 
-        // Run until all tasks are complete or there's nothing left to run
-        List<AgentTask> remaining = new ArrayList<>(tasks);
+        // Topological sort: process tasks in dependency order
+        List<AgentTask> ordered = topologicalSort(tasks);
 
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        for (AgentTask task : ordered) {
+            String taskId = task.getTaskId();
+            taskThreads.put(taskId, Thread.currentThread());
 
-            while (!remaining.isEmpty()) {
-                // Find tasks whose dependencies are all met
-                List<AgentTask> ready = remaining.stream()
-                    .filter(t -> areDependenciesMet(t, completedTaskIds))
-                    .toList();
+            try {
+                // Emit WORKING status via SSE
+                broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
 
-                if (ready.isEmpty()) {
-                    // Nothing ready — wait for in-flight tasks to complete
-                    Thread.sleep(500);
+                String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
+                String taskModel = task.getAssignedModel() != null
+                    ? task.getAssignedModel() : model;
+
+                if (!stateStore.lockTask(taskId, taskModel, branchName)) {
+                    log.warn("Task {} already locked — skipping", taskId);
+                    completedTaskIds.add(taskId);
                     continue;
                 }
 
-                // Remove ready tasks from remaining before submitting
-                remaining.removeAll(ready);
+                WorkerReport report = workerAgent.execute(task, runId);
+                stateStore.completeTask(taskId, report);
+                completedTaskIds.add(taskId);
 
-                // Submit all ready tasks in parallel
-                List<Future<WorkerReport>> futures = ready.stream()
-                    .map(task -> executor.submit(() -> {
-                        taskThreads.put(task.getTaskId(), Thread.currentThread());
-                        try {
-                            String branchName = "agent/" + runId.substring(0, 8) + "/" + task.getTaskId();
-                            // Use the planner-assigned model (not the provider role name) so
-                            // the DB record reflects the actual model the worker will use.
-                            String taskModel = task.getAssignedModel() != null
-                                ? task.getAssignedModel() : model;
-                            if (!stateStore.lockTask(task.getTaskId(), taskModel, branchName)) {
-                                log.warn("Task {} already locked -- skipping", task.getTaskId());
-                                // Mark as completed so dependents are not blocked forever
-                                completedTaskIds.add(task.getTaskId());
-                                return null;
-                            }
-                            WorkerReport report = workerAgent.execute(task, runId);
-                            stateStore.completeTask(task.getTaskId(), report);
-                            completedTaskIds.add(task.getTaskId());
-                            log.info("  Task [{}]: {}", task.getTaskId(), report.getStatus());
-                            return report;
-                        } catch (Exception e) {
-                            // Uncaught exceptions (e.g. ProviderUnavailableException at iteration=0)
-                            // must be caught here — if not, the task is never marked done and
-                            // all dependents spin in the while(!remaining.isEmpty()) loop forever.
-                            log.error("Worker task {} threw uncaught exception: {}",
-                                task.getTaskId(), e.getMessage(), e);
-                            WorkerReport blocked = WorkerReport.blocked(
-                                task.getTaskId(),
-                                "Uncaught exception: " + e.getMessage(), 0, 0);
-                            try {
-                                stateStore.completeTask(task.getTaskId(), blocked);
-                            } catch (Exception dbEx) {
-                                log.error("Failed to persist BLOCKED report for task {}: {}",
-                                    task.getTaskId(), dbEx.getMessage());
-                            }
-                            completedTaskIds.add(task.getTaskId()); // unblock dependents
-                            return blocked;
-                        } finally {
-                            taskThreads.remove(task.getTaskId());
-                        }
-                    }))
-                    .toList();
+                String st = normalizeStatus(report.getStatus());
+                broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, st));
+                log.info("  Task [{}]: {}", taskId, st);
+                reports.add(report);
 
-                // Collect results (block until this batch completes)
-                for (Future<WorkerReport> f : futures) {
-                    try {
-                        WorkerReport r = f.get();
-                        if (r != null) reports.add(r);
-                    } catch (ExecutionException e) {
-                        // Should not normally reach here since the lambda catches all exceptions,
-                        // but guard against any unexpected Future failure.
-                        log.error("Worker future failed unexpectedly: {}",
-                            e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+                // Progressive merge: merge completed task's branch to main immediately
+                if ("COMPLETE".equals(st)) {
+                    boolean merged = tryMergeToMain(runId, task, branchName);
+                    if (merged) {
+                        mergedTaskIds.add(taskId);
+                    } else {
+                        failedMergeTaskIds.add(taskId);
                     }
                 }
-            }
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            } catch (Exception e) {
+                log.error("Worker task {} threw uncaught exception: {}",
+                    taskId, e.getMessage(), e);
+                WorkerReport blocked = WorkerReport.blocked(
+                    taskId, "Uncaught exception: " + e.getMessage(), 0, 0);
+                try {
+                    stateStore.completeTask(taskId, blocked);
+                } catch (Exception dbEx) {
+                    log.error("Failed to persist BLOCKED report for task {}: {}",
+                        taskId, dbEx.getMessage());
+                }
+                completedTaskIds.add(taskId);
+                broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "BLOCKED"));
+                reports.add(blocked);
+            } finally {
+                taskThreads.remove(taskId);
+            }
         }
 
-        return reports;
+        return new WorkerPoolResult(reports, mergedTaskIds, failedMergeTaskIds);
     }
 
-    private boolean areDependenciesMet(AgentTask task, Set<String> completed) {
-        TaskDefinition def = parseTaskDef(task.getTaskJson());
-        if (def.getDependsOn() == null || def.getDependsOn().isEmpty()) {
+    // ── Progressive merge ────────────────────────────────────────────────────
+
+    /**
+     * Merges the task's branch to main immediately after completion.
+     * Returns true on success, false on conflict.
+     */
+    private boolean tryMergeToMain(String runId, AgentTask task, String branchName) {
+        try {
+            String result = gitTool.mergeBranchToMain(runId, branchName);
+            if (result != null && result.startsWith("ERROR")) {
+                log.warn("Merge conflict for task {} branch {}: {}",
+                    task.getTaskId(), branchName, result);
+                // Abort the failed merge to leave main in a clean state
+                gitTool.abortMerge(runId);
+                stateStore.failTask(task.getTaskId(),
+                    "Merge conflict — this task's output conflicted with a prior task's changes. "
+                    + "Retry this task to regenerate the changes cleanly.");
+                broadcaster.emit(runId, RunEvent.taskStatus(runId, task.getTaskId(), "FAILED"));
+                broadcaster.emit(runId, RunEvent.log(runId, task.getTaskId(),
+                    "⚠️ Merge conflict on branch " + branchName + " — task marked FAILED"));
+                return false;
+            }
+            // Clean up the worktree after successful merge
+            gitTool.removeWorktree(runId, task.getTaskId());
+            log.info("Progressive merge: task {} branch {} merged to main", task.getTaskId(), branchName);
             return true;
+        } catch (Exception e) {
+            log.error("Progressive merge failed for task {}: {}", task.getTaskId(), e.getMessage(), e);
+            return false;
         }
-        return def.getDependsOn().stream().allMatch(completed::contains);
+    }
+
+    // ── Topological sort ─────────────────────────────────────────────────────
+
+    /**
+     * Kahn's algorithm: returns tasks in dependency-first order.
+     * Tasks with no dependencies come first; tasks whose deps are all
+     * satisfied come next, etc.
+     */
+    private List<AgentTask> topologicalSort(List<AgentTask> tasks) {
+        Map<String, AgentTask> byId = new LinkedHashMap<>();
+        Map<String, List<String>> deps = new HashMap<>();
+        Map<String, Integer> inDegree = new HashMap<>();
+
+        for (AgentTask t : tasks) {
+            byId.put(t.getTaskId(), t);
+            TaskDefinition def = parseTaskDef(t.getTaskJson());
+            List<String> taskDeps = def.getDependsOn() != null ? def.getDependsOn() : List.of();
+            deps.put(t.getTaskId(), taskDeps);
+            inDegree.put(t.getTaskId(), 0);
+        }
+
+        // Count in-degrees (only for deps that are in our task set)
+        for (var entry : deps.entrySet()) {
+            int count = 0;
+            for (String dep : entry.getValue()) {
+                if (byId.containsKey(dep)) count++;
+            }
+            inDegree.put(entry.getKey(), count);
+        }
+
+        // BFS: start with tasks that have zero in-degree
+        Queue<String> queue = new LinkedList<>();
+        for (var entry : inDegree.entrySet()) {
+            if (entry.getValue() == 0) queue.add(entry.getKey());
+        }
+
+        List<AgentTask> sorted = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            String id = queue.poll();
+            sorted.add(byId.get(id));
+
+            // Reduce in-degree for tasks that depend on this one
+            for (var entry : deps.entrySet()) {
+                if (entry.getValue().contains(id)) {
+                    int newDeg = inDegree.get(entry.getKey()) - 1;
+                    inDegree.put(entry.getKey(), newDeg);
+                    if (newDeg == 0) queue.add(entry.getKey());
+                }
+            }
+        }
+
+        // If some tasks weren't added (circular deps), append them at the end
+        if (sorted.size() < tasks.size()) {
+            Set<String> added = new HashSet<>();
+            sorted.forEach(t -> added.add(t.getTaskId()));
+            for (AgentTask t : tasks) {
+                if (!added.contains(t.getTaskId())) {
+                    log.warn("Task {} has unresolved dependencies — appending at end", t.getTaskId());
+                    sorted.add(t);
+                }
+            }
+        }
+
+        return sorted;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private String normalizeStatus(String raw) {
+        if (raw == null) return "BLOCKED";
+        return switch (raw.toLowerCase()) {
+            case "complete", "done" -> "COMPLETE";
+            case "blocked" -> "BLOCKED";
+            case "partial" -> "PARTIAL";
+            case "failed"  -> "FAILED";
+            default -> raw.toUpperCase();
+        };
     }
 
     private TaskDefinition parseTaskDef(String json) {

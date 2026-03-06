@@ -101,6 +101,7 @@ public class WorkerAgent {
         // other via git checkout / working-tree state.
         String worktreePath = gitTool.createWorktree(runId, taskId, branchName, depBranches);
         WorkspaceContext.set(runId, worktreePath);
+        WorkspaceContext.setTaskId(taskId);
         log.info("Worker starting task [{}] on branch {} in worktree {} ({}:{})",
                 taskId, branchName, worktreePath, provider, model);
 
@@ -140,6 +141,14 @@ public class WorkerAgent {
 
                 iteration++;
 
+                // getResult() can return null when the provider sends an empty completion
+                // (e.g. rate-limit response, content-filter rejection) that LlmRouter
+                // passed through without throwing. Guard here so the loop can retry.
+                if (lr.response().getResult() == null) {
+                    log.warn("[Worker {}] Null ChatResponse.getResult() on iteration {} — skipping, will retry",
+                            taskId, iteration);
+                    continue;
+                }
                 AssistantMessage assistantMsg = (AssistantMessage) lr.response().getResult().getOutput();
                 String assistantText = assistantMsg.getText();
                 messages.add(assistantMsg);

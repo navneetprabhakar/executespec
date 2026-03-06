@@ -63,7 +63,18 @@ public class WorkspaceInitService {
             Files.writeString(workspace.resolve(".gitignore"),
                 "target/\nbuild/\nnode_modules/\n.gradle/\n__pycache__/\n*.class\n*.pyc\n*.log\n");
 
-            runGit(workspace, "git", "add", ".gitignore");
+            // Every worker MUST update README.md (hard requirement in worker.txt step 7).
+            // Parallel workers all modify README.md independently from the same base, causing
+            // guaranteed 3-way merge conflicts when dep branches are merged sequentially.
+            // merge=union appends both sides instead of emitting conflict markers, so every
+            // dep-merge succeeds cleanly without losing documentation from either branch.
+            Files.writeString(workspace.resolve(".gitattributes"),
+                "# Parallel worker agents all update these documentation files independently.\n" +
+                "# union merge appends both sides instead of producing conflict markers.\n" +
+                "README.md merge=union\n" +
+                "CHANGELOG.md merge=union\n");
+
+            runGit(workspace, "git", "add", ".gitignore", ".gitattributes");
             runGit(workspace, "git", "commit", "--allow-empty", "-m", "init agent workspace");
 
             log.info("Workspace initialised for run {}", runId);

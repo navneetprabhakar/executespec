@@ -53,9 +53,39 @@ public class GitTool {
         Path repoRoot = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
         Path worktreeDir = repoRoot.resolve("worktrees").resolve(taskId);
         try {
-            // Reuse existing worktree on retry
+            // On retry: reset worktree to clean state before reuse
             if (java.nio.file.Files.exists(worktreeDir.resolve(".git"))) {
-                log.info("[GitTool] Worktree '{}' already exists — reusing", taskId);
+                log.info("[GitTool] Worktree '{}' already exists — resetting for retry", taskId);
+                // Reset tracked files to branch HEAD
+                new ProcessBuilder("git", "checkout", ".")
+                        .directory(worktreeDir.toFile())
+                        .redirectErrorStream(true)
+                        .start().waitFor();
+                // Remove untracked files and directories
+                new ProcessBuilder("git", "clean", "-fd")
+                        .directory(worktreeDir.toFile())
+                        .redirectErrorStream(true)
+                        .start().waitFor();
+                // Re-merge dependency branches (may have been updated by retried deps)
+                if (depBranches != null && !depBranches.isEmpty()) {
+                    for (String dep : depBranches) {
+                        ProcessBuilder mpb = new ProcessBuilder(
+                                "git", "merge", "--no-edit", "-X", "theirs", dep);
+                        mpb.directory(worktreeDir.toFile());
+                        mpb.redirectErrorStream(true);
+                        Process mp = mpb.start();
+                        String mout = new String(mp.getInputStream().readAllBytes());
+                        int mexit = mp.waitFor();
+                        if (mexit != 0) {
+                            log.warn("[GitTool] Retry re-merge of '{}' failed in worktree {}: {}",
+                                    dep, taskId, mout.trim());
+                            new ProcessBuilder("git", "merge", "--abort")
+                                    .directory(worktreeDir.toFile())
+                                    .redirectErrorStream(true)
+                                    .start().waitFor();
+                        }
+                    }
+                }
                 return worktreeDir.toString();
             }
             java.nio.file.Files.createDirectories(repoRoot.resolve("worktrees"));
@@ -87,20 +117,31 @@ public class GitTool {
             }
             log.info("[GitTool] Created worktree '{}' at {}", taskId, worktreeDir);
 
-            // Merge dep branches
+            // Merge dep branches using shell git so that:
+            //   1. .gitattributes merge=union is honoured for README.md / CHANGELOG.md
+            //      (JGit ignores custom merge drivers, so README conflicts would still occur)
+            //   2. -X theirs auto-resolves any remaining code conflicts by preferring the
+            //      incoming dep branch — safe because the worktree has no local changes at
+            //      this point (ours == main base), so "theirs" = dep's real content.
             if (depBranches != null && !depBranches.isEmpty()) {
-                try (Git wt = Git.open(worktreeDir.toFile())) {
-                    for (String dep : depBranches) {
-                        var ref = wt.getRepository().findRef(dep);
-                        if (ref == null) {
-                            log.warn("[GitTool] Dep '{}' not found for worktree '{}'", dep, taskId);
-                            continue;
-                        }
-                        MergeResult mr = wt.merge().include(ref)
-                                .setFastForward(MergeCommand.FastForwardMode.FF)
-                                .setCommit(true)
-                                .setMessage("chore: merge dep " + dep).call();
-                        log.info("[GitTool] Worktree {}: merged '{}' — {}", taskId, dep, mr.getMergeStatus());
+                for (String dep : depBranches) {
+                    ProcessBuilder mpb = new ProcessBuilder(
+                            "git", "merge", "--no-edit", "-X", "theirs", dep);
+                    mpb.directory(worktreeDir.toFile());
+                    mpb.redirectErrorStream(true);
+                    Process mp = mpb.start();
+                    String mout = new String(mp.getInputStream().readAllBytes());
+                    int mexit = mp.waitFor();
+                    if (mexit == 0) {
+                        log.info("[GitTool] Worktree {}: merged dep '{}' (shell git -X theirs)", taskId, dep);
+                    } else {
+                        log.warn("[GitTool] Worktree {}: shell merge of '{}' failed (exit {}): {} — aborting",
+                                taskId, dep, mexit, mout.trim());
+                        // Attempt abort to restore clean state; non-fatal if already clean
+                        new ProcessBuilder("git", "merge", "--abort")
+                                .directory(worktreeDir.toFile())
+                                .redirectErrorStream(true)
+                                .start().waitFor();
                     }
                 }
             }
