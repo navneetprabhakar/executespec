@@ -46,6 +46,19 @@ import java.util.concurrent.*;
 @Slf4j
 public class PipelineHarness {
 
+    /**
+     * Task IDs handled by system agents (not WorkerAgent).
+     *
+     * <p>{@code generate_preview} — handled by {@link PreviewAgent} which generates Dockerfile /
+     * docker-compose.yml deterministically (no LLM).
+     *
+     * <p>{@code generate_openapi_spec} — previously a mandatory planner task, now retired.
+     * The spec is generated post-merge by ApiTestSuiteAgent.  Old plans in the DB may still
+     * carry this task; filtering it here prevents the worker from deleting or corrupting the
+     * existing {@code api-docs/openapi.yaml}.
+     */
+    private static final String OPENAPI_TASK_ID = "generate_openapi_spec";
+
     private final PlannerAgent plannerAgent;
     private final WorkerPool workerPool;
     private final ReviewerAgent reviewerAgent;
@@ -432,7 +445,7 @@ public class PipelineHarness {
 
         List<AgentTask> tasks = stateStore.getAllTasks(runId);
         boolean allComplete = tasks.stream()
-            .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+            .filter(t -> !isSystemTask(t))
             .allMatch(t -> "COMPLETE".equals(t.getStatus()));
         if (!allComplete)
             throw new IllegalStateException(
@@ -745,11 +758,15 @@ public class PipelineHarness {
             // Filter out generate_preview — PreviewAgent handles it deterministically
             // after all worker tasks complete, so workers never see this task.
             List<AgentTask> workerTasks = tasks.stream()
-                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .filter(t -> !isSystemTask(t))
                 .toList();
 
             List<WorkerReport> reports = workerPool.runAll(workerTasks, runId,
                 props.getRoles().getWorker());
+
+            // Auto-complete generate_openapi_spec (backwards compat with old plans that still
+            // carry this task in the DB).  ApiTestSuiteAgent generates the real spec post-merge.
+            markOpenapiTaskComplete(runId, tasks);
 
             // ── Preview Agent (generates Dockerfile, docker-compose.yml, etc.) ──
             WorkerReport previewReport = previewAgent.run(runId, tasks);
@@ -763,7 +780,7 @@ public class PipelineHarness {
             // Worker tasks = all tasks except the preview task (its BLOCKED status
             // must not block the merge gate since it is non-fatal).
             List<AgentTask> workerTasksNow = stateStore.getAllTasks(runId).stream()
-                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .filter(t -> !isSystemTask(t))
                 .toList();
 
             boolean allWorkerTasksBlocked = workerTasksNow.stream()
@@ -849,7 +866,7 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
 
                 List<AgentTask> workerTasksForRework = stateStore.getAllTasks(runId).stream()
-                    .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                    .filter(t -> !isSystemTask(t))
                     .filter(t -> failedTaskIds.isEmpty() || failedTaskIds.contains(t.getTaskId()))
                     .toList();
                 for (AgentTask t : workerTasksForRework) {
@@ -1168,6 +1185,14 @@ public class PipelineHarness {
                 + "). Only PARTIAL, BLOCKED, FAILED, PENDING, or LOCKED tasks can be retried.");
         }
 
+        // ── Special case: generate_openapi_spec is auto-completed by the harness (ApiTestSuiteAgent
+        // handles the real spec post-merge). Just re-run the auto-complete and return.
+        if (OPENAPI_TASK_ID.equals(taskId)) {
+            log.info("Retrying {} — auto-completing (spec generated post-merge) for run {}", OPENAPI_TASK_ID, runId);
+            markOpenapiTaskComplete(runId, stateStore.getAllTasks(runId));
+            return true;
+        }
+
         // ── Special case: generate_preview is always handled by PreviewAgent, never WorkerAgent.
         // Allow retry from AWAITING_MERGE (reviewer already said MERGE, just re-generate the
         // Dockerfile), PARTIAL, or FAILED. PreviewAgent.run() manages its own task state
@@ -1232,7 +1257,7 @@ public class PipelineHarness {
             // the merge gate would open prematurely with missing work.
             List<AgentTask> otherIncomplete = stateStore.getAllTasks(runId).stream()
                 .filter(t -> !taskId.equals(t.getTaskId()))
-                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .filter(t -> !isSystemTask(t))
                 .filter(t -> {
                     String s = t.getStatus();
                     return "PARTIAL".equals(s) || "BLOCKED".equals(s) || "FAILED".equals(s)
@@ -1258,6 +1283,9 @@ public class PipelineHarness {
                 workerPool.runAll(toRerun, runId, props.getRoles().getWorker());
             }
 
+            // Ensure generate_openapi_spec is marked COMPLETE before eligibility checks
+            markOpenapiTaskComplete(runId, stateStore.getAllTasks(runId));
+
             // ── 3. Collect all task reports ────────────────────────────────
             List<AgentTask> allTasks = stateStore.getAllTasks(runId);
             List<WorkerReport> allReports = allTasks.stream()
@@ -1274,7 +1302,7 @@ public class PipelineHarness {
 
             // ── 4. Merge-gate eligibility check ────────────────────────────
             List<AgentTask> workerTasksNow = allTasks.stream()
-                .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                .filter(t -> !isSystemTask(t))
                 .toList();
 
             boolean allBlocked = workerTasksNow.stream()
@@ -1346,7 +1374,7 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
 
                 List<AgentTask> workerTasksForRework = stateStore.getAllTasks(runId).stream()
-                    .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+                    .filter(t -> !isSystemTask(t))
                     .filter(t -> failedRetryTaskIds.isEmpty() || failedRetryTaskIds.contains(t.getTaskId()))
                     .toList();
                 for (AgentTask t : workerTasksForRework) {
@@ -1712,7 +1740,7 @@ public class PipelineHarness {
             "🔧 Implementing " + suggCount + " suggestion(s) across " + taskIds.size() + " task(s)…"));
 
         List<AgentTask> toRerun = stateStore.getAllTasks(runId).stream()
-            .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+            .filter(t -> !isSystemTask(t))
             .filter(t -> taskIds.contains(t.getTaskId()))
             .toList();
 
@@ -1731,7 +1759,7 @@ public class PipelineHarness {
 
         // If any task still failed, mark PARTIAL so user can retry individually
         boolean anyFailed = stateStore.getAllTasks(runId).stream()
-            .filter(t -> !PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId()))
+            .filter(t -> !isSystemTask(t))
             .anyMatch(t -> "FAILED".equals(t.getStatus()) || "PARTIAL".equals(t.getStatus()));
 
         if (anyFailed) {
@@ -1803,6 +1831,53 @@ public class PipelineHarness {
         }
 
         return sb.toString().trim();
+    }
+
+    /**
+     * Returns {@code true} for tasks that are handled by system agents (not WorkerAgent)
+     * and must be excluded from the worker task pool and partial-completion checks.
+     *
+     * <ul>
+     *   <li>{@value PreviewAgent#PREVIEW_TASK_ID} — handled by {@link PreviewAgent}.</li>
+     *   <li>{@value OPENAPI_TASK_ID} — retired; spec generated post-merge by ApiTestSuiteAgent.</li>
+     * </ul>
+     */
+    private boolean isSystemTask(com.navneet.agentteam.state.entity.AgentTask t) {
+        return PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId())
+            || OPENAPI_TASK_ID.equals(t.getTaskId());
+    }
+
+    /**
+     * Auto-completes the {@code generate_openapi_spec} task (if present) so it does not
+     * block partial-completion checks or appear as incomplete to the reviewer.
+     *
+     * <p>The actual spec is generated post-merge by ApiTestSuiteAgent.  This is called
+     * immediately after {@code workerPool.runAll()} so the task moves to COMPLETE before
+     * the all-tasks-complete gate check.
+     */
+    private void markOpenapiTaskComplete(String runId, List<com.navneet.agentteam.state.entity.AgentTask> tasks) {
+        tasks.stream()
+            .filter(t -> OPENAPI_TASK_ID.equals(t.getTaskId()))
+            .findFirst()
+            .ifPresent(t -> {
+                String model  = t.getAssignedModel() != null ? t.getAssignedModel() : "claude-haiku-4-5-20251001";
+                String branch = "agent/" + runId.substring(0, 8) + "/" + OPENAPI_TASK_ID;
+                if (!stateStore.lockTask(t.getTaskId(), model, branch)) {
+                    // Already locked (may be a retry) — still ensure it is COMPLETE
+                    log.debug("[Harness] {} already locked for run {} — skipping auto-complete lock",
+                        OPENAPI_TASK_ID, runId);
+                }
+                WorkerReport report = WorkerReport.builder()
+                    .taskId(OPENAPI_TASK_ID)
+                    .status("complete")
+                    .filesCreated(List.of())
+                    .filesModified(List.of())
+                    .filesRead(List.of())
+                    .selfReview("OpenAPI spec is auto-generated post-merge by ApiTestSuiteAgent. No worker action needed.")
+                    .build();
+                stateStore.completeTask(t.getTaskId(), report);
+                log.info("[Harness] {} auto-completed for run {} (spec generated post-merge)", OPENAPI_TASK_ID, runId);
+            });
     }
 
     /**
