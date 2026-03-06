@@ -38,6 +38,7 @@ public class WorkerPool {
     private final ObjectMapper mapper;
     private final SseBroadcaster broadcaster;
     private final GitTool gitTool;
+    private final GitMergeService mergeService;
 
     // ── Tier 5: Thread registry for cancellation ──────────────────────────────
     private final ConcurrentHashMap<String, Thread> taskThreads = new ConcurrentHashMap<>();
@@ -109,6 +110,7 @@ public class WorkerPool {
         Set<String> completedTaskIds = new HashSet<>();
         Set<String> mergedTaskIds = new HashSet<>();
         Set<String> failedMergeTaskIds = new HashSet<>();
+        List<AgentTask> previouslyMerged = new ArrayList<>();
 
         // Topological sort: process tasks in dependency order
         List<AgentTask> ordered = topologicalSort(tasks);
@@ -141,10 +143,12 @@ public class WorkerPool {
                 reports.add(report);
 
                 // Progressive merge: merge completed task's branch to main immediately
+                // Uses GitMergeService's conflict resolution cascade
                 if ("COMPLETE".equals(st)) {
-                    boolean merged = tryMergeToMain(runId, task, branchName);
+                    boolean merged = tryMergeToMain(runId, task, branchName, previouslyMerged);
                     if (merged) {
                         mergedTaskIds.add(taskId);
+                        previouslyMerged.add(task);
                     } else {
                         failedMergeTaskIds.add(taskId);
                     }
@@ -176,27 +180,34 @@ public class WorkerPool {
 
     /**
      * Merges the task's branch to main immediately after completion.
-     * Returns true on success, false on conflict.
+     * Uses GitMergeService's conflict resolution cascade (specialized mergers → Haiku → Sonnet).
+     * Returns true on success, false on unresolvable conflict.
      */
-    private boolean tryMergeToMain(String runId, AgentTask task, String branchName) {
+    private boolean tryMergeToMain(String runId, AgentTask task, String branchName,
+                                    List<AgentTask> previouslyMerged) {
         try {
-            String result = gitTool.mergeBranchToMain(runId, branchName);
-            if (result != null && result.startsWith("ERROR")) {
-                log.warn("Merge conflict for task {} branch {}: {}",
-                    task.getTaskId(), branchName, result);
-                // Abort the failed merge to leave main in a clean state
-                gitTool.abortMerge(runId);
+            GitMergeService.TaskMergeResult result = mergeService.mergeTaskBranchWithResolution(
+                runId, task, previouslyMerged);
+
+            if (result.outcome() == MergeOutcome.FAILED) {
                 stateStore.failTask(task.getTaskId(),
-                    "Merge conflict — this task's output conflicted with a prior task's changes. "
-                    + "Retry this task to regenerate the changes cleanly.");
+                    "Merge conflict — auto-resolution failed for: "
+                    + String.join(", ", result.failedFiles())
+                    + ". Retry this task to regenerate the changes cleanly.");
                 broadcaster.emit(runId, RunEvent.taskStatus(runId, task.getTaskId(), "FAILED"));
                 broadcaster.emit(runId, RunEvent.log(runId, task.getTaskId(),
                     "⚠️ Merge conflict on branch " + branchName + " — task marked FAILED"));
                 return false;
             }
-            // Clean up the worktree after successful merge
+
+            if (result.outcome() != MergeOutcome.CLEAN) {
+                broadcaster.emit(runId, RunEvent.log(runId, task.getTaskId(),
+                    "✅ Auto-resolved merge conflict in: " + String.join(", ", result.resolvedFiles())));
+            }
+
             gitTool.removeWorktree(runId, task.getTaskId());
-            log.info("Progressive merge: task {} branch {} merged to main", task.getTaskId(), branchName);
+            log.info("Progressive merge: task {} branch {} merged to main (outcome={})",
+                task.getTaskId(), branchName, result.outcome());
             return true;
         } catch (Exception e) {
             log.error("Progressive merge failed for task {}: {}", task.getTaskId(), e.getMessage(), e);

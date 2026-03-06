@@ -37,6 +37,11 @@ public class TaskDefinition {
     // Used by PipelineHarness to pre-claim file locks before worker execution.
     private List<String> ownedFiles;
 
+    // Files this task shares with other tasks (both tasks may modify).
+    // Used for conflict-risk analysis — tasks sharing files should have depends_on
+    // relationships or the planner should create a dedicated setup sub-task.
+    private List<String> sharedFiles;
+
     // ── Auto-remediation feedback ─────────────────────────────────────────────
     // Injected by PipelineHarness during REWORK remediation cycles so the worker
     // knows exactly what the reviewer flagged. Null on first attempt.

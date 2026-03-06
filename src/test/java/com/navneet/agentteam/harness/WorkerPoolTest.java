@@ -35,13 +35,14 @@ class WorkerPoolTest {
     @Mock private StateStore stateStore;
     @Mock private SseBroadcaster broadcaster;
     @Mock private GitTool gitTool;
+    @Mock private GitMergeService mergeService;
 
     private WorkerPool pool;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        pool = new WorkerPool(workerAgent, stateStore, mapper, broadcaster, gitTool);
+        pool = new WorkerPool(workerAgent, stateStore, mapper, broadcaster, gitTool, mergeService);
     }
 
     private AgentTask task(String taskId, List<String> dependsOn) {
