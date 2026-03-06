@@ -93,6 +93,14 @@ export const useRunStore = create<RunStore>((set, get) => ({
   },
 
   retryTask: async (runId, taskId) => {
+    // Optimistically patch task to PENDING so the UI updates immediately
+    set((s) => ({
+      activeRun: s.activeRun ? {
+        ...s.activeRun,
+        tasks: s.activeRun.tasks?.map((t: any) =>
+          t.taskId === taskId ? { ...t, status: 'PENDING' } : t),
+      } : null,
+    }));
     await api.retryTask(runId, taskId);
     await get().fetchRun(runId);
   },

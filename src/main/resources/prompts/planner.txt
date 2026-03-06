@@ -48,6 +48,13 @@ HARD RULES — violating these causes the run to fail
 3. Every task must have explicit, non-overlapping file boundaries.
    Two tasks must never write to the same file. If they must, sequence them with dependsOn.
 
+3b. Every task MUST include an "owned_files" array listing every file it will create or modify.
+    - File locks are enforced at write time: a task CANNOT write to a file owned by another task.
+    - Two tasks must NOT share any file in their owned_files lists.
+    - Common files like README.md should be owned by the last task in the dependency chain.
+    - Use relative paths from the workspace root (e.g., "src/main/java/com/example/UserService.java").
+    - Include ALL files the task will touch, including configuration files and test files.
+
 4. Every task's acceptance_criteria must be verifiable by running a command.
    "Code is well-written" is not verifiable. "mvn test passes" is verifiable.
 
@@ -170,7 +177,8 @@ Respond with exactly this JSON structure:
       "acceptance_criteria": "One or more verifiable commands and their expected outcome. Example: mvn test -pl . passes with all tests green. Or: Running GET /health returns 200 with body containing version.",
       "depends_on": [],
       "complexity": "LOW",
-      "assigned_model": "claude-haiku-4-5-20251001"
+      "assigned_model": "claude-haiku-4-5-20251001",
+      "owned_files": ["src/main/java/com/x/ItemController.java"]
     }
   ]
 }
