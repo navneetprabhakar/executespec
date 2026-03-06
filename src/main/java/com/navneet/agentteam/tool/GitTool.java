@@ -100,7 +100,24 @@ public class GitTool {
                                 .setFastForward(MergeCommand.FastForwardMode.FF)
                                 .setCommit(true)
                                 .setMessage("chore: merge dep " + dep).call();
-                        log.info("[GitTool] Worktree {}: merged '{}' — {}", taskId, dep, mr.getMergeStatus());
+                        if (mr.getMergeStatus().isSuccessful()) {
+                            log.info("[GitTool] Worktree {}: merged '{}' — {}", taskId, dep, mr.getMergeStatus());
+                        } else {
+                            // Abort the conflicted merge so the worktree stays in a clean state.
+                            // The worker will proceed without this dep's changes, which is safer
+                            // than starting in a conflicted git state with unresolved markers.
+                            log.warn("[GitTool] Worktree {}: conflict merging '{}' ({}) — aborting merge",
+                                    taskId, dep, mr.getMergeStatus());
+                            try {
+                                wt.getRepository().writeMergeHeads(null);
+                                wt.getRepository().writeMergeCommitMsg(null);
+                                // Hard-reset to HEAD to discard any partial merge state
+                                wt.reset().setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD).setRef("HEAD").call();
+                                log.info("[GitTool] Worktree {}: aborted conflict merge of '{}', reset to HEAD", taskId, dep);
+                            } catch (Exception abortEx) {
+                                log.warn("[GitTool] Worktree {}: could not abort merge of '{}': {}", taskId, dep, abortEx.getMessage());
+                            }
+                        }
                     }
                 }
             }

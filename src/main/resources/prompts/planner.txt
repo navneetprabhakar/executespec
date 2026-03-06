@@ -7,7 +7,7 @@ parallelisable sub-tasks for worker agents to execute.
 HARD RULES — violating these causes the run to fail
 ═══════════════════════════════════════════════════════════
 
-0. THREE MANDATORY SYSTEM / SCAFFOLD TASKS — none count against the 6-task worker limit:
+0. TWO MANDATORY SYSTEM / SCAFFOLD TASKS — neither counts against the 6-task worker limit:
 
    a) MANDATORY PROJECT SCAFFOLD TASK (new projects only):
       If the workspace has no pom.xml AND no package.json, your plan MUST start with:
@@ -25,25 +25,8 @@ HARD RULES — violating these causes the run to fail
       ALL other worker tasks MUST include "project_setup" in their depends_on list.
       If pom.xml or package.json already exists in the workspace, skip this task.
 
-   b) MANDATORY API SPEC TASK: Your response MUST include one task with
-      task_id "generate_openapi_spec" that depends on ALL worker task IDs.
-      This task scans the generated source code and writes a machine-readable
-      OpenAPI 3.0 specification. Example:
-      {
-        "task_id": "generate_openapi_spec",
-        "title": "Generate OpenAPI 3.0 specification",
-        "objective": "Scan all @RestController / @Controller classes in the workspace and produce a complete OpenAPI 3.0 YAML file at api-docs/openapi.yaml. Include every endpoint path, HTTP method, path/query/body parameters, request/response schemas (inlined or using $ref components), and a top-level info block with title and version. If no REST controllers exist (e.g. pure frontend project), write a minimal placeholder spec with info.title and an empty paths block.",
-        "boundaries": "Only create api-docs/openapi.yaml. Do not modify any source files or build files.",
-        "output_format": "api-docs/openapi.yaml — valid OpenAPI 3.0.x YAML parseable by swagger-parser.",
-        "acceptance_criteria": "File api-docs/openapi.yaml exists, starts with 'openapi: 3.0', and contains at least one path entry (or an empty paths block for non-REST projects).",
-        "depends_on": ["<ALL worker task_ids>"],
-        "complexity": "LOW",
-        "assigned_model": "claude-haiku-4-5-20251001"
-      }
-
    b) MANDATORY PREVIEW TASK: Your response MUST end with one task having
-      task_id "generate_preview" that depends on ALL worker task IDs AND
-      "generate_openapi_spec". Example:
+      task_id "generate_preview" that depends on ALL worker task IDs. Example:
       {
         "task_id": "generate_preview",
         "title": "Generate Dockerfile and deployment configuration",
@@ -51,7 +34,7 @@ HARD RULES — violating these causes the run to fail
         "boundaries": "Only generate deployment configuration files. Do not touch source files.",
         "output_format": "Dockerfile and docker-compose.yml at workspace root.",
         "acceptance_criteria": "Dockerfile exists and references the correct base image for the detected project type.",
-        "depends_on": ["<ALL worker task_ids>", "generate_openapi_spec"],
+        "depends_on": ["<ALL worker task_ids>"],
         "complexity": "LOW",
         "assigned_model": "claude-haiku-4-5-20251001"
       }
@@ -122,7 +105,7 @@ Leave depends_on as [] ONLY when tasks are 100% independent:
 CONCRETE EXAMPLES:
   backend_tests depends on [models_and_dtos, service_layer, controller_layer]
   integration_tests depends on [backend_tests, models_and_dtos, service_layer]
-  frontend depends on [controller_layer, generate_openapi_spec]
+  frontend depends on [controller_layer]
 
 If everything depends on everything, the task is too large — break it differently.
 
