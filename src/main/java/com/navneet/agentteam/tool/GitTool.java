@@ -412,10 +412,19 @@ public class GitTool {
      * @return the JGit MergeResult (caller checks getMergeStatus())
      */
     public MergeResult mergeBranchNoCommit(String runId, String branchName) {
+        if (branchName == null || branchName.isBlank()) {
+            log.warn("mergeBranchNoCommit called with null/blank branch for run {}", runId);
+            return null;
+        }
         try (Git git = openRepo(runId)) {
             git.checkout().setName("main").call();
+            org.eclipse.jgit.lib.Ref ref = git.getRepository().findRef(branchName);
+            if (ref == null) {
+                log.warn("Branch '{}' not found in repo for run {} — cannot merge", branchName, runId);
+                return null;
+            }
             return git.merge()
-                .include(git.getRepository().findRef(branchName))
+                .include(ref)
                 .setFastForward(MergeCommand.FastForwardMode.NO_FF)
                 .setCommit(false)
                 .setMessage("merge: " + branchName)

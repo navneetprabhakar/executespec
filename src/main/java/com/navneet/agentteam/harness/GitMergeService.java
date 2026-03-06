@@ -78,10 +78,11 @@ public class GitMergeService {
 
         log.info("Merging {} branches to main with conflict resolution", ordered.size());
         for (AgentTask task : ordered) {
-            if (task.getBranchName() == null || "FAILED".equals(task.getStatus()))
+            if (task.getBranchName() == null || task.getBranchName().isBlank()
+                || "FAILED".equals(task.getStatus()))
                 continue;
 
-            TaskMergeResult result = mergeTaskBranch(runId, task, previouslyMerged);
+            TaskMergeResult result = mergeWithRetry(runId, task, previouslyMerged);
 
             switch (result.outcome()) {
                 case CLEAN -> {
@@ -119,13 +120,40 @@ public class GitMergeService {
         return conflicted;
     }
 
+    private static final int MAX_MERGE_RETRIES = 2;
+
     /**
      * Public entry point for progressive merge (called by WorkerPool).
      * Merges a single task branch into main with the full resolution cascade.
+     * Retries up to {@link #MAX_MERGE_RETRIES} times on transient failures
+     * (JGit errors, lock contention) before giving up.
      */
     public TaskMergeResult mergeTaskBranchWithResolution(String runId, AgentTask task,
                                                           List<AgentTask> previouslyMerged) {
-        return mergeTaskBranch(runId, task, previouslyMerged);
+        TaskMergeResult result = null;
+        for (int attempt = 0; attempt <= MAX_MERGE_RETRIES; attempt++) {
+            result = mergeTaskBranch(runId, task, previouslyMerged);
+            if (result.outcome() != MergeOutcome.FAILED) {
+                return result;
+            }
+            // Check if the failure is transient (JGit/IO error, not a true conflict)
+            boolean isTransient = result.failedFiles().stream()
+                .anyMatch(f -> f.startsWith("merge status:") || f.startsWith("finalize merge")
+                    || f.equals("unknown conflict") || f.contains("ERROR"));
+            if (!isTransient) {
+                // Real conflict — retrying won't help
+                return result;
+            }
+            if (attempt < MAX_MERGE_RETRIES) {
+                log.warn("Merge attempt {} failed for task {} (transient) — retrying in 500ms",
+                    attempt + 1, task.getTaskId());
+                try { Thread.sleep(500); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return result;
+                }
+            }
+        }
+        return result;
     }
 
     /**
@@ -134,6 +162,12 @@ public class GitMergeService {
     private TaskMergeResult mergeTaskBranch(String runId, AgentTask task,
                                              List<AgentTask> previouslyMerged) {
         String branchName = task.getBranchName();
+
+        // Guard: no branch means nothing to merge (task produced no commits)
+        if (branchName == null || branchName.isBlank()) {
+            log.info("Task {} has no branch — skipping merge", task.getTaskId());
+            return TaskMergeResult.clean(task.getTaskId(), "(no branch)");
+        }
 
         // Step 1: Try normal merge (no-commit so we can inspect)
         MergeResult mergeResult = gitTool.mergeBranchNoCommit(runId, branchName);
@@ -245,6 +279,32 @@ public class GitMergeService {
 
         // All files resolved — now re-merge with the resolved files applied
         return finalizeMerge(runId, task, branchName, resolvedFiles, highestOutcome);
+    }
+
+    /**
+     * Wraps mergeTaskBranch with retry logic for transient failures.
+     * Used by the batch mergeAll path.
+     */
+    private TaskMergeResult mergeWithRetry(String runId, AgentTask task,
+                                            List<AgentTask> previouslyMerged) {
+        TaskMergeResult result = null;
+        for (int attempt = 0; attempt <= MAX_MERGE_RETRIES; attempt++) {
+            result = mergeTaskBranch(runId, task, previouslyMerged);
+            if (result.outcome() != MergeOutcome.FAILED) return result;
+            boolean isTransient = result.failedFiles().stream()
+                .anyMatch(f -> f.startsWith("merge status:") || f.startsWith("finalize merge")
+                    || f.equals("unknown conflict") || f.contains("ERROR"));
+            if (!isTransient) return result;
+            if (attempt < MAX_MERGE_RETRIES) {
+                log.warn("Batch merge attempt {} failed for task {} (transient) — retrying",
+                    attempt + 1, task.getTaskId());
+                try { Thread.sleep(500); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return result;
+                }
+            }
+        }
+        return result;
     }
 
     /**
