@@ -266,15 +266,22 @@ export const getFiles = (runId: string) =>
 
 /**
  * Trigger a browser download of the workspace zip.
- * Uses a hidden anchor so the browser handles the Content-Disposition header.
+ * Uses fetch with auth header, then creates an object URL for the browser download.
  */
-export function downloadWorkspace(runId: string): void {
+export async function downloadWorkspace(runId: string): Promise<void> {
+  const res = await fetch(`${BASE}/runs/${runId}/download`, {
+    headers: { ...authHeader() },
+  });
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = `${BASE}/runs/${runId}/download`;
+  a.href = url;
   a.download = `workspace-${runId.slice(0, 8)}.zip`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /** File content is served as text/plain — must NOT use res.json(). */

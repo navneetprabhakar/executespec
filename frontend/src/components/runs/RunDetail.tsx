@@ -226,7 +226,7 @@ export default function RunDetail() {
             )}
             <div className="flex items-center gap-3 ml-auto">
               <button
-                onClick={() => downloadWorkspace(activeRun.runId)}
+                onClick={() => downloadWorkspace(activeRun.runId).catch(() => {})}
                 className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
                 title="Download workspace as zip"
               >
