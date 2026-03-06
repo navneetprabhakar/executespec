@@ -108,8 +108,19 @@ public class RunMapper {
             t.getDurationMs(),
             t.getStartedAt(),
             t.getCompletedAt(),
-            extractFailureReason(t)
+            extractFailureReason(t),
+            extractObjective(t.getTaskJson())
         );
+    }
+
+    /** Parses the objective field from the planner's TaskDefinition JSON stored in the task. */
+    private String extractObjective(String taskJson) {
+        if (taskJson == null || taskJson.isBlank()) return null;
+        try {
+            return objectMapper.readTree(taskJson).path("objective").asText(null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

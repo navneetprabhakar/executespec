@@ -98,6 +98,13 @@ export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
 
       {open && (
         <div className="px-4 py-3 border-t border-white/[0.06] space-y-3">
+          {/* ── Task objective / description ─────────────────────────────── */}
+          {task.objective && (
+            <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">
+              {task.objective}
+            </p>
+          )}
+
           {/* ── Failure / stuck reason ───────────────────────────────────── */}
           {retryable && (hasReason || STUCK_RETRYABLE.has(task.status)) && (
             <div

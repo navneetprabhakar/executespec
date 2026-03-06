@@ -79,6 +79,34 @@ Do NOT split:
   - Tests from the code they test if they share imports (bundle them)
 
 ═══════════════════════════════════════════════════════════
+COMPILED LANGUAGE DEPENDENCY RULE (Java / Kotlin / Go / C# / Rust)
+═══════════════════════════════════════════════════════════
+
+In compiled languages, EVERY import creates a hard compilation dependency.
+Worker tasks run `mvn compile` or `go build` inside their own isolated git
+worktree. If the types they import are not yet committed to git, the build FAILS.
+
+RULE: For each import chain A → B → C, set:
+  B.depends_on = [..., A]
+  C.depends_on = [..., A, B]
+
+JAVA EXAMPLE — CORRECT (the only way mvn compile succeeds):
+  project_setup        depends_on: []
+  model_and_repository depends_on: ["project_setup"]
+  service_layer        depends_on: ["project_setup", "model_and_repository"]
+  controller_layer     depends_on: ["project_setup", "service_layer", "model_and_repository"]
+  tests                depends_on: ["project_setup", "controller_layer", "service_layer", "model_and_repository"]
+
+JAVA EXAMPLE — WRONG (service_layer missing model dep → mvn compile fails):
+  service_layer        depends_on: ["project_setup"]          ← WRONG
+  controller_layer     depends_on: ["project_setup"]          ← WRONG
+
+GUIDELINE: For a typical 3-layer Spring Boot app the execution is inherently
+sequential (model → service → controller → tests). This is expected and correct.
+True parallelism occurs when building independent bounded contexts (e.g.,
+user-service tasks and product-service tasks with no shared types).
+
+═══════════════════════════════════════════════════════════
 DEPENDENCY RULES — CRITICAL, READ CAREFULLY
 ═══════════════════════════════════════════════════════════
 
