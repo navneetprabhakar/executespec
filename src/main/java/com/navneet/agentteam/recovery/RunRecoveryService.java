@@ -202,7 +202,7 @@ public class RunRecoveryService {
             locksReleased
         ));
 
-        workerPool.resubmitTask(stateStore.getTask(task.getTaskId()));
+        workerPool.resubmitTask(stateStore.getTask(task.getTaskId()), run.getRunId());
 
         log.info("Task {} resubmitted — recovery attempt {}",
             task.getTaskId(), (task.getRecoveryAttempt() != null ? task.getRecoveryAttempt() : 0) + 1);

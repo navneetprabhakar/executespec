@@ -55,7 +55,7 @@ public class EscalationService {
 
         stateStore.escalateTask(task.getTaskId(), target.provider(), target.model());
         workerPool.cancelTask(task.getTaskId());
-        workerPool.resubmitTask(stateStore.getTask(task.getTaskId()));
+        workerPool.resubmitTask(stateStore.getTask(task.getTaskId()), task.getRunId());
     }
 
     public void escalateProvider(AgentTask task) {
@@ -65,7 +65,7 @@ public class EscalationService {
 
     public void escalateAfterContextOverflow(AgentTask task) {
         stateStore.forceCompactionFlag(task.getTaskId());
-        workerPool.resubmitTask(task);
+        workerPool.resubmitTask(task, task.getRunId());
     }
 
     private EscalationTarget resolveCapableModel(AgentTask task) {

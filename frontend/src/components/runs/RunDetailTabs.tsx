@@ -219,6 +219,16 @@ function OverviewTab({ run }: { run: RunDetail }) {
           </div>
         ))}
       </div>
+
+      {/* Goal — the user's original request */}
+      {run.userRequest && (
+        <div className="pt-3 border-t border-white/[0.06]">
+          <p className="text-xs text-zinc-600 mb-1.5">Goal</p>
+          <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap line-clamp-8">
+            {run.userRequest}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

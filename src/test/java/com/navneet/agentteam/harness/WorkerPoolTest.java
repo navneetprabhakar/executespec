@@ -3,8 +3,10 @@ package com.navneet.agentteam.harness;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.agentteam.agent.WorkerAgent;
 import com.navneet.agentteam.agent.model.WorkerReport;
+import com.navneet.agentteam.sse.SseBroadcaster;
 import com.navneet.agentteam.state.StateStore;
 import com.navneet.agentteam.state.entity.AgentTask;
+import com.navneet.agentteam.tool.GitTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -31,13 +33,15 @@ class WorkerPoolTest {
 
     @Mock private WorkerAgent workerAgent;
     @Mock private StateStore stateStore;
+    @Mock private SseBroadcaster broadcaster;
+    @Mock private GitTool gitTool;
 
     private WorkerPool pool;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        pool = new WorkerPool(workerAgent, stateStore, mapper);
+        pool = new WorkerPool(workerAgent, stateStore, mapper, broadcaster, gitTool);
     }
 
     private AgentTask task(String taskId, List<String> dependsOn) {
@@ -79,10 +83,10 @@ class WorkerPoolTest {
             when(workerAgent.execute(any(), any())).thenReturn(completeReport("t1"));
             when(stateStore.lockTask(any(), any(), any())).thenReturn(true);
 
-            List<WorkerReport> reports = pool.runAll(List.of(t1), "run-abcdef12", "model");
+            WorkerPool.WorkerPoolResult result = pool.runAll(List.of(t1), "run-abcdef12", "model");
 
-            assertThat(reports).hasSize(1);
-            assertThat(reports.get(0).getTaskId()).isEqualTo("t1");
+            assertThat(result.reports()).hasSize(1);
+            assertThat(result.reports().get(0).getTaskId()).isEqualTo("t1");
         }
 
         @Test
@@ -98,10 +102,10 @@ class WorkerPoolTest {
                 });
             when(stateStore.lockTask(any(), any(), any())).thenReturn(true);
 
-            List<WorkerReport> reports = pool.runAll(List.of(t2, t1), "run-abcdef12", "model");
+            WorkerPool.WorkerPoolResult result = pool.runAll(List.of(t2, t1), "run-abcdef12", "model");
 
-            assertThat(reports).hasSize(2);
-            assertThat(reports.stream().map(WorkerReport::getTaskId))
+            assertThat(result.reports()).hasSize(2);
+            assertThat(result.reports().stream().map(WorkerReport::getTaskId))
                 .containsExactlyInAnyOrder("t1", "t2");
         }
 
@@ -111,10 +115,10 @@ class WorkerPoolTest {
             AgentTask t1 = task("t1", List.of());
             when(stateStore.lockTask(eq("t1"), any(), any())).thenReturn(false);
 
-            List<WorkerReport> reports = pool.runAll(List.of(t1), "run-abcdef12", "model");
+            WorkerPool.WorkerPoolResult result = pool.runAll(List.of(t1), "run-abcdef12", "model");
 
-            // null result is filtered out — list is empty
-            assertThat(reports).isEmpty();
+            // Locked task is skipped — no reports
+            assertThat(result.reports()).isEmpty();
             verify(workerAgent, never()).execute(any(), any());
         }
 
@@ -125,7 +129,6 @@ class WorkerPoolTest {
             AgentTask t2 = task("t2", List.of("t1"));
 
             when(stateStore.lockTask(any(), any(), any())).thenReturn(true);
-            // Use thenAnswer to differentiate by taskId safely (null-safe)
             when(workerAgent.execute(any(), any()))
                 .thenAnswer(inv -> {
                     AgentTask t = inv.getArgument(0);
@@ -135,10 +138,10 @@ class WorkerPoolTest {
                     return completeReport(t != null ? t.getTaskId() : "unknown");
                 });
 
-            List<WorkerReport> reports = pool.runAll(List.of(t1, t2), "run-abcdef12", "model");
+            WorkerPool.WorkerPoolResult result = pool.runAll(List.of(t1, t2), "run-abcdef12", "model");
 
-            assertThat(reports).hasSize(2);
-            WorkerReport blockedReport = reports.stream()
+            assertThat(result.reports()).hasSize(2);
+            WorkerReport blockedReport = result.reports().stream()
                 .filter(r -> "t1".equals(r.getTaskId())).findFirst().orElseThrow();
             assertThat(blockedReport.getStatus()).isEqualTo("blocked");
             assertThat(blockedReport.getBlockers()).contains("provider down");
@@ -152,7 +155,6 @@ class WorkerPoolTest {
         @Test
         @DisplayName("cancelTask on unknown id does not throw")
         void cancelUnknownTask() {
-            // Should not throw even if task is not registered
             pool.cancelTask("non-existent-task-id");
         }
 
@@ -177,11 +179,9 @@ class WorkerPoolTest {
         void resubmitRunsWorker() throws InterruptedException {
             AgentTask t1 = task("t1", List.of());
             when(workerAgent.execute(any(), any())).thenReturn(completeReport("t1"));
-            // completeTask is void — no stub needed (Mockito default: do nothing)
 
-            pool.resubmitTask(t1);
+            pool.resubmitTask(t1, "run-abcdef12");
 
-            // Give virtual thread time to complete
             verify(stateStore, timeout(1000)).completeTask(eq("t1"), any());
         }
     }
