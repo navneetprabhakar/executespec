@@ -132,6 +132,10 @@ public class WorkerPool {
                     completedTaskIds.add(taskId);
                     continue;
                 }
+                // lockTask persists branchName to DB but doesn't update the in-memory
+                // AgentTask object — set it here so downstream merge code can read it.
+                task.setBranchName(branchName);
+                task.setAssignedModel(taskModel);
 
                 WorkerReport report = workerAgent.execute(task, runId);
                 stateStore.completeTask(taskId, report);
