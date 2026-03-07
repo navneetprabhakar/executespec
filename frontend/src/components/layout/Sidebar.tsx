@@ -2,13 +2,13 @@ import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 import {
-  LayoutDashboard, BarChart3, DollarSign, Rocket, Plug, Settings,
+  LayoutDashboard, BarChart3, DollarSign, Plug, Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
 
 const ICON_MAP: Record<string, React.ElementType> = {
-  LayoutDashboard, BarChart3, DollarSign, Rocket, Plug, Settings,
+  LayoutDashboard, BarChart3, DollarSign, Plug, Settings,
 };
 
 export default function Sidebar() {

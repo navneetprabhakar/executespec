@@ -72,6 +72,8 @@ public class WorkerAgent {
     }
 
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile("<tool_call>(.*?)</tool_call>", Pattern.DOTALL);
+    private static final int CHECKPOINT_INTERVAL = 15;
+    private static final int COMPLETION_URGENCY_THRESHOLD = 5;
 
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
@@ -117,6 +119,7 @@ public class WorkerAgent {
         int iteration = 0;
         int lastCallInputTokens = 0;
         boolean justCompacted = false;
+        int lastCompactedIteration = -999;
 
         // ── AGENTIC LOOP ──────────────────────────────────────────────────────
         try { // outer try: always clear WorkspaceContext on exit
@@ -129,6 +132,39 @@ public class WorkerAgent {
                 if (inboxContent != null) {
                     messages.add(new UserMessage(inboxContent));
                     log.debug("[Worker {}] Injected inbox messages into context", taskId);
+                }
+
+                // ── Progress checkpoint: re-inject task context every N iterations ──
+                if (iteration > 0 && iteration % CHECKPOINT_INTERVAL == 0) {
+                    messages.add(new UserMessage(buildProgressCheckpoint(taskDef, iteration, maxIterations)));
+                    log.info("[Worker {}] Injected progress checkpoint at iteration {}", taskId, iteration);
+                }
+
+                // ── Forced completion: nearing iteration limit ──
+                if (iteration > 0 && maxIterations - iteration == COMPLETION_URGENCY_THRESHOLD) {
+                    messages.add(new UserMessage(buildCompletionUrgencyPrompt(taskDef, iteration, maxIterations)));
+                    log.warn("[Worker {}] Injected completion urgency prompt at iteration {} ({} remaining)",
+                            taskId, iteration, COMPLETION_URGENCY_THRESHOLD);
+                }
+
+                // ── Pre-call token estimation: compact early if projected to exceed threshold ──
+                if (!justCompacted && messages.size() > 30) {
+                    int estimatedTokens = estimateInputTokens(messages);
+                    int limit = budgetMonitor.contextLimitFor(model);
+                    double estimatedPct = (double) estimatedTokens / limit;
+                    double compactPct = props.getCompaction().getCompactPct()
+                            + ("HIGH".equalsIgnoreCase(complexity) ? 0.05 : 0.0);
+                    if (estimatedPct >= compactPct) {
+                        log.info("[Worker {}] Pre-call estimate {}% >= compact threshold — compacting before LLM call",
+                                taskId, (int) (estimatedPct * 100));
+                        String[] compactProvider = { provider };
+                        messages = compact(messages, taskDef, taskId, runId,
+                                compactProvider, model, agentId, complexity);
+                        provider = compactProvider[0];
+                        lastCallInputTokens = 0;
+                        justCompacted = true;
+                        lastCompactedIteration = iteration;
+                    }
                 }
 
                 // Tier 5: record activity before LLM call (for stuck detection)
@@ -223,21 +259,43 @@ public class WorkerAgent {
                 }
 
                 // No tool calls and no completion report — prompt to continue
-                messages.add(new UserMessage(
-                        "If you have finished all your work, output ONLY your completion JSON report now. " +
-                        "Otherwise, use <tool_call>{\"name\": \"...\", \"args\": {...}}</tool_call> XML to call the next tool."));
+                String continuePrompt;
+                if (iteration >= maxIterations - 10) {
+                    continuePrompt = "You are at iteration " + iteration + " of " + maxIterations +
+                            ". If you have finished all your work, output ONLY your completion JSON report now. " +
+                            "Otherwise, use <tool_call> to call the MOST IMPORTANT remaining tool.";
+                } else {
+                    continuePrompt = "If you have finished all your work, output ONLY your completion JSON report now. " +
+                            "Otherwise, use <tool_call>{\"name\": \"...\", \"args\": {...}}</tool_call> XML to call the next tool.";
+                }
+                messages.add(new UserMessage(continuePrompt));
 
                 // Budget monitoring (compaction / hard-stop)
                 BudgetStatus budget = budgetMonitor.check(model, complexity, lastCallInputTokens);
                 switch (budget.status()) {
                     case HARD_STOP -> {
-                        log.warn("Hard stop threshold reached for task {} ({}% context)",
-                                taskId, (int) (budget.usagePct() * 100));
-                        stateStore.recordCompaction(taskId, "hard-stop");
-                        return WorkerReport.partial(taskId,
-                                "Hard stopped at " + (int) (budget.usagePct() * 100)
-                                        + "% context usage. Resume required.",
-                                totalInputTokens, totalOutputTokens);
+                        if (iteration - lastCompactedIteration > 2) {
+                            log.warn("Hard stop threshold reached for task {} ({}% context) — " +
+                                     "attempting emergency compaction", taskId,
+                                    (int) (budget.usagePct() * 100));
+                            stateStore.recordCompaction(taskId, "emergency-compact-at-hard-stop");
+                            String[] compactProvider = { provider };
+                            messages = compact(messages, taskDef, taskId, runId,
+                                    compactProvider, model, agentId, complexity);
+                            provider = compactProvider[0];
+                            lastCallInputTokens = 0;
+                            justCompacted = true;
+                            lastCompactedIteration = iteration;
+                        } else {
+                            log.warn("Hard stop threshold reached for task {} ({}% context) — " +
+                                     "already compacted at iteration {}, cannot recover",
+                                    taskId, (int) (budget.usagePct() * 100), lastCompactedIteration);
+                            stateStore.recordCompaction(taskId, "hard-stop");
+                            return WorkerReport.partial(taskId,
+                                    "Hard stopped at " + (int) (budget.usagePct() * 100)
+                                            + "% context usage after emergency compaction failed. Resume required.",
+                                    totalInputTokens, totalOutputTokens);
+                        }
                     }
                     case COMPACT -> {
                         log.info("Compacting context for task {} at {}% usage", taskId,
@@ -248,6 +306,7 @@ public class WorkerAgent {
                         provider = compactProvider[0];
                         lastCallInputTokens = 0;
                         justCompacted = true;
+                        lastCompactedIteration = iteration;
                     }
                     case WARN ->
                         log.warn("Context at {}% for task {} — compaction approaching",
@@ -536,6 +595,65 @@ public class WorkerAgent {
                 """.formatted(task.getTaskId(), task.getTitle(), task.getObjective(),
                 task.getBoundaries(), task.getOutputFormat(), task.getAcceptanceCriteria(),
                 deps, task.getComplexity(), branchName);
+    }
+
+    private String buildProgressCheckpoint(TaskDefinition task, int iteration, int maxIterations) {
+        return """
+                ═══ PROGRESS CHECKPOINT (iteration %d of %d) ═══
+
+                REMINDER — Your task:
+                TASK ID: %s
+                OBJECTIVE: %s
+                ACCEPTANCE CRITERIA: %s
+
+                You have used %d of %d iterations. Assess your progress:
+                • What have you accomplished so far?
+                • What remains to satisfy the acceptance criteria?
+                • If all work is done, output your completion JSON report NOW.
+
+                Continue working or report completion.
+                """.formatted(iteration, maxIterations,
+                task.getTaskId(), task.getObjective(), task.getAcceptanceCriteria(),
+                iteration, maxIterations);
+    }
+
+    private String buildCompletionUrgencyPrompt(TaskDefinition task, int iteration, int maxIterations) {
+        int remaining = maxIterations - iteration;
+        return """
+                ═══ URGENT: APPROACHING ITERATION LIMIT ═══
+
+                You have used %d of %d iterations. You have only %d iterations remaining.
+
+                TASK ID: %s
+                ACCEPTANCE CRITERIA: %s
+
+                ACTION REQUIRED:
+                1. If your work satisfies the acceptance criteria: output your completion JSON NOW.
+                2. If your work is partially done: commit what you have, then output a completion JSON
+                   with status "partial" and describe what remains in self_review.
+                3. Do NOT start new work that you cannot finish in %d iterations.
+
+                Output your completion JSON report as your next response.
+                """.formatted(iteration, maxIterations, remaining,
+                task.getTaskId(), task.getAcceptanceCriteria(), remaining);
+    }
+
+    /**
+     * Rough token estimate for a message list. Uses 4 chars per token heuristic.
+     * Not precise, but sufficient for pre-call compaction decisions.
+     */
+    private int estimateInputTokens(List<Message> messages) {
+        int totalChars = 0;
+        for (Message m : messages) {
+            if (m instanceof UserMessage um) {
+                totalChars += um.getText() != null ? um.getText().length() : 0;
+            } else if (m instanceof AssistantMessage am) {
+                totalChars += am.getText() != null ? am.getText().length() : 0;
+            } else if (m instanceof SystemMessage sm) {
+                totalChars += sm.getText() != null ? sm.getText().length() : 0;
+            }
+        }
+        return totalChars / 4;
     }
 
     /**

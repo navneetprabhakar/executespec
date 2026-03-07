@@ -25,21 +25,13 @@ public class FileSystemTool {
     @Autowired(required = false)
     private FileLockTool lockTool;
 
-    // Config and credential file names that agents must never read
-    private static final Set<String> BLOCKED_FILE_NAMES = Set.of(
-            "application.yml", "application.yaml", "application.properties",
-            "application-dev.yml", "application-dev.yaml", "application-dev.properties",
-            "application-prod.yml", "application-prod.yaml", "application-prod.properties",
-            "application-gcp.yml", "application-gcp.yaml",
-            "application-local.yml", "application-local.yaml",
+    // File names that trigger a WARN log when written (potential secret leakage).
+    // NOT blocked — agents legitimately write these for generated projects.
+    // Security boundary is safeResolve() which sandboxes all paths to the workspace.
+    private static final Set<String> SENSITIVE_FILE_NAMES = Set.of(
             ".env", ".env.local", ".env.production",
-            "bootstrap.yml", "bootstrap.yaml", "bootstrap.properties",
-            "secrets.yml", "secrets.yaml", "credentials.json",
-            "service-account.json", "key.json", "keyfile.json");
-
-    // Directory names that agents must never enter
-    private static final Set<String> BLOCKED_DIRECTORIES = Set.of(
-            ".ssh", ".gnupg", ".aws", ".gcloud", ".config");
+            "credentials.json", "service-account.json",
+            "key.json", "keyfile.json", "secrets.yml", "secrets.yaml");
 
     // Directory names that are always hidden from agent file listings.
     // "worktrees" holds sibling task worktrees; "target" / "build" / "node_modules"
@@ -69,10 +61,6 @@ public class FileSystemTool {
     }
 
     /**
-     * Checks whether a resolved path refers to a blocked credential or config file.
-     * Returns an error ToolResult if blocked, null if allowed.
-     */
-    /**
      * Checks if the current task is allowed to write to the given path.
      * Returns an error message if blocked by another task's file lock, null if OK.
      */
@@ -88,25 +76,6 @@ public class FileSystemTool {
         return null;
     }
 
-    private ToolResult checkCredentialBlock(Path resolved) {
-        String fileName = resolved.getFileName() != null
-                ? resolved.getFileName().toString().toLowerCase()
-                : "";
-
-        if (BLOCKED_FILE_NAMES.contains(fileName)) {
-            log.warn("CREDENTIAL ACCESS DENIED: {}", resolved);
-            return ToolResult.err("ACCESS DENIED: Cannot read configuration/credential files from workspace");
-        }
-
-        // Walk path components to check for blocked directories
-        for (Path segment : resolved) {
-            if (BLOCKED_DIRECTORIES.contains(segment.toString().toLowerCase())) {
-                log.warn("CREDENTIAL ACCESS DENIED (blocked dir): {}", resolved);
-                return ToolResult.err("ACCESS DENIED: Cannot access restricted directory: " + segment);
-            }
-        }
-        return null; // allowed
-    }
 
     @Tool(description = "Read the full content of a file. Use this before writing or editing any file.")
     public String readFile(
@@ -114,9 +83,6 @@ public class FileSystemTool {
             @ToolParam(description = "The relative path to the file to read", required = true) String path) {
         try {
             Path resolved = safeResolve(runId, path);
-            ToolResult blocked = checkCredentialBlock(resolved);
-            if (blocked != null)
-                return blocked.value();
             return Files.readString(resolved);
         } catch (SecurityException e) {
             return "ACCESS DENIED: " + e.getMessage();
@@ -134,6 +100,11 @@ public class FileSystemTool {
             String lockBlock = checkFileLock(path);
             if (lockBlock != null) return lockBlock;
             Path target = safeResolve(runId, path);
+            String fileName = target.getFileName() != null
+                    ? target.getFileName().toString().toLowerCase() : "";
+            if (SENSITIVE_FILE_NAMES.contains(fileName)) {
+                log.warn("[Security] Agent writing sensitive file: {} (runId={})", path, runId);
+            }
             Files.createDirectories(target.getParent());
             Files.writeString(target, content);
             return "Written: " + path + " (" + content.length() + " chars)";
@@ -173,9 +144,6 @@ public class FileSystemTool {
             @ToolParam(description = "Path of the directory to list (usually '.')", required = true) String path) {
         try {
             Path resolved = safeResolve(runId, path);
-            ToolResult blocked = checkCredentialBlock(resolved);
-            if (blocked != null)
-                return blocked.value();
             try (var stream = Files.list(resolved)) {
                 Path ws = workspace(runId);
                 String listing = stream

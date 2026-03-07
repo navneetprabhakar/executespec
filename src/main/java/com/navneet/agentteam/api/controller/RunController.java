@@ -60,6 +60,7 @@ public class RunController {
     private final AgentMessageRepository agentMessageRepository;
     private final TierEnforcementService tierEnforcementService;
     private final RunVisibilitySpec runVisibilitySpec;
+    private final com.navneet.agentteam.agent.ApiKeyResolver apiKeyResolver;
 
     /** Submit a new run. Returns immediately with the run summary (status may be PLANNING or QUEUED). */
     @PostMapping
@@ -71,6 +72,8 @@ public class RunController {
         // Enforce tier quota (throws 429 if over limit)
         if (userDetails != null) {
             tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+            // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
+            apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
         }
 
         // Extract per-user GitHub credentials to pass into the run

@@ -58,6 +58,16 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
               <Cpu className="h-3 w-3" />
               {run.plannerModel}
             </span>
+            {run.keySource && (
+              <span className={cn(
+                'px-1.5 py-0.5 rounded text-[10px] font-medium',
+                run.keySource === 'SYSTEM'   && 'bg-violet-500/15 text-violet-400',
+                run.keySource === 'OWN_KEYS' && 'bg-emerald-500/15 text-emerald-400',
+                run.keySource === 'HYBRID'   && 'bg-amber-500/15 text-amber-400',
+              )}>
+                {run.keySource === 'SYSTEM' ? 'Platform' : run.keySource === 'OWN_KEYS' ? 'Own Keys' : 'Hybrid'}
+              </span>
+            )}
             {(run.totalInputTokens + run.totalOutputTokens) > 0 && (
               <span className="text-xs text-zinc-600">{fmtTokens(run.totalInputTokens + run.totalOutputTokens)} tok</span>
             )}

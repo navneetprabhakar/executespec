@@ -30,7 +30,6 @@ export const NAV_ITEMS = [
   { path: '/',             label: 'Runs',         icon: 'LayoutDashboard' },
   { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3' },
   { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign' },
-  { path: '/deployments',  label: 'Deployments',  icon: 'Rocket' },
   { path: '/integrations', label: 'Integrations', icon: 'Plug' },
   { path: '/settings',     label: 'Settings',     icon: 'Settings' },
 ];
@@ -39,7 +38,6 @@ export const ROUTE_PATHS = {
   runs:         '/',
   dashboard:    '/dashboard',
   pricing:      '/pricing',
-  deployments:  '/deployments',
   integrations: '/integrations',
   settings:     '/settings',
 };

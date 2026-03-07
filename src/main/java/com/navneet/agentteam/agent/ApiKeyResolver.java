@@ -6,7 +6,13 @@ import com.navneet.agentteam.auth.repository.AppUserRepository;
 import com.navneet.agentteam.auth.repository.OrgRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Resolves per-run AI provider API keys using the multi-tenant hierarchy:
@@ -17,11 +23,12 @@ import org.springframework.stereotype.Service;
  *   3. System key      (application.yml — represented by null in ResolvedKeys)
  * </pre>
  *
- * Each provider key is resolved independently, so a user can override Anthropic only
- * while inheriting the org's OpenAI key and falling back to the system Gemini key.
- *
- * <p>The org is derived from the user's {@code orgId} field — no schema change needed
- * on {@code pipeline_run}.
+ * Respects org-level {@code keySourceMode} and {@code enabledProviders} settings:
+ * <ul>
+ *   <li><b>SYSTEM</b> — force all keys to null (always use platform singletons)</li>
+ *   <li><b>OWN_KEYS</b> — resolve user/org keys; null = provider unavailable (no system fallback)</li>
+ *   <li><b>HYBRID</b> (default) — resolve user/org keys first, fall back to system</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
@@ -42,6 +49,8 @@ public class ApiKeyResolver {
         String openAi    = null;
         String gemini    = null;
         String orgId     = null;
+        String keySourceMode = "HYBRID";
+        Set<String> enabledProviders = null;
 
         // ── Level 1: user-level keys ─────────────────────────────────────────
         if (userId != null) {
@@ -54,10 +63,22 @@ public class ApiKeyResolver {
             }
         }
 
-        // ── Level 2: org-level keys (fill in any gaps) ───────────────────────
-        if (orgId != null && (anthropic == null || openAi == null || gemini == null)) {
-            Org org = orgRepo.findById(orgId).orElse(null);
-            if (org != null) {
+        // ── Level 2: org-level keys + policy ─────────────────────────────────
+        Org org = null;
+        if (orgId != null) {
+            org = orgRepo.findById(orgId).orElse(null);
+        }
+        if (org != null) {
+            keySourceMode = org.getKeySourceMode() != null ? org.getKeySourceMode() : "HYBRID";
+            enabledProviders = parseProviders(org.getEnabledProviders());
+
+            if ("SYSTEM".equals(keySourceMode)) {
+                // Platform keys only — ignore any user/org keys
+                anthropic = null;
+                openAi    = null;
+                gemini    = null;
+            } else {
+                // Fill in gaps from org-level keys (OWN_KEYS and HYBRID both resolve org keys)
                 if (anthropic == null) anthropic = blankToNull(org.getAnthropicApiKey());
                 if (openAi    == null) openAi    = blankToNull(org.getOpenAiApiKey());
                 if (gemini    == null) gemini    = blankToNull(org.getGeminiApiKey());
@@ -65,14 +86,45 @@ public class ApiKeyResolver {
         }
 
         // ── Level 3: system keys (null = LlmRouter uses the system singleton bean) ─
-        ResolvedKeys keys = new ResolvedKeys(anthropic, openAi, gemini);
-        log.debug("[ApiKeyResolver] userId={} orgId={} → anthropic={} openai={} gemini={}",
-                userId, orgId,
+        ResolvedKeys keys = new ResolvedKeys(anthropic, openAi, gemini, keySourceMode, enabledProviders);
+        log.debug("[ApiKeyResolver] userId={} orgId={} mode={} providers={} → anthropic={} openai={} gemini={}",
+                userId, orgId, keySourceMode, enabledProviders,
                 anthropic != null, openAi != null, gemini != null);
         return keys;
     }
 
+    /**
+     * Pre-flight validation: in OWN_KEYS mode, at least one enabled provider must have a key.
+     * Called before submitting a run so the user gets an immediate 400 instead of a runtime failure.
+     *
+     * @throws ResponseStatusException 400 if no keys are available for any enabled provider
+     */
+    public void validateKeyAvailability(String userId) {
+        ResolvedKeys keys = resolve(userId);
+        if (!"OWN_KEYS".equals(keys.keySourceMode())) return;
+
+        boolean hasAny = false;
+        if (keys.isProviderAllowed("anthropic") && keys.anthropicKey() != null) hasAny = true;
+        if (keys.isProviderAllowed("openai")    && keys.openAiKey()    != null) hasAny = true;
+        if (keys.isProviderAllowed("google")    && keys.geminiKey()    != null) hasAny = true;
+
+        if (!hasAny) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Your org is in OWN_KEYS mode but no API keys are configured for any enabled provider. " +
+                    "Add keys in Settings → AI Keys, or ask an admin to change the key source mode.");
+        }
+    }
+
     private static String blankToNull(String s) {
         return (s != null && !s.isBlank()) ? s.strip() : null;
+    }
+
+    private static Set<String> parseProviders(String csv) {
+        if (csv == null || csv.isBlank()) return null;
+        return Arrays.stream(csv.split(","))
+                .map(String::strip)
+                .map(String::toLowerCase)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
     }
 }

@@ -95,6 +95,10 @@ public class PipelineRun {
     /** Workspace-relative directory from which static files are served, e.g. "dist" or "" (root). */
     private String previewServeDir;
 
+    /** Billing flag: which key source was used — SYSTEM | OWN_KEYS | HYBRID. */
+    @Column(name = "key_source")
+    private String keySource;
+
     @Column(name = "tenant_id", nullable = false)
     @Builder.Default
     private String tenantId = "default";

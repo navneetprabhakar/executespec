@@ -5,8 +5,6 @@ import { useRunStore } from '@/stores/useRunStore';
 import {
   getFiles, getFile,
   getOpenApiSpec,
-  getPreviewStatus, startPreview, stopPreview,
-  LocalPreviewStatus,
 } from '@/lib/api';
 import type { RunDetail } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
@@ -14,13 +12,13 @@ import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
 import RunConversation from './RunConversation';
 import TaskGraph from './TaskGraph';
+import PreviewTab from './PreviewTab';
 import { PIPELINE_STEPS } from '@/lib/constants';
 import { fmtTokens, relativeTime, cn } from '@/lib/utils';
 import {
   ChevronDown, ChevronRight,
   Folder, FolderOpen,
   FileCode2, FileText, File,
-  Play, Square, ExternalLink, RefreshCw,
   MessageSquare,
   ChevronsDownUp, ChevronsUpDown, Copy, Check,
 } from 'lucide-react';
@@ -34,7 +32,6 @@ const BASE_TABS = [
   { value: 'plan',      label: 'Plan' },
   { value: 'review',    label: 'Review' },
   { value: 'code',      label: 'Code' },
-  { value: 'preview',   label: 'Preview (Beta)' },
 ];
 
 export default function RunDetailTabs() {
@@ -59,11 +56,14 @@ export default function RunDetailTabs() {
 
   if (!activeRun) return null;
 
-  /** The Chat tab is only shown for terminal (COMPLETE / PARTIAL) runs. */
-  const showChatTab = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
+  /** Chat & Preview tabs are only shown for terminal (COMPLETE / PARTIAL) runs. */
+  const showTerminalTabs = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
   const TABS = [
     ...BASE_TABS,
-    ...(showChatTab ? [{ value: 'chat', label: 'Chat' }] : []),
+    ...(showTerminalTabs ? [
+      { value: 'preview', label: 'Preview' },
+      { value: 'chat', label: 'Chat' },
+    ] : []),
   ];
 
   return (
@@ -120,15 +120,17 @@ export default function RunDetailTabs() {
           <CodeTab runId={activeRun.runId} files={files} filesLoading={filesLoading} />
         </Tabs.Content>
 
-        <Tabs.Content value="preview" className="h-full overflow-hidden">
-          <PreviewTab runId={activeRun.runId} files={files} filesLoading={filesLoading} />
-        </Tabs.Content>
-
         <Tabs.Content value="graph" className="h-full overflow-auto p-4">
           <TaskGraph runId={activeRun.runId} />
         </Tabs.Content>
 
-        {showChatTab && (
+        {showTerminalTabs && (
+          <Tabs.Content value="preview" className="h-full overflow-hidden">
+            <PreviewTab runId={activeRun.runId} />
+          </Tabs.Content>
+        )}
+
+        {showTerminalTabs && (
           <Tabs.Content value="chat" className="h-full overflow-hidden">
             <RunConversation runId={activeRun.runId} />
           </Tabs.Content>
@@ -860,461 +862,3 @@ function CodeTab({
   );
 }
 
-// ── Preview tab ───────────────────────────────────────────────────────────────
-
-type ProjectType = 'FULLSTACK' | 'SPRING_BOOT' | 'STATIC' | 'PYTHON' | 'GO' | 'RUBY' | 'PHP';
-
-function PreviewTab({
-  runId,
-  files,
-  filesLoading,
-}: {
-  runId: string;
-  files: string[];
-  filesLoading: boolean;
-}) {
-  if (filesLoading) {
-    return <div className="p-4 text-sm text-zinc-500">Detecting project type…</div>;
-  }
-
-  if (files.length === 0) {
-    return (
-      <div className="p-4 text-sm text-zinc-500">
-        Files not available yet. Preview is available after the run completes.
-      </div>
-    );
-  }
-
-  // Use .some() so nested paths (e.g. backend/pom.xml) are detected consistently.
-  const hasJava   = files.some(f => f === 'pom.xml'          || f.endsWith('/pom.xml'));
-  const hasNode   = files.some(f => f === 'package.json'     || f.endsWith('/package.json'));
-  const hasPython = files.some(f =>
-    f === 'requirements.txt' || f.endsWith('/requirements.txt') ||
-    f === 'setup.py'         || f === 'pyproject.toml' || f === 'Pipfile'
-  );
-  const hasGo   = files.some(f => f === 'go.mod'        || f.endsWith('/go.mod'));
-  const hasRuby = files.some(f => f === 'Gemfile'       || f.endsWith('/Gemfile'));
-  const hasPhp  = files.some(f => f === 'composer.json' || f.endsWith('/composer.json'));
-
-  // Backend-only Java → show OpenAPI viewer instead of Docker preview.
-  if (hasJava && !hasNode) {
-    return <OpenApiViewer runId={runId} />;
-  }
-
-  let projectType: ProjectType | null = null;
-  if (hasJava && hasNode) projectType = 'FULLSTACK';
-  else if (hasJava)       projectType = 'SPRING_BOOT';
-  else if (hasNode)       projectType = 'STATIC';
-  else if (hasPython)     projectType = 'PYTHON';
-  else if (hasGo)         projectType = 'GO';
-  else if (hasRuby)       projectType = 'RUBY';
-  else if (hasPhp)        projectType = 'PHP';
-
-  if (projectType) {
-    return <DockerPreview runId={runId} projectType={projectType} />;
-  }
-
-  // Files exist but none are a recognisable project entrypoint.
-  // Most common cause: workers were blocked/failed before writing any source files —
-  // the workspace only contains init artefacts like CODEBASE_CONTEXT.md.
-  const nonInitFiles = files.filter(f => f !== 'CODEBASE_CONTEXT.md' && !f.startsWith('.agent-context/'));
-  return (
-    <div className="p-4 space-y-1 text-sm text-zinc-500">
-      <p className="font-medium text-zinc-400">No deployable project detected</p>
-      {nonInitFiles.length === 0 ? (
-        <p>Workers did not write any source files — the run may have failed before starting. Check the Log tab for errors.</p>
-      ) : (
-        <p>
-          {nonInitFiles.length} file{nonInitFiles.length !== 1 ? 's' : ''} generated but no recognised
-          project entrypoint found (<code className="font-mono">pom.xml</code>,{' '}
-          <code className="font-mono">package.json</code>,{' '}
-          <code className="font-mono">requirements.txt</code>,{' '}
-          <code className="font-mono">go.mod</code>,{' '}
-          <code className="font-mono">Gemfile</code>, or{' '}
-          <code className="font-mono">composer.json</code>).
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ── OpenAPI viewer (backend-only projects) ────────────────────────────────────
-
-interface Endpoint {
-  method: string;
-  path: string;
-  summary: string;
-}
-
-function parseOpenApiEndpoints(yaml: string): Endpoint[] {
-  const endpoints: Endpoint[] = [];
-  const lines = yaml.split('\n');
-  const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'head', 'options']);
-
-  let inPaths = false;
-  let currentPath = '';
-  let currentMethod = '';
-
-  for (const line of lines) {
-    if (line === 'paths:') { inPaths = true; continue; }
-    // Leave paths block when a new top-level key starts
-    if (inPaths && /^\S/.test(line) && !line.startsWith(' ')) { inPaths = false; continue; }
-    if (!inPaths) continue;
-
-    const pathMatch = line.match(/^  (\/[^:]+):\s*$/);
-    if (pathMatch) { currentPath = pathMatch[1]; currentMethod = ''; continue; }
-
-    const methodMatch = line.match(/^    ([a-z]+):\s*$/);
-    if (methodMatch && HTTP_METHODS.has(methodMatch[1]) && currentPath) {
-      currentMethod = methodMatch[1].toUpperCase();
-      continue;
-    }
-
-    const summaryMatch = line.match(/^      summary:\s*(.+)/);
-    if (summaryMatch && currentPath && currentMethod) {
-      endpoints.push({ method: currentMethod, path: currentPath, summary: summaryMatch[1].trim() });
-      currentMethod = '';
-    }
-  }
-
-  return endpoints;
-}
-
-const METHOD_COLORS: Record<string, string> = {
-  GET:    'bg-accent-emerald/15 text-accent-emerald',
-  POST:   'bg-accent-cyan/15 text-accent-cyan',
-  PUT:    'bg-accent-amber/15 text-accent-amber',
-  PATCH:  'bg-accent-amber/15 text-accent-amber',
-  DELETE: 'bg-accent-rose/15 text-accent-rose',
-};
-
-function OpenApiViewer({ runId }: { runId: string }) {
-  const [yaml, setYaml] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-  const [rawExpanded, setRawExpanded] = useState(false);
-
-  useEffect(() => {
-    setLoading(true);
-    setYaml(null);
-    setNotFound(false);
-    getOpenApiSpec(runId)
-      .then(setYaml)
-      .catch((e: Error) => {
-        if (e.message.startsWith('404')) setNotFound(true);
-      })
-      .finally(() => setLoading(false));
-  }, [runId]);
-
-  if (loading) {
-    return <div className="p-4 text-sm text-zinc-500">Loading API spec…</div>;
-  }
-
-  if (notFound || !yaml) {
-    return (
-      <div className="p-4 space-y-2">
-        <p className="text-sm font-medium text-zinc-300">No OpenAPI spec found</p>
-        <p className="text-xs text-zinc-500 leading-relaxed">
-          The API spec is auto-generated by the API Test Suite agent after the run completes
-          (written to <code className="font-mono">api-docs/openapi.yaml</code> in the workspace).
-        </p>
-        <p className="text-xs text-zinc-600">
-          If the run is complete and you still see this message, the spec may not have been generated.
-        </p>
-      </div>
-    );
-  }
-
-  const endpoints = parseOpenApiEndpoints(yaml);
-
-  // Try to extract title + version from yaml
-  const titleMatch = yaml.match(/^  title:\s*(.+)/m);
-  const versionMatch = yaml.match(/^  version:\s*(.+)/m);
-  const title = titleMatch ? titleMatch[1].trim() : 'API Documentation';
-  const version = versionMatch ? versionMatch[1].trim() : '';
-
-  return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-200">{title}</h3>
-          {version && <p className="text-xs text-zinc-500 mt-0.5">v{version}</p>}
-        </div>
-        <span className="text-xs text-zinc-600">{endpoints.length} endpoint{endpoints.length !== 1 ? 's' : ''}</span>
-      </div>
-
-      {/* Endpoint list */}
-      {endpoints.length > 0 ? (
-        <div className="space-y-1.5">
-          {endpoints.map((ep, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white/[0.02] border border-white/[0.06]"
-            >
-              <span className={cn(
-                'text-[10px] font-bold px-1.5 py-0.5 rounded font-mono flex-shrink-0 w-14 text-center',
-                METHOD_COLORS[ep.method] ?? 'bg-zinc-500/15 text-zinc-400'
-              )}>
-                {ep.method}
-              </span>
-              <code className="text-xs font-mono text-zinc-300 flex-1 truncate">{ep.path}</code>
-              {ep.summary && (
-                <span className="text-xs text-zinc-500 flex-shrink-0 max-w-[160px] truncate">
-                  {ep.summary}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-zinc-500">No endpoints found in spec. Check the raw YAML below.</p>
-      )}
-
-      {/* Raw YAML collapsible */}
-      <div className="border border-white/[0.06] rounded-lg overflow-hidden">
-        <button
-          onClick={() => setRawExpanded(!rawExpanded)}
-          className="w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.02] transition-colors"
-        >
-          <span>Raw OpenAPI YAML</span>
-          <ChevronDown className={cn('h-3 w-3 transition-transform', rawExpanded && 'rotate-180')} />
-        </button>
-        {rawExpanded && (
-          <pre className="p-3 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap break-all leading-relaxed border-t border-white/[0.06] max-h-96 overflow-y-auto">
-            {yaml}
-          </pre>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Docker preview (full-stack / frontend projects) ───────────────────────────
-
-const PROJECT_LABELS: Record<ProjectType, string> = {
-  FULLSTACK:   'Full-stack (Spring Boot + frontend)',
-  SPRING_BOOT: 'Spring Boot',
-  STATIC:      'Frontend (static)',
-  PYTHON:      'Python',
-  GO:          'Go',
-  RUBY:        'Ruby',
-  PHP:         'PHP',
-};
-
-function DockerPreview({
-  runId,
-  projectType,
-}: {
-  runId: string;
-  projectType: ProjectType;
-}) {
-  const [status, setStatus] = useState<LocalPreviewStatus | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
-
-  const projectLabel = PROJECT_LABELS[projectType];
-
-  const fetchStatus = useCallback(async () => {
-    try {
-      const s = await getPreviewStatus(runId);
-      setStatus(s);
-      // Stop polling once not building
-      if (s.status !== 'BUILDING' && pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = undefined;
-      }
-    } catch {}
-  }, [runId]);
-
-  useEffect(() => {
-    fetchStatus();
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [runId, fetchStatus]);
-
-  const handleStart = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const s = await startPreview(runId);
-      setStatus(s);
-      // Start polling while building
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(fetchStatus, 4000);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleStop = async () => {
-    setLoading(true);
-    try {
-      await stopPreview(runId);
-      if (pollRef.current) clearInterval(pollRef.current);
-      await fetchStatus();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isIdle     = !status || status.status === 'IDLE' || status.status === 'STOPPED';
-  const isBuilding = status?.status === 'BUILDING';
-  const isRunning  = status?.status === 'RUNNING';
-  const isFailed   = status?.status === 'FAILED';
-
-  return (
-    <div className="h-full flex flex-col">
-      {/* Control bar */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
-        <div className="flex-1 min-w-0">
-          <p className="text-xs text-zinc-500">{projectLabel}</p>
-          {isRunning && status?.url && (
-            <a
-              href={status.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-accent-emerald hover:underline mt-0.5"
-            >
-              <ExternalLink className="h-3 w-3" />
-              {status.url}
-            </a>
-          )}
-          {isBuilding && (
-            <p className="text-xs text-accent-amber mt-0.5 animate-pulse">
-              Building Docker image… this may take a few minutes.
-            </p>
-          )}
-          {isFailed && (
-            <p className="text-xs text-accent-rose mt-0.5 truncate">
-              {status?.errorMessage ?? 'Build failed'}
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {isBuilding && (
-            <span className="h-4 w-4 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin" />
-          )}
-          {!isBuilding && (
-            <button
-              onClick={() => fetchStatus()}
-              className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors"
-              title="Refresh status"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {(isIdle || isFailed) && (
-            <button
-              onClick={handleStart}
-              disabled={loading}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
-                'bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25 disabled:opacity-40'
-              )}
-            >
-              {loading
-                ? <span className="h-3 w-3 rounded-full border-2 border-accent-emerald/30 border-t-accent-emerald animate-spin" />
-                : <Play className="h-3 w-3" />}
-              {isFailed ? 'Retry' : 'Start Preview'}
-            </button>
-          )}
-          {isRunning && (
-            <button
-              onClick={handleStop}
-              disabled={loading}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
-                'bg-accent-rose/15 text-accent-rose hover:bg-accent-rose/25 disabled:opacity-40'
-              )}
-            >
-              <Square className="h-3 w-3" />
-              Stop
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Error detail */}
-      {error && (
-        <div className="mx-4 mt-3 p-3 rounded-lg bg-accent-rose/10 border border-accent-rose/20 text-xs text-accent-rose">
-          {error}
-        </div>
-      )}
-
-      {/* Preview iframe */}
-      {isRunning && status?.url ? (
-        <div className="flex-1 overflow-hidden">
-          <iframe
-            src={status.url}
-            className="w-full h-full border-0"
-            title="App preview"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-          />
-        </div>
-      ) : (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center space-y-2 px-8">
-            {isIdle && (
-              <>
-                <p className="text-sm text-zinc-400">Preview not started</p>
-                <p className="text-xs text-zinc-600">
-                  Click <strong className="text-zinc-400">Start Preview</strong> to build and run the project in Docker.
-                  The container is started locally and shown in an iframe.
-                </p>
-                {(projectType === 'SPRING_BOOT' || projectType === 'FULLSTACK') && (
-                  <p className="text-xs text-zinc-700">
-                    Spring Boot builds may take 3–10 minutes on the first run (Maven downloads dependencies inside Docker).
-                  </p>
-                )}
-                {projectType === 'PYTHON' && (
-                  <p className="text-xs text-zinc-700">
-                    Python builds typically take 1–3 minutes (pip installs dependencies inside Docker).
-                    Make sure your app binds to <code className="font-mono">0.0.0.0:8080</code>.
-                  </p>
-                )}
-                {projectType === 'GO' && (
-                  <p className="text-xs text-zinc-700">
-                    Go builds typically complete in 1–2 minutes (modules downloaded inside Docker).
-                    Make sure your app binds to <code className="font-mono">0.0.0.0:8080</code>.
-                  </p>
-                )}
-                {projectType === 'RUBY' && (
-                  <p className="text-xs text-zinc-700">
-                    Ruby builds typically take 2–5 minutes (bundler installs gems inside Docker).
-                    Make sure your app binds to <code className="font-mono">0.0.0.0:8080</code>.
-                  </p>
-                )}
-                {projectType === 'PHP' && (
-                  <p className="text-xs text-zinc-700">
-                    PHP builds typically take 1–3 minutes (composer installs packages inside Docker).
-                    Make sure your app binds to <code className="font-mono">0.0.0.0:8080</code>.
-                  </p>
-                )}
-              </>
-            )}
-            {isBuilding && (
-              <p className="text-sm text-zinc-400">Building…</p>
-            )}
-            {isFailed && (
-              <div className="space-y-1">
-                <p className="text-sm text-accent-rose">Build failed</p>
-                <p className="text-xs text-zinc-500 max-w-sm break-all">{status?.errorMessage}</p>
-              </div>
-            )}
-            {status?.status === 'STOPPED' && (
-              <p className="text-sm text-zinc-500">Container stopped.</p>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}

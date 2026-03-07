@@ -101,10 +101,19 @@ public class LlmRouter {
         List<String[]> chain = resolveChain(primaryModel);
         int startIndex = findIndexInChain(chain, primaryProvider);
 
+        // Resolve per-run keys to check provider restrictions
+        ResolvedKeys runKeys = runKeyStore.get(runId);
+
         Exception lastError = null;
         for (int i = startIndex; i < chain.size(); i++) {
             String provider = chain.get(i)[0];
             String model    = chain.get(i)[1];
+
+            // Skip providers disabled by org policy
+            if (runKeys != null && !runKeys.isProviderAllowed(provider)) {
+                log.info("[LlmRouter] Provider {} disabled by org policy — skipping", provider);
+                continue;
+            }
 
             if (i > startIndex) {
                 log.warn("[LlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
@@ -259,6 +268,10 @@ public class LlmRouter {
                     log.debug("[LlmRouter] Using user/org Anthropic key for this call");
                     yield buildAnthropicModel(key);
                 }
+                if ("OWN_KEYS".equals(keys.keySourceMode())) {
+                    throw new ProviderUnavailableException(
+                        "Anthropic key not provided, mode=OWN_KEYS — no system fallback");
+                }
                 yield ctx.getBean(AnthropicChatModel.class);
             }
             case "openai" -> {
@@ -267,6 +280,10 @@ public class LlmRouter {
                     log.debug("[LlmRouter] Using user/org OpenAI key for this call");
                     yield buildOpenAiModel(key);
                 }
+                if ("OWN_KEYS".equals(keys.keySourceMode())) {
+                    throw new ProviderUnavailableException(
+                        "OpenAI key not provided, mode=OWN_KEYS — no system fallback");
+                }
                 yield ctx.getBean(OpenAiChatModel.class);
             }
             case "google" -> {
@@ -274,6 +291,10 @@ public class LlmRouter {
                 if (key != null) {
                     log.debug("[LlmRouter] Using user/org Gemini key for this call");
                     yield buildGeminiModel(key);
+                }
+                if ("OWN_KEYS".equals(keys.keySourceMode())) {
+                    throw new ProviderUnavailableException(
+                        "Gemini key not provided, mode=OWN_KEYS — no system fallback");
                 }
                 GoogleGenAiChatModel systemBean = ctx.getBeanProvider(GoogleGenAiChatModel.class).getIfAvailable();
                 if (systemBean == null) {

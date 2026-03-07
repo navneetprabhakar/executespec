@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Eye, EyeOff, Github, CheckCircle, AlertCircle, Server, Database, Cpu, Clock,
-  ChevronDown, ChevronRight, Key, Layers, Building2,
+  ChevronDown, ChevronRight, Key, Layers, Building2, Shield,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -494,6 +494,9 @@ export default function SettingsPage() {
       {/* ── Organisation AI Keys (ORG_ADMIN only) ──────────────────────────── */}
       {isOrgAdmin && <OrgAiKeyCard org={org} onSaved={setOrg} />}
 
+      {/* ── Key Source & Provider Policy (ORG_ADMIN only) ──────────────────── */}
+      {isOrgAdmin && org && <OrgKeySourceCard org={org} onSaved={setOrg} />}
+
       {/* ── System Health ───────────────────────────────────────────────────── */}
       <div>
         <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">System Health</h3>
@@ -600,6 +603,150 @@ function OrgAiKeyCard({ org, onSaved }: { org: OrgDto | null; onSaved: (o: OrgDt
           clearLabel="Clear org keys"
         />
       </form>
+    </IntegrationCard>
+  );
+}
+
+// ── Key source & provider policy card (ORG_ADMIN only) ──────────────────────
+
+const KEY_SOURCE_MODES = [
+  { value: 'SYSTEM',   label: 'Platform Keys',   desc: 'Use executespec platform keys for all runs.' },
+  { value: 'OWN_KEYS', label: 'Own Keys Only',    desc: 'Use only org/personal keys. Runs fail if no key is set.' },
+  { value: 'HYBRID',   label: 'Hybrid (Default)', desc: 'Use own keys when available, fall back to platform.' },
+] as const;
+
+const PROVIDERS = [
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'openai',    label: 'OpenAI' },
+  { id: 'google',    label: 'Gemini' },
+] as const;
+
+function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) => void }) {
+  const [mode, setMode] = useState(org.keySourceMode ?? 'HYBRID');
+  const [providers, setProviders] = useState<Set<string>>(() => {
+    if (!org.enabledProviders) return new Set(PROVIDERS.map((p) => p.id));
+    return new Set(org.enabledProviders);
+  });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Sync when org prop changes
+  useEffect(() => {
+    setMode(org.keySourceMode ?? 'HYBRID');
+    if (!org.enabledProviders) {
+      setProviders(new Set(PROVIDERS.map((p) => p.id)));
+    } else {
+      setProviders(new Set(org.enabledProviders));
+    }
+  }, [org.keySourceMode, org.enabledProviders]);
+
+  const toggleProvider = (id: string) => {
+    setProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        if (next.size <= 1) return prev; // at least one must remain
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true); setMsg(null);
+    try {
+      const enabledList = providers.size === PROVIDERS.length ? null : Array.from(providers);
+      const updated = await api.updateOrgKeySourceSettings(mode, enabledList);
+      onSaved(updated);
+      setMsg({ ok: true, text: 'Key source settings saved.' });
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to save.' });
+    } finally { setSaving(false); }
+  };
+
+  const missingKeys = mode === 'OWN_KEYS' && !(
+    (providers.has('anthropic') && org.hasAnthropicKey) ||
+    (providers.has('openai') && org.hasOpenAiKey) ||
+    (providers.has('google') && org.hasGeminiKey)
+  );
+
+  return (
+    <IntegrationCard
+      icon={<Shield className="h-4 w-4 text-zinc-400" />}
+      title="Key Source & Provider Policy"
+      statusBadge={
+        <span className="text-xs text-zinc-500">
+          {mode === 'SYSTEM' ? 'Platform' : mode === 'OWN_KEYS' ? 'Own Keys' : 'Hybrid'}
+        </span>
+      }
+    >
+      {/* Key Source Mode */}
+      <div className="space-y-2">
+        <label className="text-xs text-zinc-400 block">Key Source Mode</label>
+        {KEY_SOURCE_MODES.map((m) => (
+          <label
+            key={m.value}
+            className="flex items-start gap-2.5 cursor-pointer group"
+          >
+            <input
+              type="radio"
+              name="keySourceMode"
+              value={m.value}
+              checked={mode === m.value}
+              onChange={() => setMode(m.value)}
+              className="mt-0.5 accent-accent-violet"
+            />
+            <div>
+              <span className="text-sm text-zinc-200 group-hover:text-white">{m.label}</span>
+              <p className="text-xs text-zinc-500">{m.desc}</p>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {/* Provider Restrictions */}
+      <div className="space-y-2 pt-2 border-t border-white/[0.06]">
+        <label className="text-xs text-zinc-400 block">Enabled Providers</label>
+        <div className="flex gap-3">
+          {PROVIDERS.map((p) => (
+            <label key={p.id} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={providers.has(p.id)}
+                onChange={() => toggleProvider(p.id)}
+                className="accent-accent-violet"
+              />
+              <span className="text-sm text-zinc-300">{p.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-zinc-600">
+          Disabled providers are excluded from fallback chains for all org runs.
+        </p>
+      </div>
+
+      {/* Warning */}
+      {missingKeys && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+          <p className="text-xs text-amber-400">
+            <AlertCircle className="h-3.5 w-3.5 inline mr-1 -mt-0.5" />
+            OWN_KEYS mode is selected but no org/user keys are configured for the enabled providers.
+            Runs will fail at submission.
+          </p>
+        </div>
+      )}
+
+      <SaveMessage msg={msg} />
+      <div className="flex gap-3 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
     </IntegrationCard>
   );
 }

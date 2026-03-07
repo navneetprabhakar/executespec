@@ -7,7 +7,6 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import RunsPage from '@/pages/RunsPage';
 import DashboardPage from '@/pages/DashboardPage';
 import PricingPage from '@/pages/PricingPage';
-import DeploymentsPage from '@/pages/DeploymentsPage';
 import IntegrationsPage from '@/pages/IntegrationsPage';
 import SettingsPage from '@/pages/SettingsPage';
 
@@ -52,7 +51,6 @@ export default function App() {
           <Route index element={<RunsPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="pricing" element={<PricingPage />} />
-          <Route path="deployments" element={<DeploymentsPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="settings" element={<SettingsPage />} />
 

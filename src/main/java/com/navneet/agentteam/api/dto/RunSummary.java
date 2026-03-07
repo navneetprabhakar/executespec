@@ -18,5 +18,7 @@ public record RunSummary(
     String repoUrl,
     String repoMode,
     /** Project this run belongs to, or null for un-grouped runs. */
-    String projectId
+    String projectId,
+    /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
+    String keySource
 ) {}

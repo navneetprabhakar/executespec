@@ -14,10 +14,16 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+
 import java.util.List;
 
+/**
+ * Deployment CRUD endpoints. Disabled by default — set {@code agent.deployment.enabled=true} to activate.
+ */
 @RestController
 @RequestMapping("/api/deployments")
+@ConditionalOnProperty(name = "agent.deployment.enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class DeploymentController {
 

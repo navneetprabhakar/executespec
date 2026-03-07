@@ -73,6 +73,19 @@ public class Org {
     @Column(name = "gemini_api_key")
     private String geminiApiKey;
 
+    // ── Key source mode & provider restrictions ──────────────────────────────
+    // Controls how API keys are resolved for runs created by this org's members.
+    // SYSTEM = always use platform keys; OWN_KEYS = only user/org keys (no fallback);
+    // HYBRID = user/org keys first, fall back to platform (default).
+
+    @Column(name = "key_source_mode", nullable = false)
+    @Builder.Default
+    private String keySourceMode = "HYBRID";
+
+    /** Comma-separated lowercase provider names, e.g. "anthropic,openai". Null = all allowed. */
+    @Column(name = "enabled_providers")
+    private String enabledProviders;
+
     @Column(name = "created_by_user_id", nullable = false)
     private String createdByUserId;
 

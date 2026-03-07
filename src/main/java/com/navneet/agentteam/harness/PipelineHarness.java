@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.agentteam.agent.ApiKeyResolver;
 import com.navneet.agentteam.agent.CostEstimator;
+import com.navneet.agentteam.agent.ResolvedKeys;
 import com.navneet.agentteam.agent.PlannerAgent;
 import com.navneet.agentteam.agent.ReviewerAgent;
 import com.navneet.agentteam.agent.RunKeyStore;
@@ -13,7 +14,6 @@ import com.navneet.agentteam.agent.model.TaskPlan;
 import com.navneet.agentteam.agent.model.TaskReview;
 import com.navneet.agentteam.agent.model.WorkerReport;
 import com.navneet.agentteam.config.AgentProperties;
-import com.navneet.agentteam.deployment.PreviewAgent;
 import com.navneet.agentteam.harness.event.PipelineEvent;
 import com.navneet.agentteam.recovery.RecoveryProperties;
 import com.navneet.agentteam.recovery.RunRecoveryService;
@@ -48,14 +48,8 @@ public class PipelineHarness {
 
     /**
      * Task IDs handled by system agents (not WorkerAgent).
-     *
-     * <p>{@code generate_preview} — handled by {@link PreviewAgent} which generates Dockerfile /
-     * docker-compose.yml deterministically (no LLM).
-     *
-     * <p>{@code generate_openapi_spec} — previously a mandatory planner task, now retired.
-     * The spec is generated post-merge by ApiTestSuiteAgent.  Old plans in the DB may still
-     * carry this task; filtering it here prevents the worker from deleting or corrupting the
-     * existing {@code api-docs/openapi.yaml}.
+     * Legacy plans in the DB may still carry these tasks; filtering them here prevents
+     * the worker pool from processing them.
      */
     private static final String OPENAPI_TASK_ID = "generate_openapi_spec";
 
@@ -81,7 +75,6 @@ public class PipelineHarness {
 
     // ── Tier 8: Compile agent + Preview agent ─────────────────────────────────
     private final com.navneet.agentteam.compiler.CompilerAgent compilerAgent;
-    private final PreviewAgent previewAgent;
 
     // ── Multi-tenant API key routing ──────────────────────────────────────────
     private final ApiKeyResolver apiKeyResolver;
@@ -728,7 +721,12 @@ public class PipelineHarness {
         // Resolution hierarchy: user key → org key → system key (application.yml).
         // Keys are stored in RunKeyStore so LlmRouter can use them without any agent
         // signature changes. Cleaned up in the finally block below.
-        runKeyStore.put(runId, apiKeyResolver.resolve(run.getCreatedByUserId()));
+        ResolvedKeys resolvedKeys = apiKeyResolver.resolve(run.getCreatedByUserId());
+        runKeyStore.put(runId, resolvedKeys);
+
+        // Stamp billing flag so downstream accounting knows which key source was used
+        run.setKeySource(resolvedKeys.keySourceMode());
+        stateStore.saveRun(run);
 
         if (run.getSourceRunId() != null && !run.getSourceRunId().isBlank()) {
             try {
@@ -817,8 +815,8 @@ public class PipelineHarness {
                 throw new RuntimeException("Cannot serialize plan", e);
             }
 
-            // Filter out generate_preview — PreviewAgent handles it deterministically
-            // after all worker tasks complete, so workers never see this task.
+            // Filter out legacy system tasks (generate_preview, generate_openapi_spec)
+            // that may still exist in old plans stored in the DB.
             List<AgentTask> workerTasks = tasks.stream()
                 .filter(t -> !isSystemTask(t))
                 .toList();
@@ -845,11 +843,6 @@ public class PipelineHarness {
             // carry this task in the DB).  ApiTestSuiteAgent generates the real spec post-merge.
             markOpenapiTaskComplete(runId, tasks);
 
-            // ── Preview Agent (generates Dockerfile, docker-compose.yml, etc.) ──
-            WorkerReport previewReport = previewAgent.run(runId, tasks);
-            List<WorkerReport> allReports = new ArrayList<>(reports);
-            allReports.add(previewReport);
-
             // ── Tier 8: Compile & Fix (non-fatal, sync before reviewer) ───
             compilerAgent.runCompileAndFix(runId);
 
@@ -870,7 +863,7 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
                 PipelineRun failedRun = stateStore.findRun(runId).orElse(run);
-                recoveryService.autoRestartIfTransient(failedRun, allReports);
+                recoveryService.autoRestartIfTransient(failedRun, reports);
                 return;
             }
 
@@ -906,7 +899,7 @@ public class PipelineHarness {
             int reworkCycle = 0;
             ReviewReport review = null;
             boolean reviewerRework = false;
-            List<WorkerReport> currentReports = new ArrayList<>(allReports);
+            List<WorkerReport> currentReports = new ArrayList<>(reports);
             PipelineRun currentRun = run;
 
             while (true) {
@@ -1304,26 +1297,6 @@ public class PipelineHarness {
             return true;
         }
 
-        // ── Special case: generate_preview is always handled by PreviewAgent, never WorkerAgent.
-        // Allow retry from AWAITING_MERGE (reviewer already said MERGE, just re-generate the
-        // Dockerfile), PARTIAL, or FAILED. PreviewAgent.run() manages its own task state
-        // (lockTask → WORKING → completeTask → COMPLETE/BLOCKED) so we don't touch run status.
-        if (PreviewAgent.PREVIEW_TASK_ID.equals(taskId)) {
-            String rs = run.getStatus();
-            if (!"PARTIAL".equals(rs) && !"FAILED".equals(rs) && !"AWAITING_MERGE".equals(rs)) {
-                throw new IllegalStateException(
-                    "Run " + runId + " cannot retry generate_preview in state " + rs
-                    + ". Allowed states: PARTIAL, FAILED, AWAITING_MERGE.");
-            }
-            log.info("Retrying generate_preview via PreviewAgent for run {} (run state: {})", runId, rs);
-            broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                "⟳ Re-running deployment file generation via PreviewAgent..."));
-            List<AgentTask> allTasksForPreview = stateStore.getAllTasks(runId);
-            Thread.ofVirtual().name("preview-retry-" + runId.substring(0, 8))
-                .start(() -> previewAgent.run(runId, allTasksForPreview));
-            return true;
-        }
-
         String rs = run.getStatus();
         if (!"PARTIAL".equals(rs) && !"FAILED".equals(rs)) {
             throw new IllegalStateException(
@@ -1349,7 +1322,12 @@ public class PipelineHarness {
         String taskId = task.getTaskId();
 
         // Re-resolve API keys so retries pick up any keys the user may have added since the initial run.
-        runKeyStore.put(runId, apiKeyResolver.resolve(run.getCreatedByUserId()));
+        ResolvedKeys resolvedKeys = apiKeyResolver.resolve(run.getCreatedByUserId());
+        runKeyStore.put(runId, resolvedKeys);
+
+        // Update billing flag in case org settings changed since original run
+        run.setKeySource(resolvedKeys.keySourceMode());
+        stateStore.saveRun(run);
 
         try {
             // ── 1. Lock + run the retried worker task ──────────────────────
@@ -1399,7 +1377,7 @@ public class PipelineHarness {
 
             // ── 3. Collect all task reports ────────────────────────────────
             List<AgentTask> allTasks = stateStore.getAllTasks(runId);
-            List<WorkerReport> allReports = allTasks.stream()
+            List<WorkerReport> reports = allTasks.stream()
                 .filter(t -> t.getWorkerReportJson() != null)
                 .map(t -> {
                     try { return mapper.readValue(t.getWorkerReportJson(), WorkerReport.class); }
@@ -1450,7 +1428,7 @@ public class PipelineHarness {
             int retryReworkCycle = 0;
             ReviewReport review = null;
             boolean retryRework = false;
-            List<WorkerReport> currentRetryReports = new ArrayList<>(allReports);
+            List<WorkerReport> currentRetryReports = new ArrayList<>(reports);
             PipelineRun freshRun = stateStore.findRun(runId).orElse(run);
 
             while (true) {
@@ -1984,17 +1962,12 @@ public class PipelineHarness {
     }
 
     /**
-     * Returns {@code true} for tasks that are handled by system agents (not WorkerAgent)
-     * and must be excluded from the worker task pool and partial-completion checks.
-     *
-     * <ul>
-     *   <li>{@value PreviewAgent#PREVIEW_TASK_ID} — handled by {@link PreviewAgent}.</li>
-     *   <li>{@value OPENAPI_TASK_ID} — retired; spec generated post-merge by ApiTestSuiteAgent.</li>
-     * </ul>
+     * Returns {@code true} for legacy system tasks that must be excluded from the
+     * worker task pool and partial-completion checks.
      */
     private boolean isSystemTask(com.navneet.agentteam.state.entity.AgentTask t) {
-        return PreviewAgent.PREVIEW_TASK_ID.equals(t.getTaskId())
-            || OPENAPI_TASK_ID.equals(t.getTaskId());
+        return OPENAPI_TASK_ID.equals(t.getTaskId())
+            || "generate_preview".equals(t.getTaskId()); // legacy plans in DB
     }
 
     /**

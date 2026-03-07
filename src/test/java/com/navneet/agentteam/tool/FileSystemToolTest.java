@@ -13,7 +13,7 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DisplayName("FileSystemTool credential isolation")
+@DisplayName("FileSystemTool workspace sandbox")
 class FileSystemToolTest {
 
     @TempDir
@@ -31,39 +31,43 @@ class FileSystemToolTest {
     }
 
     @Nested
-    @DisplayName("Blocked credential files")
-    class BlockedFiles {
+    @DisplayName("Workspace files are readable (no credential blocking)")
+    class WorkspaceFilesReadable {
 
         @Test
-        @DisplayName("application.yml is blocked")
+        @DisplayName("application.yml is readable inside workspace")
         void applicationYml() throws IOException {
-            Files.writeString(tempDir.resolve("test-run/application.yml"), "secret: password");
+            Files.writeString(tempDir.resolve("test-run/application.yml"), "server:\n  port: 8080");
             String result = fsTool.readFile("test-run", "application.yml");
-            assertThat(result).contains("ACCESS DENIED");
+            assertThat(result).contains("server:");
+            assertThat(result).doesNotContain("ACCESS DENIED");
         }
 
         @Test
-        @DisplayName(".env is blocked")
+        @DisplayName(".env is readable inside workspace")
         void dotEnv() throws IOException {
             Files.writeString(tempDir.resolve("test-run/.env"), "DB_PASS=secret");
             String result = fsTool.readFile("test-run", ".env");
-            assertThat(result).contains("ACCESS DENIED");
+            assertThat(result).contains("DB_PASS=secret");
+            assertThat(result).doesNotContain("ACCESS DENIED");
         }
 
         @Test
-        @DisplayName("secrets.yml is blocked")
+        @DisplayName("secrets.yml is readable inside workspace")
         void secretsYml() throws IOException {
             Files.writeString(tempDir.resolve("test-run/secrets.yml"), "api-key: 12345");
             String result = fsTool.readFile("test-run", "secrets.yml");
-            assertThat(result).contains("ACCESS DENIED");
+            assertThat(result).contains("api-key: 12345");
+            assertThat(result).doesNotContain("ACCESS DENIED");
         }
 
         @Test
-        @DisplayName("credentials.json is blocked")
+        @DisplayName("credentials.json is readable inside workspace")
         void credentialsJson() throws IOException {
-            Files.writeString(tempDir.resolve("test-run/credentials.json"), "{}");
+            Files.writeString(tempDir.resolve("test-run/credentials.json"), "{\"key\":\"value\"}");
             String result = fsTool.readFile("test-run", "credentials.json");
-            assertThat(result).contains("ACCESS DENIED");
+            assertThat(result).contains("{\"key\":\"value\"}");
+            assertThat(result).doesNotContain("ACCESS DENIED");
         }
     }
 
@@ -109,8 +113,7 @@ class FileSystemToolTest {
         void pathTraversalEscape() {
             // Attempt to escape the workspace via path traversal
             String result = fsTool.readFile("test-run", "../../application.yml");
-            // Should be blocked — either SecurityException caught (returns error) or ACCESS
-            // DENIED
+            // safeResolve() blocks path escape — returns "ACCESS DENIED: Path escape attempt"
             assertThat(result).startsWith("ACCESS DENIED");
         }
     }
