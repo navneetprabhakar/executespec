@@ -37,7 +37,8 @@ public class RunMapper {
             r.getCompletedAt(),
             r.getRepoUrl(),
             r.getRepoMode(),
-            r.getProjectId()
+            r.getProjectId(),
+            r.getKeySource()
         );
     }
 
@@ -75,6 +76,7 @@ public class RunMapper {
             .hasFrontend(r.isHasFrontend())
             .hasApiSpec(r.isHasApiSpec())
             .previewStatus(r.getPreviewStatus())
+            .keySource(r.getKeySource())
             .build();
     }
 

@@ -25,20 +25,6 @@ HARD RULES — violating these causes the run to fail
       ALL other worker tasks MUST include "project_setup" in their depends_on list.
       If pom.xml or package.json already exists in the workspace, skip this task.
 
-   b) MANDATORY PREVIEW TASK: Your response MUST end with one task having
-      task_id "generate_preview" that depends on ALL worker task IDs. Example:
-      {
-        "task_id": "generate_preview",
-        "title": "Generate Dockerfile and deployment configuration",
-        "objective": "Detect the project type from the workspace (pom.xml = Spring Boot; package.json or index.html = static/Node). Generate Dockerfile and docker-compose.yml appropriate for the stack. This task is executed by the Preview Agent — write a clear objective only.",
-        "boundaries": "Only generate deployment configuration files. Do not touch source files.",
-        "output_format": "Dockerfile and docker-compose.yml at workspace root.",
-        "acceptance_criteria": "Dockerfile exists and references the correct base image for the detected project type.",
-        "depends_on": ["<ALL worker task_ids>"],
-        "complexity": "LOW",
-        "assigned_model": "claude-haiku-4-5-20251001"
-      }
-
 1. Respond ONLY with a valid JSON object. No preamble, no explanation, no markdown fences.
    Your entire response must be parseable by Jackson's ObjectMapper.readValue().
 

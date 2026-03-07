@@ -57,6 +57,8 @@ export interface RunSummary {
   repoUrl?: string | null;
   /** Whether this run was started by cloning an existing repo. */
   repoMode?: string | null;
+  /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
+  keySource?: string | null;
 }
 
 export interface TaskSummary {
@@ -314,24 +316,34 @@ export const getMessages = (runId: string) =>
 export const getOpenApiSpec = (runId: string) =>
   reqText(`/runs/${runId}/openapi.yaml`);
 
-// ── Local Docker Preview ──────────────────────────────────────────────────────
+// ── Local Process Preview ─────────────────────────────────────────────────────
 
 export interface LocalPreviewStatus {
   runId: string;
-  status: 'IDLE' | 'BUILDING' | 'RUNNING' | 'FAILED' | 'STOPPED';
+  status: 'IDLE' | 'STARTING' | 'RUNNING' | 'FAILED' | 'STOPPED';
   url: string | null;
   projectType: string | null;
   errorMessage: string | null;
+  backendUrl: string | null;
+  frontendUrl: string | null;
+}
+
+export interface PreviewLogs {
+  runId: string;
+  lines: string[];
 }
 
 export const getPreviewStatus = (runId: string) =>
-  req<LocalPreviewStatus>(`/runs/${runId}/preview`);
+  req<LocalPreviewStatus>(`/runs/${runId}/preview/status`);
 
 export const startPreview = (runId: string) =>
   req<LocalPreviewStatus>(`/runs/${runId}/preview/start`, { method: 'POST' });
 
 export const stopPreview = (runId: string) =>
   req<void>(`/runs/${runId}/preview/stop`, { method: 'DELETE' });
+
+export const getPreviewLogs = (runId: string, lines = 100) =>
+  req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}`);
 
 // ── Conversation (pre-flight chat) ────────────────────────────────────────────
 
@@ -500,6 +512,9 @@ export interface OrgDto {
   hasAnthropicKey?: boolean;
   hasOpenAiKey?: boolean;
   hasGeminiKey?: boolean;
+  // Key source mode & provider restrictions
+  keySourceMode?: string;
+  enabledProviders?: string[] | null;
 }
 
 export interface OrgMemberDto {
@@ -534,6 +549,13 @@ export const updateOrgAiKeySettings = (anthropicApiKey: string, openAiApiKey: st
   req<OrgDto>('/org/me/settings/ai-keys', {
     method: 'PUT',
     body: JSON.stringify({ anthropicApiKey, openAiApiKey, geminiApiKey }),
+  });
+
+/** Updates org key source mode and provider restrictions (ORG_ADMIN only). */
+export const updateOrgKeySourceSettings = (keySourceMode: string, enabledProviders: string[] | null) =>
+  req<OrgDto>('/org/me/settings/key-source', {
+    method: 'PUT',
+    body: JSON.stringify({ keySourceMode, enabledProviders }),
   });
 
 export const getOrgMembers = () => req<OrgMemberDto[]>('/org/me/members');

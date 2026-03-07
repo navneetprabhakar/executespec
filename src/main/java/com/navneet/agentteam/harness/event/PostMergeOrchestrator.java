@@ -4,7 +4,6 @@ import com.navneet.agentteam.apitests.ApiTestSuiteAgent;
 import com.navneet.agentteam.context.ContextAgent;
 import com.navneet.agentteam.optimiser.PromptAuditService;
 import com.navneet.agentteam.optimiser.PromptOptimiserAgent;
-import com.navneet.agentteam.preview.PreviewService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -28,7 +27,6 @@ public class PostMergeOrchestrator {
     private final PromptOptimiserAgent promptOptimiserAgent;
     private final PromptAuditService promptAuditService;
     private final ApiTestSuiteAgent apiTestSuiteAgent;
-    private final PreviewService previewService;
 
     @Async
     @EventListener
@@ -48,9 +46,6 @@ public class PostMergeOrchestrator {
 
         Thread.startVirtualThread(() -> safeRun("ApiTestSuite", () ->
             apiTestSuiteAgent.generateAsync(event.completedRun())));
-
-        Thread.startVirtualThread(() -> safeRun("Preview", () ->
-            previewService.buildAsync(event.completedRun())));
     }
 
     private void safeRun(String agentName, Runnable task) {

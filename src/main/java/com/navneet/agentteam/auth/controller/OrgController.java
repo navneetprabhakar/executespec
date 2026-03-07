@@ -134,6 +134,21 @@ public class OrgController {
         return ResponseEntity.ok(Map.of("message", "Invitation accepted successfully"));
     }
 
+    // ── Key source mode & provider restrictions (ORG_ADMIN only) ────────────
+
+    record KeySourceSettingsRequest(String keySourceMode, List<String> enabledProviders) {}
+
+    @PutMapping("/me/settings/key-source")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<OrgDto> updateKeySourceSettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody KeySourceSettingsRequest req) {
+        String orgId = userDetails.getUser().getOrgId();
+        if (orgId == null) return ResponseEntity.badRequest().build();
+        return ResponseEntity.ok(orgService.updateKeySourceSettings(
+                orgId, req.keySourceMode(), req.enabledProviders()));
+    }
+
     // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────
 
     record OrgAiKeySettingsRequest(String anthropicApiKey, String openAiApiKey, String geminiApiKey) {}

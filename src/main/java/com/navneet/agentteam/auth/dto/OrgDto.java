@@ -19,7 +19,10 @@ public record OrgDto(
         // Per-org AI provider key flags (raw keys never exposed)
         boolean hasAnthropicKey,
         boolean hasOpenAiKey,
-        boolean hasGeminiKey
+        boolean hasGeminiKey,
+        // Key source mode & provider restrictions
+        String keySourceMode,
+        java.util.List<String> enabledProviders
 ) {
     private static boolean present(String s) { return s != null && !s.isBlank(); }
 
@@ -38,7 +41,17 @@ public record OrgDto(
                 org.getCreatedAt(),
                 present(org.getAnthropicApiKey()),
                 present(org.getOpenAiApiKey()),
-                present(org.getGeminiApiKey())
+                present(org.getGeminiApiKey()),
+                org.getKeySourceMode(),
+                parseProviders(org.getEnabledProviders())
         );
+    }
+
+    private static java.util.List<String> parseProviders(String csv) {
+        if (csv == null || csv.isBlank()) return null;
+        return java.util.Arrays.stream(csv.split(","))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 }

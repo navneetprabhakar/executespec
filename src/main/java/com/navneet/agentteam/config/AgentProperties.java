@@ -99,5 +99,7 @@ public class AgentProperties {
     @Data
     public static class Preview {
         private boolean enabled = true;
+        private int startupTimeoutSeconds = 60;
+        private int logBufferLines = 200;
     }
 }

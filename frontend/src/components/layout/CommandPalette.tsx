@@ -2,7 +2,7 @@ import { Command } from 'cmdk';
 import { useNavigate } from 'react-router-dom';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
-import { LayoutDashboard, BarChart3, DollarSign, Rocket, Plug, Settings, Plus, Wand2 } from 'lucide-react';
+import { LayoutDashboard, BarChart3, DollarSign, Plug, Settings, Plus, Wand2 } from 'lucide-react';
 import { useState } from 'react';
 import NewRunModal from '@/components/runs/NewRunModal';
 
@@ -10,7 +10,6 @@ const NAV_COMMANDS = [
   { label: 'Go to Runs',        path: '/',             icon: LayoutDashboard },
   { label: 'Go to Dashboard',   path: '/dashboard',    icon: BarChart3 },
   { label: 'Go to Pricing',     path: '/pricing',      icon: DollarSign },
-  { label: 'Go to Deployments', path: '/deployments',  icon: Rocket },
   { label: 'Go to Integrations',path: '/integrations', icon: Plug },
   { label: 'Go to Settings',    path: '/settings',     icon: Settings },
 ];

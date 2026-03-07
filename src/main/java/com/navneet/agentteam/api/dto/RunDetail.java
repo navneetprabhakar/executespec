@@ -46,6 +46,9 @@ public class RunDetail {
     Boolean hasApiSpec;      // true once ApiTestSuiteAgent writes openapi.yaml
     String  previewStatus;   // null | "READY" | "FAILED"
 
+    /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
+    String keySource;
+
     /** Present if this run was triggered by an external integration. */
     public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
 }

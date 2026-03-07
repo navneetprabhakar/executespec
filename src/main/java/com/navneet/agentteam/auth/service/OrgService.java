@@ -228,6 +228,52 @@ public class OrgService {
         return OrgDto.from(orgRepo.save(org));
     }
 
+    // ── Key source mode & provider restriction settings ─────────────────────
+
+    private static final java.util.Set<String> VALID_KEY_SOURCE_MODES =
+            java.util.Set.of("SYSTEM", "OWN_KEYS", "HYBRID");
+
+    private static final java.util.Set<String> VALID_PROVIDERS =
+            java.util.Set.of("anthropic", "openai", "google");
+
+    @Transactional
+    public OrgDto updateKeySourceSettings(String orgId, String keySourceMode, java.util.List<String> enabledProviders) {
+        Org org = orgRepo.findById(orgId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+
+        if (keySourceMode != null) {
+            if (!VALID_KEY_SOURCE_MODES.contains(keySourceMode)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid keySourceMode: " + keySourceMode + ". Must be SYSTEM, OWN_KEYS, or HYBRID.");
+            }
+            org.setKeySourceMode(keySourceMode);
+        }
+
+        if (enabledProviders != null) {
+            // Validate and normalize
+            for (String p : enabledProviders) {
+                if (!VALID_PROVIDERS.contains(p.toLowerCase())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Invalid provider: " + p + ". Must be anthropic, openai, or google.");
+                }
+            }
+            if (enabledProviders.isEmpty()) {
+                org.setEnabledProviders(null); // empty list = all providers
+            } else {
+                org.setEnabledProviders(
+                        enabledProviders.stream()
+                                .map(String::toLowerCase)
+                                .distinct()
+                                .collect(Collectors.joining(",")));
+            }
+        }
+
+        org.setUpdatedAt(Instant.now());
+        log.info("Org {} updated key source settings — mode={}, providers={}",
+                orgId, org.getKeySourceMode(), org.getEnabledProviders());
+        return OrgDto.from(orgRepo.save(org));
+    }
+
     private static String blankToNull(String s) {
         return (s != null && !s.isBlank()) ? s.strip() : null;
     }
