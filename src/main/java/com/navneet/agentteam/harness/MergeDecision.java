@@ -9,10 +9,14 @@ package com.navneet.agentteam.harness;
  *   <li>{@link #IMPLEMENT_SUGGESTIONS} — user requested automated implementation of
  *       post-merge suggestions (MEDIUM/LOW reviewer issues); re-run affected tasks with
  *       suggestion feedback injected, then re-review and re-open the gate.</li>
+ *   <li>{@link #REWORK} — user requested rework of tasks flagged by the reviewer;
+ *       re-run those tasks with reviewer feedback injected, then re-review and
+ *       re-open the gate.</li>
  * </ul>
  */
 public enum MergeDecision {
     MERGE,
     DECLINE,
-    IMPLEMENT_SUGGESTIONS
+    IMPLEMENT_SUGGESTIONS,
+    REWORK
 }

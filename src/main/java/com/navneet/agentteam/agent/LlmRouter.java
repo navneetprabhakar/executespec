@@ -1,5 +1,6 @@
 package com.navneet.agentteam.agent;
 
+import com.navneet.agentteam.config.AgentProperties;
 import com.navneet.agentteam.state.InboxService;
 import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
@@ -86,6 +87,7 @@ public class LlmRouter {
     private final ApplicationContext ctx;
     private final InboxService inboxService;
     private final RunKeyStore runKeyStore;
+    private final AgentProperties agentProperties;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -105,7 +107,8 @@ public class LlmRouter {
         ResolvedKeys runKeys = runKeyStore.get(runId);
 
         Exception lastError = null;
-        for (int i = startIndex; i < chain.size(); i++) {
+        for (int j = 0; j < chain.size(); j++) {
+            int i = (startIndex + j) % chain.size();
             String provider = chain.get(i)[0];
             String model    = chain.get(i)[1];
 
@@ -115,7 +118,7 @@ public class LlmRouter {
                 continue;
             }
 
-            if (i > startIndex) {
+            if (j > 0) {
                 log.warn("[LlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
                     primaryProvider, provider, agentId, iteration);
                 inboxService.sendProviderFallback(runId, agentId, primaryProvider, provider,
@@ -124,7 +127,7 @@ public class LlmRouter {
 
             try {
                 ChatResponse response = callWithModelOptions(provider, model, prompt, runId);
-                if (i > startIndex) {
+                if (j > 0) {
                     log.info("[LlmRouter] Fallback succeeded: {} for {}", provider, agentId);
                 }
                 return new LlmResponse(response, provider, model);
@@ -214,6 +217,11 @@ public class LlmRouter {
             cacheOpts = aco.getCacheOptions();
         }
 
+        // Anthropic API requires max_tokens — default from agent.token-budget.max-tokens
+        if (maxTokens == null) {
+            maxTokens = agentProperties.getTokenBudget().getMaxTokens();
+        }
+
         final var callbacks       = toolCallbacks;
         final var toolExecEnabled = internalToolExec;
         final var maxTok          = maxTokens;
@@ -230,10 +238,9 @@ public class LlmRouter {
 
         Prompt augmented = switch (provider.toLowerCase()) {
             case "anthropic" -> {
-                var builder = AnthropicChatOptions.builder().model(model);
+                var builder = AnthropicChatOptions.builder().model(model).maxTokens(maxTok);
                 if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
                 if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
-                if (maxTok != null) builder.maxTokens(maxTok);
                 if (finalCacheOpts != null) builder.cacheOptions(finalCacheOpts);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }

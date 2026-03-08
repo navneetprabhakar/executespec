@@ -38,7 +38,8 @@ public class RunMapper {
             r.getRepoUrl(),
             r.getRepoMode(),
             r.getProjectId(),
-            r.getKeySource()
+            r.getKeySource(),
+            r.getTechStack()
         );
     }
 
@@ -77,6 +78,8 @@ public class RunMapper {
             .hasApiSpec(r.isHasApiSpec())
             .previewStatus(r.getPreviewStatus())
             .keySource(r.getKeySource())
+            .actualCostUsd(r.getActualCostUsd())
+            .techStack(r.getTechStack())
             .build();
     }
 

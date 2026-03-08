@@ -10,7 +10,7 @@ import { downloadWorkspace, type ReviewReport } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function RunDetail() {
-  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions, createRun, pauseRun, editAndRestartRun } = useRunStore();
+  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions, reworkRun, createRun, pauseRun, editAndRestartRun, resumeRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
@@ -18,6 +18,7 @@ export default function RunDetail() {
   const [editingGoal, setEditingGoal] = useState(false);
   const [newGoal, setNewGoal] = useState('');
   const [restarting, setRestarting] = useState(false);
+  const [resuming, setResuming] = useState(false);
 
   // Parse the reviewJson once whenever the run refreshes
   const review = useMemo<ReviewReport | null>(() => {
@@ -87,6 +88,19 @@ export default function RunDetail() {
       addToast({ type: 'error', message: e.message });
     } finally {
       setRestarting(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!activeRun) return;
+    setResuming(true);
+    try {
+      await resumeRun(activeRun.runId);
+      addToast({ type: 'success', message: 'Run resumed — re-running incomplete tasks' });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message });
+    } finally {
+      setResuming(false);
     }
   };
 
@@ -186,12 +200,29 @@ export default function RunDetail() {
                 </div>
               )}
 
+              {/* Rework button — shown when reviewer recommends REWORK */}
+              {review && review.recommendation === 'REWORK' && (
+                <div className="p-3 rounded-lg border border-accent-rose/30 bg-accent-rose/5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <RotateCcw className="h-4 w-4 text-accent-rose flex-shrink-0" />
+                    <p className="text-xs text-accent-rose truncate">Reviewer recommends rework — re-run flagged tasks with feedback</p>
+                  </div>
+                  <button
+                    onClick={() => handle(() => reworkRun(activeRun.runId), 'Reworking flagged tasks…')}
+                    className="flex-shrink-0 flex items-center gap-1.5 rounded-md bg-accent-rose/20 hover:bg-accent-rose/30 border border-accent-rose/30 px-3 py-1.5 text-xs font-medium text-accent-rose transition-colors"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Rework
+                  </button>
+                </div>
+              )}
+
               {/* Approve / Decline gate buttons */}
               <GateBanner
                 message="Review changes and merge to complete"
                 icon={<GitMerge className="h-4 w-4 text-accent-amber" />}
                 onApprove={() => handle(() => mergeRun(activeRun.runId, true), 'Changes merged')}
-                onReject={() => handle(() => mergeRun(activeRun.runId, false), 'Merge declined — run preserved as PARTIAL')}
+                onReject={() => handle(() => mergeRun(activeRun.runId, false), 'Merge declined — gate reopened, choose another action')}
                 confirming={confirming}
                 setConfirming={setConfirming}
                 approveLabel="Merge"
@@ -211,6 +242,26 @@ export default function RunDetail() {
                 className="flex-shrink-0 rounded-md bg-indigo-600/80 hover:bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors"
               >
                 Reopen Merge Gate
+              </button>
+            </div>
+          )}
+          {/* Retry Rework banner — shown when rework failed */}
+          {activeRun.status === 'PARTIAL' &&
+           activeRun.failureReason?.includes('Rework failed') && (
+            <div className="mx-4 mt-3 p-3 rounded-lg border border-accent-rose/30 bg-accent-rose/5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <RotateCcw className="h-4 w-4 text-accent-rose flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-accent-rose">Rework could not be completed</p>
+                  <p className="text-xs text-accent-rose/70 truncate">{activeRun.failureReason}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => handle(() => reworkRun(activeRun.runId), 'Retrying rework…')}
+                className="flex-shrink-0 flex items-center gap-1.5 rounded-md bg-accent-rose/20 hover:bg-accent-rose/30 border border-accent-rose/30 px-3 py-1.5 text-xs font-medium text-accent-rose transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Retry Rework
               </button>
             </div>
           )}
@@ -246,12 +297,22 @@ export default function RunDetail() {
                 <span className="text-zinc-500">Current goal:</span> {activeRun.userRequest}
               </p>
               {!editingGoal ? (
-                <button
-                  onClick={() => { setEditingGoal(true); setNewGoal(activeRun.userRequest); }}
-                  className="flex items-center gap-1.5 rounded-md bg-orange-400/20 hover:bg-orange-400/30 border border-orange-400/30 px-3 py-1.5 text-xs font-medium text-orange-400 transition-colors"
-                >
-                  Edit Goal & Restart
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleResume}
+                    disabled={resuming}
+                    className="flex items-center gap-1.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors disabled:opacity-50"
+                  >
+                    <Play className="h-3 w-3" />
+                    {resuming ? 'Resuming…' : 'Resume'}
+                  </button>
+                  <button
+                    onClick={() => { setEditingGoal(true); setNewGoal(activeRun.userRequest); }}
+                    className="flex items-center gap-1.5 rounded-md bg-orange-400/20 hover:bg-orange-400/30 border border-orange-400/30 px-3 py-1.5 text-xs font-medium text-orange-400 transition-colors"
+                  >
+                    Edit Goal & Restart
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-2">
                   <textarea
@@ -363,13 +424,13 @@ function GateBanner({ message, icon, onApprove, onReject, approveLabel, rejectLa
       <div className="flex items-center gap-2 flex-shrink-0">
         {confirming === 'reject' ? (
           <>
-            <span className="text-xs text-zinc-400">Confirm?</span>
+            <span className="text-xs text-accent-rose">{rejectLabel}?</span>
             <button onClick={onReject} className="text-xs text-accent-rose font-medium">Yes</button>
             <button onClick={() => setConfirming(null)} className="text-xs text-zinc-500">No</button>
           </>
         ) : confirming === 'approve' ? (
           <>
-            <span className="text-xs text-zinc-400">Confirm?</span>
+            <span className="text-xs text-accent-emerald">{approveLabel}?</span>
             <button onClick={onApprove} className="text-xs text-accent-emerald font-medium">Yes</button>
             <button onClick={() => setConfirming(null)} className="text-xs text-zinc-500">No</button>
           </>

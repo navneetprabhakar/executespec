@@ -99,6 +99,15 @@ public class PipelineRun {
     @Column(name = "key_source")
     private String keySource;
 
+    /**
+     * Comma-separated tech stack IDs detected from the plan JSON, e.g. "react,typescript,nodejs".
+     * Computed after planning from task titles, objectives, and boundaries.
+     * Used by the frontend for accurate tech badges that reflect what the planner chose,
+     * not just what the user requested.
+     */
+    @Column(name = "tech_stack")
+    private String techStack;
+
     @Column(name = "tenant_id", nullable = false)
     @Builder.Default
     private String tenantId = "default";

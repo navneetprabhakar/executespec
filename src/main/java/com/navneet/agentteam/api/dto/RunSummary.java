@@ -20,5 +20,7 @@ public record RunSummary(
     /** Project this run belongs to, or null for un-grouped runs. */
     String projectId,
     /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
-    String keySource
+    String keySource,
+    /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). Null until planning completes. */
+    String techStack
 ) {}

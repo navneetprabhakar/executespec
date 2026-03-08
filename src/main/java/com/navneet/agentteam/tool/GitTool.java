@@ -152,6 +152,53 @@ public class GitTool {
         }
     }
 
+    /**
+     * Removes ALL worktrees for a run and prunes stale worktree metadata.
+     * Called after all workers complete (before the reviewer starts) to ensure
+     * no leftover worktree directories from failed/partial tasks or failed merges.
+     * Non-fatal — logs warnings on individual failures.
+     */
+    public void pruneAllWorktrees(String runId) {
+        Path repoRoot = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
+        Path worktreesDir = repoRoot.resolve("worktrees");
+        if (!java.nio.file.Files.isDirectory(worktreesDir)) return;
+
+        try (var dirs = java.nio.file.Files.list(worktreesDir)) {
+            dirs.filter(java.nio.file.Files::isDirectory).forEach(dir -> {
+                String taskId = dir.getFileName().toString();
+                try {
+                    ProcessBuilder pb = new ProcessBuilder(
+                            "git", "worktree", "remove", "--force", dir.toString());
+                    pb.directory(repoRoot.toFile());
+                    pb.redirectErrorStream(true);
+                    Process p = pb.start();
+                    String out = new String(p.getInputStream().readAllBytes());
+                    int exit = p.waitFor();
+                    if (exit == 0) {
+                        log.info("[GitTool] Pruned worktree '{}'", taskId);
+                    } else {
+                        log.warn("[GitTool] worktree remove exited {} for '{}': {}",
+                            exit, taskId, out.trim());
+                    }
+                } catch (Exception e) {
+                    log.warn("[GitTool] pruneAllWorktrees failed for '{}': {}", taskId, e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            log.warn("[GitTool] Failed to list worktrees for run {}: {}", runId, e.getMessage());
+        }
+
+        // Prune stale worktree metadata from .git/worktrees
+        try {
+            ProcessBuilder pb = new ProcessBuilder("git", "worktree", "prune");
+            pb.directory(repoRoot.toFile());
+            pb.redirectErrorStream(true);
+            pb.start().waitFor();
+        } catch (Exception e) {
+            log.debug("[GitTool] git worktree prune failed for run {}: {}", runId, e.getMessage());
+        }
+    }
+
     /** Prunes the git worktree for a task after its branch is merged. Non-fatal. */
     public void removeWorktree(String runId, String taskId) {
         Path repoRoot = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
@@ -208,44 +255,26 @@ public class GitTool {
     public String commit(
             @ToolParam(description = "runId", required = true) String runId,
             @ToolParam(description = "Commit message (format: feat(task_id): desc)", required = true) String message) {
-        try (Git git = openRepo(runId)) {
-            git.add().addFilepattern(".").call();
-            RevCommit commit = git.commit().setMessage(message).call();
-            return "Committed: " + commit.abbreviate(7).name() + " — " + message;
-        } catch (Exception e) {
-            return "Commit failed: " + e.getMessage();
-        }
+        // Use shell git for linked worktrees — JGit's Git.open() on a linked
+        // worktree resolves getWorkTree() to the MAIN repo root, so
+        // addFilepattern(".") stages files from the wrong directory, creating
+        // empty commits.
+        Path workDir = getWorkspacePath(runId);
+        return shellCommit(workDir, message);
     }
 
     @Tool(description = "Show git working tree status.")
     public String status(
             @ToolParam(description = "runId", required = true) String runId) {
-        try (Git git = openRepo(runId)) {
-            Status s = git.status().call();
-            StringBuilder sb = new StringBuilder();
-            if (!s.getAdded().isEmpty())
-                sb.append("Added: ").append(s.getAdded()).append("\n");
-            if (!s.getModified().isEmpty())
-                sb.append("Modified: ").append(s.getModified()).append("\n");
-            if (!s.getUntracked().isEmpty())
-                sb.append("Untracked: ").append(s.getUntracked()).append("\n");
-            return sb.toString().isEmpty() ? "Clean working tree" : sb.toString();
-        } catch (Exception e) {
-            return "Status failed: " + e.getMessage();
-        }
+        Path workDir = getWorkspacePath(runId);
+        return shellStatus(workDir);
     }
 
     @Tool(description = "Show git diff of changes since last commit.")
     public String diff(
             @ToolParam(description = "runId", required = true) String runId) {
-        try (Git git = openRepo(runId)) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            git.diff().setOutputStream(out).call();
-            String diff = out.toString();
-            return diff.isEmpty() ? "(no changes)" : diff;
-        } catch (Exception e) {
-            return "Diff failed: " + e.getMessage();
-        }
+        Path workDir = getWorkspacePath(runId);
+        return shellDiff(workDir);
     }
 
     // ── Worker-safe: merge a dependency branch into the current branch ───────
@@ -311,26 +340,68 @@ public class GitTool {
      * {@code git add .}.
      */
     public void commitIfDirty(String runId, String message) {
-        try (Git git = openRepo(runId)) {
-            Status s = git.status().call();
-            boolean dirty = !s.getUntracked().isEmpty()
-                         || !s.getModified().isEmpty()
-                         || !s.getMissing().isEmpty()
-                         || !s.getAdded().isEmpty();
-            if (!dirty) return;
-            git.add().addFilepattern(".").call();
-            git.commit().setMessage(message).call();
+        Path workDir = getWorkspacePath(runId);
+        try {
+            ProcessBuilder statusPb = new ProcessBuilder("git", "status", "--porcelain")
+                    .directory(workDir.toFile()).redirectErrorStream(true);
+            Process statusProc = statusPb.start();
+            String statusOutput = new String(statusProc.getInputStream().readAllBytes());
+            statusProc.waitFor();
+            if (statusOutput.isBlank()) return;
+
+            new ProcessBuilder("git", "add", "-A")
+                    .directory(workDir.toFile()).redirectErrorStream(true)
+                    .start().waitFor();
+            ProcessBuilder commitPb = new ProcessBuilder("git", "commit", "-m", message)
+                    .directory(workDir.toFile()).redirectErrorStream(true);
+            Process commitProc = commitPb.start();
+            commitProc.getInputStream().readAllBytes();
+            commitProc.waitFor();
             log.debug("commitIfDirty: committed on run {} — {}", runId, message);
         } catch (Exception e) {
             log.warn("commitIfDirty failed for run {}: {}", runId, e.getMessage());
         }
     }
 
+    /**
+     * Returns the diff between the merge-base of {@code baseBranch} and
+     * {@code featureBranch}, showing only what the feature branch actually added.
+     *
+     * <p>This handles the <b>progressive merge</b> scenario correctly: after each
+     * worker task branch is merged into main with {@code --no-ff}, a naive
+     * {@code diff(main, branch)} returns empty because main's tree already contains
+     * the branch's changes. Using the merge-base as the baseline shows only the
+     * changes the branch introduced, which is what the reviewer needs to see.
+     */
     public String getFullDiff(String runId, String baseBranch, String featureBranch) {
         try (Git git = openRepo(runId)) {
+            // Find the common ancestor (the commit from which the branch was created).
+            // After progressive merge, merge-base(main, branch) = the main commit the
+            // branch was forked from, NOT main's current tip.
+            ObjectId baseId = git.getRepository().resolve(baseBranch);
+            ObjectId featureId = git.getRepository().resolve(featureBranch);
+            if (baseId == null || featureId == null) {
+                return "ERROR: Could not resolve refs — base=" + baseBranch
+                    + " feature=" + featureBranch;
+            }
+
+            String diffBase = baseBranch; // default: use baseBranch directly
+            try (org.eclipse.jgit.revwalk.RevWalk walk =
+                     new org.eclipse.jgit.revwalk.RevWalk(git.getRepository())) {
+                walk.setRevFilter(org.eclipse.jgit.revwalk.filter.RevFilter.MERGE_BASE);
+                walk.markStart(walk.parseCommit(baseId));
+                walk.markStart(walk.parseCommit(featureId));
+                RevCommit mergeBase = walk.next();
+                if (mergeBase != null) {
+                    diffBase = mergeBase.getName();
+                    log.debug("[GitTool] getFullDiff: merge-base={} for {}..{}",
+                        mergeBase.abbreviate(7).name(), baseBranch, featureBranch);
+                }
+            }
+
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             git.diff()
-                    .setOldTree(getTreeIterator(git, baseBranch))
+                    .setOldTree(getTreeIterator(git, diffBase))
                     .setNewTree(getTreeIterator(git, featureBranch))
                     .setOutputStream(out).call();
             return out.toString();
@@ -514,6 +585,107 @@ public class GitTool {
         String override = WorkspaceContext.getWorkDir(runId);
         if (override != null) return Path.of(override);
         return Path.of(workspaceRoot, runId);
+    }
+
+    /**
+     * Returns the diff between the initial workspace commit and the current
+     * HEAD on main.  After progressive merge every task branch is already merged
+     * into main, so per-branch diffs are empty.  This method shows the reviewer
+     * <em>everything</em> the workers produced.
+     */
+    public String getDiffSinceInit(String runId) {
+        Path repoRoot = Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
+        try {
+            // Find the initial commit (root commit with no parents)
+            ProcessBuilder revPb = new ProcessBuilder(
+                    "git", "rev-list", "--max-parents=0", "HEAD")
+                    .directory(repoRoot.toFile()).redirectErrorStream(true);
+            Process revProc = revPb.start();
+            String initCommit = new String(revProc.getInputStream().readAllBytes()).trim();
+            revProc.waitFor();
+            if (initCommit.isBlank()) {
+                return "ERROR: Could not find initial commit";
+            }
+            // If multiple root commits, take the first one
+            initCommit = initCommit.lines().findFirst().orElse(initCommit);
+
+            ProcessBuilder diffPb = new ProcessBuilder(
+                    "git", "diff", initCommit + "..HEAD")
+                    .directory(repoRoot.toFile()).redirectErrorStream(true);
+            Process diffProc = diffPb.start();
+            String diff = new String(diffProc.getInputStream().readAllBytes());
+            diffProc.waitFor();
+            return diff.isBlank() ? "(no changes since init)" : diff;
+        } catch (Exception e) {
+            log.error("[GitTool] getDiffSinceInit failed for run {}: {}", runId, e.getMessage());
+            return "ERROR: " + e.getMessage();
+        }
+    }
+
+    // ── Shell git helpers (worktree-safe) ────────────────────────────────────
+    // JGit's Git.open() on a linked worktree (.git is a FILE, not a directory)
+    // resolves Repository.getWorkTree() to the MAIN repo root instead of the
+    // linked worktree directory. This causes addFilepattern("."), status(), and
+    // diff() to operate on the wrong working tree. Shell git handles linked
+    // worktrees natively.
+
+    private String shellCommit(Path dir, String message) {
+        try {
+            new ProcessBuilder("git", "add", "-A")
+                    .directory(dir.toFile()).redirectErrorStream(true)
+                    .start().waitFor();
+            ProcessBuilder pb = new ProcessBuilder("git", "commit", "-m", message)
+                    .directory(dir.toFile()).redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            int exit = p.waitFor();
+            if (exit == 0) {
+                String first = out.lines().findFirst().orElse("");
+                return "Committed: " + first;
+            }
+            // exit 1 with "nothing to commit" is not an error
+            if (out.contains("nothing to commit")) {
+                return "Nothing to commit — working tree clean";
+            }
+            return "Commit failed (exit " + exit + "): " + out;
+        } catch (Exception e) {
+            return "Commit failed: " + e.getMessage();
+        }
+    }
+
+    private String shellStatus(Path dir) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("git", "status", "--short")
+                    .directory(dir.toFile()).redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            p.waitFor();
+            return out.isBlank() ? "Clean working tree" : out;
+        } catch (Exception e) {
+            return "Status failed: " + e.getMessage();
+        }
+    }
+
+    private String shellDiff(Path dir) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("git", "diff")
+                    .directory(dir.toFile()).redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes());
+            p.waitFor();
+            if (out.isBlank()) {
+                // Also check staged changes
+                ProcessBuilder pb2 = new ProcessBuilder("git", "diff", "--cached")
+                        .directory(dir.toFile()).redirectErrorStream(true);
+                Process p2 = pb2.start();
+                String staged = new String(p2.getInputStream().readAllBytes());
+                p2.waitFor();
+                return staged.isBlank() ? "(no changes)" : staged;
+            }
+            return out;
+        } catch (Exception e) {
+            return "Diff failed: " + e.getMessage();
+        }
     }
 
     private AbstractTreeIterator getTreeIterator(Git git, String ref) throws Exception {

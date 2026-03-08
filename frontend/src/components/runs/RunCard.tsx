@@ -51,6 +51,7 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
           <TechBadges
             userRequest={run.userRequest}
             runStatus={run.status}
+            techStack={run.techStack}
             className="mt-1.5"
           />
           <div className="flex items-center gap-2 mt-2 flex-wrap">

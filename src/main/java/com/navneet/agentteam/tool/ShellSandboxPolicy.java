@@ -46,7 +46,7 @@ public class ShellSandboxPolicy {
         "mkdir", "cp", "mv", "touch", "echo",
         "git", "diff", "patch",
         "sort", "uniq", "sed", "awk", "tr", "cut",
-        "pwd", "which", "whoami", "env", "printenv",
+        "pwd", "which", "whoami", "env", "printenv", "sleep",
         "tar", "zip", "unzip", "gzip", "gunzip",
         "python", "python3", "pip", "pip3", "pytest",
         "docker"
@@ -83,11 +83,13 @@ public class ShellSandboxPolicy {
             }
         }
 
-        // Block directory escape via cd
-        if (normalized.contains("cd /") || normalized.contains("cd ..")) {
-            // Allow relative cd within workspace; block absolute paths and parent traversal
-            log.warn("SHELL BLOCKED (directory escape): {}", trimmed);
-            return ValidationResult.block("Directory escape attempt blocked (cd / or cd ..)");
+        // Block absolute path navigation (cd /) — prevents jumping to system dirs.
+        // Allow 'cd ..' since workers legitimately navigate subdirectories within their
+        // worktree (e.g. 'cd src && cd .. && cd resources'). The real sandbox is the
+        // process working directory set by ShellTool + FileSystemTool.safeResolve().
+        if (normalized.matches(".*\\bcd\\s+/(?!\\.).*")) {
+            log.warn("SHELL BLOCKED (absolute cd): {}", trimmed);
+            return ValidationResult.block("Absolute directory navigation blocked (cd /)");
         }
 
         // Verify command starts with an allowed prefix

@@ -1,4 +1,4 @@
-import { detectTechStack, type TechDef } from '@/lib/techDetect';
+import { resolveTechStack, type TechDef } from '@/lib/techDetect';
 
 /* ─── Tiny SVG icons per technology ────────────────────────────────────────── */
 
@@ -133,15 +133,18 @@ interface TechBadgesProps {
   userRequest: string;
   /** Only render when the run has left the pure PLANNING state */
   runStatus: string;
+  /** Server-computed tech stack from the plan (e.g. "react,typescript,nodejs"). Takes priority over userRequest detection. */
+  techStack?: string | null;
   className?: string;
 }
 
 /**
- * Renders compact coloured tech-stack badges derived from the run's user request text.
+ * Renders compact coloured tech-stack badges derived from the plan's tech stack
+ * (preferred) or the user's request text (fallback).
  * Badges appear after the initial PLANNING phase so they don't distract on brand-new runs.
  */
-export default function TechBadges({ userRequest, runStatus, className = '' }: TechBadgesProps) {
-  const stack = detectTechStack(userRequest);
+export default function TechBadges({ userRequest, runStatus, techStack, className = '' }: TechBadgesProps) {
+  const stack = resolveTechStack(techStack, userRequest);
   if (stack.length === 0) return null;
 
   return (

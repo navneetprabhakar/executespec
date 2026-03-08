@@ -83,7 +83,9 @@ public class WorkerAgent {
         String complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
         String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
 
-        log.info("Worker starting task [{}] on branch {} ({}:{})", taskId, branchName, provider, model);
+        int iterationLimit = props.getConcurrency().maxIterationsFor(complexity);
+        log.info("Worker starting task [{}] on branch {} ({}:{}) complexity={} maxIterations={}",
+                taskId, branchName, provider, model, complexity, iterationLimit);
 
         stateStore.logMessage(runId, "harness", agentId,
                 "TASK_ASSIGNMENT", "Starting: " + task.getTitle(), 0);
@@ -120,11 +122,16 @@ public class WorkerAgent {
         int lastCallInputTokens = 0;
         boolean justCompacted = false;
         int lastCompactedIteration = -999;
+        int fileWritesSinceCheck = 0;  // tracks file writes for adaptive extension
 
         // ── AGENTIC LOOP ──────────────────────────────────────────────────────
+        int baseCap = props.getConcurrency().maxIterationsFor(complexity);
+        int maxIterations = baseCap;
+        int absoluteCeiling = baseCap * props.getConcurrency().getAbsoluteCeilingMultiplier();
         try { // outer try: always clear WorkspaceContext on exit
         try {
-            int maxIterations = props.getConcurrency().getMaxIterations();
+            int extensionThreshold = (int) (baseCap * props.getConcurrency().getExtensionThresholdPct() / 100.0);
+            int nextExtensionCheck = extensionThreshold;
             while (iteration < maxIterations) {
 
                 // Drain inbox at start of each iteration; inject as user turn if non-null
@@ -138,6 +145,41 @@ public class WorkerAgent {
                 if (iteration > 0 && iteration % CHECKPOINT_INTERVAL == 0) {
                     messages.add(new UserMessage(buildProgressCheckpoint(taskDef, iteration, maxIterations)));
                     log.info("[Worker {}] Injected progress checkpoint at iteration {}", taskId, iteration);
+                }
+
+                // ── Adaptive extension: at threshold, check progress and extend or escalate ──
+                if (iteration > 0 && iteration == nextExtensionCheck && maxIterations < absoluteCeiling) {
+                    int extension = baseCap * props.getConcurrency().getExtensionPct() / 100;
+                    int newCap = Math.min(maxIterations + extension, absoluteCeiling);
+
+                    if (fileWritesSinceCheck > 0) {
+                        // Worker is making progress — extend
+                        log.info("[Worker {}] Progress detected ({} file writes) at iteration {} — extending cap {} → {}",
+                                taskId, fileWritesSinceCheck, iteration, maxIterations, newCap);
+                        stateStore.logMessage(runId, agentId, "state", "ITERATION_EXTENDED",
+                                "Extended iteration limit to " + newCap + " (progress: " + fileWritesSinceCheck + " file writes)", 0);
+                        maxIterations = newCap;
+                        fileWritesSinceCheck = 0;
+                    } else {
+                        // Stalled — escalate model + extend
+                        String escalatedModel = escalateModel(model);
+                        if (!escalatedModel.equals(model)) {
+                            log.warn("[Worker {}] Stalled at iteration {} — escalating {} → {} and extending cap {} → {}",
+                                    taskId, iteration, model, escalatedModel, maxIterations, newCap);
+                            stateStore.logMessage(runId, agentId, "state", "MODEL_ESCALATED",
+                                    "Escalating model to " + escalatedModel + " + extending to " + newCap + " (stalled)", 0);
+                            model = escalatedModel;
+                            provider = resolveProvider(model);
+                        } else {
+                            log.warn("[Worker {}] Stalled at iteration {} (already at max model) — extending cap {} → {}",
+                                    taskId, iteration, maxIterations, newCap);
+                            stateStore.logMessage(runId, agentId, "state", "ITERATION_EXTENDED",
+                                    "Extended iteration limit to " + newCap + " (stalled, already at highest model)", 0);
+                        }
+                        maxIterations = newCap;
+                    }
+                    // Schedule next extension check at 80% of NEW cap
+                    nextExtensionCheck = (int) (maxIterations * props.getConcurrency().getExtensionThresholdPct() / 100.0);
                 }
 
                 // ── Forced completion: nearing iteration limit ──
@@ -243,6 +285,7 @@ public class WorkerAgent {
                         for (ParsedToolCall tc : toolCalls) {
                             stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
                             String result = dispatchTool(tc, runId, taskId);
+                            if (isFileWriteTool(tc.name())) fileWritesSinceCheck++;
                             results.append("[").append(tc.name()).append(" result]\n<output>\n")
                                    .append(result).append("\n</output>\n\n");
                         }
@@ -325,14 +368,34 @@ public class WorkerAgent {
         }
         // ── END AGENTIC LOOP ──────────────────────────────────────────────────
 
-        log.warn("Worker for task {} hit iteration cap without completing", taskId);
+        log.warn("Worker for task {} hit iteration cap ({}/{}, complexity={}) without completing",
+                taskId, iteration, maxIterations, complexity);
         return WorkerReport.partial(taskId,
-                "Hit " + props.getConcurrency().getMaxIterations() + "-iteration cap without producing completion report.",
+                "Hit " + maxIterations + "-iteration cap (base=" + baseCap + ", complexity=" + complexity + ") without producing completion report.",
                 totalInputTokens, totalOutputTokens);
         } finally {
             // Always clear the thread-local worktree context, even on exception.
             WorkspaceContext.clear();
         }
+    }
+
+    // ── Model Router integration ────────────────────────────────────────────
+
+    /**
+     * Execute with a specific model from ModelRouter.
+     * Overrides task.assignedModel before calling execute().
+     *
+     * @param task   the task to execute
+     * @param runId  the run ID
+     * @param model  the ModelSelection from ModelRouter (contains modelName, provider, tier)
+     * @return the WorkerReport from execution
+     */
+    public WorkerReport executeWithModel(AgentTask task, String runId,
+                                          com.navneet.agentteam.router.ModelSelection model) {
+        log.info("Running task {} with model {} [{}]",
+                task.getTaskId(), model.getModelName(), model.getTier());
+        task.setAssignedModel(model.getModelName());
+        return execute(task, runId);
     }
 
     // ── XML Tool-Call Parsing & Dispatch ──────────────────────────────────────
@@ -449,6 +512,27 @@ public class WorkerAgent {
             log.warn("[Worker {}] Tool dispatch error for '{}': {}", taskId, tc.name(), e.getMessage());
             return "Tool error: " + e.getMessage();
         }
+    }
+
+    /** Returns true if the tool call is a file-writing operation (for progress tracking). */
+    private boolean isFileWriteTool(String toolName) {
+        return switch (toolName) {
+            case "writeFile", "write_file", "editFile", "edit_file" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Escalate to the next higher model within the same provider family.
+     * Used by adaptive extension when the worker is stalled.
+     */
+    private String escalateModel(String currentModel) {
+        return switch (currentModel) {
+            case "claude-haiku-4-5-20251001", "claude-haiku-4-5" -> "claude-sonnet-4-6";
+            case "claude-sonnet-4-6", "claude-sonnet-4-5" -> "claude-opus-4-6";
+            case "gpt-4o-mini" -> "gpt-4o";
+            default -> currentModel; // already at max or unknown — no change
+        };
     }
 
     /**
@@ -850,6 +934,8 @@ public class WorkerAgent {
             return "anthropic";
         if (m.contains("gpt"))
             return "openai";
+        if (m.contains("gemini"))
+            return "google";
         return props.getRoles().getWorker();
     }
 

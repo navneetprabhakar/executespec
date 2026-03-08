@@ -5,6 +5,7 @@ import { getRunChat, sendRunChatMessage, iterateRun } from '@/lib/api';
 import type { RunChatMessage, ChatResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useRunStore } from '@/stores/useRunStore';
+import { useUiStore } from '@/stores/useUiStore';
 
 const MAX_MESSAGES = 10;
 
@@ -31,7 +32,8 @@ export default function RunConversation({ runId }: Props) {
   const [loading, setLoading]           = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
-  const setActiveRunId = useRunStore((s) => s.setActiveRunId);
+  const { setActiveRunId, fetchRuns } = useRunStore();
+  const { addToast } = useUiStore();
 
   // Load chat history on mount / when runId changes
   useEffect(() => {
@@ -103,10 +105,12 @@ export default function RunConversation({ runId }: Props) {
     setError(null);
     try {
       const { runId: newRunId } = await iterateRun(runId, req);
-      // Navigate to the new run by selecting it in the sidebar
+      // Refresh sidebar so the new run appears, then navigate to it
+      await fetchRuns();
       setActiveRunId(newRunId);
       setShowIterateBox(false);
       setIterating(false);
+      addToast({ type: 'success', message: `Iteration run launched: ${newRunId.slice(0, 8)}` });
     } catch (e: any) {
       setError(e.message ?? 'Failed to create iteration run. Please try again.');
       setIterating(false);

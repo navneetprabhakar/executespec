@@ -1,11 +1,113 @@
-# ExecuteSpec — GCP Deployment Guide
+# ExecuteSpec — Deployment Guide
 
-> **Target audience:** Engineers deploying ExecuteSpec to Google Cloud Platform from scratch.
-> This document covers every step from a blank GCP project to a production-ready, HA deployment.
+> **Target audience:** Engineers running ExecuteSpec locally or deploying to Google Cloud Platform.
 
 ---
 
-## Overview
+## Local Development Setup
+
+### Prerequisites
+
+- Java 21 (`export JAVA_HOME=/opt/homebrew/opt/openjdk@21` on macOS)
+- PostgreSQL 15+ running on `localhost:5432`
+- Redis 7+ running on `localhost:6379`
+- Node.js 18+ and npm (for frontend build)
+- Maven 3.8+ (`mvn -version`)
+- API keys: `ANTHROPIC_API_KEY` (required), `OPENAI_API_KEY` (required for failover)
+
+### Database Setup
+
+```bash
+# Create the database (using Postgres.app on macOS)
+/Applications/Postgres.app/Contents/Versions/latest/bin/psql -U postgres -c "CREATE DATABASE agentteam;"
+
+# Or via standard psql
+psql -U postgres -c "CREATE DATABASE agentteam;"
+```
+
+Flyway migrations run automatically on startup and create all tables (V1–V14).
+
+### Redis Setup
+
+```bash
+# Docker (simplest)
+docker run -d -p 6379:6379 redis:7-alpine
+
+# Or install via Homebrew (macOS)
+brew install redis && brew services start redis
+```
+
+### Environment Variables
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+export ANTHROPIC_API_KEY=sk-ant-...      # required
+export OPENAI_API_KEY=sk-...             # required for fallback
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=postgres
+export REDIS_HOST=localhost
+# Optional
+export GITHUB_PAT=ghp_...               # for GitHub integration
+export GITHUB_OWNER=your-github-username
+```
+
+### Build & Run
+
+```bash
+# Option 1: Supervisor (recommended — auto-restart + health monitoring)
+./supervisor.sh start
+./supervisor.sh status   # check state
+./supervisor.sh logs     # tail app logs
+./supervisor.sh stop     # graceful stop
+
+# Option 2: Manual
+npm --prefix frontend install
+npm --prefix frontend run build          # builds to src/main/resources/static/
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -DskipTests
+```
+
+Open **http://localhost:8080** to access the dashboard.
+
+Default admin: `admin@executespec.ai` / `Admin@123`
+
+### Development Mode (Hot Reload)
+
+Run frontend and backend separately:
+
+```bash
+# Terminal 1: Frontend dev server (proxies /api -> localhost:8080)
+npm --prefix frontend run dev    # -> http://localhost:5173
+
+# Terminal 2: Backend
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -DskipTests
+```
+
+### Compile Check
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q     # backend
+npm --prefix frontend run build                             # frontend (tsc + vite)
+```
+
+### Troubleshooting (Local)
+
+| Issue | Fix |
+|-------|-----|
+| `JAVA_HOME not set` | `export JAVA_HOME=/opt/homebrew/opt/openjdk@21` |
+| `Connection refused` to PostgreSQL | Ensure PostgreSQL is running on port 5432 with database `agentteam` |
+| `Connection refused` to Redis | Start Redis: `docker run -d -p 6379:6379 redis:7-alpine` |
+| Admin login fails | Flyway V5 seeds admin, V7 fixes password hash. Check `flyway_schema_history` table. |
+| LLM calls fail | Verify `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are set and valid |
+
+---
+
+## GCP Deployment Guide
+
+> From a blank GCP project to production-ready, HA deployment.
+
+---
+
+## GCP Overview
 
 ExecuteSpec is a **single-binary deployment**. The React 18 frontend is compiled via
 `npm run build` and embedded into `src/main/resources/static/`, so the Spring Boot JAR

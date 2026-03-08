@@ -1,5 +1,6 @@
 package com.navneet.agentteam.recovery;
 
+import com.navneet.agentteam.config.AgentProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.model.ChatModel;
@@ -16,22 +17,27 @@ public class LlmCallGuard {
 
     private final ChatModel chatModel;
     private final RecoveryProperties props;
+    private final AgentProperties agentProperties;
     private String lastUsedProvider = "anthropic";
 
     public LlmCallGuard(@Qualifier("plannerModel") ChatModel chatModel,
-                        RecoveryProperties props) {
+                        RecoveryProperties props,
+                        AgentProperties agentProperties) {
         this.chatModel = chatModel;
         this.props = props;
+        this.agentProperties = agentProperties;
     }
 
     /**
      * Calls the LLM with a specific model override (e.g. Haiku for Scout-role agents).
      * Attaches the given model as AnthropicChatOptions so the override takes precedence
-     * over the application.yml default. All retry/classification logic is preserved.
+     * over the application.yml default. maxTokens from agent.token-budget.max-tokens
+     * is always set — Anthropic API requires it.
      */
     public ChatResponse call(Prompt prompt, String modelOverride, String taskId, String runId) {
+        int maxTokens = agentProperties.getTokenBudget().getMaxTokens();
         Prompt augmented = new Prompt(prompt.getInstructions(),
-            AnthropicChatOptions.builder().model(modelOverride).build());
+            AnthropicChatOptions.builder().model(modelOverride).maxTokens(maxTokens).build());
         return call(augmented, taskId, runId);
     }
 

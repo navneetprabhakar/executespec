@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
+import { useAuthStore, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import {
   getFiles, getFile,
   getOpenApiSpec,
@@ -21,17 +22,18 @@ import {
   FileCode2, FileText, File,
   MessageSquare,
   ChevronsDownUp, ChevronsUpDown, Copy, Check,
+  Clock, Coins,
 } from 'lucide-react';
 import hljs from 'highlight.js';
 
 const BASE_TABS = [
   { value: 'overview',  label: 'Overview' },
+  { value: 'plan',      label: 'Plan' },
   { value: 'tasks',     label: 'Tasks' },
   { value: 'graph',     label: 'Graph' },
   { value: 'log',       label: 'Live Log' },
-  { value: 'plan',      label: 'Plan' },
-  { value: 'review',    label: 'Review' },
   { value: 'code',      label: 'Code' },
+  { value: 'review',    label: 'Review' },
 ];
 
 export default function RunDetailTabs() {
@@ -142,11 +144,47 @@ export default function RunDetailTabs() {
 
 // ── Overview tab ─────────────────────────────────────────────────────────────
 
+/** Format duration in milliseconds to human-readable string. */
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  if (m < 60) return `${m}m ${rs}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h ${rm}m`;
+}
+
+/** Aggregate token counts per model from task list. */
+function tokensByModel(tasks: RunDetail['tasks']): { model: string; input: number; output: number }[] {
+  const map = new Map<string, { input: number; output: number }>();
+  for (const t of tasks) {
+    const model = t.assignedModel || 'unknown';
+    const entry = map.get(model) || { input: 0, output: 0 };
+    entry.input += t.inputTokens || 0;
+    entry.output += t.outputTokens || 0;
+    map.set(model, entry);
+  }
+  return Array.from(map.entries())
+    .map(([model, { input, output }]) => ({ model, input, output }))
+    .sort((a, b) => (b.input + b.output) - (a.input + a.output));
+}
+
 function OverviewTab({ run }: { run: RunDetail }) {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+
   // STUCK occurs during the WORKING phase — map it there for pipeline step display
   const displayStatus = run.status === 'STUCK' ? 'WORKING' : run.status;
   const stepIndex = PIPELINE_STEPS.indexOf(displayStatus);
   const totalTokens = (run.totalInputTokens || 0) + (run.totalOutputTokens || 0);
+
+  // Compute run duration
+  const startMs = run.startedAt ? new Date(run.startedAt).getTime() : 0;
+  const endMs = run.completedAt ? new Date(run.completedAt).getTime() : Date.now();
+  const durationMs = startMs ? endMs - startMs : 0;
+  const isTerminal = ['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(run.status);
 
   return (
     <div className="space-y-6">
@@ -205,19 +243,97 @@ function OverviewTab({ run }: { run: RunDetail }) {
         })}
       </div>
 
-      {/* Metadata */}
-      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/[0.06]">
+      {/* Run stats: time taken */}
+      <div className="pt-2 border-t border-white/[0.06]">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock className="h-3.5 w-3.5 text-zinc-500" />
+          <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Run Stats</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs text-zinc-600">Time taken</p>
+            <p className="text-sm text-zinc-200 mt-0.5 font-mono">
+              {durationMs > 0
+                ? `${fmtDuration(durationMs)}${!isTerminal ? ' (running)' : ''}`
+                : '—'}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-600">Started</p>
+            <p className="text-sm text-zinc-200 mt-0.5 font-mono">{relativeTime(run.startedAt)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-600">Tasks</p>
+            <p className="text-sm text-zinc-200 mt-0.5 font-mono">{String(run.tasks.length)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-600">Total tokens</p>
+            <p className="text-sm text-zinc-200 mt-0.5 font-mono">
+              {totalTokens > 0 ? fmtTokens(totalTokens) : '—'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Super admin: cost + token breakdown by model */}
+      {isSuperAdmin && (
+        <div className="pt-3 border-t border-white/[0.06]">
+          <div className="flex items-center gap-2 mb-3">
+            <Coins className="h-3.5 w-3.5 text-accent-amber/70" />
+            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Cost & Token Breakdown</span>
+            <span className="text-[9px] text-zinc-600 bg-white/[0.04] px-1.5 py-0.5 rounded-full">Admin</span>
+          </div>
+
+          {/* Cost */}
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <p className="text-xs text-zinc-600">Total cost</p>
+              <p className="text-sm text-accent-emerald mt-0.5 font-mono font-medium">
+                {run.actualCostUsd != null ? `$${run.actualCostUsd.toFixed(4)}` : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-600">Key source</p>
+              <p className="text-sm text-zinc-200 mt-0.5 font-mono">
+                {run.keySource ?? '—'}
+              </p>
+            </div>
+          </div>
+
+          {/* Tokens by model */}
+          {run.tasks.length > 0 && (
+            <div>
+              <p className="text-xs text-zinc-600 mb-2">Tokens by model</p>
+              <div className="space-y-1.5">
+                {tokensByModel(run.tasks).map(({ model, input, output }) => (
+                  <div key={model} className="flex items-center gap-3 p-2 rounded bg-white/[0.02] border border-white/[0.04]">
+                    <span className="text-xs font-mono text-zinc-300 flex-1 truncate">{model}</span>
+                    <div className="flex items-center gap-3 flex-shrink-0 text-[11px] font-mono">
+                      <span className="text-accent-cyan/70">
+                        {fmtTokens(input)} in
+                      </span>
+                      <span className="text-accent-violet/70">
+                        {fmtTokens(output)} out
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Model assignment */}
+      <div className="grid grid-cols-3 gap-3 pt-2 border-t border-white/[0.06]">
         {[
           { label: 'Planner', value: run.plannerModel },
           { label: 'Worker', value: run.workerModel },
           { label: 'Reviewer', value: run.reviewerModel },
-          { label: 'Tokens', value: totalTokens > 0 ? fmtTokens(totalTokens) : '—' },
-          { label: 'Started', value: relativeTime(run.startedAt) },
-          { label: 'Tasks', value: String(run.tasks.length) },
         ].map(({ label, value }) => (
           <div key={label}>
             <p className="text-xs text-zinc-600">{label}</p>
-            <p className="text-sm text-zinc-200 mt-0.5 font-mono">{value}</p>
+            <p className="text-sm text-zinc-200 mt-0.5 font-mono truncate" title={value}>{value}</p>
           </div>
         ))}
       </div>

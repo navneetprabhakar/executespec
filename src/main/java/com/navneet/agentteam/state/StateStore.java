@@ -72,9 +72,32 @@ public class StateStore {
 
     public void savePlan(String runId, TaskPlan plan) {
         PipelineRun run = runRepo.findById(runId).orElseThrow();
+
+        // ── Make task IDs globally unique ────────────────────────────────────
+        // agent_task PK is task_id alone (not composite with run_id).
+        // Planner generates predictable IDs like "project_setup", "readme" — if
+        // two runs use the same IDs, a stale pipeline thread from run A can
+        // overwrite run B's tasks.  Prefixing with the run hash prevents this.
+        String prefix = runId.substring(0, 8) + "_";
+
+        // Build old→new ID mapping so we can rewrite depends_on references
+        Map<String, String> idMap = new java.util.HashMap<>();
+        plan.getTasks().forEach(t -> idMap.put(t.getTaskId(), prefix + t.getTaskId()));
+
+        // Rewrite task IDs and dependency references in-place
+        plan.getTasks().forEach(t -> {
+            if (t.getDependsOn() != null) {
+                t.setDependsOn(t.getDependsOn().stream()
+                    .map(dep -> idMap.getOrDefault(dep, prefix + dep))
+                    .toList());
+            }
+            t.setTaskId(idMap.get(t.getTaskId()));
+        });
+
         run.setPlanJson(toJson(plan));
         run.setStatus("AWAITING_APPROVAL");
         run.setCurrentGate("PLAN_APPROVAL");
+        run.setTechStack(detectTechStack(plan, run.getUserRequest()));
         runRepo.save(run);
 
         plan.getTasks().forEach(t -> taskRepo.save(AgentTask.builder()
@@ -404,6 +427,44 @@ public class StateStore {
                 String s = task.getStatus();
                 if (!"COMPLETE".equals(s) && !"FAILED".equals(s) && !"PARTIAL".equals(s)) {
                     task.setStatus("FAILED");
+                    taskRepo.save(task);
+                }
+            });
+            return true;
+        }).orElse(false);
+    }
+
+    /**
+     * Resumes a PAUSED run — resets incomplete tasks to PENDING and sets
+     * run status to WORKING so the pipeline re-enters at the worker phase.
+     * Already-COMPLETE tasks are preserved (their merged work stays on main).
+     */
+    public boolean resumeRun(String runId) {
+        return runRepo.findById(runId).map(run -> {
+            if (!"PAUSED".equals(run.getStatus())) return false;
+
+            run.setStatus("WORKING");
+            run.setCompletedAt(null);
+            run.setFailureReason(null);
+            run.setCurrentGate(null);
+            runRepo.save(run);
+
+            taskRepo.findByRunId(runId).forEach(task -> {
+                String s = task.getStatus();
+                if (!"COMPLETE".equals(s)) {
+                    task.setStatus("PENDING");
+                    task.setWorkerReportJson(null);
+                    task.setBranchName(null);
+                    task.setStartedAt(null);
+                    task.setCompletedAt(null);
+                    task.setAssignedModel(null);
+                    task.setInputTokens(0);
+                    task.setOutputTokens(0);
+                    task.setCacheReadTokens(0);
+                    task.setCacheWriteTokens(0);
+                    task.setLastLlmFailure(null);
+                    task.setStuckDetectedAt(null);
+                    task.setLastActivityAt(Instant.now());
                     taskRepo.save(task);
                 }
             });
@@ -773,6 +834,80 @@ public class StateStore {
             run.setGcsArchivedAt(Instant.now());
             runRepo.save(run);
         });
+    }
+
+    // ── Tech stack detection ─────────────────────────────────
+
+    /**
+     * Detects the technology stack from the plan and user request.
+     * Returns a comma-separated string of tech IDs (e.g. "react,typescript,nodejs")
+     * matching the frontend's TECH_DEFS in techDetect.ts.
+     *
+     * <p>The plan text (task titles, objectives, boundaries) is the primary source
+     * because it reflects what the planner actually decided to build — not just
+     * what the user mentioned in their request.</p>
+     */
+    static String detectTechStack(TaskPlan plan, String userRequest) {
+        // Build a combined text from the plan + user request
+        StringBuilder sb = new StringBuilder();
+        if (plan.getPlanSummary() != null) sb.append(plan.getPlanSummary()).append(' ');
+        if (plan.getTasks() != null) {
+            for (TaskDefinition t : plan.getTasks()) {
+                if (t.getTitle() != null) sb.append(t.getTitle()).append(' ');
+                if (t.getObjective() != null) sb.append(t.getObjective()).append(' ');
+                if (t.getBoundaries() != null) sb.append(t.getBoundaries()).append(' ');
+                if (t.getAcceptanceCriteria() != null) sb.append(t.getAcceptanceCriteria()).append(' ');
+                if (t.getOutputFormat() != null) sb.append(t.getOutputFormat()).append(' ');
+            }
+        }
+        if (userRequest != null) sb.append(userRequest);
+        String text = sb.toString().toLowerCase();
+
+        // Same keyword→ID mapping as frontend's TECH_DEFS (techDetect.ts)
+        // Order: priority ascending (frontend frameworks → languages → backends → databases → infra)
+        record TechEntry(String id, int priority, String[] keywords) {}
+        TechEntry[] defs = {
+            new TechEntry("react",      10, new String[]{"react", "reactjs", "react.js", "create-react-app"}),
+            new TechEntry("nextjs",     11, new String[]{"next.js", "nextjs", "next js"}),
+            new TechEntry("vue",        12, new String[]{"vue", "vuejs", "vue.js", "nuxt"}),
+            new TechEntry("angular",    13, new String[]{"angular"}),
+            new TechEntry("svelte",     14, new String[]{"svelte", "sveltekit"}),
+            new TechEntry("typescript", 20, new String[]{"typescript", ".ts", "tsx", "tsconfig"}),
+            new TechEntry("nodejs",     30, new String[]{"node", "nodejs", "node.js", "express", "fastify", "koa", "hapi", "nestjs"}),
+            new TechEntry("java",       31, new String[]{"java", "jvm", "maven", "gradle", "pom.xml"}),
+            new TechEntry("spring",     32, new String[]{"spring boot", "springboot", "spring-boot", "spring framework"}),
+            new TechEntry("python",     33, new String[]{"python", "django", "fastapi", "flask", "pip", "pandas", "numpy"}),
+            new TechEntry("go",         34, new String[]{"golang", "go lang", "gin framework", "fiber"}),
+            new TechEntry("rust",       35, new String[]{"rust", "cargo", "tokio", "actix", "axum"}),
+            new TechEntry("php",        36, new String[]{"php", "laravel", "symfony", "wordpress"}),
+            new TechEntry("ruby",       37, new String[]{"ruby", "rails", "ruby on rails", "sinatra"}),
+            new TechEntry("dotnet",     38, new String[]{".net", "dotnet", "csharp", "c#", "asp.net", "blazor"}),
+            new TechEntry("postgres",   50, new String[]{"postgresql", "postgres", "psql"}),
+            new TechEntry("mongodb",    51, new String[]{"mongodb", "mongoose"}),
+            new TechEntry("mysql",      52, new String[]{"mysql", "mariadb"}),
+            new TechEntry("redis",      53, new String[]{"redis"}),
+            new TechEntry("sqlite",     54, new String[]{"sqlite"}),
+            new TechEntry("docker",     60, new String[]{"docker", "dockerfile", "container", "docker-compose"}),
+        };
+
+        List<String> found = new ArrayList<>();
+        for (TechEntry def : defs) {
+            for (String kw : def.keywords) {
+                if (text.contains(kw)) {
+                    found.add(def.id);
+                    break;
+                }
+            }
+        }
+
+        // Dedup: Spring Boot ⊃ Java, Next.js ⊃ React
+        if (found.contains("spring")) found.remove("java");
+        if (found.contains("nextjs")) found.remove("react");
+
+        // Cap at 5 badges (matches frontend MAX_BADGES)
+        if (found.size() > 5) found = new ArrayList<>(found.subList(0, 5));
+
+        return found.isEmpty() ? null : String.join(",", found);
     }
 
     // ── Helpers ───────────────────────────────────────────────
