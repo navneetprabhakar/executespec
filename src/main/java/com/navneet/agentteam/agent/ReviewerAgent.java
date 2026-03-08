@@ -58,29 +58,20 @@ public class ReviewerAgent {
         String provider = resolveProviderFromModel(model);
         log.info("[Reviewer] Using model={} provider={} (stored={})", model, provider, run.getReviewerModel());
 
-        // Gather all diffs from all worker branches — cap each diff to avoid OOM on large codebases.
-        // 80k chars ≈ 20k tokens; well within Haiku's 100k context, but prevents heap exhaustion
-        // when many large files change across 6+ worker branches simultaneously.
+        // Gather the combined diff of all work on main.
+        // After progressive merge, each task branch is merged to main immediately upon
+        // completion.  Per-branch diffs (main vs branch) are EMPTY because the merge-base
+        // equals the branch tip.  Instead, diff the initial workspace commit against
+        // main HEAD to see everything the workers produced.
         final int MAX_DIFF_CHARS = 80_000;
-        List<AgentTask> tasks = stateStore.getAllTasks(run.getRunId());
-        StringBuilder allDiffs = new StringBuilder();
-        for (AgentTask task : tasks) {
-            if (task.getBranchName() != null) {
-                String diff = gitTool.getFullDiff(run.getRunId(), "main", task.getBranchName());
-                String safeDiff = diff.length() > MAX_DIFF_CHARS
-                    ? diff.substring(0, MAX_DIFF_CHARS) +
-                      "\n... [diff truncated at " + MAX_DIFF_CHARS + " chars to prevent OOM]"
-                    : diff;
-                allDiffs.append("=== Branch: ").append(task.getBranchName()).append(" ===\n")
-                        .append(safeDiff).append("\n\n");
-                if (allDiffs.length() > MAX_DIFF_CHARS * 2) {
-                    allDiffs.append("... [further diffs omitted — combined size exceeded safe limit]\n");
-                    log.warn("[Reviewer] Combined diff exceeded {}k chars — remaining branches omitted",
-                        MAX_DIFF_CHARS * 2 / 1000);
-                    break;
-                }
-            }
+        String combinedDiff = gitTool.getDiffSinceInit(run.getRunId());
+        if (combinedDiff.length() > MAX_DIFF_CHARS) {
+            combinedDiff = combinedDiff.substring(0, MAX_DIFF_CHARS)
+                + "\n... [diff truncated at " + MAX_DIFF_CHARS + " chars to prevent OOM]";
         }
+        StringBuilder allDiffs = new StringBuilder();
+        allDiffs.append("=== Combined diff (init → main HEAD — all merged work) ===\n")
+                .append(combinedDiff).append("\n\n");
 
         // Step 8: Inject provider fallback context if any occurred during this run
         String fallbackNote = buildFallbackNote(run.getRunId());

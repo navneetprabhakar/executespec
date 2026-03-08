@@ -92,4 +92,46 @@ public record RunEvent(
         return new RunEvent("PREVIEW_READY", runId, null,
             serveDir != null ? serveDir : "", Instant.now());
     }
+
+    // ── Validation + Model Router events ──────────────────────────────────────
+
+    public static RunEvent validationStarted(String runId, String taskId, String file) {
+        return new RunEvent("VALIDATION_STARTED", runId, taskId, file, Instant.now());
+    }
+
+    public static RunEvent validationPassed(String runId, String taskId) {
+        return new RunEvent("VALIDATION_PASSED", runId, taskId, null, Instant.now());
+    }
+
+    public static RunEvent validationFailed(String runId, String taskId, String summary) {
+        return new RunEvent("VALIDATION_FAILED", runId, taskId, summary, Instant.now());
+    }
+
+    public static RunEvent modelEscalated(String runId, String taskId, String fromModel, String toModel) {
+        return new RunEvent("MODEL_ESCALATED", runId, taskId, fromModel + "|" + toModel, Instant.now());
+    }
+
+    // ── Review V2 events ─────────────────────────────────────────────────────
+
+    public static RunEvent reviewStarted(String runId, String model) {
+        return new RunEvent("REVIEW_STARTED", runId, null, model, Instant.now());
+    }
+
+    public static RunEvent reviewIssueFound(String runId, String issueId, String severity, String description) {
+        return new RunEvent("REVIEW_ISSUE_FOUND", runId, null,
+                issueId + "|" + severity + "|" + description, Instant.now());
+    }
+
+    public static RunEvent reviewAutoFixStarted(String runId, String issueId) {
+        return new RunEvent("REVIEW_AUTO_FIX_STARTED", runId, null, issueId, Instant.now());
+    }
+
+    public static RunEvent reviewAutoFixResult(String runId, String issueId, boolean success) {
+        return new RunEvent("REVIEW_AUTO_FIX_RESULT", runId, null,
+                issueId + "|" + (success ? "PASS" : "FAIL"), Instant.now());
+    }
+
+    public static RunEvent reviewComplete(String runId, String verdict, String summary) {
+        return new RunEvent("REVIEW_COMPLETE", runId, null, verdict + "|" + summary, Instant.now());
+    }
 }

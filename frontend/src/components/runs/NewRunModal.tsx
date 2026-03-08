@@ -248,14 +248,18 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden space-y-3"
                 >
-                  <label className="flex items-center justify-between">
-                    <span className="text-sm text-zinc-400">Skip approval gate</span>
-                    <button
-                      role="switch"
-                      aria-checked={skipApproval}
-                      onClick={() => setSkipApproval(!skipApproval)}
+                  <div
+                    role="switch"
+                    aria-checked={skipApproval}
+                    tabIndex={0}
+                    onClick={() => setSkipApproval(!skipApproval)}
+                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSkipApproval(!skipApproval); } }}
+                    className="flex items-center justify-between cursor-pointer select-none group"
+                  >
+                    <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">Skip approval gate</span>
+                    <span
                       className={cn(
-                        'relative h-5 w-9 rounded-full transition-colors',
+                        'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
                         skipApproval ? 'bg-accent-violet' : 'bg-white/[0.10]',
                       )}
                     >
@@ -263,8 +267,8 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
                         'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
                         skipApproval ? 'translate-x-4' : 'translate-x-0.5',
                       )} />
-                    </button>
-                  </label>
+                    </span>
+                  </div>
                   <div>
                     <label className="block text-sm text-zinc-400 mb-1.5">Model override</label>
                     <select

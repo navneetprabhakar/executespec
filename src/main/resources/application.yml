@@ -72,7 +72,13 @@ agent:
     hard-stop-pct: 0.55 # hard-stop at 110k (was 0.90 = 180k)
   concurrency:
     max-runs: 10   # Gate-waiting runs release their slot; this limits actively computing runs only
-    max-iterations: 80  # Agentic loop cap per worker task (raise for complex tasks)
+    max-iterations: 80       # Global fallback cap (used when complexity is unknown)
+    max-iterations-low: 30   # LOW complexity tasks (boilerplate, configs, simple CRUD)
+    max-iterations-medium: 55 # MEDIUM complexity tasks (standard services, controllers)
+    max-iterations-high: 80  # HIGH complexity tasks (complex logic, multi-component)
+    extension-threshold-pct: 80  # check progress at 80% of base cap
+    extension-pct: 50            # extend by 50% of base cap per grant
+    absolute-ceiling-multiplier: 2  # never exceed 2× base cap
   github:
     pat: ${GITHUB_PAT:REDACTED_FOR_PUBLIC_RELEASE}
     default-owner: ${GITHUB_OWNER:navneetprabhakar}
@@ -230,7 +236,16 @@ app:
       monthly-run-limit: -1    # -1 = unlimited
       concurrent-run-limit: 10
 
+executespec:
+  validator:
+    enabled: true
+    per-task-validation: true
+    per-task-level: TYPE
+    project-validation-level: FULL
+    max-retries: 3
+    default-timeout: 30s
+
 logging:
   level:
-    com.navneet.agentteam: DEBUG
+    com.navneet.agentteam: INFO
     org.springframework.ai: WARN

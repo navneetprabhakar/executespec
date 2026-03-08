@@ -80,13 +80,17 @@ public class RunController {
         String githubPat   = userDetails != null ? userDetails.getUser().getGithubPat()   : null;
         String githubOwner = userDetails != null ? userDetails.getUser().getGithubOwner() : null;
 
+        // Pass skipApproval and modelName INTO submitRun so they're set on the entity
+        // BEFORE the async pipeline thread starts (avoids race condition).
         PipelineRun run = harness.submitRun(
             req.userRequest(),
             req.source() != null ? req.source() : "REST",
             req.repoUrl(),
             req.repoMode(),
             githubPat,
-            githubOwner
+            githubOwner,
+            Boolean.TRUE.equals(req.skipApproval()),
+            req.modelName()
         );
 
         // Stamp ownership and optional org/project association
@@ -98,18 +102,6 @@ public class RunController {
         }
         if (req.projectId() != null && !req.projectId().isBlank()) {
             run.setProjectId(req.projectId());
-            dirty = true;
-        }
-
-        // Apply optional overrides that the front-end may send
-        if (Boolean.TRUE.equals(req.skipApproval())) {
-            run.setSkipApproval(true);
-            dirty = true;
-        }
-        if (req.modelName() != null && !req.modelName().isBlank()) {
-            run.setPlannerModel(req.modelName());
-            run.setWorkerModel(req.modelName());
-            run.setReviewerModel(req.modelName());
             dirty = true;
         }
         if (dirty) {
@@ -236,6 +228,24 @@ public class RunController {
 
     public record EditAndRestartRequest(String userRequest) {}
 
+    /**
+     * Resume a PAUSED run — continues the same run from the worker phase,
+     * preserving completed tasks and re-running incomplete ones.
+     * Returns 200 on success, 409 if the run is not in PAUSED state.
+     */
+    @PostMapping("/{runId}/resume")
+    public ResponseEntity<Void> resumeRun(@PathVariable String runId) {
+        log.info("POST /api/runs/{}/resume", runId);
+        PipelineRun run = stateStore.findRun(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (!"PAUSED".equals(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Only PAUSED runs can be resumed (current: " + run.getStatus() + ")");
+        }
+        boolean resumed = harness.resumeRun(runId);
+        return resumed ? ResponseEntity.ok().build() : ResponseEntity.status(HttpStatus.CONFLICT).build();
+    }
+
     /** Cancel a run. */
     @DeleteMapping("/{runId}")
     public ResponseEntity<Void> cancel(@PathVariable String runId) {
@@ -280,6 +290,29 @@ public class RunController {
         log.info("POST /api/runs/{}/implement-suggestions", runId);
         try {
             harness.implementSuggestions(runId);
+            return ResponseEntity.accepted().build();
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
+    /**
+     * User-triggered rework: re-runs the tasks flagged by the reviewer with
+     * remediation feedback injected, then re-reviews and re-opens the gate.
+     *
+     * <p>When the run is AWAITING_MERGE: signals the live merge gate with REWORK.
+     * <p>When the run is PARTIAL (after a failed rework): re-dispatches the
+     * review+gate cycle so the user can retry.
+     *
+     * <p>Returns 202 Accepted immediately; processing is asynchronous.
+     */
+    @PostMapping("/{runId}/rework")
+    public ResponseEntity<Void> reworkRun(@PathVariable String runId) {
+        log.info("POST /api/runs/{}/rework", runId);
+        try {
+            harness.reworkRun(runId);
             return ResponseEntity.accepted().build();
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());

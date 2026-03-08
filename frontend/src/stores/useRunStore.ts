@@ -24,8 +24,10 @@ interface RunStore {
   retryRun: (runId: string) => Promise<string>;
   reopenMergeGate: (runId: string) => Promise<void>;
   implementSuggestions: (runId: string) => Promise<void>;
+  reworkRun: (runId: string) => Promise<void>;
   pauseRun: (id: string) => Promise<void>;
   editAndRestartRun: (runId: string, newGoal: string) => Promise<string>;
+  resumeRun: (runId: string) => Promise<void>;
   patchRunStatus: (runId: string, status: string) => void;
 }
 
@@ -125,6 +127,11 @@ export const useRunStore = create<RunStore>((set, get) => ({
     await get().fetchRun(runId);
   },
 
+  reworkRun: async (runId) => {
+    await api.reworkRun(runId);
+    await get().fetchRun(runId);
+  },
+
   pauseRun: async (id) => {
     await api.pauseRun(id);
     await get().fetchRuns();
@@ -136,6 +143,12 @@ export const useRunStore = create<RunStore>((set, get) => ({
     await get().fetchRuns();
     get().setActiveRunId(newRun.runId);
     return newRun.runId;
+  },
+
+  resumeRun: async (runId) => {
+    await api.resumeRun(runId);
+    await get().fetchRuns();
+    if (get().activeRunId === runId) await get().fetchRun(runId);
   },
 
   patchRunStatus: (runId, status) => {

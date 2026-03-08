@@ -49,6 +49,12 @@ public class RunDetail {
     /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
     String keySource;
 
+    /** Actual cost in USD computed after run completion. Null until complete. */
+    Double actualCostUsd;
+
+    /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). */
+    String techStack;
+
     /** Present if this run was triggered by an external integration. */
     public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
 }

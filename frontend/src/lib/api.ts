@@ -59,6 +59,8 @@ export interface RunSummary {
   repoMode?: string | null;
   /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
   keySource?: string | null;
+  /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). Null until planning completes. */
+  techStack?: string | null;
 }
 
 export interface TaskSummary {
@@ -113,6 +115,8 @@ export interface RunDetail extends RunSummary {
   integrationSource: { sourceType: string; sourceId: string; sourceUrl: string } | null;
   failureReason?: string | null;
   currentGate?: string | null;
+  /** Actual cost in USD. Null until run completes. */
+  actualCostUsd?: number | null;
 }
 
 export interface MetricsResponse {
@@ -196,8 +200,8 @@ export const createRun = (body: {
 export const approveRun = (id: string, approved: boolean) =>
   req<void>(`/runs/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved }) });
 
-export const mergeRun = (id: string, merge: boolean) =>
-  req<void>(`/runs/${id}/merge`, { method: 'POST', body: JSON.stringify({ merge }) });
+export const mergeRun = (id: string, approved: boolean) =>
+  req<void>(`/runs/${id}/merge`, { method: 'POST', body: JSON.stringify({ approved }) });
 
 export const cancelRun = (id: string) =>
   req<void>(`/runs/${id}`, { method: 'DELETE' });
@@ -214,6 +218,9 @@ export const reopenMergeGate = (runId: string) =>
 export const implementSuggestions = (runId: string) =>
   req<void>(`/runs/${runId}/implement-suggestions`, { method: 'POST' });
 
+export const reworkRun = (runId: string) =>
+  req<void>(`/runs/${runId}/rework`, { method: 'POST' });
+
 export const pauseRun = (runId: string) =>
   req<void>(`/runs/${runId}/pause`, { method: 'POST' });
 
@@ -222,6 +229,9 @@ export const editAndRestartRun = (runId: string, userRequest: string) =>
     method: 'POST',
     body: JSON.stringify({ userRequest }),
   });
+
+export const resumeRun = (runId: string) =>
+  req<void>(`/runs/${runId}/resume`, { method: 'POST' });
 
 // ── Metrics ─────────────────────────────────────────────────────────────────
 

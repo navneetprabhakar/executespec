@@ -218,6 +218,25 @@ export const TECH_DEFS: TechDef[] = [
 /** Max badges shown to keep card compact */
 const MAX_BADGES = 5;
 
+/** Build a lookup map of tech ID → TechDef for O(1) resolution */
+const TECH_BY_ID: Record<string, TechDef> = Object.fromEntries(
+  TECH_DEFS.map((t) => [t.id, t]),
+);
+
+/**
+ * Resolves a comma-separated tech stack string (from the backend) into TechDef[].
+ * Falls back to keyword-based detection from userRequest if techStack is null/empty.
+ */
+export function resolveTechStack(techStack: string | null | undefined, userRequest: string): TechDef[] {
+  if (techStack) {
+    const ids = techStack.split(',').map((s) => s.trim()).filter(Boolean);
+    const resolved = ids.map((id) => TECH_BY_ID[id]).filter(Boolean) as TechDef[];
+    if (resolved.length > 0) return resolved.slice(0, MAX_BADGES);
+  }
+  // Fallback: keyword detection from user request text
+  return detectTechStack(userRequest);
+}
+
 /**
  * Returns the top-N detected tech stacks from `text`, ordered by priority.
  * Deduplication ensures each tech appears at most once.
