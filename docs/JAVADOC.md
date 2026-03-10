@@ -149,7 +149,7 @@ User Request
 
 ## 3. Package Structure
 
-All packages are under `com.navneet.agentteam`.
+All packages are under `com.navneet.executespec`.
 
 ### Core Packages
 
@@ -1522,7 +1522,7 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:agentteam}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
   jpa:

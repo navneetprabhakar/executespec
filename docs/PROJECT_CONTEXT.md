@@ -29,7 +29,7 @@ ExecuteSpec is a **multi-agent autonomous coding system** that converts natural 
 
 **Environment:**
 - `JAVA_HOME=/opt/homebrew/opt/openjdk@21` (macOS)
-- PostgreSQL on `localhost:5432`, database `agentteam`
+- PostgreSQL on `localhost:5432`, database `executespec`
 - Redis on `localhost:6379`
 - Node.js 18+ for frontend
 
@@ -79,7 +79,7 @@ User Request (REST / Webhook)
 
 ## 4. Package Structure
 
-Base: `com.navneet.agentteam`
+Base: `com.navneet.executespec`
 
 ```
 ├── agent/              # PlannerAgent, WorkerAgent, ReviewerAgent, ConversationAgent,
@@ -372,7 +372,7 @@ All secrets use `${VAR:}` pattern. Never hardcode.
 | `GOOGLE_API_KEY` | No | — |
 | `POSTGRES_HOST` | No | `localhost` |
 | `POSTGRES_PORT` | No | `5432` |
-| `POSTGRES_DB` | No | `agentteam` |
+| `POSTGRES_DB` | No | `executespec` |
 | `POSTGRES_USER` | No | `postgres` |
 | `POSTGRES_PASSWORD` | No | `postgres` |
 | `REDIS_HOST` | No | `localhost` |

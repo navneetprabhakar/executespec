@@ -40,7 +40,7 @@ MAX_BACKOFF=120           # cap on exponential backoff
 JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
 JAVA_BIN="$JAVA_HOME/bin/java"
 MVN_BIN="$(which mvn 2>/dev/null || echo 'mvn')"
-JAR_GLOB="$SCRIPT_DIR/target/agentteam*.jar"
+JAR_GLOB="$SCRIPT_DIR/target/executespec*.jar"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 

@@ -39,5 +39,5 @@ agent:
 
 logging:
   level:
-    com.navneet.agentteam: WARN
+    com.navneet.executespec: WARN
     org.flywaydb: INFO

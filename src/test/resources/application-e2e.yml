@@ -5,7 +5,7 @@
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/agentteam
+    url: jdbc:postgresql://localhost:5432/executespec
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
   jpa:
@@ -41,5 +41,5 @@ agent:
 
 logging:
   level:
-    com.navneet.agentteam: INFO   # less noise during test runs; change to DEBUG if debugging
+    com.navneet.executespec: INFO   # less noise during test runs; change to DEBUG if debugging
     org.springframework.ai: WARN
