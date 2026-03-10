@@ -73,12 +73,17 @@ PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → 
 - **Plan Approval Gate:** Review task breakdown before workers start
   - Endpoint: `POST /api/runs/{id}/approve` with `{approved: boolean, comment: string}`
   - Display cost estimate (low/high) for informed decision
-  - Support `skipApproval` flag (auto-approve for integrations)
+  - Support `skipApproval` flag (auto-approve for CI/integration runs)
 - **Merge Approval Gate:** Review code + review findings before merge
   - Endpoint: `POST /api/runs/{id}/merge`
   - Support decisions: MERGE, DECLINE, IMPLEMENT_SUGGESTIONS, REWORK
   - IMPLEMENT_SUGGESTIONS: re-run affected workers
   - REWORK: re-run flagged tasks with reviewer feedback
+  - Support `autoMerge` flag (auto-approve merge for CI/integration runs)
+- **Bypass Flags:**
+  - `skipApproval`: bypasses the plan approval gate (auto-approves task breakdown)
+  - `autoMerge`: bypasses the merge approval gate (auto-approves merge after review)
+  - Both flags stored on PipelineRun entity; set at run submission via RunRequest
 - Gates are Redis-backed (`gate:plan:{runId}`, `gate:merge:{runId}`, TTL 2h)
 - Pipeline thread polls Redis every 500ms
 - Any MIG instance can handle the approval REST call

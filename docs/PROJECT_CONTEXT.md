@@ -67,7 +67,7 @@ User Request (REST / Webhook)
 3. **SequentialTaskExecutor** — Executes tasks in order. Per task: creates worktree → runs WorkerAgent → validates code → retries with error feedback + model escalation on failure → progressive merge to main.
 4. **CompilerAgent** — Post-worker compilation validation (up to 3 rounds).
 5. **ReviewerAgent** — Code review with CRITICAL/MINOR issue classification.
-6. **Merge Approval Gate** — Human reviews code + review findings.
+6. **Merge Approval Gate** — Human reviews code + review findings. Can bypass via `autoMerge` flag.
 7. **GitMergeService** — Final merge with 4-tier conflict resolution.
 8. **Post-merge** — ContextAgent (docs), PromptOptimiserAgent (prompt tuning), ApiTestSuiteAgent (OpenAPI spec).
 
@@ -106,7 +106,8 @@ Base: `com.navneet.agentteam`
 ├── apitests/           # ApiTestSuiteAgent
 ├── recovery/           # StuckRunMonitor, RunRecoveryService, StuckRunEvaluator, EscalationService
 ├── deployment/         # LocalPreviewService, DeploymentService, DockerfileGenerator,
-│   │                   # WorkspaceExportService, GcsWorkspaceStore, WorkspaceArchiveJob
+│   │                   # WorkspaceExportService, WorkspaceFileService (+ GitHub fallback),
+│   │                   # GcsWorkspaceStore, WorkspaceArchiveJob
 │   └── strategy/       # 11 deployment strategies (SpringBoot, Node, Python, Go, Rust, etc.)
 ├── auth/               # AppUser, Org, Project, OrgMember, ProjectMember, TierConfig,
 │   │                   # AuthService, OrgService, ProjectService, TierEnforcementService
@@ -119,7 +120,7 @@ Base: `com.navneet.agentteam`
 │   └── dto/            # RunSummary, RunDetail, TaskSummary
 ├── config/             # AgentProperties, AgentModelConfig, WebConfig
 ├── pricing/            # ModelPricingInitializer, ModelPricingRepository
-├── repo/               # GitHubRepoService
+├── repo/               # GitHubRepoService (random repo names, descriptions, collision handling)
 └── tenant/             # TenantInterceptor
 ```
 
@@ -158,7 +159,7 @@ Resolution: **user key → org key → system key** based on org's `keySourceMod
 - `HYBRID` (default): User/org first, system fallback
 
 ### Approval Gates (Redis)
-GateStore is Redis-backed (`gate:plan:{runId}`, `gate:merge:{runId}`, TTL 2h). Pipeline thread polls 500ms. Any MIG instance can handle the approval REST call.
+GateStore is Redis-backed (`gate:plan:{runId}`, `gate:merge:{runId}`, TTL 2h). Pipeline thread polls 500ms. Any MIG instance can handle the approval REST call. Two bypass flags: `skipApproval` (plan gate) and `autoMerge` (merge gate) -- both stored on PipelineRun.
 
 ### Progressive Merge
 SequentialTaskExecutor merges each task to main immediately after validation. Later tasks see all previous output.
@@ -190,7 +191,7 @@ ModelRouter escalation: `FAST (Haiku)` → `CAPABLE (Sonnet)` → `POWER (Opus)`
 
 ---
 
-## 7. Database Migrations (V1–V14)
+## 7. Database Migrations (V1–V17)
 
 | Version | Description |
 |---------|-------------|
@@ -208,6 +209,7 @@ ModelRouter escalation: `FAST (Haiku)` → `CAPABLE (Sonnet)` → `POWER (Opus)`
 | V12 | GCS workspace archive columns |
 | V13 | Merge conflict tracking table |
 | V14 | Key source mode + provider restrictions |
+| V17 | Auto-merge flag (pipeline_run.auto_merge) |
 
 ---
 
@@ -231,6 +233,9 @@ POST   /api/runs/{id}/conversation       Chat on completed runs
 POST   /api/runs/{id}/preview/start      Start preview
 DELETE /api/runs/{id}/preview/stop       Stop preview
 POST   /api/runs/{id}/deploy             Deploy to Cloud Run
+POST   /api/runs/{id}/push-github       Push workspace to GitHub
+POST   /api/integrations/jira/trigger   Manual Jira trigger
+POST   /api/integrations/confluence/trigger  Manual Confluence trigger
 POST   /api/auth/login                   Login → JWT
 POST   /api/auth/register               Register
 PUT    /api/org/me/settings/keys         Update org API keys
@@ -250,7 +255,7 @@ GET    /actuator/health                  Health check
 
 **Run Visibility:** SUPER_ADMIN → all; ORG_ADMIN → all in org; DEVELOPER → own projects; FREE → own runs
 
-**Admin:** `admin@executespec.ai` / `Admin@123`
+**Admin:** `admin@executespec.ai` (password set via V5/V7 migration; see DB seed scripts)
 
 ---
 
