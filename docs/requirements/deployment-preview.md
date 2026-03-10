@@ -62,6 +62,10 @@ Local process-based preview for development testing, Cloud Run deployment for 11
 - File access sandboxed via FileSystemTool.safeResolve()
 - File listing, reading, downloading via REST endpoints
 - ZIP download: `GET /api/runs/{id}/download`
+- **GitHub-backed file serving fallback:** When local workspace is deleted (and GCS not configured), WorkspaceFileService falls back to GitHub:
+  - `listRepoFiles()` — list files via GitHub Trees API
+  - `readRepoFile()` — read file content via GitHub Contents API
+  - Requires the run to have an associated GitHub repo (created via GitHubRepoService)
 
 ### 4. GCS Workspace Archiving
 
@@ -89,6 +93,11 @@ Local process-based preview for development testing, Cloud Run deployment for 11
 - Automatic branch creation and merge to main
 - Optional push after merge (controlled by run properties)
 - Endpoint: `PUT /api/auth/settings/github`
+- **Manual push endpoint:** `POST /api/runs/{id}/push-github` — push workspace to GitHub on demand
+- **Random memorable repo names:** New repos use adjective-noun format (e.g. "swift-ember") instead of goal-derived slugs
+- **Repo description:** Set from user goal text on creation
+- **Collision handling:** If repo name already exists, append random 2-digit suffix (up to 3 retries before failing)
+- **Description update for existing repos:** `updateRepoDescription()` updates the description on existing repos after push
 
 ### 6. Workspace Export
 
@@ -96,6 +105,7 @@ Local process-based preview for development testing, Cloud Run deployment for 11
 - Download workspace as ZIP via `GET /api/runs/{id}/download`
 - If workspace is local: stream ZIP directly
 - If workspace archived to GCS: redirect to signed URL
+- **GitHub fallback:** If local workspace is deleted and GCS is not configured, redirect to GitHub archive ZIP (via GitHub API)
 - Exclude `.git/`, `node_modules/`, `target/`, `build/` from ZIP
 
 ---
@@ -115,7 +125,7 @@ Local process-based preview for development testing, Cloud Run deployment for 11
 | `deployment/WorkspaceArchiveJob.java` | Hourly archive job |
 | `deployment/WorkspaceFileService.java` | File listing/reading |
 | `harness/WorkspaceInitService.java` | Workspace initialization |
-| `repo/GitHubRepoService.java` | GitHub repo create/push |
+| `repo/GitHubRepoService.java` | GitHub repo create/push, random names, description updates, collision handling |
 
 ## Database Migrations
 
@@ -123,3 +133,4 @@ Local process-based preview for development testing, Cloud Run deployment for 11
 |---------|-------------|
 | V8 | Per-user GitHub settings (github_pat, github_owner) |
 | V12 | GCS workspace archive columns |
+| V17 | Auto-merge flag (pipeline_run.auto_merge) |
