@@ -17,6 +17,8 @@ public record RunRequest(
     String repoMode,
     /** When true, automatically approve the plan gate without human review. */
     Boolean skipApproval,
+    /** When true, automatically approve the merge gate without human review. */
+    Boolean autoMerge,
     /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
     String modelName,
     /** Optional project ID to associate this run with (org members only). */

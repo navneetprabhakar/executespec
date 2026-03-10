@@ -104,6 +104,48 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
         }
     }
 
+    // ── Manual trigger ─────────────────────────────────────────────────────────
+
+    /**
+     * Build an IntegrationEvent by fetching a Jira issue directly via REST API.
+     * Mirrors ConfluenceAdapter.buildFromPageId() — used by the manual trigger endpoint.
+     */
+    @SuppressWarnings("unchecked")
+    public IntegrationEvent buildFromIssueKey(String issueKey, String goalOverride) {
+        Map<String, Object> issue = client.fetchIssue(issueKey);
+        Map<String, Object> fields = (Map<String, Object>) issue.get("fields");
+
+        String summary = String.valueOf(fields.getOrDefault("summary", ""));
+        String description = "";
+        Object descObj = fields.get("description");
+        if (descObj instanceof String s) {
+            description = s;
+        } else if (descObj != null) {
+            try { description = mapper.writeValueAsString(descObj); }
+            catch (Exception ignored) {}
+        }
+
+        String ac = fields.get("customfield_10034") != null
+                ? String.valueOf(fields.get("customfield_10034")) : "";
+
+        String goal = (goalOverride != null && !goalOverride.isBlank())
+                ? goalOverride
+                : "Implement Jira issue " + issueKey + ": " + summary;
+
+        String context = String.format("""
+                ## Jira Issue: %s
+                **Summary**: %s
+                **Description**:
+                %s
+                """, issueKey, summary, description);
+
+        return new IntegrationEvent(
+                "JIRA", issueKey,
+                config.getBaseUrl() + "/browse/" + issueKey,
+                goal, context, ac, config.isSkipApproval()
+        );
+    }
+
     // ── Outbound ──────────────────────────────────────────────────────────────
 
     @Override

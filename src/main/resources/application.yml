@@ -162,28 +162,28 @@ agent:
 
   # ── Tier 7: External Integrations (all disabled by default) ─────────────────
   integrations:
-    enabled: false            # Master switch — set true to register /api/integrations/* endpoints
+    enabled: true             # Master switch — set true to register /api/integrations/* endpoints
     jira:
-      enabled: false
-      base-url: ${JIRA_BASE_URL:https://your-org.atlassian.net}
-      email: ${JIRA_EMAIL:}
-      api-token: ${JIRA_API_TOKEN:}
+      enabled: true
+      base-url: ${JIRA_BASE_URL:https://executespec.atlassian.net}
+      email: ${JIRA_EMAIL:admin@executespec.ai}
+      api-token: ${JIRA_API_TOKEN:ATATT3xFfGF0AMQ0g1aEBe1MLXpixcOEtxPsvTGIu7uUSkyXQPGFeCM4q-7HgiNjFBiLWO4VT1ixH8uBafm0OVTi11l6pP3zQE007pO80-0rO1ckzPs_R8oHupZLVbodHkg1bPn2kE5uKzrG4kJncJcQ16OlHfrz_JIAU_-G9DyE8ZuRctLVhGQ=D48C6C84}
       webhook-secret: ${JIRA_WEBHOOK_SECRET:}
       trigger-status: "Ready for Coding"   # issue status name that fires the pipeline
       in-progress-status: "In Progress"    # transition to on run start (null = skip)
       in-review-status: "In Review"        # transition to on run complete (null = skip)
       reopen-status: "Backlog"             # transition to on run failed (null = skip)
       dashboard-url: http://localhost:8080
-      skip-approval: false
+      skip-approval: true
     confluence:
-      enabled: false
-      base-url: ${CONFLUENCE_BASE_URL:https://your-org.atlassian.net}
-      email: ${CONFLUENCE_EMAIL:}
-      api-token: ${CONFLUENCE_API_TOKEN:}
+      enabled: true
+      base-url: ${CONFLUENCE_BASE_URL:https://executespec.atlassian.net}
+      email: ${CONFLUENCE_EMAIL:admin@executespec.ai}
+      api-token: ${CONFLUENCE_API_TOKEN:ATATT3xFfGF0-W1w2Q5djDN8b8seAgTmvEHB4LqSD9IGRxHlO9ZCnKMdWeUXuwabbfZJS4LsfOlY5U1UGeSPF8UL8AoWBKuNf7U8wJlf0UKcrjyGrgrnHam7zlVTmOFwaXTanzNYsBCN6VZ81INtSJtGBQok1GLTrf4kFmCyUQsSWd3Jyh0qSEA=94FD1DEB}
       trigger-label: "agent-run"           # page label that fires the pipeline
-      space-key: "ENG"                     # default space for child pages
+      space-key: "KAN"                     # default space for child pages
       dashboard-url: http://localhost:8080
-      skip-approval: false
+      skip-approval: true
     servicenow:
       enabled: false
       base-url: ${SNOW_BASE_URL:https://your-instance.service-now.com}
