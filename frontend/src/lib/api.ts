@@ -61,6 +61,8 @@ export interface RunSummary {
   keySource?: string | null;
   /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). Null until planning completes. */
   techStack?: string | null;
+  /** Human-readable project name. Null if projectId is null or project was deleted. */
+  projectName?: string | null;
 }
 
 export interface TaskSummary {
@@ -112,6 +114,15 @@ export interface ReviewReport {
   readmeUpdated: boolean;
 }
 
+/** Token usage for a non-task agent (planner, reviewer, compiler). */
+export interface AgentTokenEntry {
+  role: string;
+  provider: string | null;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface RunDetail extends RunSummary {
   tasks: TaskSummary[];
   planJson: string;
@@ -121,6 +132,8 @@ export interface RunDetail extends RunSummary {
   currentGate?: string | null;
   /** Actual cost in USD. Null until run completes. */
   actualCostUsd?: number | null;
+  /** Per-agent (planner/reviewer/compiler) token breakdown. Empty for pre-V19 runs. */
+  agentTokens?: AgentTokenEntry[];
 }
 
 export interface MetricsResponse {
@@ -205,6 +218,9 @@ export const createRun = (body: {
 export const approveRun = (id: string, approved: boolean) =>
   req<void>(`/runs/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved }) });
 
+export const clarifyRun = (id: string, response: string) =>
+  req<void>(`/runs/${id}/clarify`, { method: 'POST', body: JSON.stringify({ response }) });
+
 export const mergeRun = (id: string, approved: boolean) =>
   req<void>(`/runs/${id}/merge`, { method: 'POST', body: JSON.stringify({ approved }) });
 
@@ -240,10 +256,30 @@ export const resumeRun = (runId: string) =>
 
 // ── Metrics ─────────────────────────────────────────────────────────────────
 
-export const getMetrics = () => req<MetricsResponse>('/metrics');
+export const getMetrics = (days = 0) =>
+  req<MetricsResponse>(`/metrics${days > 0 ? `?days=${days}` : ''}`);
 
 export const getModelComparison = (days = 30) =>
   req<ModelComparisonData>(`/model-comparison?days=${days}`);
+
+// ── User Runs Summary ───────────────────────────────────────────────────────
+
+export interface UserRunStat {
+  userId: string;
+  displayName: string;
+  runCount: number;
+  completedCount: number;
+  failedCount: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
+export interface UserRunsSummaryData {
+  users: UserRunStat[];
+}
+
+export const getUserRunsSummary = (days = 30) =>
+  req<UserRunsSummaryData>(`/user-runs-summary?days=${days}`);
 
 // ── Pricing ─────────────────────────────────────────────────────────────────
 
@@ -282,6 +318,65 @@ export const triggerConfluence = (body: { pageId: string; goal: string }) =>
 
 export const triggerJira = (body: { issueKey: string; goal?: string }) =>
   req<{ runId: string }>('/integrations/jira/trigger', { method: 'POST', body: JSON.stringify(body) });
+
+// ── Slack integration ─────────────────────────────────────────────────────────
+
+export interface SlackStatus {
+  connected: boolean;
+  teamName: string | null;
+  teamId: string | null;
+  installedBy: string | null;
+  channelCount: number;
+  installedAt: string | null;
+}
+
+export interface SlackChannel {
+  channelId: string;
+  channelName: string;
+}
+
+export interface ProjectSlackChannelDto {
+  channelId: string;
+  channelName: string;
+  verbosity: 'MINIMAL' | 'STANDARD' | 'VERBOSE';
+}
+
+export const getSlackStatus = () =>
+  req<SlackStatus>('/integrations/slack/status');
+
+export const getSlackInstallUrl = () =>
+  req<{ installUrl: string }>('/integrations/slack/install');
+
+export const disconnectSlack = () =>
+  req<void>('/integrations/slack/disconnect', { method: 'DELETE' });
+
+export const listSlackChannels = () =>
+  req<SlackChannel[]>('/integrations/slack/channels');
+
+export const getProjectSlackChannels = (projectId: string) =>
+  req<ProjectSlackChannelDto[]>(`/integrations/slack/projects/${projectId}/channels`);
+
+export const addProjectSlackChannel = (
+  projectId: string, channelId: string, channelName: string, verbosity: string,
+) =>
+  req<ProjectSlackChannelDto>(`/integrations/slack/projects/${projectId}/channels`, {
+    method: 'POST', body: JSON.stringify({ channelId, channelName, verbosity }),
+  });
+
+export const removeProjectSlackChannel = (projectId: string, channelId: string) =>
+  req<void>(`/integrations/slack/projects/${projectId}/channels/${channelId}`, { method: 'DELETE' });
+
+export const updateSlackChannelVerbosity = (
+  projectId: string, channelId: string, verbosity: string,
+) =>
+  req<void>(`/integrations/slack/projects/${projectId}/channels/${channelId}/verbosity`, {
+    method: 'PUT', body: JSON.stringify({ verbosity }),
+  });
+
+export const sendSlackTestMessage = (channelId: string) =>
+  req<{ ok: boolean; message: string }>('/integrations/slack/test', {
+    method: 'POST', body: JSON.stringify({ channelId }),
+  });
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
 

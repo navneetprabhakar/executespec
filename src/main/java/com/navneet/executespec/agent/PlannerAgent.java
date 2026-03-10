@@ -87,8 +87,9 @@ public class PlannerAgent {
                         .build();
                 Prompt prompt = new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(msg)),
                         plannerOpts);
-                ChatResponse response = llmRouter.callWithFallback(provider, model, prompt,
+                LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(provider, model, prompt,
                         runId, "planner", FallbackMode.IMMEDIATE, 0, false);
+                ChatResponse response = lr.response();
 
                 String responseContent = response.getResult().getOutput().getText();
 
@@ -97,6 +98,7 @@ public class PlannerAgent {
                     int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
                     int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
                     stateStore.addTokensToRun(runId, inTok, outTok);
+                    stateStore.setAgentTokens(runId, "planner", inTok, outTok, lr.provider(), lr.model());
                 } catch (Exception ex) {
                     log.warn("[Planner] Could not extract token counts: {}", ex.getMessage());
                 }
@@ -281,6 +283,8 @@ public class PlannerAgent {
             return "anthropic";
         if (model.startsWith("gpt-"))
             return "openai";
+        if (model.startsWith("gemini-"))
+            return "google";
         return props.getRoles().getPlanner(); // safe fallback
     }
 }

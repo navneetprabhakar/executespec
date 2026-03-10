@@ -25,12 +25,18 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -DskipTests
 
 Open **http://localhost:8080**
 
+Default admin: `admin@executespec.ai` / `REDACTED_FOR_PUBLIC_RELEASE` (forced password change on first login)
+
 ---
 
 ## Pipeline
 
 ```
-POST /api/runs  →  PlannerAgent (Sonnet)
+POST /api/runs  →  ReferenceExtractor (JIRA/Confluence context)
+                      ↓
+                Clarification Gate  (if ambiguous references detected)
+                      ↓
+                PlannerAgent (Sonnet)
                       ↓
                 Plan Approval Gate  (or auto-bypass with skipApproval)
                       ↓
@@ -55,10 +61,14 @@ POST /api/runs  →  PlannerAgent (Sonnet)
 - **Code validation** — language toolchains for Java, TypeScript, Python, React (syntax → type → lint → test)
 - **Model routing** — tier escalation (FAST → CAPABLE → POWER) with Anthropic → OpenAI failover
 - **Auth & multi-tenancy** — JWT, orgs, projects, tiers (FREE/PRO/ENTERPRISE), RBAC
+- **Organization management** — create orgs, invite members, manage projects, admin email, domain-based invitations with super-admin escalation
+- **Org-level integrations** — JIRA/Confluence credentials managed at org level by admins with test-connection validation
+- **JIRA/Confluence context extraction** — auto-detects issue keys and page URLs in run requests, fetches content via org credentials, enriches planner input; clarification gate for ambiguous mentions
+- **Slack notifications** — org-level OAuth, per-project channel routing, configurable verbosity (MINIMAL/NORMAL/VERBOSE), Block Kit messages with interactive buttons
 - **API key management** — SYSTEM / OWN_KEYS / HYBRID modes with per-provider restrictions
 - **Process-based local preview** — auto-detects project type, starts dev server
 - **Post-run AI chat** — conversation panel with workspace context injection
-- **External integrations** — Jira, Confluence, ServiceNow, PagerDuty (webhook + manual triggers)
+- **External integrations** — Jira, Confluence, ServiceNow, PagerDuty (webhook + manual triggers), Slack (push notifications)
 - **GitHub integration** — auto-create repos with random names, push code, clone existing repos; GitHub-backed code viewing when local workspace is cleaned up
 - **Self-healing workers** — progress checkpoints, completion urgency, emergency compaction
 - **Real-time observability** — SSE events, D3.js Gantt timeline, token charts
@@ -70,6 +80,7 @@ POST /api/runs  →  PlannerAgent (Sonnet)
 
 | Document | Description |
 |----------|-------------|
+| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | Feature workflow diagrams — Mermaid user journey diagrams for every major feature |
 | [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | Full project context — architecture, packages, design decisions, recreation guide |
 | [docs/JAVADOC.md](docs/JAVADOC.md) | Detailed code documentation for every package and class |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Local development setup + GCP production deployment guide |
@@ -84,10 +95,31 @@ POST /api/runs  →  PlannerAgent (Sonnet)
 | [api-key-management.md](docs/requirements/api-key-management.md) | Key sources, resolution, provider restrictions, LLM/model routing |
 | [code-validation.md](docs/requirements/code-validation.md) | Validator library, toolchains, gate chain, retry with feedback |
 | [deployment-preview.md](docs/requirements/deployment-preview.md) | Local preview, Cloud Run, workspace management, GCS, GitHub |
-| [integrations.md](docs/requirements/integrations.md) | Jira, Confluence, ServiceNow, PagerDuty |
+| [integrations.md](docs/requirements/integrations.md) | Jira, Confluence, ServiceNow, PagerDuty, Slack, context extraction, org-level credential management |
 | [recovery-observability.md](docs/requirements/recovery-observability.md) | Stuck run monitor, recovery, health, SSE, token budget, cost |
 | [post-run-features.md](docs/requirements/post-run-features.md) | Conversation, iteration, pause/edit, retry, post-merge agents |
-| [user-onboarding-rbac.md](docs/requirements/user-onboarding-rbac.md) | User onboarding and role-based access control |
+| [user-onboarding-rbac.md](docs/requirements/user-onboarding-rbac.md) | User onboarding, org creation, and role-based access control |
+
+---
+
+## Database Migrations
+
+20 Flyway migrations (V1–V20) run automatically on startup:
+
+| Version | Description |
+|---------|-------------|
+| V1–V3 | Core schema, tenant_id, cost/cache fields |
+| V4–V7 | Auth schema, admin seed, tier config, password fix |
+| V8 | Per-user GitHub settings |
+| V9 | Conversation history + iteration linkage |
+| V10–V11 | Per-user + org-level AI provider keys |
+| V12 | GCS workspace archive columns |
+| V13 | Merge conflict tracking |
+| V14 | Key source mode + provider restrictions |
+| V17 | Auto-merge flag |
+| V18 | Org-level integration settings (admin_email, JIRA/Confluence credentials) |
+| V19 | Agent token breakdown (per-task input/output token tracking) |
+| V20 | Slack integration (org_slack_integration, project_slack_channel, slack_notification_log) |
 
 ---
 

@@ -41,9 +41,16 @@ JWT-based authentication with organizations, projects, tiered access control, an
 
 **Requirements:**
 - Only PRO/ENTERPRISE users can create organizations
-- Org entity stores: name, tier, key_source_mode, enabled_providers, AI API keys
+- Org creation requires: name, email domains, admin email (via UI form on /org/settings)
+- Org entity stores: name, tier, key_source_mode, enabled_providers, AI API keys, admin_email, JIRA/Confluence credentials
 - Org-level API keys (Anthropic, OpenAI, Gemini) — shared across all org members
+- Org-level integration credentials (JIRA base URL/email/token, Confluence base URL/email/token) — managed by ORG_ADMIN on Integrations page
+- Org-level Slack integration — OAuth connection stored in `org_slack_integration` table (team_id, access_token, verbosity, default_channel); per-project channel routing via `project_slack_channel` table
+- Integration status derived from org credentials (not application.yml flags); Slack status derived from `org_slack_integration` record
 - CRUD: `POST /api/orgs`, `GET /api/orgs/{id}`, `PUT /api/orgs/{id}/settings`
+- Integration settings: `PUT /api/org/me/settings/jira`, `PUT /api/org/me/settings/confluence`
+- Connection validation: `POST /api/org/me/settings/jira/validate`, `POST /api/org/me/settings/confluence/validate`
+- Slack OAuth: `GET /api/integrations/slack/install`, `GET /api/integrations/slack/oauth/callback`, `DELETE /api/integrations/slack/disconnect`
 - Member invitation via email (GmailOAuthService for email delivery)
 - Member management: invite, suspend, remove
 - Domain validation for org-invited users
@@ -55,7 +62,7 @@ JWT-based authentication with organizations, projects, tiered access control, an
 | Role | Permissions |
 |------|------------|
 | SUPER_ADMIN | Global: all orgs, all runs, all admin functions |
-| ORG_ADMIN | Manage org settings, projects, members, API keys |
+| ORG_ADMIN | Manage org settings, projects, members, API keys, integration credentials, Slack connection |
 | BILLING_ADMIN | View all org runs, manage billing/tier |
 | DEVELOPER | Submit runs, access assigned projects only |
 
@@ -125,3 +132,6 @@ JWT-based authentication with organizations, projects, tiered access control, an
 | V6 | Tier config + org run-limit overrides |
 | V7 | Fix admin password hash |
 | V8 | Per-user GitHub settings |
+| V18 | Org-level integration settings (admin_email, JIRA/Confluence credentials) |
+| V19 | Agent token breakdown (per-task input/output token tracking) |
+| V20 | Slack integration (org_slack_integration, project_slack_channel, slack_notification_log) |

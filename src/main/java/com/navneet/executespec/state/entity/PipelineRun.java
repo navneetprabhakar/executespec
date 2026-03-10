@@ -50,6 +50,22 @@ public class PipelineRun {
     private Integer totalInputTokens;   // accumulated across all agents
     private Integer totalOutputTokens;
 
+    // ── Per-agent token tracking (V19) ──────────────────────────────────────
+    @Builder.Default private Integer plannerInputTokens  = 0;
+    @Builder.Default private Integer plannerOutputTokens = 0;
+    private String plannerProvider;      // actual provider that served planning (may differ from config due to failover)
+    private String plannerActualModel;   // actual model used
+
+    @Builder.Default private Integer reviewerInputTokens  = 0;
+    @Builder.Default private Integer reviewerOutputTokens = 0;
+    private String reviewerProvider;
+    private String reviewerActualModel;
+
+    @Builder.Default private Integer compilerInputTokens  = 0;
+    @Builder.Default private Integer compilerOutputTokens = 0;
+    private String compilerProvider;
+    private String compilerActualModel;
+
     private Double actualCostUsd;       // computed post-run with cache-aware pricing (null until complete)
 
     @Column(columnDefinition = "TEXT")

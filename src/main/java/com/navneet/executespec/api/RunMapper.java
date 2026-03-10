@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.RunDetail;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.api.dto.TaskSummary;
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
@@ -19,6 +21,7 @@ import java.util.List;
 public class RunMapper {
 
     private final IntegrationRunRepository integrationRunRepository;
+    private final ProjectRepository projectRepository;
     private final ObjectMapper objectMapper;
 
     public RunSummary toSummary(PipelineRun r) {
@@ -39,8 +42,39 @@ public class RunMapper {
             r.getRepoMode(),
             r.getProjectId(),
             r.getKeySource(),
-            r.getTechStack()
+            r.getTechStack(),
+            resolveProjectName(r.getProjectId())
         );
+    }
+
+    /** Resolves a project ID to its human-readable name, or null if not found / not set. */
+    private String resolveProjectName(String projectId) {
+        if (projectId == null || projectId.isBlank()) return null;
+        return projectRepository.findById(projectId).map(Project::getName).orElse(null);
+    }
+
+    /** Builds the per-agent (planner/reviewer/compiler) token entries for the detail view. */
+    private List<RunDetail.AgentTokenEntry> buildAgentTokens(PipelineRun r) {
+        List<RunDetail.AgentTokenEntry> entries = new java.util.ArrayList<>();
+        int pIn  = r.getPlannerInputTokens()  != null ? r.getPlannerInputTokens()  : 0;
+        int pOut = r.getPlannerOutputTokens() != null ? r.getPlannerOutputTokens() : 0;
+        if (pIn > 0 || pOut > 0) {
+            entries.add(new RunDetail.AgentTokenEntry("planner",
+                    r.getPlannerProvider(), r.getPlannerActualModel(), pIn, pOut));
+        }
+        int rIn  = r.getReviewerInputTokens()  != null ? r.getReviewerInputTokens()  : 0;
+        int rOut = r.getReviewerOutputTokens() != null ? r.getReviewerOutputTokens() : 0;
+        if (rIn > 0 || rOut > 0) {
+            entries.add(new RunDetail.AgentTokenEntry("reviewer",
+                    r.getReviewerProvider(), r.getReviewerActualModel(), rIn, rOut));
+        }
+        int cIn  = r.getCompilerInputTokens()  != null ? r.getCompilerInputTokens()  : 0;
+        int cOut = r.getCompilerOutputTokens() != null ? r.getCompilerOutputTokens() : 0;
+        if (cIn > 0 || cOut > 0) {
+            entries.add(new RunDetail.AgentTokenEntry("compiler",
+                    r.getCompilerProvider(), r.getCompilerActualModel(), cIn, cOut));
+        }
+        return entries;
     }
 
     public RunDetail toDetail(PipelineRun r, List<AgentTask> tasks) {
@@ -80,6 +114,8 @@ public class RunMapper {
             .keySource(r.getKeySource())
             .actualCostUsd(r.getActualCostUsd())
             .techStack(r.getTechStack())
+            .projectName(resolveProjectName(r.getProjectId()))
+            .agentTokens(buildAgentTokens(r))
             .build();
     }
 

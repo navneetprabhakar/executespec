@@ -8,15 +8,24 @@ import com.navneet.executespec.integration.pagerduty.PagerDutyAdapter;
 import com.navneet.executespec.integration.pagerduty.PagerDutyClient;
 import com.navneet.executespec.integration.servicenow.ServiceNowAdapter;
 import com.navneet.executespec.integration.servicenow.ServiceNowClient;
+import com.navneet.executespec.integration.slack.SlackClient;
+import com.navneet.executespec.integration.slack.SlackMessageBuilder;
+import com.navneet.executespec.integration.slack.SlackOAuthService;
+import com.navneet.executespec.integration.slack.model.OrgSlackIntegrationRepository;
+import com.navneet.executespec.integration.slack.model.ProjectSlackChannelRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
+import java.util.concurrent.ThreadPoolExecutor;
 
 @Configuration
 @EnableConfigurationProperties(IntegrationProperties.class)
@@ -84,5 +93,44 @@ public class IntegrationConfig {
     @ConditionalOnProperty("agent.integrations.pagerduty.enabled")
     public PagerDutyAdapter pagerDutyAdapter(PagerDutyClient pagerDutyClient, IntegrationProperties props, ObjectMapper mapper) {
         return new PagerDutyAdapter(pagerDutyClient, props.getPagerduty(), mapper);
+    }
+
+    // ── Slack ──────────────────────────────────────────────────────────────────
+
+    @Bean
+    @ConditionalOnProperty("agent.integrations.slack.enabled")
+    public SlackClient slackClient(RestTemplate integrationRestTemplate) {
+        return new SlackClient(integrationRestTemplate);
+    }
+
+    @Bean
+    @ConditionalOnProperty("agent.integrations.slack.enabled")
+    public SlackMessageBuilder slackMessageBuilder(IntegrationProperties props) {
+        return new SlackMessageBuilder(props.getSlack().getDashboardUrl());
+    }
+
+    @Bean
+    @ConditionalOnProperty("agent.integrations.slack.enabled")
+    public SlackOAuthService slackOAuthService(
+            SlackClient slackClient,
+            OrgSlackIntegrationRepository integrationRepo,
+            ProjectSlackChannelRepository channelRepo,
+            IntegrationProperties props,
+            @Value("${app.jwt.secret:executespec-default-secret}") String jwtSecret) {
+        return new SlackOAuthService(slackClient, integrationRepo, channelRepo,
+                props.getSlack(), jwtSecret);
+    }
+
+    @Bean(name = "slackNotificationExecutor")
+    @ConditionalOnProperty("agent.integrations.slack.enabled")
+    public TaskExecutor slackNotificationExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("slack-notif-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
     }
 }

@@ -43,6 +43,30 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId")
     Long sumOutputTokensByOrgId(@Param("orgId") String orgId);
 
+    // ── Date-filtered global metrics ──────────────────────────────────────────
+
+    long countByStartedAtGreaterThanEqual(Instant since);
+
+    long countByStatusAndStartedAtGreaterThanEqual(String status, Instant since);
+
+    @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r WHERE r.startedAt >= :since")
+    Long sumInputTokensByStartedAtAfter(@Param("since") Instant since);
+
+    @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.startedAt >= :since")
+    Long sumOutputTokensByStartedAtAfter(@Param("since") Instant since);
+
+    // ── Date-filtered org-scoped metrics ────────────────────────────────────────
+
+    long countByOrgIdAndStartedAtGreaterThanEqual(String orgId, Instant since);
+
+    long countByOrgIdAndStatusAndStartedAtGreaterThanEqual(String orgId, String status, Instant since);
+
+    @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId AND r.startedAt >= :since")
+    Long sumInputTokensByOrgIdAndStartedAtAfter(@Param("orgId") String orgId, @Param("since") Instant since);
+
+    @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId AND r.startedAt >= :since")
+    Long sumOutputTokensByOrgIdAndStartedAtAfter(@Param("orgId") String orgId, @Param("since") Instant since);
+
     // ── GCS workspace archiving ───────────────────────────────────────────────
 
     /**

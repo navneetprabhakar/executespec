@@ -236,20 +236,22 @@ public class ReviewerAgentV2 {
                     .build();
             Prompt prompt = new Prompt(messages, opts);
 
-            ChatResponse response;
+            LlmRouter.LlmResponse lr;
             try {
-                response = llmRouter.callWithFallback(provider, model.getModelName(), prompt,
+                lr = llmRouter.callWithFallbackTracked(provider, model.getModelName(), prompt,
                         runId, "reviewer-v2", FallbackMode.IMMEDIATE, iteration, false);
             } catch (Exception e) {
                 log.error("[ReviewerV2] LLM call failed on iteration {}", iteration, e);
                 break;
             }
+            ChatResponse response = lr.response();
 
             // Track tokens
             try {
                 int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
                 int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
                 stateStore.addTokensToRun(runId, inTok, outTok);
+                stateStore.setAgentTokens(runId, "reviewer", inTok, outTok, lr.provider(), lr.model());
             } catch (Exception ex) {
                 log.warn("[ReviewerV2] Could not extract token counts: {}", ex.getMessage());
             }

@@ -43,6 +43,20 @@ public record RunEvent(
         return new RunEvent("COMPLETE", runId, null, status, Instant.now());
     }
 
+    // ── Context clarification events ──────────────────────────────────────────
+
+    public static RunEvent clarificationNeeded(String runId, String prompt) {
+        return new RunEvent("CLARIFICATION_NEEDED", runId, null, prompt, Instant.now());
+    }
+
+    public static RunEvent clarificationResolved(String runId) {
+        return new RunEvent("CLARIFICATION_RESOLVED", runId, null, null, Instant.now());
+    }
+
+    public static RunEvent contextExtracted(String runId, String summary) {
+        return new RunEvent("CONTEXT_EXTRACTED", runId, null, summary, Instant.now());
+    }
+
     // ── Tier 5: Recovery events ───────────────────────────────────────────────
 
     public static RunEvent recoveryAttempted(String runId, String taskId,

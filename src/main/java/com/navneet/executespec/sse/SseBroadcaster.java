@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -20,6 +21,7 @@ public class SseBroadcaster {
 
     private final Map<String, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final ObjectMapper mapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     public SseEmitter subscribe(String runId) {
         SseEmitter emitter = new SseEmitter(0L);  // no timeout
@@ -50,6 +52,13 @@ public class SseBroadcaster {
             }
         }
         if (!dead.isEmpty()) clients.removeAll(dead);
+
+        // Publish RunEvent as a Spring event for external listeners (Slack, etc.)
+        try {
+            eventPublisher.publishEvent(event);
+        } catch (Exception e) {
+            log.debug("Failed to publish RunEvent for external listeners: {}", e.getMessage());
+        }
     }
 
     public void complete(String runId) {

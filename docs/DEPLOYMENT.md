@@ -25,7 +25,7 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1–V14).
+Flyway migrations run automatically on startup and create all tables (V1–V18).
 
 ### Redis Setup
 
@@ -1302,6 +1302,11 @@ Secret Manager by `startup.sh` at boot time.
 | `CORS_ALLOWED_ORIGINS` | Yes | Allowed CORS origin (should match `APP_BASE_URL`) |
 | `GMAIL_ENABLED` | No | `true` to enable Gmail OAuth email sending |
 | `GMAIL_SENDER_EMAIL` | No | Gmail address for outbound emails |
+| `SLACK_CLIENT_ID` | No | Slack app client ID (for OAuth) |
+| `SLACK_CLIENT_SECRET` | No | Slack app client secret |
+| `SLACK_SIGNING_SECRET` | No | Slack app signing secret (for request verification) |
+| `SLACK_REDIRECT_URI` | No | OAuth callback URL (default: `http://localhost:8080/api/integrations/slack/oauth/callback`) |
+| `DASHBOARD_URL` | No | Public dashboard URL for Slack message action buttons (default: `http://localhost:8080`) |
 
 ---
 

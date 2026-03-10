@@ -1,18 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   ChevronDown, ChevronRight, HelpCircle, ExternalLink,
   Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Settings2, Unplug,
+  Send, Hash, RefreshCw,
 } from 'lucide-react';
 import IntegrationLogo from '@/components/integrations/IntegrationLogo';
 import GlassPanel from '@/components/shared/GlassPanel';
 import { useAuthStore } from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 import { relativeTime } from '@/lib/utils';
-import type { RunSummary, OrgDto } from '@/lib/api';
+import type { RunSummary, OrgDto, SlackStatus, SlackChannel, ProjectSlackChannelDto } from '@/lib/api';
 
 // ── Integration metadata ──────────────────────────────────────────────────
 
 const INTEGRATIONS = [
+  { key: 'SLACK',      name: 'Slack',      description: 'Pipeline notifications',  configurable: true  },
   { key: 'JIRA',       name: 'Jira',       description: 'Issue-triggered runs',    configurable: true  },
   { key: 'CONFLUENCE', name: 'Confluence',  description: 'Page-triggered runs',     configurable: true  },
   { key: 'SERVICENOW', name: 'ServiceNow',  description: 'Incident response runs',  configurable: false },
@@ -22,6 +24,17 @@ const INTEGRATIONS = [
 interface SetupGuide { title: string; url: string; steps: string[]; }
 
 const SETUP_GUIDES: Record<string, SetupGuide> = {
+  SLACK: {
+    title: 'Slack Bot Installation',
+    url: 'https://api.slack.com/apps',
+    steps: [
+      'Click "Configure" on the Slack card and then "Connect to Slack"',
+      'You\'ll be redirected to Slack to authorize the ExecuteSpec bot',
+      'Select the workspace you want to install the bot in and click "Allow"',
+      'Once connected, add channels to your projects to receive notifications',
+      'Choose a verbosity level: Minimal (start/complete/fail), Standard (+ approvals, reviews), or Verbose (all events)',
+    ],
+  },
   JIRA: {
     title: 'Jira API Token',
     url: 'https://id.atlassian.com/manage-profile/security/api-tokens',
@@ -304,6 +317,179 @@ function ConfluenceCredentialForm({
   );
 }
 
+// ── Slack OAuth Config Form ──────────────────────────────────────────────
+
+function SlackConfigForm({
+  slackStatus, onRefresh,
+}: {
+  slackStatus: SlackStatus | null; onRefresh: () => void;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [testingChannel, setTestingChannel] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleConnect = async () => {
+    setConnecting(true); setMsg(null);
+    try {
+      const { installUrl } = await api.getSlackInstallUrl();
+      window.location.href = installUrl;
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to start OAuth flow.' });
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm('Disconnect Slack? This will remove all channel mappings and revoke the bot token.')) return;
+    setDisconnecting(true); setMsg(null);
+    try {
+      await api.disconnectSlack();
+      setMsg({ ok: true, text: 'Slack disconnected.' });
+      onRefresh();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to disconnect.' });
+    } finally { setDisconnecting(false); }
+  };
+
+  const handleTest = async (channelId: string) => {
+    setTestingChannel(channelId); setMsg(null);
+    try {
+      const result = await api.sendSlackTestMessage(channelId);
+      setMsg({ ok: result.ok, text: result.ok ? 'Test message sent!' : (result.message || 'Test failed.') });
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to send test.' });
+    } finally { setTestingChannel(null); }
+  };
+
+  if (!slackStatus?.connected) {
+    return (
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-400">
+          Connect your Slack workspace to receive pipeline notifications in your channels.
+        </p>
+        {msg && <p className={`text-xs ${msg.ok ? 'text-accent-emerald' : 'text-red-400'}`}>{msg.text}</p>}
+        <button
+          onClick={handleConnect}
+          disabled={connecting}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4A154B] text-white text-sm font-medium hover:bg-[#4A154B]/80 disabled:opacity-50 transition-colors"
+        >
+          {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
+            <svg width="16" height="16" viewBox="0 0 32 32" fill="none"><path d="M8.8 19.2a2.4 2.4 0 01-2.4 2.4A2.4 2.4 0 014 19.2a2.4 2.4 0 012.4-2.4h2.4v2.4z" fill="#fff"/><path d="M10 19.2a2.4 2.4 0 012.4-2.4 2.4 2.4 0 012.4 2.4v6a2.4 2.4 0 01-2.4 2.4 2.4 2.4 0 01-2.4-2.4v-6z" fill="#fff"/><path d="M12.4 8.8a2.4 2.4 0 01-2.4-2.4A2.4 2.4 0 0112.4 4a2.4 2.4 0 012.4 2.4v2.4h-2.4z" fill="#fff"/><path d="M12.4 10a2.4 2.4 0 012.4 2.4 2.4 2.4 0 01-2.4 2.4h-6A2.4 2.4 0 014 12.4 2.4 2.4 0 016.4 10h6z" fill="#fff"/></svg>
+          )}
+          Connect to Slack
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Connection status */}
+      <div className="flex items-center gap-2 text-xs">
+        <CheckCircle className="h-3.5 w-3.5 text-accent-emerald" />
+        <span className="text-zinc-300">Connected to <span className="font-medium text-white">{slackStatus.teamName}</span></span>
+        {slackStatus.channelCount != null && (
+          <span className="text-zinc-600">({slackStatus.channelCount} channel{slackStatus.channelCount !== 1 ? 's' : ''} mapped)</span>
+        )}
+      </div>
+
+      {slackStatus.installedBy && (
+        <p className="text-xs text-zinc-600">
+          Installed by {slackStatus.installedBy}
+          {slackStatus.installedAt && ` \u00B7 ${relativeTime(slackStatus.installedAt)}`}
+        </p>
+      )}
+
+      <p className="text-xs text-zinc-500">
+        Configure project-level channel mappings from each project&apos;s settings.
+        Use the test button below to verify the bot can post to a channel.
+      </p>
+
+      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-emerald' : 'text-red-400'}`}>{msg.text}</p>}
+
+      <SlackTestSection onTest={handleTest} testingChannel={testingChannel} />
+
+      <div className="flex gap-3 pt-1">
+        <button
+          onClick={onRefresh}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/[0.08] text-zinc-400 hover:text-white text-xs transition-colors"
+        >
+          <RefreshCw className="h-3 w-3" /> Refresh Status
+        </button>
+        <button
+          onClick={handleDisconnect}
+          disabled={disconnecting}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-400 hover:text-red-400 text-xs transition-colors disabled:opacity-50"
+        >
+          <Unplug className="h-3 w-3" />
+          {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SlackTestSection({
+  onTest, testingChannel,
+}: {
+  onTest: (channelId: string) => void; testingChannel: string | null;
+}) {
+  const [channels, setChannels] = useState<SlackChannel[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState('');
+
+  const loadChannels = async () => {
+    setLoading(true);
+    try {
+      const list = await api.listSlackChannels();
+      setChannels(list);
+      if (list.length > 0 && !selectedChannel) setSelectedChannel(list[0].channelId);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="flex items-end gap-2">
+      <div className="flex-1">
+        <label className="text-xs text-zinc-400 mb-1 block">Send test message</label>
+        <div className="flex gap-2">
+          {channels.length === 0 ? (
+            <button
+              onClick={loadChannels}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-xs hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+            >
+              {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Hash className="h-3 w-3" />}
+              Load Channels
+            </button>
+          ) : (
+            <>
+              <select
+                value={selectedChannel}
+                onChange={(e) => setSelectedChannel(e.target.value)}
+                className="flex-1 rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-xs text-white focus:border-accent-violet focus:outline-none"
+              >
+                {channels.map((ch) => (
+                  <option key={ch.channelId} value={ch.channelId}>#{ch.channelName}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => selectedChannel && onTest(selectedChannel)}
+                disabled={!selectedChannel || testingChannel != null}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+              >
+                {testingChannel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                Test
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main IntegrationsPage ──────────────────────────────────────────────────
 
 export default function IntegrationsPage() {
@@ -314,16 +500,38 @@ export default function IntegrationsPage() {
   const [showGuide, setShowGuide] = useState(false);
   const [openGuides, setOpenGuides] = useState<Record<string, boolean>>({});
   const [configuring, setConfiguring] = useState<string | null>(null);
+  const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
 
   const isAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
+
+  const fetchSlackStatus = useCallback(() => {
+    if (!user?.orgId) return;
+    api.getSlackStatus().then(setSlackStatus).catch(() => setSlackStatus(null));
+  }, [user?.orgId]);
 
   useEffect(() => {
     api.getIntegrationStatus().then((r) => setEnabledSources(r.enabledSources)).catch(() => {});
     api.getIntegrationRuns().then(setRuns).catch(() => {});
     if (user?.orgId) {
       api.getMyOrg().then(setOrg).catch(() => {});
+      fetchSlackStatus();
     }
-  }, [user?.orgId]);
+  }, [user?.orgId, fetchSlackStatus]);
+
+  // Handle OAuth redirect — detect ?slack=success or ?slack=error in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const slackResult = params.get('slack');
+    if (slackResult === 'success') {
+      fetchSlackStatus();
+      setConfiguring('SLACK');
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (slackResult === 'error') {
+      setConfiguring('SLACK');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [fetchSlackStatus]);
 
   const handleOrgUpdated = (updatedOrg: OrgDto) => {
     setOrg(updatedOrg);
@@ -341,6 +549,7 @@ export default function IntegrationsPage() {
   const isConfigured = (key: string): boolean => {
     if (key === 'JIRA') return !!org?.hasJiraCredentials;
     if (key === 'CONFLUENCE') return !!org?.hasConfluenceCredentials;
+    if (key === 'SLACK') return !!slackStatus?.connected;
     return enabledSources.includes(key);
   };
 
@@ -422,16 +631,22 @@ export default function IntegrationsPage() {
                 {configured && int.key === 'CONFLUENCE' && org?.confluenceBaseUrl && (
                   <p className="text-xs text-zinc-500 mt-1 truncate">URL: {org.confluenceBaseUrl}</p>
                 )}
+                {configured && int.key === 'SLACK' && slackStatus?.teamName && (
+                  <p className="text-xs text-zinc-500 mt-1 truncate">Workspace: {slackStatus.teamName}</p>
+                )}
               </div>
 
               {/* Expanded credential form */}
-              {isExpanded && org && (
+              {isExpanded && (int.key === 'SLACK' ? user?.orgId : org) && (
                 <div className="px-4 pb-4 pt-1 border-t border-white/[0.06]">
-                  {int.key === 'JIRA' && (
+                  {int.key === 'JIRA' && org && (
                     <JiraCredentialForm org={org} onSaved={handleOrgUpdated} />
                   )}
-                  {int.key === 'CONFLUENCE' && (
+                  {int.key === 'CONFLUENCE' && org && (
                     <ConfluenceCredentialForm org={org} onSaved={handleOrgUpdated} />
+                  )}
+                  {int.key === 'SLACK' && (
+                    <SlackConfigForm slackStatus={slackStatus} onRefresh={fetchSlackStatus} />
                   )}
                 </div>
               )}

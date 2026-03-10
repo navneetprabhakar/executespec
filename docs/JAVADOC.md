@@ -1,7 +1,7 @@
 # ExecuteSpec -- Complete System Documentation
 
-**Version:** 2c69462 (main)
-**Last Updated:** 2026-03-07
+**Version:** 7fedbee (main)
+**Last Updated:** 2026-03-10
 **Stack:** Java 21, Spring Boot 3.3.0, Spring AI 1.1.0, PostgreSQL, Redis, JGit 6.9.0
 
 ---
@@ -190,6 +190,9 @@ All packages are under `com.navneet.executespec`.
 | `repo/` | GitHubRepoService (create repos, push branches) |
 | `pricing/` | ModelPricing entity + repository (DB-backed pricing for cost estimation) |
 | `integration/` | External system adapters: Jira, Confluence, ServiceNow, PagerDuty + IntegrationManager |
+| `integration/slack/` | Slack push notifications: SlackClient, SlackOAuthService, SlackNotificationService, SlackMessageBuilder, SlackRateLimiter |
+| `integration/slack/entity/` | OrgSlackIntegration, ProjectSlackChannel, SlackNotificationLog |
+| `integration/context/` | JIRA/Confluence context extraction: ReferenceExtractorService, ExtractionResult |
 
 ---
 
@@ -198,12 +201,12 @@ All packages are under `com.navneet.executespec`.
 ### 4.1 Run Lifecycle States
 
 ```
-PLANNING --> AWAITING_APPROVAL --> WORKING --> REVIEWING --> AWAITING_MERGE --> COMPLETE
-    |               |                |            |               |
-    v               v                v            v               v
-  FAILED         FAILED           PARTIAL      FAILED          PARTIAL
-                (rejected)       (some tasks               (merge declined
-                                  failed)                   or conflict)
+PLANNING --> AWAITING_CLARIFICATION --> AWAITING_APPROVAL --> WORKING --> REVIEWING --> AWAITING_MERGE --> COMPLETE
+    |               |                      |                    |            |               |
+    v               v                      v                    v            v               v
+  FAILED      (user provides ref        FAILED              PARTIAL      FAILED          PARTIAL
+               or skips)               (rejected)           (some tasks               (merge declined
+                                                             failed)                   or conflict)
     |
     v
   QUEUED  (waiting for compute slot)
@@ -1211,7 +1214,26 @@ Process-based local preview (NOT Docker). Starts the appropriate dev server dire
 | `POST` | `/api/integrations/servicenow/webhook` | ServiceNow webhook handler |
 | `POST` | `/api/integrations/pagerduty/webhook` | PagerDuty webhook handler |
 
-### 12.10 Metrics Endpoint (`MetricsController`)
+### 12.10 Slack Endpoints (`SlackIntegrationController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/integrations/slack/install` | Returns Slack OAuth install URL (HMAC-signed state) |
+| `GET` | `/api/integrations/slack/oauth/callback` | Handles OAuth redirect, exchanges code for token |
+| `GET` | `/api/integrations/slack/status` | Connection status for current org |
+| `DELETE` | `/api/integrations/slack/disconnect` | Removes Slack connection |
+| `POST` | `/api/integrations/slack/test` | Sends test Block Kit message to a channel |
+| `GET` | `/api/integrations/slack/channels` | Lists available Slack channels via conversations.list |
+| `GET` | `/api/integrations/slack/channels/project/{projectId}` | Get project → channel mapping |
+| `PUT` | `/api/integrations/slack/channels/project/{projectId}` | Set project → channel mapping |
+
+### 12.11 Clarification Endpoint (`RunController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/runs/{runId}/clarify` | Resolve clarification gate (accepts `{response: string}`) |
+
+### 12.12 Metrics Endpoint (`MetricsController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1230,11 +1252,15 @@ Process-based local preview (NOT Docker). Starts the appropriate dev server dire
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/orgs` | Create organization |
+| `POST` | `/api/orgs` | Create organization (requires name, domains, adminEmail) |
 | `GET` | `/api/orgs/{orgId}` | Get organization details |
 | `PUT` | `/api/orgs/{orgId}` | Update organization settings |
 | `GET` | `/api/orgs/{orgId}/members` | List org members |
 | `POST` | `/api/orgs/{orgId}/members` | Invite member |
+| `PUT` | `/api/org/me/settings/jira` | Save org JIRA credentials (ORG_ADMIN only) |
+| `PUT` | `/api/org/me/settings/confluence` | Save org Confluence credentials (ORG_ADMIN only) |
+| `POST` | `/api/org/me/settings/jira/validate` | Test JIRA connection |
+| `POST` | `/api/org/me/settings/confluence/validate` | Test Confluence connection |
 
 ### 12.13 Project Endpoints (`ProjectController`)
 
@@ -1294,6 +1320,9 @@ public record RunEvent(
 | `REVIEW_AUTO_FIX_STARTED` | Auto-fix attempt started | Issue ID |
 | `REVIEW_AUTO_FIX_RESULT` | Auto-fix result | "issueId\|PASS/FAIL" |
 | `REVIEW_COMPLETE` | Review complete | "verdict\|summary" |
+| `CLARIFICATION_NEEDED` | Context extraction needs user input | Clarification prompt text |
+| `CLARIFICATION_RESOLVED` | User provided clarification | null |
+| `CONTEXT_EXTRACTED` | JIRA/Confluence context fetched | Summary of extracted refs |
 
 ### 13.2 SseBroadcaster
 
@@ -1683,22 +1712,33 @@ app:
 | V13 | Merge conflict tracking table |
 | V14 | Key source mode + provider restrictions |
 | V15 | Task complexity and model metrics |
+| V17 | Auto-merge flag (pipeline_run.auto_merge) |
+| V18 | Org-level integration settings (admin_email, JIRA/Confluence credentials on org table) |
+| V19 | Agent token breakdown (per-task input/output token tracking) |
+| V20 | Slack integration (org_slack_integration, project_slack_channel, slack_notification_log) |
 
 ### 16.2 Entity Relationship Diagram
 
 ```
 +------------------+       +------------------+
-|   app_user       |       |     org          |
-|------------------|       |------------------|
-| id (PK)          |------>| id (PK)          |
-| email            |       | name             |
-| password_hash    |       | tier             |
-| org_id (FK)      |       | key_source_mode  |
-| anthropic_api_key|       | enabled_providers|
-| openai_api_key   |       | anthropic_api_key|
-| gemini_api_key   |       | openai_api_key   |
-| github_pat       |       | gemini_api_key   |
-+------------------+       +------------------+
+|   app_user       |       |     org              |
+|------------------|       |----------------------|
+| id (PK)          |------>| id (PK)              |
+| email            |       | name                 |
+| password_hash    |       | tier                 |
+| org_id (FK)      |       | key_source_mode      |
+| anthropic_api_key|       | enabled_providers    |
+| openai_api_key   |       | anthropic_api_key    |
+| gemini_api_key   |       | openai_api_key       |
+| github_pat       |       | gemini_api_key       |
++------------------+       | admin_email          |
+                            | jira_base_url        |
+                            | jira_email           |
+                            | jira_api_token       |
+                            | confluence_base_url  |
+                            | confluence_email     |
+                            | confluence_api_token |
+                            +----------------------+
         |                           |
         |                  +--------v---------+
         |                  |    project       |

@@ -3,7 +3,7 @@
  * Uses official brand colours; avoids external asset dependencies.
  */
 interface IntegrationLogoProps {
-  integration: string; // key: JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY, GITHUB
+  integration: string; // key: JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY, GITHUB, SLACK
   size?: number;
 }
 
@@ -66,6 +66,21 @@ export default function IntegrationLogo({ integration, size = 28 }: IntegrationL
           {/* PagerDuty green bold "P" shape */}
           <rect x="4" y="4" width="24" height="24" rx="5" fill="#06AC38"/>
           <path d="M12 8h5.5c3.3 0 5.5 2 5.5 5.2 0 3.2-2.2 5.2-5.5 5.2H15v5.6h-3V8zm3 7.8h2.3c1.7 0 2.7-.9 2.7-2.6 0-1.7-1-2.6-2.7-2.6H15v5.2z" fill="white"/>
+        </svg>
+      );
+
+    case 'SLACK':
+      return (
+        <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {/* Slack hash mark — 4 brand colours */}
+          <path d="M8.8 19.2a2.4 2.4 0 01-2.4 2.4A2.4 2.4 0 014 19.2a2.4 2.4 0 012.4-2.4h2.4v2.4z" fill="#E01E5A"/>
+          <path d="M10 19.2a2.4 2.4 0 012.4-2.4 2.4 2.4 0 012.4 2.4v6a2.4 2.4 0 01-2.4 2.4 2.4 2.4 0 01-2.4-2.4v-6z" fill="#E01E5A"/>
+          <path d="M12.4 8.8a2.4 2.4 0 01-2.4-2.4A2.4 2.4 0 0112.4 4a2.4 2.4 0 012.4 2.4v2.4h-2.4z" fill="#36C5F0"/>
+          <path d="M12.4 10a2.4 2.4 0 012.4 2.4 2.4 2.4 0 01-2.4 2.4h-6A2.4 2.4 0 014 12.4 2.4 2.4 0 016.4 10h6z" fill="#36C5F0"/>
+          <path d="M23.2 12.4a2.4 2.4 0 012.4-2.4A2.4 2.4 0 0128 12.4a2.4 2.4 0 01-2.4 2.4h-2.4v-2.4z" fill="#2EB67D"/>
+          <path d="M22 12.4A2.4 2.4 0 0119.6 14.8a2.4 2.4 0 01-2.4-2.4v-6A2.4 2.4 0 0119.6 4 2.4 2.4 0 0122 6.4v6z" fill="#2EB67D"/>
+          <path d="M19.6 23.2a2.4 2.4 0 012.4 2.4A2.4 2.4 0 0119.6 28a2.4 2.4 0 01-2.4-2.4v-2.4h2.4z" fill="#ECB22E"/>
+          <path d="M19.6 22a2.4 2.4 0 01-2.4-2.4 2.4 2.4 0 012.4-2.4h6A2.4 2.4 0 0128 19.6 2.4 2.4 0 0125.6 22h-6z" fill="#ECB22E"/>
         </svg>
       );
 

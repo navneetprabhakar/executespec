@@ -46,6 +46,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/health").permitAll()
                 // Integration webhooks (external — secured by signature, not JWT)
                 .requestMatchers("/api/integrations/*/webhook").permitAll()
+                // Slack OAuth callback (external redirect — no JWT)
+                .requestMatchers("/api/integrations/slack/oauth/callback").permitAll()
                 // SSE streaming (authenticated via ?token= query param)
                 .requestMatchers("/api/runs/*/events").permitAll()
                 // Static frontend assets (SPA)

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play } from 'lucide-react';
+import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play, HelpCircle, Send, Loader2 } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
@@ -10,7 +10,7 @@ import { downloadWorkspace, type ReviewReport } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function RunDetail() {
-  const { activeRun, activeRunId, setActiveRunId, approveRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions, reworkRun, createRun, pauseRun, editAndRestartRun, resumeRun } = useRunStore();
+  const { activeRun, activeRunId, setActiveRunId, approveRun, clarifyRun, mergeRun, cancelRun, reopenMergeGate, implementSuggestions, reworkRun, createRun, pauseRun, editAndRestartRun, resumeRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
@@ -19,6 +19,9 @@ export default function RunDetail() {
   const [newGoal, setNewGoal] = useState('');
   const [restarting, setRestarting] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [clarificationInput, setClarificationInput] = useState('');
+  const [clarifying, setClarifying] = useState(false);
 
   // Parse the reviewJson once whenever the run refreshes
   const review = useMemo<ReviewReport | null>(() => {
@@ -104,6 +107,19 @@ export default function RunDetail() {
     }
   };
 
+  const handleRefresh = async () => {
+    if (!activeRunId || refreshing) return;
+    setRefreshing(true);
+    try {
+      await useRunStore.getState().fetchRun(activeRunId);
+      await useRunStore.getState().fetchRuns();
+    } catch {
+      // silent — SSE will catch up
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       {activeRun && (
@@ -141,6 +157,38 @@ export default function RunDetail() {
               setConfirming={setConfirming}
               approveLabel="Approve Plan"
               rejectLabel="Reject"
+            />
+          )}
+          {activeRun.status === 'AWAITING_CLARIFICATION' && (
+            <ClarificationBanner
+              runId={activeRun.runId}
+              input={clarificationInput}
+              setInput={setClarificationInput}
+              submitting={clarifying}
+              onSubmit={async () => {
+                if (!clarificationInput.trim()) return;
+                setClarifying(true);
+                try {
+                  await clarifyRun(activeRun.runId, clarificationInput.trim());
+                  setClarificationInput('');
+                  addToast({ type: 'success', message: 'Clarification submitted' });
+                } catch (e: any) {
+                  addToast({ type: 'error', message: e.message });
+                } finally {
+                  setClarifying(false);
+                }
+              }}
+              onSkip={async () => {
+                setClarifying(true);
+                try {
+                  await clarifyRun(activeRun.runId, '');
+                  addToast({ type: 'info', message: 'Continuing without clarification' });
+                } catch (e: any) {
+                  addToast({ type: 'error', message: e.message });
+                } finally {
+                  setClarifying(false);
+                }
+              }}
             />
           )}
           {activeRun.status === 'AWAITING_MERGE' && (
@@ -376,6 +424,15 @@ export default function RunDetail() {
             )}
             <div className="flex items-center gap-3 ml-auto">
               <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-violet transition-colors disabled:opacity-50"
+                title="Refresh run data"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+                Refresh
+              </button>
+              <button
                 onClick={() => downloadWorkspace(activeRun.runId).catch(() => {})}
                 className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
                 title="Download workspace as zip"
@@ -413,6 +470,58 @@ interface GateBannerProps {
   confirming: string | null;
   setConfirming: (v: string | null) => void;
 }
+
+// ── Clarification Banner ──────────────────────────────────────────────────
+
+interface ClarificationBannerProps {
+  runId: string;
+  input: string;
+  setInput: (v: string) => void;
+  submitting: boolean;
+  onSubmit: () => void;
+  onSkip: () => void;
+}
+
+function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onSkip }: ClarificationBannerProps) {
+  return (
+    <div className="mx-4 mt-3 p-3 rounded-lg border border-accent-violet/30 bg-accent-violet/5 space-y-2">
+      <div className="flex items-center gap-2">
+        <HelpCircle className="h-4 w-4 text-accent-violet flex-shrink-0" />
+        <p className="text-xs text-accent-violet">
+          Please provide the specific JIRA issue key (e.g., PROJ-123) or Confluence page URL to continue.
+        </p>
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && input.trim()) onSubmit(); }}
+          placeholder="e.g., PROJ-123 or https://yourorg.atlassian.net/wiki/..."
+          className="flex-1 rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+          disabled={submitting}
+        />
+        <button
+          onClick={onSubmit}
+          disabled={submitting || !input.trim()}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+        >
+          {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+          Submit
+        </button>
+        <button
+          onClick={onSkip}
+          disabled={submitting}
+          className="px-3 py-1.5 rounded-lg border border-white/[0.06] text-zinc-400 hover:text-zinc-300 text-xs transition-colors disabled:opacity-50"
+        >
+          Skip
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Gate Banner ───────────────────────────────────────────────────────────
 
 function GateBanner({ message, icon, onApprove, onReject, approveLabel, rejectLabel, confirming, setConfirming }: GateBannerProps) {
   return (

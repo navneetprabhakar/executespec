@@ -205,6 +205,13 @@ agent:
       auto-resolve: false
       dashboard-url: http://localhost:8080
       skip-approval: false
+    slack:
+      enabled: false
+      client-id: ${SLACK_CLIENT_ID:}
+      client-secret: ${SLACK_CLIENT_SECRET:}
+      signing-secret: ${SLACK_SIGNING_SECRET:}
+      redirect-uri: ${SLACK_REDIRECT_URI:http://localhost:8080/api/integrations/slack/oauth/callback}
+      dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
 
 app:
   # Gmail API OAuth2 sender config (replaces SMTP)
