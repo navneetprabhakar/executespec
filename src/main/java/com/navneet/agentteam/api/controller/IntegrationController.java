@@ -5,6 +5,7 @@ import com.navneet.agentteam.integration.IntegrationEvent;
 import com.navneet.agentteam.integration.IntegrationManager;
 import com.navneet.agentteam.integration.WebhookSignatureException;
 import com.navneet.agentteam.integration.confluence.ConfluenceAdapter;
+import com.navneet.agentteam.integration.jira.JiraAdapter;
 import com.navneet.agentteam.state.entity.IntegrationRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +47,31 @@ public class IntegrationController {
     }
 
     /**
+     * Manual JIRA trigger: POST /api/integrations/jira/trigger
+     * Body: { "issueKey": "KAN-1", "goal": "optional goal override" }
+     */
+    @PostMapping("/jira/trigger")
+    public ResponseEntity<Map<String, String>> jiraTrigger(@RequestBody Map<String, String> body) {
+        try {
+            InboundAdapter adapter = manager.getInboundAdapter("JIRA").orElse(null);
+            if (!(adapter instanceof JiraAdapter ja)) {
+                return ResponseEntity.status(503).body(Map.of("error", "Jira integration not enabled"));
+            }
+            String issueKey = body.get("issueKey");
+            if (issueKey == null || issueKey.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "issueKey is required"));
+            }
+            String goal = body.get("goal");
+            IntegrationEvent event = ja.buildFromIssueKey(issueKey, goal);
+            String runId = manager.submitEvent(event);
+            return ResponseEntity.ok(Map.of("runId", runId));
+        } catch (Exception e) {
+            log.error("[Webhook] Jira manual trigger error: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
      * Manual Confluence trigger: POST /api/integrations/confluence/trigger
      * Body: { "pageId": "12345", "goal": "Refactor auth module" }
      */
@@ -80,11 +106,8 @@ public class IntegrationController {
                 .toList();
     }
 
-    /** Returns which integrations are currently enabled: GET /api/integrations/status */
-    @GetMapping("/status")
-    public Map<String, Object> status() {
-        return Map.of("enabledSources", manager.getEnabledSources());
-    }
+    // NOTE: GET /api/integrations/status is handled by IntegrationStatusController
+    // (always-available, not @ConditionalOnProperty gated) to avoid ambiguous mapping.
 
     private IntegrationRunSummary toSummary(IntegrationRun ir) {
         return new IntegrationRunSummary(

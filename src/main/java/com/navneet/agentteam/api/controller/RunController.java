@@ -90,6 +90,7 @@ public class RunController {
             githubPat,
             githubOwner,
             Boolean.TRUE.equals(req.skipApproval()),
+            Boolean.TRUE.equals(req.autoMerge()),
             req.modelName()
         );
 
@@ -246,6 +247,39 @@ public class RunController {
         return resumed ? ResponseEntity.ok().build() : ResponseEntity.status(HttpStatus.CONFLICT).build();
     }
 
+    /**
+     * Push an existing COMPLETE/PARTIAL run's workspace to GitHub.
+     * If repoMode=NEW and no repoUrl, creates a new repo first.
+     * This avoids re-running the pipeline just to push generated code.
+     */
+    @PostMapping("/{runId}/push-github")
+    public ResponseEntity<Map<String, String>> pushToGitHub(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable String runId,
+            @RequestParam(required = false) String repoUrl,
+            @RequestParam(required = false, defaultValue = "NEW") String repoMode) {
+        log.info("POST /api/runs/{}/push-github — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
+        PipelineRun run = stateStore.findRun(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Only COMPLETE or PARTIAL runs can be pushed to GitHub (current: " + run.getStatus() + ")");
+        }
+        // Override run's repo config with request params
+        if (repoUrl != null && !repoUrl.isBlank()) run.setRepoUrl(repoUrl);
+        run.setRepoMode(repoMode);
+        // Ensure PAT is available (from user or run or system)
+        if (userDetails != null && (run.getGithubPat() == null || run.getGithubPat().isBlank())) {
+            run.setGithubPat(userDetails.getUser().getGithubPat());
+            run.setGithubOwner(userDetails.getUser().getGithubOwner());
+        }
+        stateStore.save(run);
+        harness.pushToGitHubManual(run);
+        return ResponseEntity.ok(Map.of(
+            "status", "pushed",
+            "repoUrl", run.getRepoUrl() != null ? run.getRepoUrl() : ""));
+    }
+
     /** Cancel a run. */
     @DeleteMapping("/{runId}")
     public ResponseEntity<Void> cancel(@PathVariable String runId) {
@@ -373,19 +407,20 @@ public class RunController {
     /**
      * Download the workspace for a run as a zip file. Works for any run status.
      *
-     * <p>Two paths:
-     * <ul>
-     *   <li><b>Local (recent run, &lt;24 h)</b>: builds zip on the fly and streams it directly.</li>
-     *   <li><b>Archived (GCS)</b>: generates a 5-minute signed URL and issues a 302 redirect
-     *       so the client downloads directly from Cloud Storage — zero server bandwidth in
-     *       the data path.</li>
-     * </ul>
+     * <p>Three paths (in priority order):
+     * <ol>
+     *   <li><b>Archived (GCS)</b>: 302 redirect to a 5-minute signed URL.</li>
+     *   <li><b>Local (recent run)</b>: builds zip on the fly and streams it.</li>
+     *   <li><b>GitHub fallback</b>: if workspace deleted but repo URL exists,
+     *       redirects to GitHub's built-in archive download.</li>
+     * </ol>
      */
     @GetMapping("/{id}/download")
     public ResponseEntity<?> downloadWorkspace(@PathVariable String id) {
         try {
-            // If the workspace has been archived to GCS, redirect to a signed URL
             PipelineRun run = stateStore.findRun(id).orElse(null);
+
+            // Path 1: GCS archive — redirect to signed URL
             if (run != null && run.getGcsWorkspaceKey() != null) {
                 URL signedUrl = gcsWorkspaceStore.signedDownloadUrl(
                     run.getGcsWorkspaceKey(), Duration.ofMinutes(5));
@@ -395,23 +430,40 @@ public class RunController {
                     .build();
             }
 
-            // Local workspace: zip on the fly and stream
-            Path zipPath = workspaceExportService.exportWorkspace(id);
-            String runId8 = id.substring(0, Math.min(8, id.length()));
-            String filename = "workspace-" + runId8 + ".zip";
+            // Path 2: Local workspace — zip on the fly and stream
+            try {
+                Path zipPath = workspaceExportService.exportWorkspace(id);
+                String runId8 = id.substring(0, Math.min(8, id.length()));
+                String filename = "workspace-" + runId8 + ".zip";
 
-            Resource resource = new FileSystemResource(zipPath);
-            zipPath.toFile().deleteOnExit();
+                Resource resource = new FileSystemResource(zipPath);
+                zipPath.toFile().deleteOnExit();
 
-            return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                    "attachment; filename=\"" + filename + "\"")
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .contentLength(Files.size(zipPath))
-                .body(resource);
+                return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + filename + "\"")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .contentLength(Files.size(zipPath))
+                    .body(resource);
 
-        } catch (IllegalStateException e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+            } catch (IllegalStateException e) {
+                // Path 3: GitHub fallback — redirect to GitHub archive zip
+                if (run != null && run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
+                    String[] ownerRepo = com.navneet.agentteam.repo.GitHubRepoService.extractOwnerRepo(run.getRepoUrl());
+                    if (ownerRepo != null) {
+                        String githubZip = "https://github.com/" + ownerRepo[0] + "/" + ownerRepo[1]
+                                + "/archive/refs/heads/main.zip";
+                        log.info("Local workspace missing for run {} — redirecting to GitHub zip: {}", id, githubZip);
+                        return ResponseEntity.status(HttpStatus.FOUND)
+                            .header(HttpHeaders.LOCATION, githubZip)
+                            .build();
+                    }
+                }
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+            }
+
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                 "Failed to export workspace: " + e.getMessage());

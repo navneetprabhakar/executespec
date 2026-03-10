@@ -199,18 +199,19 @@ public class PipelineHarness {
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner) {
         return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
-                         false, null);
+                         false, false, null);
     }
 
     /**
-     * Overloaded submit that applies skipApproval and modelName BEFORE the async
-     * thread starts, avoiding the race condition where the controller sets overrides
-     * after the pipeline thread has already read the run entity.
+     * Overloaded submit that applies skipApproval, autoMerge, and modelName BEFORE
+     * the async thread starts, avoiding the race condition where the controller sets
+     * overrides after the pipeline thread has already read the run entity.
      */
     public PipelineRun submitRun(String userRequest, String source,
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner,
-                                  boolean skipApproval, String modelName) {
+                                  boolean skipApproval, boolean autoMerge,
+                                  String modelName) {
         PipelineRun run = stateStore.createRun(userRequest, source, repoUrl, repoMode,
             props.getRoles().getPlanner(),
             props.getRoles().getWorker(),
@@ -220,6 +221,10 @@ public class PipelineHarness {
         boolean needsSave = false;
         if (skipApproval) {
             run.setSkipApproval(true);
+            needsSave = true;
+        }
+        if (autoMerge) {
+            run.setAutoMerge(true);
             needsSave = true;
         }
         if (modelName != null && !modelName.isBlank()) {
@@ -684,8 +689,16 @@ public class PipelineHarness {
             String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
             broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
 
-            MergeDecision decision = gateStore.awaitMergeGate(runId);
-            stateStore.recordGateResolved(mergeGateId, decision == MergeDecision.MERGE);
+            MergeDecision decision;
+            if (run.isAutoMerge()) {
+                decision = MergeDecision.MERGE;
+                stateStore.recordGateResolved(mergeGateId, true);
+                broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-merged (autoMerge flag)"));
+                log.info("Merge gate auto-resolved for run {}", runId);
+            } else {
+                decision = gateStore.awaitMergeGate(runId);
+                stateStore.recordGateResolved(mergeGateId, decision == MergeDecision.MERGE);
+            }
 
             if (decision == MergeDecision.MERGE) {
                 List<String> conflicted = mergeService.mergeAll(runId, stateStore.getAllTasks(runId));
@@ -887,6 +900,16 @@ public class PipelineHarness {
 
     private void doReviewAndMerge(PipelineRun run, boolean holdsComputeSlot, boolean initialNeedsReview) {
         String runId = run.getRunId();
+
+        // Guard: refuse to regress a terminal run back into the review/merge loop.
+        PipelineRun guardCheck = stateStore.findRun(runId).orElse(run);
+        String guardStatus = guardCheck.getStatus();
+        if ("COMPLETE".equals(guardStatus) || "FAILED".equals(guardStatus)) {
+            log.warn("[doReviewAndMerge] Skipping — run {} is already {} (would regress to REVIEWING)",
+                runId, guardStatus);
+            return;
+        }
+
         try {
             boolean needsReview = initialNeedsReview;
             // Load existing review if skipping initial review (e.g., DECLINE re-entry)
@@ -912,21 +935,28 @@ public class PipelineHarness {
                 String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
                 broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
 
-                if (holdsComputeSlot) {
-                    log.info("[PipelineHarness] Run {} entering merge gate — releasing compute slot", runId);
-                    runSlots.release();
-                }
                 MergeDecision decision;
-                try {
-                    decision = gateStore.awaitMergeGate(runId);
-                } finally {
+                if (run.isAutoMerge()) {
+                    decision = MergeDecision.MERGE;
+                    stateStore.recordGateResolved(mergeGateId, true);
+                    broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-merged (autoMerge flag)"));
+                    log.info("Merge gate auto-resolved for run {}", runId);
+                } else {
                     if (holdsComputeSlot) {
-                        try { runSlots.acquire(); }
-                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                        log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
+                        log.info("[PipelineHarness] Run {} entering merge gate — releasing compute slot", runId);
+                        runSlots.release();
                     }
+                    try {
+                        decision = gateStore.awaitMergeGate(runId);
+                    } finally {
+                        if (holdsComputeSlot) {
+                            try { runSlots.acquire(); }
+                            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                            log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
+                        }
+                    }
+                    stateStore.recordGateResolved(mergeGateId, decision == MergeDecision.MERGE);
                 }
-                stateStore.recordGateResolved(mergeGateId, decision == MergeDecision.MERGE);
 
                 if (decision == MergeDecision.MERGE) {
                     List<WorkerReport> reports = getWorkerReports(runId);
@@ -1279,21 +1309,28 @@ public class PipelineHarness {
             String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
             broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
 
-            // Release the compute slot while the run is idle at the merge gate.
-            // Gate-waiting runs must not block new submissions from starting.
-            log.info("[PipelineHarness] Run {} entering merge gate — releasing compute slot", runId);
-            runSlots.release();
             MergeDecision mergeDecision;
-            try {
-                // Poll Redis every 500 ms — works across any MIG instance
-                mergeDecision = gateStore.awaitMergeGate(runId);  // throws InterruptedException → outer catch
-            } finally {
-                try { runSlots.acquire(); }
-                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            if (run.isAutoMerge()) {
+                mergeDecision = MergeDecision.MERGE;
+                stateStore.recordGateResolved(mergeGateId, true);
+                broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-merged (autoMerge flag)"));
+                log.info("Merge gate auto-resolved for run {}", runId);
+            } else {
+                // Release the compute slot while the run is idle at the merge gate.
+                // Gate-waiting runs must not block new submissions from starting.
+                log.info("[PipelineHarness] Run {} entering merge gate — releasing compute slot", runId);
+                runSlots.release();
+                try {
+                    // Poll Redis every 500 ms — works across any MIG instance
+                    mergeDecision = gateStore.awaitMergeGate(runId);  // throws InterruptedException → outer catch
+                } finally {
+                    try { runSlots.acquire(); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                }
+                log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
+                // Record gate resolution on the pipeline thread (it owns the local mergeGateId)
+                stateStore.recordGateResolved(mergeGateId, mergeDecision == MergeDecision.MERGE);
             }
-            log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
-            // Record gate resolution on the pipeline thread (it owns the local mergeGateId)
-            stateStore.recordGateResolved(mergeGateId, mergeDecision == MergeDecision.MERGE);
 
             if (mergeDecision == MergeDecision.MERGE) {
                 // Merge first, then mark COMPLETE immediately so that any subsequent failure
@@ -1510,6 +1547,11 @@ public class PipelineHarness {
      * - repoMode=EXISTING or repoUrl set → pushes to the existing remote.
      * Non-fatal: logs a warning but does not fail the run.
      */
+    /** Public entry point for manual GitHub push from RunController. */
+    public void pushToGitHubManual(PipelineRun run) {
+        pushToGitHubIfConfigured(run);
+    }
+
     private void pushToGitHubIfConfigured(PipelineRun run) {
         String repoMode = run.getRepoMode();
         String repoUrl  = run.getRepoUrl();
@@ -1535,8 +1577,12 @@ public class PipelineHarness {
             log.info("Creating new GitHub repo for run {} (owner={})", run.getRunId(), owner);
             remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
             if (remote != null) {
-                run.setRepoUrl(remote);
-                stateStore.save(run);
+                // Reload from DB to avoid overwriting status changes made by markComplete()
+                // (the caller's 'run' reference may be stale).
+                PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
+                freshRun.setRepoUrl(remote);
+                stateStore.save(freshRun);
+                run.setRepoUrl(remote); // keep the caller's reference in sync for downstream use
                 log.info("Created GitHub repo: {}", remote);
             }
         }
@@ -1550,6 +1596,9 @@ public class PipelineHarness {
         com.navneet.agentteam.tool.ToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
         if (!result.isOk()) {
             log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
+        } else if ("EXISTING".equals(repoMode)) {
+            // Update the repo description on GitHub so existing repos get a meaningful description
+            gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
         }
     }
 
@@ -1738,10 +1787,18 @@ public class PipelineHarness {
             String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
             broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
 
-            // Poll Redis every 500 ms — works across any MIG instance
-            // InterruptedException propagates to the outer catch block of runRetryAsync
-            MergeDecision retryDecision = gateStore.awaitMergeGate(runId);
-            stateStore.recordGateResolved(mergeGateId, retryDecision == MergeDecision.MERGE);
+            MergeDecision retryDecision;
+            if (run.isAutoMerge()) {
+                retryDecision = MergeDecision.MERGE;
+                stateStore.recordGateResolved(mergeGateId, true);
+                broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-merged (autoMerge flag)"));
+                log.info("Merge gate auto-resolved for retry run {}", runId);
+            } else {
+                // Poll Redis every 500 ms — works across any MIG instance
+                // InterruptedException propagates to the outer catch block of runRetryAsync
+                retryDecision = gateStore.awaitMergeGate(runId);
+                stateStore.recordGateResolved(mergeGateId, retryDecision == MergeDecision.MERGE);
+            }
 
             if (retryDecision == MergeDecision.MERGE) {
                 // Mark COMPLETE immediately after merge — GitHub push is non-blocking
@@ -1918,7 +1975,8 @@ public class PipelineHarness {
      */
     public PipelineRun submitIntegrationRun(String userRequest, String source, boolean skipApproval) {
         // skipApproval passed directly into submitRun so it's set before the async thread starts
-        return submitRun(userRequest, source, null, null, null, null, skipApproval, null);
+        // Integration runs also auto-merge when skipApproval is true (fully automated)
+        return submitRun(userRequest, source, null, null, null, null, skipApproval, skipApproval, null);
     }
 
     // ── File-ownership validation ────────────────────────────────────────────

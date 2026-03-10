@@ -20,6 +20,25 @@ public class JiraClient {
         this.config = config;
     }
 
+    /**
+     * Fetch a Jira issue by key. Returns the raw response map
+     * containing fields: summary, description, status, acceptanceCriteria.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> fetchIssue(String issueKey) {
+        String url = config.getBaseUrl() + "/rest/api/3/issue/" + issueKey
+                + "?fields=summary,description,status,customfield_10034";
+        try {
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, authenticatedRequest(null), Map.class);
+            log.info("[Jira] Fetched issue {}", issueKey);
+            return resp.getBody();
+        } catch (Exception e) {
+            log.error("[Jira] Failed to fetch issue {}: {}", issueKey, e.getMessage());
+            throw e;
+        }
+    }
+
     /** Add a plain-text comment to a Jira issue (Atlassian Document Format v3). */
     public void addComment(String issueKey, String commentBody) {
         String url = config.getBaseUrl() + "/rest/api/3/issue/" + issueKey + "/comment";

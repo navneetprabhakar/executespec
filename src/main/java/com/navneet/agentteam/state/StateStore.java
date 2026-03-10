@@ -9,6 +9,7 @@ import com.navneet.agentteam.agent.model.WorkerReport;
 import com.navneet.agentteam.state.entity.*;
 import com.navneet.agentteam.state.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -124,7 +126,15 @@ public class StateStore {
     }
 
     public void markReviewing(String runId) {
-        updateRunStatus(runId, "REVIEWING");
+        PipelineRun run = runRepo.findById(runId).orElseThrow();
+        String current = run.getStatus();
+        // Guard: never regress a terminal state back to REVIEWING
+        if ("COMPLETE".equals(current) || "FAILED".equals(current) || "PARTIAL".equals(current)) {
+            log.warn("[StateStore] Refusing to regress run {} from {} to REVIEWING", runId, current);
+            return;
+        }
+        run.setStatus("REVIEWING");
+        runRepo.save(run);
     }
 
     public void saveReview(String runId, ReviewReport review) {
