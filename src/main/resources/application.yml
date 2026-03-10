@@ -19,7 +19,7 @@ spring:
           min-idle: 2
 
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:agentteam}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     driver-class-name: org.postgresql.Driver
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
@@ -247,5 +247,5 @@ executespec:
 
 logging:
   level:
-    com.navneet.agentteam: INFO
+    com.navneet.executespec: INFO
     org.springframework.ai: WARN

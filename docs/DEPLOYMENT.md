@@ -19,10 +19,10 @@
 
 ```bash
 # Create the database (using Postgres.app on macOS)
-/Applications/Postgres.app/Contents/Versions/latest/bin/psql -U postgres -c "CREATE DATABASE agentteam;"
+/Applications/Postgres.app/Contents/Versions/latest/bin/psql -U postgres -c "CREATE DATABASE executespec;"
 
 # Or via standard psql
-psql -U postgres -c "CREATE DATABASE agentteam;"
+psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
 Flyway migrations run automatically on startup and create all tables (V1–V14).
@@ -94,7 +94,7 @@ npm --prefix frontend run build                             # frontend (tsc + vi
 | Issue | Fix |
 |-------|-----|
 | `JAVA_HOME not set` | `export JAVA_HOME=/opt/homebrew/opt/openjdk@21` |
-| `Connection refused` to PostgreSQL | Ensure PostgreSQL is running on port 5432 with database `agentteam` |
+| `Connection refused` to PostgreSQL | Ensure PostgreSQL is running on port 5432 with database `executespec` |
 | `Connection refused` to Redis | Start Redis: `docker run -d -p 6379:6379 redis:7-alpine` |
 | Admin login fails | Flyway V5 seeds admin, V7 fixes password hash. Check `flyway_schema_history` table. |
 | LLM calls fail | Verify `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are set and valid |
@@ -388,7 +388,7 @@ gcloud sql instances create executespec-pg \
 ### 3.2 Create the database
 
 ```bash
-gcloud sql databases create agentteam --instance=executespec-pg
+gcloud sql databases create executespec --instance=executespec-pg
 ```
 
 ### 3.3 Create the application user
@@ -522,7 +522,7 @@ create_secret GOOGLE_API_KEY     "AIzaSy-YOUR-KEY-HERE"   # optional — leave e
 create_secret POSTGRES_USER      "appuser"
 create_secret POSTGRES_PASSWORD  "$DB_PASSWORD"           # from Step 3.3
 create_secret POSTGRES_HOST      "$POSTGRES_HOST"         # from Step 3.4
-create_secret POSTGRES_DB        "agentteam"
+create_secret POSTGRES_DB        "executespec"
 
 # GitHub integration (agent pipeline pushes code to repos)
 create_secret GITHUB_PAT         "ghp_YOUR-PAT-HERE"
@@ -1288,7 +1288,7 @@ Secret Manager by `startup.sh` at boot time.
 | `GOOGLE_API_KEY` | No | Third-tier Gemini fallback |
 | `POSTGRES_HOST` | Yes | Cloud SQL private IP |
 | `POSTGRES_PORT` | No | Default: 5432 |
-| `POSTGRES_DB` | Yes | Database name (`agentteam`) |
+| `POSTGRES_DB` | Yes | Database name (`executespec`) |
 | `POSTGRES_USER` | Yes | Database user |
 | `POSTGRES_PASSWORD` | Yes | Database password |
 | `GITHUB_PAT` | Yes | GitHub PAT for pushing generated code |

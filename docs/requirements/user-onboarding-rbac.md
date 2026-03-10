@@ -899,7 +899,7 @@ interface AuthStore {
 ### 15.2 New Package Structure
 
 ```
-com.navneet.agentteam
+com.navneet.executespec
 ├── auth/
 │   ├── controller/
 │   │   ├── AuthController.java

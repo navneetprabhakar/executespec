@@ -9,7 +9,7 @@ Multi-agent autonomous coding system. Decomposes natural-language goals into seq
 ## Quick Start
 
 ```bash
-# Prerequisites: Java 21, PostgreSQL (localhost:5432/agentteam), Node.js 18+
+# Prerequisites: Java 21, PostgreSQL (localhost:5432/executespec), Node.js 18+
 
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 export ANTHROPIC_API_KEY=sk-ant-...
