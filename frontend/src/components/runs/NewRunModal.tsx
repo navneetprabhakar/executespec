@@ -32,6 +32,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showGitHub, setShowGitHub] = useState(false);
   const [skipApproval, setSkipApproval] = useState(false);
+  const [autoMerge, setAutoMerge] = useState(false);
   const [model, setModel] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [launching, setLaunching] = useState(false);
@@ -117,6 +118,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
       const runId = await createRun({
         userRequest: goal,
         skipApproval,
+        autoMerge,
         ...(model ? { modelName: model } : {}),
         ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
         ...(repoMode ? { repoMode } : {}),
@@ -266,6 +268,27 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
                       <span className={cn(
                         'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
                         skipApproval ? 'translate-x-4' : 'translate-x-0.5',
+                      )} />
+                    </span>
+                  </div>
+                  <div
+                    role="switch"
+                    aria-checked={autoMerge}
+                    tabIndex={0}
+                    onClick={() => setAutoMerge(!autoMerge)}
+                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setAutoMerge(!autoMerge); } }}
+                    className="flex items-center justify-between cursor-pointer select-none group"
+                  >
+                    <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">Auto-merge (skip merge review)</span>
+                    <span
+                      className={cn(
+                        'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
+                        autoMerge ? 'bg-accent-violet' : 'bg-white/[0.10]',
+                      )}
+                    >
+                      <span className={cn(
+                        'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
+                        autoMerge ? 'translate-x-4' : 'translate-x-0.5',
                       )} />
                     </span>
                   </div>

@@ -67,6 +67,10 @@ public class PipelineRun {
     @Column(columnDefinition = "boolean default false")
     private boolean skipApproval = false; // true = auto-approve plan gate (integration-triggered runs)
 
+    @Builder.Default
+    @Column(columnDefinition = "boolean default false")
+    private boolean autoMerge = false; // true = auto-approve merge gate (skip human merge review)
+
     // ── Auto-restart tracking ─────────────────────────────────────────────────
     /**
      * How many times this run has been auto-restarted due to transient failures

@@ -190,6 +190,7 @@ export const getRun = (id: string) =>
 export const createRun = (body: {
   userRequest: string;
   skipApproval?: boolean;
+  autoMerge?: boolean;
   modelName?: string;
   projectId?: string;
   repoMode?: string | null;
@@ -274,6 +275,9 @@ export const getIntegrationRuns = (source?: string) =>
 
 export const triggerConfluence = (body: { pageId: string; goal: string }) =>
   req<{ runId: string }>('/integrations/confluence/trigger', { method: 'POST', body: JSON.stringify(body) });
+
+export const triggerJira = (body: { issueKey: string; goal?: string }) =>
+  req<{ runId: string }>('/integrations/jira/trigger', { method: 'POST', body: JSON.stringify(body) });
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
 
