@@ -36,20 +36,20 @@ spring:
 
   ai:
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY:}
+      api-key: ${ANTHROPIC_API_KEY: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}
       chat:
         options:
           model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
           max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
     openai:
-      api-key: ${OPENAI_API_KEY:}
+      api-key: ${OPENAI_API_KEY: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}
       chat:
         options:
           model: gpt-4o-mini
           max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
     google:
       genai:
-        api-key: ${GOOGLE_API_KEY:}          # empty default — Gemini is 3rd fallback only
+        api-key: ${GOOGLE_API_KEY:AIzaSyCjIge3pbAvhejI5vELeDe0AWpmH9-P1UU}          # empty default — Gemini is 3rd fallback only
         chat:
           options:
             model: gemini-3.1-flash-lite-preview         # default; ARCHITECT chain overrides to gemini-2.5-pro
@@ -81,7 +81,7 @@ agent:
     absolute-ceiling-multiplier: 2  # never exceed 2× base cap
   github:
     pat: ${GITHUB_PAT:}
-    default-owner: ${GITHUB_OWNER:navneetprabhakar}
+    default-owner: ${GITHUB_OWNER:}
   shell:
     sandbox-enabled: true
     timeout-seconds: 300
@@ -164,9 +164,9 @@ agent:
   integrations:
     enabled: true             # Master switch — set true to register /api/integrations/* endpoints
     jira:
-      enabled: true
-      base-url: ${JIRA_BASE_URL:https://executespec.atlassian.net}
-      email: ${JIRA_EMAIL:admin@executespec.ai}
+      enabled: false
+      base-url: ${JIRA_BASE_URL:}
+      email: ${JIRA_EMAIL:}
       api-token: ${JIRA_API_TOKEN:}
       webhook-secret: ${JIRA_WEBHOOK_SECRET:}
       trigger-status: "Ready for Coding"   # issue status name that fires the pipeline
@@ -176,9 +176,9 @@ agent:
       dashboard-url: http://localhost:8080
       skip-approval: true
     confluence:
-      enabled: true
-      base-url: ${CONFLUENCE_BASE_URL:https://executespec.atlassian.net}
-      email: ${CONFLUENCE_EMAIL:admin@executespec.ai}
+      enabled: false
+      base-url: ${CONFLUENCE_BASE_URL:}
+      email: ${CONFLUENCE_EMAIL:}
       api-token: ${CONFLUENCE_API_TOKEN:}
       trigger-label: "agent-run"           # page label that fires the pipeline
       space-key: "KAN"                     # default space for child pages
@@ -186,7 +186,7 @@ agent:
       skip-approval: true
     servicenow:
       enabled: false
-      base-url: ${SNOW_BASE_URL:https://your-instance.service-now.com}
+      base-url: ${SNOW_BASE_URL:}
       username: ${SNOW_USERNAME:}
       password: ${SNOW_PASSWORD:}
       trigger-categories:

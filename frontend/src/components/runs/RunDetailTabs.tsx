@@ -157,18 +157,19 @@ function fmtDuration(ms: number): string {
   return `${h}h ${rm}m`;
 }
 
-/** Aggregate token counts per model from task list. */
-function tokensByModel(tasks: RunDetail['tasks']): { model: string; input: number; output: number }[] {
-  const map = new Map<string, { input: number; output: number }>();
+/** Aggregate token counts per model from task list. Prefers actual model over assignedModel. */
+function tokensByModel(tasks: RunDetail['tasks']): { model: string; provider: string | null; input: number; output: number }[] {
+  const map = new Map<string, { provider: string | null; input: number; output: number }>();
   for (const t of tasks) {
-    const model = t.assignedModel || 'unknown';
-    const entry = map.get(model) || { input: 0, output: 0 };
+    const model = t.model || t.assignedModel || 'unknown';
+    const entry = map.get(model) || { provider: null, input: 0, output: 0 };
     entry.input += t.inputTokens || 0;
     entry.output += t.outputTokens || 0;
+    if (t.provider) entry.provider = t.provider;
     map.set(model, entry);
   }
   return Array.from(map.entries())
-    .map(([model, { input, output }]) => ({ model, input, output }))
+    .map(([model, { provider, input, output }]) => ({ model, provider, input, output }))
     .sort((a, b) => (b.input + b.output) - (a.input + a.output));
 }
 
@@ -305,9 +306,16 @@ function OverviewTab({ run }: { run: RunDetail }) {
             <div>
               <p className="text-xs text-zinc-600 mb-2">Tokens by model</p>
               <div className="space-y-1.5">
-                {tokensByModel(run.tasks).map(({ model, input, output }) => (
+                {tokensByModel(run.tasks).map(({ model, provider, input, output }) => (
                   <div key={model} className="flex items-center gap-3 p-2 rounded bg-white/[0.02] border border-white/[0.04]">
-                    <span className="text-xs font-mono text-zinc-300 flex-1 truncate">{model}</span>
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      {provider && (
+                        <span className="text-[10px] font-mono text-zinc-600 bg-white/[0.03] px-1 py-0.5 rounded flex-shrink-0">
+                          {provider}
+                        </span>
+                      )}
+                      <span className="text-xs font-mono text-zinc-300 truncate">{model}</span>
+                    </div>
                     <div className="flex items-center gap-3 flex-shrink-0 text-[11px] font-mono">
                       <span className="text-accent-cyan/70">
                         {fmtTokens(input)} in

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   Eye, EyeOff, Github, CheckCircle, AlertCircle, Server, Database, Cpu, Clock,
-  ChevronDown, ChevronRight, Key, Layers, Building2, Shield,
+  ChevronDown, ChevronRight, Key, Building2, Shield, Loader2,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
+import IntegrationLogo from '@/components/integrations/IntegrationLogo';
 import { useAuthStore } from '@/stores/useAuthStore';
 import type { OrgDto } from '@/lib/api';
 import * as api from '@/lib/api';
@@ -178,8 +179,19 @@ export default function SettingsPage() {
   const [githubOwner, setGithubOwner] = useState(user?.githubOwner ?? '');
   const [githubSaving, setGithubSaving] = useState(false);
   const [githubMsg, setGithubMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [githubTesting, setGithubTesting] = useState(false);
 
   useEffect(() => { setGithubOwner(user?.githubOwner ?? ''); }, [user?.githubOwner]);
+
+  const handleTestGitHub = async () => {
+    setGithubTesting(true); setGithubMsg(null);
+    try {
+      const result = await api.validateGitHub(githubPat);
+      setGithubMsg({ ok: result.valid, text: result.message });
+    } catch (err: any) {
+      setGithubMsg({ ok: false, text: err.message ?? 'Validation failed.' });
+    } finally { setGithubTesting(false); }
+  };
 
   const handleSaveGitHub = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,11 +258,22 @@ export default function SettingsPage() {
   const [jiraToken, setJiraToken] = useState('');
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraMsg, setJiraMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [jiraTesting, setJiraTesting] = useState(false);
 
   useEffect(() => {
     setJiraUrl(user?.jiraBaseUrl ?? '');
     setJiraEmail(user?.jiraEmail ?? '');
   }, [user?.jiraBaseUrl, user?.jiraEmail]);
+
+  const handleTestJira = async () => {
+    setJiraTesting(true); setJiraMsg(null);
+    try {
+      const result = await api.validateJira(jiraUrl, jiraEmail, jiraToken);
+      setJiraMsg({ ok: result.valid, text: result.message });
+    } catch (err: any) {
+      setJiraMsg({ ok: false, text: err.message ?? 'Validation failed.' });
+    } finally { setJiraTesting(false); }
+  };
 
   const handleSaveJira = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,11 +306,22 @@ export default function SettingsPage() {
   const [confToken, setConfToken] = useState('');
   const [confSaving, setConfSaving] = useState(false);
   const [confMsg, setConfMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [confTesting, setConfTesting] = useState(false);
 
   useEffect(() => {
     setConfUrl(user?.confluenceBaseUrl ?? '');
     setConfEmail(user?.confluenceEmail ?? '');
   }, [user?.confluenceBaseUrl, user?.confluenceEmail]);
+
+  const handleTestConfluence = async () => {
+    setConfTesting(true); setConfMsg(null);
+    try {
+      const result = await api.validateConfluence(confUrl, confEmail, confToken);
+      setConfMsg({ ok: result.valid, text: result.message });
+    } catch (err: any) {
+      setConfMsg({ ok: false, text: err.message ?? 'Validation failed.' });
+    } finally { setConfTesting(false); }
+  };
 
   const handleSaveConf = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -347,16 +381,38 @@ export default function SettingsPage() {
             label="GitHub Owner"
             value={githubOwner}
             onChange={setGithubOwner}
-            placeholder="navneetprabhakar"
+            placeholder="github_owner"
             hint="Your GitHub username or org name."
           />
           <SaveMessage msg={githubMsg} />
-          <SaveBar
-            saving={githubSaving}
-            disabled={!githubPat.trim() && !githubOwner.trim()}
-            onClear={user?.hasGithubPat ? handleClearGitHub : undefined}
-            clearLabel="Clear credentials"
-          />
+          <div className="flex gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={githubSaving || (!githubPat.trim() && !githubOwner.trim())}
+              className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+            >
+              {githubSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={handleTestGitHub}
+              disabled={githubTesting || !githubPat.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+            >
+              {githubTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Test Connection
+            </button>
+            {user?.hasGithubPat && (
+              <button
+                type="button"
+                onClick={handleClearGitHub}
+                disabled={githubSaving}
+                className="px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+              >
+                Clear credentials
+              </button>
+            )}
+          </div>
         </form>
       </IntegrationCard>
 
@@ -407,7 +463,7 @@ export default function SettingsPage() {
 
       {/* ── JIRA ───────────────────────────────────────────────────────────── */}
       <IntegrationCard
-        icon={<Layers className="h-4 w-4 text-zinc-400" />}
+        icon={<IntegrationLogo integration="JIRA" size={18} />}
         title="JIRA Integration"
         statusBadge={user?.hasJiraToken
           ? <ConfiguredBadge label="Connected" />
@@ -439,18 +495,40 @@ export default function SettingsPage() {
             placeholder={user?.hasJiraToken ? '••••••••••••••••••••• (saved)' : 'Atlassian API token'}
           />
           <SaveMessage msg={jiraMsg} />
-          <SaveBar
-            saving={jiraSaving}
-            disabled={!jiraUrl.trim() && !jiraEmail.trim() && !jiraToken.trim()}
-            onClear={user?.hasJiraToken ? handleClearJira : undefined}
-            clearLabel="Clear credentials"
-          />
+          <div className="flex gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={jiraSaving || (!jiraUrl.trim() && !jiraEmail.trim() && !jiraToken.trim())}
+              className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+            >
+              {jiraSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={handleTestJira}
+              disabled={jiraTesting || !jiraUrl.trim() || !jiraEmail.trim() || !jiraToken.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+            >
+              {jiraTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Test Connection
+            </button>
+            {user?.hasJiraToken && (
+              <button
+                type="button"
+                onClick={handleClearJira}
+                disabled={jiraSaving}
+                className="px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+              >
+                Clear credentials
+              </button>
+            )}
+          </div>
         </form>
       </IntegrationCard>
 
       {/* ── Confluence ─────────────────────────────────────────────────────── */}
       <IntegrationCard
-        icon={<Layers className="h-4 w-4 text-zinc-400" />}
+        icon={<IntegrationLogo integration="CONFLUENCE" size={18} />}
         title="Confluence Integration"
         statusBadge={user?.hasConfluenceToken
           ? <ConfiguredBadge label="Connected" />
@@ -482,12 +560,34 @@ export default function SettingsPage() {
             placeholder={user?.hasConfluenceToken ? '••••••••••••••••••••• (saved)' : 'Atlassian API token'}
           />
           <SaveMessage msg={confMsg} />
-          <SaveBar
-            saving={confSaving}
-            disabled={!confUrl.trim() && !confEmail.trim() && !confToken.trim()}
-            onClear={user?.hasConfluenceToken ? handleClearConf : undefined}
-            clearLabel="Clear credentials"
-          />
+          <div className="flex gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={confSaving || (!confUrl.trim() && !confEmail.trim() && !confToken.trim())}
+              className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+            >
+              {confSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={handleTestConfluence}
+              disabled={confTesting || !confUrl.trim() || !confEmail.trim() || !confToken.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+            >
+              {confTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Test Connection
+            </button>
+            {user?.hasConfluenceToken && (
+              <button
+                type="button"
+                onClick={handleClearConf}
+                disabled={confSaving}
+                className="px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+              >
+                Clear credentials
+              </button>
+            )}
+          </div>
         </form>
       </IntegrationCard>
 
@@ -508,18 +608,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* ── About ──────────────────────────────────────────────────────────── */}
-      <GlassPanel className="p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-zinc-200">About ExecuteSpec</h3>
-        <div className="space-y-2 text-sm text-zinc-400">
-          <p>A multi-agent AI coding system — React + Spring Boot 3 + Spring AI 1.0</p>
-          <p>Planner → Approval → Workers → Reviewer → Merge → GitHub Push → Deploy</p>
-          <div className="pt-2 border-t border-white/[0.06] font-mono text-xs text-zinc-600 space-y-1">
-            <p>Stack: Java 21 · Spring Boot 3.3 · Spring AI 1.0 · PostgreSQL · React 18 · Vite</p>
-            <p>Agents: Planner (Opus) · Workers (Sonnet) · Reviewer (Haiku)</p>
-          </div>
-        </div>
-      </GlassPanel>
     </div>
   );
 }

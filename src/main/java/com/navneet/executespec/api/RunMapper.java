@@ -106,6 +106,8 @@ public class RunMapper {
             t.getComplexity(),
             t.getStatus(),
             t.getAssignedModel(),
+            t.getProvider(),
+            t.getModel(),
             t.getBranchName(),
             t.getReadmeUpdated(),
             t.getInputTokens() != null ? t.getInputTokens().longValue() : null,
