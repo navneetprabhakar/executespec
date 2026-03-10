@@ -16,7 +16,7 @@ interface RunStore {
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
-  createRun: (req: { userRequest: string; skipApproval?: boolean; modelName?: string; projectId?: string; repoMode?: string | null; repoUrl?: string | null }) => Promise<string>;
+  createRun: (req: { userRequest: string; skipApproval?: boolean; autoMerge?: boolean; modelName?: string; projectId?: string; repoMode?: string | null; repoUrl?: string | null }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   approveRun: (id: string, approved: boolean) => Promise<void>;
   mergeRun: (id: string, merge: boolean) => Promise<void>;
