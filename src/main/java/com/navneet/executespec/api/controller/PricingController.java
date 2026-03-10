@@ -2,12 +2,15 @@ package com.navneet.executespec.api.controller;
 
 import com.navneet.executespec.api.dto.PricingRow;
 import com.navneet.executespec.api.dto.PricingUpdateRequest;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.pricing.ModelPricing;
 import com.navneet.executespec.pricing.ModelPricingId;
 import com.navneet.executespec.pricing.ModelPricingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -20,10 +23,13 @@ import java.util.List;
 public class PricingController {
 
     private final ModelPricingRepository pricingRepo;
+    private final RunAccessGuard guard;
 
-    /** List all pricing entries. */
+    /** List all pricing entries. Any authenticated user can view pricing. */
     @GetMapping
-    public ResponseEntity<List<PricingRow>> list() {
+    public ResponseEntity<List<PricingRow>> list(
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireAuthenticated(userDetails);
         List<PricingRow> rows = pricingRepo.findAll().stream()
             .map(p -> new PricingRow(
                 p.getId().getProvider(), p.getId().getModel(),
@@ -33,10 +39,13 @@ public class PricingController {
         return ResponseEntity.ok(rows);
     }
 
-    /** Get pricing for a specific provider/model. */
+    /** Get pricing for a specific provider/model. Any authenticated user can view pricing. */
     @GetMapping("/{provider}/{model}")
-    public ResponseEntity<PricingRow> get(@PathVariable String provider,
-                                           @PathVariable String model) {
+    public ResponseEntity<PricingRow> get(
+            @PathVariable String provider,
+            @PathVariable String model,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireAuthenticated(userDetails);
         return pricingRepo.findByIdProviderAndIdModel(provider, model)
             .map(p -> ResponseEntity.ok(new PricingRow(
                 p.getId().getProvider(), p.getId().getModel(),
@@ -45,11 +54,14 @@ public class PricingController {
             .orElse(ResponseEntity.notFound().build());
     }
 
-    /** Create or update pricing for a specific provider/model. */
+    /** Create or update pricing for a specific provider/model. SUPER_ADMIN only. */
     @PutMapping("/{provider}/{model}")
-    public ResponseEntity<PricingRow> upsert(@PathVariable String provider,
-                                              @PathVariable String model,
-                                              @RequestBody PricingUpdateRequest req) {
+    public ResponseEntity<PricingRow> upsert(
+            @PathVariable String provider,
+            @PathVariable String model,
+            @RequestBody PricingUpdateRequest req,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireSuperAdmin(userDetails);
         log.info("PUT /api/pricing/{}/{} — input=${}/1M output=${}/1M", provider, model,
             req.inputCostPer1m(), req.outputCostPer1m());
 

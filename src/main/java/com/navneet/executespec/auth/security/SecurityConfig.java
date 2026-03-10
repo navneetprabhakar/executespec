@@ -45,8 +45,8 @@ public class SecurityConfig {
                 // Public health check
                 .requestMatchers("/api/health").permitAll()
                 // Integration webhooks (external — secured by signature, not JWT)
-                .requestMatchers("/api/integrations/**").permitAll()
-                // SSE streaming (authenticated via query param or cookie fallback)
+                .requestMatchers("/api/integrations/*/webhook").permitAll()
+                // SSE streaming (authenticated via ?token= query param)
                 .requestMatchers("/api/runs/*/events").permitAll()
                 // Static frontend assets (SPA)
                 .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico").permitAll()

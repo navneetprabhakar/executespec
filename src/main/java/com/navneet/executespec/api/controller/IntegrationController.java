@@ -1,5 +1,7 @@
 package com.navneet.executespec.api.controller;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.integration.InboundAdapter;
 import com.navneet.executespec.integration.IntegrationEvent;
 import com.navneet.executespec.integration.IntegrationManager;
@@ -11,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,8 +27,12 @@ import java.util.Map;
 public class IntegrationController {
 
     private final IntegrationManager manager;
+    private final RunAccessGuard guard;
 
-    /** Generic webhook receiver: POST /api/integrations/{source}/webhook */
+    /**
+     * Generic webhook receiver: POST /api/integrations/{source}/webhook
+     * Webhooks are authenticated by their own signature mechanism, not JWT.
+     */
     @PostMapping("/{source}/webhook")
     public ResponseEntity<Map<String, String>> webhook(
             @PathVariable String source,
@@ -51,7 +58,10 @@ public class IntegrationController {
      * Body: { "issueKey": "KAN-1", "goal": "optional goal override" }
      */
     @PostMapping("/jira/trigger")
-    public ResponseEntity<Map<String, String>> jiraTrigger(@RequestBody Map<String, String> body) {
+    public ResponseEntity<Map<String, String>> jiraTrigger(
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireAuthenticated(userDetails);
         try {
             InboundAdapter adapter = manager.getInboundAdapter("JIRA").orElse(null);
             if (!(adapter instanceof JiraAdapter ja)) {
@@ -77,7 +87,9 @@ public class IntegrationController {
      */
     @PostMapping("/confluence/trigger")
     public ResponseEntity<Map<String, String>> confluenceTrigger(
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireAuthenticated(userDetails);
         try {
             InboundAdapter adapter = manager.getInboundAdapter("CONFLUENCE").orElse(null);
             if (!(adapter instanceof ConfluenceAdapter ca)) {
@@ -100,7 +112,9 @@ public class IntegrationController {
     /** List integration-triggered runs: GET /api/integrations/runs?source=JIRA */
     @GetMapping("/runs")
     public List<IntegrationRunSummary> listIntegrationRuns(
-            @RequestParam(required = false) String source) {
+            @RequestParam(required = false) String source,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireAuthenticated(userDetails);
         return manager.listIntegrationRuns(source).stream()
                 .map(this::toSummary)
                 .toList();

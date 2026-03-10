@@ -47,9 +47,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private String extractBearerToken(HttpServletRequest request) {
+        // 1. Standard Authorization header
         String header = request.getHeader("Authorization");
         if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
             return header.substring(7);
+        }
+        // 2. Query-param fallback for SSE (EventSource can't set headers)
+        String queryToken = request.getParameter("token");
+        if (StringUtils.hasText(queryToken)) {
+            return queryToken;
         }
         return null;
     }
