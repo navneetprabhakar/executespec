@@ -4,7 +4,6 @@ import {
   ChevronDown, ChevronRight, Key, Building2, Shield, Loader2,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
-import IntegrationLogo from '@/components/integrations/IntegrationLogo';
 import { useAuthStore } from '@/stores/useAuthStore';
 import type { OrgDto } from '@/lib/api';
 import * as api from '@/lib/api';
@@ -251,102 +250,6 @@ export default function SettingsPage() {
 
   const hasAnyAiKey = user?.hasOpenAiKey || user?.hasAnthropicKey || user?.hasGeminiKey;
 
-  // ── JIRA ─────────────────────────────────────────────────────────────────
-
-  const [jiraUrl,   setJiraUrl]   = useState(user?.jiraBaseUrl ?? '');
-  const [jiraEmail, setJiraEmail] = useState(user?.jiraEmail ?? '');
-  const [jiraToken, setJiraToken] = useState('');
-  const [jiraSaving, setJiraSaving] = useState(false);
-  const [jiraMsg, setJiraMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [jiraTesting, setJiraTesting] = useState(false);
-
-  useEffect(() => {
-    setJiraUrl(user?.jiraBaseUrl ?? '');
-    setJiraEmail(user?.jiraEmail ?? '');
-  }, [user?.jiraBaseUrl, user?.jiraEmail]);
-
-  const handleTestJira = async () => {
-    setJiraTesting(true); setJiraMsg(null);
-    try {
-      const result = await api.validateJira(jiraUrl, jiraEmail, jiraToken);
-      setJiraMsg({ ok: result.valid, text: result.message });
-    } catch (err: any) {
-      setJiraMsg({ ok: false, text: err.message ?? 'Validation failed.' });
-    } finally { setJiraTesting(false); }
-  };
-
-  const handleSaveJira = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setJiraSaving(true); setJiraMsg(null);
-    try {
-      const updated = await api.updateJiraSettings(jiraUrl, jiraEmail, jiraToken);
-      setUser(updated); setJiraToken('');
-      setJiraMsg({ ok: true, text: 'JIRA settings saved.' });
-    } catch (err: any) {
-      setJiraMsg({ ok: false, text: err.message ?? 'Failed to save.' });
-    } finally { setJiraSaving(false); }
-  };
-
-  const handleClearJira = async () => {
-    if (!confirm('Remove JIRA credentials?')) return;
-    setJiraSaving(true); setJiraMsg(null);
-    try {
-      const updated = await api.updateJiraSettings('', '', '');
-      setUser(updated); setJiraUrl(''); setJiraEmail(''); setJiraToken('');
-      setJiraMsg({ ok: true, text: 'JIRA credentials cleared.' });
-    } catch (err: any) {
-      setJiraMsg({ ok: false, text: err.message ?? 'Failed to clear.' });
-    } finally { setJiraSaving(false); }
-  };
-
-  // ── Confluence ───────────────────────────────────────────────────────────
-
-  const [confUrl,   setConfUrl]   = useState(user?.confluenceBaseUrl ?? '');
-  const [confEmail, setConfEmail] = useState(user?.confluenceEmail ?? '');
-  const [confToken, setConfToken] = useState('');
-  const [confSaving, setConfSaving] = useState(false);
-  const [confMsg, setConfMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [confTesting, setConfTesting] = useState(false);
-
-  useEffect(() => {
-    setConfUrl(user?.confluenceBaseUrl ?? '');
-    setConfEmail(user?.confluenceEmail ?? '');
-  }, [user?.confluenceBaseUrl, user?.confluenceEmail]);
-
-  const handleTestConfluence = async () => {
-    setConfTesting(true); setConfMsg(null);
-    try {
-      const result = await api.validateConfluence(confUrl, confEmail, confToken);
-      setConfMsg({ ok: result.valid, text: result.message });
-    } catch (err: any) {
-      setConfMsg({ ok: false, text: err.message ?? 'Validation failed.' });
-    } finally { setConfTesting(false); }
-  };
-
-  const handleSaveConf = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setConfSaving(true); setConfMsg(null);
-    try {
-      const updated = await api.updateConfluenceSettings(confUrl, confEmail, confToken);
-      setUser(updated); setConfToken('');
-      setConfMsg({ ok: true, text: 'Confluence settings saved.' });
-    } catch (err: any) {
-      setConfMsg({ ok: false, text: err.message ?? 'Failed to save.' });
-    } finally { setConfSaving(false); }
-  };
-
-  const handleClearConf = async () => {
-    if (!confirm('Remove Confluence credentials?')) return;
-    setConfSaving(true); setConfMsg(null);
-    try {
-      const updated = await api.updateConfluenceSettings('', '', '');
-      setUser(updated); setConfUrl(''); setConfEmail(''); setConfToken('');
-      setConfMsg({ ok: true, text: 'Confluence credentials cleared.' });
-    } catch (err: any) {
-      setConfMsg({ ok: false, text: err.message ?? 'Failed to clear.' });
-    } finally { setConfSaving(false); }
-  };
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -461,135 +364,13 @@ export default function SettingsPage() {
         </form>
       </IntegrationCard>
 
-      {/* ── JIRA ───────────────────────────────────────────────────────────── */}
-      <IntegrationCard
-        icon={<IntegrationLogo integration="JIRA" size={18} />}
-        title="JIRA Integration"
-        statusBadge={user?.hasJiraToken
-          ? <ConfiguredBadge label="Connected" />
-          : <NotConfiguredBadge label="Not configured" />}
-        defaultOpen={!user?.hasJiraToken}
-      >
+      {/* ── JIRA/Confluence note ──────────────────────────────────────────── */}
+      <GlassPanel className="px-5 py-3">
         <p className="text-xs text-zinc-500">
-          Connect your Atlassian JIRA account to allow agents to read and update issues.
-          Use an Atlassian API token (not your password).
+          JIRA and Confluence integrations are now managed at the org level.
+          Go to <a href="/integrations" className="text-accent-violet hover:text-accent-violet/80 underline">Integrations</a> to configure them.
         </p>
-        <form onSubmit={handleSaveJira} className="space-y-3">
-          <TextField
-            label="JIRA Base URL"
-            value={jiraUrl}
-            onChange={setJiraUrl}
-            placeholder="https://yourorg.atlassian.net"
-          />
-          <TextField
-            label="JIRA Email"
-            value={jiraEmail}
-            onChange={setJiraEmail}
-            placeholder="you@yourorg.com"
-          />
-          <SecretField
-            label={`API Token${user?.hasJiraToken ? ' ✓' : ''}`}
-            subLabel={user?.hasJiraToken ? '(leave blank to keep existing)' : undefined}
-            value={jiraToken}
-            onChange={setJiraToken}
-            placeholder={user?.hasJiraToken ? '••••••••••••••••••••• (saved)' : 'Atlassian API token'}
-          />
-          <SaveMessage msg={jiraMsg} />
-          <div className="flex gap-3 pt-1">
-            <button
-              type="submit"
-              disabled={jiraSaving || (!jiraUrl.trim() && !jiraEmail.trim() && !jiraToken.trim())}
-              className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
-            >
-              {jiraSaving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={handleTestJira}
-              disabled={jiraTesting || !jiraUrl.trim() || !jiraEmail.trim() || !jiraToken.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
-            >
-              {jiraTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Test Connection
-            </button>
-            {user?.hasJiraToken && (
-              <button
-                type="button"
-                onClick={handleClearJira}
-                disabled={jiraSaving}
-                className="px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
-              >
-                Clear credentials
-              </button>
-            )}
-          </div>
-        </form>
-      </IntegrationCard>
-
-      {/* ── Confluence ─────────────────────────────────────────────────────── */}
-      <IntegrationCard
-        icon={<IntegrationLogo integration="CONFLUENCE" size={18} />}
-        title="Confluence Integration"
-        statusBadge={user?.hasConfluenceToken
-          ? <ConfiguredBadge label="Connected" />
-          : <NotConfiguredBadge label="Not configured" />}
-        defaultOpen={!user?.hasConfluenceToken}
-      >
-        <p className="text-xs text-zinc-500">
-          Connect your Atlassian Confluence account to allow agents to read and create pages.
-          Use an Atlassian API token (not your password).
-        </p>
-        <form onSubmit={handleSaveConf} className="space-y-3">
-          <TextField
-            label="Confluence Base URL"
-            value={confUrl}
-            onChange={setConfUrl}
-            placeholder="https://yourorg.atlassian.net/wiki"
-          />
-          <TextField
-            label="Confluence Email"
-            value={confEmail}
-            onChange={setConfEmail}
-            placeholder="you@yourorg.com"
-          />
-          <SecretField
-            label={`API Token${user?.hasConfluenceToken ? ' ✓' : ''}`}
-            subLabel={user?.hasConfluenceToken ? '(leave blank to keep existing)' : undefined}
-            value={confToken}
-            onChange={setConfToken}
-            placeholder={user?.hasConfluenceToken ? '••••••••••••••••••••• (saved)' : 'Atlassian API token'}
-          />
-          <SaveMessage msg={confMsg} />
-          <div className="flex gap-3 pt-1">
-            <button
-              type="submit"
-              disabled={confSaving || (!confUrl.trim() && !confEmail.trim() && !confToken.trim())}
-              className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
-            >
-              {confSaving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={handleTestConfluence}
-              disabled={confTesting || !confUrl.trim() || !confEmail.trim() || !confToken.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
-            >
-              {confTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Test Connection
-            </button>
-            {user?.hasConfluenceToken && (
-              <button
-                type="button"
-                onClick={handleClearConf}
-                disabled={confSaving}
-                className="px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
-              >
-                Clear credentials
-              </button>
-            )}
-          </div>
-        </form>
-      </IntegrationCard>
+      </GlassPanel>
 
       {/* ── Organisation AI Keys (ORG_ADMIN only) ──────────────────────────── */}
       {isOrgAdmin && <OrgAiKeyCard org={org} onSaved={setOrg} />}

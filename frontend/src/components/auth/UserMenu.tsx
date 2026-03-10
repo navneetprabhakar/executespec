@@ -46,12 +46,22 @@ export default function UserMenu() {
               >
                 Settings
               </button>
-              {(user.orgRole === 'ORG_ADMIN' || user.globalRole === 'SUPER_ADMIN') && (
+              {/* Show Org Settings for admins with an org */}
+              {user.orgId && (user.orgRole === 'ORG_ADMIN' || user.globalRole === 'SUPER_ADMIN') && (
                 <button
                   onClick={() => { setOpen(false); navigate('/org/settings'); }}
                   className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
                 >
                   Org Settings
+                </button>
+              )}
+              {/* Show Create Organization for PRO/ENTERPRISE users without an org */}
+              {!user.orgId && (user.tier === 'PRO' || user.tier === 'ENTERPRISE') && (
+                <button
+                  onClick={() => { setOpen(false); navigate('/org/settings'); }}
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-purple-400 hover:bg-slate-700"
+                >
+                  Create Organization
                 </button>
               )}
               {user.globalRole === 'SUPER_ADMIN' && (

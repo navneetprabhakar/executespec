@@ -86,6 +86,35 @@ public class Org {
     @Column(name = "enabled_providers")
     private String enabledProviders;
 
+    // ── Admin contact ────────────────────────────────────────────────────────
+
+    @Column(name = "admin_email")
+    private String adminEmail;
+
+    // ── Org-level JIRA credentials ───────────────────────────────────────────
+    // Managed by ORG_ADMIN via the Integrations page.
+    // Raw tokens are NEVER returned to the client — only boolean flags.
+
+    @Column(name = "jira_base_url")
+    private String jiraBaseUrl;
+
+    @Column(name = "jira_email")
+    private String jiraEmail;
+
+    @Column(name = "jira_api_token")
+    private String jiraApiToken;
+
+    // ── Org-level Confluence credentials ─────────────────────────────────────
+
+    @Column(name = "confluence_base_url")
+    private String confluenceBaseUrl;
+
+    @Column(name = "confluence_email")
+    private String confluenceEmail;
+
+    @Column(name = "confluence_api_token")
+    private String confluenceApiToken;
+
     @Column(name = "created_by_user_id", nullable = false)
     private String createdByUserId;
 

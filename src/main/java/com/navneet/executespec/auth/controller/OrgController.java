@@ -13,6 +13,12 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -168,4 +174,96 @@ public class OrgController {
         return ResponseEntity.ok(orgService.updateAiKeySettings(
                 orgId, req.anthropicApiKey(), req.openAiApiKey(), req.geminiApiKey()));
     }
+
+    // ── Org-level JIRA settings (ORG_ADMIN only) ────────────────────────────
+
+    record OrgJiraSettingsRequest(String baseUrl, String email, String apiToken) {}
+
+    @PutMapping("/me/settings/jira")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<OrgDto> updateOrgJiraSettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody OrgJiraSettingsRequest req) {
+        String orgId = userDetails.getUser().getOrgId();
+        if (orgId == null) return ResponseEntity.badRequest().build();
+        return ResponseEntity.ok(orgService.updateJiraSettings(
+                orgId, req.baseUrl(), req.email(), req.apiToken()));
+    }
+
+    record ValidationResult(boolean valid, String message) {}
+
+    @PostMapping("/me/settings/jira/validate")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ValidationResult> validateOrgJira(@RequestBody OrgJiraSettingsRequest req) {
+        if (req.baseUrl() == null || req.email() == null || req.apiToken() == null) {
+            return ResponseEntity.ok(new ValidationResult(false, "Base URL, email, and API token are all required"));
+        }
+        try {
+            String auth = Base64.getEncoder().encodeToString(
+                    (req.email().strip() + ":" + req.apiToken().strip()).getBytes());
+            String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
+            HttpResponse<String> resp = HTTP_CLIENT.send(
+                    HttpRequest.newBuilder()
+                            .uri(URI.create(url))
+                            .header("Authorization", "Basic " + auth)
+                            .header("Accept", "application/json")
+                            .timeout(Duration.ofSeconds(10))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return ResponseEntity.ok(new ValidationResult(true, "JIRA credentials are valid"));
+            }
+            return ResponseEntity.ok(new ValidationResult(false,
+                    "JIRA returned " + resp.statusCode() + " — check your credentials"));
+        } catch (Exception e) {
+            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
+        }
+    }
+
+    // ── Org-level Confluence settings (ORG_ADMIN only) ──────────────────────
+
+    record OrgConfluenceSettingsRequest(String baseUrl, String email, String apiToken) {}
+
+    @PutMapping("/me/settings/confluence")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<OrgDto> updateOrgConfluenceSettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody OrgConfluenceSettingsRequest req) {
+        String orgId = userDetails.getUser().getOrgId();
+        if (orgId == null) return ResponseEntity.badRequest().build();
+        return ResponseEntity.ok(orgService.updateConfluenceSettings(
+                orgId, req.baseUrl(), req.email(), req.apiToken()));
+    }
+
+    @PostMapping("/me/settings/confluence/validate")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ValidationResult> validateOrgConfluence(@RequestBody OrgConfluenceSettingsRequest req) {
+        if (req.baseUrl() == null || req.email() == null || req.apiToken() == null) {
+            return ResponseEntity.ok(new ValidationResult(false, "Base URL, email, and API token are all required"));
+        }
+        try {
+            String auth = Base64.getEncoder().encodeToString(
+                    (req.email().strip() + ":" + req.apiToken().strip()).getBytes());
+            String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
+            HttpResponse<String> resp = HTTP_CLIENT.send(
+                    HttpRequest.newBuilder()
+                            .uri(URI.create(url))
+                            .header("Authorization", "Basic " + auth)
+                            .header("Accept", "application/json")
+                            .timeout(Duration.ofSeconds(10))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return ResponseEntity.ok(new ValidationResult(true, "Confluence credentials are valid"));
+            }
+            return ResponseEntity.ok(new ValidationResult(false,
+                    "Confluence returned " + resp.statusCode() + " — check your credentials"));
+        } catch (Exception e) {
+            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
+        }
+    }
+
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
 }

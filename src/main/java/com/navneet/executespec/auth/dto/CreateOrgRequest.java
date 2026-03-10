@@ -7,5 +7,6 @@ import java.util.List;
 
 public record CreateOrgRequest(
         @NotBlank String name,
-        @NotEmpty List<String> domains   // e.g. ["acme.com", "acmecorp.com"]
+        @NotEmpty List<String> domains,   // e.g. ["acme.com", "acmecorp.com"]
+        @NotBlank String adminEmail       // admin contact email for the org
 ) {}
