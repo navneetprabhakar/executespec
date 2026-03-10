@@ -564,6 +564,48 @@ public class StateStore {
         return new ModelComparisonData(stats);
     }
 
+    /**
+     * Org-scoped model comparison: only tasks belonging to runs in the given org.
+     */
+    public ModelComparisonData computeModelComparisonForOrg(int days, String orgId) {
+        Instant since = Instant.now().minus(Duration.ofDays(days));
+        // Get run IDs for this org
+        List<String> orgRunIds = runRepo.findAll().stream()
+            .filter(r -> orgId.equals(r.getOrgId()))
+            .map(PipelineRun::getRunId)
+            .toList();
+        if (orgRunIds.isEmpty()) return new ModelComparisonData(List.of());
+
+        List<AgentTask> allTasks = taskRepo.findAll().stream()
+            .filter(t -> orgRunIds.contains(t.getRunId()))
+            .filter(t -> t.getStartedAt() != null && t.getStartedAt().isAfter(since))
+            .filter(t -> t.getInputTokens() != null)
+            .toList();
+
+        Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
+        for (AgentTask t : allTasks) {
+            String key = (t.getProvider() != null ? t.getProvider() : "anthropic") + "/"
+                       + (t.getModel() != null ? t.getModel() : "claude-sonnet-4-6");
+            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
+        }
+
+        List<ModelStatData> stats = grouped.entrySet().stream().map(entry -> {
+            String[] parts = entry.getKey().split("/", 2);
+            String provider = parts[0];
+            String model = parts.length > 1 ? parts[1] : "unknown";
+            List<AgentTask> tl = entry.getValue();
+            long totalIn  = tl.stream().mapToLong(t -> t.getInputTokens()  != null ? t.getInputTokens()  : 0).sum();
+            long totalOut = tl.stream().mapToLong(t -> t.getOutputTokens() != null ? t.getOutputTokens() : 0).sum();
+            int count = tl.size();
+            int compactions = tl.stream().mapToInt(t -> t.getCompactionCount() != null ? t.getCompactionCount() : 0).sum();
+            return new ModelStatData(provider, model, count, totalIn, totalOut,
+                count > 0 ? (double) totalIn / count : 0,
+                count > 0 ? (double) totalOut / count : 0, compactions);
+        }).toList();
+
+        return new ModelComparisonData(stats);
+    }
+
     public record TimelineData(PipelineRun run, List<AgentTask> tasks,
                                 List<GateEvent> gates, List<CompactionEvent> compactions,
                                 List<AgentMessage> messages) {}

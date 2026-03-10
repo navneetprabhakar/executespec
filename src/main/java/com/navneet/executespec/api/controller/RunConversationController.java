@@ -4,6 +4,7 @@ import com.navneet.executespec.agent.ConversationAgent;
 import com.navneet.executespec.api.RunMapper;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -46,6 +47,7 @@ public class RunConversationController {
     private final ConversationAgent conversationAgent;
     private final PipelineHarness harness;
     private final RunMapper runMapper;
+    private final RunAccessGuard guard;
 
     // ── GET /api/runs/{runId}/chat ────────────────────────────────────────────
 
@@ -59,8 +61,7 @@ public class RunConversationController {
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
-        PipelineRun run = requireRun(runId);
-        requireAccess(run, userDetails);
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
 
         List<Map<String, String>> history = stateStore.getChatHistory(runId);
         return ResponseEntity.ok(history);
@@ -83,8 +84,7 @@ public class RunConversationController {
             @RequestBody Map<String, String> body,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
-        PipelineRun run = requireRun(runId);
-        requireAccess(run, userDetails);
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
 
         // Only allow chat on completed runs
         if (!"COMPLETE".equals(run.getStatus()) && !"PARTIAL".equals(run.getStatus())) {
@@ -152,8 +152,7 @@ public class RunConversationController {
             @RequestBody Map<String, String> body,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
-        PipelineRun sourceRun = requireRun(runId);
-        requireAccess(sourceRun, userDetails);
+        PipelineRun sourceRun = guard.requireRunAccess(runId, userDetails);
 
         if (!"COMPLETE".equals(sourceRun.getStatus()) && !"PARTIAL".equals(sourceRun.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -169,9 +168,8 @@ public class RunConversationController {
         PipelineRun newRun = stateStore.createIterationRun(sourceRun, userRequest);
 
         // Set ownership from caller identity
-        if (userDetails != null) {
-            newRun.setCreatedByUserId(userDetails.getUser().getId());
-        }
+        newRun.setCreatedByUserId(userDetails.getUser().getId());
+        newRun.setOrgId(userDetails.getUser().getOrgId());
         stateStore.save(newRun);
 
         // Kick off the async pipeline (workspace copy happens inside executeRunAsync)
@@ -181,32 +179,5 @@ public class RunConversationController {
 
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(Map.of("runId", newRun.getRunId()));
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private PipelineRun requireRun(String runId) {
-        return stateStore.findRun(runId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                "Run not found: " + runId));
-    }
-
-    private void requireAccess(PipelineRun run, AppUserDetails userDetails) {
-        if (userDetails == null) return; // anonymous access — let Spring Security handle it
-        // SUPER_ADMIN can access any run; others can only access their own runs
-        // (detailed RBAC is already applied at the RunController level; here we do a basic check)
-        String role = userDetails.getUser().getGlobalRole();
-        if ("SUPER_ADMIN".equals(role)) return;
-        String userId = userDetails.getUser().getId();
-        if (userId != null && !userId.equals(run.getCreatedByUserId())) {
-            // For org users, allow access based on org membership
-            String orgId = run.getOrgId();
-            String userOrgId = userDetails.getOrgMember() != null
-                ? userDetails.getOrgMember().getOrgId() : null;
-            if (orgId == null || !orgId.equals(userOrgId)) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Access denied to run " + run.getRunId());
-            }
-        }
     }
 }

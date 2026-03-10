@@ -3,6 +3,8 @@ package com.navneet.executespec.api.controller;
 import com.navneet.executespec.api.dto.DeployRequest;
 import com.navneet.executespec.api.dto.DeploymentDetail;
 import com.navneet.executespec.api.dto.DeploymentSummary;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.state.entity.Deployment;
 import com.navneet.executespec.state.entity.RunRepo;
@@ -11,6 +13,7 @@ import com.navneet.executespec.state.repository.RunRepoRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -30,9 +33,13 @@ public class DeploymentController {
     private final DeploymentService deploymentService;
     private final DeploymentRepository deploymentRepo;
     private final RunRepoRepository runRepoRepo;
+    private final RunAccessGuard guard;
 
     @PostMapping
-    public ResponseEntity<DeploymentSummary> deploy(@RequestBody DeployRequest request) {
+    public ResponseEntity<DeploymentSummary> deploy(
+            @RequestBody DeployRequest request,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(request.runId(), userDetails);
         try {
             RunRepo.RepoMode mode = RunRepo.RepoMode.valueOf(request.repoMode().toUpperCase());
             Deployment d = deploymentService.deploy(
@@ -47,18 +54,29 @@ public class DeploymentController {
     }
 
     @GetMapping
-    public List<DeploymentSummary> list(@RequestParam(required = false) String runId) {
-        List<Deployment> list = (runId != null)
-            ? deploymentRepo.findByRunIdOrderByCreatedAtDesc(runId)
-            : deploymentRepo.findAll();
-        return list.stream().map(DeploymentSummary::from).toList();
+    public List<DeploymentSummary> list(
+            @RequestParam(required = false) String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireAuthenticated(userDetails);
+        if (runId != null) {
+            guard.requireRunAccess(runId, userDetails);
+            return deploymentRepo.findByRunIdOrderByCreatedAtDesc(runId)
+                .stream().map(DeploymentSummary::from).toList();
+        }
+        // Listing all deployments requires org admin
+        guard.requireOrgAdmin(userDetails);
+        return deploymentRepo.findAll().stream().map(DeploymentSummary::from).toList();
     }
 
     @GetMapping("/{id}")
-    public DeploymentDetail detail(@PathVariable String id) {
+    public DeploymentDetail detail(
+            @PathVariable String id,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireAuthenticated(userDetails);
         Deployment d = deploymentRepo.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                 "Deployment not found: " + id));
+        guard.requireRunAccess(d.getRunId(), userDetails);
         RunRepo repo = (d.getRunRepoId() != null)
             ? runRepoRepo.findById(d.getRunRepoId()).orElse(null)
             : null;
@@ -66,7 +84,13 @@ public class DeploymentController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable String id) {
+    public ResponseEntity<Void> delete(
+            @PathVariable String id,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        Deployment d = deploymentRepo.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "Deployment not found: " + id));
+        guard.requireRunAccess(d.getRunId(), userDetails);
         try {
             deploymentService.deleteDeployment(id);
             return ResponseEntity.noContent().build();
@@ -76,7 +100,13 @@ public class DeploymentController {
     }
 
     @PostMapping("/{id}/rollback")
-    public ResponseEntity<Void> rollback(@PathVariable String id) {
+    public ResponseEntity<Void> rollback(
+            @PathVariable String id,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        Deployment d = deploymentRepo.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "Deployment not found: " + id));
+        guard.requireRunAccess(d.getRunId(), userDetails);
         try {
             deploymentService.rollback(id);
             return ResponseEntity.ok().build();
@@ -89,7 +119,9 @@ public class DeploymentController {
     }
 
     @GetMapping("/live")
-    public List<DeploymentSummary> live() {
+    public List<DeploymentSummary> live(
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireOrgAdmin(userDetails);
         return deploymentRepo.findByStatus(Deployment.DeployStatus.LIVE)
             .stream().map(DeploymentSummary::from).toList();
     }

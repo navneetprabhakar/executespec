@@ -41,7 +41,12 @@ export function useSse(runId: string | null) {
       esRef.current?.close();
       setStatus(attemptRef.current === 0 ? 'CONNECTING' : 'RECONNECTING');
 
-      const es = new EventSource(`/api/runs/${runId}/events`);
+      // Pass JWT via query param (EventSource can't set Authorization headers)
+      const token = localStorage.getItem('access_token');
+      const sseUrl = token
+        ? `/api/runs/${runId}/events?token=${encodeURIComponent(token)}`
+        : `/api/runs/${runId}/events`;
+      const es = new EventSource(sseUrl);
       esRef.current = es;
 
       es.onopen = () => {
