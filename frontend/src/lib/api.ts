@@ -551,6 +551,8 @@ export interface OrgDto {
   apiKeysProvided: boolean;
   planExpiresAt: string | null;
   createdAt: string;
+  // Admin contact
+  adminEmail?: string | null;
   // Per-org AI provider key flags (raw keys never returned)
   hasAnthropicKey?: boolean;
   hasOpenAiKey?: boolean;
@@ -558,6 +560,12 @@ export interface OrgDto {
   // Key source mode & provider restrictions
   keySourceMode?: string;
   enabledProviders?: string[] | null;
+  // JIRA integration flags (raw credentials never returned)
+  hasJiraCredentials?: boolean;
+  jiraBaseUrl?: string | null;
+  // Confluence integration flags (raw credentials never returned)
+  hasConfluenceCredentials?: boolean;
+  confluenceBaseUrl?: string | null;
 }
 
 export interface OrgMemberDto {
@@ -581,7 +589,7 @@ export interface OrgInvitation {
 
 export const getMyOrg = () => req<OrgDto>('/org/me');
 
-export const createOrg = (body: { name: string; domains: string[] }) =>
+export const createOrg = (body: { name: string; domains: string[]; adminEmail: string }) =>
   req<OrgDto>('/org', { method: 'POST', body: JSON.stringify(body) });
 
 export const updateOrg = (body: { name?: string; domains?: string[] }) =>
@@ -599,6 +607,34 @@ export const updateOrgKeySourceSettings = (keySourceMode: string, enabledProvide
   req<OrgDto>('/org/me/settings/key-source', {
     method: 'PUT',
     body: JSON.stringify({ keySourceMode, enabledProviders }),
+  });
+
+/** Saves org-level JIRA credentials (ORG_ADMIN only). Pass empty strings to clear. */
+export const updateOrgJiraSettings = (baseUrl: string, email: string, apiToken: string) =>
+  req<OrgDto>('/org/me/settings/jira', {
+    method: 'PUT',
+    body: JSON.stringify({ baseUrl, email, apiToken }),
+  });
+
+/** Tests JIRA credentials at org level. */
+export const validateOrgJira = (baseUrl: string, email: string, apiToken: string) =>
+  req<ValidationResult>('/org/me/settings/jira/validate', {
+    method: 'POST',
+    body: JSON.stringify({ baseUrl, email, apiToken }),
+  });
+
+/** Saves org-level Confluence credentials (ORG_ADMIN only). Pass empty strings to clear. */
+export const updateOrgConfluenceSettings = (baseUrl: string, email: string, apiToken: string) =>
+  req<OrgDto>('/org/me/settings/confluence', {
+    method: 'PUT',
+    body: JSON.stringify({ baseUrl, email, apiToken }),
+  });
+
+/** Tests Confluence credentials at org level. */
+export const validateOrgConfluence = (baseUrl: string, email: string, apiToken: string) =>
+  req<ValidationResult>('/org/me/settings/confluence/validate', {
+    method: 'POST',
+    body: JSON.stringify({ baseUrl, email, apiToken }),
   });
 
 export const getOrgMembers = () => req<OrgMemberDto[]>('/org/me/members');

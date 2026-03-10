@@ -3,6 +3,119 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import RoleGuard from '@/components/auth/RoleGuard';
 import * as api from '@/lib/api';
 
+// ── Create Organization Form ───────────────────────────────────────────────
+
+function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
+  const { user, loadMe } = useAuthStore();
+  const [name, setName] = useState('');
+  const [domains, setDomains] = useState('');
+  const [adminEmail, setAdminEmail] = useState(user?.email ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const canCreate = user?.tier === 'PRO' || user?.tier === 'ENTERPRISE';
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !domains.trim() || !adminEmail.trim()) {
+      setError('All fields are required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const domainList = domains.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+      await api.createOrg({ name: name.trim(), domains: domainList, adminEmail: adminEmail.trim() });
+      // Refresh user state so orgId is populated
+      await loadMe();
+      onCreated();
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to create organization');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!canCreate) {
+    return (
+      <div className="p-8 text-center">
+        <h2 className="text-xl font-bold text-white mb-2">Upgrade Required</h2>
+        <p className="text-slate-400 mb-4">
+          Only <span className="text-purple-400 font-semibold">PRO</span> and{' '}
+          <span className="text-purple-400 font-semibold">ENTERPRISE</span> users can create an organization.
+        </p>
+        <p className="text-slate-500 text-sm">
+          Your current plan: <span className="text-white font-semibold">{user?.tier ?? 'FREE'}</span>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-8 max-w-lg mx-auto">
+      <h2 className="text-xl font-bold text-white mb-2">Create Organization</h2>
+      <p className="text-slate-400 text-sm mb-6">
+        Set up your organization to manage team members, integrations, and AI provider keys.
+      </p>
+      <form onSubmit={handleCreate} className="space-y-4">
+        <div>
+          <label className="text-sm text-slate-300 mb-1 block">Organization Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            required
+            placeholder="Acme Corp"
+            className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="text-sm text-slate-300 mb-1 block">Email Domains</label>
+          <input
+            type="text"
+            value={domains}
+            onChange={e => setDomains(e.target.value)}
+            required
+            placeholder="acme.com, acmecorp.com"
+            className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            Comma-separated domains. Users with matching emails can be invited.
+          </p>
+        </div>
+        <div>
+          <label className="text-sm text-slate-300 mb-1 block">Admin Email</label>
+          <input
+            type="email"
+            value={adminEmail}
+            onChange={e => setAdminEmail(e.target.value)}
+            required
+            placeholder="admin@acme.com"
+            className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            Primary contact email for the organization admin.
+          </p>
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-400">{error}</p>
+        )}
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full rounded-lg bg-purple-600 px-4 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'Creating...' : 'Create Organization'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ── Main OrgSettingsPage ───────────────────────────────────────────────────
+
 export default function OrgSettingsPage() {
   const { user } = useAuthStore();
   const [org, setOrg] = useState<api.OrgDto | null>(null);
@@ -13,7 +126,8 @@ export default function OrgSettingsPage() {
   const [inviteMsg, setInviteMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadOrgData = () => {
+    setLoading(true);
     Promise.all([
       api.getMyOrg().catch(() => null),
       api.getOrgMembers().catch(() => []),
@@ -23,7 +137,9 @@ export default function OrgSettingsPage() {
       setMembers(m);
       setInvitations(i);
     }).finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { loadOrgData(); }, []);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,7 +166,6 @@ export default function OrgSettingsPage() {
     if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this member?`)) return;
     try {
       await api.orgSuspendMember(userId, !currentlySuspended);
-      // Reload members to reflect new status (OrgMemberDto doesn't carry status directly)
       const updated = await api.getOrgMembers().catch(() => members);
       setMembers(updated);
     } catch (err: any) {
@@ -59,12 +174,9 @@ export default function OrgSettingsPage() {
   };
 
   if (loading) return <div className="p-8 text-slate-400">Loading…</div>;
-  if (!org) return (
-    <div className="p-8 text-center">
-      <h2 className="text-xl font-bold text-white mb-2">No org yet</h2>
-      <p className="text-slate-400 mb-4">You don't belong to an org or haven't created one.</p>
-    </div>
-  );
+
+  // Show Create Org form if user has no org
+  if (!org) return <CreateOrgForm onCreated={loadOrgData} />;
 
   return (
     <RoleGuard requireOrgAdmin>
@@ -76,6 +188,7 @@ export default function OrgSettingsPage() {
             Tier: <span className="text-purple-400 font-semibold">{org.tier}</span> ·
             Runs this month: <span className="text-white">{org.monthlyRunCount}</span> ·
             Domains: <span className="text-slate-300">{org.domainPatterns}</span>
+            {org.adminEmail && <> · Admin: <span className="text-slate-300">{org.adminEmail}</span></>}
           </p>
         </div>
 

@@ -48,6 +48,7 @@ public class OrgService {
                 .domainPatterns(domainPatterns)
                 .tier(creator.getTier())
                 .status("ACTIVE")
+                .adminEmail(req.adminEmail())
                 .createdByUserId(creatorUserId)
                 .build();
         orgRepo.save(org);
@@ -272,6 +273,60 @@ public class OrgService {
         log.info("Org {} updated key source settings — mode={}, providers={}",
                 orgId, org.getKeySourceMode(), org.getEnabledProviders());
         return OrgDto.from(orgRepo.save(org));
+    }
+
+    // ── Org-level JIRA credential management ──────────────────────────────
+
+    @Transactional
+    public OrgDto updateJiraSettings(String orgId, String baseUrl, String email, String apiToken) {
+        Org org = orgRepo.findById(orgId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        org.setJiraBaseUrl(blankToNull(baseUrl));
+        org.setJiraEmail(blankToNull(email));
+        org.setJiraApiToken(blankToNull(apiToken));
+        org.setUpdatedAt(Instant.now());
+        log.info("Org {} updated JIRA settings — baseUrl={}, hasToken={}",
+                orgId, org.getJiraBaseUrl(), org.getJiraApiToken() != null);
+        return OrgDto.from(orgRepo.save(org));
+    }
+
+    // ── Org-level Confluence credential management ──────────────────────────
+
+    @Transactional
+    public OrgDto updateConfluenceSettings(String orgId, String baseUrl, String email, String apiToken) {
+        Org org = orgRepo.findById(orgId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        org.setConfluenceBaseUrl(blankToNull(baseUrl));
+        org.setConfluenceEmail(blankToNull(email));
+        org.setConfluenceApiToken(blankToNull(apiToken));
+        org.setUpdatedAt(Instant.now());
+        log.info("Org {} updated Confluence settings — baseUrl={}, hasToken={}",
+                orgId, org.getConfluenceBaseUrl(), org.getConfluenceApiToken() != null);
+        return OrgDto.from(orgRepo.save(org));
+    }
+
+    // ── Integration status helpers ──────────────────────────────────────────
+
+    /**
+     * Returns the list of integration source keys (e.g. "JIRA", "CONFLUENCE") that have
+     * fully configured credentials at the org level.
+     */
+    public List<String> getEnabledIntegrations(String orgId) {
+        if (orgId == null) return List.of();
+        Org org = orgRepo.findById(orgId).orElse(null);
+        if (org == null) return List.of();
+        var result = new java.util.ArrayList<String>();
+        if (present(org.getJiraBaseUrl()) && present(org.getJiraEmail()) && present(org.getJiraApiToken())) {
+            result.add("JIRA");
+        }
+        if (present(org.getConfluenceBaseUrl()) && present(org.getConfluenceEmail()) && present(org.getConfluenceApiToken())) {
+            result.add("CONFLUENCE");
+        }
+        return result;
+    }
+
+    private static boolean present(String s) {
+        return s != null && !s.isBlank();
     }
 
     private static String blankToNull(String s) {
