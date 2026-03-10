@@ -27,11 +27,11 @@ export const PIPELINE_STEPS = [
 ];
 
 export const NAV_ITEMS = [
-  { path: '/',             label: 'Runs',         icon: 'LayoutDashboard' },
-  { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3' },
-  { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign' },
-  { path: '/integrations', label: 'Integrations', icon: 'Plug' },
-  { path: '/settings',     label: 'Settings',     icon: 'Settings' },
+  { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
+  { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3',       adminOnly: true  },
+  { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign',     adminOnly: false },
+  { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false },
+  { path: '/settings',     label: 'Settings',     icon: 'Settings',       adminOnly: false },
 ];
 
 export const ROUTE_PATHS = {

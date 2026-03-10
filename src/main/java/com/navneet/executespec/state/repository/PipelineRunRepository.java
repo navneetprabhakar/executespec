@@ -31,6 +31,18 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r")
     Long sumOutputTokens();
 
+    // ── Org-filtered metrics ────────────────────────────────────────────────────
+
+    long countByOrgId(String orgId);
+
+    long countByOrgIdAndStatus(String orgId, String status);
+
+    @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId")
+    Long sumInputTokensByOrgId(@Param("orgId") String orgId);
+
+    @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId")
+    Long sumOutputTokensByOrgId(@Param("orgId") String orgId);
+
     // ── GCS workspace archiving ───────────────────────────────────────────────
 
     /**

@@ -158,11 +158,11 @@ function SaveBar({
 
 export default function SettingsPage() {
   const { user, setUser } = useAuthStore();
-  const [health, setHealth] = useState<Record<string, unknown> | null>(null);
+  const [health, setHealth] = useState<api.MetricsResponse | null>(null);
   const [org, setOrg] = useState<OrgDto | null>(null);
 
   useEffect(() => {
-    fetch('/api/metrics').then((r) => r.json()).then(setHealth).catch(() => {});
+    api.getMetrics().then(setHealth).catch(() => {});
   }, []);
 
   // Load org data for ORG_ADMIN users so we can show org-level key status

@@ -1,27 +1,32 @@
 import { useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import MetricCard from '@/components/dashboard/MetricCard';
 import TokenBubbleChart from '@/components/dashboard/TokenBubbleChart';
-import AgentCommGraph from '@/components/dashboard/AgentCommGraph';
 import ModelComparisonChart from '@/components/dashboard/ModelComparisonChart';
 import ActivityFeed from '@/components/dashboard/ActivityFeed';
 import { useMetricsStore } from '@/stores/useMetricsStore';
 import { useRunStore } from '@/stores/useRunStore';
+import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { fmtTokens } from '@/lib/utils';
 
 export default function DashboardPage() {
+  const isAdmin = useAuthStore(selectIsOrgAdmin);
   const { metrics, modelComparison, fetchMetrics, fetchModelComparison } = useMetricsStore();
   const { runs, fetchRuns } = useRunStore();
 
   useEffect(() => {
+    if (!isAdmin) return;
     fetchMetrics();
     fetchModelComparison();
-    // fetchRuns once on mount — the list stays current via SSE patchRunStatus;
-    // no need to re-poll it here (RunList has its own 10s poll when visible).
     fetchRuns();
-    // Only re-poll metrics — they're server-side aggregates that don't come via SSE.
     const interval = setInterval(() => { fetchMetrics(); }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAdmin]);
+
+  // Redirect non-admin users to the Runs page
+  if (!isAdmin) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
@@ -51,9 +56,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <TokenBubbleChart metrics={metrics} />
-        <AgentCommGraph />
         <ModelComparisonChart data={modelComparison} />
       </div>
 
