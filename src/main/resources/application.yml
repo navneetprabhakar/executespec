@@ -36,20 +36,20 @@ spring:
 
   ai:
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY: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}
+      api-key: ${ANTHROPIC_API_KEY:}
       chat:
         options:
           model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
           max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
     openai:
-      api-key: ${OPENAI_API_KEY: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}
+      api-key: ${OPENAI_API_KEY:}
       chat:
         options:
           model: gpt-4o-mini
           max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
     google:
       genai:
-        api-key: ${GOOGLE_API_KEY:AIzaSyCjIge3pbAvhejI5vELeDe0AWpmH9-P1UU}          # empty default — Gemini is 3rd fallback only
+        api-key: ${GOOGLE_API_KEY:}          # empty default — Gemini is 3rd fallback only
         chat:
           options:
             model: gemini-3.1-flash-lite-preview         # default; ARCHITECT chain overrides to gemini-2.5-pro
@@ -80,7 +80,7 @@ agent:
     extension-pct: 50            # extend by 50% of base cap per grant
     absolute-ceiling-multiplier: 2  # never exceed 2× base cap
   github:
-    pat: ${GITHUB_PAT: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}
+    pat: ${GITHUB_PAT:}
     default-owner: ${GITHUB_OWNER:navneetprabhakar}
   shell:
     sandbox-enabled: true
@@ -167,7 +167,7 @@ agent:
       enabled: true
       base-url: ${JIRA_BASE_URL:https://executespec.atlassian.net}
       email: ${JIRA_EMAIL:admin@executespec.ai}
-      api-token: ${JIRA_API_TOKEN:ATATT3xFfGF0AMQ0g1aEBe1MLXpixcOEtxPsvTGIu7uUSkyXQPGFeCM4q-7HgiNjFBiLWO4VT1ixH8uBafm0OVTi11l6pP3zQE007pO80-0rO1ckzPs_R8oHupZLVbodHkg1bPn2kE5uKzrG4kJncJcQ16OlHfrz_JIAU_-G9DyE8ZuRctLVhGQ=D48C6C84}
+      api-token: ${JIRA_API_TOKEN:}
       webhook-secret: ${JIRA_WEBHOOK_SECRET:}
       trigger-status: "Ready for Coding"   # issue status name that fires the pipeline
       in-progress-status: "In Progress"    # transition to on run start (null = skip)
@@ -179,7 +179,7 @@ agent:
       enabled: true
       base-url: ${CONFLUENCE_BASE_URL:https://executespec.atlassian.net}
       email: ${CONFLUENCE_EMAIL:admin@executespec.ai}
-      api-token: ${CONFLUENCE_API_TOKEN:ATATT3xFfGF0-W1w2Q5djDN8b8seAgTmvEHB4LqSD9IGRxHlO9ZCnKMdWeUXuwabbfZJS4LsfOlY5U1UGeSPF8UL8AoWBKuNf7U8wJlf0UKcrjyGrgrnHam7zlVTmOFwaXTanzNYsBCN6VZ81INtSJtGBQok1GLTrf4kFmCyUQsSWd3Jyh0qSEA=94FD1DEB}
+      api-token: ${CONFLUENCE_API_TOKEN:}
       trigger-label: "agent-run"           # page label that fires the pipeline
       space-key: "KAN"                     # default space for child pages
       dashboard-url: http://localhost:8080

@@ -68,7 +68,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -DskipTests
 
 Open **http://localhost:8080** to access the dashboard.
 
-Default admin: `admin@executespec.ai` / `Admin@123`
+Default admin: `admin@executespec.ai` — password is set via Flyway migration V7 (change on first login via Settings)
 
 ### Development Mode (Hot Reload)
 
@@ -1114,7 +1114,7 @@ After deployment, run through this checklist to confirm everything is working:
 - [ ] Response body is `{"status":"UP"}` (details hidden by `show-details: never`)
 - [ ] `curl -I https://YOUR_DOMAIN/api/health` returns HTTP 200 (Spring Boot health endpoint)
 - [ ] `https://YOUR_DOMAIN` loads the React SPA (white screen or login page — not a 404)
-- [ ] Login with `admin@executespec.ai` / `Admin@123` succeeds and returns a JWT
+- [ ] Login with `admin@executespec.ai` and the admin password succeeds and returns a JWT
 - [ ] After login, the Runs list page loads without 401 errors
 - [ ] Submit a test run (simple spec) and verify it transitions: PENDING → PLANNING → AWAITING_APPROVAL
 - [ ] Approve the plan and verify workers start (RUNNING)
@@ -1347,7 +1347,7 @@ sudo find /data/workspace -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +
 
 ### Admin password not working
 
-Default admin credentials: `admin@executespec.ai` / `Admin@123`
+Default admin email: `admin@executespec.ai` (password set by Flyway V7 migration)
 
 These are seeded by Flyway migration V5 (initial seed) and corrected by V7 (bcrypt hash fix).
 If login fails, check that Flyway migrations completed successfully in the startup logs:
