@@ -2,14 +2,14 @@
 
 Multi-agent autonomous coding system. Decomposes natural-language goals into sequential coding tasks, executes them with LLM worker agents, validates, reviews, and merges the result.
 
-**Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind
+**Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · React 18 · Vite 5 · Tailwind
 
 ---
 
 ## Quick Start
 
 ```bash
-# Prerequisites: Java 21, PostgreSQL (localhost:5432/agentteam), Redis (localhost:6379), Node.js 18+
+# Prerequisites: Java 21, PostgreSQL (localhost:5432/agentteam), Node.js 18+
 
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -32,7 +32,7 @@ Open **http://localhost:8080**
 ```
 POST /api/runs  →  PlannerAgent (Sonnet)
                       ↓
-                Plan Approval Gate
+                Plan Approval Gate  (or auto-bypass with skipApproval)
                       ↓
                 SequentialTaskExecutor
                    → WorkerAgent per task (Haiku)
@@ -41,9 +41,9 @@ POST /api/runs  →  PlannerAgent (Sonnet)
                       ↓
                 CompilerAgent (full project build)
                       ↓
-                ReviewerAgent → Merge Gate
+                ReviewerAgent → Merge Gate  (or auto-bypass with autoMerge)
                       ↓
-                GitMergeService → Post-merge agents
+                GitMergeService → GitHub push → Post-merge agents
 ```
 
 ---
@@ -51,14 +51,15 @@ POST /api/runs  →  PlannerAgent (Sonnet)
 ## Key Features
 
 - **Sequential task execution** with per-task code validation and model escalation
-- **Two human-in-the-loop gates** — plan approval + merge approval (Redis-backed, multi-instance safe)
+- **Two human-in-the-loop gates** — plan approval + merge approval (with optional auto-bypass via `skipApproval` / `autoMerge`)
 - **Code validation** — language toolchains for Java, TypeScript, Python, React (syntax → type → lint → test)
 - **Model routing** — tier escalation (FAST → CAPABLE → POWER) with Anthropic → OpenAI failover
 - **Auth & multi-tenancy** — JWT, orgs, projects, tiers (FREE/PRO/ENTERPRISE), RBAC
 - **API key management** — SYSTEM / OWN_KEYS / HYBRID modes with per-provider restrictions
 - **Process-based local preview** — auto-detects project type, starts dev server
 - **Post-run AI chat** — conversation panel with workspace context injection
-- **External integrations** — Jira, Confluence, ServiceNow, PagerDuty webhook triggers
+- **External integrations** — Jira, Confluence, ServiceNow, PagerDuty (webhook + manual triggers)
+- **GitHub integration** — auto-create repos with random names, push code, clone existing repos; GitHub-backed code viewing when local workspace is cleaned up
 - **Self-healing workers** — progress checkpoints, completion urgency, emergency compaction
 - **Real-time observability** — SSE events, D3.js Gantt timeline, token charts
 - **GCP deployment** — GCE MIG + Cloud SQL + Redis + GCS + Load Balancer
@@ -96,9 +97,3 @@ POST /api/runs  →  PlannerAgent (Sonnet)
 JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q    # Java
 npm --prefix frontend run build                           # Frontend
 ```
-
----
-
-## Default Admin
-
-After first run: `admin@executespec.ai` / `Admin@123`
