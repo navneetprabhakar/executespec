@@ -19,6 +19,7 @@ interface RunStore {
   createRun: (req: { userRequest: string; skipApproval?: boolean; autoMerge?: boolean; modelName?: string; projectId?: string; repoMode?: string | null; repoUrl?: string | null }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   approveRun: (id: string, approved: boolean) => Promise<void>;
+  clarifyRun: (id: string, response: string) => Promise<void>;
   mergeRun: (id: string, merge: boolean) => Promise<void>;
   retryTask: (runId: string, taskId: string) => Promise<void>;
   retryRun: (runId: string) => Promise<string>;
@@ -87,6 +88,11 @@ export const useRunStore = create<RunStore>((set, get) => ({
   approveRun: async (id, approved) => {
     await api.approveRun(id, approved);
     // fetchRun refreshes the detail; the runs list is kept current by SSE patchRunStatus.
+    await get().fetchRun(id);
+  },
+
+  clarifyRun: async (id, response) => {
+    await api.clarifyRun(id, response);
     await get().fetchRun(id);
   },
 

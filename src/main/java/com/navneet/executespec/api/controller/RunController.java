@@ -150,6 +150,22 @@ public class RunController {
             : ResponseEntity.<Void>notFound().build();
     }
 
+    /** Resolve the context-clarification gate — user provides JIRA key, Confluence URL, etc. */
+    @PostMapping("/{runId}/clarify")
+    public ResponseEntity<Void> clarifyContext(
+            @PathVariable String runId,
+            @RequestBody ClarificationRequest req,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+        log.info("POST /api/runs/{}/clarify — response length: {}", runId,
+                req.response() != null ? req.response().length() : 0);
+        boolean resolved = harness.resolveClarificationGate(runId, req.response());
+        if (resolved) return ResponseEntity.ok().build();
+        return ResponseEntity.notFound().build();
+    }
+
+    public record ClarificationRequest(String response) {}
+
     /** Approve or reject the merge-approval gate. */
     @PostMapping("/{runId}/merge")
     public ResponseEntity<Void> approveMerge(

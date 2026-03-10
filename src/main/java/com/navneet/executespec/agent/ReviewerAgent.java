@@ -108,8 +108,9 @@ public class ReviewerAgent {
                 Prompt prompt = new Prompt(List.of(
                     new SystemMessage(loadPrompt()),
                     new UserMessage(msg)), reviewerOpts);
-                ChatResponse response = llmRouter.callWithFallback(provider, model, prompt,
+                LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(provider, model, prompt,
                     run.getRunId(), "reviewer", FallbackMode.IMMEDIATE, 0, false);
+                ChatResponse response = lr.response();
 
                 String responseContent = response.getResult().getOutput().getText();
 
@@ -118,6 +119,7 @@ public class ReviewerAgent {
                     int inTok  = response.getMetadata().getUsage().getPromptTokens().intValue();
                     int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
                     stateStore.addTokensToRun(run.getRunId(), inTok, outTok);
+                    stateStore.setAgentTokens(run.getRunId(), "reviewer", inTok, outTok, lr.provider(), lr.model());
                 } catch (Exception ex) {
                     log.warn("[Reviewer] Could not extract token counts: {}", ex.getMessage());
                 }
@@ -198,6 +200,7 @@ public class ReviewerAgent {
         if (model == null) return props.getRoles().getReviewer();
         if (model.startsWith("claude-")) return "anthropic";
         if (model.startsWith("gpt-"))    return "openai";
+        if (model.startsWith("gemini-")) return "google";
         return props.getRoles().getReviewer();
     }
 }

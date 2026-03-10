@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.ShellTool;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +54,7 @@ public class CompilerAgent {
     private final SseBroadcaster broadcaster;
     private final CompilerProperties compilerProps;
     private final ObjectMapper mapper;
+    private final StateStore stateStore;
 
     @Value("classpath:prompts/compiler.txt")
     private Resource compilerPrompt;
@@ -142,10 +144,21 @@ public class CompilerAgent {
 
         Prompt prompt = new Prompt(List.of(new SystemMessage(system), new UserMessage(user)));
 
-        String resp = llmRouter.callWithFallback(
+        LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
                 compilerProps.getProvider(), compilerProps.getModel(),
                 prompt, runId, "compiler",
-                LlmRouter.FallbackMode.IMMEDIATE, 0, false).getResult().getOutput().getText();
+                LlmRouter.FallbackMode.IMMEDIATE, 0, false);
+        String resp = lr.response().getResult().getOutput().getText();
+
+        // Track compiler token usage
+        try {
+            int inTok = lr.response().getMetadata().getUsage().getPromptTokens().intValue();
+            int outTok = lr.response().getMetadata().getUsage().getCompletionTokens().intValue();
+            stateStore.addTokensToRun(runId, inTok, outTok);
+            stateStore.setAgentTokens(runId, "compiler", inTok, outTok, lr.provider(), lr.model());
+        } catch (Exception ex) {
+            log.warn("[Compiler] Could not extract token counts: {}", ex.getMessage());
+        }
 
         applyJsonFixes(runId, resp);
     }

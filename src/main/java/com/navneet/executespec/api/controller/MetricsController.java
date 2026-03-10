@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -25,6 +26,7 @@ public class MetricsController {
      */
     @GetMapping
     public ResponseEntity<MetricsResponse> metrics(
+            @RequestParam(defaultValue = "0") int days,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
         MetricsData d;
@@ -32,13 +34,10 @@ public class MetricsController {
                 && "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole());
 
         if (isSuperAdmin) {
-            // SUPER_ADMIN: global view across all orgs
-            d = stateStore.computeMetrics();
+            d = stateStore.computeMetrics(days);
         } else if (userDetails != null && userDetails.getUser().getOrgId() != null) {
-            // ORG_ADMIN / any org member: scoped to their org
-            d = stateStore.computeMetricsForOrg(userDetails.getUser().getOrgId());
+            d = stateStore.computeMetricsForOrg(userDetails.getUser().getOrgId(), days);
         } else {
-            // Free user with no org — return zeros (no org runs)
             d = new MetricsData(0, 0, 0, 0, 0, 0, 0);
         }
 

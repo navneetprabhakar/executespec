@@ -6,6 +6,8 @@ import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.state.entity.*;
 import com.navneet.executespec.state.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +41,7 @@ public class StateStore {
     // ── Tier 5 repositories ───────────────────────────────────
     private final RunRecoveryRepository recoveryRepo;
     private final PromptAuditRepository promptAuditRepo;
+    private final AppUserRepository appUserRepo;
 
     // ── Run lifecycle ─────────────────────────────────────────
 
@@ -274,6 +277,9 @@ public class StateStore {
         task.setOutputTokens(report.getOutputTokens());
         task.setCacheReadTokens(report.getCacheReadTokens());
         task.setCacheWriteTokens(report.getCacheWriteTokens());
+        // Persist actual provider/model used (may differ from assignedModel due to failover/escalation)
+        if (report.getProvider() != null) task.setProvider(report.getProvider());
+        if (report.getModel() != null) task.setModel(report.getModel());
         task.setCompletedAt(Instant.now());
         task.setDurationMs(task.getStartedAt() != null
             ? Duration.between(task.getStartedAt(), Instant.now()).toMillis() : 0);
@@ -292,6 +298,36 @@ public class StateStore {
         runRepo.findById(runId).ifPresent(run -> {
             run.setTotalInputTokens(run.getTotalInputTokens() + inputTok);
             run.setTotalOutputTokens(run.getTotalOutputTokens() + outputTok);
+            runRepo.save(run);
+        });
+    }
+
+    /** Stores per-agent token breakdown + actual provider/model (planner, reviewer, compiler). */
+    public void setAgentTokens(String runId, String agentRole,
+                               int inputTok, int outputTok,
+                               String provider, String model) {
+        runRepo.findById(runId).ifPresent(run -> {
+            switch (agentRole) {
+                case "planner" -> {
+                    run.setPlannerInputTokens((run.getPlannerInputTokens() != null ? run.getPlannerInputTokens() : 0) + inputTok);
+                    run.setPlannerOutputTokens((run.getPlannerOutputTokens() != null ? run.getPlannerOutputTokens() : 0) + outputTok);
+                    run.setPlannerProvider(provider);
+                    run.setPlannerActualModel(model);
+                }
+                case "reviewer" -> {
+                    run.setReviewerInputTokens((run.getReviewerInputTokens() != null ? run.getReviewerInputTokens() : 0) + inputTok);
+                    run.setReviewerOutputTokens((run.getReviewerOutputTokens() != null ? run.getReviewerOutputTokens() : 0) + outputTok);
+                    run.setReviewerProvider(provider);
+                    run.setReviewerActualModel(model);
+                }
+                case "compiler" -> {
+                    run.setCompilerInputTokens((run.getCompilerInputTokens() != null ? run.getCompilerInputTokens() : 0) + inputTok);
+                    run.setCompilerOutputTokens((run.getCompilerOutputTokens() != null ? run.getCompilerOutputTokens() : 0) + outputTok);
+                    run.setCompilerProvider(provider);
+                    run.setCompilerActualModel(model);
+                }
+                default -> log.warn("Unknown agent role for token tracking: {}", agentRole);
+            }
             runRepo.save(run);
         });
     }
@@ -522,6 +558,46 @@ public class StateStore {
                                long activeRuns, long queuedRuns,
                                long totalInputTokens, long totalOutputTokens) {}
 
+    /** Date-filtered global metrics. If days <= 0, delegates to all-time variant. */
+    public MetricsData computeMetrics(int days) {
+        if (days <= 0) return computeMetrics();
+        Instant since = Instant.now().minus(Duration.ofDays(days));
+        long total     = runRepo.countByStartedAtGreaterThanEqual(since);
+        long completed = runRepo.countByStatusAndStartedAtGreaterThanEqual("COMPLETE", since);
+        long failed    = runRepo.countByStatusAndStartedAtGreaterThanEqual("FAILED", since);
+        long active    = runRepo.countByStatusAndStartedAtGreaterThanEqual("WORKING", since)
+                       + runRepo.countByStatusAndStartedAtGreaterThanEqual("STUCK", since)
+                       + runRepo.countByStatusAndStartedAtGreaterThanEqual("PLANNING", since)
+                       + runRepo.countByStatusAndStartedAtGreaterThanEqual("REVIEWING", since)
+                       + runRepo.countByStatusAndStartedAtGreaterThanEqual("AWAITING_APPROVAL", since)
+                       + runRepo.countByStatusAndStartedAtGreaterThanEqual("AWAITING_MERGE", since);
+        long queued    = runRepo.countByStatusAndStartedAtGreaterThanEqual("QUEUED", since);
+        Long sumIn  = runRepo.sumInputTokensByStartedAtAfter(since);
+        Long sumOut = runRepo.sumOutputTokensByStartedAtAfter(since);
+        return new MetricsData(total, completed, failed, active, queued,
+                               sumIn != null ? sumIn : 0, sumOut != null ? sumOut : 0);
+    }
+
+    /** Date-filtered org metrics. If days <= 0, delegates to all-time variant. */
+    public MetricsData computeMetricsForOrg(String orgId, int days) {
+        if (days <= 0) return computeMetricsForOrg(orgId);
+        Instant since = Instant.now().minus(Duration.ofDays(days));
+        long total     = runRepo.countByOrgIdAndStartedAtGreaterThanEqual(orgId, since);
+        long completed = runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "COMPLETE", since);
+        long failed    = runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "FAILED", since);
+        long active    = runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "WORKING", since)
+                       + runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "STUCK", since)
+                       + runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "PLANNING", since)
+                       + runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "REVIEWING", since)
+                       + runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "AWAITING_APPROVAL", since)
+                       + runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "AWAITING_MERGE", since);
+        long queued    = runRepo.countByOrgIdAndStatusAndStartedAtGreaterThanEqual(orgId, "QUEUED", since);
+        Long sumIn  = runRepo.sumInputTokensByOrgIdAndStartedAtAfter(orgId, since);
+        Long sumOut = runRepo.sumOutputTokensByOrgIdAndStartedAtAfter(orgId, since);
+        return new MetricsData(total, completed, failed, active, queued,
+                               sumIn != null ? sumIn : 0, sumOut != null ? sumOut : 0);
+    }
+
     // ── Tier 4: Timeline and model comparison ─────────────────
 
     public TimelineData buildTimeline(String runId) {
@@ -534,9 +610,9 @@ public class StateStore {
     }
 
     public ModelComparisonData computeModelComparison(int days) {
-        Instant since = Instant.now().minus(Duration.ofDays(days));
+        Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
         List<AgentTask> allTasks = taskRepo.findAll().stream()
-            .filter(t -> t.getStartedAt() != null && t.getStartedAt().isAfter(since))
+            .filter(t -> since == null || (t.getStartedAt() != null && t.getStartedAt().isAfter(since)))
             .filter(t -> t.getInputTokens() != null)
             .toList();
 
@@ -568,7 +644,7 @@ public class StateStore {
      * Org-scoped model comparison: only tasks belonging to runs in the given org.
      */
     public ModelComparisonData computeModelComparisonForOrg(int days, String orgId) {
-        Instant since = Instant.now().minus(Duration.ofDays(days));
+        Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
         // Get run IDs for this org
         List<String> orgRunIds = runRepo.findAll().stream()
             .filter(r -> orgId.equals(r.getOrgId()))
@@ -578,7 +654,7 @@ public class StateStore {
 
         List<AgentTask> allTasks = taskRepo.findAll().stream()
             .filter(t -> orgRunIds.contains(t.getRunId()))
-            .filter(t -> t.getStartedAt() != null && t.getStartedAt().isAfter(since))
+            .filter(t -> since == null || (t.getStartedAt() != null && t.getStartedAt().isAfter(since)))
             .filter(t -> t.getInputTokens() != null)
             .toList();
 
@@ -616,6 +692,61 @@ public class StateStore {
                                  long totalInputTokens, long totalOutputTokens,
                                  double avgInputTokensPerTask, double avgOutputTokensPerTask,
                                  int compactionCount) {}
+
+    // ── Per-user run statistics ───────────────────────────────
+
+    public record UserRunsSummaryData(List<UserRunStat> users) {}
+
+    public record UserRunStat(String userId, String displayName,
+                              int runCount, int completedCount, int failedCount,
+                              long totalInputTokens, long totalOutputTokens) {}
+
+    /** Computes per-user run statistics for the given org. */
+    public UserRunsSummaryData computeUserRunsSummary(String orgId, int days) {
+        Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
+        List<PipelineRun> runs = runRepo.findAll().stream()
+            .filter(r -> orgId.equals(r.getOrgId()))
+            .filter(r -> since == null || (r.getStartedAt() != null && r.getStartedAt().isAfter(since)))
+            .toList();
+        Map<String, AppUser> userMap = appUserRepo.findActiveByOrgId(orgId).stream()
+            .collect(Collectors.toMap(AppUser::getId, u -> u, (a, b) -> a));
+        return buildUserStats(runs, userMap);
+    }
+
+    /** Global (SUPER_ADMIN) variant: no org filter. */
+    public UserRunsSummaryData computeUserRunsSummaryGlobal(int days) {
+        Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
+        List<PipelineRun> runs = runRepo.findAll().stream()
+            .filter(r -> since == null || (r.getStartedAt() != null && r.getStartedAt().isAfter(since)))
+            .toList();
+        Map<String, AppUser> userMap = appUserRepo.findAllActive().stream()
+            .collect(Collectors.toMap(AppUser::getId, u -> u, (a, b) -> a));
+        return buildUserStats(runs, userMap);
+    }
+
+    private UserRunsSummaryData buildUserStats(List<PipelineRun> runs, Map<String, AppUser> userMap) {
+        Map<String, List<PipelineRun>> grouped = runs.stream()
+            .filter(r -> r.getCreatedByUserId() != null)
+            .collect(Collectors.groupingBy(PipelineRun::getCreatedByUserId));
+
+        List<UserRunStat> stats = grouped.entrySet().stream().map(entry -> {
+            String uid = entry.getKey();
+            List<PipelineRun> userRuns = entry.getValue();
+            AppUser user = userMap.get(uid);
+            String displayName = user != null
+                ? (user.getFirstName() + " " + user.getLastName()).trim()
+                : uid.substring(0, Math.min(8, uid.length())) + "…";
+            int runCount  = userRuns.size();
+            int completed = (int) userRuns.stream().filter(r -> "COMPLETE".equals(r.getStatus())).count();
+            int failed    = (int) userRuns.stream().filter(r -> "FAILED".equals(r.getStatus())).count();
+            long totalIn  = userRuns.stream().mapToLong(r -> r.getTotalInputTokens() != null ? r.getTotalInputTokens() : 0).sum();
+            long totalOut = userRuns.stream().mapToLong(r -> r.getTotalOutputTokens() != null ? r.getTotalOutputTokens() : 0).sum();
+            return new UserRunStat(uid, displayName, runCount, completed, failed, totalIn, totalOut);
+        }).sorted(Comparator.comparingInt(UserRunStat::runCount).reversed())
+          .toList();
+
+        return new UserRunsSummaryData(stats);
+    }
 
     // ── Logging ───────────────────────────────────────────────
 

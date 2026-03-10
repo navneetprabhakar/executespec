@@ -52,6 +52,7 @@ public class GateStore {
     // In-memory write-through maps — instant same-instance resolution
     private final ConcurrentHashMap<String, CompletableFuture<Boolean>>        planFutures  = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CompletableFuture<MergeDecision>>  mergeFutures = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CompletableFuture<String>>         clarificationFutures = new ConcurrentHashMap<>();
 
     // ── Signal (write-through: in-memory + Redis) ────────────────────────────────
 
@@ -178,6 +179,61 @@ public class GateStore {
         return null;
     }
 
+    // ── Context Clarification gate ─────────────────────────────────────────────
+
+    /**
+     * Signals the context-clarification gate for a run.
+     * The response string contains the user's clarification text (e.g., a JIRA key or Confluence URL).
+     */
+    public void setClarificationGate(String runId, String response) {
+        redis.opsForValue().set(clarificationKey(runId), response != null ? response : "", GATE_TTL);
+        CompletableFuture<String> future = clarificationFutures.remove(runId);
+        if (future != null) {
+            future.complete(response);
+            log.debug("[GateStore] Clarification gate resolved via in-memory future for run {}", runId);
+        }
+    }
+
+    /**
+     * Blocks the calling (pipeline) thread until the clarification gate is signaled.
+     * Returns the user's clarification response string (may be empty if user skipped).
+     */
+    public String awaitClarificationGate(String runId) throws InterruptedException {
+        CompletableFuture<String> future = clarificationFutures.computeIfAbsent(runId, k -> new CompletableFuture<>());
+        log.debug("[GateStore] Awaiting clarification gate for run {} (in-memory + Redis fallback)", runId);
+
+        while (true) {
+            try {
+                String response = future.get(POLL_MS, TimeUnit.MILLISECONDS);
+                clarificationFutures.remove(runId);
+                redis.delete(clarificationKey(runId));
+                log.debug("[GateStore] Clarification gate resolved via in-memory for run {}", runId);
+                return response;
+            } catch (TimeoutException e) {
+                String val = redis.opsForValue().getAndDelete(clarificationKey(runId));
+                if (val != null) {
+                    clarificationFutures.remove(runId);
+                    log.debug("[GateStore] Clarification gate resolved via Redis for run {}", runId);
+                    return val;
+                }
+            } catch (ExecutionException | CancellationException e) {
+                clarificationFutures.remove(runId);
+                throw new InterruptedException("Clarification gate failed for run " + runId + ": " + e.getMessage());
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                clarificationFutures.remove(runId);
+                throw new InterruptedException("Clarification gate interrupted for run " + runId);
+            }
+        }
+    }
+
+    /** Removes the clarification gate key and in-memory future for a run (idempotent). */
+    public void clearClarificationGate(String runId) {
+        CompletableFuture<String> f = clarificationFutures.remove(runId);
+        if (f != null) f.cancel(false);
+        redis.delete(clarificationKey(runId));
+    }
+
     // ── Cleanup (on run cancellation / hard failure) ─────────────────────────────
 
     /** Removes the plan gate key and in-memory future for a run (idempotent). */
@@ -196,6 +252,7 @@ public class GateStore {
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
-    private static String planKey(String runId)  { return "gate:plan:"  + runId; }
-    private static String mergeKey(String runId) { return "gate:merge:" + runId; }
+    private static String planKey(String runId)           { return "gate:plan:"          + runId; }
+    private static String mergeKey(String runId)          { return "gate:merge:"         + runId; }
+    private static String clarificationKey(String runId)  { return "gate:clarification:" + runId; }
 }

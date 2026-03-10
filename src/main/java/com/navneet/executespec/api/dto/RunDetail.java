@@ -55,6 +55,17 @@ public class RunDetail {
     /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). */
     String techStack;
 
+    /** Human-readable project name. Null if projectId is null or project was deleted. */
+    String projectName;
+
+    // ── Per-agent token breakdown (V19) ─────────────────────────────────────
+    /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
+    List<AgentTokenEntry> agentTokens;
+
     /** Present if this run was triggered by an external integration. */
     public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
+
+    /** Token usage for a non-task agent (planner, reviewer, compiler). */
+    public record AgentTokenEntry(String role, String provider, String model,
+                                  int inputTokens, int outputTokens) {}
 }

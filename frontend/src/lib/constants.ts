@@ -1,6 +1,7 @@
 export const STATUS_COLORS: Record<string, { dot: string; text: string; glow: string; bg: string }> = {
   QUEUED:            { dot: 'bg-zinc-500',         text: 'text-zinc-400',      glow: '',                        bg: 'bg-zinc-500/10' },
   PLANNING:          { dot: 'bg-accent-violet',    text: 'text-accent-violet', glow: 'shadow-glow-violet',      bg: 'bg-accent-violet/10' },
+  AWAITING_CLARIFICATION: { dot: 'bg-accent-violet', text: 'text-accent-violet', glow: 'shadow-glow-violet',      bg: 'bg-accent-violet/10' },
   AWAITING_APPROVAL: { dot: 'bg-accent-amber',     text: 'text-accent-amber',  glow: 'shadow-glow-amber',       bg: 'bg-accent-amber/10' },
   WORKING:           { dot: 'bg-accent-cyan',      text: 'text-accent-cyan',   glow: 'shadow-glow-cyan',        bg: 'bg-accent-cyan/10' },
   REVIEWING:         { dot: 'bg-accent-violet',    text: 'text-accent-violet', glow: 'shadow-glow-violet',      bg: 'bg-accent-violet/10' },
@@ -19,7 +20,7 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string; glow: st
 };
 
 export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'REVIEWING', 'MERGING']);
-export const GATE_STATUSES   = new Set(['AWAITING_APPROVAL', 'AWAITING_MERGE']);
+export const GATE_STATUSES   = new Set(['AWAITING_APPROVAL', 'AWAITING_MERGE', 'AWAITING_CLARIFICATION']);
 
 export const PIPELINE_STEPS = [
   'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'WORKING',

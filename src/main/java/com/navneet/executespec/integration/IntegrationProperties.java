@@ -17,6 +17,7 @@ public class IntegrationProperties {
     private ConfluenceConfig confluence = new ConfluenceConfig();
     private ServiceNowConfig servicenow = new ServiceNowConfig();
     private PagerDutyConfig pagerduty = new PagerDutyConfig();
+    private SlackConfig slack = new SlackConfig();
 
     @Data
     public static class JiraConfig {
@@ -67,5 +68,18 @@ public class IntegrationProperties {
         private boolean autoResolve = false;
         private String dashboardUrl = "http://localhost:8080";
         private boolean skipApproval = false;
+    }
+
+    @Data
+    public static class SlackConfig {
+        private boolean enabled = false;
+        private String clientId;
+        private String clientSecret;
+        private String signingSecret;
+        private String redirectUri = "http://localhost:8080/api/integrations/slack/oauth/callback";
+        private String dashboardUrl = "http://localhost:8080";
+        private String botScopes = "chat:write,chat:write.public,channels:read,groups:read";
+        private int maxRetries = 3;
+        private int retryDelayMs = 1500;
     }
 }

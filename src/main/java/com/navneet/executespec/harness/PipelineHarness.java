@@ -89,6 +89,9 @@ public class PipelineHarness {
     private final ApiKeyResolver apiKeyResolver;
     private final RunKeyStore runKeyStore;
 
+    // ── JIRA/Confluence context extraction ─────────────────────────────────
+    private final com.navneet.executespec.integration.context.ReferenceExtractorService referenceExtractorService;
+
     // ── Async infrastructure ──────────────────────────────────────────────────
 
     /**
@@ -315,6 +318,22 @@ public class PipelineHarness {
         } catch (Exception e) {
             log.debug("SSE emit failed on plan gate resolve for run {} — client likely disconnected", runId);
         }
+        return true;
+    }
+
+    /**
+     * Resolves the context-clarification gate for a REST-submitted run.
+     *
+     * @param response the user's clarification text (e.g., a JIRA key or Confluence URL)
+     * @return false if the run is not in AWAITING_CLARIFICATION state
+     */
+    public boolean resolveClarificationGate(String runId, String response) {
+        Optional<PipelineRun> optRun = stateStore.findRun(runId);
+        if (optRun.isEmpty()) return false;
+        if (!"AWAITING_CLARIFICATION".equals(optRun.get().getStatus())) return false;
+
+        gateStore.setClarificationGate(runId, response);
+        clearGateSync(runId);
         return true;
     }
 
@@ -1133,11 +1152,69 @@ public class PipelineHarness {
         broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
         eventPublisher.publishEvent(new PipelineEvent.RunStarted(runId));
 
+        // ── 0. JIRA/Confluence context extraction ─────────────────────────
+        // Detect references in the user request and fetch content before planning.
+        // If vague mentions found, pause and ask the user for clarification.
+        String effectiveRequest = userRequest;
+        try {
+            var extraction = referenceExtractorService.extractAndEnrich(userRequest, run.getOrgId());
+
+            if (extraction.clarificationNeeded()) {
+                // Pause pipeline — ask user for clarification
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_CLARIFICATION"));
+                String clarificationGateId = stateStore.recordGateOpened(runId, "CONTEXT_CLARIFICATION");
+                broadcaster.emit(runId, RunEvent.clarificationNeeded(runId, extraction.clarificationPrompt()));
+
+                log.info("[PipelineHarness] Run {} entering clarification gate", runId);
+                runSlots.release();
+                String clarificationResponse;
+                try {
+                    clarificationResponse = gateStore.awaitClarificationGate(runId);
+                } finally {
+                    try { runSlots.acquire(); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                }
+                log.info("[PipelineHarness] Run {} clarification received", runId);
+                stateStore.recordGateResolved(clarificationGateId, true);
+                broadcaster.emit(runId, RunEvent.clarificationResolved(runId));
+
+                // Re-extract with the clarification response
+                if (clarificationResponse != null && !clarificationResponse.isBlank()) {
+                    var enriched = referenceExtractorService.extractFromClarification(
+                            userRequest, clarificationResponse, run.getOrgId());
+                    effectiveRequest = enriched.enrichedRequest();
+                    if (!enriched.extractedRefs().isEmpty()) {
+                        String refSummary = enriched.extractedRefs().stream()
+                                .map(r -> r.type() + ":" + r.identifier())
+                                .reduce((a, b) -> a + ", " + b).orElse("");
+                        broadcaster.emit(runId, RunEvent.contextExtracted(runId, refSummary));
+                    }
+                }
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
+
+            } else if (!extraction.extractedRefs().isEmpty()) {
+                // Concrete references found — enrich and continue
+                effectiveRequest = extraction.enrichedRequest();
+                String refSummary = extraction.extractedRefs().stream()
+                        .map(r -> r.type() + ":" + r.identifier())
+                        .reduce((a, b) -> a + ", " + b).orElse("");
+                broadcaster.emit(runId, RunEvent.contextExtracted(runId, refSummary));
+                log.info("[RefExtractor] Enriched run {} with: {}", runId, refSummary);
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            stateStore.markFailed(runId, "Interrupted during context clarification");
+            return;
+        } catch (Exception e) {
+            // Non-fatal — log and continue with original request
+            log.warn("[RefExtractor] Failed to extract references for run {}: {}", runId, e.getMessage());
+        }
+
         try {
             // ── 1. Plan ────────────────────────────────────────────────────
             // Pass the stored plannerModel so UI model-overrides are honoured.
             // run was already fetched from DB above, no extra DB call needed.
-            TaskPlan plan = plannerAgent.plan(userRequest, runId, run.getPlannerModel());
+            TaskPlan plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
             stateStore.savePlan(runId, plan);
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_APPROVAL"));
 

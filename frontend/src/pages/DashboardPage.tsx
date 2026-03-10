@@ -3,6 +3,8 @@ import { Navigate } from 'react-router-dom';
 import MetricCard from '@/components/dashboard/MetricCard';
 import TokenBubbleChart from '@/components/dashboard/TokenBubbleChart';
 import ModelComparisonChart from '@/components/dashboard/ModelComparisonChart';
+import UserRunsChart from '@/components/dashboard/UserRunsChart';
+import DateRangeFilter from '@/components/dashboard/DateRangeFilter';
 import ActivityFeed from '@/components/dashboard/ActivityFeed';
 import { useMetricsStore } from '@/stores/useMetricsStore';
 import { useRunStore } from '@/stores/useRunStore';
@@ -11,17 +13,16 @@ import { fmtTokens } from '@/lib/utils';
 
 export default function DashboardPage() {
   const isAdmin = useAuthStore(selectIsOrgAdmin);
-  const { metrics, modelComparison, fetchMetrics, fetchModelComparison } = useMetricsStore();
+  const { metrics, modelComparison, userRunsSummary, days, fetchAll } = useMetricsStore();
   const { runs, fetchRuns } = useRunStore();
 
   useEffect(() => {
     if (!isAdmin) return;
-    fetchMetrics();
-    fetchModelComparison();
+    fetchAll();
     fetchRuns();
-    const interval = setInterval(() => { fetchMetrics(); }, 30000);
+    const interval = setInterval(() => { fetchAll(); }, 30000);
     return () => clearInterval(interval);
-  }, [isAdmin]);
+  }, [isAdmin, days]);
 
   // Redirect non-admin users to the Runs page
   if (!isAdmin) {
@@ -30,6 +31,12 @@ export default function DashboardPage() {
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
+      {/* Header with date filter */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-zinc-100">Dashboard</h2>
+        <DateRangeFilter />
+      </div>
+
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <MetricCard
@@ -55,14 +62,17 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Charts */}
+      {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <TokenBubbleChart metrics={metrics} />
         <ModelComparisonChart data={modelComparison} />
       </div>
 
-      {/* Activity feed */}
-      <ActivityFeed runs={runs} />
+      {/* Charts row 2 + Activity feed */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <UserRunsChart data={userRunsSummary} />
+        <ActivityFeed runs={runs} />
+      </div>
     </div>
   );
 }

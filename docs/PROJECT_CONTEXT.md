@@ -62,14 +62,16 @@ User Request (REST / Webhook)
 
 ### Pipeline Flow
 
-1. **PlannerAgent** — Decomposes user request into ordered tasks with complexity ratings (LOW/MEDIUM/HIGH). Uses `claude-sonnet-4-6`.
-2. **Plan Approval Gate** — Human reviews task breakdown. Can skip via `skipApproval` flag.
-3. **SequentialTaskExecutor** — Executes tasks in order. Per task: creates worktree → runs WorkerAgent → validates code → retries with error feedback + model escalation on failure → progressive merge to main.
-4. **CompilerAgent** — Post-worker compilation validation (up to 3 rounds).
-5. **ReviewerAgent** — Code review with CRITICAL/MINOR issue classification.
-6. **Merge Approval Gate** — Human reviews code + review findings. Can bypass via `autoMerge` flag.
-7. **GitMergeService** — Final merge with 4-tier conflict resolution.
-8. **Post-merge** — ContextAgent (docs), PromptOptimiserAgent (prompt tuning), ApiTestSuiteAgent (OpenAPI spec).
+1. **ReferenceExtractorService** — Scans user request for JIRA issue keys and Confluence page URLs. Fetches content via org-level credentials and appends to request. Opens clarification gate if vague mentions detected (e.g., "jira ticket" without a key).
+2. **PlannerAgent** — Decomposes (potentially enriched) user request into ordered tasks with complexity ratings (LOW/MEDIUM/HIGH). Uses `claude-sonnet-4-6`.
+3. **Plan Approval Gate** — Human reviews task breakdown. Can skip via `skipApproval` flag.
+4. **SequentialTaskExecutor** — Executes tasks in order. Per task: creates worktree → runs WorkerAgent → validates code → retries with error feedback + model escalation on failure → progressive merge to main.
+5. **CompilerAgent** — Post-worker compilation validation (up to 3 rounds).
+6. **ReviewerAgent** — Code review with CRITICAL/MINOR issue classification.
+7. **Merge Approval Gate** — Human reviews code + review findings. Can bypass via `autoMerge` flag.
+8. **GitMergeService** — Final merge with 4-tier conflict resolution.
+9. **Post-merge** — ContextAgent (docs), PromptOptimiserAgent (prompt tuning), ApiTestSuiteAgent (OpenAPI spec).
+10. **SlackNotificationService** — Listens for RunEvent via @EventListener, pushes Block Kit messages to configured Slack channels.
 
 **Decoupled services (REST-triggered, not in pipeline):**
 - `LocalPreviewService` — ProcessBuilder-based dev server
@@ -115,6 +117,10 @@ Base: `com.navneet.executespec`
 │   ├── controller/     # AuthController, OrgController, ProjectController
 │   └── dto/            # OrgDto, ProjectDto, UserDto
 ├── integration/        # IntegrationManager + jira/confluence/servicenow/pagerduty adapters
+│   ├── slack/          # SlackClient, SlackOAuthService, SlackNotificationService,
+│   │                   # SlackMessageBuilder, SlackRateLimiter, SlackNotificationLogCleanupJob
+│   │   └── entity/     # OrgSlackIntegration, ProjectSlackChannel, SlackNotificationLog
+│   └── context/        # ReferenceExtractorService, ExtractionResult (JIRA/Confluence context extraction)
 ├── sse/                # RunEvent (record + factory methods), SseBroadcaster
 ├── api/                # RunController, SseController, DeploymentController, etc.
 │   └── dto/            # RunSummary, RunDetail, TaskSummary
@@ -159,7 +165,7 @@ Resolution: **user key → org key → system key** based on org's `keySourceMod
 - `HYBRID` (default): User/org first, system fallback
 
 ### Approval Gates (Redis)
-GateStore is Redis-backed (`gate:plan:{runId}`, `gate:merge:{runId}`, TTL 2h). Pipeline thread polls 500ms. Any MIG instance can handle the approval REST call. Two bypass flags: `skipApproval` (plan gate) and `autoMerge` (merge gate) -- both stored on PipelineRun.
+GateStore is Redis-backed (`gate:plan:{runId}`, `gate:merge:{runId}`, `gate:clarification:{runId}`, TTL 2h). Pipeline thread polls 500ms. Any MIG instance can handle the approval REST call. Two bypass flags: `skipApproval` (plan gate) and `autoMerge` (merge gate) -- both stored on PipelineRun. Clarification gate opens when ReferenceExtractorService detects vague JIRA/Confluence mentions — user provides the specific reference or skips.
 
 ### Progressive Merge
 SequentialTaskExecutor merges each task to main immediately after validation. Later tasks see all previous output.
@@ -191,7 +197,7 @@ ModelRouter escalation: `FAST (Haiku)` → `CAPABLE (Sonnet)` → `POWER (Opus)`
 
 ---
 
-## 7. Database Migrations (V1–V17)
+## 7. Database Migrations (V1–V20)
 
 | Version | Description |
 |---------|-------------|
@@ -210,6 +216,9 @@ ModelRouter escalation: `FAST (Haiku)` → `CAPABLE (Sonnet)` → `POWER (Opus)`
 | V13 | Merge conflict tracking table |
 | V14 | Key source mode + provider restrictions |
 | V17 | Auto-merge flag (pipeline_run.auto_merge) |
+| V18 | Org-level integration settings (admin_email, JIRA/Confluence credentials on org table) |
+| V19 | Agent token breakdown (per-task input/output token tracking) |
+| V20 | Slack integration (org_slack_integration, project_slack_channel, slack_notification_log) |
 
 ---
 
@@ -234,11 +243,23 @@ POST   /api/runs/{id}/preview/start      Start preview
 DELETE /api/runs/{id}/preview/stop       Stop preview
 POST   /api/runs/{id}/deploy             Deploy to Cloud Run
 POST   /api/runs/{id}/push-github       Push workspace to GitHub
+POST   /api/runs/{id}/clarify            Clarification gate (context extraction)
 POST   /api/integrations/jira/trigger   Manual Jira trigger
 POST   /api/integrations/confluence/trigger  Manual Confluence trigger
+GET    /api/integrations/slack/install  Slack OAuth install URL
+GET    /api/integrations/slack/oauth/callback  Slack OAuth callback
+GET    /api/integrations/slack/status   Slack connection status
+DELETE /api/integrations/slack/disconnect  Remove Slack connection
+POST   /api/integrations/slack/test     Send test Slack message
+GET    /api/integrations/slack/channels List Slack channels
+GET    /api/user-runs-summary           Per-user run summary (dashboard)
 POST   /api/auth/login                   Login → JWT
 POST   /api/auth/register               Register
 PUT    /api/org/me/settings/keys         Update org API keys
+PUT    /api/org/me/settings/jira        Save org JIRA credentials
+PUT    /api/org/me/settings/confluence  Save org Confluence credentials
+POST   /api/org/me/settings/jira/validate      Test JIRA connection
+POST   /api/org/me/settings/confluence/validate Test Confluence connection
 GET    /actuator/health                  Health check
 ```
 
@@ -355,8 +376,11 @@ All secrets use `${VAR:}` pattern. Never hardcode.
 18. Add deployment: 11 strategies + Cloud Run client
 19. Add preview: LocalPreviewService (ProcessBuilder)
 20. Add integrations: Jira, Confluence, ServiceNow, PagerDuty
-21. Add post-merge agents: ContextAgent, PromptOptimiserAgent, ApiTestSuiteAgent
-22. Add conversation: ConversationAgent with workspace context
+21. Add org-level integration management: JIRA/Confluence credentials on Org entity, Integrations page with credential forms, test connection, enable/disable
+22. Add post-merge agents: ContextAgent, PromptOptimiserAgent, ApiTestSuiteAgent
+23. Add conversation: ConversationAgent with workspace context
+24. Add Slack integration: OAuth flow, Block Kit notifications, per-project channel routing, verbosity levels
+25. Add JIRA/Confluence context extraction: ReferenceExtractorService, clarification gate, enriched planner input
 23. Add cost estimation + pricing
 24. Build React frontend with SSE, Zustand, tabs
 25. Add CI/CD: GitHub Actions → GCS → GCE
@@ -381,6 +405,11 @@ All secrets use `${VAR:}` pattern. Never hardcode.
 | `JWT_SECRET` | No | dev default |
 | `GCP_PROJECT` | No | — |
 | `CORS_ALLOWED_ORIGINS` | No | `http://localhost:5173` |
+| `SLACK_CLIENT_ID` | No | — |
+| `SLACK_CLIENT_SECRET` | No | — |
+| `SLACK_SIGNING_SECRET` | No | — |
+| `SLACK_REDIRECT_URI` | No | `http://localhost:8080/api/integrations/slack/oauth/callback` |
+| `DASHBOARD_URL` | No | `http://localhost:8080` |
 
 ---
 

@@ -175,16 +175,23 @@ When `must_change_password = true` on login:
 Only a **PRO or ENTERPRISE user** can create an org. A FREE user must upgrade their own account first.
 
 ```
-1. PRO/Enterprise user visits /settings/create-org (or prompt after upgrade)
+1. PRO/Enterprise user clicks "Create Organization" in User Menu
+   (or visits /org/settings directly)
 2. Fills in:
    - Org name (required)
    - Email domain(s) (required, e.g. "acme.com" — can add multiple)
-3. POST /api/org
-   → Create org record (status = ACTIVE, plan = creator's tier)
+   - Admin email (required, pre-filled with user's email)
+3. POST /api/org  { name, domains, adminEmail }
+   → Create org record (status = ACTIVE, plan = creator's tier, admin_email set)
    → Associate creator as ORG_ADMIN
    → Creator's free-user quota now replaced by org quota
-4. Redirect to /org/settings
+   → loadMe() refreshes auth state (orgId now populated)
+4. Redirect to /org/settings (org dashboard with members, invites, etc.)
 ```
+
+**UI Entry Points:**
+- User Menu dropdown: "Create Organization" option shown for PRO/ENTERPRISE users without an org
+- /org/settings page: Shows CreateOrgForm if user has no org; shows org dashboard if they do
 
 **Domain patterns:** stored as comma-separated list (e.g., `acme.com,acmecorp.com`). Exact match on the domain portion of email addresses (no wildcards in v1).
 
@@ -215,9 +222,11 @@ if (domainMatches) {
 | Setting | Description |
 |---|---|
 | Org name | Display name |
+| Admin email | Primary contact email for the org admin |
 | Domain patterns | Email domains allowed to join without super-admin approval |
 | Members | View/manage all members; change their project assignments and roles |
 | Projects | Create/archive projects |
+| Integrations | JIRA/Confluence credential management (on Integrations page) |
 | Billing | View current plan, usage, invoices (details deferred) |
 
 ---
@@ -565,6 +574,13 @@ CREATE TABLE IF NOT EXISTS org (
     payment_ref_id       VARCHAR(255),
     plan_expires_at      TIMESTAMP WITH TIME ZONE,
     created_by_user_id   VARCHAR(255)  NOT NULL,
+    admin_email          VARCHAR(255),            -- V18: org admin contact email
+    jira_base_url        TEXT,                    -- V18: org-level JIRA credentials
+    jira_email           TEXT,
+    jira_api_token       TEXT,
+    confluence_base_url  TEXT,                    -- V18: org-level Confluence credentials
+    confluence_email     TEXT,
+    confluence_api_token TEXT,
     created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     deleted_at           TIMESTAMP WITH TIME ZONE

@@ -120,6 +120,7 @@ public class CostEstimator {
         List<AgentTask> tasks = stateStore.getAllTasks(runId);
         double totalCost = 0.0;
 
+        // Worker task costs (cache-aware)
         for (AgentTask task : tasks) {
             if (nvl(task.getInputTokens()) == 0 && nvl(task.getOutputTokens()) == 0) continue;
 
@@ -140,8 +141,46 @@ public class CostEstimator {
             totalCost += (out        / 1_000_000.0) * rates[1];          // 1.00x
         }
 
+        // Pipeline agent costs (planner, reviewer, compiler) — stored on the run since V19
+        stateStore.findRun(runId).ifPresent(run -> {
+            // Helper: add agent cost to running total via array trick (lambda needs effectively final)
+        });
+        totalCost += computeAgentCost(runId);
+
         log.info("[CostEstimator] Actual cost for run {}: ${}", runId, String.format("%.6f", totalCost));
         return totalCost;
+    }
+
+    /** Computes cost for planner/reviewer/compiler from per-agent token fields on the run. */
+    private double computeAgentCost(String runId) {
+        return stateStore.findRun(runId).map(run -> {
+            double cost = 0.0;
+            // Planner
+            int pIn = nvl(run.getPlannerInputTokens()), pOut = nvl(run.getPlannerOutputTokens());
+            if (pIn > 0 || pOut > 0) {
+                String prov = run.getPlannerProvider() != null ? run.getPlannerProvider() : props.getRoles().getPlanner();
+                String model = run.getPlannerActualModel() != null ? run.getPlannerActualModel() : defaultModel(prov);
+                double[] rates = dbRatesForModel(prov, model);
+                cost += (pIn / 1_000_000.0) * rates[0] + (pOut / 1_000_000.0) * rates[1];
+            }
+            // Reviewer
+            int rIn = nvl(run.getReviewerInputTokens()), rOut = nvl(run.getReviewerOutputTokens());
+            if (rIn > 0 || rOut > 0) {
+                String prov = run.getReviewerProvider() != null ? run.getReviewerProvider() : props.getRoles().getReviewer();
+                String model = run.getReviewerActualModel() != null ? run.getReviewerActualModel() : defaultModel(prov);
+                double[] rates = dbRatesForModel(prov, model);
+                cost += (rIn / 1_000_000.0) * rates[0] + (rOut / 1_000_000.0) * rates[1];
+            }
+            // Compiler
+            int cIn = nvl(run.getCompilerInputTokens()), cOut = nvl(run.getCompilerOutputTokens());
+            if (cIn > 0 || cOut > 0) {
+                String prov = run.getCompilerProvider() != null ? run.getCompilerProvider() : props.getRoles().getWorker();
+                String model = run.getCompilerActualModel() != null ? run.getCompilerActualModel() : defaultModel(prov);
+                double[] rates = dbRatesForModel(prov, model);
+                cost += (cIn / 1_000_000.0) * rates[0] + (cOut / 1_000_000.0) * rates[1];
+            }
+            return cost;
+        }).orElse(0.0);
     }
 
     private int nvl(Integer v) { return v != null ? v : 0; }

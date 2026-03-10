@@ -31,6 +31,11 @@ public class WorkerReport {
     private int cacheReadTokens;    // Anthropic cache_read_input_tokens  (billed at 0.10x input rate)
     private int cacheWriteTokens;   // Anthropic cache_creation_input_tokens (billed at 1.25x input rate)
 
+    /** AI provider that actually served this task (e.g. "anthropic", "google", "openai"). May differ from initial assignment due to failover. */
+    private String provider;
+    /** Actual model ID used (e.g. "claude-haiku-4-5-20251001"). May differ from assignedModel due to escalation. */
+    private String model;
+
     /** Convenience factory for tasks that hit a token/iteration limit. */
     public static WorkerReport partial(String taskId, String reason,
                                        int inputTokens, int outputTokens) {

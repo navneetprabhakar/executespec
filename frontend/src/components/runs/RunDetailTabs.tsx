@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useReducer } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
@@ -7,7 +7,7 @@ import {
   getFiles, getFile,
   getOpenApiSpec,
 } from '@/lib/api';
-import type { RunDetail } from '@/lib/api';
+import type { RunDetail, AgentTokenEntry } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
@@ -22,7 +22,7 @@ import {
   FileCode2, FileText, File,
   MessageSquare,
   ChevronsDownUp, ChevronsUpDown, Copy, Check,
-  Clock, Coins,
+  Clock, Coins, Cpu, RefreshCw,
 } from 'lucide-react';
 import hljs from 'highlight.js';
 
@@ -39,22 +39,45 @@ const BASE_TABS = [
 export default function RunDetailTabs() {
   const { activeTab, setActiveTab } = useUiStore();
   const activeRun = useRunStore((s) => s.activeRun);
+  const fetchRun = useRunStore((s) => s.fetchRun);
+  const fetchRuns = useRunStore((s) => s.fetchRuns);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Hoist files so both Code and Preview tabs share them
   const [files, setFiles] = useState<string[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  // Bump this to force re-fetch files (e.g. on manual refresh)
+  const [filesTick, bumpFiles] = useReducer((n: number) => n + 1, 0);
 
-  useEffect(() => {
-    if (!activeRun) return;
+  const loadFiles = useCallback((runId: string) => {
     setFilesLoading(true);
     setFiles([]);
-    getFiles(activeRun.runId)
+    getFiles(runId)
       .then(setFiles)
       .catch(() => {})
       .finally(() => setFilesLoading(false));
-  }, [activeRun?.runId]);
+  }, []);
+
+  useEffect(() => {
+    if (!activeRun) return;
+    loadFiles(activeRun.runId);
+  }, [activeRun?.runId, filesTick, loadFiles]);
   // Note: live task updates are driven entirely by SSE (taskStatus events → fetchRun).
   // useSse also re-fetches on reconnect to catch any events missed during a gap.
+
+  const handleRefresh = useCallback(async () => {
+    if (!activeRun || refreshing) return;
+    setRefreshing(true);
+    try {
+      await fetchRun(activeRun.runId);
+      await fetchRuns();
+      bumpFiles();
+    } catch {
+      // silent
+    } finally {
+      setRefreshing(false);
+    }
+  }, [activeRun, refreshing, fetchRun, fetchRuns]);
 
   if (!activeRun) return null;
 
@@ -90,6 +113,14 @@ export default function RunDetailTabs() {
             ) : tab.label}
           </Tabs.Trigger>
         ))}
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="ml-auto flex-shrink-0 p-2 text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-50"
+          title="Refresh run data"
+        >
+          <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+        </button>
       </Tabs.List>
 
       <div className="flex-1 overflow-hidden">
@@ -157,9 +188,13 @@ function fmtDuration(ms: number): string {
   return `${h}h ${rm}m`;
 }
 
-/** Aggregate token counts per model from task list. Prefers actual model over assignedModel. */
-function tokensByModel(tasks: RunDetail['tasks']): { model: string; provider: string | null; input: number; output: number }[] {
-  const map = new Map<string, { provider: string | null; input: number; output: number }>();
+/** Aggregate token counts per model from task list + pipeline agent entries (planner/reviewer/compiler). */
+function tokensByModel(
+  tasks: RunDetail['tasks'],
+  agentTokens?: AgentTokenEntry[],
+): { model: string; provider: string | null; input: number; output: number; role?: string }[] {
+  const map = new Map<string, { provider: string | null; input: number; output: number; role?: string }>();
+  // Worker task tokens
   for (const t of tasks) {
     const model = t.model || t.assignedModel || 'unknown';
     const entry = map.get(model) || { provider: null, input: 0, output: 0 };
@@ -168,8 +203,26 @@ function tokensByModel(tasks: RunDetail['tasks']): { model: string; provider: st
     if (t.provider) entry.provider = t.provider;
     map.set(model, entry);
   }
+  // Pipeline agent tokens (planner, reviewer, compiler) — keyed by "role:model" to avoid
+  // merging planner (sonnet) with a worker that happens to use the same model name
+  if (agentTokens) {
+    for (const a of agentTokens) {
+      const model = a.model || 'unknown';
+      const key = `${a.role}:${model}`;
+      const entry = map.get(key) || { provider: null, input: 0, output: 0, role: a.role };
+      entry.input += a.inputTokens || 0;
+      entry.output += a.outputTokens || 0;
+      if (a.provider) entry.provider = a.provider;
+      entry.role = a.role;
+      map.set(key, entry);
+    }
+  }
   return Array.from(map.entries())
-    .map(([model, { provider, input, output }]) => ({ model, provider, input, output }))
+    .map(([key, { provider, input, output, role }]) => ({
+      // Strip the "role:" prefix for agent entries to show the real model name
+      model: key.includes(':') ? key.split(':').slice(1).join(':') : key,
+      provider, input, output, role,
+    }))
     .sort((a, b) => (b.input + b.output) - (a.input + a.output));
 }
 
@@ -273,20 +326,28 @@ function OverviewTab({ run }: { run: RunDetail }) {
               {totalTokens > 0 ? fmtTokens(totalTokens) : '—'}
             </p>
           </div>
+          {run.projectName && (
+            <div>
+              <p className="text-xs text-zinc-600">Project</p>
+              <p className="text-sm text-zinc-200 mt-0.5 flex items-center gap-1.5">
+                <FolderOpen className="h-3 w-3 text-cyan-400" />
+                {run.projectName}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Super admin: cost + token breakdown by model */}
+      {/* Super admin: cost breakdown */}
       {isSuperAdmin && (
         <div className="pt-3 border-t border-white/[0.06]">
           <div className="flex items-center gap-2 mb-3">
             <Coins className="h-3.5 w-3.5 text-accent-amber/70" />
-            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Cost & Token Breakdown</span>
+            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Cost Breakdown</span>
             <span className="text-[9px] text-zinc-600 bg-white/[0.04] px-1.5 py-0.5 rounded-full">Admin</span>
           </div>
 
-          {/* Cost */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="text-xs text-zinc-600">Total cost</p>
               <p className="text-sm text-accent-emerald mt-0.5 font-mono font-medium">
@@ -300,35 +361,43 @@ function OverviewTab({ run }: { run: RunDetail }) {
               </p>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Tokens by model */}
-          {run.tasks.length > 0 && (
-            <div>
-              <p className="text-xs text-zinc-600 mb-2">Tokens by model</p>
-              <div className="space-y-1.5">
-                {tokensByModel(run.tasks).map(({ model, provider, input, output }) => (
-                  <div key={model} className="flex items-center gap-3 p-2 rounded bg-white/[0.02] border border-white/[0.04]">
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                      {provider && (
-                        <span className="text-[10px] font-mono text-zinc-600 bg-white/[0.03] px-1 py-0.5 rounded flex-shrink-0">
-                          {provider}
-                        </span>
-                      )}
-                      <span className="text-xs font-mono text-zinc-300 truncate">{model}</span>
-                    </div>
-                    <div className="flex items-center gap-3 flex-shrink-0 text-[11px] font-mono">
-                      <span className="text-accent-cyan/70">
-                        {fmtTokens(input)} in
-                      </span>
-                      <span className="text-accent-violet/70">
-                        {fmtTokens(output)} out
-                      </span>
-                    </div>
-                  </div>
-                ))}
+      {/* Token usage by model — visible to all users */}
+      {tokensByModel(run.tasks, run.agentTokens).length > 0 && (
+        <div className="pt-3 border-t border-white/[0.06]">
+          <div className="flex items-center gap-2 mb-3">
+            <Cpu className="h-3.5 w-3.5 text-zinc-500" />
+            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Token Usage by Model</span>
+          </div>
+          <div className="space-y-1.5">
+            {tokensByModel(run.tasks, run.agentTokens).map(({ model, provider, input, output, role }) => (
+              <div key={role ? `${role}:${model}` : model} className="flex items-center gap-3 p-2 rounded bg-white/[0.02] border border-white/[0.04]">
+                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                  {role && (
+                    <span className="text-[10px] font-medium text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded flex-shrink-0 capitalize">
+                      {role}
+                    </span>
+                  )}
+                  {provider && (
+                    <span className="text-[10px] font-mono text-zinc-600 bg-white/[0.03] px-1 py-0.5 rounded flex-shrink-0">
+                      {provider}
+                    </span>
+                  )}
+                  <span className="text-xs font-mono text-zinc-300 truncate">{model}</span>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0 text-[11px] font-mono">
+                  <span className="text-accent-cyan/70">
+                    {fmtTokens(input)} in
+                  </span>
+                  <span className="text-accent-violet/70">
+                    {fmtTokens(output)} out
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
       )}
 

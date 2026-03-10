@@ -200,9 +200,11 @@ public class WorkerAgent {
                         log.info("[Worker {}] Pre-call estimate {}% >= compact threshold — compacting before LLM call",
                                 taskId, (int) (estimatedPct * 100));
                         String[] compactProvider = { provider };
+                        String[] compactModel   = { model };
                         messages = compact(messages, taskDef, taskId, runId,
-                                compactProvider, model, agentId, complexity);
+                                compactProvider, compactModel, agentId, complexity);
                         provider = compactProvider[0];
+                        model    = compactModel[0];
                         lastCallInputTokens = 0;
                         justCompacted = true;
                         lastCompactedIteration = iteration;
@@ -216,6 +218,7 @@ public class WorkerAgent {
                 LlmRouter.LlmResponse lr = callModel(messages, provider, model,
                         runId, agentId, iteration, justCompacted, complexity);
                 provider = lr.provider(); // track the provider that actually succeeded
+                model    = lr.model();    // track the model that actually served the call
 
                 iteration++;
 
@@ -295,9 +298,11 @@ public class WorkerAgent {
 
                     // 2. Strict completion detection: JSON must be the entire response
                     if (looksLikeCompletionReport(assistantText)) {
-                        return parseCompletionReport(assistantText, taskId,
-                                totalInputTokens, totalOutputTokens,
-                                totalCacheReadTokens, totalCacheWriteTokens);
+                        return withProviderModel(
+                                parseCompletionReport(assistantText, taskId,
+                                        totalInputTokens, totalOutputTokens,
+                                        totalCacheReadTokens, totalCacheWriteTokens),
+                                provider, model);
                     }
                 }
 
@@ -323,9 +328,11 @@ public class WorkerAgent {
                                     (int) (budget.usagePct() * 100));
                             stateStore.recordCompaction(taskId, "emergency-compact-at-hard-stop");
                             String[] compactProvider = { provider };
+                            String[] compactModel   = { model };
                             messages = compact(messages, taskDef, taskId, runId,
-                                    compactProvider, model, agentId, complexity);
+                                    compactProvider, compactModel, agentId, complexity);
                             provider = compactProvider[0];
+                            model    = compactModel[0];
                             lastCallInputTokens = 0;
                             justCompacted = true;
                             lastCompactedIteration = iteration;
@@ -334,19 +341,21 @@ public class WorkerAgent {
                                      "already compacted at iteration {}, cannot recover",
                                     taskId, (int) (budget.usagePct() * 100), lastCompactedIteration);
                             stateStore.recordCompaction(taskId, "hard-stop");
-                            return WorkerReport.partial(taskId,
+                            return withProviderModel(WorkerReport.partial(taskId,
                                     "Hard stopped at " + (int) (budget.usagePct() * 100)
                                             + "% context usage after emergency compaction failed. Resume required.",
-                                    totalInputTokens, totalOutputTokens);
+                                    totalInputTokens, totalOutputTokens), provider, model);
                         }
                     }
                     case COMPACT -> {
                         log.info("Compacting context for task {} at {}% usage", taskId,
                                 (int) (budget.usagePct() * 100));
                         String[] compactProvider = { provider };
+                        String[] compactModel   = { model };
                         messages = compact(messages, taskDef, taskId, runId,
-                                compactProvider, model, agentId, complexity);
+                                compactProvider, compactModel, agentId, complexity);
                         provider = compactProvider[0];
+                        model    = compactModel[0];
                         lastCallInputTokens = 0;
                         justCompacted = true;
                         lastCompactedIteration = iteration;
@@ -360,23 +369,31 @@ public class WorkerAgent {
             }
         } catch (MidTaskProviderFailureException e) {
             log.error("Mid-task provider failure for task {}: {}", taskId, e.getMessage());
-            return WorkerReport.blocked(taskId, e.getMessage(), totalInputTokens, totalOutputTokens);
+            return withProviderModel(WorkerReport.blocked(taskId, e.getMessage(),
+                    totalInputTokens, totalOutputTokens), provider, model);
         } catch (LlmRouter.ProviderUnavailableException e) {
             log.error("All providers exhausted for task {}: {}", taskId, e.getMessage());
-            return WorkerReport.blocked(taskId, "All providers exhausted: " + e.getMessage(),
-                    totalInputTokens, totalOutputTokens);
+            return withProviderModel(WorkerReport.blocked(taskId, "All providers exhausted: " + e.getMessage(),
+                    totalInputTokens, totalOutputTokens), provider, model);
         }
         // ── END AGENTIC LOOP ──────────────────────────────────────────────────
 
         log.warn("Worker for task {} hit iteration cap ({}/{}, complexity={}) without completing",
                 taskId, iteration, maxIterations, complexity);
-        return WorkerReport.partial(taskId,
+        return withProviderModel(WorkerReport.partial(taskId,
                 "Hit " + maxIterations + "-iteration cap (base=" + baseCap + ", complexity=" + complexity + ") without producing completion report.",
-                totalInputTokens, totalOutputTokens);
+                totalInputTokens, totalOutputTokens), provider, model);
         } finally {
             // Always clear the thread-local worktree context, even on exception.
             WorkspaceContext.clear();
         }
+    }
+
+    /** Stamps the final provider and model onto the report so downstream code can persist it. */
+    private static WorkerReport withProviderModel(WorkerReport report, String provider, String model) {
+        report.setProvider(provider);
+        report.setModel(model);
+        return report;
     }
 
     // ── Model Router integration ────────────────────────────────────────────
@@ -554,9 +571,10 @@ public class WorkerAgent {
 
     private List<Message> compact(List<Message> messages,
             TaskDefinition task, String taskId, String runId,
-            String[] effectiveProvider, String model, String agentId,
+            String[] effectiveProvider, String[] effectiveModel, String agentId,
             String complexity) {
         String provider = effectiveProvider[0];
+        String model    = effectiveModel[0];
         String summaryPrompt = """
                 Summarize this coding session precisely for resumption. Be specific — vague summaries
                 cause the worker to repeat work or miss context.
@@ -587,6 +605,7 @@ public class WorkerAgent {
         LlmRouter.LlmResponse summaryLr = callModel(summaryMessages, provider, model,
                 runId, agentId, 0, false, complexity);
         effectiveProvider[0] = summaryLr.provider();
+        effectiveModel[0]    = summaryLr.model();
         String summary = summaryLr.response().getResult().getOutput().getText();
 
         String checkpointPath = ".agent-context/worker-" + taskId + "-checkpoint.md";
