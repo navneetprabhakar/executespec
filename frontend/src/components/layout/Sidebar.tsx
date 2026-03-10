@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
+import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings,
@@ -13,6 +14,12 @@ const ICON_MAP: Record<string, React.ElementType> = {
 
 export default function Sidebar() {
   const [expanded, setExpanded] = useState(false);
+  const isAdmin = useAuthStore(selectIsOrgAdmin);
+
+  const visibleItems = useMemo(
+    () => NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin],
+  );
 
   return (
     <motion.aside
@@ -38,7 +45,7 @@ export default function Sidebar() {
 
       {/* Nav items */}
       <nav className="flex-1 py-3 space-y-0.5">
-        {NAV_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = ICON_MAP[item.icon] ?? LayoutDashboard;
           return (
             <NavLink

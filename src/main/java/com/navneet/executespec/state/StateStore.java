@@ -482,6 +482,7 @@ public class StateStore {
         }).orElse(false);
     }
 
+    /** Computes metrics across ALL runs (for SUPER_ADMIN). */
     public MetricsData computeMetrics() {
         long total     = runRepo.count();
         long completed = runRepo.countByStatus("COMPLETE");
@@ -495,6 +496,24 @@ public class StateStore {
         long queued    = runRepo.countByStatus("QUEUED");
         Long sumIn  = runRepo.sumInputTokens();
         Long sumOut = runRepo.sumOutputTokens();
+        return new MetricsData(total, completed, failed, active, queued,
+                               sumIn != null ? sumIn : 0, sumOut != null ? sumOut : 0);
+    }
+
+    /** Computes metrics filtered by orgId (for ORG_ADMIN). */
+    public MetricsData computeMetricsForOrg(String orgId) {
+        long total     = runRepo.countByOrgId(orgId);
+        long completed = runRepo.countByOrgIdAndStatus(orgId, "COMPLETE");
+        long failed    = runRepo.countByOrgIdAndStatus(orgId, "FAILED");
+        long active    = runRepo.countByOrgIdAndStatus(orgId, "WORKING")
+                       + runRepo.countByOrgIdAndStatus(orgId, "STUCK")
+                       + runRepo.countByOrgIdAndStatus(orgId, "PLANNING")
+                       + runRepo.countByOrgIdAndStatus(orgId, "REVIEWING")
+                       + runRepo.countByOrgIdAndStatus(orgId, "AWAITING_APPROVAL")
+                       + runRepo.countByOrgIdAndStatus(orgId, "AWAITING_MERGE");
+        long queued    = runRepo.countByOrgIdAndStatus(orgId, "QUEUED");
+        Long sumIn  = runRepo.sumInputTokensByOrgId(orgId);
+        Long sumOut = runRepo.sumOutputTokensByOrgId(orgId);
         return new MetricsData(total, completed, failed, active, queued,
                                sumIn != null ? sumIn : 0, sumOut != null ? sumOut : 0);
     }
