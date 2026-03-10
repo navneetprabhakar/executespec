@@ -8,6 +8,10 @@ public record TaskSummary(
     String complexity,
     String status,
     String assignedModel,
+    /** Actual AI provider used for this task (e.g. "anthropic", "openai"). Null if not yet run. */
+    String provider,
+    /** Actual model used for this task (e.g. "claude-sonnet-4-5"). Null if not yet run. */
+    String model,
     String branchName,
     Boolean readmeUpdated,
     Long inputTokens,

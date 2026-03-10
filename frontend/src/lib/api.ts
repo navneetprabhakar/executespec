@@ -68,6 +68,10 @@ export interface TaskSummary {
   title: string;
   status: string;
   assignedModel: string;
+  /** Actual AI provider used for this task (e.g. "anthropic", "openai"). Null if not yet run. */
+  provider?: string | null;
+  /** Actual model used for this task (e.g. "claude-sonnet-4-5"). Null if not yet run. */
+  model?: string | null;
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
@@ -506,6 +510,31 @@ export const updateConfluenceSettings = (confluenceBaseUrl: string, confluenceEm
   req<AuthUser>('/auth/settings/confluence', {
     method: 'PUT',
     body: JSON.stringify({ confluenceBaseUrl, confluenceEmail, confluenceApiToken }),
+  });
+
+// ── Credential Validation ──────────────────────────────────────────────────────
+
+export interface ValidationResult { valid: boolean; message: string; }
+
+/** Tests a GitHub PAT by calling the GitHub API. */
+export const validateGitHub = (pat: string) =>
+  req<ValidationResult>('/auth/settings/github/validate', {
+    method: 'POST',
+    body: JSON.stringify({ pat }),
+  });
+
+/** Tests JIRA credentials by calling the JIRA REST API. */
+export const validateJira = (baseUrl: string, email: string, apiToken: string) =>
+  req<ValidationResult>('/auth/settings/jira/validate', {
+    method: 'POST',
+    body: JSON.stringify({ baseUrl, email, apiToken }),
+  });
+
+/** Tests Confluence credentials by calling the Confluence REST API. */
+export const validateConfluence = (baseUrl: string, email: string, apiToken: string) =>
+  req<ValidationResult>('/auth/settings/confluence/validate', {
+    method: 'POST',
+    body: JSON.stringify({ baseUrl, email, apiToken }),
   });
 
 // ── Org endpoints ─────────────────────────────────────────────────────────────

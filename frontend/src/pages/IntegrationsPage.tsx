@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Send, ChevronDown, ChevronRight, HelpCircle, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronRight, HelpCircle, ExternalLink } from 'lucide-react';
 import IntegrationCard from '@/components/integrations/IntegrationCard';
 import GlassPanel from '@/components/shared/GlassPanel';
-import { getIntegrationStatus, triggerConfluence, triggerJira, getIntegrationRuns } from '@/lib/api';
-import { useUiStore } from '@/stores/useUiStore';
+import { getIntegrationStatus, getIntegrationRuns } from '@/lib/api';
 import { relativeTime } from '@/lib/utils';
 import type { RunSummary } from '@/lib/api';
 
@@ -81,52 +80,13 @@ const SETUP_GUIDES: Record<string, SetupGuide> = {
 export default function IntegrationsPage() {
   const [enabledSources, setEnabledSources] = useState<string[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [pageId, setPageId] = useState('');
-  const [confGoal, setConfGoal] = useState('');
-  const [triggering, setTriggering] = useState(false);
-  const [issueKey, setIssueKey] = useState('');
-  const [jiraGoal, setJiraGoal] = useState('');
-  const [jiraTriggering, setJiraTriggering] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [openGuides, setOpenGuides] = useState<Record<string, boolean>>({});
-  const { addToast } = useUiStore();
 
   useEffect(() => {
     getIntegrationStatus().then((r) => setEnabledSources(r.enabledSources)).catch(() => {});
     getIntegrationRuns().then(setRuns).catch(() => {});
   }, []);
-
-  const handleConfluenceTrigger = async () => {
-    if (!pageId.trim() || !confGoal.trim()) return;
-    setTriggering(true);
-    try {
-      const { runId } = await triggerConfluence({ pageId, goal: confGoal });
-      addToast({ type: 'success', message: `Run launched: ${runId.slice(0, 8)}` });
-      setPageId('');
-      setConfGoal('');
-      const fresh = await getIntegrationRuns();
-      setRuns(fresh);
-    } catch (e: any) {
-      addToast({ type: 'error', message: e.message });
-    }
-    setTriggering(false);
-  };
-
-  const handleJiraTrigger = async () => {
-    if (!issueKey.trim()) return;
-    setJiraTriggering(true);
-    try {
-      const { runId } = await triggerJira({ issueKey, goal: jiraGoal || undefined });
-      addToast({ type: 'success', message: `Run launched: ${runId.slice(0, 8)}` });
-      setIssueKey('');
-      setJiraGoal('');
-      const fresh = await getIntegrationRuns();
-      setRuns(fresh);
-    } catch (e: any) {
-      addToast({ type: 'error', message: e.message });
-    }
-    setJiraTriggering(false);
-  };
 
   const toggleGuide = (key: string) => {
     setOpenGuides((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -204,64 +164,6 @@ export default function IntegrationsPage() {
                 )}
               </div>
             ))}
-          </div>
-        </GlassPanel>
-      )}
-
-      {/* Jira manual trigger */}
-      {enabledSources.includes('JIRA') && (
-        <GlassPanel className="p-4">
-          <h3 className="text-sm font-semibold text-zinc-200 mb-3">Manual Jira Trigger</h3>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              value={issueKey}
-              onChange={(e) => setIssueKey(e.target.value)}
-              placeholder="Issue Key (e.g. KAN-1)"
-              className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none"
-            />
-            <input
-              value={jiraGoal}
-              onChange={(e) => setJiraGoal(e.target.value)}
-              placeholder="Goal override (optional)"
-              className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none"
-            />
-            <button
-              onClick={handleJiraTrigger}
-              disabled={!issueKey.trim() || jiraTriggering}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-40"
-            >
-              {jiraTriggering ? <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <Send className="h-4 w-4" />}
-              Trigger
-            </button>
-          </div>
-        </GlassPanel>
-      )}
-
-      {/* Confluence manual trigger */}
-      {enabledSources.includes('CONFLUENCE') && (
-        <GlassPanel className="p-4">
-          <h3 className="text-sm font-semibold text-zinc-200 mb-3">Manual Confluence Trigger</h3>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              value={pageId}
-              onChange={(e) => setPageId(e.target.value)}
-              placeholder="Page ID"
-              className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none"
-            />
-            <input
-              value={confGoal}
-              onChange={(e) => setConfGoal(e.target.value)}
-              placeholder="Goal / instructions"
-              className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none"
-            />
-            <button
-              onClick={handleConfluenceTrigger}
-              disabled={!pageId.trim() || !confGoal.trim() || triggering}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-40"
-            >
-              {triggering ? <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <Send className="h-4 w-4" />}
-              Trigger
-            </button>
           </div>
         </GlassPanel>
       )}

@@ -17,6 +17,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Base64;
 import java.util.Map;
 
 @RestController
@@ -189,6 +195,90 @@ public class AuthController {
         log.info("User {} updated Confluence settings — url={}, hasToken={}", user.getId(), user.getConfluenceBaseUrl(), user.getConfluenceApiToken() != null);
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
+
+    // ── Validation endpoints ──────────────────────────────────────────────────
+
+    record ValidateGitHubRequest(String pat, String owner) {}
+    record ValidateJiraRequest(String baseUrl, String email, String apiToken) {}
+    record ValidateConfluenceRequest(String baseUrl, String email, String apiToken) {}
+    record ValidationResult(boolean valid, String message) {}
+
+    @PostMapping("/settings/github/validate")
+    public ResponseEntity<ValidationResult> validateGitHub(@RequestBody ValidateGitHubRequest req) {
+        if (req.pat() == null || req.pat().isBlank()) {
+            return ResponseEntity.ok(new ValidationResult(false, "PAT is required"));
+        }
+        try {
+            HttpResponse<String> resp = HTTP_CLIENT.send(
+                HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/user"))
+                    .header("Authorization", "Bearer " + req.pat().strip())
+                    .header("Accept", "application/vnd.github+json")
+                    .timeout(Duration.ofSeconds(10))
+                    .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return ResponseEntity.ok(new ValidationResult(true, "GitHub PAT is valid"));
+            }
+            return ResponseEntity.ok(new ValidationResult(false, "GitHub returned " + resp.statusCode() + " — check your PAT"));
+        } catch (Exception e) {
+            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/settings/jira/validate")
+    public ResponseEntity<ValidationResult> validateJira(@RequestBody ValidateJiraRequest req) {
+        if (req.baseUrl() == null || req.email() == null || req.apiToken() == null) {
+            return ResponseEntity.ok(new ValidationResult(false, "Base URL, email, and API token are all required"));
+        }
+        try {
+            String auth = Base64.getEncoder().encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
+            String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
+            HttpResponse<String> resp = HTTP_CLIENT.send(
+                HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Basic " + auth)
+                    .header("Accept", "application/json")
+                    .timeout(Duration.ofSeconds(10))
+                    .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return ResponseEntity.ok(new ValidationResult(true, "JIRA credentials are valid"));
+            }
+            return ResponseEntity.ok(new ValidationResult(false, "JIRA returned " + resp.statusCode() + " — check your credentials"));
+        } catch (Exception e) {
+            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/settings/confluence/validate")
+    public ResponseEntity<ValidationResult> validateConfluence(@RequestBody ValidateConfluenceRequest req) {
+        if (req.baseUrl() == null || req.email() == null || req.apiToken() == null) {
+            return ResponseEntity.ok(new ValidationResult(false, "Base URL, email, and API token are all required"));
+        }
+        try {
+            String auth = Base64.getEncoder().encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
+            String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
+            HttpResponse<String> resp = HTTP_CLIENT.send(
+                HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Basic " + auth)
+                    .header("Accept", "application/json")
+                    .timeout(Duration.ofSeconds(10))
+                    .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return ResponseEntity.ok(new ValidationResult(true, "Confluence credentials are valid"));
+            }
+            return ResponseEntity.ok(new ValidationResult(false, "Confluence returned " + resp.statusCode() + " — check your credentials"));
+        } catch (Exception e) {
+            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
+        }
+    }
+
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
