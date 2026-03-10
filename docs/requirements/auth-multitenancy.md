@@ -18,7 +18,7 @@ JWT-based authentication with organizations, projects, tiered access control, an
 - `GET /api/auth/me` — current user profile
 - All REST endpoints require valid JWT (except auth endpoints + health check)
 - Signing key: `${JWT_SECRET}` (min 256 bits for HS256)
-- Default admin: `admin@executespec.ai` / `REDACTED_FOR_PUBLIC_RELEASE` (seeded by Flyway V5, hash fixed by V7)
+- Default admin: `admin@executespec.ai` (password seeded by Flyway V5, hash fixed by V7 — change on first login)
 
 ### 2. Subscription Tiers
 

@@ -1,6 +1,6 @@
 -- V7__fix_admin_password.sql
 -- The hash seeded in V5 was incorrect and did not match any known password.
--- This migration replaces it with a verified bcrypt(strength=12) hash of 'REDACTED_FOR_PUBLIC_RELEASE'.
+-- This migration replaces it with a verified bcrypt(strength=12) hash of the default admin password.
 -- must_change_password is set to false so the admin can log in immediately.
 -- Change the password via Settings → Change Password after first login.
 

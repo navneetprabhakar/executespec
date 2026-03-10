@@ -1,6 +1,6 @@
 -- V5__seed_admin_user.sql
 -- Seeds the default super admin account.
--- Password is bcrypt(strength=12) of 'admin'.
+-- Password is bcrypt(strength=12) of the initial admin password (see DEPLOYMENT.md).
 -- must_change_password = true forces a password change on first login.
 
 INSERT INTO app_user (

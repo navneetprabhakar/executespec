@@ -1063,7 +1063,7 @@ Pricing is DB-backed (`model_pricing` table), editable via UI/REST.
 
 - Access token expiry: 1440 minutes (24 hours)
 - Refresh token expiry: 7 days
-- Admin credentials: `admin@executespec.ai` / `REDACTED_FOR_PUBLIC_RELEASE`
+- Admin email: `admin@executespec.ai` (password set during deployment — see DEPLOYMENT.md)
 
 ---
 
