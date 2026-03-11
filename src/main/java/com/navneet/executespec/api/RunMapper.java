@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.RunDetail;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.api.dto.TaskSummary;
+import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -22,6 +24,7 @@ public class RunMapper {
 
     private final IntegrationRunRepository integrationRunRepository;
     private final ProjectRepository projectRepository;
+    private final AppUserRepository appUserRepository;
     private final ObjectMapper objectMapper;
 
     public RunSummary toSummary(PipelineRun r) {
@@ -43,7 +46,8 @@ public class RunMapper {
             r.getProjectId(),
             r.getKeySource(),
             r.getTechStack(),
-            resolveProjectName(r.getProjectId())
+            resolveProjectName(r.getProjectId()),
+            resolveCreatorName(r.getCreatedByUserId())
         );
     }
 
@@ -51,6 +55,16 @@ public class RunMapper {
     private String resolveProjectName(String projectId) {
         if (projectId == null || projectId.isBlank()) return null;
         return projectRepository.findById(projectId).map(Project::getName).orElse(null);
+    }
+
+    /** Resolves a user ID to "FirstName LastName", or null if not found / not set. */
+    private String resolveCreatorName(String userId) {
+        if (userId == null || userId.isBlank()) return null;
+        return appUserRepository.findById(userId)
+                .map(u -> ((u.getFirstName() != null ? u.getFirstName() : "") + " "
+                         + (u.getLastName() != null ? u.getLastName() : "")).trim())
+                .filter(name -> !name.isEmpty())
+                .orElse(null);
     }
 
     /** Builds the per-agent (planner/reviewer/compiler) token entries for the detail view. */
@@ -115,6 +129,7 @@ public class RunMapper {
             .actualCostUsd(r.getActualCostUsd())
             .techStack(r.getTechStack())
             .projectName(resolveProjectName(r.getProjectId()))
+            .createdByName(resolveCreatorName(r.getCreatedByUserId()))
             .agentTokens(buildAgentTokens(r))
             .build();
     }

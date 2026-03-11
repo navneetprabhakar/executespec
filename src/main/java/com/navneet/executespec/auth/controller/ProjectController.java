@@ -24,7 +24,7 @@ public class ProjectController {
     private final ProjectService projectService;
 
     @PostMapping
-    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('DEVELOPER') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<ProjectDto> createProject(
             @AuthenticationPrincipal AppUserDetails userDetails,
             @Valid @RequestBody CreateProjectRequest req) {
@@ -56,8 +56,10 @@ public class ProjectController {
 
     @PutMapping("/{id}/archive")
     @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
-    public ResponseEntity<ProjectDto> archiveProject(@PathVariable String id) {
-        return ResponseEntity.ok(projectService.archiveProject(id));
+    public ResponseEntity<ProjectDto> archiveProject(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable String id) {
+        return ResponseEntity.ok(projectService.archiveProject(id, userDetails.getUser().getId()));
     }
 
     @GetMapping("/{id}/members")
@@ -68,18 +70,20 @@ public class ProjectController {
     @PostMapping("/{id}/members")
     @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<Void> addMember(
+            @AuthenticationPrincipal AppUserDetails userDetails,
             @PathVariable String id,
             @RequestBody Map<String, String> body) {
-        projectService.addMember(id, body.get("userId"), body.get("role"));
+        projectService.addMember(id, body.get("userId"), body.get("role"), userDetails.getUser().getId());
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
     @DeleteMapping("/{id}/members/{userId}")
     @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<Void> removeMember(
+            @AuthenticationPrincipal AppUserDetails userDetails,
             @PathVariable String id,
             @PathVariable String userId) {
-        projectService.removeMember(id, userId);
+        projectService.removeMember(id, userId, userDetails.getUser().getId());
         return ResponseEntity.noContent().build();
     }
 

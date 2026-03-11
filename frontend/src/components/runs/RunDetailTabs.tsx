@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState, useReducer } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
-import { useAuthStore, selectIsSuperAdmin } from '@/stores/useAuthStore';
+import { useAuthStore, selectIsSuperAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import {
   getFiles, getFile,
   getOpenApiSpec,
+  getProjects, createProject, updateRunProject,
 } from '@/lib/api';
-import type { RunDetail, AgentTokenEntry } from '@/lib/api';
+import type { RunDetail, AgentTokenEntry, ProjectDto } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
@@ -23,7 +24,7 @@ import {
   FileCode2, FileText, File,
   MessageSquare,
   ChevronsDownUp, ChevronsUpDown, Copy, Check,
-  Clock, Coins, Cpu, RefreshCw,
+  Clock, Coins, Cpu, RefreshCw, FolderKanban, X, Plus, User,
 } from 'lucide-react';
 import hljs from 'highlight.js';
 
@@ -126,7 +127,7 @@ export default function RunDetailTabs() {
 
       <div className="flex-1 overflow-hidden">
         <Tabs.Content value="overview" className="h-full overflow-y-auto p-4">
-          <OverviewTab run={activeRun} />
+          <OverviewTab run={activeRun} fetchRun={fetchRun} fetchRuns={fetchRuns} />
         </Tabs.Content>
 
         <Tabs.Content value="tasks" className="h-full overflow-y-auto p-4 space-y-2">
@@ -227,9 +228,80 @@ function tokensByModel(
     .sort((a, b) => (b.input + b.output) - (a.input + a.output));
 }
 
-function OverviewTab({ run }: { run: RunDetail }) {
+function OverviewTab({ run, fetchRun, fetchRuns }: {
+  run: RunDetail;
+  fetchRun: (id: string) => Promise<void>;
+  fetchRuns: () => Promise<void>;
+}) {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const isOrgMember = useAuthStore(selectIsOrgMember);
   const permissions = useTierPermissions();
+
+  // ── Project tagging ──────────────────────────────────────────────────
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [projectSaving, setProjectSaving] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const projectDropdownRef = useRef<HTMLDivElement>(null);
+  const newProjectInputRef = useRef<HTMLInputElement>(null);
+
+  const refreshProjects = useCallback(() => {
+    if (!isOrgMember) return;
+    getProjects()
+      .then((p) => setProjects(p.filter((proj) => proj.status === 'ACTIVE')))
+      .catch(() => setProjects([]));
+  }, [isOrgMember]);
+
+  useEffect(() => { refreshProjects(); }, [refreshProjects]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!projectDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
+        setProjectDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [projectDropdownOpen]);
+
+  const handleProjectChange = useCallback(async (projectId: string | null) => {
+    setProjectSaving(true);
+    setProjectDropdownOpen(false);
+    setCreatingProject(false);
+    try {
+      await updateRunProject(run.runId, projectId);
+      await fetchRun(run.runId);
+      await fetchRuns();
+    } catch {
+      // silent
+    } finally {
+      setProjectSaving(false);
+    }
+  }, [run.runId, fetchRun, fetchRuns]);
+
+  const handleCreateProject = useCallback(async () => {
+    const name = newProjectName.trim();
+    if (!name) return;
+    setProjectSaving(true);
+    try {
+      const created = await createProject({ name });
+      refreshProjects();
+      // Immediately assign the run to the new project
+      await updateRunProject(run.runId, created.id);
+      await fetchRun(run.runId);
+      await fetchRuns();
+    } catch {
+      // silent
+    } finally {
+      setProjectSaving(false);
+      setCreatingProject(false);
+      setNewProjectName('');
+      setProjectDropdownOpen(false);
+    }
+  }, [newProjectName, run.runId, fetchRun, fetchRuns, refreshProjects]);
 
   // STUCK occurs during the WORKING phase — map it there for pipeline step display
   const displayStatus = run.status === 'STUCK' ? 'WORKING' : run.status;
@@ -328,7 +400,114 @@ function OverviewTab({ run }: { run: RunDetail }) {
               {totalTokens > 0 ? fmtTokens(totalTokens) : '—'}
             </p>
           </div>
-          {run.projectName && (
+          {run.createdByName && (
+            <div>
+              <p className="text-xs text-zinc-600">Created by</p>
+              <p className="text-sm text-zinc-200 mt-0.5 flex items-center gap-1.5">
+                <User className="h-3 w-3 text-indigo-400" />
+                {run.createdByName}
+              </p>
+            </div>
+          )}
+          {/* Project selector — org members can assign/change/remove/create project */}
+          {isOrgMember ? (
+            <div className="relative" ref={projectDropdownRef}>
+              <p className="text-xs text-zinc-600">Project</p>
+              <button
+                onClick={() => { setProjectDropdownOpen((v) => !v); setCreatingProject(false); }}
+                disabled={projectSaving}
+                className={cn(
+                  'mt-0.5 flex items-center gap-1.5 text-sm rounded px-1.5 py-0.5 -mx-1.5 transition-colors',
+                  'hover:bg-white/[0.06] cursor-pointer',
+                  projectSaving && 'opacity-50 pointer-events-none',
+                )}
+              >
+                <FolderKanban className="h-3 w-3 text-cyan-400 flex-shrink-0" />
+                <span className={run.projectName ? 'text-zinc-200' : 'text-zinc-500 italic'}>
+                  {run.projectName ?? 'Assign project…'}
+                </span>
+                <ChevronDown className="h-3 w-3 text-zinc-500" />
+              </button>
+
+              {projectDropdownOpen && (
+                <div className="absolute left-0 top-full mt-1 z-50 min-w-[200px] rounded-md border border-white/[0.08] bg-surface-2 shadow-xl py-1">
+                  {/* Un-assign option — only if currently assigned */}
+                  {run.projectId && (
+                    <button
+                      onClick={() => handleProjectChange(null)}
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                      Remove from project
+                    </button>
+                  )}
+                  {projects.map((proj) => (
+                    <button
+                      key={proj.id}
+                      onClick={() => handleProjectChange(proj.id)}
+                      className={cn(
+                        'flex items-center gap-2 w-full px-3 py-1.5 text-sm transition-colors',
+                        run.projectId === proj.id
+                          ? 'text-cyan-400 bg-white/[0.04]'
+                          : 'text-zinc-300 hover:bg-white/[0.06]',
+                      )}
+                    >
+                      <FolderKanban className="h-3 w-3 flex-shrink-0" />
+                      {proj.name}
+                    </button>
+                  ))}
+
+                  {/* Divider */}
+                  {(projects.length > 0 || run.projectId) && (
+                    <div className="border-t border-white/[0.06] my-1" />
+                  )}
+
+                  {/* Create new project */}
+                  {creatingProject ? (
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); handleCreateProject(); }}
+                      className="px-2 py-1.5"
+                    >
+                      <input
+                        ref={newProjectInputRef}
+                        type="text"
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        placeholder="Project name…"
+                        autoFocus
+                        className="w-full bg-white/[0.04] border border-white/[0.10] rounded px-2 py-1 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-accent-violet/50"
+                        onKeyDown={(e) => { if (e.key === 'Escape') { setCreatingProject(false); setNewProjectName(''); } }}
+                      />
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <button
+                          type="submit"
+                          disabled={!newProjectName.trim() || projectSaving}
+                          className="flex-1 text-xs text-center py-1 rounded bg-accent-violet/20 text-accent-violet hover:bg-accent-violet/30 transition-colors disabled:opacity-40"
+                        >
+                          Create & assign
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setCreatingProject(false); setNewProjectName(''); }}
+                          className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => { setCreatingProject(true); setTimeout(() => newProjectInputRef.current?.focus(), 0); }}
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-accent-violet hover:bg-white/[0.06] transition-colors"
+                    >
+                      <Plus className="h-3 w-3" />
+                      New project…
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : run.projectName ? (
             <div>
               <p className="text-xs text-zinc-600">Project</p>
               <p className="text-sm text-zinc-200 mt-0.5 flex items-center gap-1.5">
@@ -336,7 +515,7 @@ function OverviewTab({ run }: { run: RunDetail }) {
                 {run.projectName}
               </p>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 

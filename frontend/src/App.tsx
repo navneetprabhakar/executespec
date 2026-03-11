@@ -25,6 +25,9 @@ import OrgProjectsPage from '@/pages/org/OrgProjectsPage';
 // Admin page
 import AdminPage from '@/pages/admin/AdminPage';
 
+// Audit page
+import AuditPage from '@/pages/AuditPage';
+
 import { useAuthStore } from '@/stores/useAuthStore';
 
 export default function App() {
@@ -52,6 +55,7 @@ export default function App() {
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="pricing" element={<PricingPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
+          <Route path="audit" element={<AuditPage />} />
           <Route path="settings" element={<SettingsPage />} />
 
           {/* Org pages */}

@@ -24,6 +24,7 @@ public class OrgService {
     private final OrgMemberRepository orgMemberRepo;
     private final AppUserRepository userRepo;
     private final PaymentAuditService paymentAuditService;
+    private final ActivityAuditService auditService;
 
     @Transactional
     public OrgDto createOrg(String creatorUserId, CreateOrgRequest req) {
@@ -68,6 +69,13 @@ public class OrgService {
         paymentAuditService.record("ORG", orgId, "PLAN_ASSIGNED",
                 null, org.getTier(), creatorUserId, "Org created");
 
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_CREATED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(creatorUserId)
+                .newValue("{\"name\":\"" + req.name() + "\",\"tier\":\"" + creator.getTier() + "\"}")
+                .build());
+
         log.info("Org created: {} ({}) by {}", req.name(), orgId, creatorUserId);
         return OrgDto.from(org);
     }
@@ -79,15 +87,27 @@ public class OrgService {
     }
 
     @Transactional
-    public OrgDto updateOrg(String orgId, String name, List<String> domains) {
+    public OrgDto updateOrg(String orgId, String actorId, String name, List<String> domains) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        String oldName = org.getName();
+        String oldDomains = org.getDomainPatterns();
         if (name != null && !name.isBlank()) org.setName(name);
         if (domains != null && !domains.isEmpty()) {
             org.setDomainPatterns(String.join(",", domains).toLowerCase());
         }
         org.setUpdatedAt(Instant.now());
-        return OrgDto.from(orgRepo.save(org));
+        OrgDto result = OrgDto.from(orgRepo.save(org));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_UPDATED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .oldValue("{\"name\":\"" + oldName + "\",\"domains\":\"" + oldDomains + "\"}")
+                .newValue("{\"name\":\"" + org.getName() + "\",\"domains\":\"" + org.getDomainPatterns() + "\"}")
+                .build());
+
+        return result;
     }
 
     public List<OrgMemberDto> listMembers(String orgId) {
@@ -116,6 +136,7 @@ public class OrgService {
             }
         }
 
+        String removedRole = member.getOrgRole();
         orgMemberRepo.delete(member);
 
         // Clear user's org_id
@@ -124,15 +145,32 @@ public class OrgService {
             user.setUpdatedAt(Instant.now());
             userRepo.save(user);
         });
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_MEMBER_REMOVED")
+                .entityType("ORG_MEMBER").entityId(userId)
+                .orgId(orgId).actorId(performedBy)
+                .oldValue("{\"userId\":\"" + userId + "\",\"role\":\"" + removedRole + "\"}")
+                .build());
+
         log.info("Removed user {} from org {} by {}", userId, orgId, performedBy);
     }
 
     @Transactional
-    public void changeMemberRole(String orgId, String userId, String newRole) {
+    public void changeMemberRole(String orgId, String userId, String newRole, String actorId) {
         OrgMember member = orgMemberRepo.findByOrgIdAndUserId(orgId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found"));
+        String oldRole = member.getOrgRole();
         member.setOrgRole(newRole);
         orgMemberRepo.save(member);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_MEMBER_ROLE_CHANGED")
+                .entityType("ORG_MEMBER").entityId(userId)
+                .orgId(orgId).actorId(actorId)
+                .oldValue("{\"role\":\"" + oldRole + "\"}")
+                .newValue("{\"role\":\"" + newRole + "\"}")
+                .build());
     }
 
     public List<OrgDto> listAllOrgs() {
@@ -143,9 +181,18 @@ public class OrgService {
     public void changeOrgStatus(String orgId, String status, String performedBy) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        String oldStatus = org.getStatus();
         org.setStatus(status);
         org.setUpdatedAt(Instant.now());
         orgRepo.save(org);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_STATUS_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(performedBy)
+                .oldValue("{\"status\":\"" + oldStatus + "\"}")
+                .newValue("{\"status\":\"" + status + "\"}")
+                .build());
     }
 
     /**
@@ -164,9 +211,19 @@ public class OrgService {
         AppUser target = userRepo.findById(targetUserId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
+        String oldStatus = target.getStatus();
         target.setStatus(suspend ? "SUSPENDED" : "ACTIVE");
         target.setUpdatedAt(Instant.now());
         userRepo.save(target);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType(suspend ? "ORG_MEMBER_SUSPENDED" : "ORG_MEMBER_RESTORED")
+                .entityType("ORG_MEMBER").entityId(targetUserId)
+                .orgId(orgId).actorId(performedBy)
+                .oldValue("{\"status\":\"" + oldStatus + "\"}")
+                .newValue("{\"status\":\"" + target.getStatus() + "\"}")
+                .build());
+
         log.info("User {} {} by {}", targetUserId, suspend ? "suspended" : "restored", performedBy);
     }
 
@@ -187,34 +244,64 @@ public class OrgService {
                 .build();
         orgRepo.save(org);
         paymentAuditService.record("ORG", orgId, "PLAN_ASSIGNED", null, "PRO", adminUserId, "Created by super admin");
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_CREATED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(adminUserId)
+                .newValue("{\"name\":\"" + name + "\",\"tier\":\"PRO\",\"createdByAdmin\":true}")
+                .build());
+
         log.info("Org '{}' ({}) created by super admin {}", name, orgId, adminUserId);
         return org;
     }
 
     /** Update per-org run limit override. Pass null to clear the override (use tier default). */
     @Transactional
-    public OrgDto updateRunLimitOverride(String orgId, Integer limit) {
+    public OrgDto updateRunLimitOverride(String orgId, Integer limit, String actorId) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        Integer oldLimit = org.getMonthlyRunLimitOverride();
         org.setMonthlyRunLimitOverride(limit);
         org.setUpdatedAt(Instant.now());
-        return OrgDto.from(orgRepo.save(org));
+        OrgDto result = OrgDto.from(orgRepo.save(org));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_RUN_LIMIT_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .oldValue("{\"limit\":" + oldLimit + "}")
+                .newValue("{\"limit\":" + limit + "}")
+                .build());
+
+        return result;
     }
 
     /** Toggle the api_keys_provided flag for an enterprise org. */
     @Transactional
-    public OrgDto updateApiKeysProvided(String orgId, boolean provided) {
+    public OrgDto updateApiKeysProvided(String orgId, boolean provided, String actorId) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        boolean oldProvided = org.isApiKeysProvided();
         org.setApiKeysProvided(provided);
         org.setUpdatedAt(Instant.now());
-        return OrgDto.from(orgRepo.save(org));
+        OrgDto result = OrgDto.from(orgRepo.save(org));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_API_KEYS_FLAG_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .oldValue("{\"provided\":" + oldProvided + "}")
+                .newValue("{\"provided\":" + provided + "}")
+                .build());
+
+        return result;
     }
 
     // ── Org-level AI provider key management ─────────────────────────────────
 
     @Transactional
-    public OrgDto updateAiKeySettings(String orgId, String anthropicKey, String openAiKey, String geminiKey) {
+    public OrgDto updateAiKeySettings(String orgId, String anthropicKey, String openAiKey, String geminiKey, String actorId) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
         org.setAnthropicApiKey(blankToNull(anthropicKey));
@@ -226,7 +313,18 @@ public class OrgService {
                 org.getAnthropicApiKey() != null,
                 org.getOpenAiApiKey() != null,
                 org.getGeminiApiKey() != null);
-        return OrgDto.from(orgRepo.save(org));
+        OrgDto result = OrgDto.from(orgRepo.save(org));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_AI_KEYS_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .newValue("{\"anthropic\":" + (org.getAnthropicApiKey() != null)
+                        + ",\"openai\":" + (org.getOpenAiApiKey() != null)
+                        + ",\"gemini\":" + (org.getGeminiApiKey() != null) + "}")
+                .build());
+
+        return result;
     }
 
     // ── Key source mode & provider restriction settings ─────────────────────
@@ -238,7 +336,7 @@ public class OrgService {
             java.util.Set.of("anthropic", "openai", "google");
 
     @Transactional
-    public OrgDto updateKeySourceSettings(String orgId, String keySourceMode, java.util.List<String> enabledProviders) {
+    public OrgDto updateKeySourceSettings(String orgId, String keySourceMode, java.util.List<String> enabledProviders, String actorId) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
 
@@ -272,13 +370,22 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         log.info("Org {} updated key source settings — mode={}, providers={}",
                 orgId, org.getKeySourceMode(), org.getEnabledProviders());
-        return OrgDto.from(orgRepo.save(org));
+        OrgDto result = OrgDto.from(orgRepo.save(org));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_KEY_SOURCE_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .newValue("{\"mode\":\"" + org.getKeySourceMode() + "\",\"providers\":\"" + org.getEnabledProviders() + "\"}")
+                .build());
+
+        return result;
     }
 
     // ── Org-level JIRA credential management ──────────────────────────────
 
     @Transactional
-    public OrgDto updateJiraSettings(String orgId, String baseUrl, String email, String apiToken) {
+    public OrgDto updateJiraSettings(String orgId, String baseUrl, String email, String apiToken, String actorId) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
         org.setJiraBaseUrl(blankToNull(baseUrl));
@@ -287,13 +394,22 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         log.info("Org {} updated JIRA settings — baseUrl={}, hasToken={}",
                 orgId, org.getJiraBaseUrl(), org.getJiraApiToken() != null);
-        return OrgDto.from(orgRepo.save(org));
+        OrgDto result = OrgDto.from(orgRepo.save(org));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_JIRA_SETTINGS_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .newValue("{\"hasToken\":" + (org.getJiraApiToken() != null) + ",\"baseUrl\":\"" + org.getJiraBaseUrl() + "\"}")
+                .build());
+
+        return result;
     }
 
     // ── Org-level Confluence credential management ──────────────────────────
 
     @Transactional
-    public OrgDto updateConfluenceSettings(String orgId, String baseUrl, String email, String apiToken) {
+    public OrgDto updateConfluenceSettings(String orgId, String baseUrl, String email, String apiToken, String actorId) {
         Org org = orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
         org.setConfluenceBaseUrl(blankToNull(baseUrl));
@@ -302,7 +418,16 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         log.info("Org {} updated Confluence settings — baseUrl={}, hasToken={}",
                 orgId, org.getConfluenceBaseUrl(), org.getConfluenceApiToken() != null);
-        return OrgDto.from(orgRepo.save(org));
+        OrgDto result = OrgDto.from(orgRepo.save(org));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_CONFLUENCE_SETTINGS_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .newValue("{\"hasToken\":" + (org.getConfluenceApiToken() != null) + ",\"baseUrl\":\"" + org.getConfluenceBaseUrl() + "\"}")
+                .build());
+
+        return result;
     }
 
     // ── Integration status helpers ──────────────────────────────────────────
@@ -342,5 +467,13 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         orgRepo.save(org);
         paymentAuditService.record("ORG", orgId, "PLAN_UPGRADED", oldTier, newTier, performedBy, null);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_TIER_CHANGED")
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(performedBy)
+                .oldValue("{\"tier\":\"" + oldTier + "\"}")
+                .newValue("{\"tier\":\"" + newTier + "\"}")
+                .build());
     }
 }

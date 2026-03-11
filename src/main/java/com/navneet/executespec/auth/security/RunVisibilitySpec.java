@@ -39,7 +39,13 @@ public class RunVisibilitySpec {
                 return cb.equal(root.get("orgId"), user.getOrgId());
             }
 
-            // FREE user — see own runs only
+            // Safety fallback: user has orgId but orgMember record is missing/orphaned.
+            // Still grant org-scoped visibility so they can see runs in their org.
+            if (user.getOrgId() != null) {
+                return cb.equal(root.get("orgId"), user.getOrgId());
+            }
+
+            // FREE user (no org) — see own runs only
             return cb.equal(root.get("createdByUserId"), user.getId());
         };
     }

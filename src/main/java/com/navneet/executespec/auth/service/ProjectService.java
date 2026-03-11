@@ -3,6 +3,7 @@ package com.navneet.executespec.auth.service;
 import com.navneet.executespec.auth.dto.CreateProjectRequest;
 import com.navneet.executespec.auth.dto.ProjectDto;
 import com.navneet.executespec.auth.dto.ProjectMemberDto;
+import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.ProjectMember;
@@ -29,6 +30,7 @@ public class ProjectService {
     private final ProjectRepository projectRepo;
     private final ProjectMemberRepository projectMemberRepo;
     private final AppUserRepository userRepo;
+    private final ActivityAuditService auditService;
 
     @Transactional
     public ProjectDto createProject(String orgId, String createdBy, CreateProjectRequest req) {
@@ -48,6 +50,13 @@ public class ProjectService {
                 .projectId(project.getId())
                 .userId(createdBy)
                 .projectRole("PROJECT_ADMIN")
+                .build());
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("PROJECT_CREATED")
+                .entityType("PROJECT").entityId(project.getId())
+                .orgId(orgId).actorId(createdBy)
+                .newValue("{\"name\":\"" + req.name() + "\",\"orgId\":\"" + orgId + "\"}")
                 .build());
 
         log.info("Project created: {} ({}) in org {}", req.name(), project.getId(), orgId);
@@ -77,32 +86,60 @@ public class ProjectService {
     }
 
     @Transactional
-    public ProjectDto archiveProject(String projectId) {
+    public ProjectDto archiveProject(String projectId, String actorId) {
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+        String oldStatus = project.getStatus();
         project.setStatus("ARCHIVED");
         project.setUpdatedAt(Instant.now());
-        return ProjectDto.from(projectRepo.save(project));
+        ProjectDto result = ProjectDto.from(projectRepo.save(project));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("PROJECT_ARCHIVED")
+                .entityType("PROJECT").entityId(projectId)
+                .orgId(project.getOrgId()).actorId(actorId)
+                .oldValue("{\"status\":\"" + oldStatus + "\"}")
+                .newValue("{\"status\":\"ARCHIVED\"}")
+                .build());
+
+        return result;
     }
 
     @Transactional
-    public void addMember(String projectId, String userId, String role) {
+    public void addMember(String projectId, String userId, String role, String actorId) {
         if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
+            String effectiveRole = role != null ? role : "PROJECT_DEVELOPER";
             projectMemberRepo.save(ProjectMember.builder()
                     .id(UUID.randomUUID().toString())
                     .projectId(projectId)
                     .userId(userId)
-                    .projectRole(role != null ? role : "PROJECT_DEVELOPER")
+                    .projectRole(effectiveRole)
+                    .build());
+
+            Project project = projectRepo.findById(projectId).orElse(null);
+            auditService.record(ActivityAudit.builder()
+                    .eventType("PROJECT_MEMBER_ADDED")
+                    .entityType("PROJECT").entityId(projectId)
+                    .orgId(project != null ? project.getOrgId() : null).actorId(actorId)
+                    .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + effectiveRole + "\"}")
                     .build());
         }
     }
 
     @Transactional
-    public void removeMember(String projectId, String userId) {
+    public void removeMember(String projectId, String userId, String actorId) {
         if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found in project");
         }
         projectMemberRepo.deleteByProjectIdAndUserId(projectId, userId);
+
+        Project project = projectRepo.findById(projectId).orElse(null);
+        auditService.record(ActivityAudit.builder()
+                .eventType("PROJECT_MEMBER_REMOVED")
+                .entityType("PROJECT").entityId(projectId)
+                .orgId(project != null ? project.getOrgId() : null).actorId(actorId)
+                .oldValue("{\"userId\":\"" + userId + "\"}")
+                .build());
     }
 
     public List<ProjectMemberDto> listMembers(String projectId) {

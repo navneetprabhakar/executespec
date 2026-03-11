@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, FolderOpen, Plus } from 'lucide-react';
-import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
+import { useAuthStore, selectIsOrgMember } from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
 interface Props {
@@ -16,7 +16,7 @@ export default function ProjectSelector({ value, onChange, required }: Props) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [saving, setSaving] = useState(false);
-  const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
+  const isOrgMember = useAuthStore(selectIsOrgMember);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -125,8 +125,8 @@ export default function ProjectSelector({ value, onChange, required }: Props) {
             ))}
           </div>
 
-          {/* Create new project (ORG_ADMIN / SUPER_ADMIN only) */}
-          {isOrgAdmin && (
+          {/* Create new project — any org member can create */}
+          {isOrgMember && (
             <div className="border-t border-white/[0.06]">
               {!creating ? (
                 <button

@@ -202,19 +202,21 @@ public class PipelineHarness {
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner) {
         return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
-                         false, false, null);
+                         false, false, null, null, null, null);
     }
 
     /**
-     * Overloaded submit that applies skipApproval, autoMerge, and modelName BEFORE
-     * the async thread starts, avoiding the race condition where the controller sets
-     * overrides after the pipeline thread has already read the run entity.
+     * Overloaded submit that applies skipApproval, autoMerge, modelName, AND ownership
+     * fields (createdByUserId, orgId, projectId) BEFORE the async thread starts,
+     * avoiding the race condition where the async pipeline thread re-loads and re-saves
+     * the run entity before the controller can stamp these fields.
      */
     public PipelineRun submitRun(String userRequest, String source,
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner,
                                   boolean skipApproval, boolean autoMerge,
-                                  String modelName) {
+                                  String modelName,
+                                  String createdByUserId, String orgId, String projectId) {
         PipelineRun run = stateStore.createRun(userRequest, source, repoUrl, repoMode,
             props.getRoles().getPlanner(),
             props.getRoles().getWorker(),
@@ -246,6 +248,21 @@ public class PipelineHarness {
             run.setGithubOwner(githubOwner);
             needsSave = true;
         }
+
+        // Stamp ownership BEFORE async thread starts (critical for visibility queries)
+        if (createdByUserId != null) {
+            run.setCreatedByUserId(createdByUserId);
+            needsSave = true;
+        }
+        if (orgId != null) {
+            run.setOrgId(orgId);
+            needsSave = true;
+        }
+        if (projectId != null && !projectId.isBlank()) {
+            run.setProjectId(projectId);
+            needsSave = true;
+        }
+
         if (needsSave) {
             stateStore.save(run);
         }
@@ -535,23 +552,25 @@ public class PipelineHarness {
     public PipelineRun restartWithNewGoal(PipelineRun pausedRun, String newGoal) {
         log.info("Restarting paused run {} with new goal", pausedRun.getRunId());
 
+        // Pass ownership INTO submitRun so it's stamped BEFORE the async thread starts
         PipelineRun newRun = submitRun(
             newGoal,
             pausedRun.getSourceType() != null ? pausedRun.getSourceType() : "MANUAL",
             pausedRun.getRepoUrl(),
             pausedRun.getRepoMode(),
             pausedRun.getGithubPat(),
-            pausedRun.getGithubOwner()
+            pausedRun.getGithubOwner(),
+            pausedRun.isSkipApproval(),
+            false,
+            pausedRun.getPlannerModel(),
+            pausedRun.getCreatedByUserId(),
+            pausedRun.getOrgId(),
+            pausedRun.getProjectId()
         );
 
-        // Carry forward ownership and context
-        newRun.setCreatedByUserId(pausedRun.getCreatedByUserId());
-        newRun.setOrgId(pausedRun.getOrgId());
-        newRun.setProjectId(pausedRun.getProjectId());
-        newRun.setPlannerModel(pausedRun.getPlannerModel());
+        // Carry forward additional context (not part of submitRun params)
         newRun.setReviewerModel(pausedRun.getReviewerModel());
         newRun.setSourceRunId(pausedRun.getRunId());
-        if (pausedRun.isSkipApproval()) newRun.setSkipApproval(true);
         stateStore.saveRun(newRun);
 
         // Update paused run's failure reason with forward link
@@ -1998,12 +2017,18 @@ public class PipelineHarness {
      */
     public String restartRun(PipelineRun original) {
         log.info("Restarting run {} (auto-recovery)", original.getRunId());
+        // Pass ownership INTO submitRun so it's stamped BEFORE the async thread starts
         PipelineRun newRun = submitRun(
             original.getUserRequest(),
             original.getSourceType() != null ? original.getSourceType() : "RECOVERY",
             original.getRepoUrl(),
             original.getRepoMode(),
-            original.getGithubPat(), original.getGithubOwner()   // carry credentials forward
+            original.getGithubPat(), original.getGithubOwner(),
+            original.isSkipApproval(), original.isAutoMerge(),
+            original.getPlannerModel(),
+            original.getCreatedByUserId(),
+            original.getOrgId(),
+            original.getProjectId()
         );
         broadcaster.emit(original.getRunId(), RunEvent.log(
             original.getRunId(), null,
@@ -2026,12 +2051,18 @@ public class PipelineHarness {
         int newCount = original.getAutoRestartCount() + 1;
         log.info("Auto-restarting run {} due to transient failure (restart #{})",
             original.getRunId(), newCount);
+        // Pass ownership INTO submitRun so it's stamped BEFORE the async thread starts
         PipelineRun newRun = submitRun(
             original.getUserRequest(),
             original.getSourceType() != null ? original.getSourceType() : "RECOVERY",
             original.getRepoUrl(),
             original.getRepoMode(),
-            original.getGithubPat(), original.getGithubOwner()   // carry credentials forward
+            original.getGithubPat(), original.getGithubOwner(),
+            original.isSkipApproval(), original.isAutoMerge(),
+            original.getPlannerModel(),
+            original.getCreatedByUserId(),
+            original.getOrgId(),
+            original.getProjectId()
         );
         // Propagate the restart counter so we don't loop forever
         newRun.setAutoRestartCount(newCount);
@@ -2053,7 +2084,7 @@ public class PipelineHarness {
     public PipelineRun submitIntegrationRun(String userRequest, String source, boolean skipApproval) {
         // skipApproval passed directly into submitRun so it's set before the async thread starts
         // Integration runs also auto-merge when skipApproval is true (fully automated)
-        return submitRun(userRequest, source, null, null, null, null, skipApproval, skipApproval, null);
+        return submitRun(userRequest, source, null, null, null, null, skipApproval, skipApproval, null, null, null, null);
     }
 
     // ── File-ownership validation ────────────────────────────────────────────

@@ -63,6 +63,8 @@ export interface RunSummary {
   techStack?: string | null;
   /** Human-readable project name. Null if projectId is null or project was deleted. */
   projectName?: string | null;
+  /** Display name of the user who created this run. Null for pre-ownership runs. */
+  createdByName?: string | null;
 }
 
 export interface TaskSummary {
@@ -847,3 +849,57 @@ export interface TaskGraphNode {
   level: number;
 }
 export const getTaskGraph = (runId: string) => req<TaskGraphNode[]>(`/runs/${runId}/task-graph`);
+
+/** Update or remove the project association of an existing run. Pass null to un-assign. */
+export const updateRunProject = (runId: string, projectId: string | null) =>
+  req<RunSummary>(`/runs/${runId}/project`, {
+    method: 'PATCH',
+    body: JSON.stringify({ projectId: projectId ?? '' }),
+  });
+
+// ── Audit Logs ────────────────────────────────────────────────────────────
+export interface AuditLogEntry {
+  id: string;
+  eventType: string;
+  entityType: string;
+  entityId: string;
+  orgId: string | null;
+  actorId: string | null;
+  actorEmail: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  metadata: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  content: AuditLogEntry[];
+  totalPages: number;
+  totalElements: number;
+  number: number;
+  size: number;
+}
+
+export const getAuditLogs = (params: {
+  orgScoped?: boolean;
+  entityType?: string;
+  eventType?: string;
+  actorId?: string;
+  entityId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  size?: number;
+}) => {
+  const qs = new URLSearchParams();
+  if (params.entityType) qs.set('entityType', params.entityType);
+  if (params.eventType) qs.set('eventType', params.eventType);
+  if (params.actorId) qs.set('actorId', params.actorId);
+  if (params.entityId) qs.set('entityId', params.entityId);
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  qs.set('page', String(params.page ?? 0));
+  qs.set('size', String(params.size ?? 50));
+  const base = params.orgScoped ? '/org/me/audit-logs' : '/admin/audit-logs';
+  return req<AuditLogPage>(`${base}?${qs.toString()}`);
+};

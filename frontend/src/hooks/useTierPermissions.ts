@@ -15,6 +15,7 @@ export interface TierPermissions {
   canCreateOrg: boolean;
   canInviteMembers: boolean;
   canViewOrgMembers: boolean;
+  canViewAudit: boolean;
   monthlyRunLimit: number;
   currentRunCount: number;
   maxOrgMembers: number;

@@ -6,6 +6,7 @@ import com.navneet.executespec.auth.entity.OrgInvitation;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.OrgService;
 import jakarta.validation.Valid;
@@ -21,6 +22,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +34,7 @@ public class OrgController {
 
     private final OrgService orgService;
     private final InvitationService invitationService;
+    private final ActivityAuditService auditService;
     private final OrgRepository orgRepo;
     private final OrgMemberRepository orgMemberRepo;
 
@@ -58,7 +61,7 @@ public class OrgController {
         String orgId = userDetails.getUser().getOrgId();
         @SuppressWarnings("unchecked")
         List<String> domains = (List<String>) body.get("domains");
-        OrgDto updated = orgService.updateOrg(orgId, (String) body.get("name"), domains);
+        OrgDto updated = orgService.updateOrg(orgId, userDetails.getUser().getId(), (String) body.get("name"), domains);
         return ResponseEntity.ok(updated);
     }
 
@@ -113,7 +116,7 @@ public class OrgController {
             }
         }
 
-        orgService.changeMemberRole(orgId, userId, newRole);
+        orgService.changeMemberRole(orgId, userId, newRole, userDetails.getUser().getId());
         return ResponseEntity.noContent().build();
     }
 
@@ -159,6 +162,28 @@ public class OrgController {
         return ResponseEntity.ok(Map.of("message", "Invitation accepted successfully"));
     }
 
+    // ── Audit Logs (ORG_ADMIN only, scoped to own org) ─────────────────────
+
+    @GetMapping("/me/audit-logs")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<com.navneet.executespec.auth.dto.AuditLogPage> getOrgAuditLogs(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestParam(required = false) String entityType,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) String actorId,
+            @RequestParam(required = false) String entityId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        String orgId = userDetails.getUser().getOrgId();
+        if (orgId == null) return ResponseEntity.noContent().build();
+        Instant fromInstant = from != null ? Instant.parse(from) : null;
+        Instant toInstant = to != null ? Instant.parse(to) : null;
+        return ResponseEntity.ok(auditService.query(
+                orgId, entityType, eventType, actorId, entityId, fromInstant, toInstant, page, size));
+    }
+
     // ── Key source mode & provider restrictions (ORG_ADMIN only) ────────────
 
     record KeySourceSettingsRequest(String keySourceMode, List<String> enabledProviders) {}
@@ -171,7 +196,7 @@ public class OrgController {
         String orgId = userDetails.getUser().getOrgId();
         if (orgId == null) return ResponseEntity.badRequest().build();
         return ResponseEntity.ok(orgService.updateKeySourceSettings(
-                orgId, req.keySourceMode(), req.enabledProviders()));
+                orgId, req.keySourceMode(), req.enabledProviders(), userDetails.getUser().getId()));
     }
 
     // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────
@@ -191,7 +216,7 @@ public class OrgController {
         String orgId = userDetails.getUser().getOrgId();
         if (orgId == null) return ResponseEntity.badRequest().build();
         return ResponseEntity.ok(orgService.updateAiKeySettings(
-                orgId, req.anthropicApiKey(), req.openAiApiKey(), req.geminiApiKey()));
+                orgId, req.anthropicApiKey(), req.openAiApiKey(), req.geminiApiKey(), userDetails.getUser().getId()));
     }
 
     // ── Org-level JIRA settings (ORG_ADMIN only) ────────────────────────────
@@ -206,7 +231,7 @@ public class OrgController {
         String orgId = userDetails.getUser().getOrgId();
         if (orgId == null) return ResponseEntity.badRequest().build();
         return ResponseEntity.ok(orgService.updateJiraSettings(
-                orgId, req.baseUrl(), req.email(), req.apiToken()));
+                orgId, req.baseUrl(), req.email(), req.apiToken(), userDetails.getUser().getId()));
     }
 
     record ValidationResult(boolean valid, String message) {}
@@ -251,7 +276,7 @@ public class OrgController {
         String orgId = userDetails.getUser().getOrgId();
         if (orgId == null) return ResponseEntity.badRequest().build();
         return ResponseEntity.ok(orgService.updateConfluenceSettings(
-                orgId, req.baseUrl(), req.email(), req.apiToken()));
+                orgId, req.baseUrl(), req.email(), req.apiToken(), userDetails.getUser().getId()));
     }
 
     @PostMapping("/me/settings/confluence/validate")

@@ -35,6 +35,7 @@ public class AuthService {
     private final JwtUtil jwtUtil;
     private final AuthenticationManager authManager;
     private final MailService mailService;
+    private final ActivityAuditService auditService;
 
     @Value("${app.mail.base-url:http://localhost:5173}")
     private String baseUrl;
@@ -66,6 +67,12 @@ public class AuthService {
         mailService.sendVerificationEmail(user.getEmail(), user.getFirstName(), token);
         log.info("User registered: {}", user.getEmail());
 
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_REGISTERED")
+                .entityType("USER").entityId(user.getId())
+                .newValue("{\"email\":\"" + user.getEmail() + "\",\"tier\":\"" + user.getTier() + "\"}")
+                .build());
+
         return UserDto.from(user, null);
     }
 
@@ -93,6 +100,12 @@ public class AuthService {
 
         emailToken.setUsedAt(Instant.now());
         emailTokenRepo.save(emailToken);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("EMAIL_VERIFIED")
+                .entityType("USER").entityId(user.getId())
+                .newValue("{\"email\":\"" + user.getEmail() + "\"}")
+                .build());
     }
 
     // ── Login ─────────────────────────────────────────────────────────────────
@@ -207,6 +220,12 @@ public class AuthService {
 
         emailToken.setUsedAt(Instant.now());
         emailTokenRepo.save(emailToken);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("PASSWORD_RESET")
+                .entityType("USER").entityId(user.getId())
+                .newValue("{\"email\":\"" + user.getEmail() + "\"}")
+                .build());
     }
 
     // ── Change Password ───────────────────────────────────────────────────────
@@ -230,6 +249,12 @@ public class AuthService {
         user.setMustChangePassword(false);
         user.setUpdatedAt(Instant.now());
         userRepo.save(user);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("PASSWORD_CHANGED")
+                .entityType("USER").entityId(userId)
+                .actorId(userId)
+                .build());
     }
 
     // ── Resend Verification ───────────────────────────────────────────────────

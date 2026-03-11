@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ChevronRight, Cpu, FolderOpen, Github } from 'lucide-react';
+import { ChevronRight, Cpu, FolderOpen, Github, User } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import TechBadges from '@/components/runs/TechBadges';
 import { fmtTokens, relativeTime, truncate } from '@/lib/utils';
@@ -59,6 +59,12 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
               <Cpu className="h-3 w-3" />
               {run.plannerModel}
             </span>
+            {run.createdByName && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/15 text-indigo-400">
+                <User className="h-2.5 w-2.5" />
+                {run.createdByName}
+              </span>
+            )}
             {run.projectName && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-500/15 text-cyan-400">
                 <FolderOpen className="h-2.5 w-2.5" />
