@@ -5,6 +5,8 @@ import com.navneet.executespec.agent.LlmRouter.FallbackMode;
 import com.navneet.executespec.api.dto.ConversationMessage;
 import com.navneet.executespec.api.dto.ConversationRequest;
 import com.navneet.executespec.api.dto.ConversationResponse;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.TierPermissionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -13,8 +15,11 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,9 +49,21 @@ public class ConversationController {
             """;
 
     private final LlmRouter llmRouter;
+    private final TierPermissionService tierPermissionService;
 
     @PostMapping
-    public ResponseEntity<ConversationResponse> chat(@RequestBody ConversationRequest req) {
+    public ResponseEntity<ConversationResponse> chat(
+            @RequestBody ConversationRequest req,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+
+        // Tier gate: only PRO+ org members can use conversation
+        if (userDetails != null) {
+            var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+            if (!perms.canUseChat()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Chat is not available on your current plan. Upgrade to PRO or ENTERPRISE.");
+            }
+        }
         List<ConversationMessage> incoming = req.messages() == null ? List.of() : req.messages();
 
         // Server-side guard: honour the same 10-message cap enforced in the UI

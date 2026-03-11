@@ -2,26 +2,18 @@ package com.navneet.executespec.auth.security;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.OrgMember;
-import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Component;
-
-import java.util.List;
 
 /**
  * Builds JPA Specifications for run visibility based on the current user's role.
  */
 @Component
-@RequiredArgsConstructor
 public class RunVisibilitySpec {
-
-    private final ProjectMemberRepository projectMemberRepo;
 
     /**
      * Returns a Specification that filters pipeline_run rows to only those
@@ -42,13 +34,9 @@ public class RunVisibilitySpec {
                 return cb.equal(root.get("orgId"), user.getOrgId());
             }
 
-            // DEVELOPER — see runs in assigned projects only
+            // DEVELOPER — see all runs in their org (projects are shared grouping tools)
             if (orgMember != null && "DEVELOPER".equals(orgMember.getOrgRole())) {
-                List<String> projectIds = projectMemberRepo.findProjectIdsByUserId(user.getId());
-                if (projectIds.isEmpty()) {
-                    return cb.disjunction(); // no projects → no runs
-                }
-                return root.get("projectId").in(projectIds);
+                return cb.equal(root.get("orgId"), user.getOrgId());
             }
 
             // FREE user — see own runs only

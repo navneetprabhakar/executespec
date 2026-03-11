@@ -70,7 +70,18 @@ export default function RunList() {
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
             )}
           >
-            All Projects
+            All Runs
+          </button>
+          <button
+            onClick={() => setProjectFilter('__none__')}
+            className={cn(
+              'px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+              projectFilter === '__none__'
+                ? 'bg-zinc-600 text-zinc-100'
+                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
+            )}
+          >
+            Unassigned
           </button>
           {projects
             .filter((p) => p.status === 'ACTIVE')

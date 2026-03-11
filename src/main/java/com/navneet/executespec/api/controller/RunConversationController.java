@@ -5,6 +5,7 @@ import com.navneet.executespec.api.RunMapper;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -48,6 +49,7 @@ public class RunConversationController {
     private final PipelineHarness harness;
     private final RunMapper runMapper;
     private final RunAccessGuard guard;
+    private final TierPermissionService tierPermissionService;
 
     // ── GET /api/runs/{runId}/chat ────────────────────────────────────────────
 
@@ -85,6 +87,13 @@ public class RunConversationController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
+
+        // Tier gate: only PRO+ org members and admins can use post-run chat
+        var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+        if (!perms.canUseChat()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Post-run chat is not available on your current plan. Upgrade to PRO or ENTERPRISE.");
+        }
 
         // Only allow chat on completed runs
         if (!"COMPLETE".equals(run.getStatus()) && !"PARTIAL".equals(run.getStatus())) {

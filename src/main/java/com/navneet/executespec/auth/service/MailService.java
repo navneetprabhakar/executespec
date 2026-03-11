@@ -55,6 +55,16 @@ public class MailService {
     }
 
     @Async
+    public void sendTemporaryPasswordEmail(String toEmail, String firstName, String tempPassword) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("tempPassword", tempPassword);
+        ctx.setVariable("loginUrl", baseUrl + "/login");
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, "Your executespec temporary password", "email/temp-password", ctx);
+    }
+
+    @Async
     public void sendOrgInviteEmail(String toEmail, String orgName, String token) {
         Context ctx = new Context();
         ctx.setVariable("orgName", orgName);

@@ -55,14 +55,9 @@ public class ProjectService {
     }
 
     public List<ProjectDto> listProjectsForUser(String orgId, String userId, boolean isOrgAdmin) {
-        if (isOrgAdmin) {
-            return projectRepo.findByOrgId(orgId).stream()
-                    .map(ProjectDto::from)
-                    .collect(Collectors.toList());
-        }
-        // Developer — only projects they're a member of
-        List<String> projectIds = projectMemberRepo.findProjectIdsByUserId(userId);
-        return projectRepo.findAllById(projectIds).stream()
+        // All org members can see all org projects — projects are a shared grouping tool.
+        // Write operations (create/archive/manage members) are still restricted to ORG_ADMIN.
+        return projectRepo.findByOrgId(orgId).stream()
                 .map(ProjectDto::from)
                 .collect(Collectors.toList());
     }
@@ -70,9 +65,13 @@ public class ProjectService {
     public ProjectDto getProject(String projectId, String userId, boolean isSuperAdmin, boolean isOrgAdmin) {
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-        if (!isSuperAdmin && !isOrgAdmin &&
-                !projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this project");
+        // All org members can view any project in their org (projects are a shared grouping tool).
+        // Org membership is already validated by the controller's auth check.
+        if (!isSuperAdmin) {
+            AppUser user = userRepo.findById(userId).orElse(null);
+            if (user == null || user.getOrgId() == null || !user.getOrgId().equals(project.getOrgId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this organization");
+            }
         }
         return ProjectDto.from(project);
     }

@@ -17,4 +17,8 @@ public interface OrgMemberRepository extends JpaRepository<OrgMember, String> {
     boolean existsByOrgIdAndUserId(String orgId, String userId);
 
     void deleteByOrgIdAndUserId(String orgId, String userId);
+
+    long countByOrgId(String orgId);
+
+    long countByOrgIdAndOrgRole(String orgId, String orgRole);
 }

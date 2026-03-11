@@ -11,10 +11,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import org.springframework.dao.DataIntegrityViolationException;
+
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -28,12 +31,32 @@ public class InvitationService {
     private final OrgMemberRepository orgMemberRepo;
     private final AppUserRepository userRepo;
     private final ProjectMemberRepository projectMemberRepo;
+    private final TierConfigRepository tierConfigRepo;
     private final MailService mailService;
 
     @Value("${app.mail.base-url:http://localhost:5173}")
     private String baseUrl;
 
     private static final String SUPER_ADMIN_EMAIL = "admin@executespec.ai";
+
+    // ── Common consumer email domains (blocked for org invitations) ──────────
+    private static final Set<String> BLOCKED_DOMAINS = Set.of(
+            "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.in", "yahoo.co.uk",
+            "hotmail.com", "outlook.com", "live.com", "msn.com", "aol.com",
+            "icloud.com", "me.com", "mac.com", "protonmail.com", "proton.me",
+            "zoho.com", "yandex.com", "mail.com", "gmx.com", "gmx.net",
+            "fastmail.com", "tutanota.com", "hey.com", "pm.me",
+            "rediffmail.com", "inbox.com", "mail.ru", "rambler.ru",
+            "qq.com", "163.com", "126.com", "sina.com",
+            "naver.com", "daum.net", "hanmail.net",
+            "web.de", "t-online.de", "laposte.net", "orange.fr",
+            "libero.it", "virgilio.it", "seznam.cz",
+            "comcast.net", "verizon.net", "att.net", "sbcglobal.net",
+            "cox.net", "charter.net", "earthlink.net",
+            "btinternet.com", "sky.com", "talktalk.net",
+            "rogers.com", "shaw.ca", "bell.net",
+            "bigpond.com", "optusnet.com.au"
+    );
 
     @Transactional
     public OrgInvitation createInvitation(String orgId, String invitedByUserId, InviteRequest req) {
@@ -46,8 +69,41 @@ public class InvitationService {
                 ? String.join(",", req.projectIds())
                 : null;
 
+        // ── Common domain blocking ──────────────────────────────────────────
+        // ENTERPRISE: always blocked. PRO: blocked only if admin has enabled it.
+        boolean shouldBlockCommon = "ENTERPRISE".equals(org.getTier()) || org.isBlockCommonDomains();
+        if (shouldBlockCommon && isCommonDomain(email)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Consumer email domains (e.g. gmail.com, yahoo.com) cannot be used for org invitations. " +
+                    "Please use a work email address.");
+        }
+
+        // ── Member limit check ──────────────────────────────────────────────
+        int maxMembers = resolveMaxMembers(org);
+        if (maxMembers > 0) {
+            long currentMembers = orgMemberRepo.countByOrgId(orgId);
+            if (currentMembers >= maxMembers) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Organization has reached its member limit (" + maxMembers + "). " +
+                        "Upgrade to ENTERPRISE for unlimited members.");
+            }
+        }
+
         String token = UUID.randomUUID().toString().replace("-", "");
         boolean domainMatches = domainMatches(email, org.getDomainPatterns());
+
+        // ── Domain enforcement mode ─────────────────────────────────────────
+        // ENTERPRISE is always ENFORCED; PRO respects the stored flag.
+        String effectiveMode = "ENTERPRISE".equals(org.getTier())
+                ? "ENFORCED"
+                : (org.getDomainEnforcementMode() != null ? org.getDomainEnforcementMode() : "OPEN");
+
+        if (!domainMatches && "ENFORCED".equals(effectiveMode)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only emails matching org domain patterns (" + org.getDomainPatterns() + ") are allowed. " +
+                    "Domain enforcement is set to ENFORCED.");
+        }
+
         String status = domainMatches ? "PENDING" : "ESCALATED";
 
         OrgInvitation invitation = OrgInvitation.builder()
@@ -118,6 +174,12 @@ public class InvitationService {
         OrgInvitation invitation = invitationRepo.findByToken(token)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
 
+        // Idempotent: if already accepted, return success silently
+        if ("ACCEPTED".equals(invitation.getStatus())) {
+            log.info("Invitation {} already accepted — returning success (idempotent)", invitation.getId());
+            return;
+        }
+
         if (!"PENDING".equals(invitation.getStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Invitation is " + invitation.getStatus() + " and cannot be accepted");
@@ -149,18 +211,29 @@ public class InvitationService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "User is already a member of another org");
         }
 
-        // Add to org
+        // Add to org — catch constraint violation from concurrent/duplicate requests
         if (!orgMemberRepo.existsByOrgIdAndUserId(invitation.getOrgId(), userId)) {
-            orgMemberRepo.save(OrgMember.builder()
-                    .id(UUID.randomUUID().toString())
-                    .orgId(invitation.getOrgId())
-                    .userId(userId)
-                    .orgRole(invitation.getOrgRole())
-                    .build());
+            try {
+                orgMemberRepo.save(OrgMember.builder()
+                        .id(UUID.randomUUID().toString())
+                        .orgId(invitation.getOrgId())
+                        .userId(userId)
+                        .orgRole(invitation.getOrgRole())
+                        .build());
+                orgMemberRepo.flush();
+            } catch (DataIntegrityViolationException e) {
+                log.warn("OrgMember already exists for org={} user={} (race condition) — continuing",
+                        invitation.getOrgId(), userId);
+            }
         }
 
-        // Update user's org_id
+        // Update user's org_id and inherit org tier
         user.setOrgId(invitation.getOrgId());
+        orgRepo.findById(invitation.getOrgId()).ifPresent(org -> {
+            if (org.getTier() != null) {
+                user.setTier(org.getTier());
+            }
+        });
         user.setUpdatedAt(Instant.now());
         userRepo.save(user);
 
@@ -168,13 +241,20 @@ public class InvitationService {
         if (invitation.getProjectIds() != null && !invitation.getProjectIds().isBlank()) {
             List<String> projectIds = Arrays.asList(invitation.getProjectIds().split(","));
             for (String pid : projectIds) {
-                if (!projectMemberRepo.existsByProjectIdAndUserId(pid.trim(), userId)) {
-                    projectMemberRepo.save(ProjectMember.builder()
-                            .id(UUID.randomUUID().toString())
-                            .projectId(pid.trim())
-                            .userId(userId)
-                            .projectRole("PROJECT_DEVELOPER")
-                            .build());
+                String trimmedPid = pid.trim();
+                if (trimmedPid.isEmpty()) continue;
+                if (!projectMemberRepo.existsByProjectIdAndUserId(trimmedPid, userId)) {
+                    try {
+                        projectMemberRepo.save(ProjectMember.builder()
+                                .id(UUID.randomUUID().toString())
+                                .projectId(trimmedPid)
+                                .userId(userId)
+                                .projectRole("PROJECT_DEVELOPER")
+                                .build());
+                        projectMemberRepo.flush();
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("ProjectMember already exists or project {} not found — skipping", trimmedPid);
+                    }
                 }
             }
         }
@@ -233,5 +313,21 @@ public class InvitationService {
                 .map(String::trim)
                 .map(String::toLowerCase)
                 .anyMatch(d -> emailLower.endsWith("@" + d));
+    }
+
+    /** Check if the email belongs to a consumer/free email provider. */
+    private boolean isCommonDomain(String email) {
+        int at = email.lastIndexOf('@');
+        if (at < 0) return false;
+        String domain = email.substring(at + 1).toLowerCase();
+        return BLOCKED_DOMAINS.contains(domain);
+    }
+
+    /** Resolve max org members: per-org override → tier_config default. */
+    private int resolveMaxMembers(Org org) {
+        if (org.getMaxMembers() != null) return org.getMaxMembers();
+        return tierConfigRepo.findById(org.getTier())
+                .map(com.navneet.executespec.auth.entity.TierConfig::getMaxOrgMembers)
+                .orElse(-1);
     }
 }

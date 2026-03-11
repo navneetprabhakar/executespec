@@ -85,7 +85,9 @@ public class TierEnforcementService {
      *  - else                           → tier_config default
      */
     public int effectiveOrgLimit(Org org) {
-        String effectiveTier = org.isPaymentVerified() ? org.getTier() : "FREE";
+        // Use the org's actual tier. Payment verification gates tier *upgrades*
+        // (handled at the billing layer), not run quota enforcement.
+        String effectiveTier = org.getTier() != null ? org.getTier() : "FREE";
 
         // Enterprise with own keys = unlimited
         if ("ENTERPRISE".equals(effectiveTier) && org.isApiKeysProvided()) return -1;

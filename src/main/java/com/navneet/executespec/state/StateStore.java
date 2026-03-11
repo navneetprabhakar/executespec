@@ -428,7 +428,9 @@ public class StateStore {
             final String s = status;
             combined = combined.and((root, q, cb) -> cb.equal(root.get("status"), s));
         }
-        if (projectId != null && !projectId.isBlank()) {
+        if ("__none__".equals(projectId)) {
+            combined = combined.and((root, q, cb) -> cb.isNull(root.get("projectId")));
+        } else if (projectId != null && !projectId.isBlank()) {
             final String pid = projectId;
             combined = combined.and((root, q, cb) -> cb.equal(root.get("projectId"), pid));
         }

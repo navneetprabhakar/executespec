@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useTierPermissions } from '@/hooks/useTierPermissions';
 import type { OrgDto } from '@/lib/api';
 import * as api from '@/lib/api';
 
@@ -157,12 +158,15 @@ function SaveBar({
 
 export default function SettingsPage() {
   const { user, setUser } = useAuthStore();
+  const permissions = useTierPermissions();
   const [health, setHealth] = useState<api.MetricsResponse | null>(null);
   const [org, setOrg] = useState<OrgDto | null>(null);
 
   useEffect(() => {
-    api.getMetrics().then(setHealth).catch(() => {});
-  }, []);
+    if (permissions?.canViewMetrics) {
+      api.getMetrics().then(setHealth).catch(() => {});
+    }
+  }, [permissions?.canViewMetrics]);
 
   // Load org data for ORG_ADMIN users so we can show org-level key status
   const isOrgAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
@@ -319,50 +323,52 @@ export default function SettingsPage() {
         </form>
       </IntegrationCard>
 
-      {/* ── AI Provider Keys ────────────────────────────────────────────────── */}
-      <IntegrationCard
-        icon={<Key className="h-4 w-4 text-zinc-400" />}
-        title="AI Provider Keys"
-        statusBadge={hasAnyAiKey
-          ? <ConfiguredBadge label={`${[user?.hasOpenAiKey && 'OpenAI', user?.hasAnthropicKey && 'Anthropic', user?.hasGeminiKey && 'Gemini'].filter(Boolean).join(', ')} configured`} />
-          : <NotConfiguredBadge label="No keys saved" />}
-        defaultOpen={!hasAnyAiKey}
-      >
-        <p className="text-xs text-zinc-500">
-          Per-user API keys for AI providers. Leave a field blank to keep an existing key unchanged.
-          Save with all fields empty to clear all keys.
-        </p>
-        <form onSubmit={handleSaveAiKeys} className="space-y-3">
-          <SecretField
-            label={`OpenAI API Key${user?.hasOpenAiKey ? ' ✓' : ''}`}
-            subLabel={user?.hasOpenAiKey ? '(leave blank to keep existing)' : undefined}
-            value={openAiKey}
-            onChange={setOpenAiKey}
-            placeholder={user?.hasOpenAiKey ? '••••••••••••••••••••• (saved)' : 'sk-…'}
-          />
-          <SecretField
-            label={`Anthropic API Key${user?.hasAnthropicKey ? ' ✓' : ''}`}
-            subLabel={user?.hasAnthropicKey ? '(leave blank to keep existing)' : undefined}
-            value={anthropicKey}
-            onChange={setAnthropicKey}
-            placeholder={user?.hasAnthropicKey ? '••••••••••••••••••••• (saved)' : 'sk-ant-…'}
-          />
-          <SecretField
-            label={`Gemini API Key${user?.hasGeminiKey ? ' ✓' : ''}`}
-            subLabel={user?.hasGeminiKey ? '(leave blank to keep existing)' : undefined}
-            value={geminiKey}
-            onChange={setGeminiKey}
-            placeholder={user?.hasGeminiKey ? '••••••••••••••••••••• (saved)' : 'AIza…'}
-          />
-          <SaveMessage msg={aiMsg} />
-          <SaveBar
-            saving={aiSaving}
-            disabled={!openAiKey.trim() && !anthropicKey.trim() && !geminiKey.trim()}
-            onClear={hasAnyAiKey ? handleClearAiKeys : undefined}
-            clearLabel="Clear all keys"
-          />
-        </form>
-      </IntegrationCard>
+      {/* ── AI Provider Keys (requires canManageAiKeys) ─────────────────────── */}
+      {permissions?.canManageAiKeys && (
+        <IntegrationCard
+          icon={<Key className="h-4 w-4 text-zinc-400" />}
+          title="AI Provider Keys"
+          statusBadge={hasAnyAiKey
+            ? <ConfiguredBadge label={`${[user?.hasOpenAiKey && 'OpenAI', user?.hasAnthropicKey && 'Anthropic', user?.hasGeminiKey && 'Gemini'].filter(Boolean).join(', ')} configured`} />
+            : <NotConfiguredBadge label="No keys saved" />}
+          defaultOpen={!hasAnyAiKey}
+        >
+          <p className="text-xs text-zinc-500">
+            Per-user API keys for AI providers. Leave a field blank to keep an existing key unchanged.
+            Save with all fields empty to clear all keys.
+          </p>
+          <form onSubmit={handleSaveAiKeys} className="space-y-3">
+            <SecretField
+              label={`OpenAI API Key${user?.hasOpenAiKey ? ' ✓' : ''}`}
+              subLabel={user?.hasOpenAiKey ? '(leave blank to keep existing)' : undefined}
+              value={openAiKey}
+              onChange={setOpenAiKey}
+              placeholder={user?.hasOpenAiKey ? '••••••••••••••••••••• (saved)' : 'sk-…'}
+            />
+            <SecretField
+              label={`Anthropic API Key${user?.hasAnthropicKey ? ' ✓' : ''}`}
+              subLabel={user?.hasAnthropicKey ? '(leave blank to keep existing)' : undefined}
+              value={anthropicKey}
+              onChange={setAnthropicKey}
+              placeholder={user?.hasAnthropicKey ? '••••••••••••••••••••• (saved)' : 'sk-ant-…'}
+            />
+            <SecretField
+              label={`Gemini API Key${user?.hasGeminiKey ? ' ✓' : ''}`}
+              subLabel={user?.hasGeminiKey ? '(leave blank to keep existing)' : undefined}
+              value={geminiKey}
+              onChange={setGeminiKey}
+              placeholder={user?.hasGeminiKey ? '••••••••••••••••••••• (saved)' : 'AIza…'}
+            />
+            <SaveMessage msg={aiMsg} />
+            <SaveBar
+              saving={aiSaving}
+              disabled={!openAiKey.trim() && !anthropicKey.trim() && !geminiKey.trim()}
+              onClear={hasAnyAiKey ? handleClearAiKeys : undefined}
+              clearLabel="Clear all keys"
+            />
+          </form>
+        </IntegrationCard>
+      )}
 
       {/* ── JIRA/Confluence note ──────────────────────────────────────────── */}
       <GlassPanel className="px-5 py-3">
@@ -378,16 +384,18 @@ export default function SettingsPage() {
       {/* ── Key Source & Provider Policy (ORG_ADMIN only) ──────────────────── */}
       {isOrgAdmin && org && <OrgKeySourceCard org={org} onSaved={setOrg} />}
 
-      {/* ── System Health ───────────────────────────────────────────────────── */}
-      <div>
-        <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">System Health</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <HealthCard icon={<Server className="h-5 w-5 text-accent-violet" />} label="API" value="Healthy" color="text-accent-emerald" />
-          <HealthCard icon={<Database className="h-5 w-5 text-accent-cyan" />} label="Database" value="Connected" color="text-accent-emerald" />
-          <HealthCard icon={<Cpu className="h-5 w-5 text-accent-amber" />} label="Total Runs" value={String(health?.totalRuns ?? '—')} color="text-zinc-200" />
-          <HealthCard icon={<Clock className="h-5 w-5 text-accent-emerald" />} label="Active Runs" value={String(health?.activeRuns ?? '—')} color="text-zinc-200" />
+      {/* ── System Health (requires canViewMetrics) ────────────────────────── */}
+      {permissions?.canViewMetrics && (
+        <div>
+          <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">System Health</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <HealthCard icon={<Server className="h-5 w-5 text-accent-violet" />} label="API" value="Healthy" color="text-accent-emerald" />
+            <HealthCard icon={<Database className="h-5 w-5 text-accent-cyan" />} label="Database" value="Connected" color="text-accent-emerald" />
+            <HealthCard icon={<Cpu className="h-5 w-5 text-accent-amber" />} label="Total Runs" value={String(health?.totalRuns ?? '—')} color="text-zinc-200" />
+            <HealthCard icon={<Clock className="h-5 w-5 text-accent-emerald" />} label="Active Runs" value={String(health?.activeRuns ?? '—')} color="text-zinc-200" />
+          </div>
         </div>
-      </div>
+      )}
 
     </div>
   );

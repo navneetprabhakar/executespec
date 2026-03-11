@@ -86,6 +86,24 @@ public class Org {
     @Column(name = "enabled_providers")
     private String enabledProviders;
 
+    // ── Domain enforcement & member limits ────────────────────────────────────
+
+    /** OPEN = escalate cross-domain invites; ENFORCED = reject immediately.
+     *  ENTERPRISE orgs are always treated as ENFORCED regardless of this value. */
+    @Column(name = "domain_enforcement_mode", nullable = false)
+    @Builder.Default
+    private String domainEnforcementMode = "OPEN";
+
+    /** Per-org member cap override. NULL = use tier_config.max_org_members default. */
+    @Column(name = "max_members")
+    private Integer maxMembers;
+
+    /** When true, consumer email domains (gmail, yahoo, etc.) are blocked for invites.
+     *  PRO: admin-toggleable. ENTERPRISE: always true. */
+    @Column(name = "block_common_domains", nullable = false)
+    @Builder.Default
+    private boolean blockCommonDomains = false;
+
     // ── Admin contact ────────────────────────────────────────────────────────
 
     @Column(name = "admin_email")

@@ -2,15 +2,12 @@ package com.navneet.executespec.auth.security;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.OrgMember;
-import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
-
-import java.util.List;
 
 /**
  * Centralised access-control guard for single-run endpoints.
@@ -22,7 +19,7 @@ import java.util.List;
  * <ul>
  *   <li><b>SUPER_ADMIN</b> — unrestricted access to every run</li>
  *   <li><b>ORG_ADMIN / BILLING_ADMIN</b> — runs that belong to the same org</li>
- *   <li><b>DEVELOPER</b> — own runs <em>or</em> runs in projects the user is a member of</li>
+ *   <li><b>DEVELOPER</b> — all runs in their org (projects are shared grouping tools)</li>
  *   <li><b>FREE user</b> — own runs only</li>
  * </ul>
  */
@@ -31,7 +28,6 @@ import java.util.List;
 public class RunAccessGuard {
 
     private final StateStore stateStore;
-    private final ProjectMemberRepository projectMemberRepo;
 
     // ── Run-level access ─────────────────────────────────────────────────────
 
@@ -71,13 +67,9 @@ public class RunAccessGuard {
             throw forbidden(run);
         }
 
-        // DEVELOPER — own runs OR runs in assigned projects
+        // DEVELOPER — all runs in their org (projects are shared grouping tools)
         if (orgMember != null && "DEVELOPER".equals(orgMember.getOrgRole())) {
-            if (isOwner(user, run)) return;
-            if (run.getProjectId() != null) {
-                List<String> projectIds = projectMemberRepo.findProjectIdsByUserId(user.getId());
-                if (projectIds.contains(run.getProjectId())) return;
-            }
+            if (user.getOrgId() != null && user.getOrgId().equals(run.getOrgId())) return;
             throw forbidden(run);
         }
 

@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import * as api from '@/lib/api';
+import type { TierPermissions } from '@/hooks/useTierPermissions';
 
 interface AuthStore {
   user: api.AuthUser | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  permissions: TierPermissions | null;
 
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -21,17 +23,20 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   accessToken: localStorage.getItem('access_token'),
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: false,
+  permissions: null,
 
   login: async (email, password) => {
     const resp = await api.authLogin({ email, password });
     localStorage.setItem('access_token', resp.accessToken);
     set({ accessToken: resp.accessToken, user: resp.user, isAuthenticated: true });
+    // Load permissions after login
+    api.getMyPermissions().then((p) => set({ permissions: p })).catch(() => {});
   },
 
   logout: async () => {
     try { await api.authLogout(); } catch { /* ignore */ }
     localStorage.removeItem('access_token');
-    set({ accessToken: null, user: null, isAuthenticated: false });
+    set({ accessToken: null, user: null, isAuthenticated: false, permissions: null });
   },
 
   register: async (email, firstName, lastName, password) => {
@@ -47,7 +52,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       return true;
     } catch {
       localStorage.removeItem('access_token');
-      set({ accessToken: null, user: null, isAuthenticated: false });
+      set({ accessToken: null, user: null, isAuthenticated: false, permissions: null });
       return false;
     }
   },
@@ -62,15 +67,17 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       const user = await api.authMe();
       set({ user, isAuthenticated: true });
+      // Load tier permissions
+      api.getMyPermissions().then((p) => set({ permissions: p })).catch(() => {});
     } catch {
-      set({ user: null, isAuthenticated: false });
+      set({ user: null, isAuthenticated: false, permissions: null });
     }
   },
 
   setUser: (user) => set({ user }),
   clearAuth: () => {
     localStorage.removeItem('access_token');
-    set({ accessToken: null, user: null, isAuthenticated: false });
+    set({ accessToken: null, user: null, isAuthenticated: false, permissions: null });
   },
 }));
 

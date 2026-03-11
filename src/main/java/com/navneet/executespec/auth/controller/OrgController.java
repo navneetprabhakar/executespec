@@ -1,7 +1,10 @@
 package com.navneet.executespec.auth.controller;
 
 import com.navneet.executespec.auth.dto.*;
+import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.OrgInvitation;
+import com.navneet.executespec.auth.repository.OrgMemberRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.OrgService;
@@ -29,6 +32,8 @@ public class OrgController {
 
     private final OrgService orgService;
     private final InvitationService invitationService;
+    private final OrgRepository orgRepo;
+    private final OrgMemberRepository orgMemberRepo;
 
     @PostMapping
     public ResponseEntity<OrgDto> createOrg(
@@ -57,11 +62,12 @@ public class OrgController {
         return ResponseEntity.ok(updated);
     }
 
+    /** List org members — accessible to ALL org members (developers get read-only view). */
     @GetMapping("/me/members")
-    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<List<OrgMemberDto>> listMembers(
             @AuthenticationPrincipal AppUserDetails userDetails) {
         String orgId = userDetails.getUser().getOrgId();
+        if (orgId == null) return ResponseEntity.noContent().build();
         return ResponseEntity.ok(orgService.listMembers(orgId));
     }
 
@@ -94,7 +100,20 @@ public class OrgController {
             @PathVariable String userId,
             @RequestBody Map<String, String> body) {
         String orgId = userDetails.getUser().getOrgId();
-        orgService.changeMemberRole(orgId, userId, body.get("role"));
+        String newRole = body.get("role");
+
+        // PRO orgs can only have one ORG_ADMIN — ENTERPRISE allows multiple
+        if ("ORG_ADMIN".equals(newRole) && orgId != null) {
+            Org org = orgRepo.findById(orgId).orElse(null);
+            if (org != null && "PRO".equals(org.getTier())) {
+                long adminCount = orgMemberRepo.countByOrgIdAndOrgRole(orgId, "ORG_ADMIN");
+                if (adminCount >= 1) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+                }
+            }
+        }
+
+        orgService.changeMemberRole(orgId, userId, newRole);
         return ResponseEntity.noContent().build();
     }
 

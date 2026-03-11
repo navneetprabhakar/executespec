@@ -7,6 +7,7 @@ import {
 import IntegrationLogo from '@/components/integrations/IntegrationLogo';
 import GlassPanel from '@/components/shared/GlassPanel';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useTierPermissions } from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
 import { relativeTime } from '@/lib/utils';
 import type { RunSummary, OrgDto, SlackStatus, SlackChannel, ProjectSlackChannelDto } from '@/lib/api';
@@ -494,6 +495,7 @@ function SlackTestSection({
 
 export default function IntegrationsPage() {
   const { user } = useAuthStore();
+  const permissions = useTierPermissions();
   const [enabledSources, setEnabledSources] = useState<string[]>([]);
   const [org, setOrg] = useState<OrgDto | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
@@ -503,6 +505,25 @@ export default function IntegrationsPage() {
   const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
 
   const isAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
+
+  // Tier gate — show locked message if user doesn't have integration permissions
+  if (permissions && !permissions.canManageIntegrations) {
+    return (
+      <div className="h-full overflow-y-auto p-4 flex items-center justify-center">
+        <div className="text-center space-y-3 max-w-md">
+          <div className="h-12 w-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mx-auto">
+            <Unplug className="h-6 w-6 text-zinc-600" />
+          </div>
+          <h2 className="text-lg font-semibold text-zinc-200">Integrations Unavailable</h2>
+          <p className="text-sm text-zinc-500 leading-relaxed">
+            Managing integrations requires a <span className="text-accent-violet font-medium">PRO</span> or{' '}
+            <span className="text-accent-violet font-medium">ENTERPRISE</span> plan with org admin access.
+            Contact your organization admin to upgrade.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const fetchSlackStatus = useCallback(() => {
     if (!user?.orgId) return;

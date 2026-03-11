@@ -24,11 +24,11 @@ export default function ForgotPasswordPage() {
         <div className="rounded-2xl border border-slate-700 bg-[#1a1f2e] p-8 shadow-2xl">
           {sent ? (
             <div className="text-center">
-              <div className="mb-4 text-4xl">📧</div>
+              <div className="mb-4 text-4xl">🔑</div>
               <h2 className="mb-2 text-xl font-bold text-white">Check your email</h2>
               <p className="text-slate-400 text-sm">
                 If an account exists for <strong className="text-white">{email}</strong>,
-                we sent a password reset link. It expires in 1 hour.
+                we sent a temporary password. Use it to log in and you'll be prompted to set a new password.
               </p>
               <Link to="/login" className="mt-6 inline-block text-purple-400 hover:text-purple-300 text-sm">
                 Back to login
@@ -37,7 +37,7 @@ export default function ForgotPasswordPage() {
           ) : (
             <>
               <h2 className="mb-2 text-xl font-bold text-white">Reset password</h2>
-              <p className="mb-6 text-sm text-slate-400">Enter your email and we'll send a reset link.</p>
+              <p className="mb-6 text-sm text-slate-400">Enter your email and we'll send a temporary password.</p>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="mb-1 block text-sm text-slate-400">Email</label>
@@ -46,7 +46,7 @@ export default function ForgotPasswordPage() {
                 </div>
                 <button type="submit" disabled={loading}
                   className="w-full rounded-lg bg-purple-600 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors">
-                  {loading ? 'Sending…' : 'Send reset link'}
+                  {loading ? 'Sending…' : 'Send temporary password'}
                 </button>
               </form>
               <Link to="/login" className="mt-4 block text-center text-sm text-slate-400 hover:text-white">

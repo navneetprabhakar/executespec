@@ -234,7 +234,7 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
   tiers:
     free:
-      monthly-run-limit: 10
+      monthly-run-limit: 5
       concurrent-run-limit: 1
     pro:
       monthly-run-limit: 100
