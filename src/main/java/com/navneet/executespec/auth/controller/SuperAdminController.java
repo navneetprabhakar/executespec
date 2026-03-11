@@ -14,7 +14,9 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.MailService;
 import com.navneet.executespec.auth.service.OrgService;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.PaymentAuditService;
+import com.navneet.executespec.auth.entity.ActivityAudit;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +43,7 @@ public class SuperAdminController {
     private final PaymentAuditService paymentAuditService;
     private final TierConfigRepository tierConfigRepo;
     private final MailService mailService;
+    private final ActivityAuditService auditService;
 
     // ── Users ─────────────────────────────────────────────────────────────────
 
@@ -69,13 +72,24 @@ public class SuperAdminController {
 
     @PutMapping("/users/{id}/status")
     public ResponseEntity<UserDto> updateUserStatus(
+            @AuthenticationPrincipal AppUserDetails adminDetails,
             @PathVariable String id,
             @RequestBody Map<String, String> body) {
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        String oldStatus = user.getStatus();
         user.setStatus(body.get("status"));
         user.setUpdatedAt(Instant.now());
         userRepo.save(user);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_STATUS_CHANGED")
+                .entityType("USER").entityId(id)
+                .actorId(adminDetails.getUser().getId())
+                .oldValue("{\"status\":\"" + oldStatus + "\"}")
+                .newValue("{\"status\":\"" + body.get("status") + "\"}")
+                .build());
+
         return ResponseEntity.ok(UserDto.from(user, null));
     }
 
@@ -92,18 +106,38 @@ public class SuperAdminController {
         userRepo.save(user);
         paymentAuditService.record("USER", id, "PLAN_UPGRADED", oldTier, body.get("tier"),
                 adminDetails.getUser().getId(), null);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_TIER_CHANGED")
+                .entityType("USER").entityId(id)
+                .actorId(adminDetails.getUser().getId())
+                .oldValue("{\"tier\":\"" + oldTier + "\"}")
+                .newValue("{\"tier\":\"" + body.get("tier") + "\"}")
+                .build());
+
         return ResponseEntity.ok(UserDto.from(user, null));
     }
 
     @PutMapping("/users/{id}/role")
     public ResponseEntity<UserDto> updateUserRole(
+            @AuthenticationPrincipal AppUserDetails adminDetails,
             @PathVariable String id,
             @RequestBody Map<String, String> body) {
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        String oldRole = user.getGlobalRole();
         user.setGlobalRole(body.get("role"));
         user.setUpdatedAt(Instant.now());
         userRepo.save(user);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_ROLE_CHANGED")
+                .entityType("USER").entityId(id)
+                .actorId(adminDetails.getUser().getId())
+                .oldValue("{\"role\":\"" + oldRole + "\"}")
+                .newValue("{\"role\":\"" + body.get("role") + "\"}")
+                .build());
+
         return ResponseEntity.ok(UserDto.from(user, null));
     }
 
@@ -140,20 +174,22 @@ public class SuperAdminController {
     /** Override (or clear) the per-org monthly run limit. Null limit resets to tier default. */
     @PutMapping("/orgs/{id}/run-limit")
     public ResponseEntity<OrgDto> updateOrgRunLimit(
+            @AuthenticationPrincipal AppUserDetails adminDetails,
             @PathVariable String id,
             @RequestBody Map<String, Object> body) {
         Object raw = body.get("limit");
         Integer limit = raw == null ? null : ((Number) raw).intValue();
-        return ResponseEntity.ok(orgService.updateRunLimitOverride(id, limit));
+        return ResponseEntity.ok(orgService.updateRunLimitOverride(id, limit, adminDetails.getUser().getId()));
     }
 
     /** Toggle the api_keys_provided flag for an enterprise org. */
     @PutMapping("/orgs/{id}/api-keys")
     public ResponseEntity<OrgDto> updateOrgApiKeys(
+            @AuthenticationPrincipal AppUserDetails adminDetails,
             @PathVariable String id,
             @RequestBody Map<String, Boolean> body) {
         boolean provided = Boolean.TRUE.equals(body.get("provided"));
-        return ResponseEntity.ok(orgService.updateApiKeysProvided(id, provided));
+        return ResponseEntity.ok(orgService.updateApiKeysProvided(id, provided, adminDetails.getUser().getId()));
     }
 
     // ── Tier Config ───────────────────────────────────────────────────────────
@@ -219,6 +255,24 @@ public class SuperAdminController {
             @PathVariable String id) {
         invitationService.rejectEscalation(id, adminDetails.getUser().getId());
         return ResponseEntity.ok(Map.of("message", "Invitation rejected"));
+    }
+
+    // ── Audit Logs ─────────────────────────────────────────────────────────────
+
+    @GetMapping("/audit-logs")
+    public ResponseEntity<com.navneet.executespec.auth.dto.AuditLogPage> getAuditLogs(
+            @RequestParam(required = false) String entityType,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) String actorId,
+            @RequestParam(required = false) String entityId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        Instant fromInstant = from != null ? Instant.parse(from) : null;
+        Instant toInstant = to != null ? Instant.parse(to) : null;
+        return ResponseEntity.ok(auditService.query(
+                null, entityType, eventType, actorId, entityId, fromInstant, toInstant, page, size));
     }
 
     // ── Test Email ────────────────────────────────────────────────────────────

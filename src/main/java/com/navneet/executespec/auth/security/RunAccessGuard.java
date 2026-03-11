@@ -73,7 +73,14 @@ public class RunAccessGuard {
             throw forbidden(run);
         }
 
-        // FREE user — own runs only
+        // Safety fallback: user has orgId but orgMember record is missing/orphaned.
+        // Still grant org-scoped access so they can interact with runs in their org.
+        if (user.getOrgId() != null) {
+            if (user.getOrgId().equals(run.getOrgId())) return;
+            throw forbidden(run);
+        }
+
+        // FREE user (no org) — own runs only
         if (isOwner(user, run)) return;
 
         throw forbidden(run);

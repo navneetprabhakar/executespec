@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban,
+  LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban, ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -13,7 +13,7 @@ import * as api from '@/lib/api';
 import type { ProjectDto } from '@/lib/api';
 
 const ICON_MAP: Record<string, React.ElementType> = {
-  LayoutDashboard, BarChart3, DollarSign, Plug, Settings,
+  LayoutDashboard, BarChart3, DollarSign, Plug, ClipboardList, Settings,
 };
 
 export default function Sidebar() {

@@ -44,6 +44,7 @@ public class TierPermissionService {
             boolean canCreateOrg,
             boolean canInviteMembers,
             boolean canViewOrgMembers,
+            boolean canViewAudit,
             int monthlyRunLimit,
             int currentRunCount,
             int maxOrgMembers,
@@ -99,6 +100,7 @@ public class TierPermissionService {
                 true,  // canCreateOrg
                 true,  // canInviteMembers
                 true,  // canViewOrgMembers
+                true,  // canViewAudit
                 limit, used, maxMembers, currentMembers
         );
     }
@@ -131,6 +133,7 @@ public class TierPermissionService {
                     true,  // canCreateOrg
                     true,  // canInviteMembers
                     true,  // canViewOrgMembers
+                    true,  // canViewAudit
                     limit, used, maxMembers, currentMembers
             );
         }
@@ -147,6 +150,7 @@ public class TierPermissionService {
                 false, // canCreateOrg
                 false, // canInviteMembers
                 true,  // canViewOrgMembers (read-only)
+                false, // canViewAudit
                 limit, used, maxMembers, currentMembers
         );
     }
@@ -166,6 +170,7 @@ public class TierPermissionService {
                 false, // canCreateOrg
                 false, // canInviteMembers
                 false, // canViewOrgMembers
+                false, // canViewAudit
                 limit, used, -1, 0
         );
     }

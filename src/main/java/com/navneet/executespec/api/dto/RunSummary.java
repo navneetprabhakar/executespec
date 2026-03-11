@@ -24,5 +24,7 @@ public record RunSummary(
     /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). Null until planning completes. */
     String techStack,
     /** Human-readable project name. Null if projectId is null or project was deleted. */
-    String projectName
+    String projectName,
+    /** Display name of the user who created this run (e.g. "John Doe"). Null for pre-ownership runs. */
+    String createdByName
 ) {}

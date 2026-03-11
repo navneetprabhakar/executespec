@@ -1,9 +1,11 @@
 package com.navneet.executespec.auth.controller;
 
 import com.navneet.executespec.auth.dto.*;
+import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.AuthService;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import jakarta.servlet.http.Cookie;
@@ -35,6 +37,7 @@ public class AuthController {
     private final AuthService authService;
     private final AppUserRepository userRepo;
     private final TierPermissionService tierPermissionService;
+    private final ActivityAuditService auditService;
 
     private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
     private final PasswordEncoder passwordEncoder;
@@ -146,6 +149,14 @@ public class AuthController {
         user.setGithubOwner((newOwner != null && !newOwner.isBlank()) ? newOwner : null);
         userRepo.save(user);
         log.info("User {} updated GitHub settings — owner={}, hasPat={}", user.getId(), user.getGithubOwner(), user.getGithubPat() != null);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_GITHUB_SETTINGS_CHANGED")
+                .entityType("USER").entityId(user.getId())
+                .actorId(user.getId())
+                .newValue("{\"hasToken\":" + (user.getGithubPat() != null) + ",\"owner\":\"" + user.getGithubOwner() + "\"}")
+                .build());
+
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
 
@@ -173,6 +184,16 @@ public class AuthController {
                 user.getOpenAiApiKey() != null,
                 user.getAnthropicApiKey() != null,
                 user.getGeminiApiKey() != null);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_AI_KEYS_CHANGED")
+                .entityType("USER").entityId(user.getId())
+                .actorId(user.getId())
+                .newValue("{\"openai\":" + (user.getOpenAiApiKey() != null)
+                        + ",\"anthropic\":" + (user.getAnthropicApiKey() != null)
+                        + ",\"gemini\":" + (user.getGeminiApiKey() != null) + "}")
+                .build());
+
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
 
@@ -190,6 +211,14 @@ public class AuthController {
         user.setJiraApiToken(blankToNull(req.jiraApiToken()));
         userRepo.save(user);
         log.info("User {} updated JIRA settings — url={}, hasToken={}", user.getId(), user.getJiraBaseUrl(), user.getJiraApiToken() != null);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_JIRA_SETTINGS_CHANGED")
+                .entityType("USER").entityId(user.getId())
+                .actorId(user.getId())
+                .newValue("{\"hasToken\":" + (user.getJiraApiToken() != null) + ",\"baseUrl\":\"" + user.getJiraBaseUrl() + "\"}")
+                .build());
+
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
 
@@ -207,6 +236,14 @@ public class AuthController {
         user.setConfluenceApiToken(blankToNull(req.confluenceApiToken()));
         userRepo.save(user);
         log.info("User {} updated Confluence settings — url={}, hasToken={}", user.getId(), user.getConfluenceBaseUrl(), user.getConfluenceApiToken() != null);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_CONFLUENCE_SETTINGS_CHANGED")
+                .entityType("USER").entityId(user.getId())
+                .actorId(user.getId())
+                .newValue("{\"hasToken\":" + (user.getConfluenceApiToken() != null) + ",\"baseUrl\":\"" + user.getConfluenceBaseUrl() + "\"}")
+                .build());
+
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
 

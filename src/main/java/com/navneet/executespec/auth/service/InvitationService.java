@@ -33,6 +33,7 @@ public class InvitationService {
     private final ProjectMemberRepository projectMemberRepo;
     private final TierConfigRepository tierConfigRepo;
     private final MailService mailService;
+    private final ActivityAuditService auditService;
 
     @Value("${app.mail.base-url:http://localhost:5173}")
     private String baseUrl;
@@ -127,8 +128,20 @@ public class InvitationService {
 
         if (domainMatches) {
             mailService.sendOrgInviteEmail(email, org.getName(), token);
+            auditService.record(ActivityAudit.builder()
+                    .eventType("INVITATION_CREATED")
+                    .entityType("INVITATION").entityId(invitation.getId())
+                    .orgId(orgId).actorId(invitedByUserId)
+                    .newValue("{\"email\":\"" + email + "\",\"role\":\"" + orgRole + "\"}")
+                    .build());
         } else {
             mailService.sendEscalationToAdmin(SUPER_ADMIN_EMAIL, email, org.getName(), invitation.getId());
+            auditService.record(ActivityAudit.builder()
+                    .eventType("INVITATION_ESCALATED")
+                    .entityType("INVITATION").entityId(invitation.getId())
+                    .orgId(orgId).actorId(invitedByUserId)
+                    .newValue("{\"email\":\"" + email + "\",\"reason\":\"domain mismatch\"}")
+                    .build());
         }
 
         return invitation;
@@ -147,6 +160,14 @@ public class InvitationService {
 
         Org org = orgRepo.findById(invitation.getOrgId()).orElseThrow();
         mailService.sendOrgInviteEmail(invitation.getInvitedEmail(), org.getName(), invitation.getToken());
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("INVITATION_APPROVED")
+                .entityType("INVITATION").entityId(invitationId)
+                .orgId(invitation.getOrgId()).actorId(adminUserId)
+                .newValue("{\"email\":\"" + invitation.getInvitedEmail() + "\"}")
+                .build());
+
         log.info("Escalated invitation {} approved by {}", invitationId, adminUserId);
     }
 
@@ -166,6 +187,14 @@ public class InvitationService {
         userRepo.findById(invitation.getInvitedBy()).ifPresent(admin ->
             mailService.sendInviteRejectedEmail(admin.getEmail(), invitation.getInvitedEmail())
         );
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("INVITATION_REJECTED")
+                .entityType("INVITATION").entityId(invitationId)
+                .orgId(invitation.getOrgId()).actorId(adminUserId)
+                .newValue("{\"email\":\"" + invitation.getInvitedEmail() + "\"}")
+                .build());
+
         log.info("Escalated invitation {} rejected by {}", invitationId, adminUserId);
     }
 
@@ -263,6 +292,21 @@ public class InvitationService {
         invitation.setResolvedAt(Instant.now());
         invitationRepo.save(invitation);
 
+        auditService.record(ActivityAudit.builder()
+                .eventType("INVITATION_ACCEPTED")
+                .entityType("INVITATION").entityId(invitation.getId())
+                .orgId(invitation.getOrgId()).actorId(userId)
+                .newValue("{\"email\":\"" + invitation.getInvitedEmail() + "\",\"userId\":\"" + userId + "\"}")
+                .build());
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ORG_MEMBER_ADDED")
+                .entityType("ORG_MEMBER").entityId(userId)
+                .orgId(invitation.getOrgId()).actorId(userId)
+                .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + invitation.getOrgRole()
+                        + "\",\"email\":\"" + invitation.getInvitedEmail() + "\"}")
+                .build());
+
         log.info("Invitation {} accepted by user {}", invitation.getId(), userId);
     }
 
@@ -292,6 +336,14 @@ public class InvitationService {
 
         invitationRepo.save(invitation);
         mailService.sendOrgInviteEmail(email, org.getName(), token);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("ADMIN_INVITATION_CREATED")
+                .entityType("INVITATION").entityId(invitation.getId())
+                .orgId(orgId).actorId(adminUserId)
+                .newValue("{\"email\":\"" + email + "\",\"orgId\":\"" + orgId + "\"}")
+                .build());
+
         log.info("Admin invite sent to {} for org {} by {}", email, orgId, adminUserId);
         return invitation;
     }

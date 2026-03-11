@@ -3,7 +3,7 @@
 -- cache_read_tokens / cache_write_tokens: sourced from Anthropic response metadata per iteration
 
 ALTER TABLE pipeline_run
-    ADD COLUMN IF NOT EXISTS actual_cost_usd DECIMAL(10,6);
+    ADD COLUMN IF NOT EXISTS actual_cost_usd DOUBLE PRECISION;
 
 ALTER TABLE agent_task
     ADD COLUMN IF NOT EXISTS cache_read_tokens  INTEGER DEFAULT 0,

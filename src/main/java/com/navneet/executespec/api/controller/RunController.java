@@ -79,8 +79,9 @@ public class RunController {
         String githubPat   = userDetails.getUser().getGithubPat();
         String githubOwner = userDetails.getUser().getGithubOwner();
 
-        // Pass skipApproval and modelName INTO submitRun so they're set on the entity
-        // BEFORE the async pipeline thread starts (avoids race condition).
+        // Pass ALL pre-async fields INTO submitRun so they're set on the entity
+        // BEFORE the async pipeline thread starts (avoids race condition where the
+        // pipeline thread re-loads and re-saves the run without ownership fields).
         PipelineRun run = harness.submitRun(
             req.userRequest(),
             req.source() != null ? req.source() : "REST",
@@ -90,16 +91,11 @@ public class RunController {
             githubOwner,
             Boolean.TRUE.equals(req.skipApproval()),
             Boolean.TRUE.equals(req.autoMerge()),
-            req.modelName()
+            req.modelName(),
+            userDetails.getUser().getId(),
+            userDetails.getUser().getOrgId(),
+            req.projectId()
         );
-
-        // Stamp ownership and optional org/project association
-        run.setCreatedByUserId(userDetails.getUser().getId());
-        run.setOrgId(userDetails.getUser().getOrgId());
-        if (req.projectId() != null && !req.projectId().isBlank()) {
-            run.setProjectId(req.projectId());
-        }
-        run = stateStore.save(run);
 
         // Increment run counter after successful submission
         tierEnforcementService.incrementRunCount(userDetails.getUser().getId());
@@ -292,6 +288,20 @@ public class RunController {
         return ResponseEntity.ok(Map.of(
             "status", "pushed",
             "repoUrl", run.getRepoUrl() != null ? run.getRepoUrl() : ""));
+    }
+
+    /** Update the project association of an existing run. Send null or empty projectId to un-assign. */
+    @PatchMapping("/{runId}/project")
+    public ResponseEntity<RunSummary> updateRunProject(
+            @PathVariable String runId,
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        String newProjectId = body.get("projectId");
+        run.setProjectId(newProjectId != null && !newProjectId.isBlank() ? newProjectId : null);
+        stateStore.save(run);
+        log.info("PATCH /api/runs/{}/project — projectId={}", runId, run.getProjectId());
+        return ResponseEntity.ok(mapper.toSummary(run));
     }
 
     /** Cancel a run. */
