@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -175,8 +176,12 @@ public class AuthService {
     @Transactional
     public void forgotPassword(String email) {
         userRepo.findByEmail(email.toLowerCase()).ifPresent(user -> {
-            String token = createEmailToken(user.getId(), "PASSWORD_RESET", 1); // 1 hour
-            mailService.sendPasswordResetEmail(user.getEmail(), user.getFirstName(), token);
+            String tempPassword = generateSecurePassword();
+            user.setPasswordHash(passwordEncoder.encode(tempPassword));
+            user.setMustChangePassword(true);
+            user.setUpdatedAt(Instant.now());
+            userRepo.save(user);
+            mailService.sendTemporaryPasswordEmail(user.getEmail(), user.getFirstName(), tempPassword);
         });
         // Always return success to prevent email enumeration
     }
@@ -266,5 +271,40 @@ public class AuthService {
         if (password.contains(" ")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must not contain whitespace");
         }
+    }
+
+    /**
+     * Generates a random 12-character password containing uppercase, lowercase,
+     * digits, and special characters — guaranteed to pass validatePasswordStrength().
+     */
+    private String generateSecurePassword() {
+        String upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        String lower = "abcdefghijklmnopqrstuvwxyz";
+        String digits = "0123456789";
+        String special = "!@#$%&*";
+        String all = upper + lower + digits + special;
+        SecureRandom rng = new SecureRandom();
+
+        // Guarantee at least one of each required type
+        StringBuilder sb = new StringBuilder(12);
+        sb.append(upper.charAt(rng.nextInt(upper.length())));
+        sb.append(lower.charAt(rng.nextInt(lower.length())));
+        sb.append(digits.charAt(rng.nextInt(digits.length())));
+        sb.append(special.charAt(rng.nextInt(special.length())));
+
+        // Fill the rest
+        for (int i = 4; i < 12; i++) {
+            sb.append(all.charAt(rng.nextInt(all.length())));
+        }
+
+        // Shuffle to avoid predictable positions
+        char[] chars = sb.toString().toCharArray();
+        for (int i = chars.length - 1; i > 0; i--) {
+            int j = rng.nextInt(i + 1);
+            char tmp = chars[i];
+            chars[i] = chars[j];
+            chars[j] = tmp;
+        }
+        return new String(chars);
     }
 }

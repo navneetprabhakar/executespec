@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Loader2, Rocket, MessageSquare } from 'lucide-react';
+import { Send, Loader2, Rocket, MessageSquare, Lock } from 'lucide-react';
 import { getRunChat, sendRunChatMessage, iterateRun } from '@/lib/api';
 import type { RunChatMessage, ChatResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
+import { useTierPermissions } from '@/hooks/useTierPermissions';
 
 const MAX_MESSAGES = 10;
 
@@ -21,6 +22,7 @@ interface Props {
  * • Offers an "Implement as New Run" button to create an iteration run.
  */
 export default function RunConversation({ runId }: Props) {
+  const permissions = useTierPermissions();
   const [messages, setMessages]         = useState<RunChatMessage[]>([]);
   const [userCount, setUserCount]       = useState(0);
   const [input, setInput]               = useState('');
@@ -34,6 +36,27 @@ export default function RunConversation({ runId }: Props) {
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const { setActiveRunId, fetchRuns } = useRunStore();
   const { addToast } = useUiStore();
+
+  // Tier gate — show upgrade prompt if chat is not available on the user's plan
+  if (permissions && !permissions.canUseChat) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center space-y-3 py-8 px-4">
+        <div className="h-12 w-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
+          <Lock className="h-6 w-6 text-zinc-600" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-zinc-400">
+            Post-run Chat Unavailable
+          </p>
+          <p className="text-xs text-zinc-600 mt-1 max-w-xs leading-relaxed">
+            Post-run conversations require a <span className="text-accent-violet font-medium">PRO</span> or{' '}
+            <span className="text-accent-violet font-medium">ENTERPRISE</span> plan.
+            Upgrade to ask questions about generated code.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Load chat history on mount / when runId changes
   useEffect(() => {

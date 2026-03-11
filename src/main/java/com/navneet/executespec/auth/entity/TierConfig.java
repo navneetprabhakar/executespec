@@ -36,4 +36,16 @@ public class TierConfig {
 
     @Column(name = "description")
     private String description;
+
+    /** Max org members. -1 = unlimited. FREE=-1 (N/A), PRO=10, ENT=-1. */
+    @Column(name = "max_org_members", nullable = false)
+    private int maxOrgMembers = -1;
+
+    /** Max chat messages per run. 0 = disabled. FREE=0, PRO/ENT=10. */
+    @Column(name = "max_chat_messages", nullable = false)
+    private int maxChatMessages = 10;
+
+    /** Max concurrent runs. FREE=1, PRO=3, ENT=10. */
+    @Column(name = "concurrent_run_limit", nullable = false)
+    private int concurrentRunLimit = 1;
 }

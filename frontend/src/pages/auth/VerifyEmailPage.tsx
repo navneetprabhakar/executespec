@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import * as api from '@/lib/api';
 
@@ -7,9 +7,13 @@ export default function VerifyEmailPage() {
   const token = searchParams.get('token') ?? '';
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState('');
+  const calledRef = useRef(false);
 
   useEffect(() => {
     if (!token) { setStatus('error'); setError('Missing verification token.'); return; }
+    // Guard against React StrictMode double-invocation — only call the API once
+    if (calledRef.current) return;
+    calledRef.current = true;
     api.authVerifyEmail(token)
       .then(() => setStatus('success'))
       .catch((err: any) => { setStatus('error'); setError(err.message ?? 'Verification failed.'); });

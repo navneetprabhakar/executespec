@@ -3,6 +3,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsSuperAdmin } from '@/stores/useAuthStore';
+import { useTierPermissions } from '@/hooks/useTierPermissions';
 import {
   getFiles, getFile,
   getOpenApiSpec,
@@ -228,6 +229,7 @@ function tokensByModel(
 
 function OverviewTab({ run }: { run: RunDetail }) {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const permissions = useTierPermissions();
 
   // STUCK occurs during the WORKING phase — map it there for pipeline step display
   const displayStatus = run.status === 'STUCK' ? 'WORKING' : run.status;
@@ -364,8 +366,8 @@ function OverviewTab({ run }: { run: RunDetail }) {
         </div>
       )}
 
-      {/* Token usage by model — visible to all users */}
-      {tokensByModel(run.tasks, run.agentTokens).length > 0 && (
+      {/* Token usage by model — visible to users with canViewTokenUsage */}
+      {permissions?.canViewTokenUsage && tokensByModel(run.tasks, run.agentTokens).length > 0 && (
         <div className="pt-3 border-t border-white/[0.06]">
           <div className="flex items-center gap-2 mb-3">
             <Cpu className="h-3.5 w-3.5 text-zinc-500" />

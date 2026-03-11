@@ -558,6 +558,9 @@ export const authLogout = () =>
 export const authMe = () =>
   req<AuthUser>('/auth/me');
 
+export const getMyPermissions = () =>
+  req<import('@/hooks/useTierPermissions').TierPermissions>('/auth/me/permissions');
+
 export const authVerifyEmail = (token: string) =>
   req<{ message: string }>(`/auth/verify-email?token=${token}`);
 

@@ -5,6 +5,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AuthService;
+import com.navneet.executespec.auth.service.TierPermissionService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -33,6 +34,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final AppUserRepository userRepo;
+    private final TierPermissionService tierPermissionService;
 
     private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
     private final PasswordEncoder passwordEncoder;
@@ -117,6 +119,12 @@ public class AuthController {
         return ResponseEntity.ok(UserDto.from(userDetails.getUser(), userDetails.getOrgMember()));
     }
 
+    @GetMapping("/me/permissions")
+    public ResponseEntity<TierPermissionService.TierPermissions> myPermissions(
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        return ResponseEntity.ok(tierPermissionService.getPermissions(userDetails.getUser().getId()));
+    }
+
     // ── GitHub settings ───────────────────────────────────────────────────────
 
     record GitHubSettingsRequest(String githubPat, String githubOwner) {}
@@ -149,6 +157,12 @@ public class AuthController {
     public ResponseEntity<UserDto> updateAiKeySettings(
             @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestBody AiKeySettingsRequest req) {
+        // Tier gate: only PRO+ org admins / ENTERPRISE can manage AI keys
+        var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+        if (!perms.canManageAiKeys()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "AI key management requires a PRO or ENTERPRISE plan with org admin access");
+        }
         AppUser user = userDetails.getUser();
         user.setOpenAiApiKey(blankToNull(req.openAiApiKey()));
         user.setAnthropicApiKey(blankToNull(req.anthropicApiKey()));

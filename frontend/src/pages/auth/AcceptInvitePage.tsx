@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
@@ -10,9 +10,13 @@ export default function AcceptInvitePage() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'needsAuth'>('loading');
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const calledRef = useRef(false);
 
   useEffect(() => {
     if (!token) { setStatus('error'); setError('Missing invitation token.'); return; }
+    // Guard against React StrictMode double-invocation
+    if (calledRef.current) return;
+    calledRef.current = true;
 
     api.acceptInvite(token)
       .then(async () => {

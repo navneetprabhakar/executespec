@@ -27,11 +27,17 @@ export const PIPELINE_STEPS = [
   'REVIEWING', 'AWAITING_MERGE', 'MERGING', 'COMPLETE',
 ];
 
-export const NAV_ITEMS = [
+export const NAV_ITEMS: {
+  path: string;
+  label: string;
+  icon: string;
+  adminOnly: boolean;
+  requiredPermission?: string;
+}[] = [
   { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
   { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3',       adminOnly: true  },
-  { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign',     adminOnly: false },
-  { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false },
+  { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign',     adminOnly: false, requiredPermission: 'canViewPricing' },
+  { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false, requiredPermission: 'canManageIntegrations' },
   { path: '/settings',     label: 'Settings',     icon: 'Settings',       adminOnly: false },
 ];
 
