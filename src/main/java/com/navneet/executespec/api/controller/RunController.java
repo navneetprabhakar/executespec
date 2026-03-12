@@ -9,6 +9,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.security.RunVisibilitySpec;
 import com.navneet.executespec.auth.service.TierEnforcementService;
+import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
@@ -58,6 +59,7 @@ public class RunController {
     private final GcsWorkspaceStore gcsWorkspaceStore;
     private final AgentMessageRepository agentMessageRepository;
     private final TierEnforcementService tierEnforcementService;
+    private final UsageTrackingService usageTrackingService;
     private final RunVisibilitySpec runVisibilitySpec;
     private final RunAccessGuard guard;
     private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
@@ -72,6 +74,8 @@ public class RunController {
 
         // Enforce tier quota (throws 429 if over limit)
         tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+        // Enforce billing usage limits (throws 402 if limit exceeded)
+        usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
         // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
         apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
 
@@ -99,6 +103,7 @@ public class RunController {
 
         // Increment run counter after successful submission
         tierEnforcementService.incrementRunCount(userDetails.getUser().getId());
+        usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));
     }
@@ -438,9 +443,21 @@ public class RunController {
     @GetMapping("/{id}/download")
     public ResponseEntity<?> downloadWorkspace(
             @PathVariable String id,
+            @RequestParam(defaultValue = "zip") String format,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         PipelineRun run = guard.requireRunAccess(id, userDetails);
         try {
+            // "repo" format — clean archive with .gitignore and README
+            if ("repo".equals(format)) {
+                byte[] repoZip = workspaceExportService.exportAsRepoZip(id);
+                String runId8 = id.substring(0, Math.min(8, id.length()));
+                return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + runId8 + "-repo.zip\"")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .body(repoZip);
+            }
+
             // Path 1: GCS archive — redirect to signed URL
             if (run.getGcsWorkspaceKey() != null) {
                 URL signedUrl = gcsWorkspaceStore.signedDownloadUrl(

@@ -178,6 +178,13 @@
       <version>1.34.1</version>
     </dependency>
 
+    <!-- Apache Commons Codec — HMAC signature verification for Razorpay webhooks -->
+    <dependency>
+      <groupId>commons-codec</groupId>
+      <artifactId>commons-codec</artifactId>
+      <version>1.16.1</version>
+    </dependency>
+
     <!-- Spring Validation -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

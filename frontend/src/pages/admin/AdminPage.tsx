@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2 } from 'lucide-react';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
 import { useUiStore } from '@/stores/useUiStore';
 import AdminInviteModal from './AdminInviteModal';
+import GrantRunsModal from './GrantRunsModal';
 
-type Tab = 'users' | 'orgs' | 'tiers' | 'escalations';
+type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages';
 
 const TIER_LABEL: Record<string, string> = { FREE: 'Free', PRO: 'Team', ENTERPRISE: 'Enterprise' };
 const STATUS_COLOR: Record<string, string> = {
@@ -44,12 +45,22 @@ function AdminPageInner() {
   // ── Escalations state ─────────────────────────────────────────────────────
   const [escalations, setEscalations] = useState<api.OrgInvitation[]>([]);
 
+  // ── Grant Runs state ────────────────────────────────────────────────────
+  const [grantTarget, setGrantTarget] = useState<{ type: 'user' | 'org'; id: string; name: string } | null>(null);
+
+  // ── Top-Up Packages state ───────────────────────────────────────────────
+  const [packages, setPackages] = useState<api.TopupPackageAdmin[]>([]);
+  const [editingPkg, setEditingPkg] = useState<api.TopupPackageAdmin | null>(null);
+  const [newPkg, setNewPkg] = useState(false);
+  const [pkgForm, setPkgForm] = useState({ name: '', runCount: '', amountInr: '', amountUsd: '', sortOrder: '' });
+
   const loadUsers       = () => api.adminListUsers().then(setUsers).catch(() => {});
   const loadOrgs        = () => api.adminListOrgs().then(setOrgs).catch(() => {});
   const loadTierConfigs = () => api.adminGetTierConfig().then(setTierConfigs).catch(() => {});
   const loadEscalations = () => api.adminListEscalated().then(setEscalations).catch(() => {});
+  const loadPackages    = () => api.adminListTopupPackages().then(setPackages).catch(() => {});
 
-  useEffect(() => { loadUsers(); loadOrgs(); loadTierConfigs(); loadEscalations(); }, []);
+  useEffect(() => { loadUsers(); loadOrgs(); loadTierConfigs(); loadEscalations(); loadPackages(); }, []);
 
   // ── User actions ──────────────────────────────────────────────────────────
   const toggleUserStatus = async (u: api.AuthUser) => {
@@ -115,6 +126,54 @@ function AdminPageInner() {
     catch (e: any) { addToast({ type: 'error', message: e.message }); }
   };
 
+  // ── Package actions ──────────────────────────────────────────────────────
+  const resetPkgForm = () => { setPkgForm({ name: '', runCount: '', amountInr: '', amountUsd: '', sortOrder: '' }); setEditingPkg(null); setNewPkg(false); };
+
+  const startEditPkg = (p: api.TopupPackageAdmin) => {
+    setEditingPkg(p);
+    setNewPkg(false);
+    setPkgForm({
+      name: p.name,
+      runCount: String(p.runCount),
+      amountInr: String(p.amountInr),
+      amountUsd: String(p.amountUsd),
+      sortOrder: String(p.sortOrder),
+    });
+  };
+
+  const savePkg = async () => {
+    const body = {
+      name: pkgForm.name,
+      runCount: parseInt(pkgForm.runCount, 10),
+      amountInr: parseInt(pkgForm.amountInr, 10),
+      amountUsd: parseInt(pkgForm.amountUsd, 10) || 0,
+      sortOrder: parseInt(pkgForm.sortOrder, 10) || 0,
+    };
+    if (!body.name || isNaN(body.runCount) || isNaN(body.amountInr)) {
+      addToast({ type: 'error', message: 'Name, run count, and INR amount are required' });
+      return;
+    }
+    try {
+      if (editingPkg) {
+        await api.adminUpdateTopupPackage(editingPkg.id, body);
+        addToast({ type: 'success', message: 'Package updated' });
+      } else {
+        await api.adminCreateTopupPackage(body);
+        addToast({ type: 'success', message: 'Package created' });
+      }
+      resetPkgForm();
+      await loadPackages();
+    } catch (e: any) { addToast({ type: 'error', message: e.message }); }
+  };
+
+  const deactivatePkg = async (id: string) => {
+    try {
+      await api.adminDeleteTopupPackage(id);
+      addToast({ type: 'success', message: 'Package deactivated' });
+      await loadPackages();
+    } catch (e: any) { addToast({ type: 'error', message: e.message }); }
+  };
+
   const filteredUsers = users.filter((u) => {
     const q = userSearch.toLowerCase();
     return !q || u.email.toLowerCase().includes(q) ||
@@ -126,6 +185,7 @@ function AdminPageInner() {
     { id: 'orgs',        label: 'Organisations', icon: Building2, count: orgs.length },
     { id: 'tiers',       label: 'Tier Config',  icon: Settings2 },
     { id: 'escalations', label: 'Escalations',  icon: GitMerge,  count: escalations.length || undefined },
+    { id: 'packages',    label: 'Top-Up Pkgs',  icon: Package,   count: packages.filter((p) => p.active).length },
   ];
 
   return (
@@ -219,7 +279,14 @@ function AdminPageInner() {
                         </select>
                       </td>
                       <td className="px-4 py-3 text-zinc-400 text-xs">{u.orgRole ?? '—'}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 flex items-center gap-1.5">
+                        <button
+                          onClick={() => setGrantTarget({ type: 'user', id: u.id, name: `${u.firstName} ${u.lastName}` })}
+                          className="px-2.5 py-1 rounded text-xs font-medium bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20 transition-colors"
+                          title="Grant bonus runs"
+                        >
+                          <Gift className="h-3 w-3 inline mr-1" />Runs
+                        </button>
                         <button
                           onClick={() => toggleUserStatus(u)}
                           className={cn(
@@ -320,17 +387,26 @@ function AdminPageInner() {
                           {o.monthlyRunCount} runs
                         </td>
                         <td className="px-4 py-3">
-                          <button
-                            onClick={() => toggleOrgStatus(o)}
-                            className={cn(
-                              'px-3 py-1 rounded text-xs font-medium transition-colors',
-                              o.status === 'SUSPENDED'
-                                ? 'bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20'
-                                : 'bg-accent-amber/10 text-accent-amber hover:bg-accent-amber/20',
-                            )}
-                          >
-                            {o.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setGrantTarget({ type: 'org', id: o.id, name: o.name })}
+                              className="px-2.5 py-1 rounded text-xs font-medium bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20 transition-colors"
+                              title="Grant bonus runs"
+                            >
+                              <Gift className="h-3 w-3 inline mr-1" />Runs
+                            </button>
+                            <button
+                              onClick={() => toggleOrgStatus(o)}
+                              className={cn(
+                                'px-3 py-1 rounded text-xs font-medium transition-colors',
+                                o.status === 'SUSPENDED'
+                                  ? 'bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20'
+                                  : 'bg-accent-amber/10 text-accent-amber hover:bg-accent-amber/20',
+                              )}
+                            >
+                              {o.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -438,12 +514,180 @@ function AdminPageInner() {
             )}
           </div>
         )}
+
+        {/* ── TOP-UP PACKAGES TAB ─────────────────────────────────────────── */}
+        {tab === 'packages' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-zinc-500">
+                Manage top-up run packages available for purchase. Deactivated packages are hidden from users.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setNewPkg(true); setEditingPkg(null); setPkgForm({ name: '', runCount: '', amountInr: '', amountUsd: '', sortOrder: '' }); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-violet hover:bg-accent-violet/80 text-white text-xs font-medium transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" /> New Package
+                </button>
+                <button onClick={loadPackages} className="p-2 text-zinc-500 hover:text-zinc-300">
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Create / Edit form */}
+            {(newPkg || editingPkg) && (
+              <div className="rounded-xl bg-surface-1 border border-accent-violet/30 p-4 space-y-3">
+                <h3 className="text-sm font-medium text-zinc-200">
+                  {editingPkg ? `Edit: ${editingPkg.name}` : 'Create New Package'}
+                </h3>
+                <div className="grid grid-cols-5 gap-3">
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={pkgForm.name}
+                      onChange={(e) => setPkgForm((p) => ({ ...p, name: e.target.value }))}
+                      placeholder="e.g. 10 Runs"
+                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Run Count</label>
+                    <input
+                      type="number"
+                      value={pkgForm.runCount}
+                      onChange={(e) => setPkgForm((p) => ({ ...p, runCount: e.target.value }))}
+                      placeholder="10"
+                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">INR (paise)</label>
+                    <input
+                      type="number"
+                      value={pkgForm.amountInr}
+                      onChange={(e) => setPkgForm((p) => ({ ...p, amountInr: e.target.value }))}
+                      placeholder="49900"
+                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">USD (cents)</label>
+                    <input
+                      type="number"
+                      value={pkgForm.amountUsd}
+                      onChange={(e) => setPkgForm((p) => ({ ...p, amountUsd: e.target.value }))}
+                      placeholder="599"
+                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Sort Order</label>
+                    <input
+                      type="number"
+                      value={pkgForm.sortOrder}
+                      onChange={(e) => setPkgForm((p) => ({ ...p, sortOrder: e.target.value }))}
+                      placeholder="1"
+                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={savePkg}
+                    className="px-4 py-1.5 rounded-lg bg-accent-emerald/15 text-accent-emerald text-xs font-medium hover:bg-accent-emerald/25 transition-colors"
+                  >
+                    {editingPkg ? 'Save Changes' : 'Create'}
+                  </button>
+                  <button
+                    onClick={resetPkgForm}
+                    className="px-4 py-1.5 rounded-lg bg-white/[0.06] text-zinc-400 text-xs font-medium hover:bg-white/[0.10] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Packages table */}
+            <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-surface-1 text-zinc-500 text-xs">
+                  <tr>
+                    {['Name', 'Runs', 'Price (INR)', 'Price (USD)', 'Order', 'Status', 'Actions'].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.04]">
+                  {packages.map((p) => (
+                    <tr key={p.id} className={cn('hover:bg-white/[0.02] transition-colors', !p.active && 'opacity-50')}>
+                      <td className="px-4 py-3 text-zinc-200 font-medium">{p.name}</td>
+                      <td className="px-4 py-3 text-zinc-300">{p.runCount}</td>
+                      <td className="px-4 py-3 text-zinc-300 font-mono text-xs">
+                        {'\u20B9'}{(p.amountInr / 100).toFixed(0)}
+                        <span className="text-zinc-600 ml-1">({p.amountInr}p)</span>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-300 font-mono text-xs">
+                        ${(p.amountUsd / 100).toFixed(2)}
+                        <span className="text-zinc-600 ml-1">({p.amountUsd}c)</span>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-400 text-xs">{p.sortOrder}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn(
+                          'px-2 py-0.5 rounded-full text-xs font-medium',
+                          p.active ? 'text-accent-emerald bg-accent-emerald/10' : 'text-zinc-500 bg-zinc-500/10',
+                        )}>
+                          {p.active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => startEditPkg(p)}
+                            className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] transition-colors"
+                            title="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          {p.active && (
+                            <button
+                              onClick={() => deactivatePkg(p.id)}
+                              className="p-1.5 rounded text-accent-rose/60 hover:text-accent-rose hover:bg-accent-rose/10 transition-colors"
+                              title="Deactivate"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {packages.length === 0 && (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-600">No top-up packages</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {showInviteModal && (
         <AdminInviteModal
           onClose={() => setShowInviteModal(false)}
           onSuccess={loadUsers}
+        />
+      )}
+
+      {grantTarget && (
+        <GrantRunsModal
+          targetType={grantTarget.type}
+          targetId={grantTarget.id}
+          targetName={grantTarget.name}
+          onClose={() => setGrantTarget(null)}
+          onSuccess={() => { grantTarget.type === 'user' ? loadUsers() : loadOrgs(); }}
         />
       )}
     </div>

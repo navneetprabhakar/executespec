@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 
 // ── Human-readable labels ────────────────────────────────────────────────
 
-const ENTITY_TYPES = ['ALL', 'USER', 'ORG', 'ORG_MEMBER', 'INVITATION', 'PROJECT'] as const;
+const ENTITY_TYPES = ['ALL', 'USER', 'ORG', 'ORG_MEMBER', 'INVITATION', 'PROJECT', 'BILLING'] as const;
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   USER_REGISTERED: 'User Registered',
@@ -48,6 +48,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   PROJECT_ARCHIVED: 'Project Archived',
   PROJECT_MEMBER_ADDED: 'Project Member Added',
   PROJECT_MEMBER_REMOVED: 'Project Member Removed',
+  TOPUP_PURCHASED: 'Runs Purchased',
+  TOPUP_ADMIN_GRANTED: 'Bonus Runs Granted',
+  TOPUP_CONSUMED: 'Bonus Run Consumed',
+  TOPUP_EXPIRED: 'Bonus Runs Expired',
 };
 
 function humanLabel(eventType: string): string {
@@ -61,6 +65,7 @@ function entityBadgeColor(entityType: string): string {
     case 'ORG_MEMBER': return 'bg-accent-amber/20 text-accent-amber';
     case 'INVITATION': return 'bg-blue-500/20 text-blue-400';
     case 'PROJECT': return 'bg-accent-emerald/20 text-accent-emerald';
+    case 'BILLING': return 'bg-green-500/20 text-green-400';
     default: return 'bg-zinc-500/20 text-zinc-400';
   }
 }

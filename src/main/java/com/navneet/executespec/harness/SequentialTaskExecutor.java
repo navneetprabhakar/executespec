@@ -210,7 +210,17 @@ public class SequentialTaskExecutor {
         task.setAssignedModel(taskModel);
 
         // === Execute with validation + model routing ===
-        WorkerReport report = executeWithValidation(run, task, level, availableProviders);
+        WorkerReport report;
+        try {
+            report = executeWithValidation(run, task, level, availableProviders);
+        } catch (Exception e) {
+            log.error("Task {} crashed with unhandled exception: {}", taskId, e.getMessage(), e);
+            stateStore.failTask(taskId, "Unhandled exception: " + e.getMessage());
+            sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
+            failed.add(task);
+            try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
+            return;
+        }
         allReports.add(report);
 
         String normalizedStatus = normalizeStatus(report.getStatus());

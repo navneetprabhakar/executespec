@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Eye, EyeOff, Github, CheckCircle, AlertCircle, Server, Database, Cpu, Clock,
-  ChevronDown, ChevronRight, Key, Building2, Shield, Loader2,
+  ChevronDown, ChevronRight, Key, Building2, Shield, Loader2, ArrowUpRight,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -157,6 +158,7 @@ function SaveBar({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
   const { user, setUser } = useAuthStore();
   const permissions = useTierPermissions();
   const [health, setHealth] = useState<api.MetricsResponse | null>(null);
@@ -262,6 +264,47 @@ export default function SettingsPage() {
         <h1 className="text-lg font-semibold text-white">Settings</h1>
         <p className="text-xs text-zinc-500 mt-0.5">Account configuration and system health</p>
       </div>
+
+      {/* ── Current Plan & Upgrade ───────────────────────────────────────── */}
+      <GlassPanel className="px-5 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold
+            ${user?.tier === 'ENTERPRISE' ? 'bg-accent-amber/20 text-accent-amber' :
+              user?.tier === 'PRO' ? 'bg-accent-violet/20 text-accent-violet' :
+              'bg-zinc-700 text-zinc-300'}`}>
+            {user?.tier === 'ENTERPRISE' ? 'E' : user?.tier === 'PRO' ? 'P' : 'F'}
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-zinc-200">
+              {user?.tier === 'ENTERPRISE' ? 'Enterprise' : user?.tier === 'PRO' ? 'Pro' : 'Free'} Plan
+            </p>
+            <p className="text-xs text-zinc-500">
+              {user?.tier === 'ENTERPRISE'
+                ? 'Unlimited runs, priority support, dedicated infrastructure'
+                : user?.tier === 'PRO'
+                ? '100 runs/month, 3 concurrent runs, advanced features'
+                : '5 runs/month, 1 concurrent run, basic features'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => navigate('/billing')}
+            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 border border-white/[0.08] hover:border-white/[0.15] transition-colors"
+          >
+            View Billing
+          </button>
+          {user?.tier !== 'ENTERPRISE' && (
+            <button
+              onClick={() => navigate('/plans')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 transition-colors"
+            >
+              Upgrade Plan
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </GlassPanel>
 
       {/* ── GitHub ─────────────────────────────────────────────────────────── */}
       <IntegrationCard

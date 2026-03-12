@@ -220,6 +220,9 @@ public class WorkerAgent {
                 provider = lr.provider(); // track the provider that actually succeeded
                 model    = lr.model();    // track the model that actually served the call
 
+                // Record activity AFTER LLM call returns so stuck detection has accurate timing
+                stateStore.updateLastActivity(taskId);
+
                 iteration++;
 
                 // getResult() can return null when the provider sends an empty completion

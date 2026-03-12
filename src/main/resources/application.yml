@@ -35,6 +35,12 @@ spring:
     locations: classpath:db/migration
 
   ai:
+    retry:
+      max-attempts: 3               # down from default 10 — LlmRouter handles its own fallback chain
+      backoff:
+        initial-interval: 2000      # 2s
+        multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
+        max-interval: 10000         # 10s cap
     anthropic:
       api-key: ${ANTHROPIC_API_KEY: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}
       chat:
@@ -89,8 +95,8 @@ agent:
     additional-blocked-patterns: []
   recovery:
     enabled: true
-    warn-threshold-minutes: 15
-    act-threshold-minutes: 30
+    warn-threshold-minutes: 5
+    act-threshold-minutes: 10
     max-task-retries: 1
     evaluator-log-window: 20
     loop-repeat-threshold: 3
@@ -251,6 +257,18 @@ executespec:
     project-validation-level: FULL
     max-retries: 3
     default-timeout: 30s
+
+razorpay:
+  key-id: ${RAZORPAY_KEY_ID:}
+  key-secret: ${RAZORPAY_KEY_SECRET:}
+  webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  base-url: https://api.razorpay.com/v1
+
+billing:
+  terms-version: "2026-03-v1"
+  founder-pricing:
+    max-slots: 100
+    discount-pct: 30
 
 logging:
   level:

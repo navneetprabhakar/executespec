@@ -9,6 +9,7 @@ import { conversationChat, ConversationMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import ProjectSelector from '@/components/auth/ProjectSelector';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
+import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
 
 interface NewRunModalProps {
   onClose: () => void;
@@ -36,6 +37,8 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
   const [model, setModel] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [launching, setLaunching] = useState(false);
+  const [showUpgradeNudge, setShowUpgradeNudge] = useState(false);
+  const [upgradeInfo, setUpgradeInfo] = useState({ metric: 'RUNS', current: 0, max: 0 });
 
   // ── github repo options ───────────────────────────────────────────────────
   type RepoChoice = 'NONE' | 'NEW' | 'EXISTING';
@@ -129,7 +132,17 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
       setActiveRunId(runId);
       onClose();
     } catch (e: any) {
-      addToast({ type: 'error', message: e.message });
+      const msg = e.message || '';
+      if (msg.startsWith('402')) {
+        // Parse billing limit error: "402: RUNS limit reached (5/5). Upgrade..."
+        const match = msg.match(/(\w+) limit reached \((\d+)\/(\d+)\)/);
+        if (match) {
+          setUpgradeInfo({ metric: match[1], current: parseInt(match[2]), max: parseInt(match[3]) });
+        }
+        setShowUpgradeNudge(true);
+      } else {
+        addToast({ type: 'error', message: msg });
+      }
       setLaunching(false);
     }
   };
@@ -512,6 +525,14 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
           </>
         )}
       </motion.div>
+
+      {/* Upgrade Nudge on 402 */}
+      <UpgradeNudge
+        isOpen={showUpgradeNudge}
+        onClose={() => setShowUpgradeNudge(false)}
+        currentTier={user?.tier || 'FREE'}
+        {...upgradeInfo}
+      />
     </div>
   );
 }

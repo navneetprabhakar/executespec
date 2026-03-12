@@ -6,6 +6,7 @@ import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.billing.service.RunTopupService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,7 @@ public class TierEnforcementService {
     private final AppUserRepository userRepo;
     private final OrgRepository orgRepo;
     private final TierConfigRepository tierConfigRepo;
+    private final RunTopupService runTopupService;
 
     /** Safe fallback limits if tier_config rows are missing. */
     private static final int FALLBACK_FREE = 5;
@@ -58,7 +60,7 @@ public class TierEnforcementService {
         }
     }
 
-    /** Increment run counter after a run is accepted. */
+    /** Increment run counter after a run is accepted. Consumes bonus run if over quota. */
     public void incrementRunCount(String userId) {
         AppUser user = userRepo.findById(userId).orElse(null);
         if (user == null) return;
@@ -68,11 +70,23 @@ public class TierEnforcementService {
                 maybeResetOrgCounter(org);
                 org.setMonthlyRunCount(org.getMonthlyRunCount() + 1);
                 orgRepo.save(org);
+
+                // If now over limit, consume a bonus run
+                int limit = effectiveOrgLimit(org);
+                if (limit >= 0 && org.getMonthlyRunCount() > limit) {
+                    runTopupService.consumeBonusRunForOrg(org.getId());
+                }
             });
         } else {
             maybeResetUserCounter(user);
             user.setPersonalRunCount(user.getPersonalRunCount() + 1);
             userRepo.save(user);
+
+            // If now over limit, consume a bonus run
+            int limit = getMonthlyLimit(user.getTier());
+            if (limit >= 0 && user.getPersonalRunCount() > limit) {
+                runTopupService.consumeBonusRun(userId);
+            }
         }
     }
 
@@ -111,8 +125,14 @@ public class TierEnforcementService {
         if (limit < 0) return; // unlimited
         maybeResetUserCounter(user);
         if (user.getPersonalRunCount() >= limit) {
+            // Check bonus runs before rejecting
+            long bonus = runTopupService.getAvailableBonus(user.getId());
+            if (bonus > 0) {
+                log.debug("User {} over quota but has {} bonus runs available", user.getId(), bonus);
+                return; // allow — bonus will be consumed in incrementRunCount
+            }
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Monthly run quota exceeded (" + limit + " runs). Upgrade your plan.");
+                    "Monthly run quota exceeded (" + limit + " runs). Upgrade your plan or buy extra runs.");
         }
     }
 
@@ -121,8 +141,14 @@ public class TierEnforcementService {
         if (limit < 0) return; // unlimited
         maybeResetOrgCounter(org);
         if (org.getMonthlyRunCount() >= limit) {
+            // Check org + member bonus runs before rejecting
+            long bonus = runTopupService.getAvailableBonusForOrg(org.getId());
+            if (bonus > 0) {
+                log.debug("Org {} over quota but has {} bonus runs available", org.getId(), bonus);
+                return; // allow — bonus will be consumed in incrementRunCount
+            }
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Org monthly run quota exceeded (" + limit + " runs). Upgrade your plan.");
+                    "Org monthly run quota exceeded (" + limit + " runs). Upgrade your plan or buy extra runs.");
         }
     }
 
