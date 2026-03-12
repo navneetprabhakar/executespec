@@ -7,6 +7,8 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import RunsPage from '@/pages/RunsPage';
 import DashboardPage from '@/pages/DashboardPage';
 import PricingPage from '@/pages/PricingPage';
+import PlansPage from '@/pages/PlansPage';
+import BillingPage from '@/pages/BillingPage';
 import IntegrationsPage from '@/pages/IntegrationsPage';
 import SettingsPage from '@/pages/SettingsPage';
 
@@ -54,6 +56,8 @@ export default function App() {
           <Route index element={<RunsPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="pricing" element={<PricingPage />} />
+          <Route path="plans" element={<PlansPage />} />
+          <Route path="billing" element={<BillingPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="settings" element={<SettingsPage />} />

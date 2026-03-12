@@ -4,8 +4,10 @@ import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2, RotateC
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
+import { RunTimeline } from '@/components/run/RunTimeline';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
+import { useSseStore } from '@/stores/useSseStore';
 import { downloadWorkspace, type ReviewReport } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +24,7 @@ export default function RunDetail() {
   const [refreshing, setRefreshing] = useState(false);
   const [clarificationInput, setClarificationInput] = useState('');
   const [clarifying, setClarifying] = useState(false);
+  const sseEntries = useSseStore((s) => s.entries);
 
   // Parse the reviewJson once whenever the run refreshes
   const review = useMemo<ReviewReport | null>(() => {
@@ -391,6 +394,21 @@ export default function RunDetail() {
             </div>
           )}
 
+          {/* Run Timeline */}
+          <div className="px-4 border-b border-white/[0.06] flex-shrink-0">
+            <RunTimeline
+              events={sseEntries.map(e => ({
+                type: e.type,
+                taskId: (e.data?.taskId as string) || undefined,
+                payload: (e.data?.payload as string) || undefined,
+                timestamp: new Date(e.timestamp).toISOString(),
+              }))}
+              status={activeRun.status}
+              taskCount={activeRun.tasks?.length || 0}
+              completedTaskCount={activeRun.tasks?.filter(t => t.status === 'COMPLETE').length || 0}
+            />
+          </div>
+
           {/* Action bar */}
           <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] flex-shrink-0">
             {!['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED'].includes(activeRun.status) && (
@@ -432,14 +450,29 @@ export default function RunDetail() {
                 <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
                 Refresh
               </button>
-              <button
-                onClick={() => downloadWorkspace(activeRun.runId).catch(() => {})}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
-                title="Download workspace as zip"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Download
-              </button>
+              <div className="relative group">
+                <button
+                  className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
+                  title="Download workspace"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download ▾
+                </button>
+                <div className="hidden group-hover:block absolute right-0 mt-1 bg-surface-2 border border-white/[0.08] rounded-lg shadow-lg z-10 min-w-[180px]">
+                  <button
+                    onClick={() => downloadWorkspace(activeRun.runId).catch(() => {})}
+                    className="block w-full text-left px-4 py-2 text-xs text-zinc-300 hover:bg-white/[0.06]"
+                  >
+                    Download as ZIP
+                  </button>
+                  <a
+                    href={`/api/runs/${activeRun.runId}/download?format=repo`}
+                    className="block px-4 py-2 text-xs text-zinc-300 hover:bg-white/[0.06]"
+                  >
+                    Download as GitHub Repo
+                  </a>
+                </div>
+              </div>
               <button
                 onClick={() => { setActiveTab('log'); }}
                 className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-cyan transition-colors"

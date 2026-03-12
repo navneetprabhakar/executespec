@@ -42,6 +42,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public auth endpoints
                 .requestMatchers("/api/auth/**").permitAll()
+                // Razorpay webhook (secured by HMAC signature, not JWT)
+                .requestMatchers(HttpMethod.POST, "/api/webhooks/razorpay").permitAll()
                 // Public health check
                 .requestMatchers("/api/health").permitAll()
                 // Integration webhooks (external — secured by signature, not JWT)

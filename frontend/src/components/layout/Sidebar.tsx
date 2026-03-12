@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
 import { useAuthStore, selectIsOrgAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
+import { UsageBadge } from '@/components/billing/UsageBadge';
 import { useRunStore } from '@/stores/useRunStore';
 import * as api from '@/lib/api';
 import type { ProjectDto } from '@/lib/api';
@@ -171,6 +172,15 @@ export default function Sidebar() {
           </>
         )}
       </nav>
+
+      {/* Usage badge */}
+      <motion.div
+        animate={{ opacity: expanded ? 1 : 0, height: expanded ? 'auto' : 0 }}
+        transition={{ duration: 0.1 }}
+        className="px-4 py-2 border-t border-white/[0.06] overflow-hidden"
+      >
+        <UsageBadge />
+      </motion.div>
 
       {/* Bottom health dot */}
       <div className="px-4 py-3 border-t border-white/[0.06] flex items-center gap-3">

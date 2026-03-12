@@ -5,6 +5,10 @@ import com.navneet.executespec.auth.entity.*;
 import com.navneet.executespec.auth.repository.*;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
+import com.navneet.executespec.billing.entity.BillingPlan;
+import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.repository.BillingPlanRepository;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +40,8 @@ public class AuthService {
     private final AuthenticationManager authManager;
     private final MailService mailService;
     private final ActivityAuditService auditService;
+    private final BillingPlanRepository billingPlanRepo;
+    private final BillingSubscriptionRepository billingSubscriptionRepo;
 
     @Value("${app.mail.base-url:http://localhost:5173}")
     private String baseUrl;
@@ -61,6 +67,9 @@ public class AuthService {
                 .emailVerified(false)
                 .build();
         userRepo.save(user);
+
+        // Auto-create FREE billing subscription so usage checks pass
+        createFreeSubscription(user.getId());
 
         // Send verification email
         String token = createEmailToken(user.getId(), "EMAIL_VERIFICATION", 24);
@@ -267,6 +276,39 @@ public class AuthService {
                 mailService.sendVerificationEmail(user.getEmail(), user.getFirstName(), token);
             }
         });
+    }
+
+    // ── FREE subscription bootstrap ─────────────────────────────────────────
+
+    /**
+     * Creates a billing_subscription row with status='FREE' so that
+     * UsageTrackingService.assertWithinLimits() can look up plan limits.
+     * Called once at registration.
+     */
+    private void createFreeSubscription(String userId) {
+        try {
+            BillingPlan freePlan = billingPlanRepo.findByTierAndActiveTrue("FREE")
+                    .stream().findFirst().orElse(null);
+            if (freePlan == null) {
+                log.warn("No active FREE billing plan found — skipping subscription creation for user {}", userId);
+                return;
+            }
+            BillingSubscription sub = BillingSubscription.builder()
+                    .userId(userId)
+                    .billingPlanId(freePlan.getId())
+                    .paymentGateway("NONE")
+                    .status("FREE")
+                    .totalSeats(1)
+                    .extraSeats(0)
+                    .cancelAtPeriodEnd(false)
+                    .founderPricing(false)
+                    .build();
+            billingSubscriptionRepo.save(sub);
+            log.debug("Created FREE billing subscription for user {}", userId);
+        } catch (Exception e) {
+            // Non-fatal: tier enforcement still works via TierEnforcementService
+            log.warn("Failed to create FREE billing subscription for user {}: {}", userId, e.getMessage());
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

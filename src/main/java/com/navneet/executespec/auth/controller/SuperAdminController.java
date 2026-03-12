@@ -17,6 +17,10 @@ import com.navneet.executespec.auth.service.OrgService;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.PaymentAuditService;
 import com.navneet.executespec.auth.entity.ActivityAudit;
+import com.navneet.executespec.billing.entity.RunTopup;
+import com.navneet.executespec.billing.entity.TopupPackage;
+import com.navneet.executespec.billing.repository.TopupPackageRepository;
+import com.navneet.executespec.billing.service.RunTopupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,6 +32,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @RestController
@@ -44,6 +49,8 @@ public class SuperAdminController {
     private final TierConfigRepository tierConfigRepo;
     private final MailService mailService;
     private final ActivityAuditService auditService;
+    private final RunTopupService runTopupService;
+    private final TopupPackageRepository topupPackageRepo;
 
     // ── Users ─────────────────────────────────────────────────────────────────
 
@@ -290,5 +297,82 @@ public class SuperAdminController {
         }
         mailService.sendNewUserAlertToAdmin(to, "test-trigger@executespec.local");
         return ResponseEntity.ok(Map.of("message", "Test email dispatched to " + to));
+    }
+
+    // ── Grant Bonus Runs ──────────────────────────────────────────────────────
+
+    @PostMapping("/users/{id}/grant-runs")
+    public ResponseEntity<RunTopup> grantUserRuns(
+            @AuthenticationPrincipal AppUserDetails adminDetails,
+            @PathVariable String id,
+            @RequestBody Map<String, Object> body) {
+        int quantity = ((Number) body.get("quantity")).intValue();
+        Integer expiryDays = body.containsKey("expiryDays") && body.get("expiryDays") != null
+                ? ((Number) body.get("expiryDays")).intValue() : null;
+        String reason = (String) body.get("reason");
+
+        RunTopup topup = runTopupService.grantBonusRuns(
+                id, null, quantity, expiryDays, reason, adminDetails.getUser().getId());
+        return ResponseEntity.ok(topup);
+    }
+
+    @PostMapping("/orgs/{id}/grant-runs")
+    public ResponseEntity<RunTopup> grantOrgRuns(
+            @AuthenticationPrincipal AppUserDetails adminDetails,
+            @PathVariable String id,
+            @RequestBody Map<String, Object> body) {
+        int quantity = ((Number) body.get("quantity")).intValue();
+        Integer expiryDays = body.containsKey("expiryDays") && body.get("expiryDays") != null
+                ? ((Number) body.get("expiryDays")).intValue() : null;
+        String reason = (String) body.get("reason");
+
+        RunTopup topup = runTopupService.grantBonusRuns(
+                null, id, quantity, expiryDays, reason, adminDetails.getUser().getId());
+        return ResponseEntity.ok(topup);
+    }
+
+    // ── Top-Up Package CRUD ─────────────────────────────────────────────────
+
+    @GetMapping("/topup-packages")
+    public ResponseEntity<List<TopupPackage>> listTopupPackages() {
+        return ResponseEntity.ok(topupPackageRepo.findAllByOrderBySortOrder());
+    }
+
+    @PostMapping("/topup-packages")
+    public ResponseEntity<TopupPackage> createTopupPackage(
+            @RequestBody Map<String, Object> body) {
+        TopupPackage pkg = TopupPackage.builder()
+                .name((String) body.get("name"))
+                .runCount(((Number) body.get("runCount")).intValue())
+                .amountInr(((Number) body.get("amountInr")).longValue())
+                .amountUsd(body.containsKey("amountUsd") ? ((Number) body.get("amountUsd")).longValue() : 0)
+                .active(true)
+                .sortOrder(body.containsKey("sortOrder") ? ((Number) body.get("sortOrder")).intValue() : 0)
+                .build();
+        return ResponseEntity.ok(topupPackageRepo.save(pkg));
+    }
+
+    @PutMapping("/topup-packages/{id}")
+    public ResponseEntity<TopupPackage> updateTopupPackage(
+            @PathVariable UUID id,
+            @RequestBody Map<String, Object> body) {
+        TopupPackage pkg = topupPackageRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Package not found"));
+        if (body.containsKey("name")) pkg.setName((String) body.get("name"));
+        if (body.containsKey("runCount")) pkg.setRunCount(((Number) body.get("runCount")).intValue());
+        if (body.containsKey("amountInr")) pkg.setAmountInr(((Number) body.get("amountInr")).longValue());
+        if (body.containsKey("amountUsd")) pkg.setAmountUsd(((Number) body.get("amountUsd")).longValue());
+        if (body.containsKey("active")) pkg.setActive((Boolean) body.get("active"));
+        if (body.containsKey("sortOrder")) pkg.setSortOrder(((Number) body.get("sortOrder")).intValue());
+        return ResponseEntity.ok(topupPackageRepo.save(pkg));
+    }
+
+    @DeleteMapping("/topup-packages/{id}")
+    public ResponseEntity<Map<String, String>> deleteTopupPackage(@PathVariable UUID id) {
+        TopupPackage pkg = topupPackageRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Package not found"));
+        pkg.setActive(false);
+        topupPackageRepo.save(pkg);
+        return ResponseEntity.ok(Map.of("message", "Package deactivated"));
     }
 }

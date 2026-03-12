@@ -8,7 +8,7 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function req<T>(url: string, opts?: RequestInit): Promise<T> {
+export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, {
     headers: { 'Content-Type': 'application/json', ...authHeader(), ...opts?.headers },
     credentials: 'include',  // send refresh_token cookie
@@ -837,6 +837,38 @@ export const adminInviteUser = (body: AdminInviteRequest) =>
 // Org member suspend
 export const orgSuspendMember = (userId: string, suspended: boolean) =>
   req<void>(`/org/me/members/${userId}/suspend`, { method: 'PUT', body: JSON.stringify({ suspended }) });
+
+// ── Admin Grant Runs & Top-Up Packages ────────────────────────────────────
+
+export const adminGrantUserRuns = (userId: string, quantity: number, expiryDays?: number | null, reason?: string) =>
+  req<any>(`/admin/users/${userId}/grant-runs`, {
+    method: 'POST',
+    body: JSON.stringify({ quantity, expiryDays, reason }),
+  });
+
+export const adminGrantOrgRuns = (orgId: string, quantity: number, expiryDays?: number | null, reason?: string) =>
+  req<any>(`/admin/orgs/${orgId}/grant-runs`, {
+    method: 'POST',
+    body: JSON.stringify({ quantity, expiryDays, reason }),
+  });
+
+export interface TopupPackageAdmin {
+  id: string;
+  name: string;
+  runCount: number;
+  amountInr: number;
+  amountUsd: number;
+  active: boolean;
+  sortOrder: number;
+}
+
+export const adminListTopupPackages = () => req<TopupPackageAdmin[]>('/admin/topup-packages');
+export const adminCreateTopupPackage = (body: { name: string; runCount: number; amountInr: number; amountUsd?: number; sortOrder?: number }) =>
+  req<TopupPackageAdmin>('/admin/topup-packages', { method: 'POST', body: JSON.stringify(body) });
+export const adminUpdateTopupPackage = (id: string, body: Partial<TopupPackageAdmin>) =>
+  req<TopupPackageAdmin>(`/admin/topup-packages/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+export const adminDeleteTopupPackage = (id: string) =>
+  req<{ message: string }>(`/admin/topup-packages/${id}`, { method: 'DELETE' });
 
 // Task execution graph
 export interface TaskGraphNode {
