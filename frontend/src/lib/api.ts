@@ -136,6 +136,8 @@ export interface RunDetail extends RunSummary {
   actualCostUsd?: number | null;
   /** Per-agent (planner/reviewer/compiler) token breakdown. Empty for pre-V19 runs. */
   agentTokens?: AgentTokenEntry[];
+  /** Number of apply-suggestion actions used on this run. */
+  applySuggestionCount?: number;
 }
 
 export interface MetricsResponse {
@@ -457,8 +459,8 @@ export const startPreview = (runId: string) =>
 export const stopPreview = (runId: string) =>
   req<void>(`/runs/${runId}/preview/stop`, { method: 'DELETE' });
 
-export const getPreviewLogs = (runId: string, lines = 100) =>
-  req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}`);
+export const getPreviewLogs = (runId: string, lines = 0, filter: 'all' | 'backend' | 'frontend' = 'all') =>
+  req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}&filter=${filter}`);
 
 // ── Conversation (pre-flight chat) ────────────────────────────────────────────
 
@@ -506,6 +508,20 @@ export const iterateRun = (runId: string, userRequest: string) =>
   req<{ runId: string }>(`/runs/${runId}/iterate`, {
     method: 'POST',
     body: JSON.stringify({ userRequest }),
+  });
+
+// ── Apply Suggestion (Chat Copilot / Review) ──────────────────────────────
+
+export interface ApplyResult {
+  taskCount: number;
+  tasks: { taskId: string; title: string }[];
+}
+
+/** Apply a chat copilot suggestion or review fixes to an existing run. */
+export const applyToRun = (runId: string, suggestion: string, source: 'COPILOT' | 'REVIEW' = 'COPILOT') =>
+  req<ApplyResult>(`/runs/${runId}/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ suggestion, source }),
   });
 
 // ── Auth types & endpoints ────────────────────────────────────────────────────

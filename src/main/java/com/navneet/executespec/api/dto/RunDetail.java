@@ -61,6 +61,9 @@ public class RunDetail {
     /** Display name of the user who created this run (e.g. "John Doe"). Null for pre-ownership runs. */
     String createdByName;
 
+    /** Number of apply-suggestion actions used on this run (chat copilot + review combined). */
+    Integer applySuggestionCount;
+
     // ── Per-agent token breakdown (V19) ─────────────────────────────────────
     /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
     List<AgentTokenEntry> agentTokens;

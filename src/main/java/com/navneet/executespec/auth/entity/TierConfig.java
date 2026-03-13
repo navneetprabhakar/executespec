@@ -48,4 +48,8 @@ public class TierConfig {
     /** Max concurrent runs. FREE=1, PRO=3, ENT=10. */
     @Column(name = "concurrent_run_limit", nullable = false)
     private int concurrentRunLimit = 1;
+
+    /** Max apply-suggestion actions per run. FREE=2, PRO=10, ENT=-1 (unlimited). */
+    @Column(name = "max_apply_suggestions", nullable = false)
+    private int maxApplySuggestions = 2;
 }

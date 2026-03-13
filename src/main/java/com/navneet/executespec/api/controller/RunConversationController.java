@@ -1,13 +1,18 @@
 package com.navneet.executespec.api.controller;
 
+import com.navneet.executespec.agent.ApplySuggestionTooLargeException;
 import com.navneet.executespec.agent.ConversationAgent;
+import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.api.RunMapper;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.harness.PipelineHarness;
+import com.navneet.executespec.state.ApplySource;
 import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +55,7 @@ public class RunConversationController {
     private final RunMapper runMapper;
     private final RunAccessGuard guard;
     private final TierPermissionService tierPermissionService;
+    private final TierEnforcementService tierEnforcementService;
 
     // ── GET /api/runs/{runId}/chat ────────────────────────────────────────────
 
@@ -139,6 +145,116 @@ public class RunConversationController {
             "reply", reply,
             "messageCount", newUserMessages,
             "maxMessages", ConversationAgent.MAX_MESSAGES
+        ));
+    }
+
+    // ── POST /api/runs/{runId}/apply ──────────────────────────────────────────
+
+    /**
+     * Applies a suggestion (from Chat Copilot or Review) to the same run by
+     * generating a mini task plan, appending it to the existing plan, and
+     * executing only the new tasks.
+     *
+     * <p>Request body:
+     * <ul>
+     *   <li>{@code suggestion} — the improvement text (required for COPILOT, ignored for REVIEW)</li>
+     *   <li>{@code source} — "COPILOT" or "REVIEW" (default: COPILOT)</li>
+     * </ul>
+     *
+     * <p>Response 200: {@code {"taskCount": 2, "tasks": [{"taskId":"...","title":"..."}]}}
+     * <p>Response 422: {@code {"error": "too_many_tasks", "compiledGoal": "..."}}
+     * <p>Response 429: Apply limit exceeded
+     */
+    @PostMapping("/{runId}/apply")
+    public ResponseEntity<Map<String, Object>> applySuggestion(
+            @PathVariable String runId,
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        String userId = userDetails.getUser().getId();
+
+        // Tier gate: only PRO+ org members and admins can apply suggestions
+        var perms = tierPermissionService.getPermissions(userId);
+        if (!perms.canUseChat()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Apply suggestion is not available on your current plan. Upgrade to PRO or ENTERPRISE.");
+        }
+
+        // Only allow on completed runs
+        if (!"COMPLETE".equals(run.getStatus()) && !"PARTIAL".equals(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Apply is only available for COMPLETE or PARTIAL runs");
+        }
+
+        // Check no tasks are currently executing
+        List<AgentTask> activeTasks = stateStore.getTasksForRun(runId).stream()
+                .filter(t -> "LOCKED".equals(t.getStatus()) || "WORKING".equals(t.getStatus()))
+                .toList();
+        if (!activeTasks.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Cannot apply while tasks are still executing");
+        }
+
+        // Tier limit check (shared counter for both COPILOT and REVIEW)
+        tierEnforcementService.assertCanApplySuggestion(userId, run);
+
+        // Determine source
+        String sourceStr = body.getOrDefault("source", "COPILOT").toUpperCase();
+        ApplySource source;
+        try {
+            source = ApplySource.valueOf(sourceStr);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid source: " + sourceStr);
+        }
+
+        // Resolve suggestion text
+        String suggestion;
+        if (source == ApplySource.REVIEW) {
+            suggestion = conversationAgent.extractReviewSuggestion(run);
+            if (suggestion == null || suggestion.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "No actionable review issues found to apply.");
+            }
+        } else {
+            suggestion = body.get("suggestion");
+            if (suggestion == null || suggestion.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Suggestion must not be blank");
+            }
+        }
+
+        // Generate mini-plan
+        TaskPlan miniPlan;
+        try {
+            miniPlan = conversationAgent.generateSuggestionPlan(run, suggestion);
+        } catch (ApplySuggestionTooLargeException e) {
+            return ResponseEntity.unprocessableEntity().body(Map.of(
+                    "error", "too_many_tasks",
+                    "compiledGoal", e.getCompiledGoal()
+            ));
+        }
+
+        // Append tasks to existing plan
+        int applyIndex = run.getApplySuggestionCount() + 1;
+        List<AgentTask> newTasks = stateStore.appendSuggestionTasks(runId, miniPlan, applyIndex, source);
+        stateStore.incrementApplySuggestionCount(runId);
+
+        // Collect task IDs for execution
+        List<String> newTaskIds = newTasks.stream().map(AgentTask::getTaskId).toList();
+
+        // Kick off async execution
+        harness.executeApplySuggestion(runId, newTaskIds);
+
+        // Build response
+        List<Map<String, String>> taskSummaries = newTasks.stream()
+                .map(t -> Map.of("taskId", t.getTaskId(), "title", t.getTitle()))
+                .toList();
+
+        log.info("[Apply] run={} source={} tasks={} applyIndex={}", runId, source, newTasks.size(), applyIndex);
+
+        return ResponseEntity.ok(Map.of(
+                "taskCount", newTasks.size(),
+                "tasks", taskSummaries
         ));
     }
 

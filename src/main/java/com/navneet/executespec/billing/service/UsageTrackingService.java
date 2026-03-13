@@ -110,6 +110,28 @@ public class UsageTrackingService {
     }
 
     /**
+     * Decrement usage counter for a metric (e.g., refund a failed run).
+     * Will not go below zero.
+     */
+    @Transactional
+    public void decrement(String userId, String metric, long delta) {
+        BillingSubscription sub = subscriptionRepo.findActiveByUserId(userId).orElse(null);
+
+        Instant now = Instant.now();
+        Optional<BillingUsage> usageOpt = usageRepo.findCurrentByUserIdAndMetric(userId, metric, now);
+        if (usageOpt.isEmpty()) return; // nothing to decrement
+
+        BillingUsage usage = usageOpt.get();
+        long actualDelta = Math.min(delta, usage.getCurrentValue()); // don't go below 0
+        if (actualDelta <= 0) return;
+
+        usageRepo.incrementValue(usage.getId(), -actualDelta, now);
+
+        log.info("Usage decremented (refund): user={}, metric={}, delta={}, newValue={}",
+                userId, metric, actualDelta, usage.getCurrentValue() - actualDelta);
+    }
+
+    /**
      * Get current usage for all metrics for a user (for billing status display).
      */
     public List<BillingUsage> getCurrentUsage(String userId) {

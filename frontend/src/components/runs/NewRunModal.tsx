@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, ArrowLeft, ChevronDown, Github, Loader2, Rocket, Send, Sparkles, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ChevronDown, Github, Loader2, Rocket, Send, Sparkles, X, Zap } from 'lucide-react';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -30,10 +30,8 @@ type Mode = 'compose' | 'chat';
 export default function NewRunModal({ onClose }: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
   const [goal, setGoal] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [fastMode, setFastMode] = useState(false);
   const [showGitHub, setShowGitHub] = useState(false);
-  const [skipApproval, setSkipApproval] = useState(false);
-  const [autoMerge, setAutoMerge] = useState(false);
   const [model, setModel] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [launching, setLaunching] = useState(false);
@@ -144,8 +142,8 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
       const repoMode = repoChoice === 'NONE' ? null : repoChoice;  // 'NEW' | 'EXISTING' | null
       const runId = await createRun({
         userRequest: goal,
-        skipApproval,
-        autoMerge,
+        skipApproval: fastMode,
+        autoMerge: fastMode,
         ...(model ? { modelName: model } : {}),
         ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
         ...(repoMode ? { repoMode } : {}),
@@ -270,81 +268,49 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
               Refine with AI
             </button>
 
-            {/* Advanced toggle */}
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300"
+            {/* Fast Mode toggle */}
+            <div
+              role="switch"
+              aria-checked={fastMode}
+              tabIndex={0}
+              onClick={() => setFastMode(!fastMode)}
+              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setFastMode(!fastMode); } }}
+              className="flex items-center justify-between cursor-pointer select-none group"
             >
-              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showAdvanced && 'rotate-180')} />
-              Advanced options
-            </button>
+              <div className="flex items-center gap-2">
+                <Zap className={cn('h-3.5 w-3.5 transition-colors', fastMode ? 'text-accent-amber' : 'text-zinc-500')} />
+                <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
+                  Fast Mode
+                  <span className="text-xs text-zinc-600 ml-1.5">(Auto Approved)</span>
+                </span>
+              </div>
+              <span
+                className={cn(
+                  'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
+                  fastMode ? 'bg-accent-amber' : 'bg-white/[0.10]',
+                )}
+              >
+                <span className={cn(
+                  'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
+                  fastMode ? 'translate-x-4' : 'translate-x-0.5',
+                )} />
+              </span>
+            </div>
 
-            <AnimatePresence>
-              {showAdvanced && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden space-y-3"
-                >
-                  <div
-                    role="switch"
-                    aria-checked={skipApproval}
-                    tabIndex={0}
-                    onClick={() => setSkipApproval(!skipApproval)}
-                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSkipApproval(!skipApproval); } }}
-                    className="flex items-center justify-between cursor-pointer select-none group"
-                  >
-                    <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">Skip approval gate</span>
-                    <span
-                      className={cn(
-                        'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
-                        skipApproval ? 'bg-accent-violet' : 'bg-white/[0.10]',
-                      )}
-                    >
-                      <span className={cn(
-                        'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
-                        skipApproval ? 'translate-x-4' : 'translate-x-0.5',
-                      )} />
-                    </span>
-                  </div>
-                  <div
-                    role="switch"
-                    aria-checked={autoMerge}
-                    tabIndex={0}
-                    onClick={() => setAutoMerge(!autoMerge)}
-                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setAutoMerge(!autoMerge); } }}
-                    className="flex items-center justify-between cursor-pointer select-none group"
-                  >
-                    <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">Auto-merge (skip merge review)</span>
-                    <span
-                      className={cn(
-                        'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
-                        autoMerge ? 'bg-accent-violet' : 'bg-white/[0.10]',
-                      )}
-                    >
-                      <span className={cn(
-                        'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
-                        autoMerge ? 'translate-x-4' : 'translate-x-0.5',
-                      )} />
-                    </span>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-zinc-400 mb-1.5">Model override</label>
-                    <select
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                      className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
-                    >
-                      <option value="">Default (Claude Opus)</option>
-                      {MODELS.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* Model override */}
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1.5">Model override</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+              >
+                <option value="">Default (Claude Opus)</option>
+                {MODELS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
 
             {/* GitHub toggle */}
             <button

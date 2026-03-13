@@ -131,6 +131,7 @@ public class RunMapper {
             .projectName(resolveProjectName(r.getProjectId()))
             .createdByName(resolveCreatorName(r.getCreatedByUserId()))
             .agentTokens(buildAgentTokens(r))
+            .applySuggestionCount(r.getApplySuggestionCount())
             .build();
     }
 

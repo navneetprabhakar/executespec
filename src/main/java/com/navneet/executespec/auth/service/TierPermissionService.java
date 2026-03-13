@@ -49,7 +49,8 @@ public class TierPermissionService {
             int monthlyRunLimit,
             int currentRunCount,
             int maxOrgMembers,
-            int currentOrgMembers
+            int currentOrgMembers,
+            int maxApplySuggestions
     ) {}
 
     // ── Main entry point ────────────────────────────────────────────────────
@@ -75,21 +76,8 @@ public class TierPermissionService {
     // ── Permission builders ─────────────────────────────────────────────────
 
     private TierPermissions superAdminPermissions(AppUser user) {
-        int limit = -1; // unlimited
-        int used = 0;
-        int maxMembers = -1;
-        int currentMembers = 0;
-
-        if (user.getOrgId() != null) {
-            Org org = orgRepo.findById(user.getOrgId()).orElse(null);
-            if (org != null) {
-                limit = tierEnforcementService.effectiveOrgLimit(org);
-                used = org.getMonthlyRunCount();
-                maxMembers = resolveMaxOrgMembers(org);
-                currentMembers = (int) orgMemberRepo.countByOrgId(org.getId());
-            }
-        }
-
+        // SUPER_ADMIN always unlimited — never show quota constraints
+        // regardless of which org they belong to
         return new TierPermissions(
                 true,  // canManageAiKeys
                 true,  // canViewPricing
@@ -103,7 +91,11 @@ public class TierPermissionService {
                 true,  // canViewOrgMembers
                 true,  // canViewAudit
                 true,  // canViewLiveLog
-                limit, used, maxMembers, currentMembers
+                -1,    // monthlyRunLimit = unlimited
+                0,     // currentRunCount = irrelevant
+                -1,    // maxMembers = unlimited
+                0,     // currentMembers = irrelevant
+                -1     // maxApplySuggestions = unlimited
         );
     }
 
@@ -121,6 +113,7 @@ public class TierPermissionService {
         int used = org.getMonthlyRunCount();
         int maxMembers = resolveMaxOrgMembers(org);
         int currentMembers = (int) orgMemberRepo.countByOrgId(org.getId());
+        int maxApply = resolveMaxApplySuggestions(org.getTier());
 
         if (isOrgAdmin) {
             // ORG_ADMIN (PRO or ENTERPRISE) — full access except cost breakdown (super admin only)
@@ -137,7 +130,7 @@ public class TierPermissionService {
                     true,  // canViewOrgMembers
                     true,  // canViewAudit
                     true,  // canViewLiveLog
-                    limit, used, maxMembers, currentMembers
+                    limit, used, maxMembers, currentMembers, maxApply
             );
         }
 
@@ -155,13 +148,14 @@ public class TierPermissionService {
                 true,  // canViewOrgMembers (read-only)
                 false, // canViewAudit
                 false, // canViewLiveLog (org admin & super admin only)
-                limit, used, maxMembers, currentMembers
+                limit, used, maxMembers, currentMembers, maxApply
         );
     }
 
     private TierPermissions freeUserPermissions(AppUser user) {
         int limit = tierEnforcementService.effectiveUserLimit(user);
         int used = user.getPersonalRunCount();
+        int maxApply = resolveMaxApplySuggestions("FREE");
 
         return new TierPermissions(
                 false, // canManageAiKeys
@@ -176,7 +170,7 @@ public class TierPermissionService {
                 false, // canViewOrgMembers
                 false, // canViewAudit
                 false, // canViewLiveLog
-                limit, used, -1, 0
+                limit, used, -1, 0, maxApply
         );
     }
 
@@ -190,5 +184,15 @@ public class TierPermissionService {
         return tierConfigRepo.findById(org.getTier())
                 .map(TierConfig::getMaxOrgMembers)
                 .orElse(-1);
+    }
+
+    /**
+     * Resolve max apply suggestions from tier_config for the given tier.
+     */
+    private int resolveMaxApplySuggestions(String tier) {
+        if (tier == null) return 2;
+        return tierConfigRepo.findById(tier.toUpperCase())
+                .map(TierConfig::getMaxApplySuggestions)
+                .orElse(2);
     }
 }

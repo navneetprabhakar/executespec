@@ -6,6 +6,7 @@ import type { LocalPreviewStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   Play, Square, RefreshCw, ChevronDown, Terminal, ExternalLink,
+  Filter,
 } from 'lucide-react';
 
 const BACKEND_ONLY = new Set(['SPRING_BOOT', 'GRADLE']);
@@ -25,12 +26,15 @@ const TYPE_LABELS: Record<string, string> = {
   UNKNOWN: 'Unknown',
 };
 
+const FULL_STACK_TYPES = new Set(['FULL_STACK', 'FULLSTACK']);
+
 export default function PreviewTab({ runId }: { runId: string }) {
   const [status, setStatus] = useState<LocalPreviewStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [openapiSpec, setOpenapiSpec] = useState<string | null>(null);
+  const [logFilter, setLogFilter] = useState<'all' | 'backend' | 'frontend'>('all');
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const logPollRef = useRef<ReturnType<typeof setInterval>>();
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -62,18 +66,23 @@ export default function PreviewTab({ runId }: { runId: string }) {
     };
   }, [status?.status, runId]);
 
-  // Poll logs while STARTING or RUNNING
+  // Determine if full-stack for log filtering
+  const isFullStack = status?.projectType ? FULL_STACK_TYPES.has(status.projectType) : false;
+  // For full-stack, default to backend logs; for single-stack show all
+  const effectiveFilter = isFullStack ? logFilter : 'all';
+
+  // Poll logs while STARTING or RUNNING — fetch ALL logs from startup
   useEffect(() => {
     const active = status?.status === 'STARTING' || status?.status === 'RUNNING';
     if (active) {
-      const fetchLogs = () => getPreviewLogs(runId, 100).then(r => setLogs(r.lines)).catch(() => {});
+      const fetchLogs = () => getPreviewLogs(runId, 0, effectiveFilter).then(r => setLogs(r.lines)).catch(() => {});
       fetchLogs();
       logPollRef.current = setInterval(fetchLogs, 5000);
     }
     return () => {
       if (logPollRef.current) clearInterval(logPollRef.current);
     };
-  }, [status?.status, runId]);
+  }, [status?.status, runId, effectiveFilter]);
 
   // Fetch OpenAPI spec for backend-only projects
   useEffect(() => {
@@ -113,9 +122,9 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const handleRefresh = useCallback(async () => {
     const s = await getPreviewStatus(runId).catch(() => null);
     if (s) setStatus(s);
-    const l = await getPreviewLogs(runId, 100).catch(() => null);
+    const l = await getPreviewLogs(runId, 0, effectiveFilter).catch(() => null);
     if (l) setLogs(l.lines);
-  }, [runId]);
+  }, [runId, effectiveFilter]);
 
   const isIdle = !status || status.status === 'IDLE' || status.status === 'STOPPED';
   const isStarting = status?.status === 'STARTING';
@@ -124,6 +133,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const projectType = status?.projectType ?? 'UNKNOWN';
   const isBackendOnly = BACKEND_ONLY.has(projectType);
   const hasLogs = isStarting || isRunning || isFailed;
+  const showLogFilter = isFullStack && hasLogs;
 
   return (
     <div className="flex flex-col h-full">
@@ -244,7 +254,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
             </div>
             {logs.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs text-zinc-500 font-medium">Process output (last {logs.length} lines):</p>
+                <p className="text-xs text-zinc-500 font-medium">Process output ({logs.length} lines):</p>
                 <pre className="p-3 rounded-lg bg-black/30 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap break-all max-h-64 overflow-y-auto leading-relaxed">
                   {logs.join('\n')}
                 </pre>
@@ -284,12 +294,34 @@ export default function PreviewTab({ runId }: { runId: string }) {
             <ChevronDown className={cn('h-3 w-3 transition-transform', logsExpanded && 'rotate-180')} />
           </button>
           {logsExpanded && (
-            <div className="max-h-48 overflow-y-auto px-4 pb-3">
-              <pre className="text-[11px] font-mono text-zinc-500 whitespace-pre-wrap break-all leading-relaxed">
-                {logs.length > 0 ? logs.join('\n') : 'No output yet...'}
-              </pre>
-              <div ref={logEndRef} />
-            </div>
+            <>
+              {/* Filter bar for full-stack projects */}
+              {showLogFilter && (
+                <div className="flex items-center gap-1.5 px-4 pb-2">
+                  <Filter className="h-3 w-3 text-zinc-600" />
+                  {(['all', 'backend', 'frontend'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setLogFilter(f)}
+                      className={cn(
+                        'px-2 py-0.5 rounded text-[10px] font-medium transition-colors',
+                        logFilter === f
+                          ? 'bg-accent-cyan/15 text-accent-cyan'
+                          : 'bg-white/[0.04] text-zinc-500 hover:text-zinc-300'
+                      )}
+                    >
+                      {f === 'all' ? 'All' : f === 'backend' ? 'Backend' : 'Frontend'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="max-h-48 overflow-y-auto px-4 pb-3">
+                <pre className="text-[11px] font-mono text-zinc-500 whitespace-pre-wrap break-all leading-relaxed">
+                  {logs.length > 0 ? logs.join('\n') : 'No output yet...'}
+                </pre>
+                <div ref={logEndRef} />
+              </div>
+            </>
           )}
         </div>
       )}

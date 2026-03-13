@@ -111,6 +111,13 @@ export default function TaskGraph({ runId }: Props) {
     }
   };
 
+  // Source badge — detect from task ID prefix
+  const sourceBadge = (taskId: string): { label: string; bg: string; text: string; border: string } | null => {
+    if (taskId.includes('_cop')) return { label: 'COPILOT', bg: 'rgba(139,92,246,0.20)', text: '#c4b5fd', border: '#8B5CF6' };
+    if (taskId.includes('_rev')) return { label: 'REVIEW',  bg: 'rgba(245,158,11,0.20)', text: '#fcd34d', border: '#F59E0B' };
+    return null;
+  };
+
   return (
     <div className="relative w-full overflow-auto rounded-xl border border-white/10 bg-[#0a0a0f] p-2">
       {/* Legend */}
@@ -121,6 +128,14 @@ export default function TaskGraph({ runId }: Props) {
             <span style={{ color: c.text }}>{s}</span>
           </span>
         ))}
+        <span className="border-l border-white/10 pl-3 flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm" style={{ background: '#8B5CF6' }} />
+          <span style={{ color: '#c4b5fd' }}>COPILOT</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm" style={{ background: '#F59E0B' }} />
+          <span style={{ color: '#fcd34d' }}>REVIEW</span>
+        </span>
       </div>
 
       <svg
@@ -168,6 +183,7 @@ export default function TaskGraph({ runId }: Props) {
           const { x, y } = pos[n.taskId];
           const c = statusColor(n.status);
           const cb = complexityBadge(n.complexity);
+          const sb = sourceBadge(n.taskId);
           const isWorking = n.status === 'WORKING';
           return (
             <g
@@ -187,9 +203,13 @@ export default function TaskGraph({ runId }: Props) {
                   filter="url(#glow)" />
               )}
 
-              {/* Node body */}
+              {/* Node body — applied tasks get source-coloured left border accent */}
               <rect x={0} y={0} width={NODE_W} height={NODE_H}
-                rx={8} fill={c.bg} stroke={c.border} strokeWidth={1.5} />
+                rx={8} fill={c.bg} stroke={sb ? sb.border : c.border} strokeWidth={1.5} />
+              {sb && (
+                <rect x={0} y={4} width={3} height={NODE_H - 8}
+                  rx={1.5} fill={sb.border} />
+              )}
 
               {/* Status dot */}
               <circle cx={14} cy={14} r={4} fill={c.dot} />
@@ -197,6 +217,18 @@ export default function TaskGraph({ runId }: Props) {
                 <animate attributeName="r" from="4" to="9" dur="1.4s" repeatCount="indefinite"/>
                 <animate attributeName="opacity" from="0.4" to="0" dur="1.4s" repeatCount="indefinite"/>
               </circle>}
+
+              {/* Source badge (COPILOT / REVIEW) */}
+              {sb && (
+                <g transform={`translate(${NODE_W - 58}, 6)`}>
+                  <rect x={0} y={0} width={52} height={14} rx={4}
+                    fill={sb.bg} stroke={sb.border} strokeWidth={0.5} />
+                  <text x={26} y={7} fontSize={7.5} fill={sb.text} fontFamily="monospace"
+                    textAnchor="middle" dominantBaseline="middle" fontWeight="700">
+                    {sb.label}
+                  </text>
+                </g>
+              )}
 
               {/* Task ID */}
               <text x={24} y={16} fontSize={9} fill={c.dot} fontFamily="monospace" fontWeight="600"

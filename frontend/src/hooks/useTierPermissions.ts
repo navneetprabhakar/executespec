@@ -21,6 +21,8 @@ export interface TierPermissions {
   currentRunCount: number;
   maxOrgMembers: number;
   currentOrgMembers: number;
+  /** Max apply-to-run actions per run. -1 = unlimited. */
+  maxApplySuggestions: number;
 }
 
 /** Convenience hook — reads permissions from the auth store. */

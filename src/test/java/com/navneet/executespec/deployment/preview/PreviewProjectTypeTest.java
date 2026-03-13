@@ -33,9 +33,17 @@ class PreviewProjectTypeTest {
     }
 
     @Test
-    @DisplayName("All enum values have distinct container ports")
-    void distinctPorts() {
+    @DisplayName("FULL_STACK exposes port 5173 (same as frontend — primary preview)")
+    void fullStackPort() {
+        assertThat(PreviewProjectType.FULL_STACK.getContainerPort()).isEqualTo(5173);
+    }
+
+    @Test
+    @DisplayName("Single-project types have distinct container ports")
+    void distinctSingleProjectPorts() {
+        // FULL_STACK intentionally shares 5173 with NODE_FRONTEND since the primary preview is frontend
         var ports = java.util.Arrays.stream(PreviewProjectType.values())
+                .filter(t -> t != PreviewProjectType.FULL_STACK)
                 .map(PreviewProjectType::getContainerPort)
                 .toList();
         assertThat(ports).doesNotHaveDuplicates();

@@ -111,14 +111,17 @@ public class DockerExecutor {
     }
 
     /**
-     * Retrieve container logs (tail N lines).
+     * Retrieve container logs.
+     * If tailLines > 0, returns the last N lines (docker logs --tail N).
+     * If tailLines <= 0, returns ALL logs from container start.
      */
     public String logs(String containerName, int tailLines) {
         try {
-            var result = exec(
-                    List.of("docker", "logs", "--tail", String.valueOf(tailLines), containerName),
-                    Duration.ofSeconds(5), null);
-            return result.output();
+            List<String> cmd = tailLines > 0
+                    ? List.of("docker", "logs", "--tail", String.valueOf(tailLines), containerName)
+                    : List.of("docker", "logs", containerName);
+            var result = exec(cmd, Duration.ofSeconds(5), null);
+            return (result.exitCode() == 0) ? result.output() : "";
         } catch (Exception e) {
             log.debug("Failed to get logs for {}: {}", containerName, e.getMessage());
             return "";

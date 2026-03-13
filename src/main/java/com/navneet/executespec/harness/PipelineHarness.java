@@ -1075,6 +1075,82 @@ public class PipelineHarness {
         }
     }
 
+    // ── REST async path: apply suggestion to existing run ──────────────────
+
+    /**
+     * Executes newly appended suggestion tasks on an existing COMPLETE/PARTIAL run.
+     * Only the new tasks are executed. After completion, runs compiler + reviewer,
+     * and restarts preview if it was previously active.
+     *
+     * @param runId   the existing run ID
+     * @param taskIds IDs of the newly appended tasks to execute
+     */
+    public void executeApplySuggestion(String runId, List<String> taskIds) {
+        executor.submit(() -> {
+            log.info("[ApplySuggestion] Starting execution of {} tasks for run {}", taskIds.size(), runId);
+            PipelineRun run = stateStore.findRun(runId).orElseThrow();
+            String previousStatus = run.getStatus();
+
+            try {
+                // Set run to WORKING
+                run.setStatus("WORKING");
+                run.setCurrentGate(null);
+                stateStore.save(run);
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+
+                // Load only the new tasks
+                List<AgentTask> newTasks = taskIds.stream()
+                        .map(stateStore::getTask)
+                        .toList();
+
+                // Execute using existing sequential task executor
+                sequentialTaskExecutor.execute(run, newTasks);
+
+                // Run compiler on full workspace
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+                try {
+                    compilerAgent.runCompileAndFix(runId);
+                } catch (Exception e) {
+                    log.warn("[ApplySuggestion] Compiler failed for run {}: {}", runId, e.getMessage());
+                }
+
+                // Run reviewer on the changes
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+                try {
+                    var freshRun = stateStore.findRun(runId).orElseThrow();
+                    var providers = availableProviderResolver.resolve(runId);
+                    reviewerAgentV2.review(freshRun, newTasks, freshRun.getUserRequest(), providers);
+                } catch (Exception e) {
+                    log.warn("[ApplySuggestion] Reviewer failed for run {}: {}", runId, e.getMessage());
+                }
+
+                // Determine final status based on task outcomes
+                boolean allComplete = newTasks.stream()
+                        .map(t -> stateStore.getTask(t.getTaskId()))
+                        .allMatch(t -> "COMPLETE".equals(t.getStatus()));
+
+                String finalStatus = allComplete ? "COMPLETE" : "PARTIAL";
+                run = stateStore.findRun(runId).orElseThrow();
+                run.setStatus(finalStatus);
+                run.setCurrentGate(null);
+                stateStore.save(run);
+
+                broadcaster.emit(runId, RunEvent.complete(runId, finalStatus));
+
+                log.info("[ApplySuggestion] run={} completed with status={}", runId, finalStatus);
+
+            } catch (Exception e) {
+                log.error("[ApplySuggestion] Failed for run {}: {}", runId, e.getMessage(), e);
+                run = stateStore.findRun(runId).orElse(run);
+                // Restore to previous status rather than marking FAILED
+                run.setStatus(previousStatus);
+                run.setCurrentGate(null);
+                stateStore.save(run);
+                broadcaster.emit(runId, RunEvent.runStatus(runId, previousStatus));
+            }
+        });
+    }
+
     // ── REST async path: iteration run (starts from a completed run's codebase) ──
 
     /**

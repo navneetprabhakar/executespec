@@ -1025,6 +1025,93 @@ public class StateStore {
         }
     }
 
+    // ── Apply suggestion tasks ──────────────────────────────────
+
+    /**
+     * Appends suggestion tasks to an existing run's plan.
+     * Task IDs are prefixed to indicate their source (copilot/review) and apply index.
+     *
+     * @param runId      the run to append tasks to
+     * @param miniPlan   the generated mini-plan (≤6 tasks)
+     * @param applyIndex the 1-based apply iteration number
+     * @param source     COPILOT or REVIEW — determines the task ID prefix
+     * @return the list of newly created AgentTask entities
+     */
+    public List<AgentTask> appendSuggestionTasks(String runId, TaskPlan miniPlan,
+                                                  int applyIndex, ApplySource source) {
+        PipelineRun run = runRepo.findById(runId).orElseThrow();
+
+        // Build prefix: e.g. "adb68707_cop1_" or "adb68707_rev2_"
+        String prefix = runId.substring(0, 8) + "_" + source.prefix() + applyIndex + "_";
+
+        // Build old→new ID mapping for rewriting depends_on references
+        Map<String, String> idMap = new java.util.HashMap<>();
+        miniPlan.getTasks().forEach(t -> idMap.put(t.getTaskId(), prefix + t.getTaskId()));
+
+        // Rewrite task IDs and dependency references
+        miniPlan.getTasks().forEach(t -> {
+            if (t.getDependsOn() != null) {
+                t.setDependsOn(t.getDependsOn().stream()
+                    .map(dep -> idMap.getOrDefault(dep, prefix + dep))
+                    .toList());
+            }
+            t.setTaskId(idMap.get(t.getTaskId()));
+        });
+
+        // Merge into existing plan_json
+        try {
+            TaskPlan existingPlan = run.getPlanJson() != null
+                    ? mapper.readValue(run.getPlanJson(), TaskPlan.class)
+                    : TaskPlan.builder().planSummary("").tasks(new ArrayList<>()).build();
+
+            List<TaskDefinition> mergedTasks = new ArrayList<>(existingPlan.getTasks());
+            mergedTasks.addAll(miniPlan.getTasks());
+            existingPlan.setTasks(mergedTasks);
+
+            // Append to plan summary
+            String suffix = "\n\n[" + source.name() + " Apply #" + applyIndex + "] " +
+                    (miniPlan.getPlanSummary() != null ? miniPlan.getPlanSummary() : "Applied suggestion");
+            existingPlan.setPlanSummary(
+                    (existingPlan.getPlanSummary() != null ? existingPlan.getPlanSummary() : "") + suffix);
+
+            run.setPlanJson(toJson(existingPlan));
+            runRepo.save(run);
+        } catch (JsonProcessingException e) {
+            log.error("[StateStore] Failed to merge suggestion plan for run {}: {}", runId, e.getMessage());
+            throw new RuntimeException("Failed to merge suggestion plan", e);
+        }
+
+        // Create AgentTask rows for each new task
+        List<AgentTask> created = new ArrayList<>();
+        for (TaskDefinition t : miniPlan.getTasks()) {
+            AgentTask task = taskRepo.save(AgentTask.builder()
+                .taskId(t.getTaskId())
+                .runId(runId)
+                .title(t.getTitle())
+                .complexity(t.getComplexity())
+                .assignedModel(t.getAssignedModel())
+                .status("PENDING")
+                .taskJson(toJson(t))
+                .compactionCount(0)
+                .build());
+            created.add(task);
+        }
+
+        log.info("[StateStore] Appended {} {} tasks for run {} (apply #{})",
+                created.size(), source.name(), runId, applyIndex);
+        return created;
+    }
+
+    /**
+     * Atomically increments the apply_suggestion_count for the given run.
+     */
+    public void incrementApplySuggestionCount(String runId) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setApplySuggestionCount(run.getApplySuggestionCount() + 1);
+            runRepo.save(run);
+        });
+    }
+
     // ── GCS workspace archiving ───────────────────────────────
 
     /**
