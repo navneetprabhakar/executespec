@@ -106,6 +106,7 @@ agent:
     server-error-backoff-seconds: 10
     max-auto-restarts: 3
     auto-restart-backoff-seconds: 60
+    orphaned-run-threshold-minutes: 5
     default-provider: anthropic
     capable-models:
       anthropic: claude-haiku-4-5-20251001
@@ -218,6 +219,17 @@ agent:
       signing-secret: ${SLACK_SIGNING_SECRET:}
       redirect-uri: ${SLACK_REDIRECT_URI:http://localhost:8080/api/integrations/slack/oauth/callback}
       dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
+
+# ── Docker-based preview ────────────────────────────────────────────────────
+preview:
+  enabled: true
+  port-range-start: 10000
+  port-range-end: 10100
+  build-timeout-seconds: 300
+  readiness-timeout-seconds: 120
+  proxy:
+    enabled: false
+    base-url: ""
 
 app:
   # Gmail API OAuth2 sender config (replaces SMTP)

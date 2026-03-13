@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, ArrowLeft, ChevronDown, Github, Rocket, Send, Sparkles, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ChevronDown, Github, Loader2, Rocket, Send, Sparkles, X } from 'lucide-react';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -50,6 +50,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [compilingGoalIndex, setCompilingGoalIndex] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { createRun, setActiveRunId } = useRunStore();
@@ -104,11 +105,34 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
   };
 
   // ── use an AI message as the goal, return to compose ─────────────────────
-  const useAsGoal = (text: string) => {
-    // Strip the "REQUIREMENT SUMMARY:" prefix if the LLM included it
-    const cleaned = text.replace(/^REQUIREMENT SUMMARY:\s*/im, '').trim();
-    setGoal(cleaned);
-    setMode('compose');
+  const useAsGoal = async (text: string, messageIndex: number) => {
+    const hasSummary = /REQUIREMENT SUMMARY:/i.test(text);
+
+    if (hasSummary) {
+      // Instant extraction — message already contains a well-formed summary
+      const cleaned = text.replace(/^REQUIREMENT SUMMARY:\s*/im, '').trim();
+      setGoal(cleaned);
+      setMode('compose');
+      return;
+    }
+
+    // Mid-chat compilation — call AI to compile goals from conversation so far
+    setCompilingGoalIndex(messageIndex);
+    try {
+      const context = messages.slice(0, messageIndex + 1);
+      const compilePrompt: ConversationMessage = {
+        role: 'user',
+        content: 'Based on the conversation above, compile a clear, concise, actionable REQUIREMENT SUMMARY that captures all discussed requirements, constraints, and goals. Output only the requirement summary, nothing else.',
+      };
+      const { reply } = await conversationChat([...context, compilePrompt]);
+      const cleaned = reply.replace(/^REQUIREMENT SUMMARY:\s*/im, '').trim();
+      setGoal(cleaned);
+      setMode('compose');
+    } catch (e: any) {
+      addToast({ type: 'error', message: `Failed to compile goals: ${e.message}` });
+    } finally {
+      setCompilingGoalIndex(null);
+    }
   };
 
   // ── launch the pipeline run ───────────────────────────────────────────────
@@ -440,7 +464,8 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
                 <ChatBubble
                   key={i}
                   msg={msg}
-                  onUseAsGoal={msg.role === 'assistant' ? () => useAsGoal(msg.content) : undefined}
+                  onUseAsGoal={msg.role === 'assistant' ? () => useAsGoal(msg.content, i) : undefined}
+                  compiling={compilingGoalIndex === i}
                 />
               ))}
 
@@ -542,9 +567,11 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
 function ChatBubble({
   msg,
   onUseAsGoal,
+  compiling = false,
 }: {
   msg: ConversationMessage;
   onUseAsGoal?: () => void;
+  compiling?: boolean;
 }) {
   const isUser = msg.role === 'user';
 
@@ -606,14 +633,27 @@ function ChatBubble({
         {onUseAsGoal && (
           <button
             onClick={onUseAsGoal}
+            disabled={compiling}
             className={cn(
-              'mt-2 text-[11px] px-2 py-0.5 rounded transition-colors',
-              summaryMatch
-                ? 'bg-accent-emerald/20 text-accent-emerald hover:bg-accent-emerald/30'
-                : 'bg-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.10]',
+              'mt-2 text-[11px] px-2 py-0.5 rounded transition-colors flex items-center gap-1',
+              compiling
+                ? 'bg-accent-violet/20 text-accent-violet cursor-wait'
+                : summaryMatch
+                  ? 'bg-accent-emerald/20 text-accent-emerald hover:bg-accent-emerald/30'
+                  : 'bg-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.10]',
+              'disabled:opacity-70',
             )}
           >
-            Use as Goal →
+            {compiling ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Compiling goals…
+              </>
+            ) : summaryMatch ? (
+              'Use as Goal →'
+            ) : (
+              'Use as Goal →'
+            )}
           </button>
         )}
       </div>

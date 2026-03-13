@@ -521,7 +521,7 @@ public class PipelineHarness {
 
         boolean cancelled = stateStore.cancelRun(runId);
         if (cancelled) {
-            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+            broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
             broadcaster.complete(runId);
         }
         return cancelled;

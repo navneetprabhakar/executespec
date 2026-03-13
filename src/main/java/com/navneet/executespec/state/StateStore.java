@@ -449,12 +449,12 @@ public class StateStore {
 
     public boolean cancelRun(String runId) {
         return runRepo.findById(runId).map(run -> {
-            if (List.of("COMPLETE", "FAILED", "PAUSED").contains(run.getStatus())) return false;
-            finaliseRun(run, "FAILED", "Cancelled by user");
+            if (List.of("COMPLETE", "FAILED", "CANCELLED", "PAUSED").contains(run.getStatus())) return false;
+            finaliseRun(run, "CANCELLED", "Cancelled by user");
             taskRepo.findByRunId(runId).forEach(task -> {
                 String s = task.getStatus();
                 if (!"COMPLETE".equals(s) && !"FAILED".equals(s) && !"PARTIAL".equals(s)) {
-                    task.setStatus("FAILED");
+                    task.setStatus("CANCELLED");
                     taskRepo.save(task);
                 }
             });
@@ -469,7 +469,7 @@ public class StateStore {
      */
     public boolean pauseRun(String runId) {
         return runRepo.findById(runId).map(run -> {
-            if (List.of("COMPLETE", "FAILED", "PAUSED").contains(run.getStatus())) return false;
+            if (List.of("COMPLETE", "FAILED", "CANCELLED", "PAUSED").contains(run.getStatus())) return false;
             finaliseRun(run, "PAUSED", "Paused by user for goal editing");
             taskRepo.findByRunId(runId).forEach(task -> {
                 String s = task.getStatus();
@@ -763,6 +763,16 @@ public class StateStore {
     }
 
     // ── Tier 5: Stuck detection ───────────────────────────────
+
+    /** Find runs in any of the given statuses (used by OrphanedRunWatchdog). */
+    public List<PipelineRun> findRunsByStatuses(List<String> statuses) {
+        return runRepo.findByStatusIn(statuses);
+    }
+
+    /** Get tasks in WORKING or LOCKED status for a specific run (used by OrphanedRunWatchdog). */
+    public List<AgentTask> getActiveTasksForRun(String runId) {
+        return taskRepo.findByRunIdAndStatusIn(runId, List.of("WORKING", "LOCKED"));
+    }
 
     public List<AgentTask> getWorkingTasks() {
         return taskRepo.findByStatus("WORKING");

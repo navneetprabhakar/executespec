@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, GitMerge, Trash2, RefreshCw, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play, HelpCircle, Send, Loader2 } from 'lucide-react';
+import { X, GitMerge, Trash2, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play, HelpCircle, Send, Loader2 } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
@@ -21,7 +21,6 @@ export default function RunDetail() {
   const [newGoal, setNewGoal] = useState('');
   const [restarting, setRestarting] = useState(false);
   const [resuming, setResuming] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [clarificationInput, setClarificationInput] = useState('');
   const [clarifying, setClarifying] = useState(false);
   const sseEntries = useSseStore((s) => s.entries);
@@ -107,19 +106,6 @@ export default function RunDetail() {
       addToast({ type: 'error', message: e.message });
     } finally {
       setResuming(false);
-    }
-  };
-
-  const handleRefresh = async () => {
-    if (!activeRunId || refreshing) return;
-    setRefreshing(true);
-    try {
-      await useRunStore.getState().fetchRun(activeRunId);
-      await useRunStore.getState().fetchRuns();
-    } catch {
-      // silent — SSE will catch up
-    } finally {
-      setRefreshing(false);
     }
   };
 
@@ -441,15 +427,6 @@ export default function RunDetail() {
               </button>
             )}
             <div className="flex items-center gap-3 ml-auto">
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-violet transition-colors disabled:opacity-50"
-                title="Refresh run data"
-              >
-                <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-                Refresh
-              </button>
               <div className="relative group">
                 <button
                   className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
@@ -473,13 +450,6 @@ export default function RunDetail() {
                   </a>
                 </div>
               </div>
-              <button
-                onClick={() => { setActiveTab('log'); }}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-cyan transition-colors"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Live Log
-              </button>
             </div>
           </div>
 
