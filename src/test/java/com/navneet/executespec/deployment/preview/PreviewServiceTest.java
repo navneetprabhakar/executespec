@@ -6,6 +6,7 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -54,7 +55,20 @@ class PreviewServiceTest {
         agentProps = new AgentProperties();
         agentProps.setWorkspace(workspaceRoot.toString());
 
+        // Make virtual threads from buildAndStart() exit quickly (returns build failure immediately)
+        // Without this, docker.build() returns null (Mockito default) → NPE in virtual thread → race with @TempDir cleanup
+        when(docker.build(any(), any())).thenReturn(
+                new DockerExecutor.DockerBuildResult(false, null, "mock-build", 0));
+
         service = new PreviewService(docker, dockerfileGen, portPool, props, broadcaster, stateStore, agentProps);
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        // Virtual threads spawned by service.start() write Dockerfile/.dockerignore to workspace dirs.
+        // Wait for them to finish before JUnit @TempDir cleanup, otherwise cleanup fails
+        // because the files are still being written.
+        Thread.sleep(300);
     }
 
     private AppUser freeUser() {
@@ -177,7 +191,7 @@ class PreviewServiceTest {
 
         @Test
         @DisplayName("FREE tier allows 1 concurrent preview")
-        void freeTierLimit() throws IOException {
+        void freeTierLimit() throws Exception {
             when(docker.isDockerAvailable()).thenReturn(true);
 
             // First preview — should succeed
@@ -192,6 +206,11 @@ class PreviewServiceTest {
 
             PreviewSession s1 = service.start(runId1, freeUser());
             assertThat(s1).isNotNull();
+
+            // Wait for virtual thread from first start() to finish touching mocks
+            // (it calls dockerIgnore/generate/build on the mock — concurrent access
+            //  while stubbing new mocks causes WrongTypeOfReturnValue)
+            Thread.sleep(500);
 
             // Second preview — should fail (FREE = 1 max)
             String runId2 = "run-2";
@@ -315,7 +334,7 @@ class PreviewServiceTest {
         @Test
         @DisplayName("getLogs returns empty for unknown run")
         void logsEmpty() {
-            assertThat(service.getLogs("unknown", 50)).isEmpty();
+            assertThat(service.getLogs("unknown", 50, null)).isEmpty();
         }
 
         @Test
@@ -439,6 +458,166 @@ class PreviewServiceTest {
                 // Cleanup for next iteration
                 service.stop(runId);
             }
+        }
+    }
+
+    // ── Multi project type support ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("All project types")
+    class AllProjectTypes {
+
+        @Test
+        @DisplayName("Start accepts NODE_BACKEND type")
+        void startsNodeBackend() throws IOException {
+            when(docker.isDockerAvailable()).thenReturn(true);
+            String runId = "run-backend";
+            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
+
+            Path ws = workspaceRoot.resolve(runId);
+            Files.createDirectories(ws);
+            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_BACKEND);
+            when(portPool.allocate(runId)).thenReturn(10001);
+            when(dockerfileGen.dockerIgnore()).thenReturn("");
+            when(dockerfileGen.generate(any(), any())).thenReturn("FROM node:20-alpine\n");
+
+            PreviewSession session = service.start(runId, freeUser());
+            assertThat(session.projectType()).isEqualTo(PreviewProjectType.NODE_BACKEND);
+            assertThat(session.status()).isEqualTo(PreviewStatus.BUILDING);
+        }
+
+        @Test
+        @DisplayName("Start accepts SPRING_BOOT type")
+        void startsSpringBoot() throws IOException {
+            when(docker.isDockerAvailable()).thenReturn(true);
+            String runId = "run-spring";
+            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
+
+            Path ws = workspaceRoot.resolve(runId);
+            Files.createDirectories(ws);
+            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.SPRING_BOOT);
+            when(portPool.allocate(runId)).thenReturn(10002);
+            when(dockerfileGen.dockerIgnore()).thenReturn("");
+            when(dockerfileGen.generate(any(), any())).thenReturn("FROM eclipse-temurin:21\n");
+
+            PreviewSession session = service.start(runId, freeUser());
+            assertThat(session.projectType()).isEqualTo(PreviewProjectType.SPRING_BOOT);
+        }
+
+        @Test
+        @DisplayName("Start accepts PYTHON type")
+        void startsPython() throws IOException {
+            when(docker.isDockerAvailable()).thenReturn(true);
+            String runId = "run-python";
+            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
+
+            Path ws = workspaceRoot.resolve(runId);
+            Files.createDirectories(ws);
+            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.PYTHON);
+            when(portPool.allocate(runId)).thenReturn(10003);
+            when(dockerfileGen.dockerIgnore()).thenReturn("");
+            when(dockerfileGen.generate(any(), any())).thenReturn("FROM python:3.12-slim\n");
+
+            PreviewSession session = service.start(runId, freeUser());
+            assertThat(session.projectType()).isEqualTo(PreviewProjectType.PYTHON);
+        }
+
+        @Test
+        @DisplayName("Each project type maps to the correct container port")
+        void containerPortPerType() {
+            // Verify enum container ports directly — the session's projectType is set
+            // from what detect() returns, so the enum is the source of truth
+            assertThat(PreviewProjectType.NODE_FRONTEND.getContainerPort()).isEqualTo(5173);
+            assertThat(PreviewProjectType.NODE_BACKEND.getContainerPort()).isEqualTo(3000);
+            assertThat(PreviewProjectType.SPRING_BOOT.getContainerPort()).isEqualTo(8080);
+            assertThat(PreviewProjectType.PYTHON.getContainerPort()).isEqualTo(8000);
+            assertThat(PreviewProjectType.FULL_STACK.getContainerPort()).isEqualTo(5173);
+        }
+    }
+
+    // ── Workspace file lifecycle ────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Workspace file management")
+    class WorkspaceFiles {
+
+        @Test
+        @DisplayName("Start invokes dockerfileGen.generate and dockerIgnore")
+        void startCallsGenerator() throws IOException {
+            when(docker.isDockerAvailable()).thenReturn(true);
+            String runId = "run-files";
+            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
+
+            Path ws = workspaceRoot.resolve(runId);
+            Files.createDirectories(ws);
+            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
+            when(portPool.allocate(runId)).thenReturn(10020);
+            when(dockerfileGen.dockerIgnore()).thenReturn(".git\nnode_modules\n");
+            when(dockerfileGen.generate(any(), any())).thenReturn("FROM node:20-alpine\nCMD npm start\n");
+
+            service.start(runId, freeUser());
+
+            // buildAndStart runs on a virtual thread and calls generate + dockerIgnore
+            // Verify they were called (verify will wait up to 1s by default)
+            verify(dockerfileGen, timeout(2000)).generate(eq(PreviewProjectType.NODE_FRONTEND), eq(ws));
+            verify(dockerfileGen, timeout(2000)).dockerIgnore();
+        }
+
+        @Test
+        @DisplayName("Stop deletes Dockerfile and .dockerignore if they exist")
+        void stopDeletesFiles() throws IOException {
+            when(docker.isDockerAvailable()).thenReturn(true);
+            String runId = "run-cleanup";
+            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
+
+            Path ws = workspaceRoot.resolve(runId);
+            Files.createDirectories(ws);
+            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
+            when(portPool.allocate(runId)).thenReturn(10021);
+            when(dockerfileGen.dockerIgnore()).thenReturn("");
+            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
+
+            service.start(runId, freeUser());
+
+            // Manually create files to simulate what buildAndStart does
+            Files.writeString(ws.resolve("Dockerfile"), "FROM alpine\n");
+            Files.writeString(ws.resolve(".dockerignore"), "");
+
+            service.stop(runId);
+            assertThat(ws.resolve("Dockerfile")).doesNotExist();
+            assertThat(ws.resolve(".dockerignore")).doesNotExist();
+        }
+    }
+
+    // ── SSE event emission ──────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("SSE event emission on start")
+    class SseEvents {
+
+        @Test
+        @DisplayName("Start emits PREVIEW_BUILDING event on virtual thread")
+        void startEmitsBuildingEvent() throws IOException {
+            when(docker.isDockerAvailable()).thenReturn(true);
+            String runId = "run-sse";
+            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
+
+            Path ws = workspaceRoot.resolve(runId);
+            Files.createDirectories(ws);
+            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
+            when(portPool.allocate(runId)).thenReturn(10030);
+            when(dockerfileGen.dockerIgnore()).thenReturn("");
+            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
+
+            service.start(runId, freeUser());
+
+            // PREVIEW_BUILDING is emitted from the virtual thread — wait for it
+            ArgumentCaptor<RunEvent> captor = ArgumentCaptor.forClass(RunEvent.class);
+            verify(broadcaster, timeout(2000).atLeast(2)).emit(eq(runId), captor.capture());
+
+            boolean hasBuildingEvent = captor.getAllValues().stream()
+                    .anyMatch(e -> "PREVIEW_BUILDING".equals(e.type()));
+            assertThat(hasBuildingEvent).isTrue();
         }
     }
 }

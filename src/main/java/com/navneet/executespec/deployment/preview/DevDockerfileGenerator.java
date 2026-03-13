@@ -24,6 +24,22 @@ public class DevDockerfileGenerator {
             "express", "fastify", "koa", "hono", "@nestjs/core"
     );
 
+    private static final Set<String> FRONTEND_DIR_NAMES = Set.of(
+            "frontend", "client", "web", "app", "ui"
+    );
+    private static final Set<String> BACKEND_DIR_NAMES = Set.of(
+            "backend", "server", "api", "service"
+    );
+
+    /**
+     * Captures the layout of a full-stack project with separate frontend/backend subdirectories.
+     */
+    record FullStackLayout(String frontendDir, String backendDir,
+                           PreviewProjectType frontendType, PreviewProjectType backendType) {
+        boolean hasFrontend() { return frontendDir != null; }
+        boolean hasBackend()  { return backendDir != null; }
+    }
+
     // ── Public API ──────────────────────────────────────────────────────────
 
     /**
@@ -65,6 +81,18 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.PYTHON;
         }
 
+        // 4. Full-stack: scan subdirectories (frontend/ + backend/, client/ + server/, etc.)
+        // This handles projects where frontend and backend are in separate directories
+        // without npm workspaces or a root-level package.json
+        FullStackLayout layout = detectFullStack(workspace);
+        if (layout != null && (layout.hasFrontend() || layout.hasBackend())) {
+            if (layout.hasFrontend() && layout.hasBackend()) {
+                return PreviewProjectType.FULL_STACK;
+            }
+            // Single subdir detected — return its type
+            return layout.hasFrontend() ? layout.frontendType() : layout.backendType();
+        }
+
         return null;
     }
 
@@ -79,11 +107,20 @@ public class DevDockerfileGenerator {
             return monorepoDockerfile(pkg, workspace, type);
         }
 
+        // Full-stack gets a multi-service Dockerfile
+        if (type == PreviewProjectType.FULL_STACK) {
+            FullStackLayout layout = detectFullStack(workspace);
+            if (layout != null) {
+                return fullStackDockerfile(workspace, layout);
+            }
+        }
+
         return switch (type) {
             case NODE_FRONTEND -> nodeFrontendDockerfile(workspace);
             case NODE_BACKEND -> nodeBackendDockerfile(workspace);
             case SPRING_BOOT -> springBootDockerfile();
             case PYTHON -> pythonDockerfile(workspace);
+            case FULL_STACK -> nodeFrontendDockerfile(workspace); // fallback
         };
     }
 
@@ -247,6 +284,248 @@ public class DevDockerfileGenerator {
                 cmd.stripLeading() + "\n";
     }
 
+    // ── Full-stack support (directory-based) ────────────────────────────────
+
+    /**
+     * Scan subdirectories for frontend/backend projects.
+     * Handles cases where frontend/ and backend/ exist as sibling directories
+     * without npm workspaces (e.g., React + Spring Boot, React + Express, React + Python).
+     */
+    FullStackLayout detectFullStack(Path workspace) {
+        String frontendDir = null;
+        PreviewProjectType frontendType = null;
+        String backendDir = null;
+        PreviewProjectType backendType = null;
+
+        try (Stream<Path> dirs = Files.list(workspace)) {
+            for (Path dir : dirs.filter(Files::isDirectory).toList()) {
+                String name = dir.getFileName().toString().toLowerCase();
+
+                // Check frontend directories
+                if (frontendDir == null && FRONTEND_DIR_NAMES.contains(name)) {
+                    PreviewProjectType detected = detectSingleDir(dir);
+                    if (detected == PreviewProjectType.NODE_FRONTEND) {
+                        frontendDir = dir.getFileName().toString();
+                        frontendType = detected;
+                    }
+                }
+
+                // Check backend directories
+                if (backendDir == null && BACKEND_DIR_NAMES.contains(name)) {
+                    PreviewProjectType detected = detectSingleDir(dir);
+                    if (detected != null && detected != PreviewProjectType.NODE_FRONTEND) {
+                        backendDir = dir.getFileName().toString();
+                        backendType = detected;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.debug("Failed to scan workspace subdirectories: {}", e.getMessage());
+        }
+
+        if (frontendDir == null && backendDir == null) return null;
+        return new FullStackLayout(frontendDir, backendDir, frontendType, backendType);
+    }
+
+    /**
+     * Detect project type for a single subdirectory.
+     */
+    private PreviewProjectType detectSingleDir(Path dir) {
+        // Spring Boot
+        Path pomXml = dir.resolve("pom.xml");
+        if (Files.exists(pomXml) && fileContainsPattern(pomXml, "spring-boot-starter")) {
+            return PreviewProjectType.SPRING_BOOT;
+        }
+
+        // Node
+        if (Files.exists(dir.resolve("package.json"))) {
+            JsonNode pkg = null;
+            try {
+                pkg = mapper.readTree(dir.resolve("package.json").toFile());
+            } catch (IOException ignored) {}
+
+            if (pkg != null) {
+                JsonNode deps = pkg.get("dependencies");
+                if (deps != null) {
+                    for (String backendDep : NODE_BACKEND_DEPS) {
+                        if (deps.has(backendDep)) return PreviewProjectType.NODE_BACKEND;
+                    }
+                }
+            }
+            return PreviewProjectType.NODE_FRONTEND;
+        }
+
+        // Python
+        if (Files.exists(dir.resolve("requirements.txt")) || Files.exists(dir.resolve("pyproject.toml"))) {
+            return PreviewProjectType.PYTHON;
+        }
+
+        return null;
+    }
+
+    /**
+     * Generate a Dockerfile for full-stack projects with separate frontend/backend directories.
+     * Supports: Node+Node, Node+SpringBoot, Node+Python.
+     */
+    private String fullStackDockerfile(Path workspace, FullStackLayout layout) {
+        if (layout.backendType() == PreviewProjectType.SPRING_BOOT) {
+            return fullStackNodeSpringBoot(workspace, layout);
+        }
+        if (layout.backendType() == PreviewProjectType.PYTHON) {
+            return fullStackNodePython(workspace, layout);
+        }
+        // Default: Node + Node
+        return fullStackNodeNode(workspace, layout);
+    }
+
+    /** Node frontend + Node backend in separate directories (no npm workspaces). */
+    private String fullStackNodeNode(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+        int backendPort = 3000;
+
+        // Try to detect backend port
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            try {
+                JsonNode pkg = mapper.readTree(beDir.resolve("package.json").toFile());
+                backendPort = detectBackendPort(beDir, pkg);
+            } catch (IOException ignored) {}
+        }
+
+        var sb = new StringBuilder();
+        sb.append("FROM node:20-alpine\nWORKDIR /app\nLABEL preview=true\n");
+
+        // Install frontend deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --ignore-scripts && npm rebuild\n");
+        }
+        // Install backend deps
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
+            sb.append("RUN cd ").append(be).append(" && npm install --ignore-scripts && npm rebuild\n");
+        }
+
+        sb.append("COPY . .\n");
+
+        if (fe != null && be != null) {
+            sb.append("EXPOSE 5173 ").append(backendPort).append("\n");
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
+              .append(" && npm start 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        } else if (fe != null) {
+            sb.append("EXPOSE 5173\n");
+            sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(fe).append(" && npx vite --host 0.0.0.0 --port 5173\"]\n");
+        } else {
+            sb.append("EXPOSE ").append(backendPort).append("\n");
+            sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be).append(" && npm start\"]\n");
+        }
+
+        return sb.toString();
+    }
+
+    /** Node frontend + Spring Boot backend. */
+    private String fullStackNodeSpringBoot(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        // Use JDK image with Node installed
+        sb.append("FROM eclipse-temurin:21\nWORKDIR /app\nLABEL preview=true\n");
+        sb.append("RUN apt-get update && apt-get install -y maven nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+
+        // Install backend Maven deps first (slow, cached)
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/pom.xml ./").append(be).append("/\n");
+            sb.append("RUN cd ").append(be).append(" && mvn dependency:go-offline -q -B\n");
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --ignore-scripts && npm rebuild\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 5173 8080\n");
+
+        if (fe != null && be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
+              .append(" && mvn spring-boot:run -DskipTests -q 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        } else if (be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be)
+              .append(" && mvn spring-boot:run -DskipTests -q\"]\n");
+        }
+
+        return sb.toString();
+    }
+
+    /** Node frontend + Python backend. */
+    private String fullStackNodePython(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        // Use Python image with Node installed
+        sb.append("FROM python:3.12-slim\nWORKDIR /app\nLABEL preview=true\n");
+        sb.append("RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+
+        // Install backend Python deps
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            sb.append("COPY ").append(be).append("/requirements.txt* ").append(be).append("/pyproject.toml* ./").append(be).append("/\n");
+            if (Files.exists(beDir.resolve("requirements.txt"))) {
+                sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir -r requirements.txt\n");
+            } else if (Files.exists(beDir.resolve("pyproject.toml"))) {
+                sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir .\n");
+            }
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --ignore-scripts && npm rebuild\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 5173 8000\n");
+
+        // Detect Python backend CMD
+        String pythonCmd = "python app.py";
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            if (Files.exists(beDir.resolve("manage.py"))) {
+                pythonCmd = "python manage.py runserver 0.0.0.0:8000";
+            } else {
+                String fastApiFile = findPythonFileWithPattern(beDir, "from fastapi", "import fastapi");
+                if (fastApiFile != null) {
+                    String module = fastApiFile.replace(".py", "");
+                    pythonCmd = "uvicorn " + module + ":app --host 0.0.0.0 --port 8000";
+                } else {
+                    String flaskFile = findPythonFileWithPattern(beDir, "from flask", "import flask");
+                    if (flaskFile != null) {
+                        pythonCmd = "FLASK_APP=" + flaskFile + " flask run --host 0.0.0.0 --port 8000";
+                    } else if (Files.exists(beDir.resolve("main.py"))) {
+                        pythonCmd = "python main.py";
+                    }
+                }
+            }
+        }
+
+        if (fe != null && be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be).append(" && ").append(pythonCmd)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        } else if (be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be).append(" && ").append(pythonCmd).append("\"]\n");
+        }
+
+        return sb.toString();
+    }
+
     // ── Monorepo support ───────────────────────────────────────────────────
 
     private boolean isMonorepo(JsonNode pkg, Path workspace) {
@@ -390,9 +669,11 @@ public class DevDockerfileGenerator {
         // Expose ports
         if (frontendWs != null && backendWs != null) {
             sb.append("EXPOSE ").append(frontendPort).append(" ").append(backendPort).append("\n");
-            sb.append("CMD [\"sh\", \"-c\", \"npm run dev --prefix ")
-              .append(backendWs).append(" & npx --prefix ").append(frontendWs)
-              .append(" vite --host 0.0.0.0 --port ").append(frontendPort).append("\"]\n");
+            sb.append("CMD [\"sh\", \"-c\", \"(npm run dev --prefix ")
+              .append(backendWs).append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(npx --prefix ").append(frontendWs)
+              .append(" vite --host 0.0.0.0 --port ").append(frontendPort)
+              .append(" 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (frontendWs != null) {
             sb.append("EXPOSE ").append(frontendPort).append("\n");
             sb.append("CMD [\"npx\", \"--prefix\", \"").append(frontendWs)

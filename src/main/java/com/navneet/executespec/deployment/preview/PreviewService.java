@@ -165,11 +165,23 @@ public class PreviewService {
 
     /**
      * Get container logs for a running preview.
+     * @param tailLines if <= 0, returns ALL logs from container start
+     * @param filter    if "backend" or "frontend", returns only lines with that prefix (full-stack containers);
+     *                  null or "all" returns everything
      */
-    public String getLogs(String runId, int tailLines) {
+    public String getLogs(String runId, int tailLines, String filter) {
         PreviewSession session = active.get(runId);
         if (session == null) return "";
-        return docker.logs(session.containerName(), tailLines);
+        String raw = docker.logs(session.containerName(), tailLines);
+        if (filter == null || filter.isBlank() || "all".equalsIgnoreCase(filter)) {
+            return raw;
+        }
+        // Filter lines by prefix: [backend] or [frontend]
+        String prefix = "[" + filter.toLowerCase() + "] ";
+        return raw.lines()
+                .filter(line -> line.startsWith(prefix))
+                .map(line -> line.substring(prefix.length()))
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     // ── Private: build and start ────────────────────────────────────────────
@@ -198,9 +210,10 @@ public class PreviewService {
 
             log.info("Preview image built for {} in {}ms", runId, buildResult.durationMs());
 
-            // Determine resource limits
-            String cpu = (type == PreviewProjectType.SPRING_BOOT) ? props.getSpringBootCpuLimit() : props.getCpuLimit();
-            String mem = (type == PreviewProjectType.SPRING_BOOT) ? props.getSpringBootMemoryLimit() : props.getMemoryLimit();
+            // Determine resource limits — Spring Boot and full-stack apps need more resources
+            boolean heavyWeight = (type == PreviewProjectType.SPRING_BOOT || type == PreviewProjectType.FULL_STACK);
+            String cpu = heavyWeight ? props.getSpringBootCpuLimit() : props.getCpuLimit();
+            String mem = heavyWeight ? props.getSpringBootMemoryLimit() : props.getMemoryLimit();
 
             // Run container
             String containerName = containerName(runId);

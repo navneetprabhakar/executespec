@@ -348,6 +348,500 @@ class DevDockerfileGeneratorTest {
         }
     }
 
+    // ── Monorepo detection tests ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Monorepo detection")
+    class MonorepoDetection {
+
+        @Test
+        @DisplayName("Detects monorepo with frontend+backend workspaces as NODE_FRONTEND")
+        void detectsFullMonorepo(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["frontend","backend"]}
+                    """);
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"react":"^18"},"devDependencies":{"vite":"^5"}}
+                    """);
+            Files.createDirectories(ws.resolve("backend"));
+            Files.writeString(ws.resolve("backend/package.json"), """
+                    {"name":"backend","dependencies":{"express":"^4"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
+        }
+
+        @Test
+        @DisplayName("Detects monorepo with only backend workspace as NODE_BACKEND")
+        void detectsBackendOnlyMonorepo(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["server"]}
+                    """);
+            Files.createDirectories(ws.resolve("server"));
+            Files.writeString(ws.resolve("server/package.json"), """
+                    {"name":"server","dependencies":{"fastify":"^4"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_BACKEND);
+        }
+
+        @Test
+        @DisplayName("Detects monorepo with only frontend workspace as NODE_FRONTEND")
+        void detectsFrontendOnlyMonorepo(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["web"]}
+                    """);
+            Files.createDirectories(ws.resolve("web"));
+            Files.writeString(ws.resolve("web/package.json"), """
+                    {"name":"web","dependencies":{"react":"^18"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
+        }
+
+        @Test
+        @DisplayName("Workspaces array with no existing sub-dirs falls back to standard detection")
+        void workspacesWithMissingDirs(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["nonexistent"]}
+                    """);
+            // nonexistent/ dir does not exist → not a monorepo → falls back to NODE_FRONTEND
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
+        }
+
+        @Test
+        @DisplayName("Empty workspaces array is not treated as monorepo")
+        void emptyWorkspacesArray(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"app","workspaces":[],"dependencies":{"express":"^4"}}
+                    """);
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_BACKEND);
+        }
+
+        @Test
+        @DisplayName("Vue monorepo detected as NODE_FRONTEND")
+        void vueMonorepo(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["client","api"]}
+                    """);
+            Files.createDirectories(ws.resolve("client"));
+            Files.writeString(ws.resolve("client/package.json"), """
+                    {"name":"client","dependencies":{"vue":"^3"}}
+                    """);
+            Files.createDirectories(ws.resolve("api"));
+            Files.writeString(ws.resolve("api/package.json"), """
+                    {"name":"api","dependencies":{"koa":"^2"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
+        }
+    }
+
+    // ── Monorepo Dockerfile generation tests ────────────────────────────────
+
+    @Nested
+    @DisplayName("Monorepo Dockerfile generation")
+    class MonorepoGeneration {
+
+        @Test
+        @DisplayName("Full-stack monorepo exposes both ports and runs both services")
+        void fullStackMonorepo(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["frontend","backend"]}
+                    """);
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"react":"^18"},"devDependencies":{"vite":"^5"}}
+                    """);
+            Files.createDirectories(ws.resolve("backend"));
+            Files.writeString(ws.resolve("backend/package.json"), """
+                    {"name":"backend","dependencies":{"express":"^4"}}
+                    """);
+            Files.writeString(ws.resolve("backend/server.js"),
+                    "const PORT = process.env.PORT || 3001;");
+
+            String df = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
+
+            assertThat(df).contains("FROM node:20-alpine");
+            assertThat(df).contains("LABEL preview=true");
+            assertThat(df).contains("COPY package.json package-lock.json* ./");
+            assertThat(df).contains("COPY frontend/package.json ./frontend/");
+            assertThat(df).contains("COPY backend/package.json ./backend/");
+            assertThat(df).contains("RUN npm install --ignore-scripts");
+            assertThat(df).contains("COPY . .");
+            assertThat(df).contains("EXPOSE 5173");   // frontend port
+            assertThat(df).contains("vite --host 0.0.0.0");
+        }
+
+        @Test
+        @DisplayName("Backend-only monorepo exposes backend port and uses dev script")
+        void backendOnlyMonorepo(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["api"]}
+                    """);
+            Files.createDirectories(ws.resolve("api"));
+            Files.writeString(ws.resolve("api/package.json"), """
+                    {"name":"api","dependencies":{"express":"^4"}}
+                    """);
+
+            String df = gen.generate(PreviewProjectType.NODE_BACKEND, ws);
+
+            assertThat(df).contains("FROM node:20-alpine");
+            assertThat(df).contains("COPY api/package.json ./api/");
+            assertThat(df).contains("npm install --ignore-scripts");
+            assertThat(df).contains("EXPOSE 3000");
+            assertThat(df).contains("--prefix", "api");
+        }
+
+        @Test
+        @DisplayName("Frontend-only monorepo starts vite with prefix")
+        void frontendOnlyMonorepo(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["web"]}
+                    """);
+            Files.createDirectories(ws.resolve("web"));
+            Files.writeString(ws.resolve("web/package.json"), """
+                    {"name":"web","dependencies":{"react":"^18"},"devDependencies":{"@vitejs/plugin-react":"^4"}}
+                    """);
+
+            String df = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
+
+            assertThat(df).contains("EXPOSE 5173");
+            assertThat(df).contains("--prefix", "web");
+            assertThat(df).contains("vite");
+        }
+
+        @Test
+        @DisplayName("Monorepo with no recognized sub-packages falls back to npm run dev")
+        void monorepoFallback(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["lib"]}
+                    """);
+            Files.createDirectories(ws.resolve("lib"));
+            Files.writeString(ws.resolve("lib/package.json"), """
+                    {"name":"lib","dependencies":{"lodash":"^4"}}
+                    """);
+
+            String df = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
+
+            assertThat(df).contains("npm", "run", "dev");
+        }
+    }
+
+    // ── Backend port detection tests ────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Backend port detection in monorepo")
+    class BackendPortDetection {
+
+        @Test
+        @DisplayName("Detects PORT || 3001 pattern from server.js")
+        void detectsPortOrPattern(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["backend"]}
+                    """);
+            Files.createDirectories(ws.resolve("backend"));
+            Files.writeString(ws.resolve("backend/package.json"), """
+                    {"name":"backend","dependencies":{"express":"^4"}}
+                    """);
+            Files.writeString(ws.resolve("backend/server.js"),
+                    "const PORT = process.env.PORT || 3001;\napp.listen(PORT);");
+
+            String df = gen.generate(PreviewProjectType.NODE_BACKEND, ws);
+
+            assertThat(df).contains("EXPOSE 3001");
+        }
+
+        @Test
+        @DisplayName("Detects listen(4000) pattern from main file")
+        void detectsListenPattern(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["api"]}
+                    """);
+            Files.createDirectories(ws.resolve("api"));
+            Files.writeString(ws.resolve("api/package.json"), """
+                    {"name":"api","dependencies":{"express":"^4"},"main":"src/index.js"}
+                    """);
+            Files.createDirectories(ws.resolve("api/src"));
+            Files.writeString(ws.resolve("api/src/index.js"),
+                    "app.listen(4000, () => console.log('ready'));");
+
+            String df = gen.generate(PreviewProjectType.NODE_BACKEND, ws);
+
+            assertThat(df).contains("EXPOSE 4000");
+        }
+
+        @Test
+        @DisplayName("Defaults to 3000 when no port pattern found")
+        void defaultsTo3000(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["svc"]}
+                    """);
+            Files.createDirectories(ws.resolve("svc"));
+            Files.writeString(ws.resolve("svc/package.json"), """
+                    {"name":"svc","dependencies":{"hono":"^4"}}
+                    """);
+            Files.writeString(ws.resolve("svc/index.js"),
+                    "export default { fetch(req) { return new Response('ok'); } };");
+
+            String df = gen.generate(PreviewProjectType.NODE_BACKEND, ws);
+
+            assertThat(df).contains("EXPOSE 3000");
+        }
+    }
+
+    // ── Node install safety tests ───────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Node install safety")
+    class NodeInstallSafety {
+
+        @Test
+        @DisplayName("NODE_FRONTEND Dockerfile uses --ignore-scripts && npm rebuild")
+        void frontendUsesIgnoreScripts(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), "{\"name\":\"app\"}");
+            String df = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
+
+            assertThat(df).contains("npm install --ignore-scripts && npm rebuild");
+        }
+
+        @Test
+        @DisplayName("NODE_BACKEND Dockerfile uses --ignore-scripts && npm rebuild")
+        void backendUsesIgnoreScripts(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"api","dependencies":{"express":"^4"}}
+                    """);
+            String df = gen.generate(PreviewProjectType.NODE_BACKEND, ws);
+
+            assertThat(df).contains("npm install --ignore-scripts && npm rebuild");
+        }
+
+        @Test
+        @DisplayName("Monorepo Dockerfile uses --ignore-scripts")
+        void monorepoUsesIgnoreScripts(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"monorepo","workspaces":["frontend"]}
+                    """);
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"react":"^18"}}
+                    """);
+
+            String df = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
+
+            assertThat(df).contains("npm install --ignore-scripts");
+        }
+    }
+
+    // ── Python edge case tests ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Python edge cases")
+    class PythonEdgeCases {
+
+        @Test
+        @DisplayName("Python with app.py fallback (no main.py, no framework)")
+        void pythonAppPyFallback(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("requirements.txt"), "requests==2.31\n");
+            Files.writeString(ws.resolve("app.py"), "print('running app')\n");
+
+            String df = gen.generate(PreviewProjectType.PYTHON, ws);
+            assertThat(df).contains("python", "app.py");
+        }
+
+        @Test
+        @DisplayName("Python with no requirements or pyproject falls back gracefully")
+        void pythonNoRequirements(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("main.py"), "print('hello')\n");
+
+            String df = gen.generate(PreviewProjectType.PYTHON, ws);
+
+            assertThat(df).contains("# No requirements file found");
+            assertThat(df).contains("python", "main.py");
+        }
+
+        @Test
+        @DisplayName("Python uses COPY with glob for requirements and pyproject")
+        void pythonCopiesDepFiles(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("requirements.txt"), "flask==3.0\n");
+            Files.writeString(ws.resolve("app.py"), "from flask import Flask\n");
+
+            String df = gen.generate(PreviewProjectType.PYTHON, ws);
+
+            assertThat(df).contains("COPY requirements.txt* pyproject.toml* ./");
+        }
+    }
+
+    // ── Full-stack detection tests ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Full-stack detection (directory-based)")
+    class FullStackDetection {
+
+        @Test
+        @DisplayName("Detects React frontend/ + Express backend/ as FULL_STACK")
+        void detectsNodeNodeFullStack(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"react":"^18"},"devDependencies":{"vite":"^5"}}
+                    """);
+            Files.createDirectories(ws.resolve("backend"));
+            Files.writeString(ws.resolve("backend/package.json"), """
+                    {"name":"backend","dependencies":{"express":"^4"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.FULL_STACK);
+        }
+
+        @Test
+        @DisplayName("Detects React client/ + Spring Boot server/ as FULL_STACK")
+        void detectsNodeSpringBootFullStack(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("client"));
+            Files.writeString(ws.resolve("client/package.json"), """
+                    {"name":"client","dependencies":{"react":"^18"}}
+                    """);
+            Files.createDirectories(ws.resolve("server"));
+            Files.writeString(ws.resolve("server/pom.xml"), """
+                    <project><dependencies>
+                      <dependency><artifactId>spring-boot-starter-web</artifactId></dependency>
+                    </dependencies></project>
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.FULL_STACK);
+        }
+
+        @Test
+        @DisplayName("Detects React frontend/ + Python api/ as FULL_STACK")
+        void detectsNodePythonFullStack(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"vue":"^3"}}
+                    """);
+            Files.createDirectories(ws.resolve("api"));
+            Files.writeString(ws.resolve("api/requirements.txt"), "fastapi==0.110\n");
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.FULL_STACK);
+        }
+
+        @Test
+        @DisplayName("Only backend/ (no frontend/) detected as backend type, not FULL_STACK")
+        void backendOnlyIsNotFullStack(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("backend"));
+            Files.writeString(ws.resolve("backend/package.json"), """
+                    {"name":"backend","dependencies":{"express":"^4"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_BACKEND);
+        }
+
+        @Test
+        @DisplayName("Only frontend/ (no backend/) detected as NODE_FRONTEND")
+        void frontendOnlyIsNodeFrontend(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"react":"^18"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
+        }
+
+        @Test
+        @DisplayName("Root-level package.json takes priority over subdirectory detection")
+        void rootLevelPriorityOverSubdirs(@TempDir Path ws) throws IOException {
+            // Root has package.json → detected as root-level Node, not full-stack
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"app","dependencies":{"react":"^18"}}
+                    """);
+            Files.createDirectories(ws.resolve("backend"));
+            Files.writeString(ws.resolve("backend/package.json"), """
+                    {"name":"backend","dependencies":{"express":"^4"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
+        }
+    }
+
+    // ── Full-stack Dockerfile generation tests ───────────────────────────────
+
+    @Nested
+    @DisplayName("Full-stack Dockerfile generation")
+    class FullStackGeneration {
+
+        @Test
+        @DisplayName("Node+Node full-stack runs both services with sh -c")
+        void nodeNodeFullStack(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"react":"^18"}}
+                    """);
+            Files.createDirectories(ws.resolve("backend"));
+            Files.writeString(ws.resolve("backend/package.json"), """
+                    {"name":"backend","dependencies":{"express":"^4"},"scripts":{"start":"node server.js"}}
+                    """);
+
+            String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
+
+            assertThat(df).contains("FROM node:20-alpine");
+            assertThat(df).contains("LABEL preview=true");
+            assertThat(df).contains("COPY frontend/package*.json ./frontend/");
+            assertThat(df).contains("COPY backend/package*.json ./backend/");
+            assertThat(df).contains("npm install --ignore-scripts");
+            assertThat(df).contains("EXPOSE 5173");
+            assertThat(df).contains("npm start");
+            assertThat(df).contains("vite --host 0.0.0.0");
+        }
+
+        @Test
+        @DisplayName("Node+SpringBoot full-stack uses JDK image with Node installed")
+        void nodeSpringBootFullStack(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("client"));
+            Files.writeString(ws.resolve("client/package.json"), """
+                    {"name":"client","dependencies":{"react":"^18"}}
+                    """);
+            Files.createDirectories(ws.resolve("server"));
+            Files.writeString(ws.resolve("server/pom.xml"), """
+                    <project><dependencies>
+                      <dependency><artifactId>spring-boot-starter-web</artifactId></dependency>
+                    </dependencies></project>
+                    """);
+
+            String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
+
+            assertThat(df).contains("FROM eclipse-temurin:21");
+            assertThat(df).contains("nodejs npm");
+            assertThat(df).contains("COPY server/pom.xml ./server/");
+            assertThat(df).contains("mvn dependency:go-offline");
+            assertThat(df).contains("COPY client/package*.json ./client/");
+            assertThat(df).contains("EXPOSE 5173 8080");
+            assertThat(df).contains("spring-boot:run");
+            assertThat(df).contains("vite --host 0.0.0.0");
+        }
+
+        @Test
+        @DisplayName("Node+Python full-stack uses Python image with Node installed")
+        void nodePythonFullStack(@TempDir Path ws) throws IOException {
+            Files.createDirectories(ws.resolve("frontend"));
+            Files.writeString(ws.resolve("frontend/package.json"), """
+                    {"name":"frontend","dependencies":{"react":"^18"}}
+                    """);
+            Files.createDirectories(ws.resolve("api"));
+            Files.writeString(ws.resolve("api/requirements.txt"), "fastapi==0.110\n");
+            Files.writeString(ws.resolve("api/main.py"), "from fastapi import FastAPI\napp = FastAPI()\n");
+
+            String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
+
+            assertThat(df).contains("FROM python:3.12-slim");
+            assertThat(df).contains("nodejs npm");
+            assertThat(df).contains("COPY api/requirements.txt");
+            assertThat(df).contains("pip install");
+            assertThat(df).contains("COPY frontend/package*.json ./frontend/");
+            assertThat(df).contains("EXPOSE 5173 8000");
+            assertThat(df).contains("uvicorn");
+            assertThat(df).contains("vite --host 0.0.0.0");
+        }
+    }
+
     // ── .dockerignore tests ─────────────────────────────────────────────────
 
     @Nested

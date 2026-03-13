@@ -7,6 +7,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.service.RunTopupService;
+import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -60,6 +61,41 @@ public class TierEnforcementService {
         }
     }
 
+    /**
+     * Assert the given user can apply a suggestion (chat copilot or review) to the given run.
+     * Throws 429 if the per-run apply limit for the user's tier is exceeded.
+     * SUPER_ADMIN and ENTERPRISE (limit=-1) are always allowed.
+     */
+    public void assertCanApplySuggestion(String userId, PipelineRun run) {
+        AppUser user = userRepo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        // SUPER_ADMIN has no limit
+        if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
+
+        int limit = getApplySuggestionLimit(user);
+        if (limit < 0) return; // unlimited (ENTERPRISE)
+
+        if (run.getApplySuggestionCount() >= limit) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Apply limit reached (" + run.getApplySuggestionCount() + "/" + limit + "). Create a fresh run instead.");
+        }
+    }
+
+    /** Resolves the max_apply_suggestions limit for the user's effective tier. */
+    private int getApplySuggestionLimit(AppUser user) {
+        String tier;
+        if (user.getOrgId() != null) {
+            Org org = orgRepo.findById(user.getOrgId()).orElse(null);
+            tier = (org != null && org.getTier() != null) ? org.getTier() : "FREE";
+        } else {
+            tier = user.getTier() != null ? user.getTier() : "FREE";
+        }
+        return tierConfigRepo.findById(tier.toUpperCase())
+                .map(TierConfig::getMaxApplySuggestions)
+                .orElse(2); // fallback FREE
+    }
+
     /** Increment run counter after a run is accepted. Consumes bonus run if over quota. */
     public void incrementRunCount(String userId) {
         AppUser user = userRepo.findById(userId).orElse(null);
@@ -86,6 +122,31 @@ public class TierEnforcementService {
             int limit = getMonthlyLimit(user.getTier());
             if (limit >= 0 && user.getPersonalRunCount() > limit) {
                 runTopupService.consumeBonusRun(userId);
+            }
+        }
+    }
+
+    /**
+     * Decrement run counter when a run fails completely (refund quota).
+     * Only decrements if counter is > 0 to avoid negative counts.
+     */
+    public void decrementRunCount(String userId) {
+        AppUser user = userRepo.findById(userId).orElse(null);
+        if (user == null) return;
+
+        if (user.getOrgId() != null) {
+            orgRepo.findById(user.getOrgId()).ifPresent(org -> {
+                if (org.getMonthlyRunCount() > 0) {
+                    org.setMonthlyRunCount(org.getMonthlyRunCount() - 1);
+                    orgRepo.save(org);
+                    log.info("Refunded run quota for org {} (new count: {})", org.getId(), org.getMonthlyRunCount());
+                }
+            });
+        } else {
+            if (user.getPersonalRunCount() > 0) {
+                user.setPersonalRunCount(user.getPersonalRunCount() - 1);
+                userRepo.save(user);
+                log.info("Refunded run quota for user {} (new count: {})", userId, user.getPersonalRunCount());
             }
         }
     }

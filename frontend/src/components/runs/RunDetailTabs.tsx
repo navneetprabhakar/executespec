@@ -8,9 +8,11 @@ import {
   getFiles, getFile,
   getOpenApiSpec,
   getProjects, createProject, updateRunProject,
+  applyToRun,
 } from '@/lib/api';
 import type { RunDetail, AgentTokenEntry, ProjectDto } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
+import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
 import RunConversation from './RunConversation';
@@ -24,7 +26,7 @@ import {
   FileCode2, FileText, File,
   MessageSquare,
   ChevronsDownUp, ChevronsUpDown, Copy, Check,
-  Clock, Coins, Cpu, RefreshCw, FolderKanban, X, Plus, User,
+  Clock, Coins, Cpu, RefreshCw, FolderKanban, X, Plus, User, Wrench, Loader2,
 } from 'lucide-react';
 import hljs from 'highlight.js';
 
@@ -597,13 +599,13 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         ))}
       </div>
 
-      {/* Goal — the user's original request */}
+      {/* Goal — the user's original request (markdown rendered) */}
       {run.userRequest && (
         <div className="pt-3 border-t border-white/[0.06]">
           <p className="text-xs text-zinc-600 mb-1.5">Goal</p>
-          <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap line-clamp-8">
-            {run.userRequest}
-          </p>
+          <div className="line-clamp-8">
+            <MarkdownContent content={run.userRequest} />
+          </div>
         </div>
       )}
     </div>
@@ -758,6 +760,11 @@ const VERDICT_COLORS: Record<string, string> = {
 };
 
 function ReviewTab({ run }: { run: RunDetail }) {
+  const permissions = useTierPermissions();
+  const { addToast } = useUiStore();
+  const [applyingReview, setApplyingReview] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
   if (!run.reviewJson) {
     return <p className="text-sm text-zinc-500">Review not available yet.</p>;
   }
@@ -774,6 +781,31 @@ function ReviewTab({ run }: { run: RunDetail }) {
   }
 
   const verdict = review.recommendation ?? review.verdict;
+  const hasIssues = Array.isArray(review.issues) && review.issues.length > 0;
+  const isApplyable = ['COMPLETE', 'PARTIAL'].includes(run.status) && hasIssues;
+
+  const handleApplyReview = async () => {
+    if (applyingReview) return;
+    setApplyingReview(true);
+    setApplyError(null);
+    try {
+      const result = await applyToRun(run.runId, '', 'REVIEW');
+      addToast({ type: 'success', message: `Applied ${result.taskCount} review fix task${result.taskCount !== 1 ? 's' : ''}` });
+      // Refresh the run to show new tasks
+      useRunStore.getState().fetchRun(run.runId);
+    } catch (e: any) {
+      const msg = e.message ?? '';
+      if (msg.includes('429')) {
+        setApplyError('Apply limit reached. Create a fresh run instead.');
+      } else if (msg.includes('422')) {
+        setApplyError('Review fixes require too many tasks. Please create a fresh run instead.');
+      } else {
+        setApplyError(msg || 'Failed to apply review. Please try again.');
+      }
+    } finally {
+      setApplyingReview(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -806,7 +838,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
       )}
 
       {/* Issues */}
-      {Array.isArray(review.issues) && review.issues.length > 0 && (
+      {hasIssues && (
         <div className="space-y-2">
           <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Issues ({review.issues.length})</h4>
           {review.issues.map((issue: any, i: number) => (
@@ -840,6 +872,39 @@ function ReviewTab({ run }: { run: RunDetail }) {
               <li key={i} className="text-sm text-zinc-400 pl-3 border-l border-white/[0.06]">{s}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Apply Review button */}
+      {isApplyable && permissions?.canUseChat && (
+        <div className="pt-3 border-t border-white/[0.06]">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-zinc-500">Apply review fixes to this run</p>
+              {permissions.maxApplySuggestions > 0 && (
+                <p className="text-[10px] text-zinc-600 font-mono mt-0.5">
+                  {run.applySuggestionCount ?? 0}/{permissions.maxApplySuggestions} applied
+                </p>
+              )}
+            </div>
+            <button
+              onClick={handleApplyReview}
+              disabled={applyingReview}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all',
+                'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border border-amber-500/20',
+                'disabled:opacity-40 disabled:cursor-not-allowed'
+              )}
+            >
+              {applyingReview
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Applying&hellip;</>
+                : <><Wrench className="h-3.5 w-3.5" /> Apply Review</>
+              }
+            </button>
+          </div>
+          {applyError && (
+            <p className="text-xs text-accent-rose mt-2">{applyError}</p>
+          )}
         </div>
       )}
     </div>

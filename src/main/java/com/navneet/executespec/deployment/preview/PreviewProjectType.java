@@ -7,7 +7,8 @@ public enum PreviewProjectType {
     NODE_FRONTEND(5173),
     NODE_BACKEND(3000),
     SPRING_BOOT(8080),
-    PYTHON(8000);
+    PYTHON(8000),
+    FULL_STACK(5173); // primary preview port is the frontend
 
     private final int containerPort;
 

@@ -82,10 +82,11 @@ public class PreviewController {
     @GetMapping("/{runId}/preview/logs")
     public ResponseEntity<PreviewLogsDto> getLogs(
             @PathVariable String runId,
-            @RequestParam(defaultValue = "100") int lines,
+            @RequestParam(defaultValue = "0") int lines,
+            @RequestParam(defaultValue = "all") String filter,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(runId, userDetails);
-        String raw = previewService.getLogs(runId, lines);
+        String raw = previewService.getLogs(runId, lines, filter);
         List<String> logLines = raw.isBlank()
                 ? List.of()
                 : Arrays.asList(raw.split("\n"));

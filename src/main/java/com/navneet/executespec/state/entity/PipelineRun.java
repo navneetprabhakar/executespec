@@ -173,6 +173,14 @@ public class PipelineRun {
     private int chatMessageCount = 0;
 
     /**
+     * How many times apply-suggestion (chat copilot or review) has been invoked on this run.
+     * Shared counter for both COPILOT and REVIEW sources. Capped by tier_config.max_apply_suggestions.
+     */
+    @Builder.Default
+    @Column(name = "apply_suggestion_count", columnDefinition = "integer default 0")
+    private int applySuggestionCount = 0;
+
+    /**
      * When this run was created as an iteration of a previous run, this field
      * holds the source run's ID so the harness can copy the workspace.
      */
