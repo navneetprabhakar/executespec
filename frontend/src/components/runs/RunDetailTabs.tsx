@@ -85,8 +85,9 @@ export default function RunDetailTabs() {
 
   /** Chat & Preview tabs are only shown for terminal (COMPLETE / PARTIAL) runs. */
   const showTerminalTabs = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
+  const topLevelPermissions = useTierPermissions();
   const TABS = [
-    ...BASE_TABS,
+    ...BASE_TABS.filter(t => t.value !== 'log' || topLevelPermissions?.canViewLiveLog !== false),
     ...(showTerminalTabs ? [
       { value: 'preview', label: 'Preview' },
       { value: 'chat', label: 'Chat' },

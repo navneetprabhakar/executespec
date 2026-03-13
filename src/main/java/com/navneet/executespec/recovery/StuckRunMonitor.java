@@ -6,6 +6,7 @@ import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -24,6 +25,7 @@ public class StuckRunMonitor {
     private final RecoveryProperties props;
 
     @Scheduled(fixedDelay = 2 * 60 * 1000)
+    @SchedulerLock(name = "StuckRunMonitor", lockAtMostFor = "90s", lockAtLeastFor = "15s")
     public void checkForStuckTasks() {
         if (!props.isEnabled()) return;
 

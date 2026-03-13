@@ -6,9 +6,13 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface RunRecoveryRepository extends JpaRepository<RunRecovery, String> {
+
+    /** Used by OrphanedRunWatchdog to prevent recovery loops — checks if a run was recovered recently. */
+    boolean existsByOriginalRunIdAndRecoveredAtAfter(String originalRunId, Instant after);
 
     List<RunRecovery> findByOriginalRunIdOrRestartRunId(String originalRunId, String restartRunId);
 

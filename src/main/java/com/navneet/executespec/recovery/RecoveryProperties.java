@@ -33,6 +33,10 @@ public class RecoveryProperties {
     /** When true, auto-restarts go through ApprovalGate before fresh run starts */
     private boolean requireRestartApproval = false;
 
+    // ── Orphaned run watchdog ────────────────────────────────────────────────
+    /** Minutes of run inactivity (no active tasks) before watchdog triggers recovery. */
+    private int orphanedRunThresholdMinutes = 5;
+
     // ── Transient retry config ────────────────────────────────────────────────
     private int maxTransientRetries = 3;
     private int rateLimitBackoffSeconds = 30;

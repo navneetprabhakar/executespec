@@ -12,6 +12,9 @@ import * as api from '@/lib/api';
 
 const FILTERS = ['ALL', 'PLANNING', 'WORKING', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'COMPLETE', 'PAUSED', 'FAILED'];
 
+const toTitleCase = (s: string) =>
+  s.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+
 export default function RunList() {
   const {
     runs, loading, activeRunId,
@@ -52,7 +55,7 @@ export default function RunList() {
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
             )}
           >
-            {f === 'ALL' ? 'All' : f.replace(/_/g, ' ')}
+            {f === 'ALL' ? 'All' : toTitleCase(f)}
           </button>
         ))}
       </div>
