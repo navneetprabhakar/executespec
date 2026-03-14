@@ -1,6 +1,8 @@
 package com.navneet.executespec.deployment;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.deployment.preview.DevDockerfileGenerator;
+import com.navneet.executespec.deployment.preview.PreviewProjectType;
 import com.navneet.executespec.state.StateStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,9 +32,10 @@ import java.util.zip.ZipOutputStream;
 @Slf4j
 public class WorkspaceExportService {
 
-    private final AgentProperties agentProps;
-    private final StateStore      stateStore;
-    private final GcsWorkspaceStore gcsStore;
+    private final AgentProperties        agentProps;
+    private final StateStore             stateStore;
+    private final GcsWorkspaceStore      gcsStore;
+    private final DevDockerfileGenerator dockerfileGen;
 
     /**
      * Excluded patterns — internal agent machinery, build artifacts,
@@ -150,6 +153,25 @@ public class WorkspaceExportService {
                 zos.putNextEntry(new ZipEntry("README.md"));
                 zos.write(readmeContent.getBytes(StandardCharsets.UTF_8));
                 zos.closeEntry();
+            }
+
+            // Ensure Dockerfile + .dockerignore exist (generated from project type detection)
+            if (!Files.exists(workspacePath.resolve("Dockerfile"))) {
+                try {
+                    PreviewProjectType type = dockerfileGen.detect(workspacePath);
+                    String dockerfile = dockerfileGen.generate(type, workspacePath);
+                    zos.putNextEntry(new ZipEntry("Dockerfile"));
+                    zos.write(dockerfile.getBytes(StandardCharsets.UTF_8));
+                    zos.closeEntry();
+
+                    zos.putNextEntry(new ZipEntry(".dockerignore"));
+                    zos.write(dockerfileGen.dockerIgnore().getBytes(StandardCharsets.UTF_8));
+                    zos.closeEntry();
+
+                    log.info("Generated Dockerfile for repo export (type={})", type);
+                } catch (Exception e) {
+                    log.debug("Skipping Dockerfile generation for run {}: {}", runId, e.getMessage());
+                }
             }
 
             // Walk workspace, skip .git directory and node_modules

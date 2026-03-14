@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, GitMerge, Trash2, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play, HelpCircle, Send, Loader2 } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
@@ -23,7 +23,20 @@ export default function RunDetail() {
   const [resuming, setResuming] = useState(false);
   const [clarificationInput, setClarificationInput] = useState('');
   const [clarifying, setClarifying] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const downloadRef = useRef<HTMLDivElement>(null);
   const sseEntries = useSseStore((s) => s.entries);
+
+  // Close download dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (downloadRef.current && !downloadRef.current.contains(e.target as Node)) {
+        setDownloadOpen(false);
+      }
+    };
+    if (downloadOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [downloadOpen]);
 
   // Parse the reviewJson once whenever the run refreshes
   const review = useMemo<ReviewReport | null>(() => {
@@ -427,28 +440,32 @@ export default function RunDetail() {
               </button>
             )}
             <div className="flex items-center gap-3 ml-auto">
-              <div className="relative group">
+              <div className="relative" ref={downloadRef}>
                 <button
+                  onClick={() => setDownloadOpen((o) => !o)}
                   className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
                   title="Download workspace"
                 >
                   <Download className="h-3.5 w-3.5" />
                   Download ▾
                 </button>
-                <div className="hidden group-hover:block absolute right-0 mt-1 bg-surface-2 border border-white/[0.08] rounded-lg shadow-lg z-10 min-w-[180px]">
-                  <button
-                    onClick={() => downloadWorkspace(activeRun.runId).catch(() => {})}
-                    className="block w-full text-left px-4 py-2 text-xs text-zinc-300 hover:bg-white/[0.06]"
-                  >
-                    Download as ZIP
-                  </button>
-                  <a
-                    href={`/api/runs/${activeRun.runId}/download?format=repo`}
-                    className="block px-4 py-2 text-xs text-zinc-300 hover:bg-white/[0.06]"
-                  >
-                    Download as GitHub Repo
-                  </a>
-                </div>
+                {downloadOpen && (
+                  <div className="absolute right-0 mt-1 bg-surface-2 border border-white/[0.08] rounded-lg shadow-lg z-10 min-w-[180px] py-1">
+                    <button
+                      onClick={() => { setDownloadOpen(false); downloadWorkspace(activeRun.runId).catch(() => {}); }}
+                      className="block w-full text-left px-4 py-2.5 text-xs text-zinc-300 hover:bg-white/[0.06] transition-colors"
+                    >
+                      Download as ZIP
+                    </button>
+                    <a
+                      href={`/api/runs/${activeRun.runId}/download?format=repo`}
+                      onClick={() => setDownloadOpen(false)}
+                      className="block px-4 py-2.5 text-xs text-zinc-300 hover:bg-white/[0.06] transition-colors"
+                    >
+                      Download as GitHub Repo
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           </div>
