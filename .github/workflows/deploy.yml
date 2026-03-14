@@ -2,27 +2,33 @@ name: Build & Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
 
 env:
   JAVA_VERSION: '21'
-  GCP_PROJECT:  ${{ secrets.GCP_PROJECT }}
-  GCP_REGION:   ${{ secrets.GCP_REGION }}        # e.g. us-central1
-  GCE_INSTANCE: ${{ secrets.GCE_INSTANCE }}      # e.g. executespec-prod
-  GCE_ZONE:     ${{ secrets.GCE_ZONE }}          # e.g. us-central1-a
-  DEPLOY_BUCKET: gs://executespec-deploy
+  DEPLOY_BUCKET_PREFIX: executespec    # Bucket: executespec-{env}-deploy
 
 jobs:
   build-and-deploy:
-    name: Build JAR → GCS → GCE
+    name: Build → Deploy (${{ github.ref_name == 'main' && 'prod' || 'dev' }})
     runs-on: ubuntu-latest
 
+    # ── Environment: main → production, dev → development ───────────────────
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+
+    env:
+      DEPLOY_ENV:    ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+      GCP_PROJECT:   ${{ secrets.GCP_PROJECT }}
+      GCP_REGION:    ${{ secrets.GCP_REGION }}
+      GCE_INSTANCE:  ${{ secrets.GCE_INSTANCE }}
+      GCE_ZONE:      ${{ secrets.GCE_ZONE }}
+
     steps:
-      # ── Checkout ────────────────────────────────────────────────────────────
+      # ── Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Java setup ──────────────────────────────────────────────────────────
+      # ── Java setup ────────────────────────────────────────────────────────
       - name: Set up Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
@@ -30,20 +36,42 @@ jobs:
           distribution: temurin
           cache: maven
 
-      # ── Build ───────────────────────────────────────────────────────────────
+      # ── Node.js setup (for frontend build) ────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ── Frontend build ────────────────────────────────────────────────────
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      # ── Backend build ─────────────────────────────────────────────────────
       - name: Build JAR (skip tests)
         run: mvn package -DskipTests -q
 
-      # ── Authenticate to GCP ─────────────────────────────────────────────────
+      # ── Authenticate to GCP ───────────────────────────────────────────────
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}   # Service account JSON
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      # ── Upload JAR keyed by commit SHA ──────────────────────────────────────
+      # ── Determine deploy bucket ───────────────────────────────────────────
+      - name: Set deploy bucket
+        run: |
+          DEPLOY_BUCKET="gs://${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy"
+          echo "DEPLOY_BUCKET=$DEPLOY_BUCKET" >> $GITHUB_ENV
+          echo "Deploy bucket: $DEPLOY_BUCKET"
+
+      # ── Upload JAR keyed by commit SHA ────────────────────────────────────
       # JAR is stored permanently by SHA — never overwritten — full rollback history.
       - name: Upload JAR to GCS
         run: |
@@ -52,7 +80,7 @@ jobs:
           echo "${{ github.sha }}" | gsutil cp - ${{ env.DEPLOY_BUCKET }}/CURRENT_SHA
           echo "Uploaded: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
 
-      # ── Ensure validator toolchains on GCE (idempotent) ────────────────────
+      # ── Ensure validator toolchains on GCE (idempotent) ───────────────────
       # The code validator needs Node.js (npx/tsc/eslint) and Python3 (mypy/ruff/pytest)
       # installed on the VM. This step is idempotent — skips if already present.
       - name: Ensure validator toolchains on GCE
@@ -63,7 +91,7 @@ jobs:
             --command="
               set -e
 
-              # ── Node.js (LTS via NodeSource) ───────────────────────────────
+              # ── Node.js (LTS via NodeSource) ──────────────────────────────
               if ! command -v node &>/dev/null; then
                 echo 'Installing Node.js LTS...'
                 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
@@ -71,7 +99,7 @@ jobs:
               fi
               echo \"Node: \$(node --version)  npm: \$(npm --version)  npx: \$(npx --version)\"
 
-              # ── Python3 + pip ──────────────────────────────────────────────
+              # ── Python3 + pip ─────────────────────────────────────────────
               if ! command -v python3 &>/dev/null; then
                 echo 'Installing Python3...'
                 sudo apt-get update -y
@@ -79,16 +107,15 @@ jobs:
               fi
               echo \"Python: \$(python3 --version)\"
 
-              # ── Global Python linting/typing tools ─────────────────────────
-              # These are system-wide fallbacks; per-project venvs override at validation time.
+              # ── Global Python linting/typing tools ────────────────────────
               pip3 install --quiet --break-system-packages mypy ruff pytest 2>/dev/null \
                 || pip3 install --quiet mypy ruff pytest 2>/dev/null \
-                || echo 'pip install skipped (tools may already be present or managed per-project)'
+                || echo 'pip install skipped (tools may already be present)'
               echo 'Validator toolchains OK'
             "
 
-      # ── Deploy to GCE via IAP tunnel ────────────────────────────────────────
-      - name: Deploy to GCE
+      # ── Deploy to GCE via IAP tunnel ──────────────────────────────────────
+      - name: Deploy to GCE (${{ env.DEPLOY_ENV }})
         run: |
           gcloud compute ssh ${{ env.GCE_INSTANCE }} \
             --zone ${{ env.GCE_ZONE }} \
@@ -102,10 +129,19 @@ jobs:
               sudo systemctl restart executespec
               echo 'Waiting for health check...'
               sleep 20
-              curl -sf http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"' && echo 'Health OK' || (echo 'Health FAILED'; exit 1)
+              for i in 1 2 3 4 5; do
+                if curl -sf http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'; then
+                  echo 'Health OK'
+                  exit 0
+                fi
+                echo \"Health check attempt \$i failed, retrying in 10s...\"
+                sleep 10
+              done
+              echo 'Health check FAILED after 5 attempts'
+              exit 1
             "
 
-      # ── Prune old releases (keep last 10) ───────────────────────────────────
+      # ── Prune old releases (keep last 10) ─────────────────────────────────
       - name: Prune old JAR releases
         run: |
           COUNT=$(gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ | wc -l)
@@ -119,8 +155,10 @@ jobs:
             echo "Only $COUNT release(s) — no pruning needed"
           fi
 
-      # ── Summary ─────────────────────────────────────────────────────────────
+      # ── Summary ───────────────────────────────────────────────────────────
       - name: Deployment summary
         run: |
-          echo "✅ Deployed commit ${{ github.sha }} to ${{ env.GCE_INSTANCE }}"
+          echo "✅ Deployed commit ${{ github.sha }} to ${{ env.GCE_INSTANCE }} (${{ env.DEPLOY_ENV }})"
           echo "   JAR: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
+          echo "   Branch: ${{ github.ref_name }}"
+          echo "   Environment: ${{ env.DEPLOY_ENV }}"
