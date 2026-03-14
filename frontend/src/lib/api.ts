@@ -433,13 +433,14 @@ export const getMessages = (runId: string) =>
 export const getOpenApiSpec = (runId: string) =>
   reqText(`/runs/${runId}/openapi.yaml`);
 
-// ── Local Process Preview ─────────────────────────────────────────────────────
+// ── Docker Compose Preview ────────────────────────────────────────────────────
 
 export interface LocalPreviewStatus {
   runId: string;
-  status: 'IDLE' | 'STARTING' | 'RUNNING' | 'FAILED' | 'STOPPED';
+  status: 'IDLE' | 'STARTING' | 'RUNNING' | 'FAILED' | 'STOPPED' | 'TIMED_OUT';
   url: string | null;
   projectType: string | null;
+  databaseType: string | null;
   errorMessage: string | null;
   backendUrl: string | null;
   frontendUrl: string | null;
@@ -450,16 +451,34 @@ export interface PreviewLogs {
   lines: string[];
 }
 
+export interface PreviewAnalysis {
+  databaseType: string | null;
+  requiredEnvVars: {
+    name: string;
+    category: 'SECRET' | 'DATABASE' | 'STANDARD';
+    source: string;
+    defaultValue: string | null;
+  }[];
+}
+
+export const analyzePreview = (runId: string) =>
+  req<PreviewAnalysis>(`/runs/${runId}/preview/analyze`);
+
 export const getPreviewStatus = (runId: string) =>
   req<LocalPreviewStatus>(`/runs/${runId}/preview/status`);
 
-export const startPreview = (runId: string) =>
-  req<LocalPreviewStatus>(`/runs/${runId}/preview/start`, { method: 'POST' });
+export const startPreview = (runId: string, envVars?: Record<string, string>) =>
+  req<LocalPreviewStatus>(`/runs/${runId}/preview/start`, {
+    method: 'POST',
+    body: envVars && Object.keys(envVars).length > 0
+      ? JSON.stringify({ envVars })
+      : undefined,
+  });
 
 export const stopPreview = (runId: string) =>
   req<void>(`/runs/${runId}/preview/stop`, { method: 'DELETE' });
 
-export const getPreviewLogs = (runId: string, lines = 0, filter: 'all' | 'backend' | 'frontend' = 'all') =>
+export const getPreviewLogs = (runId: string, lines = 0, filter: 'all' | 'backend' | 'frontend' | 'db' = 'all') =>
   req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}&filter=${filter}`);
 
 // ── Conversation (pre-flight chat) ────────────────────────────────────────────

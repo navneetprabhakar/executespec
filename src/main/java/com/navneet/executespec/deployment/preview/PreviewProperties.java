@@ -12,6 +12,7 @@ public class PreviewProperties {
     private boolean enabled = true;
     private int portRangeStart = 10000;
     private int portRangeEnd = 10100;
+    private int totalStartupTimeoutSeconds = 300;  // 5-minute total deadline for entire preview startup
     private int buildTimeoutSeconds = 300;
     private int readinessTimeoutSeconds = 120;
     private int readinessPollIntervalMs = 2000;

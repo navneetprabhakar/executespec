@@ -15,6 +15,7 @@ public class PreviewPortPool {
 
     private final PreviewProperties props;
     private final DockerExecutor docker;
+    private final ComposeExecutor compose;
 
     /** port → runId */
     private final ConcurrentHashMap<Integer, String> allocated = new ConcurrentHashMap<>();
@@ -65,8 +66,8 @@ public class PreviewPortPool {
     }
 
     /**
-     * Reconcile on startup: discover running preview containers that survived a JVM restart,
-     * and register their ports in our in-memory map.
+     * Reconcile on startup: discover running compose projects and containers
+     * that survived a JVM restart, and clean them up.
      */
     @PostConstruct
     void reconcile() {
@@ -75,11 +76,18 @@ public class PreviewPortPool {
             return;
         }
 
+        // First: clean up orphaned compose projects
+        List<String> orphanProjects = compose.listProjects("es-preview-");
+        for (String projectName : orphanProjects) {
+            log.info("Cleaning up orphan compose project: {}", projectName);
+            compose.down(projectName, true);
+        }
+
+        // Second: clean up any legacy single-container previews
         List<String> containers = docker.listPreviewContainers();
         int reconciled = 0;
 
         for (String containerName : containers) {
-            // Container names: preview-<runId> or preview-<runIdPrefix>
             String runId = containerName.startsWith("preview-")
                     ? containerName.substring("preview-".length())
                     : containerName;
@@ -88,16 +96,18 @@ public class PreviewPortPool {
             for (PreviewProjectType type : PreviewProjectType.values()) {
                 int hostPort = docker.inspectHostPort(containerName, type.getContainerPort());
                 if (hostPort > 0 && hostPort >= props.getPortRangeStart() && hostPort <= props.getPortRangeEnd()) {
-                    allocated.put(hostPort, runId);
+                    // Stop legacy container and release port
+                    docker.stop(containerName);
                     reconciled++;
-                    log.info("Reconciled orphan container {} → port {}", containerName, hostPort);
+                    log.info("Cleaned up legacy container {} (port {})", containerName, hostPort);
                     break;
                 }
             }
         }
 
-        if (reconciled > 0) {
-            log.info("Reconciled {} orphan preview containers from previous JVM run", reconciled);
+        if (orphanProjects.size() + reconciled > 0) {
+            log.info("Cleanup complete: {} compose projects, {} legacy containers",
+                    orphanProjects.size(), reconciled);
         }
     }
 }

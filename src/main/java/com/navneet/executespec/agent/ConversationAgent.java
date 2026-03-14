@@ -504,7 +504,7 @@ public class ConversationAgent {
             StringBuilder sb = new StringBuilder();
             sb.append("Preview status: ").append(session.status()).append('\n');
             sb.append("Project type: ").append(session.projectType()).append('\n');
-            sb.append("Container: ").append(session.containerName()).append('\n');
+            sb.append("Container: ").append(session.composeProjectName()).append('\n');
             sb.append("Port: ").append(session.hostPort()).append('\n');
 
             if (session.errorMessage() != null && !session.errorMessage().isBlank()) {
