@@ -435,15 +435,14 @@ public class PreviewService {
         };
     }
 
+    /**
+     * Docker files (Dockerfile, .dockerignore, docker-compose.yml) are intentionally
+     * kept in the workspace after preview stops — they're useful project artifacts
+     * for the user's code download.
+     */
+    @SuppressWarnings("unused")
     private void cleanupWorkspaceFiles(String runId) {
-        try {
-            Path workspace = Path.of(agentProps.getWorkspace(), runId);
-            Files.deleteIfExists(workspace.resolve("Dockerfile"));
-            Files.deleteIfExists(workspace.resolve(".dockerignore"));
-            Files.deleteIfExists(workspace.resolve("docker-compose.yml"));
-        } catch (IOException e) {
-            log.debug("Failed to cleanup preview files for run {}: {}", runId, e.getMessage());
-        }
+        // No-op: Docker files are retained for download
     }
 
     // ── Scheduled cleanup ───────────────────────────────────────────────────
