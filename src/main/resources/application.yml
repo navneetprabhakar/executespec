@@ -225,8 +225,10 @@ preview:
   enabled: true
   port-range-start: 10000
   port-range-end: 10100
+  total-startup-timeout-seconds: 300   # 5-minute total deadline (covers build + DB + app readiness)
   build-timeout-seconds: 300
   readiness-timeout-seconds: 120
+  readiness-poll-interval-ms: 2000
   proxy:
     enabled: false
     base-url: ""

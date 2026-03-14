@@ -4,9 +4,9 @@ import java.time.Instant;
 
 public record PreviewSession(
         String runId,
-        String containerId,
-        String containerName,
+        String composeProjectName,
         PreviewProjectType projectType,
+        DatabaseType databaseType,
         PreviewStatus status,
         int hostPort,
         String url,

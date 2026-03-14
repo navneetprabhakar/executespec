@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getPreviewStatus, startPreview, stopPreview, getPreviewLogs, getOpenApiSpec,
+  analyzePreview,
 } from '@/lib/api';
-import type { LocalPreviewStatus } from '@/lib/api';
+import type { LocalPreviewStatus, PreviewAnalysis } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   Play, Square, RefreshCw, ChevronDown, Terminal, ExternalLink,
-  Filter,
+  Filter, AlertTriangle, Database, Eye, EyeOff, X, Shield,
 } from 'lucide-react';
 
 const BACKEND_ONLY = new Set(['SPRING_BOOT', 'GRADLE']);
@@ -26,6 +27,13 @@ const TYPE_LABELS: Record<string, string> = {
   UNKNOWN: 'Unknown',
 };
 
+const DB_LABELS: Record<string, { label: string; emoji: string }> = {
+  POSTGRESQL: { label: 'PostgreSQL', emoji: '\u{1F418}' },
+  MYSQL: { label: 'MySQL', emoji: '\u{1F42C}' },
+  MONGODB: { label: 'MongoDB', emoji: '\u{1F343}' },
+  REDIS: { label: 'Redis', emoji: '\u{26A1}' },
+};
+
 const FULL_STACK_TYPES = new Set(['FULL_STACK', 'FULLSTACK']);
 
 export default function PreviewTab({ runId }: { runId: string }) {
@@ -33,8 +41,11 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const [logs, setLogs] = useState<string[]>([]);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [openapiSpec, setOpenapiSpec] = useState<string | null>(null);
-  const [logFilter, setLogFilter] = useState<'all' | 'backend' | 'frontend'>('all');
+  const [logFilter, setLogFilter] = useState<'all' | 'backend' | 'frontend' | 'db'>('all');
+  const [showEnvDialog, setShowEnvDialog] = useState(false);
+  const [analysis, setAnalysis] = useState<PreviewAnalysis | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const logPollRef = useRef<ReturnType<typeof setInterval>>();
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -68,8 +79,8 @@ export default function PreviewTab({ runId }: { runId: string }) {
 
   // Determine if full-stack for log filtering
   const isFullStack = status?.projectType ? FULL_STACK_TYPES.has(status.projectType) : false;
-  // For full-stack, default to backend logs; for single-stack show all
-  const effectiveFilter = isFullStack ? logFilter : 'all';
+  const hasDatabase = !!status?.databaseType;
+  const effectiveFilter = isFullStack ? logFilter : (logFilter === 'db' ? 'db' : 'all');
 
   // Poll logs while STARTING or RUNNING — fetch ALL logs from startup
   useEffect(() => {
@@ -97,9 +108,42 @@ export default function PreviewTab({ runId }: { runId: string }) {
   }, [logs]);
 
   const handleStart = useCallback(async () => {
+    setAnalyzing(true);
+    try {
+      // First: analyze workspace for DB + env var requirements
+      const result = await analyzePreview(runId);
+      setAnalysis(result);
+
+      // Only show dialog if there are third-party SECRET vars without defaults
+      // STANDARD vars are internal config and should never be shown to the user
+      const thirdPartySecrets = result.requiredEnvVars.filter(
+        v => v.category === 'SECRET' && !v.defaultValue
+      );
+
+      if (thirdPartySecrets.length > 0) {
+        setShowEnvDialog(true);
+        setAnalyzing(false);
+        return;
+      }
+
+      // No env vars needed — start directly
+      setAnalyzing(false);
+      setLoading(true);
+      const s = await startPreview(runId);
+      setStatus(s);
+    } catch (e: any) {
+      setStatus(prev => prev ? { ...prev, status: 'FAILED', errorMessage: e.message } : null);
+    } finally {
+      setLoading(false);
+      setAnalyzing(false);
+    }
+  }, [runId]);
+
+  const handleStartWithEnvVars = useCallback(async (envVars: Record<string, string>) => {
+    setShowEnvDialog(false);
     setLoading(true);
     try {
-      const s = await startPreview(runId);
+      const s = await startPreview(runId, envVars);
       setStatus(s);
     } catch (e: any) {
       setStatus(prev => prev ? { ...prev, status: 'FAILED', errorMessage: e.message } : null);
@@ -130,10 +174,12 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const isStarting = status?.status === 'STARTING';
   const isRunning = status?.status === 'RUNNING';
   const isFailed = status?.status === 'FAILED';
+  const isTimedOut = status?.status === 'TIMED_OUT';
   const projectType = status?.projectType ?? 'UNKNOWN';
   const isBackendOnly = BACKEND_ONLY.has(projectType);
-  const hasLogs = isStarting || isRunning || isFailed;
-  const showLogFilter = isFullStack && hasLogs;
+  const hasLogs = isStarting || isRunning || isFailed || isTimedOut;
+  const showLogFilter = (isFullStack || hasDatabase) && hasLogs;
+  const dbInfo = status?.databaseType ? DB_LABELS[status.databaseType] : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -144,6 +190,12 @@ export default function PreviewTab({ runId }: { runId: string }) {
             <span className="text-xs px-2 py-0.5 rounded bg-white/[0.06] text-zinc-400 font-mono">
               {TYPE_LABELS[projectType] ?? projectType}
             </span>
+            {dbInfo && (
+              <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan">
+                <Database className="h-3 w-3" />
+                {dbInfo.label}
+              </span>
+            )}
             {isRunning && (
               <span className="flex items-center gap-1.5 text-xs text-accent-emerald">
                 <span className="relative flex h-1.5 w-1.5">
@@ -161,6 +213,12 @@ export default function PreviewTab({ runId }: { runId: string }) {
             )}
             {isFailed && (
               <span className="text-xs text-accent-rose">Failed</span>
+            )}
+            {isTimedOut && (
+              <span className="flex items-center gap-1 text-xs text-accent-rose">
+                <AlertTriangle className="h-3 w-3" />
+                Timed Out
+              </span>
             )}
           </div>
           {isRunning && status?.url && (
@@ -192,19 +250,19 @@ export default function PreviewTab({ runId }: { runId: string }) {
               <RefreshCw className="h-3.5 w-3.5" />
             </button>
           )}
-          {(isIdle || isFailed) && (
+          {(isIdle || isFailed || isTimedOut) && (
             <button
               onClick={handleStart}
-              disabled={loading}
+              disabled={loading || analyzing}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
                 'bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25 disabled:opacity-40'
               )}
             >
-              {loading
+              {(loading || analyzing)
                 ? <span className="h-3 w-3 rounded-full border-2 border-accent-emerald/30 border-t-accent-emerald animate-spin" />
                 : <Play className="h-3 w-3" />}
-              {isFailed ? 'Retry' : 'Start Preview'}
+              {analyzing ? 'Analyzing...' : isFailed || isTimedOut ? 'Retry' : 'Start Preview'}
             </button>
           )}
           {(isRunning || isStarting) && (
@@ -241,14 +299,32 @@ export default function PreviewTab({ runId }: { runId: string }) {
             <div className="text-center space-y-2">
               <span className="inline-block h-6 w-6 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin" />
               <p className="text-sm text-zinc-400">Starting {TYPE_LABELS[projectType] ?? projectType} server...</p>
+              {dbInfo && (
+                <p className="text-xs text-accent-cyan">
+                  {dbInfo.emoji} {dbInfo.label} database auto-configured
+                </p>
+              )}
               <p className="text-xs text-zinc-600">This may take a moment for the first run</p>
             </div>
           </div>
-        ) : isFailed ? (
+        ) : (isFailed || isTimedOut) ? (
           <div className="p-4 space-y-3">
-            <div className="p-3 rounded-lg bg-accent-rose/10 border border-accent-rose/20">
-              <p className="text-sm font-medium text-accent-rose">Preview failed to start</p>
-              <p className="text-xs text-accent-rose/80 mt-1 break-all whitespace-pre-wrap">
+            <div className={cn(
+              'p-3 rounded-lg border',
+              isTimedOut
+                ? 'bg-accent-amber/10 border-accent-amber/20'
+                : 'bg-accent-rose/10 border-accent-rose/20'
+            )}>
+              <p className={cn(
+                'text-sm font-medium',
+                isTimedOut ? 'text-accent-amber' : 'text-accent-rose'
+              )}>
+                {isTimedOut ? 'Preview startup timed out (5 minutes)' : 'Preview failed to start'}
+              </p>
+              <p className={cn(
+                'text-xs mt-1 break-all whitespace-pre-wrap',
+                isTimedOut ? 'text-accent-amber/80' : 'text-accent-rose/80'
+              )}>
                 {status?.errorMessage ?? 'Unknown error'}
               </p>
             </div>
@@ -267,8 +343,8 @@ export default function PreviewTab({ runId }: { runId: string }) {
               <p className="text-sm text-zinc-400">Preview not started</p>
               <p className="text-xs text-zinc-600 max-w-sm">
                 Click <strong className="text-zinc-400">Start Preview</strong> to launch
-                the {TYPE_LABELS[projectType]?.toLowerCase() ?? 'application'} dev server
-                directly in the workspace.
+                the {TYPE_LABELS[projectType]?.toLowerCase() ?? 'application'} dev server.
+                {' '}Database and dependencies will be auto-detected.
               </p>
               {projectType === 'UNKNOWN' && (
                 <p className="text-xs text-zinc-700">
@@ -295,14 +371,14 @@ export default function PreviewTab({ runId }: { runId: string }) {
           </button>
           {logsExpanded && (
             <>
-              {/* Filter bar for full-stack projects */}
+              {/* Filter bar */}
               {showLogFilter && (
                 <div className="flex items-center gap-1.5 px-4 pb-2">
                   <Filter className="h-3 w-3 text-zinc-600" />
-                  {(['all', 'backend', 'frontend'] as const).map(f => (
+                  {(['all', ...(isFullStack ? ['backend', 'frontend'] as const : []), ...(hasDatabase ? ['db'] as const : [])] as const).map(f => (
                     <button
                       key={f}
-                      onClick={() => setLogFilter(f)}
+                      onClick={() => setLogFilter(f as typeof logFilter)}
                       className={cn(
                         'px-2 py-0.5 rounded text-[10px] font-medium transition-colors',
                         logFilter === f
@@ -310,7 +386,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                           : 'bg-white/[0.04] text-zinc-500 hover:text-zinc-300'
                       )}
                     >
-                      {f === 'all' ? 'All' : f === 'backend' ? 'Backend' : 'Frontend'}
+                      {f === 'all' ? 'All' : f === 'backend' ? 'Backend' : f === 'frontend' ? 'Frontend' : 'Database'}
                     </button>
                   ))}
                 </div>
@@ -325,6 +401,142 @@ export default function PreviewTab({ runId }: { runId: string }) {
           )}
         </div>
       )}
+
+      {/* ── Environment Configuration Dialog ── */}
+      {showEnvDialog && analysis && (
+        <EnvConfigDialog
+          analysis={analysis}
+          onStart={handleStartWithEnvVars}
+          onClose={() => setShowEnvDialog(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Environment Configuration Dialog ────────────────────────────────────────
+
+function EnvConfigDialog({
+  analysis,
+  onStart,
+  onClose,
+}: {
+  analysis: PreviewAnalysis;
+  onStart: (envVars: Record<string, string>) => void;
+  onClose: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const defaults: Record<string, string> = {};
+    analysis.requiredEnvVars.forEach(v => {
+      if (v.defaultValue) defaults[v.name] = v.defaultValue;
+    });
+    return defaults;
+  });
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+
+  const dbInfo = analysis.databaseType ? DB_LABELS[analysis.databaseType] : null;
+  // Only show third-party SECRET vars — internal config is auto-populated
+  const secretVars = analysis.requiredEnvVars.filter(v => v.category === 'SECRET');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-zinc-900 border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <h3 className="text-sm font-semibold text-zinc-100">Third-Party API Keys</h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-white/[0.06] text-zinc-500 hover:text-zinc-300">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Disclaimer */}
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-accent-amber/10 border border-accent-amber/20">
+            <Shield className="h-4 w-4 text-accent-amber mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-accent-amber/90 leading-relaxed">
+              These values are <strong>not stored, logged, or transmitted</strong> beyond this preview session.
+              They exist only in the container&apos;s memory and are discarded when the preview stops.
+            </p>
+          </div>
+
+          {/* Database info */}
+          {dbInfo && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-accent-cyan/5 border border-accent-cyan/10">
+              <Database className="h-4 w-4 text-accent-cyan" />
+              <p className="text-xs text-accent-cyan">
+                {dbInfo.emoji} <strong>{dbInfo.label}</strong> database will be auto-configured
+                (fresh instance, no data persistence)
+              </p>
+            </div>
+          )}
+
+          {/* Third-party API keys only */}
+          {secretVars.length > 0 && (
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">External API Keys</p>
+                <p className="text-[10px] text-zinc-600 mt-0.5">
+                  Internal config (URLs, CORS, ports) is auto-configured. Only third-party keys are needed.
+                </p>
+              </div>
+              {secretVars.map(v => (
+                <div key={v.name} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-mono text-zinc-300">{v.name}</label>
+                    <span className="text-[10px] text-zinc-600">from {v.source}</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showSecrets[v.name] ? 'text' : 'password'}
+                      value={values[v.name] ?? ''}
+                      onChange={e => setValues(prev => ({ ...prev, [v.name]: e.target.value }))}
+                      placeholder="Enter value (optional)..."
+                      className="w-full px-3 py-2 pr-9 text-xs font-mono bg-black/30 border border-white/[0.08] rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent-cyan/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecrets(prev => ({ ...prev, [v.name]: !prev[v.name] }))}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-zinc-600 hover:text-zinc-400"
+                    >
+                      {showSecrets[v.name] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {secretVars.length === 0 && dbInfo && (
+            <p className="text-xs text-zinc-500 text-center py-4">
+              No additional configuration needed. Click Start Preview below.
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/[0.06]">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              // Filter out empty values
+              const nonEmpty = Object.fromEntries(
+                Object.entries(values).filter(([, v]) => v.trim() !== '')
+              );
+              onStart(nonEmpty);
+            }}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25 transition-all"
+          >
+            <Play className="h-3 w-3" />
+            Start Preview
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -341,7 +553,6 @@ function BackendPreview({
   openapiSpec: string | null;
 }) {
   if (openapiSpec) {
-    // Render SwaggerUI via CDN in an iframe — no npm dependency needed
     const swaggerHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -382,7 +593,6 @@ function BackendPreview({
     );
   }
 
-  // No OpenAPI spec — show simple health status
   return (
     <div className="h-full flex items-center justify-center">
       <div className="text-center space-y-3 px-8">

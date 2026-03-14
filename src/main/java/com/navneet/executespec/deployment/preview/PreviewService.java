@@ -19,6 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -26,8 +28,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class PreviewService {
 
+    private final ComposeExecutor compose;
     private final DockerExecutor docker;
     private final DevDockerfileGenerator dockerfileGen;
+    private final ComposeFileGenerator composeFileGen;
+    private final DatabaseDetector databaseDetector;
+    private final EnvVarDetector envVarDetector;
     private final PreviewPortPool portPool;
     private final PreviewProperties props;
     private final SseBroadcaster broadcaster;
@@ -42,15 +48,23 @@ public class PreviewService {
 
     private static final Set<String> COMPLETE_STATUSES = Set.of("COMPLETE", "PARTIAL");
 
-    public PreviewService(DockerExecutor docker,
+    public PreviewService(ComposeExecutor compose,
+                          DockerExecutor docker,
                           DevDockerfileGenerator dockerfileGen,
+                          ComposeFileGenerator composeFileGen,
+                          DatabaseDetector databaseDetector,
+                          EnvVarDetector envVarDetector,
                           PreviewPortPool portPool,
                           PreviewProperties props,
                           SseBroadcaster broadcaster,
                           StateStore stateStore,
                           AgentProperties agentProps) {
+        this.compose = compose;
         this.docker = docker;
         this.dockerfileGen = dockerfileGen;
+        this.composeFileGen = composeFileGen;
+        this.databaseDetector = databaseDetector;
+        this.envVarDetector = envVarDetector;
         this.portPool = portPool;
         this.props = props;
         this.broadcaster = broadcaster;
@@ -61,10 +75,28 @@ public class PreviewService {
     // ── Public API ──────────────────────────────────────────────────────────
 
     /**
-     * Start a preview for a completed run. Returns immediately with BUILDING status.
-     * The actual build+start happens on a virtual thread.
+     * Analyze workspace for database and env var requirements (pre-start step).
      */
-    public PreviewSession start(String runId, AppUser user) {
+    public PreviewAnalysis analyze(String runId) {
+        Path workspace = Path.of(agentProps.getWorkspace(), runId);
+        DatabaseType dbType = databaseDetector.detect(workspace);
+        List<EnvVarDetector.DetectedEnvVar> envVars = envVarDetector.detect(workspace);
+
+        // Filter out DATABASE category vars — they're auto-injected
+        List<EnvVarDetector.DetectedEnvVar> userVars = envVars.stream()
+                .filter(v -> v.category() != EnvVarDetector.EnvVarCategory.DATABASE)
+                .toList();
+
+        return new PreviewAnalysis(dbType, userVars);
+    }
+
+    /**
+     * Start a preview for a completed run. Returns immediately with ANALYZING status.
+     * The actual build+start happens on a virtual thread.
+     *
+     * @param envVars user-provided environment variables (may be null/empty)
+     */
+    public PreviewSession start(String runId, AppUser user, Map<String, String> envVars) {
         // Guard: preview enabled
         if (!props.isEnabled()) {
             throw new PreviewException("Preview is disabled");
@@ -111,21 +143,22 @@ public class PreviewService {
 
         // Allocate port and create initial session
         int port = portPool.allocate(runId);
-        String containerName = containerName(runId);
+        String projectName = composeProjectName(runId);
         String url = props.getProxy().isEnabled()
                 ? props.getProxy().getBaseUrl() + "/preview/" + runId
                 : "http://localhost:" + port;
         Duration ttl = getTtl(user.getTier());
 
         PreviewSession session = new PreviewSession(
-                runId, null, containerName, type,
-                PreviewStatus.BUILDING, port, url, null,
+                runId, projectName, type, null,
+                PreviewStatus.ANALYZING, port, url, null,
                 Instant.now(), Instant.now().plus(ttl)
         );
         active.put(runId, session);
 
         // Launch async build+start on a virtual thread
-        Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, port));
+        Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
+        Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, port, projectName, safeEnvVars));
 
         log.info("Preview started for run {} (type={}, port={}, ttl={}min)",
                 runId, type, port, ttl.toMinutes());
@@ -133,13 +166,21 @@ public class PreviewService {
     }
 
     /**
-     * Stop a running preview. Idempotent.
+     * Backward-compatible start without env vars.
+     */
+    public PreviewSession start(String runId, AppUser user) {
+        return start(runId, user, null);
+    }
+
+    /**
+     * Stop a running preview. Tears down compose project. Idempotent.
      */
     public void stop(String runId) {
         PreviewSession session = active.get(runId);
         if (session == null) return;
 
-        docker.stop(session.containerName());
+        // Tear down compose project (removes containers, networks, volumes)
+        compose.down(session.composeProjectName(), true);
         portPool.release(session.hostPort());
 
         if (caddyProxyManager != null) {
@@ -149,7 +190,7 @@ public class PreviewService {
         active.remove(runId);
         broadcaster.emit(runId, new RunEvent("PREVIEW_STOPPED", runId, null, null, Instant.now()));
 
-        // Cleanup Dockerfile and .dockerignore
+        // Cleanup workspace files
         cleanupWorkspaceFiles(runId);
 
         log.info("Preview stopped for run {}", runId);
@@ -165,92 +206,124 @@ public class PreviewService {
 
     /**
      * Get container logs for a running preview.
+     *
      * @param tailLines if <= 0, returns ALL logs from container start
-     * @param filter    if "backend" or "frontend", returns only lines with that prefix (full-stack containers);
-     *                  null or "all" returns everything
+     * @param filter    "backend", "frontend", "db", or "all"
      */
     public String getLogs(String runId, int tailLines, String filter) {
         PreviewSession session = active.get(runId);
         if (session == null) return "";
-        String raw = docker.logs(session.containerName(), tailLines);
-        if (filter == null || filter.isBlank() || "all".equalsIgnoreCase(filter)) {
+
+        String serviceName = null;
+        if ("db".equalsIgnoreCase(filter) && session.databaseType() != null) {
+            serviceName = "db";
+        }
+        // For backend/frontend filter on full-stack, we still get app logs and filter by prefix
+        String raw = compose.logs(session.composeProjectName(), serviceName, tailLines);
+
+        if (serviceName != null || filter == null || filter.isBlank() || "all".equalsIgnoreCase(filter)) {
             return raw;
         }
+
         // Filter lines by prefix: [backend] or [frontend]
         String prefix = "[" + filter.toLowerCase() + "] ";
         return raw.lines()
-                .filter(line -> line.startsWith(prefix))
-                .map(line -> line.substring(prefix.length()))
+                .filter(line -> line.contains(prefix))
+                .map(line -> {
+                    int idx = line.indexOf(prefix);
+                    return idx >= 0 ? line.substring(idx + prefix.length()) : line;
+                })
                 .collect(java.util.stream.Collectors.joining("\n"));
     }
 
-    // ── Private: build and start ────────────────────────────────────────────
+    // ── Private: build and start with deadline ───────────────────────────────
 
-    private void buildAndStart(String runId, Path workspace, PreviewProjectType type, int port) {
+    private void buildAndStart(String runId, Path workspace, PreviewProjectType type,
+                               int port, String projectName, Map<String, String> envVars) {
+        Instant deadline = Instant.now().plusSeconds(props.getTotalStartupTimeoutSeconds());
+
         try {
-            // Write .dockerignore
-            Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+            // Phase 1: Detect database
+            checkDeadline(deadline, "database detection");
+            broadcaster.emit(runId, new RunEvent("PREVIEW_ANALYZING", runId, null,
+                    "Detecting project dependencies...", Instant.now()));
 
-            // Write Dockerfile
+            DatabaseType dbType = databaseDetector.detect(workspace);
+            if (dbType != null) {
+                log.info("Preview for run {}: detected database {}", runId, dbType);
+                updateSession(runId, s -> new PreviewSession(
+                        s.runId(), s.composeProjectName(), s.projectType(), dbType,
+                        PreviewStatus.ANALYZING, s.hostPort(), s.url(), null,
+                        s.startedAt(), s.expiresAt()));
+            }
+
+            // Phase 2: Write .dockerignore and Dockerfile
+            checkDeadline(deadline, "Dockerfile generation");
+            Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
             Files.writeString(workspace.resolve("Dockerfile"), dockerfileGen.generate(type, workspace));
 
-            // Emit BUILDING event
+            // Phase 3: Generate docker-compose.yml
+            checkDeadline(deadline, "compose file generation");
+            Path composeFile = composeFileGen.generate(workspace, type, dbType, envVars, port);
+
+            // Phase 4: Docker Compose up (build + start)
+            checkDeadline(deadline, "container build");
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.BUILDING, s.hostPort(), s.url(), null,
+                    s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_BUILDING", runId, null,
-                    "Building " + type + " container...", Instant.now()));
+                    "Building " + type + " container" + (dbType != null ? " + " + dbType + " database" : "") + "...",
+                    Instant.now()));
 
-            // Build Docker image
-            String imageTag = "preview-" + runId;
-            var buildResult = docker.build(workspace, imageTag);
+            Duration buildTimeout = Duration.between(Instant.now(), deadline);
+            compose.up(composeFile, projectName, buildTimeout);
 
-            if (!buildResult.success()) {
-                String lastLines = lastNLines(buildResult.logs(), 20);
-                fail(runId, "Docker build failed:\n" + lastLines);
-                return;
+            log.info("Compose up complete for run {} (project={})", runId, projectName);
+
+            // Phase 5: Wait for DB healthy (if applicable)
+            if (dbType != null) {
+                checkDeadline(deadline, "database readiness");
+                updateSession(runId, s -> new PreviewSession(
+                        s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                        PreviewStatus.DB_STARTING, s.hostPort(), s.url(), null,
+                        s.startedAt(), s.expiresAt()));
+                broadcaster.emit(runId, new RunEvent("PREVIEW_DB_STARTING", runId, null,
+                        "Waiting for " + dbType + " database to be ready...", Instant.now()));
+
+                Duration dbTimeout = Duration.ofSeconds(Math.min(60,
+                        Duration.between(Instant.now(), deadline).toSeconds()));
+                compose.waitForHealthy(projectName, "db", dbTimeout);
+
+                log.info("Database {} is healthy for run {}", dbType, runId);
             }
 
-            log.info("Preview image built for {} in {}ms", runId, buildResult.durationMs());
-
-            // Determine resource limits — Spring Boot and full-stack apps need more resources
-            boolean heavyWeight = (type == PreviewProjectType.SPRING_BOOT || type == PreviewProjectType.FULL_STACK);
-            String cpu = heavyWeight ? props.getSpringBootCpuLimit() : props.getCpuLimit();
-            String mem = heavyWeight ? props.getSpringBootMemoryLimit() : props.getMemoryLimit();
-
-            // Run container
-            String containerName = containerName(runId);
-            String containerId = docker.run(imageTag, containerName, port, type.getContainerPort(), cpu, mem);
-
-            // Update session to STARTING
+            // Phase 6: Wait for app readiness (HTTP poll)
+            checkDeadline(deadline, "application readiness");
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), containerId, s.containerName(), s.projectType(),
+                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
                     PreviewStatus.STARTING, s.hostPort(), s.url(), null,
-                    s.startedAt(), s.expiresAt()
-            ));
+                    s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_STARTING", runId, null,
-                    "Container started, waiting for readiness...", Instant.now()));
+                    "Waiting for application to be ready...", Instant.now()));
 
-            // Wait for readiness
-            int readinessTimeout = (type == PreviewProjectType.SPRING_BOOT)
-                    ? props.getReadinessTimeoutSeconds()
-                    : 30;
-            boolean ready = waitForReadiness(port, readinessTimeout);
+            Duration appTimeout = Duration.between(Instant.now(), deadline);
+            boolean ready = waitForReadiness(port, (int) appTimeout.toSeconds());
 
             if (!ready) {
-                String logs = docker.logs(containerName, 30);
-                fail(runId, "Startup timed out after " + readinessTimeout + "s\n" + logs);
-                docker.stop(containerName);
-                portPool.release(port);
+                String logs = compose.logs(projectName, "app", 30);
+                fail(runId, "Application startup timed out\n" + logs, projectName);
                 return;
             }
 
-            // Update session to RUNNING
+            // Success!
             PreviewSession session = active.get(runId);
             if (session == null) return; // was stopped while starting
 
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.containerId(), s.containerName(), s.projectType(),
+                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
                     PreviewStatus.RUNNING, s.hostPort(), s.url(), null,
-                    s.startedAt(), s.expiresAt()
-            ));
+                    s.startedAt(), s.expiresAt()));
 
             if (caddyProxyManager != null) {
                 caddyProxyManager.addRoute(runId, port);
@@ -259,24 +332,49 @@ public class PreviewService {
             String previewUrl = active.get(runId) != null ? active.get(runId).url() : "http://localhost:" + port;
             broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null, previewUrl, Instant.now()));
 
-            log.info("Preview ready for run {} at {}", runId, previewUrl);
+            log.info("Preview ready for run {} at {} (db={})", runId, previewUrl, dbType);
+
+        } catch (DeadlineExceededException e) {
+            compose.down(projectName, true);
+            portPool.release(port);
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.TIMED_OUT, s.hostPort(), s.url(),
+                    "Preview startup timed out after " + props.getTotalStartupTimeoutSeconds()
+                            + "s during: " + e.getPhase(),
+                    s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_TIMED_OUT", runId, null,
+                    "Timed out during: " + e.getPhase(), Instant.now()));
+            log.warn("Preview timed out for run {} during: {}", runId, e.getPhase());
 
         } catch (IOException e) {
-            fail(runId, "Failed to write Dockerfile: " + e.getMessage());
+            fail(runId, "Failed to write Dockerfile: " + e.getMessage(), projectName);
         } catch (PreviewException e) {
-            fail(runId, e.getMessage());
+            fail(runId, e.getMessage(), projectName);
         } catch (Exception e) {
-            fail(runId, "Unexpected error: " + e.getMessage());
+            fail(runId, "Unexpected error: " + e.getMessage(), projectName);
             log.error("Preview build/start failed for run {}", runId, e);
         }
     }
 
-    private void fail(String runId, String message) {
+    private void checkDeadline(Instant deadline, String phase) {
+        if (Instant.now().isAfter(deadline)) {
+            throw new DeadlineExceededException(phase);
+        }
+    }
+
+    private void fail(String runId, String message, String projectName) {
+        // Clean up compose project on failure
+        try {
+            compose.down(projectName, true);
+        } catch (Exception e) {
+            log.debug("Compose down failed during cleanup for {}: {}", runId, e.getMessage());
+        }
+
         updateSession(runId, s -> new PreviewSession(
-                s.runId(), s.containerId(), s.containerName(), s.projectType(),
+                s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
                 PreviewStatus.FAILED, s.hostPort(), s.url(), message,
-                s.startedAt(), s.expiresAt()
-        ));
+                s.startedAt(), s.expiresAt()));
         broadcaster.emit(runId, new RunEvent("PREVIEW_FAILED", runId, null, message, Instant.now()));
         log.warn("Preview failed for run {}: {}", runId, message);
     }
@@ -295,7 +393,6 @@ public class PreviewService {
                 conn.setRequestMethod("GET");
                 int code = conn.getResponseCode();
                 conn.disconnect();
-                // Accept any response 200-499 as "ready" (4xx means app is up)
                 if (code >= 200 && code < 500) {
                     return true;
                 }
@@ -314,10 +411,12 @@ public class PreviewService {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
-    private String containerName(String runId) {
-        // Container names must match [a-zA-Z0-9][a-zA-Z0-9_.-]
-        String safe = runId.replaceAll("[^a-zA-Z0-9]", "");
-        return "preview-" + safe.substring(0, Math.min(12, safe.length()));
+    /**
+     * Compose project name derived from runId. Must be lowercase alphanumeric + hyphens.
+     */
+    private String composeProjectName(String runId) {
+        String safe = runId.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+        return "es-preview-" + safe.substring(0, Math.min(12, safe.length()));
     }
 
     private Duration getTtl(String tier) {
@@ -336,22 +435,12 @@ public class PreviewService {
         };
     }
 
-    private String lastNLines(String text, int n) {
-        if (text == null) return "";
-        String[] lines = text.split("\n");
-        int start = Math.max(0, lines.length - n);
-        var sb = new StringBuilder();
-        for (int i = start; i < lines.length; i++) {
-            sb.append(lines[i]).append("\n");
-        }
-        return sb.toString();
-    }
-
     private void cleanupWorkspaceFiles(String runId) {
         try {
             Path workspace = Path.of(agentProps.getWorkspace(), runId);
             Files.deleteIfExists(workspace.resolve("Dockerfile"));
             Files.deleteIfExists(workspace.resolve(".dockerignore"));
+            Files.deleteIfExists(workspace.resolve("docker-compose.yml"));
         } catch (IOException e) {
             log.debug("Failed to cleanup preview files for run {}: {}", runId, e.getMessage());
         }
@@ -364,7 +453,7 @@ public class PreviewService {
         active.values().stream()
                 .filter(PreviewSession::isExpired)
                 .map(PreviewSession::runId)
-                .toList() // collect first to avoid ConcurrentModificationException
+                .toList()
                 .forEach(runId -> {
                     log.info("Preview expired for run {}, stopping", runId);
                     stop(runId);
@@ -379,4 +468,11 @@ public class PreviewService {
             active.keySet().forEach(this::stop);
         }
     }
+
+    // ── Analysis result ─────────────────────────────────────────────────────
+
+    public record PreviewAnalysis(
+            DatabaseType databaseType,
+            List<EnvVarDetector.DetectedEnvVar> requiredEnvVars
+    ) {}
 }
