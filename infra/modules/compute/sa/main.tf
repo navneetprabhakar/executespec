@@ -43,10 +43,24 @@ resource "google_project_iam_member" "artifact_registry" {
   member  = "serviceAccount:${google_service_account.gce.email}"
 }
 
-# Access deploy bucket (read JARs)
-resource "google_storage_bucket_iam_member" "deploy_read" {
+# SSH into GCE instances via IAP (CI/CD deploy step)
+resource "google_project_iam_member" "compute_instance_admin" {
+  project = var.project_id
+  role    = "roles/compute.instanceAdmin.v1"
+  member  = "serviceAccount:${google_service_account.gce.email}"
+}
+
+# Use IAP tunnels for SSH
+resource "google_project_iam_member" "iap_tunnel_user" {
+  project = var.project_id
+  role    = "roles/iap.tunnelResourceAccessor"
+  member  = "serviceAccount:${google_service_account.gce.email}"
+}
+
+# Access deploy bucket (read JARs on GCE + write JARs from CI/CD via WIF)
+resource "google_storage_bucket_iam_member" "deploy_rw" {
   bucket = var.deploy_bucket_name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.gce.email}"
 }
 
