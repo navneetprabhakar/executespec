@@ -143,12 +143,12 @@ jobs:
       # ── Health check (separate short SSH session) ────────────────────────
       - name: Health check
         run: |
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7 8; do
             echo "Health check attempt $i..."
             RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE }} \
               --zone ${{ env.GCE_ZONE }} \
               --tunnel-through-iap \
-              --command="curl -sf http://localhost:8080/actuator/health 2>/dev/null || echo FAIL" \
+              --command="curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/actuator/health 2>/dev/null; echo \"HTTP_CODE=\$?:\$(cat /tmp/health.json 2>/dev/null)\"" \
               2>/dev/null) || RESULT="SSH_FAIL"
             echo "  Result: $RESULT"
             if echo "$RESULT" | grep -q '"status":"UP"'; then
@@ -157,7 +157,7 @@ jobs:
             fi
             sleep 10
           done
-          echo "Health check FAILED after 5 attempts"
+          echo "Health check FAILED after 8 attempts"
           exit 1
 
       # ── Dump logs on failure ─────────────────────────────────────────────

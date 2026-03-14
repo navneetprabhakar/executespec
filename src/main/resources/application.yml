@@ -236,7 +236,7 @@ preview:
 app:
   # Gmail API OAuth2 sender config (replaces SMTP)
   gmail:
-    enabled: ${GMAIL_ENABLED:true}
+    enabled: ${GMAIL_ENABLED:false}
     # Path to the credentials.json downloaded from Google Cloud Console
     credentials-path: ${GMAIL_CREDENTIALS_PATH:credentials.json}
     # Where to persist OAuth tokens after the first browser consent (never commit this dir)
