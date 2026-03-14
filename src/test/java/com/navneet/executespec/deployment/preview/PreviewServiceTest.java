@@ -35,8 +35,12 @@ import static org.mockito.Mockito.*;
 @DisplayName("PreviewService")
 class PreviewServiceTest {
 
+    @Mock ComposeExecutor compose;
     @Mock DockerExecutor docker;
     @Mock DevDockerfileGenerator dockerfileGen;
+    @Mock ComposeFileGenerator composeFileGen;
+    @Mock DatabaseDetector databaseDetector;
+    @Mock EnvVarDetector envVarDetector;
     @Mock PreviewPortPool portPool;
     @Mock SseBroadcaster broadcaster;
     @Mock StateStore stateStore;
@@ -60,7 +64,8 @@ class PreviewServiceTest {
         when(docker.build(any(), any())).thenReturn(
                 new DockerExecutor.DockerBuildResult(false, null, "mock-build", 0));
 
-        service = new PreviewService(docker, dockerfileGen, portPool, props, broadcaster, stateStore, agentProps);
+        service = new PreviewService(compose, docker, dockerfileGen, composeFileGen,
+                databaseDetector, envVarDetector, portPool, props, broadcaster, stateStore, agentProps);
     }
 
     @AfterEach
@@ -111,7 +116,8 @@ class PreviewServiceTest {
         @DisplayName("Throws when preview is disabled")
         void throwsWhenDisabled() {
             props.setEnabled(false);
-            service = new PreviewService(docker, dockerfileGen, portPool, props, broadcaster, stateStore, agentProps);
+            service = new PreviewService(compose, docker, dockerfileGen, composeFileGen,
+                databaseDetector, envVarDetector, portPool, props, broadcaster, stateStore, agentProps);
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
                     .isInstanceOf(PreviewException.class)
@@ -409,7 +415,8 @@ class PreviewServiceTest {
         void urlWithProxy() throws IOException {
             props.getProxy().setEnabled(true);
             props.getProxy().setBaseUrl("https://preview.executespec.ai");
-            service = new PreviewService(docker, dockerfileGen, portPool, props, broadcaster, stateStore, agentProps);
+            service = new PreviewService(compose, docker, dockerfileGen, composeFileGen,
+                databaseDetector, envVarDetector, portPool, props, broadcaster, stateStore, agentProps);
 
             when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-1";

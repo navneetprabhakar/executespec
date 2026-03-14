@@ -19,8 +19,3 @@ variable "instance_group" {
   description = "Instance group self_link for backend"
   type        = string
 }
-
-variable "labels" {
-  type    = map(string)
-  default = {}
-}
