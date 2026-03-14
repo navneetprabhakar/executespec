@@ -113,29 +113,23 @@ REDIS_PORT=$(meta "es-redis-port")
 DEPLOY_BUCKET=$(meta "es-deploy-bucket")
 WORKSPACE_BUCKET=$(meta "es-workspace-bucket")
 
-# ── 6b. Download Gmail OAuth credentials from GCS (if uploaded) ────────────
+# ── 6b. Load SMTP credentials from GCS (if uploaded) ──────────────────────
 
-GMAIL_DIR="$APP_DIR/gmail"
-mkdir -p "$GMAIL_DIR"
-
-GMAIL_ENABLED="false"
+SMTP_USERNAME=""
+SMTP_PASSWORD=""
 if [ -n "$DEPLOY_BUCKET" ]; then
-  if gsutil -q stat "gs://${DEPLOY_BUCKET}/config/gmail/credentials.json" 2>/dev/null; then
-    gsutil cp "gs://${DEPLOY_BUCKET}/config/gmail/credentials.json" "$GMAIL_DIR/credentials.json"
-    log "Gmail credentials.json downloaded from GCS"
-
-    if gsutil -q stat "gs://${DEPLOY_BUCKET}/config/gmail/StoredCredential" 2>/dev/null; then
-      gsutil cp "gs://${DEPLOY_BUCKET}/config/gmail/StoredCredential" "$GMAIL_DIR/StoredCredential"
-      log "Gmail StoredCredential downloaded from GCS"
-      GMAIL_ENABLED="true"
-    else
-      log "Gmail StoredCredential not found in GCS — authorize locally first, then upload"
-    fi
+  # SMTP credentials stored as a simple key=value file in GCS
+  SMTP_CREDS_FILE="/tmp/smtp-creds"
+  if gsutil -q stat "gs://${DEPLOY_BUCKET}/config/smtp-credentials" 2>/dev/null; then
+    gsutil cp "gs://${DEPLOY_BUCKET}/config/smtp-credentials" "$SMTP_CREDS_FILE"
+    SMTP_USERNAME=$(grep '^SMTP_USERNAME=' "$SMTP_CREDS_FILE" | cut -d= -f2-)
+    SMTP_PASSWORD=$(grep '^SMTP_PASSWORD=' "$SMTP_CREDS_FILE" | cut -d= -f2-)
+    rm -f "$SMTP_CREDS_FILE"
+    log "SMTP credentials loaded from GCS"
   else
-    log "Gmail credentials.json not found in GCS — Gmail will be disabled"
+    log "No SMTP credentials in GCS — emails will be skipped"
   fi
 fi
-chmod -R 600 "$GMAIL_DIR"/* 2>/dev/null || true
 
 # ── 6c. Derive public URL and CORS origins from environment ─────────────────
 
@@ -168,10 +162,13 @@ REDIS_PORT=${REDIS_PORT}
 GCS_WORKSPACE_BUCKET=${WORKSPACE_BUCKET}
 DEPLOY_BUCKET=${DEPLOY_BUCKET}
 
-# Gmail
-GMAIL_ENABLED=${GMAIL_ENABLED}
-GMAIL_CREDENTIALS_PATH=${GMAIL_DIR}/credentials.json
-GMAIL_TOKENS_DIR=${GMAIL_DIR}
+# Mail (SMTP)
+MAIL_TRANSPORT=smtp
+MAIL_FROM=admin@executespec.ai
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=${SMTP_USERNAME}
+SMTP_PASSWORD=${SMTP_PASSWORD}
 
 # App
 SPRING_PROFILES_ACTIVE=${ES_ENV:-prod}
@@ -182,7 +179,7 @@ JAVA_OPTS="-Xms512m -Xmx3g -XX:+UseG1GC"
 ENVEOF
 
 chmod 600 "$ENV_FILE"
-log "Environment file written to $ENV_FILE (GMAIL_ENABLED=${GMAIL_ENABLED})"
+log "Environment file written to $ENV_FILE (MAIL_TRANSPORT=smtp)"
 
 # ── 7. Systemd service ──────────────────────────────────────────────────────
 
