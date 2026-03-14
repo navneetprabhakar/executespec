@@ -130,7 +130,7 @@ git push -u origin dev    # → triggers GitHub Actions → deploys to dev
 
 ```
 https://dev.executespec.ai                  → app loads
-https://dev.executespec.ai/actuator/health  → {"status":"UP"}
+https://dev.executespec.ai/api/health  → {"status":"UP"}
 ```
 
 ---
@@ -221,7 +221,7 @@ git push origin main    # → triggers GitHub Actions → deploys to prod
 
 ```
 https://app.executespec.ai                  → app loads
-https://app.executespec.ai/actuator/health  → {"status":"UP"}
+https://app.executespec.ai/api/health  → {"status":"UP"}
 ```
 
 ---

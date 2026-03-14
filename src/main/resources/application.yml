@@ -1,11 +1,4 @@
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health     # Required for LB health check: GET /actuator/health
-  endpoint:
-    health:
-      show-details: never   # Don't expose DB credentials in health response
+# Health check: GET /api/health (custom HealthController — no actuator dependency)
 
 spring:
   data:

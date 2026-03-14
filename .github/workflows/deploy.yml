@@ -148,7 +148,7 @@ jobs:
             RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE }} \
               --zone ${{ env.GCE_ZONE }} \
               --tunnel-through-iap \
-              --command="curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/actuator/health 2>/dev/null; echo \"HTTP_CODE=\$?:\$(cat /tmp/health.json 2>/dev/null)\"" \
+              --command="curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/api/health 2>/dev/null; echo \"HTTP_CODE=\$?:\$(cat /tmp/health.json 2>/dev/null)\"" \
               2>/dev/null) || RESULT="SSH_FAIL"
             echo "  Result: $RESULT"
             if echo "$RESULT" | grep -q '"status":"UP"'; then
