@@ -144,6 +144,10 @@ jobs:
                 sleep 10
               done
               echo 'Health check FAILED after 5 attempts'
+              echo '── Last 100 lines of application log ──'
+              sudo journalctl -u executespec --no-pager -n 100 || true
+              echo '── systemctl status ──'
+              sudo systemctl status executespec --no-pager || true
               exit 1
             "
 
