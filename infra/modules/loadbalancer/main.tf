@@ -40,8 +40,6 @@ resource "google_compute_backend_service" "app" {
     enable      = true
     sample_rate = 1.0
   }
-
-  labels = var.labels
 }
 
 # ── Health Check (for LB) ──────────────────────────────────────────────────

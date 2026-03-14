@@ -174,7 +174,6 @@ module "loadbalancer" {
   name_prefix    = local.name_prefix
   domain         = local.fqdn
   instance_group = module.compute.instance_group
-  labels         = local.common_labels
 
   depends_on = [module.compute, google_project_service.apis]
 }

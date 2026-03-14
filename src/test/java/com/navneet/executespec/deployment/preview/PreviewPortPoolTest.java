@@ -19,6 +19,7 @@ import static org.mockito.Mockito.when;
 class PreviewPortPoolTest {
 
     @Mock DockerExecutor docker;
+    @Mock ComposeExecutor compose;
 
     PreviewProperties props;
     PreviewPortPool pool;
@@ -30,7 +31,7 @@ class PreviewPortPoolTest {
         props.setPortRangeEnd(10002); // Small range: 3 ports (10000, 10001, 10002)
 
         when(docker.isDockerAvailable()).thenReturn(false); // skip reconcile in PostConstruct
-        pool = new PreviewPortPool(props, docker);
+        pool = new PreviewPortPool(props, docker, compose);
         pool.reconcile();
     }
 
@@ -139,7 +140,7 @@ class PreviewPortPoolTest {
             when(docker.listPreviewContainers()).thenReturn(List.of("preview-abc123"));
             when(docker.inspectHostPort("preview-abc123", 5173)).thenReturn(10001);
 
-            PreviewPortPool freshPool = new PreviewPortPool(props, docker);
+            PreviewPortPool freshPool = new PreviewPortPool(props, docker, compose);
             freshPool.reconcile();
 
             // Port 10001 should be taken, so first allocation should be 10000
@@ -158,7 +159,7 @@ class PreviewPortPoolTest {
             when(docker.inspectHostPort("preview-xyz", 8080)).thenReturn(-1);
             when(docker.inspectHostPort("preview-xyz", 8000)).thenReturn(-1);
 
-            PreviewPortPool freshPool = new PreviewPortPool(props, docker);
+            PreviewPortPool freshPool = new PreviewPortPool(props, docker, compose);
             freshPool.reconcile();
 
             assertThat(freshPool.activeCount()).isEqualTo(0);
@@ -169,7 +170,7 @@ class PreviewPortPoolTest {
         void handlesDockerUnavailable() {
             when(docker.isDockerAvailable()).thenReturn(false);
 
-            PreviewPortPool freshPool = new PreviewPortPool(props, docker);
+            PreviewPortPool freshPool = new PreviewPortPool(props, docker, compose);
             freshPool.reconcile();
 
             assertThat(freshPool.activeCount()).isEqualTo(0);
