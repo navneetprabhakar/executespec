@@ -40,7 +40,7 @@ public class ExecutespecApplication {
             harness.run(request);
         }
         // No ctx.close() — web server stays up for REST, SSE, and Web UI
-        log.info("AgentTeam web server running on http://localhost:8080");
+        log.info("Executespec web server running");
     }
 
     private static String promptUser(String prompt) {

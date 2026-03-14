@@ -55,25 +55,28 @@ public class GmailOAuthService {
     /** Only need SEND scope — never read user's inbox. */
     private static final List<String> SCOPES = List.of(GmailScopes.GMAIL_SEND);
 
-    @Value("${app.gmail.enabled:false}")
+    @Value("${app.mail.transport:smtp}")
+    private String transport;
+
+    @Value("${app.mail.gmail-api.enabled:false}")
     private boolean enabled;
 
     /** Absolute or relative path to the downloaded credentials.json file. */
-    @Value("${app.gmail.credentials-path:credentials.json}")
+    @Value("${app.mail.gmail-api.credentials-path:credentials.json}")
     private String credentialsPath;
 
     /**
      * Directory where the OAuth tokens (StoredCredential) are persisted.
      * Defaults to ~/.executespec/gmail-tokens — never commit this directory.
      */
-    @Value("${app.gmail.tokens-dir:${user.home}/.executespec/gmail-tokens}")
+    @Value("${app.mail.gmail-api.tokens-dir:${user.home}/.executespec/gmail-tokens}")
     private String tokensDir;
 
     /** The Gmail address that will appear as the From: sender. */
-    @Value("${app.gmail.sender-email:}")
+    @Value("${app.mail.from:}")
     private String senderEmail;
 
-    @Value("${app.gmail.app-name:executespec}")
+    @Value("${app.mail.gmail-api.app-name:executespec}")
     private String appName;
 
     private Gmail gmailService;
@@ -82,8 +85,12 @@ public class GmailOAuthService {
 
     @PostConstruct
     public void init() {
+        if (!"gmail-api".equals(transport)) {
+            log.info("Mail transport is '{}' — Gmail OAuth service not needed", transport);
+            return;
+        }
         if (!enabled) {
-            log.info("Gmail OAuth service disabled (app.gmail.enabled=false) — emails will be skipped");
+            log.info("Gmail API transport selected but disabled (app.mail.gmail-api.enabled=false)");
             return;
         }
         try {

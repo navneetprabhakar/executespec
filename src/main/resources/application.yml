@@ -227,18 +227,23 @@ preview:
     base-url: ""
 
 app:
-  # Gmail API OAuth2 sender config (replaces SMTP)
-  gmail:
-    enabled: ${GMAIL_ENABLED:false}
-    # Path to the credentials.json downloaded from Google Cloud Console
-    credentials-path: ${GMAIL_CREDENTIALS_PATH:credentials.json}
-    # Where to persist OAuth tokens after the first browser consent (never commit this dir)
-    tokens-dir: ${GMAIL_TOKENS_DIR:${user.home}/.executespec/gmail-tokens}
-    # Gmail address that will appear as From: — must be the authenticated account
-    sender-email: ${GMAIL_SENDER_EMAIL:admin@executespec.ai}
-    app-name: executespec
   mail:
+    # Transport: "smtp" (recommended for server) or "gmail-api" (OAuth, local dev)
+    transport: ${MAIL_TRANSPORT:smtp}
     base-url: ${APP_BASE_URL:http://localhost:5173}
+    from: ${MAIL_FROM:admin@executespec.ai}
+    # ── SMTP config (used when transport=smtp) ──────────────────────────────
+    smtp:
+      host: ${SMTP_HOST:smtp.gmail.com}
+      port: ${SMTP_PORT:587}
+      username: ${SMTP_USERNAME:}
+      password: ${SMTP_PASSWORD:}          # Gmail App Password (16 chars, no spaces)
+    # ── Gmail API OAuth2 config (used when transport=gmail-api) ─────────────
+    gmail-api:
+      enabled: ${GMAIL_ENABLED:false}
+      credentials-path: ${GMAIL_CREDENTIALS_PATH:credentials.json}
+      tokens-dir: ${GMAIL_TOKENS_DIR:${user.home}/.executespec/gmail-tokens}
+      app-name: executespec
   jwt:
     secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}
     access-token-expiry-minutes: 1440
