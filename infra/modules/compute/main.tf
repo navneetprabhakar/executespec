@@ -92,6 +92,6 @@ resource "google_compute_health_check" "app" {
 
   http_health_check {
     port         = 8080
-    request_path = "/actuator/health"
+    request_path = "/api/health"
   }
 }
