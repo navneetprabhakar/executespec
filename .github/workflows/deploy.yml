@@ -142,8 +142,8 @@ jobs:
 
               # Ensure CORS, dashboard URL, and app base URL are set in env file
               sudo grep -q '^CORS_ALLOWED_ORIGINS=' /opt/app/executespec.env 2>/dev/null \
-                && sudo sed -i 's|^CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=${{ env.APP_PUBLIC_URL }},http://localhost:5173|' /opt/app/executespec.env \
-                || echo 'CORS_ALLOWED_ORIGINS=${{ env.APP_PUBLIC_URL }},http://localhost:5173' | sudo tee -a /opt/app/executespec.env
+                && sudo sed -i 's|^CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173|' /opt/app/executespec.env \
+                || echo 'CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173' | sudo tee -a /opt/app/executespec.env
               sudo grep -q '^DASHBOARD_URL=' /opt/app/executespec.env 2>/dev/null \
                 && sudo sed -i 's|^DASHBOARD_URL=.*|DASHBOARD_URL=${{ env.APP_PUBLIC_URL }}|' /opt/app/executespec.env \
                 || echo 'DASHBOARD_URL=${{ env.APP_PUBLIC_URL }}' | sudo tee -a /opt/app/executespec.env
