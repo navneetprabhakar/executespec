@@ -57,6 +57,13 @@ resource "google_project_iam_member" "iap_tunnel_user" {
   member  = "serviceAccount:${google_service_account.gce.email}"
 }
 
+# Act as service account (required to SSH into instances running with this SA)
+resource "google_project_iam_member" "service_account_user" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.gce.email}"
+}
+
 # Access deploy bucket (read JARs on GCE + write JARs from CI/CD via WIF)
 resource "google_storage_bucket_iam_member" "deploy_rw" {
   bucket = var.deploy_bucket_name
