@@ -26,11 +26,22 @@ import java.util.List;
 /**
  * Manages Gmail API access via OAuth 2.0 (Desktop / Installed App credentials).
  *
- * First-run flow:
- *   1. Place credentials.json in the path configured by app.gmail.credentials-path
- *   2. Start the app — a browser window opens at localhost:8888 for Google consent
- *   3. Grant access; tokens are written to app.gmail.tokens-dir/StoredCredential
- *   4. All subsequent starts load the stored tokens and refresh them automatically
+ * <h3>Local development (browser available):</h3>
+ * <ol>
+ *   <li>Place credentials.json in the path configured by app.gmail.credentials-path</li>
+ *   <li>Start the app — a browser window opens at localhost:8888 for Google consent</li>
+ *   <li>Grant access; tokens are written to app.gmail.tokens-dir/StoredCredential</li>
+ *   <li>All subsequent starts load the stored tokens and refresh them automatically</li>
+ * </ol>
+ *
+ * <h3>Server deployment (headless):</h3>
+ * <ol>
+ *   <li>Authorize locally first (steps above) to generate StoredCredential</li>
+ *   <li>Upload credentials.json + StoredCredential to GCS deploy bucket under config/</li>
+ *   <li>The GCE startup script downloads them to /opt/app/gmail/</li>
+ *   <li>Set GMAIL_CREDENTIALS_PATH and GMAIL_TOKENS_DIR env vars</li>
+ *   <li>The service loads stored tokens directly — no browser needed</li>
+ * </ol>
  *
  * The Google client library refreshes the access token transparently before each
  * API call, so no manual refresh plumbing is needed in normal operation.
@@ -130,15 +141,16 @@ public class GmailOAuthService {
     // ── private helpers ──────────────────────────────────────────────────────
 
     /**
-     * Runs the OAuth2 installed-app authorisation flow.
+     * Loads or obtains OAuth2 credentials.
      *
-     * <ul>
-     *   <li>First run: opens a browser tab → user grants consent → callback to
-     *       localhost:8888 → tokens written to tokensDir/StoredCredential.</li>
-     *   <li>Subsequent runs: loads StoredCredential from disk; the Google client
-     *       library calls refreshToken() automatically when the access token is
-     *       within the expiry window.</li>
-     * </ul>
+     * <p><b>If StoredCredential exists</b> (server or repeat local run): loads the
+     * stored refresh token directly from the data store — no browser, no local server.
+     * The Google client auto-refreshes the access token when it's within the expiry window.
+     *
+     * <p><b>If StoredCredential does NOT exist</b> (first local run): starts a
+     * LocalServerReceiver on port 8888 and opens a browser for user consent.
+     * This only works on a machine with a display — on a headless server with no
+     * stored tokens, the service logs an error and stays unavailable.
      */
     private Credential authorize(NetHttpTransport httpTransport) throws Exception {
         File credFile = new File(credentialsPath);
@@ -162,14 +174,32 @@ public class GmailOAuthService {
 
         GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
                 httpTransport, JSON_FACTORY, clientSecrets, SCOPES)
-                // FileDataStoreFactory persists tokens so the browser only opens once
                 .setDataStoreFactory(new FileDataStoreFactory(tokenDirectory))
-                // "offline" access_type guarantees a refresh_token is returned
                 .setAccessType("offline")
                 .build();
 
-        // Port 8888 receives the redirect after the user clicks "Allow" in their browser.
-        // Change the port if 8888 is occupied on your machine.
+        // Try loading existing stored credential first (works on server without browser)
+        Credential storedCredential = flow.loadCredential("user");
+        if (storedCredential != null && storedCredential.getRefreshToken() != null) {
+            log.info("Gmail OAuth: loaded stored credential (token expiry: {}ms)",
+                    storedCredential.getExpirationTimeMilliseconds());
+            return storedCredential;
+        }
+
+        // No stored credential — need browser-based consent flow.
+        // Only attempt this if we're NOT on a headless server.
+        if (isHeadless()) {
+            throw new IllegalStateException(
+                    "No stored Gmail OAuth tokens found and running on headless server. " +
+                    "First authorize locally, then upload StoredCredential to the server. " +
+                    "Steps: 1) Run app locally with GMAIL_ENABLED=true → browser opens → grant consent. " +
+                    "2) Upload ~/.executespec/gmail-tokens/StoredCredential to " +
+                    "gs://<deploy-bucket>/config/gmail/StoredCredential. " +
+                    "3) Upload credentials.json to gs://<deploy-bucket>/config/gmail/credentials.json. " +
+                    "4) Redeploy — startup script downloads them automatically.");
+        }
+
+        log.info("Gmail OAuth: no stored tokens found — starting browser consent flow on port 8888");
         LocalServerReceiver receiver = new LocalServerReceiver.Builder()
                 .setPort(8888)
                 .build();
@@ -177,8 +207,30 @@ public class GmailOAuthService {
         Credential credential = new AuthorizationCodeInstalledApp(flow, receiver)
                 .authorize("user");
 
-        log.info("Gmail OAuth credential loaded — access token expiry: {}ms",
+        log.info("Gmail OAuth credential obtained — access token expiry: {}ms",
                 credential.getExpirationTimeMilliseconds());
         return credential;
+    }
+
+    /**
+     * Detects if running on a headless server (no display available).
+     * On GCE/CI, DISPLAY is unset and java.awt.GraphicsEnvironment.isHeadless() returns true.
+     */
+    private boolean isHeadless() {
+        // Check Java AWT headless flag
+        if (java.awt.GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        // Check if DISPLAY is set (Linux/macOS)
+        String display = System.getenv("DISPLAY");
+        if (display == null || display.isBlank()) {
+            // macOS doesn't use DISPLAY but has a built-in display, check for GCE metadata
+            String gceMetadata = System.getenv("GCE_METADATA_HOST");
+            if (gceMetadata != null) return true;
+            // Also check for common server indicators
+            File optApp = new File("/opt/app/executespec.env");
+            if (optApp.exists()) return true;
+        }
+        return false;
     }
 }
