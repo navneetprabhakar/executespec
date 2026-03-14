@@ -120,8 +120,8 @@ jobs:
               echo 'Validator toolchains OK'
             "
 
-      # ── Deploy to GCE via IAP tunnel ──────────────────────────────────────
-      - name: Deploy to GCE (${{ env.DEPLOY_ENV }})
+      # ── Deploy JAR and restart service ──────────────────────────────────────
+      - name: Deploy JAR to GCE (${{ env.DEPLOY_ENV }})
         run: |
           gcloud compute ssh ${{ env.GCE_INSTANCE }} \
             --zone ${{ env.GCE_ZONE }} \
@@ -133,23 +133,57 @@ jobs:
               sudo ln -sf /opt/app/releases/app-${{ github.sha }}.jar /opt/app/app.jar
               echo '${{ github.sha }}' | sudo tee /opt/app/RUNNING_SHA
               sudo systemctl restart executespec
-              echo 'Waiting for health check...'
-              sleep 20
-              for i in 1 2 3 4 5; do
-                if curl -sf http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'; then
-                  echo 'Health OK'
-                  exit 0
-                fi
-                echo \"Health check attempt \$i failed, retrying in 10s...\"
-                sleep 10
-              done
-              echo 'Health check FAILED after 5 attempts'
-              echo '── Last 100 lines of application log ──'
-              sudo journalctl -u executespec --no-pager -n 100 || true
-              echo '── systemctl status ──'
-              sudo systemctl status executespec --no-pager || true
-              exit 1
+              echo 'Deploy done — service restarting'
             "
+
+      # ── Wait for app to boot (local sleep, not over SSH) ─────────────────
+      - name: Wait for app startup
+        run: sleep 30
+
+      # ── Health check (separate short SSH session) ────────────────────────
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "Health check attempt $i..."
+            RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+              --zone ${{ env.GCE_ZONE }} \
+              --tunnel-through-iap \
+              --command="curl -sf http://localhost:8080/actuator/health 2>/dev/null || echo FAIL" \
+              2>/dev/null) || RESULT="SSH_FAIL"
+            echo "  Result: $RESULT"
+            if echo "$RESULT" | grep -q '"status":"UP"'; then
+              echo "Health OK"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Health check FAILED after 5 attempts"
+          exit 1
+
+      # ── Dump logs on failure ─────────────────────────────────────────────
+      - name: Dump app logs (on failure)
+        if: failure()
+        run: |
+          echo "── systemctl status ──"
+          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --command="sudo systemctl status executespec --no-pager 2>&1 || true" \
+            2>/dev/null || echo "SSH failed"
+          echo ""
+          echo "── Last 150 lines of app log ──"
+          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --command="sudo journalctl -u executespec --no-pager -n 150 2>&1 || true" \
+            2>/dev/null || echo "SSH failed"
+          echo ""
+          echo "── Environment file (redacted) ──"
+          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --command="sudo cat /opt/app/executespec.env 2>/dev/null | sed 's/=.*/=***/' || echo 'No env file'" \
+            2>/dev/null || echo "SSH failed"
 
       # ── Prune old releases (keep last 10) ─────────────────────────────────
       - name: Prune old JAR releases
