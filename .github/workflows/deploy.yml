@@ -130,8 +130,35 @@ jobs:
           fi
 
       # ── Deploy JAR and restart service ──────────────────────────────────────
+      - name: Write env patch script
+        run: |
+          cat > /tmp/env-patch.sh << 'SCRIPT'
+          #!/bin/bash
+          # Upsert a key=value into the env file
+          upsert() {
+            local key="${1%%=*}"
+            local kv="$1"
+            if grep -q "^${key}=" /opt/app/executespec.env 2>/dev/null; then
+              sed -i "s|^${key}=.*|${kv}|" /opt/app/executespec.env
+            else
+              echo "${kv}" >> /opt/app/executespec.env
+            fi
+          }
+          upsert "CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173"
+          upsert "DASHBOARD_URL=$1"
+          upsert "APP_BASE_URL=$1"
+          upsert "MAIL_TRANSPORT=smtp"
+          upsert "MAIL_FROM=admin@executespec.ai"
+          SCRIPT
+          chmod +x /tmp/env-patch.sh
+
       - name: Deploy JAR to GCE (${{ env.DEPLOY_ENV }})
         run: |
+          # Upload env-patch script to the VM
+          gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE }}:/tmp/env-patch.sh \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap
+
           gcloud compute ssh ${{ env.GCE_INSTANCE }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
@@ -139,20 +166,8 @@ jobs:
               set -e
               sudo mkdir -p /opt/app/releases
               sudo gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar /opt/app/releases/
-
-              # Ensure CORS, dashboard URL, app base URL, and mail transport are set
-              for KV in \
-                "CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173" \
-                "DASHBOARD_URL=${{ env.APP_PUBLIC_URL }}" \
-                "APP_BASE_URL=${{ env.APP_PUBLIC_URL }}" \
-                "MAIL_TRANSPORT=smtp" \
-                "MAIL_FROM=admin@executespec.ai"; do
-                KEY=\${KV%%=*}
-                sudo grep -q "^\${KEY}=" /opt/app/executespec.env 2>/dev/null \
-                  && sudo sed -i "s|^\${KEY}=.*|\${KV}|" /opt/app/executespec.env \
-                  || echo "\${KV}" | sudo tee -a /opt/app/executespec.env
-              done
-
+              sudo bash /tmp/env-patch.sh '${{ env.APP_PUBLIC_URL }}'
+              rm -f /tmp/env-patch.sh
               sudo ln -sf /opt/app/releases/app-${{ github.sha }}.jar /opt/app/app.jar
               echo '${{ github.sha }}' | sudo tee /opt/app/RUNNING_SHA
               sudo systemctl restart executespec
