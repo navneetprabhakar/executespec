@@ -101,6 +101,7 @@ fi
 log "Phase 6: Environment configuration"
 
 mkdir -p "$APP_DIR" "$RELEASES_DIR"
+chmod 755 "$APP_DIR" "$RELEASES_DIR"
 
 ES_ENV=$(meta "es-environment")
 DB_HOST=$(meta "es-db-host")

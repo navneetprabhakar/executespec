@@ -196,3 +196,5 @@ vite.config.ts.timestamp-*
 # Test Plans
 E2E_TEST_PLAN.md
 INTEGRATION_TEST_PLAN.md
+# Service account keys — never commit
+sa-key.json

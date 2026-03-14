@@ -128,9 +128,9 @@ jobs:
             --tunnel-through-iap \
             --command="
               set -e
-              mkdir -p /opt/app/releases
-              gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar /opt/app/releases/
-              ln -sf /opt/app/releases/app-${{ github.sha }}.jar /opt/app/app.jar
+              sudo mkdir -p /opt/app/releases
+              sudo gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar /opt/app/releases/
+              sudo ln -sf /opt/app/releases/app-${{ github.sha }}.jar /opt/app/app.jar
               echo '${{ github.sha }}' | sudo tee /opt/app/RUNNING_SHA
               sudo systemctl restart executespec
               echo 'Waiting for health check...'
