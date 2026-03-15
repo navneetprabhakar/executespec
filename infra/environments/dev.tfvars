@@ -13,7 +13,7 @@ domain           = "executespec.ai"
 subdomain_prefix = "dev"   # → dev.executespec.ai
 
 # ── Compute (smaller for dev) ───────────────────────────────────────────────
-machine_type      = "e2-standard-2"   # 2 vCPU, 8 GB RAM (~$49/mo)
+machine_type      = "e2-standard-4"   # 4 vCPU, 16 GB RAM (~$98/mo)
 instance_count    = 1                  # Single instance
 boot_disk_size_gb = 30
 boot_disk_type    = "pd-balanced"
@@ -47,4 +47,4 @@ labels = {
 # Cloud NAT:                  ~$3
 # GCS (minimal):              ~$1
 # ────────────────────────────────────────────
-# Total:                      ~$132/month
+# Total:                      ~$181/month

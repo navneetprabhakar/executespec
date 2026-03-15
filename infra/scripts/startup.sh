@@ -175,7 +175,7 @@ SPRING_PROFILES_ACTIVE=${ES_ENV:-prod}
 CORS_ALLOWED_ORIGINS=${CORS_ORIGINS}
 DASHBOARD_URL=${APP_PUBLIC_URL}
 APP_BASE_URL=${APP_PUBLIC_URL}
-JAVA_OPTS="-Xms512m -Xmx3g -XX:+UseG1GC"
+JAVA_OPTS="-Xms1g -Xmx6g -XX:+UseG1GC"
 ENVEOF
 
 chmod 600 "$ENV_FILE"
@@ -231,10 +231,24 @@ if [ -n "$DEPLOY_BUCKET" ]; then
     JAR_PATH="$RELEASES_DIR/app-${CURRENT_SHA}.jar"
     if [ ! -f "$JAR_PATH" ]; then
       log "Downloading app-${CURRENT_SHA}.jar from GCS..."
-      gsutil cp "gs://${DEPLOY_BUCKET}/releases/app-${CURRENT_SHA}.jar" "$JAR_PATH"
+      if ! gsutil cp "gs://${DEPLOY_BUCKET}/releases/app-${CURRENT_SHA}.jar" "$JAR_PATH" 2>/dev/null; then
+        log "WARN: CURRENT_SHA JAR not found in GCS (pruned?). Falling back to latest available..."
+        LATEST_JAR=$(gsutil ls "gs://${DEPLOY_BUCKET}/releases/app-*.jar" 2>/dev/null | sort | tail -1 || echo "")
+        if [ -n "$LATEST_JAR" ]; then
+          FALLBACK_NAME=$(basename "$LATEST_JAR")
+          JAR_PATH="$RELEASES_DIR/$FALLBACK_NAME"
+          gsutil cp "$LATEST_JAR" "$JAR_PATH"
+          log "Downloaded fallback JAR: $FALLBACK_NAME"
+        else
+          log "ERROR: No JARs available in GCS — waiting for CI/CD deploy"
+          JAR_PATH=""
+        fi
+      fi
     fi
-    ln -sf "$JAR_PATH" "$APP_DIR/app.jar"
-    log "Linked app.jar → app-${CURRENT_SHA}.jar"
+    if [ -n "$JAR_PATH" ] && [ -f "$JAR_PATH" ]; then
+      ln -sf "$JAR_PATH" "$APP_DIR/app.jar"
+      log "Linked app.jar → $(basename "$JAR_PATH")"
+    fi
   else
     log "No CURRENT_SHA found in GCS — skipping JAR download (first deploy?)"
   fi
