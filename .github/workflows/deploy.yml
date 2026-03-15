@@ -226,13 +226,15 @@ jobs:
       # ── Prune old releases (keep last 10) ─────────────────────────────────
       - name: Prune old JAR releases
         run: |
-          COUNT=$(gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ | wc -l)
+          CURRENT_JAR="app-${{ github.sha }}.jar"
+          ALL_JARS=$(gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ | sort)
+          COUNT=$(echo "$ALL_JARS" | wc -l)
           if [ "$COUNT" -gt 10 ]; then
-            gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ \
-              | sort \
+            echo "$ALL_JARS" \
               | head -n -10 \
+              | grep -v "$CURRENT_JAR" \
               | xargs -r gsutil rm
-            echo "Pruned $((COUNT - 10)) old release(s)"
+            echo "Pruned old release(s), kept current ($CURRENT_JAR) + last 10"
           else
             echo "Only $COUNT release(s) — no pruning needed"
           fi
