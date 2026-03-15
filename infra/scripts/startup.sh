@@ -131,16 +131,16 @@ if [ -n "$DEPLOY_BUCKET" ]; then
   fi
 fi
 
-# ── 6c. Load API keys from GCS (survives VM reboots) ─────────────────────
+# ── 6c. API Keys ─────────────────────────────────────────────────────────
 #
-# Upload once:
-#   gsutil cp api-keys gs://<DEPLOY_BUCKET>/config/api-keys
+# PRIMARY: GCP Secret Manager (loaded by SecretManagerConfigLoader at app startup).
+#          Secrets are labelled app=executespec and read via ADC.
 #
-# Format (plain key=value):
-#   ANTHROPIC_API_KEY=sk-ant-...
-#   OPENAI_API_KEY=sk-proj-...
-#   GOOGLE_API_KEY=AIza...
-#   GITHUB_PAT=ghp_...
+# FALLBACK: GCS plain-text file (for bootstrapping before Secret Manager is seeded).
+#          Upload once: gsutil cp api-keys gs://<DEPLOY_BUCKET>/config/api-keys
+#
+# The env file always gets empty defaults so Spring can start.
+# Secret Manager values (if present) override these at runtime.
 
 ANTHROPIC_API_KEY=""
 OPENAI_API_KEY=""
@@ -155,9 +155,9 @@ if [ -n "$DEPLOY_BUCKET" ]; then
     GOOGLE_API_KEY=$(grep '^GOOGLE_API_KEY=' "$API_KEYS_FILE" | cut -d= -f2-)
     GITHUB_PAT=$(grep '^GITHUB_PAT=' "$API_KEYS_FILE" | cut -d= -f2-)
     rm -f "$API_KEYS_FILE"
-    log "API keys loaded from GCS (${#ANTHROPIC_API_KEY} / ${#OPENAI_API_KEY} / ${#GOOGLE_API_KEY} / ${#GITHUB_PAT} chars)"
+    log "API keys loaded from GCS fallback (${#ANTHROPIC_API_KEY} / ${#OPENAI_API_KEY} / ${#GOOGLE_API_KEY} / ${#GITHUB_PAT} chars)"
   else
-    log "WARN: No API keys in GCS — backend will fail to call LLMs"
+    log "No GCS api-keys file — app will load secrets from Secret Manager at startup"
   fi
 fi
 

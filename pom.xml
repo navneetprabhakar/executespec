@@ -159,6 +159,13 @@
       <version>2.40.0</version>
     </dependency>
 
+    <!-- Google Cloud Secret Manager — externalized secrets (API keys, credentials) -->
+    <dependency>
+      <groupId>com.google.cloud</groupId>
+      <artifactId>google-cloud-secretmanager</artifactId>
+      <version>2.51.0</version>
+    </dependency>
+
     <!-- Redis (Lettuce client) — gate signaling across instances + ShedLock provider -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
