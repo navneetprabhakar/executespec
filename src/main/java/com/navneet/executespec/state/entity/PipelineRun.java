@@ -187,6 +187,11 @@ public class PipelineRun {
     @Column(name = "source_run_id")
     private String sourceRunId;
 
+    /** How many times a preview has been started for this run. Capped by tier_config.max_preview_starts. */
+    @Builder.Default
+    @Column(name = "preview_start_count", columnDefinition = "integer default 0")
+    private int previewStartCount = 0;
+
     // ── GCS workspace archiving ────────────────────────────────────────────────
 
     /**

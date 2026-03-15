@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Gift, Package, ShoppingCart, Clock, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/useAuthStore';
+import BillingProfileForm from '@/components/billing/BillingProfileForm';
 import { useUiStore } from '@/stores/useUiStore';
 import {
   fetchBillingStatus,
@@ -333,6 +334,9 @@ export default function BillingPage() {
           userEmail={user?.email}
         />
       )}
+
+      {/* Billing profile (GST details) */}
+      <BillingProfileForm />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.service.MailService;
 import com.navneet.executespec.billing.dto.*;
 import com.navneet.executespec.billing.entity.*;
 import com.navneet.executespec.billing.exception.BillingException;
@@ -48,6 +49,12 @@ public class BillingService {
 
     // Run top-up (V1.2)
     private final RunTopupRepository runTopupRepo;
+
+    // Invoicing (V1.3)
+    private final InvoiceService invoiceService;
+
+    // Email service for welcome/upgrade emails
+    private final MailService mailService;
 
     @Value("${billing.terms-version:2026-03-v1}")
     private String currentTermsVersion;
@@ -175,6 +182,13 @@ public class BillingService {
         AppUser activatedUser = userRepo.findById(userId).orElse(null);
         if (activatedUser != null) {
             notificationService.sendSubscriptionActivated(activatedUser.getEmail(), plan.getName());
+        }
+
+        // V1.3: Generate invoice
+        try {
+            invoiceService.generateSubscriptionInvoice(sub, plan, request.razorpayPaymentId());
+        } catch (Exception e) {
+            log.warn("Invoice generation failed for subscription activation (non-blocking): {}", e.getMessage());
         }
 
         return getStatus(userId);
@@ -422,6 +436,15 @@ public class BillingService {
 
                 log.info("Webhook: subscription charged and extended, user={}, periodEnd={}",
                         sub.getUserId(), sub.getCurrentPeriodEnd());
+
+                // Generate renewal invoice
+                try {
+                    String renewalPaymentId = payload.path("payload").path("payment")
+                            .path("entity").path("id").asText("");
+                    invoiceService.generateSubscriptionInvoice(sub, plan, renewalPaymentId);
+                } catch (Exception e) {
+                    log.warn("Invoice generation failed for renewal (non-blocking): {}", e.getMessage());
+                }
             }
             case "subscription.pending" -> {
                 sub.setStatus("PAST_DUE");
@@ -499,6 +522,13 @@ public class BillingService {
         log.info("Top-up credited via webhook: orderId={}, quantity={}, userId={}",
                 orderId, topup.getQuantity(), topup.getUserId());
 
+        // Generate invoice
+        try {
+            invoiceService.generateTopupInvoice(topup, null, paymentId);
+        } catch (Exception e) {
+            log.warn("Invoice generation failed for top-up webhook (non-blocking): {}", e.getMessage());
+        }
+
         // Notify user
         if (topup.getUserId() != null) {
             AppUser user = userRepo.findById(topup.getUserId()).orElse(null);
@@ -539,6 +569,14 @@ public class BillingService {
 
         log.info("Tier upgraded: user={}, authTier={}, planTier={}, keyMode={}",
                 userId, authTier, plan.getTier(), plan.getKeyMode());
+
+        // Send upgrade email
+        try {
+            mailService.sendTierUpgradeEmail(user.getEmail(), user.getFirstName(),
+                    plan.getName(), authTier);
+        } catch (Exception e) {
+            log.warn("Failed to send tier upgrade email (non-blocking): {}", e.getMessage());
+        }
     }
 
     private void downgradeToFree(BillingSubscription sub) {

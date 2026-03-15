@@ -51,31 +51,12 @@ public class AgentProperties {
     @Data
     public static class Concurrency {
         private int maxRuns = 3;
-        /** Default agentic loop iterations — used as fallback and for HIGH complexity tasks. */
-        private int maxIterations = 80;
-        /** Iteration cap for LOW complexity tasks. */
-        private int maxIterationsLow = 30;
-        /** Iteration cap for MEDIUM complexity tasks. */
-        private int maxIterationsMedium = 55;
-        /** Iteration cap for HIGH complexity tasks. */
-        private int maxIterationsHigh = 80;
 
-        /** % of base cap at which to check progress and potentially extend. */
-        private int extensionThresholdPct = 80;
-        /** % of base cap to add per extension grant. */
-        private int extensionPct = 50;
-        /** Absolute ceiling as multiplier of base cap — never exceeded. */
-        private int absoluteCeilingMultiplier = 2;
+        /** Maximum wall-clock time per task in minutes. Replaces iteration-based caps. */
+        private int maxTaskDurationMinutes = 15;
 
-        /** Resolve iteration limit by complexity string (LOW/MEDIUM/HIGH). */
-        public int maxIterationsFor(String complexity) {
-            if (complexity == null) return maxIterationsMedium;
-            return switch (complexity.toUpperCase()) {
-                case "LOW" -> maxIterationsLow;
-                case "HIGH" -> maxIterationsHigh;
-                default -> maxIterationsMedium;
-            };
-        }
+        /** Safety-net iteration cap to prevent infinite loops (should never trigger). */
+        private int safetyIterationCap = 500;
     }
 
     @Data

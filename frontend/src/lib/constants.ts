@@ -38,6 +38,8 @@ export const NAV_ITEMS: {
   { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3',       adminOnly: true  },
   { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign',     adminOnly: false, requiredPermission: 'canViewPricing' },
   { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false, requiredPermission: 'canManageIntegrations' },
+  { path: '/invoices',     label: 'Invoices',     icon: 'Receipt',        adminOnly: false, requiredPermission: 'canViewInvoices' },
+  { path: '/accounting',   label: 'Accounting',   icon: 'Calculator',     adminOnly: false, requiredPermission: 'canViewAccounting' },
   { path: '/audit',        label: 'Audit',        icon: 'ClipboardList',  adminOnly: false, requiredPermission: 'canViewAudit' },
   { path: '/settings',     label: 'Settings',     icon: 'Settings',       adminOnly: false },
 ];
@@ -47,6 +49,8 @@ export const ROUTE_PATHS = {
   dashboard:    '/dashboard',
   pricing:      '/pricing',
   integrations: '/integrations',
+  invoices:     '/invoices',
+  accounting:   '/accounting',
   audit:        '/audit',
   settings:     '/settings',
 };

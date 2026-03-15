@@ -1,24 +1,27 @@
 package com.navneet.executespec.deployment.preview;
 
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.TierConfig;
+import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.deployment.ArtifactRegistryClient;
+import com.navneet.executespec.deployment.CloudRunClient;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,48 +31,42 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class PreviewService {
 
-    private final ComposeExecutor compose;
-    private final DockerExecutor docker;
     private final DevDockerfileGenerator dockerfileGen;
-    private final ComposeFileGenerator composeFileGen;
     private final DatabaseDetector databaseDetector;
     private final EnvVarDetector envVarDetector;
-    private final PreviewPortPool portPool;
+    private final ArtifactRegistryClient artifactRegistry;
+    private final CloudRunClient cloudRun;
     private final PreviewProperties props;
     private final SseBroadcaster broadcaster;
     private final StateStore stateStore;
     private final AgentProperties agentProps;
-
-    @Autowired(required = false)
-    private CaddyProxyManager caddyProxyManager;
+    private final TierConfigRepository tierConfigRepo;
 
     /** runId → session */
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
 
     private static final Set<String> COMPLETE_STATUSES = Set.of("COMPLETE", "PARTIAL");
 
-    public PreviewService(ComposeExecutor compose,
-                          DockerExecutor docker,
-                          DevDockerfileGenerator dockerfileGen,
-                          ComposeFileGenerator composeFileGen,
+    public PreviewService(DevDockerfileGenerator dockerfileGen,
                           DatabaseDetector databaseDetector,
                           EnvVarDetector envVarDetector,
-                          PreviewPortPool portPool,
+                          ArtifactRegistryClient artifactRegistry,
+                          CloudRunClient cloudRun,
                           PreviewProperties props,
                           SseBroadcaster broadcaster,
                           StateStore stateStore,
-                          AgentProperties agentProps) {
-        this.compose = compose;
-        this.docker = docker;
+                          AgentProperties agentProps,
+                          TierConfigRepository tierConfigRepo) {
         this.dockerfileGen = dockerfileGen;
-        this.composeFileGen = composeFileGen;
         this.databaseDetector = databaseDetector;
         this.envVarDetector = envVarDetector;
-        this.portPool = portPool;
+        this.artifactRegistry = artifactRegistry;
+        this.cloudRun = cloudRun;
         this.props = props;
         this.broadcaster = broadcaster;
         this.stateStore = stateStore;
         this.agentProps = agentProps;
+        this.tierConfigRepo = tierConfigRepo;
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -92,7 +89,7 @@ public class PreviewService {
 
     /**
      * Start a preview for a completed run. Returns immediately with ANALYZING status.
-     * The actual build+start happens on a virtual thread.
+     * The actual build → push → deploy happens on a virtual thread via Cloud Run.
      *
      * @param envVars user-provided environment variables (may be null/empty)
      */
@@ -100,11 +97,6 @@ public class PreviewService {
         // Guard: preview enabled
         if (!props.isEnabled()) {
             throw new PreviewException("Preview is disabled");
-        }
-
-        // Guard: Docker available
-        if (!docker.isDockerAvailable()) {
-            throw new PreviewException("Docker is not available on this host");
         }
 
         // Guard: run must exist and be complete
@@ -122,17 +114,29 @@ public class PreviewService {
 
         // Guard: concurrent preview limit
         long userPreviewCount = active.values().stream()
-                .filter(s -> {
-                    return stateStore.findRun(s.runId())
-                            .map(r -> user.getId().equals(r.getCreatedByUserId()))
-                            .orElse(false);
-                })
+                .filter(s -> stateStore.findRun(s.runId())
+                        .map(r -> user.getId().equals(r.getCreatedByUserId()))
+                        .orElse(false))
                 .count();
         int maxConcurrent = getMaxConcurrent(user.getTier());
         if (userPreviewCount >= maxConcurrent) {
             throw new PreviewException("Max concurrent previews reached (" + maxConcurrent +
                     " for " + user.getTier() + " tier). Stop an existing preview first.");
         }
+
+        // Guard: per-run preview start limit
+        int maxStarts = tierConfigRepo.findById(user.getTier())
+                .map(TierConfig::getMaxPreviewStarts)
+                .orElse(3);
+        if (maxStarts >= 0 && run.getPreviewStartCount() >= maxStarts) {
+            throw new PreviewException("Preview limit reached for this run ("
+                    + run.getPreviewStartCount() + "/" + maxStarts
+                    + "). Upgrade your plan for more.");
+        }
+
+        // Increment preview start counter
+        run.setPreviewStartCount(run.getPreviewStartCount() + 1);
+        stateStore.saveRun(run);
 
         // Detect project type
         Path workspace = Path.of(agentProps.getWorkspace(), runId);
@@ -141,59 +145,61 @@ public class PreviewService {
             throw new PreviewException("Unsupported project type. Use Deploy to Cloud Run instead.");
         }
 
-        // Allocate port and create initial session
-        int port = portPool.allocate(runId);
-        String projectName = composeProjectName(runId);
-        String url = props.getProxy().isEnabled()
-                ? props.getProxy().getBaseUrl() + "/preview/" + runId
-                : "http://localhost:" + port;
-        Duration ttl = getTtl(user.getTier());
+        // Create initial session
+        String serviceName = cloudRunServiceName(runId);
+        Duration ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
 
         PreviewSession session = new PreviewSession(
-                runId, projectName, type, null,
-                PreviewStatus.ANALYZING, port, url, null,
+                runId, serviceName, type, null,
+                PreviewStatus.ANALYZING, null, null, null,
                 Instant.now(), Instant.now().plus(ttl)
         );
         active.put(runId, session);
 
-        // Launch async build+start on a virtual thread
+        // Launch async build → push → deploy on a virtual thread
         Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
-        Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, port, projectName, safeEnvVars));
+        Thread.startVirtualThread(() -> buildPushAndDeploy(runId, workspace, type, serviceName, safeEnvVars));
 
-        log.info("Preview started for run {} (type={}, port={}, ttl={}min)",
-                runId, type, port, ttl.toMinutes());
+        log.info("Preview started for run {} (type={}, service={}, ttl={}min)",
+                runId, type, serviceName, ttl.toMinutes());
         return session;
     }
 
-    /**
-     * Backward-compatible start without env vars.
-     */
+    /** Backward-compatible start without env vars. */
     public PreviewSession start(String runId, AppUser user) {
         return start(runId, user, null);
     }
 
     /**
-     * Stop a running preview. Tears down compose project. Idempotent.
+     * Stop a running preview. Deletes Cloud Run service and AR image. Idempotent.
      */
     public void stop(String runId) {
-        PreviewSession session = active.get(runId);
+        PreviewSession session = active.remove(runId);
         if (session == null) return;
 
-        // Tear down compose project (removes containers, networks, volumes)
-        compose.down(session.composeProjectName(), true);
-        portPool.release(session.hostPort());
-
-        if (caddyProxyManager != null) {
-            caddyProxyManager.removeRoute(runId);
+        // Delete Cloud Run service
+        if (session.cloudRunServiceName() != null) {
+            try {
+                cloudRun.deleteService(session.cloudRunServiceName());
+            } catch (Exception e) {
+                log.warn("Failed to delete Cloud Run service {} for run {}: {}",
+                        session.cloudRunServiceName(), runId, e.getMessage());
+            }
         }
 
-        active.remove(runId);
+        // Delete AR image
+        if (session.imageUri() != null) {
+            try {
+                cloudRun.deleteImage(session.imageUri());
+            } catch (Exception e) {
+                log.warn("Failed to delete AR image {} for run {}: {}",
+                        session.imageUri(), runId, e.getMessage());
+            }
+        }
+
         broadcaster.emit(runId, new RunEvent("PREVIEW_STOPPED", runId, null, null, Instant.now()));
-
-        // Cleanup workspace files
-        cleanupWorkspaceFiles(runId);
-
-        log.info("Preview stopped for run {}", runId);
+        log.info("Preview stopped for run {} (service={}, image={})",
+                runId, session.cloudRunServiceName(), session.imageUri());
     }
 
     /**
@@ -205,41 +211,20 @@ public class PreviewService {
     }
 
     /**
-     * Get container logs for a running preview.
-     *
-     * @param tailLines if <= 0, returns ALL logs from container start
-     * @param filter    "backend", "frontend", "db", or "all"
+     * Get logs for a Cloud Run preview. Currently returns a status message.
+     * Future: fetch via gcloud logging read.
      */
     public String getLogs(String runId, int tailLines, String filter) {
         PreviewSession session = active.get(runId);
         if (session == null) return "";
-
-        String serviceName = null;
-        if ("db".equalsIgnoreCase(filter) && session.databaseType() != null) {
-            serviceName = "db";
-        }
-        // For backend/frontend filter on full-stack, we still get app logs and filter by prefix
-        String raw = compose.logs(session.composeProjectName(), serviceName, tailLines);
-
-        if (serviceName != null || filter == null || filter.isBlank() || "all".equalsIgnoreCase(filter)) {
-            return raw;
-        }
-
-        // Filter lines by prefix: [backend] or [frontend]
-        String prefix = "[" + filter.toLowerCase() + "] ";
-        return raw.lines()
-                .filter(line -> line.contains(prefix))
-                .map(line -> {
-                    int idx = line.indexOf(prefix);
-                    return idx >= 0 ? line.substring(idx + prefix.length()) : line;
-                })
-                .collect(java.util.stream.Collectors.joining("\n"));
+        if (session.url() == null) return "Preview is still starting up...";
+        return "Preview is running at: " + session.url() + "\nCloud Run console logs available in GCP Console.";
     }
 
-    // ── Private: build and start with deadline ───────────────────────────────
+    // ── Private: build, push, deploy with deadline ──────────────────────────
 
-    private void buildAndStart(String runId, Path workspace, PreviewProjectType type,
-                               int port, String projectName, Map<String, String> envVars) {
+    private void buildPushAndDeploy(String runId, Path workspace, PreviewProjectType type,
+                                     String serviceName, Map<String, String> envVars) {
         Instant deadline = Instant.now().plusSeconds(props.getTotalStartupTimeoutSeconds());
 
         try {
@@ -252,94 +237,91 @@ public class PreviewService {
             if (dbType != null) {
                 log.info("Preview for run {}: detected database {}", runId, dbType);
                 updateSession(runId, s -> new PreviewSession(
-                        s.runId(), s.composeProjectName(), s.projectType(), dbType,
-                        PreviewStatus.ANALYZING, s.hostPort(), s.url(), null,
+                        s.runId(), s.cloudRunServiceName(), s.projectType(), dbType,
+                        PreviewStatus.ANALYZING, s.url(), s.imageUri(), null,
                         s.startedAt(), s.expiresAt()));
             }
 
-            // Phase 2: Write .dockerignore and Dockerfile
+            // Phase 2: Generate Cloud Run-compatible Dockerfile
             checkDeadline(deadline, "Dockerfile generation");
             Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
-            Files.writeString(workspace.resolve("Dockerfile"), dockerfileGen.generate(type, workspace));
+            Files.writeString(workspace.resolve("Dockerfile"), dockerfileGen.generateForCloudRun(type, workspace));
 
-            // Phase 3: Generate docker-compose.yml
-            checkDeadline(deadline, "compose file generation");
-            Path composeFile = composeFileGen.generate(workspace, type, dbType, envVars, port);
-
-            // Phase 4: Docker Compose up (build + start)
-            checkDeadline(deadline, "container build");
+            // Phase 3: Docker build
+            checkDeadline(deadline, "Docker build");
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
-                    PreviewStatus.BUILDING, s.hostPort(), s.url(), null,
+                    s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.BUILDING, s.url(), s.imageUri(), null,
                     s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_BUILDING", runId, null,
-                    "Building " + type + " container" + (dbType != null ? " + " + dbType + " database" : "") + "...",
-                    Instant.now()));
+                    "Building " + type + " container...", Instant.now()));
 
-            Duration buildTimeout = Duration.between(Instant.now(), deadline);
-            compose.up(composeFile, projectName, buildTimeout);
+            String versionTag = "preview-" + runId.substring(0, 8) + "-" + Instant.now().getEpochSecond();
+            var buildResult = artifactRegistry.buildImage(workspace, versionTag);
+            String imageUri = buildResult.imageTag();
 
-            log.info("Compose up complete for run {} (project={})", runId, projectName);
+            // Phase 4: Push to Artifact Registry
+            checkDeadline(deadline, "image push");
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.PUSHING, s.url(), imageUri, null,
+                    s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_PUSHING", runId, null,
+                    "Pushing image to registry...", Instant.now()));
 
-            // Phase 5: Wait for DB healthy (if applicable)
+            artifactRegistry.pushImage(imageUri);
+
+            // Phase 5: Deploy to Cloud Run
+            checkDeadline(deadline, "Cloud Run deploy");
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.DEPLOYING, s.url(), imageUri, null,
+                    s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_DEPLOYING", runId, null,
+                    "Deploying to Cloud Run...", Instant.now()));
+
+            // Build env vars: inject embedded DB config if DB detected + user env vars
+            Map<String, String> deployEnvVars = new HashMap<>(envVars);
+            deployEnvVars.put("PORT", "8080");
             if (dbType != null) {
-                checkDeadline(deadline, "database readiness");
-                updateSession(runId, s -> new PreviewSession(
-                        s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
-                        PreviewStatus.DB_STARTING, s.hostPort(), s.url(), null,
-                        s.startedAt(), s.expiresAt()));
-                broadcaster.emit(runId, new RunEvent("PREVIEW_DB_STARTING", runId, null,
-                        "Waiting for " + dbType + " database to be ready...", Instant.now()));
-
-                Duration dbTimeout = Duration.ofSeconds(Math.min(60,
-                        Duration.between(Instant.now(), deadline).toSeconds()));
-                compose.waitForHealthy(projectName, "db", dbTimeout);
-
-                log.info("Database {} is healthy for run {}", dbType, runId);
+                injectEmbeddedDbConfig(type, dbType, deployEnvVars);
             }
 
-            // Phase 6: Wait for app readiness (HTTP poll)
-            checkDeadline(deadline, "application readiness");
+            var deployResult = cloudRun.deployPreview(serviceName, imageUri,
+                    props.getCloudRunCpu(), props.getCloudRunMemory(), deployEnvVars);
+
+            // Phase 6: Health check
+            checkDeadline(deadline, "health check");
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
-                    PreviewStatus.STARTING, s.hostPort(), s.url(), null,
+                    s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.STARTING, deployResult.serviceUrl(), imageUri, null,
                     s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_STARTING", runId, null,
                     "Waiting for application to be ready...", Instant.now()));
 
-            Duration appTimeout = Duration.between(Instant.now(), deadline);
-            boolean ready = waitForReadiness(port, (int) appTimeout.toSeconds());
-
-            if (!ready) {
-                String logs = compose.logs(projectName, "app", 30);
-                fail(runId, "Application startup timed out\n" + logs, projectName);
+            boolean healthy = cloudRun.healthCheck(deployResult.serviceUrl());
+            if (!healthy) {
+                fail(runId, "Application health check failed after deployment", imageUri, serviceName);
                 return;
             }
 
             // Success!
-            PreviewSession session = active.get(runId);
-            if (session == null) return; // was stopped while starting
+            if (!active.containsKey(runId)) return; // was stopped while starting
 
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
-                    PreviewStatus.RUNNING, s.hostPort(), s.url(), null,
+                    s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.RUNNING, deployResult.serviceUrl(), imageUri, null,
                     s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null,
+                    deployResult.serviceUrl(), Instant.now()));
 
-            if (caddyProxyManager != null) {
-                caddyProxyManager.addRoute(runId, port);
-            }
-
-            String previewUrl = active.get(runId) != null ? active.get(runId).url() : "http://localhost:" + port;
-            broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null, previewUrl, Instant.now()));
-
-            log.info("Preview ready for run {} at {} (db={})", runId, previewUrl, dbType);
+            log.info("Preview ready for run {} at {} (db={})", runId, deployResult.serviceUrl(), dbType);
 
         } catch (DeadlineExceededException e) {
-            compose.down(projectName, true);
-            portPool.release(port);
+            cleanupOnFailure(runId, serviceName);
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
-                    PreviewStatus.TIMED_OUT, s.hostPort(), s.url(),
+                    s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
+                    PreviewStatus.TIMED_OUT, s.url(), s.imageUri(),
                     "Preview startup timed out after " + props.getTotalStartupTimeoutSeconds()
                             + "s during: " + e.getPhase(),
                     s.startedAt(), s.expiresAt()));
@@ -348,12 +330,12 @@ public class PreviewService {
             log.warn("Preview timed out for run {} during: {}", runId, e.getPhase());
 
         } catch (IOException e) {
-            fail(runId, "Failed to write Dockerfile: " + e.getMessage(), projectName);
+            fail(runId, "Build/push failed: " + e.getMessage(), null, serviceName);
         } catch (PreviewException e) {
-            fail(runId, e.getMessage(), projectName);
+            fail(runId, e.getMessage(), null, serviceName);
         } catch (Exception e) {
-            fail(runId, "Unexpected error: " + e.getMessage(), projectName);
-            log.error("Preview build/start failed for run {}", runId, e);
+            fail(runId, "Unexpected error: " + e.getMessage(), null, serviceName);
+            log.error("Preview build/push/deploy failed for run {}", runId, e);
         }
     }
 
@@ -363,68 +345,67 @@ public class PreviewService {
         }
     }
 
-    private void fail(String runId, String message, String projectName) {
-        // Clean up compose project on failure
-        try {
-            compose.down(projectName, true);
-        } catch (Exception e) {
-            log.debug("Compose down failed during cleanup for {}: {}", runId, e.getMessage());
-        }
+    private void fail(String runId, String message, String imageUri, String serviceName) {
+        cleanupOnFailure(runId, serviceName);
 
         updateSession(runId, s -> new PreviewSession(
-                s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
-                PreviewStatus.FAILED, s.hostPort(), s.url(), message,
+                s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
+                PreviewStatus.FAILED, s.url(), imageUri != null ? imageUri : s.imageUri(), message,
                 s.startedAt(), s.expiresAt()));
         broadcaster.emit(runId, new RunEvent("PREVIEW_FAILED", runId, null, message, Instant.now()));
         log.warn("Preview failed for run {}: {}", runId, message);
+    }
+
+    private void cleanupOnFailure(String runId, String serviceName) {
+        if (serviceName != null) {
+            try {
+                cloudRun.deleteService(serviceName);
+            } catch (Exception e) {
+                log.debug("Cleanup: failed to delete Cloud Run service {}: {}", serviceName, e.getMessage());
+            }
+        }
     }
 
     private void updateSession(String runId, java.util.function.UnaryOperator<PreviewSession> updater) {
         active.computeIfPresent(runId, (k, old) -> updater.apply(old));
     }
 
-    private boolean waitForReadiness(int port, int timeoutSeconds) {
-        long deadline = System.currentTimeMillis() + (timeoutSeconds * 1000L);
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                var conn = (HttpURLConnection) URI.create("http://localhost:" + port).toURL().openConnection();
-                conn.setConnectTimeout(2000);
-                conn.setReadTimeout(2000);
-                conn.setRequestMethod("GET");
-                int code = conn.getResponseCode();
-                conn.disconnect();
-                if (code >= 200 && code < 500) {
-                    return true;
-                }
-            } catch (Exception ignored) {
-                // Server not ready yet
+    /**
+     * Inject embedded database config for Cloud Run previews (no DB sidecar available).
+     */
+    private void injectEmbeddedDbConfig(PreviewProjectType type, DatabaseType dbType,
+                                         Map<String, String> envVars) {
+        switch (type) {
+            case SPRING_BOOT -> {
+                // H2 in-memory for Spring Boot
+                envVars.put("SPRING_DATASOURCE_URL", "jdbc:h2:mem:preview;DB_CLOSE_DELAY=-1");
+                envVars.put("SPRING_DATASOURCE_DRIVER_CLASS_NAME", "org.h2.Driver");
+                envVars.put("SPRING_JPA_DATABASE_PLATFORM", "org.hibernate.dialect.H2Dialect");
+                log.info("Injected H2 in-memory DB config for {} preview", type);
             }
-            try {
-                Thread.sleep(props.getReadinessPollIntervalMs());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
+            case NODE_BACKEND, FULL_STACK -> {
+                // SQLite for Node.js
+                envVars.put("DATABASE_URL", "sqlite://:memory:");
+                log.info("Injected SQLite in-memory DB config for {} preview", type);
             }
+            case PYTHON -> {
+                // SQLite for Python/Django
+                envVars.putIfAbsent("DATABASE_URL", "sqlite:///db.sqlite3");
+                log.info("Injected SQLite DB config for Python preview");
+            }
+            default -> log.debug("No embedded DB injection needed for {}", type);
         }
-        return false;
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     /**
-     * Compose project name derived from runId. Must be lowercase alphanumeric + hyphens.
+     * Cloud Run service name derived from runId.
+     * Must be lowercase alphanumeric + hyphens, max 63 chars.
      */
-    private String composeProjectName(String runId) {
+    private String cloudRunServiceName(String runId) {
         String safe = runId.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
         return "es-preview-" + safe.substring(0, Math.min(12, safe.length()));
-    }
-
-    private Duration getTtl(String tier) {
-        return switch (tier) {
-            case "ENTERPRISE" -> Duration.ofMinutes(props.getTtl().getEnterpriseMinutes());
-            case "PRO" -> Duration.ofMinutes(props.getTtl().getProMinutes());
-            default -> Duration.ofMinutes(props.getTtl().getFreeMinutes());
-        };
     }
 
     private int getMaxConcurrent(String tier) {
@@ -433,16 +414,6 @@ public class PreviewService {
             case "PRO" -> props.getConcurrency().getProMax();
             default -> props.getConcurrency().getFreeMax();
         };
-    }
-
-    /**
-     * Docker files (Dockerfile, .dockerignore, docker-compose.yml) are intentionally
-     * kept in the workspace after preview stops — they're useful project artifacts
-     * for the user's code download.
-     */
-    @SuppressWarnings("unused")
-    private void cleanupWorkspaceFiles(String runId) {
-        // No-op: Docker files are retained for download
     }
 
     // ── Scheduled cleanup ───────────────────────────────────────────────────
@@ -457,6 +428,45 @@ public class PreviewService {
                     log.info("Preview expired for run {}, stopping", runId);
                     stop(runId);
                 });
+    }
+
+    /**
+     * Orphan cleanup: find Cloud Run services with the preview label
+     * that are not in our active map (e.g., from a previous server instance).
+     */
+    @Scheduled(fixedRate = 1800000) // every 30 minutes
+    void cleanupOrphans() {
+        try {
+            List<String> services = cloudRun.listPreviewServices();
+            Set<String> activeServiceNames = ConcurrentHashMap.newKeySet();
+            active.values().forEach(s -> activeServiceNames.add(s.cloudRunServiceName()));
+
+            for (String serviceName : services) {
+                if (!activeServiceNames.contains(serviceName)) {
+                    log.info("Deleting orphaned preview Cloud Run service: {}", serviceName);
+                    try {
+                        cloudRun.deleteService(serviceName);
+                    } catch (Exception e) {
+                        log.warn("Failed to delete orphaned service {}: {}", serviceName, e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Orphan cleanup failed: {}", e.getMessage());
+        }
+    }
+
+    @PostConstruct
+    void recoverOrphans() {
+        // On startup, schedule a one-time orphan cleanup after 60 seconds
+        Thread.startVirtualThread(() -> {
+            try {
+                Thread.sleep(60000);
+                cleanupOrphans();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
     }
 
     @PreDestroy

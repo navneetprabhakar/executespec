@@ -17,12 +17,21 @@ export interface TierPermissions {
   canViewOrgMembers: boolean;
   canViewAudit: boolean;
   canViewLiveLog: boolean;
+  // Finance permissions
+  canViewInvoices: boolean;
+  canViewAccounting: boolean;
+  canManageCreditNotes: boolean;
+  canExportGstr: boolean;
+  canManageSellerConfig: boolean;
+  canManageBillingProfile: boolean;
   monthlyRunLimit: number;
   currentRunCount: number;
   maxOrgMembers: number;
   currentOrgMembers: number;
   /** Max apply-to-run actions per run. -1 = unlimited. */
   maxApplySuggestions: number;
+  /** Max preview starts per run. -1 = unlimited. */
+  maxPreviewStarts: number;
 }
 
 /** Convenience hook — reads permissions from the auth store. */

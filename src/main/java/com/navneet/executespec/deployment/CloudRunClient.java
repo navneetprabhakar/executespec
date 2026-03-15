@@ -12,6 +12,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Slf4j
@@ -72,6 +73,91 @@ public class CloudRunClient {
 
         log.info("Cloud Run deployed: {} → {} (revision: {})", serviceName, serviceUrl, revisionName);
         return new DeployResult(serviceUrl, revisionName);
+    }
+
+    /**
+     * Deploy a preview image to Cloud Run with ephemeral settings.
+     * Uses min-instances=0 for cost savings, labels for cleanup identification.
+     */
+    public DeployResult deployPreview(String serviceName, String imageUri, String cpu, String memory,
+                                       Map<String, String> envVars)
+            throws IOException, InterruptedException {
+
+        List<String> cmd = new ArrayList<>(List.of(
+            "gcloud", "run", "deploy", serviceName,
+            "--image", imageUri,
+            "--project", props.gcpProject(),
+            "--region", props.gcpRegion(),
+            "--cpu", cpu,
+            "--memory", memory,
+            "--min-instances", "0",
+            "--max-instances", "1",
+            "--port", "8080",
+            "--startup-cpu-boost",
+            "--allow-unauthenticated",
+            "--no-cpu-throttling",
+            "--labels", "managed-by=executespec-preview",
+            "--quiet",
+            "--format", "json"
+        ));
+
+        // Inject env vars
+        if (envVars != null && !envVars.isEmpty()) {
+            StringBuilder envFlag = new StringBuilder();
+            envVars.forEach((k, v) -> {
+                if (!envFlag.isEmpty()) envFlag.append(",");
+                envFlag.append(k).append("=").append(v);
+            });
+            cmd.add("--set-env-vars");
+            cmd.add(envFlag.toString());
+        }
+
+        ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+        Process process = pb.start();
+        String output = new String(process.getInputStream().readAllBytes()).trim();
+        int exit = process.waitFor();
+
+        if (exit != 0) {
+            if (output.contains("UNAUTHENTICATED") || output.contains("token has been expired")) {
+                throw new IOException("GCP auth expired. Run: gcloud auth login");
+            }
+            throw new IOException("Cloud Run preview deploy failed: " + output);
+        }
+
+        JsonNode root = objectMapper.readTree(output);
+        String serviceUrl = root.path("status").path("url").asText(null);
+        if (serviceUrl == null) {
+            serviceUrl = root.path("uri").asText(null);
+        }
+
+        log.info("Cloud Run preview deployed: {} → {}", serviceName, serviceUrl);
+        return new DeployResult(serviceUrl, null);
+    }
+
+    /**
+     * List all Cloud Run services with the executespec-preview label.
+     * Used by orphan cleanup to find leftover preview services.
+     */
+    public List<String> listPreviewServices() throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder(
+            "gcloud", "run", "services", "list",
+            "--project", props.gcpProject(),
+            "--region", props.gcpRegion(),
+            "--filter", "metadata.labels.managed-by=executespec-preview",
+            "--format", "value(metadata.name)",
+            "--quiet"
+        ).redirectErrorStream(true);
+
+        Process process = pb.start();
+        String output = new String(process.getInputStream().readAllBytes()).trim();
+        int exit = process.waitFor();
+
+        if (exit != 0) {
+            log.warn("Failed to list preview services: {}", output);
+            return List.of();
+        }
+
+        return output.isBlank() ? List.of() : List.of(output.split("\n"));
     }
 
     /**

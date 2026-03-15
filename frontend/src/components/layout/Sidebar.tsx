@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban, ClipboardList,
+  Receipt, Calculator,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -15,6 +16,7 @@ import type { ProjectDto } from '@/lib/api';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   LayoutDashboard, BarChart3, DollarSign, Plug, ClipboardList, Settings,
+  Receipt, Calculator,
 };
 
 export default function Sidebar() {

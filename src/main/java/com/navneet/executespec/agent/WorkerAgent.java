@@ -37,6 +37,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -72,8 +73,12 @@ public class WorkerAgent {
     }
 
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile("<tool_call>(.*?)</tool_call>", Pattern.DOTALL);
-    private static final int CHECKPOINT_INTERVAL = 15;
-    private static final int COMPLETION_URGENCY_THRESHOLD = 5;
+    /** Inject a progress checkpoint every this many minutes. */
+    private static final int CHECKPOINT_INTERVAL_MINUTES = 5;
+    /** Inject completion urgency prompt when this many minutes remain. */
+    private static final int URGENCY_THRESHOLD_MINUTES = 2;
+    /** Check for stall (no file writes) and escalate model after this many minutes. */
+    private static final int STALL_CHECK_MINUTES = 5;
 
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
@@ -83,9 +88,9 @@ public class WorkerAgent {
         String complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
         String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
 
-        int iterationLimit = props.getConcurrency().maxIterationsFor(complexity);
-        log.info("Worker starting task [{}] on branch {} ({}:{}) complexity={} maxIterations={}",
-                taskId, branchName, provider, model, complexity, iterationLimit);
+        int taskDurationMinutes = props.getConcurrency().getMaxTaskDurationMinutes();
+        log.info("Worker starting task [{}] on branch {} ({}:{}) complexity={} timeLimit={}min",
+                taskId, branchName, provider, model, complexity, taskDurationMinutes);
 
         stateStore.logMessage(runId, "harness", agentId,
                 "TASK_ASSIGNMENT", "Starting: " + task.getTitle(), 0);
@@ -124,15 +129,15 @@ public class WorkerAgent {
         int lastCompactedIteration = -999;
         int fileWritesSinceCheck = 0;  // tracks file writes for adaptive extension
 
-        // ── AGENTIC LOOP ──────────────────────────────────────────────────────
-        int baseCap = props.getConcurrency().maxIterationsFor(complexity);
-        int maxIterations = baseCap;
-        int absoluteCeiling = baseCap * props.getConcurrency().getAbsoluteCeilingMultiplier();
+        // ── AGENTIC LOOP (time-based) ────────────────────────────────────────
+        Instant deadline = Instant.now().plus(Duration.ofMinutes(taskDurationMinutes));
+        int safetyIterationCap = props.getConcurrency().getSafetyIterationCap();
+        Instant lastCheckpointTime = Instant.now();
+        Instant lastStallCheckTime = Instant.now();
+        boolean urgencyInjected = false;
         try { // outer try: always clear WorkspaceContext on exit
         try {
-            int extensionThreshold = (int) (baseCap * props.getConcurrency().getExtensionThresholdPct() / 100.0);
-            int nextExtensionCheck = extensionThreshold;
-            while (iteration < maxIterations) {
+            while (Instant.now().isBefore(deadline) && iteration < safetyIterationCap) {
 
                 // Drain inbox at start of each iteration; inject as user turn if non-null
                 String inboxContent = inboxService.drainInbox(agentId, runId);
@@ -141,52 +146,41 @@ public class WorkerAgent {
                     log.debug("[Worker {}] Injected inbox messages into context", taskId);
                 }
 
-                // ── Progress checkpoint: re-inject task context every N iterations ──
-                if (iteration > 0 && iteration % CHECKPOINT_INTERVAL == 0) {
-                    messages.add(new UserMessage(buildProgressCheckpoint(taskDef, iteration, maxIterations)));
-                    log.info("[Worker {}] Injected progress checkpoint at iteration {}", taskId, iteration);
+                long elapsedMinutes = Duration.between(deadline.minus(Duration.ofMinutes(taskDurationMinutes)), Instant.now()).toMinutes();
+                long remainingMinutes = Duration.between(Instant.now(), deadline).toMinutes();
+
+                // ── Progress checkpoint: re-inject task context every N minutes ──
+                if (iteration > 0 && Duration.between(lastCheckpointTime, Instant.now()).toMinutes() >= CHECKPOINT_INTERVAL_MINUTES) {
+                    messages.add(new UserMessage(buildProgressCheckpoint(taskDef, elapsedMinutes, taskDurationMinutes)));
+                    log.info("[Worker {}] Injected progress checkpoint at {}min elapsed (iteration {})", taskId, elapsedMinutes, iteration);
+                    lastCheckpointTime = Instant.now();
                 }
 
-                // ── Adaptive extension: at threshold, check progress and extend or escalate ──
-                if (iteration > 0 && iteration == nextExtensionCheck && maxIterations < absoluteCeiling) {
-                    int extension = baseCap * props.getConcurrency().getExtensionPct() / 100;
-                    int newCap = Math.min(maxIterations + extension, absoluteCeiling);
-
-                    if (fileWritesSinceCheck > 0) {
-                        // Worker is making progress — extend
-                        log.info("[Worker {}] Progress detected ({} file writes) at iteration {} — extending cap {} → {}",
-                                taskId, fileWritesSinceCheck, iteration, maxIterations, newCap);
-                        stateStore.logMessage(runId, agentId, "state", "ITERATION_EXTENDED",
-                                "Extended iteration limit to " + newCap + " (progress: " + fileWritesSinceCheck + " file writes)", 0);
-                        maxIterations = newCap;
-                        fileWritesSinceCheck = 0;
-                    } else {
-                        // Stalled — escalate model + extend
+                // ── Stall detection: if no file writes in N minutes, escalate model ──
+                if (iteration > 0 && Duration.between(lastStallCheckTime, Instant.now()).toMinutes() >= STALL_CHECK_MINUTES) {
+                    if (fileWritesSinceCheck == 0) {
                         String escalatedModel = escalateModel(model);
                         if (!escalatedModel.equals(model)) {
-                            log.warn("[Worker {}] Stalled at iteration {} — escalating {} → {} and extending cap {} → {}",
-                                    taskId, iteration, model, escalatedModel, maxIterations, newCap);
+                            log.warn("[Worker {}] Stalled (no file writes in {}min) — escalating {} → {}",
+                                    taskId, STALL_CHECK_MINUTES, model, escalatedModel);
                             stateStore.logMessage(runId, agentId, "state", "MODEL_ESCALATED",
-                                    "Escalating model to " + escalatedModel + " + extending to " + newCap + " (stalled)", 0);
+                                    "Escalating model to " + escalatedModel + " (stalled — no file writes in " + STALL_CHECK_MINUTES + " min)", 0);
                             model = escalatedModel;
                             provider = resolveProvider(model);
-                        } else {
-                            log.warn("[Worker {}] Stalled at iteration {} (already at max model) — extending cap {} → {}",
-                                    taskId, iteration, maxIterations, newCap);
-                            stateStore.logMessage(runId, agentId, "state", "ITERATION_EXTENDED",
-                                    "Extended iteration limit to " + newCap + " (stalled, already at highest model)", 0);
                         }
-                        maxIterations = newCap;
+                    } else {
+                        log.info("[Worker {}] Progress check: {} file writes in last {}min", taskId, fileWritesSinceCheck, STALL_CHECK_MINUTES);
                     }
-                    // Schedule next extension check at 80% of NEW cap
-                    nextExtensionCheck = (int) (maxIterations * props.getConcurrency().getExtensionThresholdPct() / 100.0);
+                    fileWritesSinceCheck = 0;
+                    lastStallCheckTime = Instant.now();
                 }
 
-                // ── Forced completion: nearing iteration limit ──
-                if (iteration > 0 && maxIterations - iteration == COMPLETION_URGENCY_THRESHOLD) {
-                    messages.add(new UserMessage(buildCompletionUrgencyPrompt(taskDef, iteration, maxIterations)));
-                    log.warn("[Worker {}] Injected completion urgency prompt at iteration {} ({} remaining)",
-                            taskId, iteration, COMPLETION_URGENCY_THRESHOLD);
+                // ── Forced completion: approaching time limit ──
+                if (!urgencyInjected && remainingMinutes <= URGENCY_THRESHOLD_MINUTES) {
+                    messages.add(new UserMessage(buildCompletionUrgencyPrompt(taskDef, elapsedMinutes, taskDurationMinutes)));
+                    log.warn("[Worker {}] Injected completion urgency prompt at {}min elapsed (~{}min remaining)",
+                            taskId, elapsedMinutes, remainingMinutes);
+                    urgencyInjected = true;
                 }
 
                 // ── Pre-call token estimation: compact early if projected to exceed threshold ──
@@ -311,9 +305,10 @@ public class WorkerAgent {
 
                 // No tool calls and no completion report — prompt to continue
                 String continuePrompt;
-                if (iteration >= maxIterations - 10) {
-                    continuePrompt = "You are at iteration " + iteration + " of " + maxIterations +
-                            ". If you have finished all your work, output ONLY your completion JSON report now. " +
+                long minsLeft = Duration.between(Instant.now(), deadline).toMinutes();
+                if (minsLeft <= 3) {
+                    continuePrompt = "You have approximately " + minsLeft + " minute(s) remaining. " +
+                            "If you have finished all your work, output ONLY your completion JSON report now. " +
                             "Otherwise, use <tool_call> to call the MOST IMPORTANT remaining tool.";
                 } else {
                     continuePrompt = "If you have finished all your work, output ONLY your completion JSON report now. " +
@@ -381,10 +376,12 @@ public class WorkerAgent {
         }
         // ── END AGENTIC LOOP ──────────────────────────────────────────────────
 
-        log.warn("Worker for task {} hit iteration cap ({}/{}, complexity={}) without completing",
-                taskId, iteration, maxIterations, complexity);
-        return withProviderModel(WorkerReport.partial(taskId,
-                "Hit " + maxIterations + "-iteration cap (base=" + baseCap + ", complexity=" + complexity + ") without producing completion report.",
+        boolean hitTimeLimitFlag = !Instant.now().isBefore(deadline);
+        String reason = hitTimeLimitFlag
+                ? "Hit " + taskDurationMinutes + "-minute time limit after " + iteration + " iterations without producing completion report."
+                : "Hit safety iteration cap (" + safetyIterationCap + ") without producing completion report.";
+        log.warn("Worker for task {} stopped: {} (complexity={})", taskId, reason, complexity);
+        return withProviderModel(WorkerReport.partial(taskId, reason,
                 totalInputTokens, totalOutputTokens), provider, model);
         } finally {
             // Always clear the thread-local worktree context, even on exception.
@@ -703,32 +700,34 @@ public class WorkerAgent {
                 deps, task.getComplexity(), branchName);
     }
 
-    private String buildProgressCheckpoint(TaskDefinition task, int iteration, int maxIterations) {
+    private String buildProgressCheckpoint(TaskDefinition task, long elapsedMinutes, int totalMinutes) {
+        long remainingMinutes = totalMinutes - elapsedMinutes;
         return """
-                ═══ PROGRESS CHECKPOINT (iteration %d of %d) ═══
+                ═══ PROGRESS CHECKPOINT (%d of %d minutes elapsed) ═══
 
                 REMINDER — Your task:
                 TASK ID: %s
                 OBJECTIVE: %s
                 ACCEPTANCE CRITERIA: %s
 
-                You have used %d of %d iterations. Assess your progress:
+                You have been working for %d minutes. You have approximately %d minutes remaining.
+                Assess your progress:
                 • What have you accomplished so far?
                 • What remains to satisfy the acceptance criteria?
                 • If all work is done, output your completion JSON report NOW.
 
                 Continue working or report completion.
-                """.formatted(iteration, maxIterations,
+                """.formatted(elapsedMinutes, totalMinutes,
                 task.getTaskId(), task.getObjective(), task.getAcceptanceCriteria(),
-                iteration, maxIterations);
+                elapsedMinutes, remainingMinutes);
     }
 
-    private String buildCompletionUrgencyPrompt(TaskDefinition task, int iteration, int maxIterations) {
-        int remaining = maxIterations - iteration;
+    private String buildCompletionUrgencyPrompt(TaskDefinition task, long elapsedMinutes, int totalMinutes) {
+        long remainingMinutes = totalMinutes - elapsedMinutes;
         return """
-                ═══ URGENT: APPROACHING ITERATION LIMIT ═══
+                ═══ URGENT: APPROACHING TIME LIMIT ═══
 
-                You have used %d of %d iterations. You have only %d iterations remaining.
+                You have been working for %d of %d minutes. You have less than %d minutes remaining.
 
                 TASK ID: %s
                 ACCEPTANCE CRITERIA: %s
@@ -737,11 +736,11 @@ public class WorkerAgent {
                 1. If your work satisfies the acceptance criteria: output your completion JSON NOW.
                 2. If your work is partially done: commit what you have, then output a completion JSON
                    with status "partial" and describe what remains in self_review.
-                3. Do NOT start new work that you cannot finish in %d iterations.
+                3. Do NOT start new work that you cannot finish in the remaining time.
 
                 Output your completion JSON report as your next response.
-                """.formatted(iteration, maxIterations, remaining,
-                task.getTaskId(), task.getAcceptanceCriteria(), remaining);
+                """.formatted(elapsedMinutes, totalMinutes, remainingMinutes,
+                task.getTaskId(), task.getAcceptanceCriteria());
     }
 
     /**

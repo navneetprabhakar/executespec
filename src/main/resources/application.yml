@@ -35,20 +35,20 @@ spring:
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
         max-interval: 10000         # 10s cap
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY: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}
+      api-key: ${ANTHROPIC_API_KEY}
       chat:
         options:
           model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
           max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
     openai:
-      api-key: ${OPENAI_API_KEY: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}
+      api-key: ${OPENAI_API_KEY}
       chat:
         options:
           model: gpt-4o-mini
           max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
     google:
       genai:
-        api-key: ${GOOGLE_API_KEY:AIzaSyCjIge3pbAvhejI5vELeDe0AWpmH9-P1UU}          # empty default — Gemini is 3rd fallback only
+        api-key: ${GOOGLE_API_KEY}          # empty default — Gemini is 3rd fallback only
         chat:
           options:
             model: gemini-3.1-flash-lite-preview         # default; ARCHITECT chain overrides to gemini-2.5-pro
@@ -71,13 +71,8 @@ agent:
     hard-stop-pct: 0.55 # hard-stop at 110k (was 0.90 = 180k)
   concurrency:
     max-runs: 10   # Gate-waiting runs release their slot; this limits actively computing runs only
-    max-iterations: 80       # Global fallback cap (used when complexity is unknown)
-    max-iterations-low: 30   # LOW complexity tasks (boilerplate, configs, simple CRUD)
-    max-iterations-medium: 55 # MEDIUM complexity tasks (standard services, controllers)
-    max-iterations-high: 80  # HIGH complexity tasks (complex logic, multi-component)
-    extension-threshold-pct: 80  # check progress at 80% of base cap
-    extension-pct: 50            # extend by 50% of base cap per grant
-    absolute-ceiling-multiplier: 2  # never exceed 2× base cap
+    max-task-duration-minutes: 15  # Wall-clock time limit per task (replaces iteration-based caps)
+    safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
   github:
     pat: ${GITHUB_PAT:}
     default-owner: ${GITHUB_OWNER:}
@@ -213,18 +208,17 @@ agent:
       redirect-uri: ${SLACK_REDIRECT_URI:http://localhost:8080/api/integrations/slack/oauth/callback}
       dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
 
-# ── Docker-based preview ────────────────────────────────────────────────────
+# ── Cloud Run-based preview ─────────────────────────────────────────────────
 preview:
   enabled: true
-  port-range-start: 10000
-  port-range-end: 10100
-  total-startup-timeout-seconds: 300   # 5-minute total deadline (covers build + DB + app readiness)
-  build-timeout-seconds: 300
-  readiness-timeout-seconds: 120
-  readiness-poll-interval-ms: 2000
-  proxy:
-    enabled: false
-    base-url: ""
+  total-startup-timeout-seconds: 300   # 5-minute total deadline (covers build + push + deploy + health check)
+  preview-ttl-minutes: 10              # auto-shutdown after 10 minutes
+  cloud-run-cpu: "1"
+  cloud-run-memory: "512Mi"
+  concurrency:
+    free-max: 1
+    pro-max: 3
+    enterprise-max: 10
 
 app:
   mail:

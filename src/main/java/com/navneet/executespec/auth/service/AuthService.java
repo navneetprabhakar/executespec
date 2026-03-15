@@ -115,6 +115,9 @@ public class AuthService {
                 .entityType("USER").entityId(user.getId())
                 .newValue("{\"email\":\"" + user.getEmail() + "\"}")
                 .build());
+
+        // Send welcome email
+        mailService.sendWelcomeEmail(user.getEmail(), user.getFirstName(), user.getTier());
     }
 
     // ── Login ─────────────────────────────────────────────────────────────────

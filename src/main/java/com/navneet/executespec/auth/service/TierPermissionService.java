@@ -46,11 +46,19 @@ public class TierPermissionService {
             boolean canViewOrgMembers,
             boolean canViewAudit,
             boolean canViewLiveLog,
+            // Finance permissions
+            boolean canViewInvoices,
+            boolean canViewAccounting,
+            boolean canManageCreditNotes,
+            boolean canExportGstr,
+            boolean canManageSellerConfig,
+            boolean canManageBillingProfile,
             int monthlyRunLimit,
             int currentRunCount,
             int maxOrgMembers,
             int currentOrgMembers,
-            int maxApplySuggestions
+            int maxApplySuggestions,
+            int maxPreviewStarts
     ) {}
 
     // ── Main entry point ────────────────────────────────────────────────────
@@ -62,6 +70,11 @@ public class TierPermissionService {
         // SUPER_ADMIN — unrestricted
         if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
             return superAdminPermissions(user);
+        }
+
+        // FINANCE role — read-only access to invoices, accounting, audit
+        if ("FINANCE".equals(user.getGlobalRole())) {
+            return financePermissions(user);
         }
 
         // User with org membership
@@ -91,11 +104,47 @@ public class TierPermissionService {
                 true,  // canViewOrgMembers
                 true,  // canViewAudit
                 true,  // canViewLiveLog
+                true,  // canViewInvoices
+                true,  // canViewAccounting
+                true,  // canManageCreditNotes
+                true,  // canExportGstr
+                true,  // canManageSellerConfig
+                true,  // canManageBillingProfile
                 -1,    // monthlyRunLimit = unlimited
                 0,     // currentRunCount = irrelevant
                 -1,    // maxMembers = unlimited
                 0,     // currentMembers = irrelevant
-                -1     // maxApplySuggestions = unlimited
+                -1,    // maxApplySuggestions = unlimited
+                -1     // maxPreviewStarts = unlimited
+        );
+    }
+
+    private TierPermissions financePermissions(AppUser user) {
+        return new TierPermissions(
+                false, // canManageAiKeys
+                false, // canViewPricing
+                false, // canManageIntegrations
+                false, // canViewMetrics
+                true,  // canViewCostBreakdown
+                false, // canViewTokenUsage
+                false, // canUseChat
+                false, // canCreateOrg
+                false, // canInviteMembers
+                false, // canViewOrgMembers
+                true,  // canViewAudit
+                false, // canViewLiveLog
+                true,  // canViewInvoices
+                true,  // canViewAccounting
+                true,  // canManageCreditNotes
+                true,  // canExportGstr
+                false, // canManageSellerConfig (super admin only)
+                true,  // canManageBillingProfile
+                0,     // monthlyRunLimit
+                0,     // currentRunCount
+                -1,    // maxMembers
+                0,     // currentMembers
+                0,     // maxApplySuggestions
+                0      // maxPreviewStarts
         );
     }
 
@@ -114,6 +163,7 @@ public class TierPermissionService {
         int maxMembers = resolveMaxOrgMembers(org);
         int currentMembers = (int) orgMemberRepo.countByOrgId(org.getId());
         int maxApply = resolveMaxApplySuggestions(org.getTier());
+        int maxPreviews = resolveMaxPreviewStarts(org.getTier());
 
         if (isOrgAdmin) {
             // ORG_ADMIN (PRO or ENTERPRISE) — full access except cost breakdown (super admin only)
@@ -130,7 +180,13 @@ public class TierPermissionService {
                     true,  // canViewOrgMembers
                     true,  // canViewAudit
                     true,  // canViewLiveLog
-                    limit, used, maxMembers, currentMembers, maxApply
+                    true,  // canViewInvoices
+                    false, // canViewAccounting (finance + super admin)
+                    false, // canManageCreditNotes (finance + super admin)
+                    false, // canExportGstr (finance + super admin)
+                    false, // canManageSellerConfig
+                    true,  // canManageBillingProfile
+                    limit, used, maxMembers, currentMembers, maxApply, maxPreviews
             );
         }
 
@@ -148,7 +204,13 @@ public class TierPermissionService {
                 true,  // canViewOrgMembers (read-only)
                 false, // canViewAudit
                 false, // canViewLiveLog (org admin & super admin only)
-                limit, used, maxMembers, currentMembers, maxApply
+                false, // canViewInvoices
+                false, // canViewAccounting
+                false, // canManageCreditNotes
+                false, // canExportGstr
+                false, // canManageSellerConfig
+                false, // canManageBillingProfile
+                limit, used, maxMembers, currentMembers, maxApply, maxPreviews
         );
     }
 
@@ -156,6 +218,7 @@ public class TierPermissionService {
         int limit = tierEnforcementService.effectiveUserLimit(user);
         int used = user.getPersonalRunCount();
         int maxApply = resolveMaxApplySuggestions("FREE");
+        int maxPreviews = resolveMaxPreviewStarts("FREE");
 
         return new TierPermissions(
                 false, // canManageAiKeys
@@ -170,7 +233,13 @@ public class TierPermissionService {
                 false, // canViewOrgMembers
                 false, // canViewAudit
                 false, // canViewLiveLog
-                limit, used, -1, 0, maxApply
+                true,  // canViewInvoices (own invoices)
+                false, // canViewAccounting
+                false, // canManageCreditNotes
+                false, // canExportGstr
+                false, // canManageSellerConfig
+                true,  // canManageBillingProfile (own profile)
+                limit, used, -1, 0, maxApply, maxPreviews
         );
     }
 
@@ -194,5 +263,15 @@ public class TierPermissionService {
         return tierConfigRepo.findById(tier.toUpperCase())
                 .map(TierConfig::getMaxApplySuggestions)
                 .orElse(2);
+    }
+
+    /**
+     * Resolve max preview starts per run from tier_config for the given tier.
+     */
+    private int resolveMaxPreviewStarts(String tier) {
+        if (tier == null) return 3;
+        return tierConfigRepo.findById(tier.toUpperCase())
+                .map(TierConfig::getMaxPreviewStarts)
+                .orElse(3);
     }
 }

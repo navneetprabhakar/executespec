@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,4 +23,6 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
 
     @Query("SELECT COUNT(s) FROM BillingSubscription s WHERE s.founderPricing = true AND s.status IN ('ACTIVE', 'PAST_DUE')")
     long countActiveFounderSubscriptions();
+
+    List<BillingSubscription> findByStatus(String status);
 }
