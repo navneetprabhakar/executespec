@@ -7,6 +7,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration;
 import org.springframework.boot.Banner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -18,9 +23,17 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import java.util.Scanner;
 
 @SpringBootApplication(exclude = {
+    // Google Gemini — only used via manual LlmRouter calls, not auto-configured beans
     GoogleGenAiChatAutoConfiguration.class,
     GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
-    GoogleGenAiTextEmbeddingAutoConfiguration.class
+    GoogleGenAiTextEmbeddingAutoConfiguration.class,
+    // OpenAI — we only use chat; exclude audio/image/embedding to avoid
+    // startup failures when OPENAI_API_KEY is empty (graceful degradation)
+    OpenAiAudioSpeechAutoConfiguration.class,
+    OpenAiAudioTranscriptionAutoConfiguration.class,
+    OpenAiEmbeddingAutoConfiguration.class,
+    OpenAiImageAutoConfiguration.class,
+    OpenAiModerationAutoConfiguration.class
 })
 @EnableScheduling
 @EnableAsync
