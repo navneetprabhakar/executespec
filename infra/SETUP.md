@@ -78,33 +78,34 @@ gcloud compute ssl-certificates list --project=executespecv1
 Once status is `ACTIVE` (5-15 min), you can optionally flip Cloudflare proxy to orange cloud
 and set SSL/TLS mode to **Full (strict)**.
 
-### 3. Set application secrets on the VM
+### 3. Upload application secrets to GCS
 
-MIG appends a random suffix to instance names. Find the actual name first:
+API keys are stored in GCS and loaded automatically by the startup script on every boot.
+This ensures keys survive VM reboots, MIG recreations, and auto-healer events.
+
+```bash
+# Create the api-keys file locally
+cat > /tmp/api-keys << 'EOF'
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-proj-...
+GOOGLE_API_KEY=AIza...
+GITHUB_PAT=ghp_...
+EOF
+
+# Upload to the dev deploy bucket
+gsutil cp /tmp/api-keys gs://executespec-dev-deploy/config/api-keys
+rm /tmp/api-keys
+```
+
+The startup script reads `gs://<DEPLOY_BUCKET>/config/api-keys` and writes
+the values into `/opt/app/executespec.env` before starting the application.
+
+To verify keys are loaded, SSH into the VM and check:
 
 ```bash
 gcloud compute instances list --project=executespecv1 --filter="name~executespec-dev" --format="value(name)"
-```
-
-Then SSH into it:
-
-```bash
-gcloud compute ssh <INSTANCE_NAME> \
-  --zone=asia-south1-a \
-  --tunnel-through-iap \
-  --project=executespecv1
-```
-
-```bash
-sudo tee -a /opt/app/executespec.env << 'EOF'
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=AIza...
-GITHUB_PAT=ghp_...
-DASHBOARD_URL=https://dev.executespec.ai
-EOF
-
-sudo systemctl restart executespec
+gcloud compute ssh <INSTANCE_NAME> --zone=asia-south1-a --tunnel-through-iap --project=executespecv1
+sudo grep API_KEY /opt/app/executespec.env | cut -c1-30   # verify prefix only
 ```
 
 ### 4. Set GitHub secrets
@@ -164,30 +165,14 @@ In **Cloudflare Dashboard** → `executespec.ai` → **DNS Records**:
 
 > Same SSL provisioning process as dev — wait for `ACTIVE`, then optionally enable Cloudflare proxy.
 
-### 3. Set application secrets on the VM
-
-Find the actual instance name (MIG appends a random suffix):
+### 3. Upload application secrets to GCS
 
 ```bash
-gcloud compute instances list --project=executespecv1 --filter="name~executespec-prod" --format="value(name)"
-```
-
-Then SSH:
-
-```bash
-gcloud compute ssh <INSTANCE_NAME> \
-  --zone=asia-south1-a \
-  --tunnel-through-iap \
-  --project=executespecv1
-```
-
-```bash
-sudo tee -a /opt/app/executespec.env << 'EOF'
+cat > /tmp/api-keys << 'EOF'
 ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY=sk-proj-...
 GOOGLE_API_KEY=AIza...
 GITHUB_PAT=ghp_...
-DASHBOARD_URL=https://app.executespec.ai
 RAZORPAY_KEY_ID=rzp_...
 RAZORPAY_KEY_SECRET=...
 SLACK_CLIENT_ID=...
@@ -195,8 +180,11 @@ SLACK_CLIENT_SECRET=...
 SLACK_SIGNING_SECRET=...
 EOF
 
-sudo systemctl restart executespec
+gsutil cp /tmp/api-keys gs://executespec-prod-deploy/config/api-keys
+rm /tmp/api-keys
 ```
+
+See the dev section above for how verification works.
 
 ### 4. Set GitHub secrets
 
