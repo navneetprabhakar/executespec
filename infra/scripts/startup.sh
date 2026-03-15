@@ -206,6 +206,9 @@ OPENAI_API_KEY=${OPENAI_API_KEY}
 GOOGLE_API_KEY=${GOOGLE_API_KEY}
 GITHUB_PAT=${GITHUB_PAT}
 
+# GCP (for Secret Manager + runtime config)
+GCP_PROJECT=$(curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/project/project-id" 2>/dev/null || echo "")
+
 # App
 SPRING_PROFILES_ACTIVE=${ES_ENV:-prod}
 CORS_ALLOWED_ORIGINS=${CORS_ORIGINS}

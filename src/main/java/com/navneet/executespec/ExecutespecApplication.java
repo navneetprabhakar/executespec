@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration;
 import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration;
 import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration;
 import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration;
@@ -27,8 +28,9 @@ import java.util.Scanner;
     GoogleGenAiChatAutoConfiguration.class,
     GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
     GoogleGenAiTextEmbeddingAutoConfiguration.class,
-    // OpenAI — we only use chat; exclude audio/image/embedding to avoid
-    // startup failures when OPENAI_API_KEY is empty (graceful degradation)
+    // OpenAI — exclude ALL auto-configs; we create the chat bean manually
+    // in AgentModelConfig with graceful degradation when OPENAI_API_KEY is empty
+    OpenAiChatAutoConfiguration.class,
     OpenAiAudioSpeechAutoConfiguration.class,
     OpenAiAudioTranscriptionAutoConfiguration.class,
     OpenAiEmbeddingAutoConfiguration.class,
