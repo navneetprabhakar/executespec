@@ -35,20 +35,20 @@ spring:
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
         max-interval: 10000         # 10s cap
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY}
+      api-key: ${ANTHROPIC_API_KEY:}
       chat:
         options:
           model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
           max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
     openai:
-      api-key: ${OPENAI_API_KEY}
+      api-key: ${OPENAI_API_KEY:}
       chat:
         options:
           model: gpt-4o-mini
           max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
     google:
       genai:
-        api-key: ${GOOGLE_API_KEY}          # empty default — Gemini is 3rd fallback only
+        api-key: ${GOOGLE_API_KEY:}          # empty default — Gemini is 3rd fallback only
         chat:
           options:
             model: gemini-3.1-flash-lite-preview         # default; ARCHITECT chain overrides to gemini-2.5-pro
