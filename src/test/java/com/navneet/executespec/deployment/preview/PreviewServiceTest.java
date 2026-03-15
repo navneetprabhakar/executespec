@@ -1,7 +1,11 @@
 package com.navneet.executespec.deployment.preview;
 
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.TierConfig;
+import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.deployment.ArtifactRegistryClient;
+import com.navneet.executespec.deployment.CloudRunClient;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -35,15 +39,14 @@ import static org.mockito.Mockito.*;
 @DisplayName("PreviewService")
 class PreviewServiceTest {
 
-    @Mock ComposeExecutor compose;
-    @Mock DockerExecutor docker;
     @Mock DevDockerfileGenerator dockerfileGen;
-    @Mock ComposeFileGenerator composeFileGen;
     @Mock DatabaseDetector databaseDetector;
     @Mock EnvVarDetector envVarDetector;
-    @Mock PreviewPortPool portPool;
+    @Mock ArtifactRegistryClient artifactRegistry;
+    @Mock CloudRunClient cloudRun;
     @Mock SseBroadcaster broadcaster;
     @Mock StateStore stateStore;
+    @Mock TierConfigRepository tierConfigRepo;
 
     PreviewProperties props;
     AgentProperties agentProps;
@@ -59,37 +62,24 @@ class PreviewServiceTest {
         agentProps = new AgentProperties();
         agentProps.setWorkspace(workspaceRoot.toString());
 
-        // Make virtual threads from buildAndStart() exit quickly (returns build failure immediately)
-        // Without this, docker.build() returns null (Mockito default) → NPE in virtual thread → race with @TempDir cleanup
-        when(docker.build(any(), any())).thenReturn(
-                new DockerExecutor.DockerBuildResult(false, null, "mock-build", 0));
+        // Default: tier config returns unlimited preview starts (don't block tests)
+        TierConfig freeTier = new TierConfig();
+        freeTier.setMaxPreviewStarts(-1);
+        when(tierConfigRepo.findById(any())).thenReturn(Optional.of(freeTier));
 
-        service = new PreviewService(compose, docker, dockerfileGen, composeFileGen,
-                databaseDetector, envVarDetector, portPool, props, broadcaster, stateStore, agentProps);
+        service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
+                artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo);
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        // Virtual threads spawned by service.start() write Dockerfile/.dockerignore to workspace dirs.
-        // Wait for them to finish before JUnit @TempDir cleanup, otherwise cleanup fails
-        // because the files are still being written.
+        // Virtual threads spawned by service.start() run buildPushAndDeploy.
+        // Wait for them to finish before JUnit @TempDir cleanup.
         Thread.sleep(300);
     }
 
     private AppUser freeUser() {
         return AppUser.builder().id("user-1").tier("FREE")
-                .firstName("Test").lastName("User").email("test@test.com")
-                .passwordHash("x").build();
-    }
-
-    private AppUser proUser() {
-        return AppUser.builder().id("user-1").tier("PRO")
-                .firstName("Test").lastName("User").email("test@test.com")
-                .passwordHash("x").build();
-    }
-
-    private AppUser enterpriseUser() {
-        return AppUser.builder().id("user-1").tier("ENTERPRISE")
                 .firstName("Test").lastName("User").email("test@test.com")
                 .passwordHash("x").build();
     }
@@ -116,8 +106,8 @@ class PreviewServiceTest {
         @DisplayName("Throws when preview is disabled")
         void throwsWhenDisabled() {
             props.setEnabled(false);
-            service = new PreviewService(compose, docker, dockerfileGen, composeFileGen,
-                databaseDetector, envVarDetector, portPool, props, broadcaster, stateStore, agentProps);
+            service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
+                    artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo);
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
                     .isInstanceOf(PreviewException.class)
@@ -125,19 +115,8 @@ class PreviewServiceTest {
         }
 
         @Test
-        @DisplayName("Throws when Docker is not available")
-        void throwsWhenNoDocker() {
-            when(docker.isDockerAvailable()).thenReturn(false);
-
-            assertThatThrownBy(() -> service.start("run-1", freeUser()))
-                    .isInstanceOf(PreviewException.class)
-                    .hasMessageContaining("Docker");
-        }
-
-        @Test
         @DisplayName("Throws when run does not exist")
         void throwsWhenRunNotFound() {
-            when(docker.isDockerAvailable()).thenReturn(true);
             when(stateStore.findRun("run-1")).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
@@ -148,7 +127,6 @@ class PreviewServiceTest {
         @Test
         @DisplayName("Throws when run is still WORKING (not complete)")
         void throwsWhenRunNotComplete() {
-            when(docker.isDockerAvailable()).thenReturn(true);
             when(stateStore.findRun("run-1")).thenReturn(Optional.of(workingRun("run-1")));
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
@@ -159,7 +137,6 @@ class PreviewServiceTest {
         @Test
         @DisplayName("Accepts PARTIAL status for preview")
         void acceptsPartialStatus() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             when(stateStore.findRun("run-1")).thenReturn(Optional.of(partialRun("run-1")));
 
             // Create workspace dir
@@ -176,7 +153,6 @@ class PreviewServiceTest {
         @Test
         @DisplayName("Throws when unsupported project type detected")
         void throwsWhenUnsupportedType() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             when(stateStore.findRun("run-1")).thenReturn(Optional.of(completedRun("run-1")));
 
             Path ws = workspaceRoot.resolve("run-1");
@@ -198,24 +174,17 @@ class PreviewServiceTest {
         @Test
         @DisplayName("FREE tier allows 1 concurrent preview")
         void freeTierLimit() throws Exception {
-            when(docker.isDockerAvailable()).thenReturn(true);
-
             // First preview — should succeed
             String runId1 = "run-1";
             when(stateStore.findRun(runId1)).thenReturn(Optional.of(completedRun(runId1)));
             Path ws1 = workspaceRoot.resolve(runId1);
             Files.createDirectories(ws1);
             when(dockerfileGen.detect(ws1)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId1)).thenReturn(10000);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
 
             PreviewSession s1 = service.start(runId1, freeUser());
             assertThat(s1).isNotNull();
 
-            // Wait for virtual thread from first start() to finish touching mocks
-            // (it calls dockerIgnore/generate/build on the mock — concurrent access
-            //  while stubbing new mocks causes WrongTypeOfReturnValue)
+            // Wait for virtual thread to settle
             Thread.sleep(500);
 
             // Second preview — should fail (FREE = 1 max)
@@ -240,22 +209,18 @@ class PreviewServiceTest {
         @Test
         @DisplayName("Starting same run twice returns existing session")
         void startSameRunTwice() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-1";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10000);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
 
             PreviewSession s1 = service.start(runId, freeUser());
             PreviewSession s2 = service.start(runId, freeUser()); // idempotent
 
             assertThat(s2.runId()).isEqualTo(s1.runId());
-            assertThat(s2.hostPort()).isEqualTo(s1.hostPort());
+            assertThat(s2.cloudRunServiceName()).isEqualTo(s1.cloudRunServiceName());
         }
     }
 
@@ -273,44 +238,33 @@ class PreviewServiceTest {
         }
 
         @Test
-        @DisplayName("Stop cleans up Docker container, port, and workspace files")
+        @DisplayName("Stop removes session from active map")
         void stopCleansUp() throws IOException {
-            // Start a preview first
-            when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-1";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10000);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
 
             service.start(runId, freeUser());
 
             // Now stop it
             service.stop(runId);
 
-            // Verify cleanup
-            verify(docker).stop(any()); // docker stop called
-            verify(portPool).release(10000); // port released
-            assertThat(service.getStatus(runId)).isNull(); // session removed
+            // Session removed
+            assertThat(service.getStatus(runId)).isNull();
         }
 
         @Test
         @DisplayName("Stop emits PREVIEW_STOPPED SSE event")
         void stopEmitsEvent() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-1";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10000);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
 
             service.start(runId, freeUser());
             service.stop(runId);
@@ -346,16 +300,12 @@ class PreviewServiceTest {
         @Test
         @DisplayName("getStatus returns session after start")
         void statusAfterStart() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-1";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10000);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
 
             service.start(runId, freeUser());
 
@@ -363,7 +313,6 @@ class PreviewServiceTest {
             assertThat(session).isNotNull();
             assertThat(session.runId()).isEqualTo(runId);
             assertThat(session.projectType()).isEqualTo(PreviewProjectType.NODE_FRONTEND);
-            assertThat(session.hostPort()).isEqualTo(10000);
         }
     }
 
@@ -374,97 +323,34 @@ class PreviewServiceTest {
     class InitialSession {
 
         @Test
-        @DisplayName("Initial session status is BUILDING")
-        void initialStatusIsBuilding() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
+        @DisplayName("Initial session status is ANALYZING")
+        void initialStatusIsAnalyzing() throws IOException {
             String runId = "run-1";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10000);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
 
             PreviewSession session = service.start(runId, freeUser());
-            assertThat(session.status()).isEqualTo(PreviewStatus.BUILDING);
+            assertThat(session.status()).isEqualTo(PreviewStatus.ANALYZING);
         }
 
         @Test
-        @DisplayName("URL uses localhost when proxy is disabled")
-        void urlWithoutProxy() throws IOException {
-            props.getProxy().setEnabled(false);
-            when(docker.isDockerAvailable()).thenReturn(true);
+        @DisplayName("Session has valid expiresAt based on TTL config")
+        void sessionHasExpiresAt() throws IOException {
             String runId = "run-1";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10042);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
 
             PreviewSession session = service.start(runId, freeUser());
-            assertThat(session.url()).isEqualTo("http://localhost:10042");
-        }
+            assertThat(session.expiresAt()).isNotNull();
 
-        @Test
-        @DisplayName("URL uses proxy base URL when proxy is enabled")
-        void urlWithProxy() throws IOException {
-            props.getProxy().setEnabled(true);
-            props.getProxy().setBaseUrl("https://preview.executespec.ai");
-            service = new PreviewService(compose, docker, dockerfileGen, composeFileGen,
-                databaseDetector, envVarDetector, portPool, props, broadcaster, stateStore, agentProps);
-
-            when(docker.isDockerAvailable()).thenReturn(true);
-            String runId = "run-1";
-            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
-
-            Path ws = workspaceRoot.resolve(runId);
-            Files.createDirectories(ws);
-            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10042);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
-
-            PreviewSession session = service.start(runId, freeUser());
-            assertThat(session.url()).isEqualTo("https://preview.executespec.ai/preview/run-1");
-        }
-
-        @Test
-        @DisplayName("expiresAt reflects tier TTL — FREE=15min, PRO=60min, ENTERPRISE=240min")
-        void expiresAtReflectsTier() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
-
-            for (var entry : new Object[][]{
-                    {"FREE", freeUser(), 15},
-                    {"PRO", proUser(), 60},
-                    {"ENTERPRISE", enterpriseUser(), 240}
-            }) {
-                String tier = (String) entry[0];
-                AppUser user = (AppUser) entry[1];
-                int minutes = (int) entry[2];
-
-                String runId = "run-" + tier;
-                when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
-
-                Path ws = workspaceRoot.resolve(runId);
-                Files.createDirectories(ws);
-                when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-                when(portPool.allocate(runId)).thenReturn(10000 + minutes);
-                when(dockerfileGen.dockerIgnore()).thenReturn("");
-                when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
-
-                PreviewSession session = service.start(runId, user);
-
-                long ttlMinutes = java.time.Duration.between(session.startedAt(), session.expiresAt()).toMinutes();
-                assertThat(ttlMinutes).as("TTL for tier " + tier).isEqualTo(minutes);
-
-                // Cleanup for next iteration
-                service.stop(runId);
-            }
+            long ttlMinutes = java.time.Duration.between(session.startedAt(), session.expiresAt()).toMinutes();
+            assertThat(ttlMinutes).isEqualTo(props.getPreviewTtlMinutes());
         }
     }
 
@@ -477,35 +363,27 @@ class PreviewServiceTest {
         @Test
         @DisplayName("Start accepts NODE_BACKEND type")
         void startsNodeBackend() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-backend";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_BACKEND);
-            when(portPool.allocate(runId)).thenReturn(10001);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM node:20-alpine\n");
 
             PreviewSession session = service.start(runId, freeUser());
             assertThat(session.projectType()).isEqualTo(PreviewProjectType.NODE_BACKEND);
-            assertThat(session.status()).isEqualTo(PreviewStatus.BUILDING);
+            assertThat(session.status()).isEqualTo(PreviewStatus.ANALYZING);
         }
 
         @Test
         @DisplayName("Start accepts SPRING_BOOT type")
         void startsSpringBoot() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-spring";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.SPRING_BOOT);
-            when(portPool.allocate(runId)).thenReturn(10002);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM eclipse-temurin:21\n");
 
             PreviewSession session = service.start(runId, freeUser());
             assertThat(session.projectType()).isEqualTo(PreviewProjectType.SPRING_BOOT);
@@ -514,16 +392,12 @@ class PreviewServiceTest {
         @Test
         @DisplayName("Start accepts PYTHON type")
         void startsPython() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
             String runId = "run-python";
             when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
 
             Path ws = workspaceRoot.resolve(runId);
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.PYTHON);
-            when(portPool.allocate(runId)).thenReturn(10003);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM python:3.12-slim\n");
 
             PreviewSession session = service.start(runId, freeUser());
             assertThat(session.projectType()).isEqualTo(PreviewProjectType.PYTHON);
@@ -532,8 +406,6 @@ class PreviewServiceTest {
         @Test
         @DisplayName("Each project type maps to the correct container port")
         void containerPortPerType() {
-            // Verify enum container ports directly — the session's projectType is set
-            // from what detect() returns, so the enum is the source of truth
             assertThat(PreviewProjectType.NODE_FRONTEND.getContainerPort()).isEqualTo(5173);
             assertThat(PreviewProjectType.NODE_BACKEND.getContainerPort()).isEqualTo(3000);
             assertThat(PreviewProjectType.SPRING_BOOT.getContainerPort()).isEqualTo(8080);
@@ -542,89 +414,33 @@ class PreviewServiceTest {
         }
     }
 
-    // ── Workspace file lifecycle ────────────────────────────────────────────
+    // ── Per-run preview start limits ────────────────────────────────────────
 
     @Nested
-    @DisplayName("Workspace file management")
-    class WorkspaceFiles {
+    @DisplayName("Per-run preview start limits")
+    class PreviewStartLimits {
 
         @Test
-        @DisplayName("Start invokes dockerfileGen.generate and dockerIgnore")
-        void startCallsGenerator() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
-            String runId = "run-files";
-            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
+        @DisplayName("Throws when per-run preview limit is reached")
+        void throwsWhenLimitReached() throws IOException {
+            // Configure tier to allow max 3 starts
+            TierConfig config = new TierConfig();
+            config.setMaxPreviewStarts(3);
+            when(tierConfigRepo.findById("FREE")).thenReturn(Optional.of(config));
 
-            Path ws = workspaceRoot.resolve(runId);
+            // Run already has 3 starts
+            PipelineRun run = PipelineRun.builder()
+                    .runId("run-limited").status("COMPLETE").createdByUserId("user-1")
+                    .previewStartCount(3).build();
+            when(stateStore.findRun("run-limited")).thenReturn(Optional.of(run));
+
+            Path ws = workspaceRoot.resolve("run-limited");
             Files.createDirectories(ws);
             when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10020);
-            when(dockerfileGen.dockerIgnore()).thenReturn(".git\nnode_modules\n");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM node:20-alpine\nCMD npm start\n");
 
-            service.start(runId, freeUser());
-
-            // buildAndStart runs on a virtual thread and calls generate + dockerIgnore
-            // Verify they were called (verify will wait up to 1s by default)
-            verify(dockerfileGen, timeout(2000)).generate(eq(PreviewProjectType.NODE_FRONTEND), eq(ws));
-            verify(dockerfileGen, timeout(2000)).dockerIgnore();
-        }
-
-        @Test
-        @DisplayName("Stop deletes Dockerfile and .dockerignore if they exist")
-        void stopDeletesFiles() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
-            String runId = "run-cleanup";
-            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
-
-            Path ws = workspaceRoot.resolve(runId);
-            Files.createDirectories(ws);
-            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10021);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
-
-            service.start(runId, freeUser());
-
-            // Manually create files to simulate what buildAndStart does
-            Files.writeString(ws.resolve("Dockerfile"), "FROM alpine\n");
-            Files.writeString(ws.resolve(".dockerignore"), "");
-
-            service.stop(runId);
-            assertThat(ws.resolve("Dockerfile")).doesNotExist();
-            assertThat(ws.resolve(".dockerignore")).doesNotExist();
-        }
-    }
-
-    // ── SSE event emission ──────────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("SSE event emission on start")
-    class SseEvents {
-
-        @Test
-        @DisplayName("Start emits PREVIEW_BUILDING event on virtual thread")
-        void startEmitsBuildingEvent() throws IOException {
-            when(docker.isDockerAvailable()).thenReturn(true);
-            String runId = "run-sse";
-            when(stateStore.findRun(runId)).thenReturn(Optional.of(completedRun(runId)));
-
-            Path ws = workspaceRoot.resolve(runId);
-            Files.createDirectories(ws);
-            when(dockerfileGen.detect(ws)).thenReturn(PreviewProjectType.NODE_FRONTEND);
-            when(portPool.allocate(runId)).thenReturn(10030);
-            when(dockerfileGen.dockerIgnore()).thenReturn("");
-            when(dockerfileGen.generate(any(), any())).thenReturn("FROM alpine\n");
-
-            service.start(runId, freeUser());
-
-            // PREVIEW_BUILDING is emitted from the virtual thread — wait for it
-            ArgumentCaptor<RunEvent> captor = ArgumentCaptor.forClass(RunEvent.class);
-            verify(broadcaster, timeout(2000).atLeast(2)).emit(eq(runId), captor.capture());
-
-            boolean hasBuildingEvent = captor.getAllValues().stream()
-                    .anyMatch(e -> "PREVIEW_BUILDING".equals(e.type()));
-            assertThat(hasBuildingEvent).isTrue();
+            assertThatThrownBy(() -> service.start("run-limited", freeUser()))
+                    .isInstanceOf(PreviewException.class)
+                    .hasMessageContaining("Preview limit reached");
         }
     }
 }

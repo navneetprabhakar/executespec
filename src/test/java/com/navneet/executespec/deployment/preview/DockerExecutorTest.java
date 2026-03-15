@@ -23,14 +23,11 @@ import static org.assertj.core.api.Assumptions.assumeThat;
 @DisplayName("DockerExecutor")
 class DockerExecutorTest {
 
-    PreviewProperties props;
     DockerExecutor executor;
 
     @BeforeEach
     void setUp() {
-        props = new PreviewProperties();
-        props.setBuildTimeoutSeconds(60);
-        executor = new DockerExecutor(props);
+        executor = new DockerExecutor();
     }
 
     @Nested
