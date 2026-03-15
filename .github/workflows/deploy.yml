@@ -282,3 +282,57 @@ jobs:
           echo "   JAR: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
           echo "   Branch: ${{ github.ref_name }}"
           echo "   Environment: ${{ env.DEPLOY_ENV }}"
+
+      # ── Slack notifications ────────────────────────────────────────────────
+      - name: Notify Slack (success)
+        if: success()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          [ -z "$SLACK_WEBHOOK_URL" ] && echo "No SLACK_WEBHOOK_URL — skipping" && exit 0
+          COMMIT_MSG=$(git log -1 --pretty=%s | head -c 80)
+          COMMIT_URL="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Build payload with jq to handle escaping safely
+          PAYLOAD=$(jq -nc \
+            --arg env "${{ env.DEPLOY_ENV }}" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg commit "$COMMIT_MSG" \
+            --arg commit_url "$COMMIT_URL" \
+            --arg actor "${{ github.actor }}" \
+            --arg run_url "$RUN_URL" \
+            '{blocks:[{type:"section",text:{type:"mrkdwn",text:(
+              ":white_check_mark: *Deploy succeeded* — `" + $env + "`\n" +
+              "*Branch:* `" + $branch + "`\n" +
+              "*Commit:* <" + $commit_url + "|" + $commit + ">\n" +
+              "*By:* " + $actor + "\n" +
+              "<" + $run_url + "|View workflow>"
+            )}}]}')
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD" || echo "Slack notification failed (non-blocking)"
+
+      - name: Notify Slack (failure)
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          [ -z "$SLACK_WEBHOOK_URL" ] && echo "No SLACK_WEBHOOK_URL — skipping" && exit 0
+          COMMIT_MSG=$(git log -1 --pretty=%s | head -c 80)
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(jq -nc \
+            --arg env "${{ env.DEPLOY_ENV }}" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg commit "$COMMIT_MSG" \
+            --arg actor "${{ github.actor }}" \
+            --arg run_url "$RUN_URL" \
+            '{blocks:[{type:"section",text:{type:"mrkdwn",text:(
+              ":x: *Deploy FAILED* — `" + $env + "`\n" +
+              "*Branch:* `" + $branch + "`\n" +
+              "*Commit:* " + $commit + "\n" +
+              "*By:* " + $actor + "\n" +
+              "<" + $run_url + "|View logs>"
+            )}}]}')
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD" || echo "Slack notification failed (non-blocking)"
