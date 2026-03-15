@@ -291,7 +291,12 @@ public class LlmRouter {
                     throw new ProviderUnavailableException(
                         "OpenAI key not provided, mode=OWN_KEYS — no system fallback");
                 }
-                yield ctx.getBean(OpenAiChatModel.class);
+                OpenAiChatModel bean = ctx.getBean(OpenAiChatModel.class);
+                if (bean == null) {
+                    throw new ProviderUnavailableException(
+                        "OpenAI system key not configured — provider unavailable");
+                }
+                yield bean;
             }
             case "google" -> {
                 String key = keys.geminiKey();

@@ -8,6 +8,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.ApplicationContext;
@@ -69,9 +70,35 @@ public class AgentModelConfig {
     private ChatModel resolveModel(String provider) {
         return switch (provider.toLowerCase()) {
             case "anthropic" -> ctx.getBean(AnthropicChatModel.class);
-            case "openai"    -> ctx.getBean(OpenAiChatModel.class);
+            case "openai"    -> {
+                OpenAiChatModel model = ctx.getBean(OpenAiChatModel.class);
+                if (model == null) {
+                    throw new IllegalStateException("OpenAI provider requested but OPENAI_API_KEY not configured");
+                }
+                yield model;
+            }
             default -> throw new IllegalArgumentException("Unknown provider: " + provider);
         };
+    }
+
+    /**
+     * System-level OpenAI bean — only created when OPENAI_API_KEY is configured.
+     * Auto-config is excluded (requires non-empty key at startup); we create manually
+     * so the app can start without an OpenAI key (graceful degradation).
+     * When absent, LlmRouter skips OpenAI in the fallback chain.
+     */
+    @Bean
+    public OpenAiChatModel openAiChatModel(
+            @Value("${spring.ai.openai.api-key:}") String apiKey) {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.info("[AgentModelConfig] No OPENAI_API_KEY configured — system OpenAI fallback disabled");
+            return null;
+        }
+        log.info("[AgentModelConfig] Creating system OpenAI bean (gpt-4o)");
+        OpenAiApi api = OpenAiApi.builder().apiKey(apiKey).build();
+        return OpenAiChatModel.builder()
+                .openAiApi(api)
+                .build();
     }
 
     /**
