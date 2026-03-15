@@ -125,6 +125,36 @@ public class DevDockerfileGenerator {
     }
 
     /**
+     * Generate a Cloud Run-compatible Dockerfile.
+     * Ensures the container listens on $PORT (Cloud Run requirement).
+     * Replaces hardcoded ports with $PORT and adds ENV PORT=8080 default.
+     */
+    public String generateForCloudRun(PreviewProjectType type, Path workspace) {
+        String dockerfile = generate(type, workspace);
+
+        // Add ENV PORT=8080 after FROM line if not already present
+        if (!dockerfile.contains("ENV PORT")) {
+            dockerfile = dockerfile.replaceFirst("(FROM [^\n]+\n)", "$1ENV PORT=8080\n");
+        }
+
+        // Replace hardcoded port references with $PORT for Cloud Run compatibility
+        // Vite: --port 5173 → --port $PORT
+        dockerfile = dockerfile.replace("--port\", \"5173\"", "--port\", \"${PORT:-8080}\"");
+        dockerfile = dockerfile.replace("--port 5173", "--port ${PORT:-8080}");
+        // serve: -l 5173 → -l $PORT
+        dockerfile = dockerfile.replace("-l\", \"5173\"", "-l\", \"${PORT:-8080}\"");
+        // Node backend: 3000 → $PORT (EXPOSE line)
+        dockerfile = dockerfile.replace("EXPOSE 5173", "EXPOSE 8080");
+        dockerfile = dockerfile.replace("EXPOSE 3000", "EXPOSE 8080");
+        // Python: --port 8000 → --port $PORT
+        dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
+        dockerfile = dockerfile.replace(":8000", ":${PORT:-8080}");
+        // Spring Boot already uses 8080 by default
+
+        return dockerfile;
+    }
+
+    /**
      * Returns .dockerignore content.
      */
     public String dockerIgnore() {

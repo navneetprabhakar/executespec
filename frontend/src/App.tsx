@@ -30,6 +30,10 @@ import AdminPage from '@/pages/admin/AdminPage';
 // Audit page
 import AuditPage from '@/pages/AuditPage';
 
+// Finance pages
+import InvoicesPage from '@/pages/InvoicesPage';
+import AccountingPage from '@/pages/AccountingPage';
+
 import { useAuthStore } from '@/stores/useAuthStore';
 
 export default function App() {
@@ -59,6 +63,8 @@ export default function App() {
           <Route path="plans" element={<PlansPage />} />
           <Route path="billing" element={<BillingPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
+          <Route path="invoices" element={<InvoicesPage />} />
+          <Route path="accounting" element={<AccountingPage />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="settings" element={<SettingsPage />} />
 

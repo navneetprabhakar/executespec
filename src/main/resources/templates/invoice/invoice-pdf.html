@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #1a1a2e; padding: 40px; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 30px; }
+        .brand { font-size: 22px; font-weight: bold; color: #8b5cf6; }
+        .invoice-title { font-size: 28px; font-weight: bold; color: #1a1a2e; text-align: right; }
+        .meta-table { width: 100%; margin-bottom: 24px; }
+        .meta-table td { padding: 3px 8px; vertical-align: top; }
+        .meta-label { font-weight: bold; color: #64748b; width: 140px; }
+        .section-title { font-size: 12px; font-weight: bold; color: #8b5cf6; text-transform: uppercase;
+                          letter-spacing: 1px; margin: 20px 0 8px; border-bottom: 2px solid #8b5cf6; padding-bottom: 4px; }
+        .party-row { width: 100%; margin-bottom: 20px; }
+        .party-box { width: 48%; display: inline-block; vertical-align: top; }
+        .party-box h4 { font-size: 11px; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+        .party-box p { margin: 2px 0; }
+        .items-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        .items-table th { background: #f1f5f9; color: #475569; font-size: 10px; text-transform: uppercase;
+                           padding: 8px; text-align: left; border-bottom: 2px solid #e2e8f0; }
+        .items-table td { padding: 8px; border-bottom: 1px solid #e2e8f0; }
+        .items-table .amount { text-align: right; }
+        .totals-table { width: 300px; margin-left: auto; margin-top: 8px; }
+        .totals-table td { padding: 4px 8px; }
+        .totals-table .total-row td { font-weight: bold; font-size: 14px; border-top: 2px solid #1a1a2e;
+                                        padding-top: 8px; }
+        .words { font-style: italic; color: #64748b; margin: 12px 0; font-size: 10px; }
+        .footer { margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 12px; color: #94a3b8; font-size: 9px; text-align: center; }
+        .reverse-charge { color: #ef4444; font-weight: bold; font-size: 10px; margin: 8px 0; }
+        .export-note { color: #059669; font-weight: bold; font-size: 10px; margin: 8px 0; }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<table style="width:100%;margin-bottom:24px">
+    <tr>
+        <td style="vertical-align:top">
+            <div class="brand">executespec</div>
+            <div style="color:#64748b;font-size:10px">Autonomous Code Generation Platform</div>
+        </td>
+        <td style="text-align:right;vertical-align:top">
+            <div class="invoice-title" th:text="${invoice.invoiceType == 'CREDIT_NOTE' ? 'CREDIT NOTE' : 'TAX INVOICE'}">TAX INVOICE</div>
+        </td>
+    </tr>
+</table>
+
+<!-- Invoice meta -->
+<table class="meta-table">
+    <tr>
+        <td class="meta-label">Invoice No:</td>
+        <td th:text="${invoice.invoiceNumber}">ES-2526-0001</td>
+        <td class="meta-label">Date:</td>
+        <td th:text="${invoice.invoiceDate}">2026-03-15</td>
+    </tr>
+    <tr>
+        <td class="meta-label">SAC Code:</td>
+        <td th:text="${invoice.sacCode}">998314</td>
+        <td class="meta-label">Due Date:</td>
+        <td th:text="${invoice.dueDate}">2026-03-22</td>
+    </tr>
+    <tr th:if="${invoice.gatewayPaymentId != null}">
+        <td class="meta-label">Payment Ref:</td>
+        <td th:text="${invoice.gatewayPaymentId}"></td>
+        <td class="meta-label">Place of Supply:</td>
+        <td th:text="${invoice.placeOfSupply != null ? invoice.placeOfSupply : 'N/A'}"></td>
+    </tr>
+</table>
+
+<!-- Seller / Buyer -->
+<div class="section-title">Parties</div>
+<table style="width:100%;margin-bottom:20px">
+    <tr>
+        <td style="width:48%;vertical-align:top;padding-right:16px">
+            <h4 style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">FROM (Seller)</h4>
+            <p style="font-weight:bold" th:text="${invoice.sellerName}">ExecuteSpec</p>
+            <p th:text="${invoice.sellerAddress}">Address</p>
+            <p th:if="${invoice.sellerGstin != null}">
+                <strong>GSTIN:</strong> <span th:text="${invoice.sellerGstin}"></span>
+            </p>
+            <p><strong>State:</strong> <span th:text="${invoice.sellerStateCode}"></span></p>
+        </td>
+        <td style="width:48%;vertical-align:top">
+            <h4 style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">TO (Buyer)</h4>
+            <div th:if="${invoice.buyerName != null}">
+                <p style="font-weight:bold" th:text="${invoice.buyerName}">Customer</p>
+                <p th:text="${invoice.buyerAddress}">Address</p>
+                <p th:if="${invoice.buyerGstin != null}">
+                    <strong>GSTIN:</strong> <span th:text="${invoice.buyerGstin}"></span>
+                </p>
+                <p th:if="${invoice.buyerStateCode != null}">
+                    <strong>State:</strong> <span th:text="${invoice.buyerStateCode}"></span>
+                </p>
+            </div>
+            <div th:if="${invoice.buyerName == null}">
+                <p style="color:#94a3b8">No billing profile on file</p>
+            </div>
+        </td>
+    </tr>
+</table>
+
+<!-- Line items -->
+<div class="section-title">Items</div>
+<table class="items-table">
+    <thead>
+        <tr>
+            <th style="width:5%">#</th>
+            <th style="width:55%">Description</th>
+            <th style="width:10%" class="amount">Qty</th>
+            <th style="width:15%" class="amount">Unit Price</th>
+            <th style="width:15%" class="amount">Amount</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr th:each="item, stat : ${lineItems}">
+            <td th:text="${stat.index + 1}">1</td>
+            <td th:text="${item.description}">Item</td>
+            <td class="amount" th:text="${item.quantity != null ? item.quantity : 1}">1</td>
+            <td class="amount" th:text="${lineItemAmounts[stat.index]}">₹0.00</td>
+            <td class="amount" th:text="${lineItemAmounts[stat.index]}">₹0.00</td>
+        </tr>
+    </tbody>
+</table>
+
+<!-- Totals -->
+<table class="totals-table">
+    <tr>
+        <td style="color:#64748b">Subtotal:</td>
+        <td class="amount" th:text="${subtotalFormatted}">₹0.00</td>
+    </tr>
+    <tr th:if="${showCgstSgst}">
+        <td style="color:#64748b">CGST (<span th:text="${cgstRateFormatted}">9%</span>):</td>
+        <td class="amount" th:text="${cgstFormatted}">₹0.00</td>
+    </tr>
+    <tr th:if="${showCgstSgst}">
+        <td style="color:#64748b">SGST (<span th:text="${sgstRateFormatted}">9%</span>):</td>
+        <td class="amount" th:text="${sgstFormatted}">₹0.00</td>
+    </tr>
+    <tr th:if="${showIgst}">
+        <td style="color:#64748b">IGST (<span th:text="${igstRateFormatted}">18%</span>):</td>
+        <td class="amount" th:text="${igstFormatted}">₹0.00</td>
+    </tr>
+    <tr th:if="${invoice.totalTax == 0}">
+        <td style="color:#64748b">Tax:</td>
+        <td class="amount">₹0.00</td>
+    </tr>
+    <tr class="total-row">
+        <td>Total:</td>
+        <td class="amount" th:text="${totalFormatted}">₹0.00</td>
+    </tr>
+</table>
+
+<p class="words" th:text="${totalInWords}">Rupees One Thousand Only</p>
+
+<p th:if="${invoice.reverseCharge}" class="reverse-charge">Tax payable under Reverse Charge Mechanism</p>
+<p th:if="${invoice.export_}" class="export-note">Zero-rated supply under LUT — Export of services</p>
+
+<!-- Credit note reference -->
+<div th:if="${invoice.invoiceType == 'CREDIT_NOTE' and invoice.originalInvoiceId != null}" style="margin:12px 0;padding:8px;background:#fef3c7;border-radius:4px;font-size:10px">
+    <strong>Credit Note Reason:</strong> <span th:text="${invoice.creditNoteReason}"></span>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>This is a computer-generated invoice and does not require a physical signature.</p>
+    <p style="margin-top:4px">executespec.ai &middot; Autonomous Code Generation</p>
+</div>
+
+</body>
+</html>

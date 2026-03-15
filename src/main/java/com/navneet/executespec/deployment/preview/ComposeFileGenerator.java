@@ -40,8 +40,8 @@ public class ComposeFileGenerator {
         // Determine resource limits
         boolean heavyWeight = (projectType == PreviewProjectType.SPRING_BOOT
                 || projectType == PreviewProjectType.FULL_STACK);
-        String cpu = heavyWeight ? props.getSpringBootCpuLimit() : props.getCpuLimit();
-        String mem = heavyWeight ? props.getSpringBootMemoryLimit() : props.getMemoryLimit();
+        String cpu = heavyWeight ? "1.5" : "0.5";
+        String mem = heavyWeight ? "2G" : "512M";
 
         // Merge user-provided env vars with auto-injected DB vars
         Map<String, String> allEnvVars = new LinkedHashMap<>();

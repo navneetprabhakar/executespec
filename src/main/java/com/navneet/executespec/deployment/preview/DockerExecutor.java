@@ -1,6 +1,5 @@
 package com.navneet.executespec.deployment.preview;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -8,19 +7,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class DockerExecutor {
 
     private static final int MAX_OUTPUT_BYTES = 1_048_576; // 1 MB
-
-    private final PreviewProperties props;
+    private static final int BUILD_TIMEOUT_SECONDS = 300;
 
     // ── Inner record ────────────────────────────────────────────────────────
 
@@ -54,7 +50,7 @@ public class DockerExecutor {
         try {
             var result = exec(
                     List.of("docker", "build", "-t", tag, "."),
-                    Duration.ofSeconds(props.getBuildTimeoutSeconds()),
+                    Duration.ofSeconds(BUILD_TIMEOUT_SECONDS),
                     contextDir);
 
             long durationMs = System.currentTimeMillis() - start;
@@ -62,7 +58,7 @@ public class DockerExecutor {
 
             if (result.timedOut()) {
                 return new DockerBuildResult(false, null,
-                        result.output() + "\n[BUILD TIMED OUT after " + props.getBuildTimeoutSeconds() + "s]",
+                        result.output() + "\n[BUILD TIMED OUT after " + BUILD_TIMEOUT_SECONDS + "s]",
                         durationMs);
             }
 

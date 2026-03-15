@@ -35,6 +35,7 @@ public class RunTopupService {
     private final AppUserRepository userRepo;
     private final ActivityAuditService auditService;
     private final BillingNotificationService notificationService;
+    private final InvoiceService invoiceService;
 
     // ── Package listing ─────────────────────────────────────────────────────────
 
@@ -208,6 +209,21 @@ public class RunTopupService {
         var user = userRepo.findById(userId).orElse(null);
         if (user != null) {
             notificationService.sendTopupCredited(user.getEmail(), topup.getQuantity());
+        }
+
+        // Generate invoice
+        try {
+            // Resolve package from order notes if available
+            TopupPackage pkg = null;
+            if (topup.getGrantReason() != null && topup.getGrantReason().startsWith("pkg:")) {
+                try {
+                    var pkgId = UUID.fromString(topup.getGrantReason().substring(4));
+                    pkg = packageRepo.findById(pkgId).orElse(null);
+                } catch (Exception ignored) {}
+            }
+            invoiceService.generateTopupInvoice(topup, pkg, paymentId);
+        } catch (Exception e) {
+            log.warn("Invoice generation failed for top-up (non-blocking): {}", e.getMessage());
         }
 
         log.info("Top-up credited: userId={}, quantity={}, orderId={}", userId, topup.getQuantity(), orderId);

@@ -433,17 +433,21 @@ export const getMessages = (runId: string) =>
 export const getOpenApiSpec = (runId: string) =>
   reqText(`/runs/${runId}/openapi.yaml`);
 
-// ── Docker Compose Preview ────────────────────────────────────────────────────
+// ── Cloud Run Preview ─────────────────────────────────────────────────────────
 
 export interface LocalPreviewStatus {
   runId: string;
-  status: 'IDLE' | 'STARTING' | 'RUNNING' | 'FAILED' | 'STOPPED' | 'TIMED_OUT';
+  status: 'IDLE' | 'ANALYZING' | 'BUILDING' | 'PUSHING' | 'DEPLOYING' | 'STARTING' | 'RUNNING' | 'FAILED' | 'STOPPED' | 'TIMED_OUT';
   url: string | null;
   projectType: string | null;
   databaseType: string | null;
   errorMessage: string | null;
   backendUrl: string | null;
   frontendUrl: string | null;
+  expiresAt: string | null;
+  ttlRemainingSeconds: number;
+  previewStartCount: number;
+  maxPreviewStarts: number;
 }
 
 export interface PreviewLogs {
@@ -550,7 +554,7 @@ export interface AuthUser {
   email: string;
   firstName: string;
   lastName: string;
-  globalRole: 'SUPER_ADMIN' | 'USER';
+  globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
   tier: 'FREE' | 'PRO' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;

@@ -7,7 +7,7 @@ import type { LocalPreviewStatus, PreviewAnalysis } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
   Play, Square, RefreshCw, ChevronDown, Terminal, ExternalLink,
-  Filter, AlertTriangle, Database, Eye, EyeOff, X, Shield,
+  Filter, AlertTriangle, Database, Eye, EyeOff, X, Shield, Clock,
 } from 'lucide-react';
 
 const BACKEND_ONLY = new Set(['SPRING_BOOT', 'GRADLE']);
@@ -36,6 +36,25 @@ const DB_LABELS: Record<string, { label: string; emoji: string }> = {
 
 const FULL_STACK_TYPES = new Set(['FULL_STACK', 'FULLSTACK']);
 
+/** Statuses that indicate the preview is starting up (intermediate phases) */
+const STARTING_STATUSES = new Set(['ANALYZING', 'BUILDING', 'PUSHING', 'DEPLOYING', 'STARTING']);
+
+const STATUS_MESSAGES: Record<string, string> = {
+  ANALYZING: 'Analyzing project...',
+  BUILDING: 'Building container...',
+  PUSHING: 'Pushing image to registry...',
+  DEPLOYING: 'Deploying to Cloud Run...',
+  STARTING: 'Waiting for application...',
+};
+
+/** Format seconds to MM:SS */
+function formatCountdown(seconds: number): string {
+  if (seconds <= 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export default function PreviewTab({ runId }: { runId: string }) {
   const [status, setStatus] = useState<LocalPreviewStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -46,8 +65,10 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const [logFilter, setLogFilter] = useState<'all' | 'backend' | 'frontend' | 'db'>('all');
   const [showEnvDialog, setShowEnvDialog] = useState(false);
   const [analysis, setAnalysis] = useState<PreviewAnalysis | null>(null);
+  const [countdown, setCountdown] = useState<number>(0);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const logPollRef = useRef<ReturnType<typeof setInterval>>();
+  const countdownRef = useRef<ReturnType<typeof setInterval>>();
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch status once on mount
@@ -59,13 +80,14 @@ export default function PreviewTab({ runId }: { runId: string }) {
     };
   }, [runId]);
 
-  // Poll status while STARTING
+  // Poll status while in any starting phase
   useEffect(() => {
-    if (status?.status === 'STARTING') {
+    const isStartingPhase = status?.status ? STARTING_STATUSES.has(status.status) : false;
+    if (isStartingPhase) {
       pollRef.current = setInterval(() => {
         getPreviewStatus(runId).then((s) => {
           setStatus(s);
-          if (s.status !== 'STARTING' && pollRef.current) {
+          if (!STARTING_STATUSES.has(s.status) && pollRef.current) {
             clearInterval(pollRef.current);
             pollRef.current = undefined;
           }
@@ -77,14 +99,36 @@ export default function PreviewTab({ runId }: { runId: string }) {
     };
   }, [status?.status, runId]);
 
+  // Countdown timer for running previews
+  useEffect(() => {
+    if (status?.status === 'RUNNING' && status.expiresAt) {
+      const updateCountdown = () => {
+        const remaining = Math.max(0, Math.floor(
+          (new Date(status.expiresAt!).getTime() - Date.now()) / 1000
+        ));
+        setCountdown(remaining);
+        if (remaining <= 0) {
+          // Refresh status — preview has expired
+          getPreviewStatus(runId).then(setStatus).catch(() => {});
+        }
+      };
+      updateCountdown();
+      countdownRef.current = setInterval(updateCountdown, 1000);
+    }
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [status?.status, status?.expiresAt, runId]);
+
   // Determine if full-stack for log filtering
   const isFullStack = status?.projectType ? FULL_STACK_TYPES.has(status.projectType) : false;
   const hasDatabase = !!status?.databaseType;
   const effectiveFilter = isFullStack ? logFilter : (logFilter === 'db' ? 'db' : 'all');
 
-  // Poll logs while STARTING or RUNNING — fetch ALL logs from startup
+  // Poll logs while in any starting phase or RUNNING — fetch ALL logs from startup
   useEffect(() => {
-    const active = status?.status === 'STARTING' || status?.status === 'RUNNING';
+    const isActive = status?.status ? (STARTING_STATUSES.has(status.status) || status.status === 'RUNNING') : false;
+    const active = isActive;
     if (active) {
       const fetchLogs = () => getPreviewLogs(runId, 0, effectiveFilter).then(r => setLogs(r.lines)).catch(() => {});
       fetchLogs();
@@ -171,15 +215,19 @@ export default function PreviewTab({ runId }: { runId: string }) {
   }, [runId, effectiveFilter]);
 
   const isIdle = !status || status.status === 'IDLE' || status.status === 'STOPPED';
-  const isStarting = status?.status === 'STARTING';
+  const isStartingPhase = status?.status ? STARTING_STATUSES.has(status.status) : false;
   const isRunning = status?.status === 'RUNNING';
   const isFailed = status?.status === 'FAILED';
   const isTimedOut = status?.status === 'TIMED_OUT';
   const projectType = status?.projectType ?? 'UNKNOWN';
   const isBackendOnly = BACKEND_ONLY.has(projectType);
-  const hasLogs = isStarting || isRunning || isFailed || isTimedOut;
+  const hasLogs = isStartingPhase || isRunning || isFailed || isTimedOut;
   const showLogFilter = (isFullStack || hasDatabase) && hasLogs;
   const dbInfo = status?.databaseType ? DB_LABELS[status.databaseType] : null;
+  const previewCountInfo = status?.maxPreviewStarts && status.maxPreviewStarts > 0
+    ? `${status.previewStartCount ?? 0} of ${status.maxPreviewStarts} previews used`
+    : null;
+  const countdownWarning = countdown > 0 && countdown <= 120; // amber warning under 2 min
 
   return (
     <div className="flex flex-col h-full">
@@ -205,10 +253,19 @@ export default function PreviewTab({ runId }: { runId: string }) {
                 Running
               </span>
             )}
-            {isStarting && (
+            {isRunning && countdown > 0 && (
+              <span className={cn(
+                'flex items-center gap-1 text-xs font-mono',
+                countdownWarning ? 'text-accent-amber' : 'text-zinc-500'
+              )}>
+                <Clock className="h-3 w-3" />
+                {formatCountdown(countdown)}
+              </span>
+            )}
+            {isStartingPhase && (
               <span className="flex items-center gap-1.5 text-xs text-accent-amber animate-pulse">
                 <span className="h-3.5 w-3.5 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin" />
-                Starting...
+                {STATUS_MESSAGES[status!.status] ?? 'Starting...'}
               </span>
             )}
             {isFailed && (
@@ -219,6 +276,9 @@ export default function PreviewTab({ runId }: { runId: string }) {
                 <AlertTriangle className="h-3 w-3" />
                 Timed Out
               </span>
+            )}
+            {previewCountInfo && (
+              <span className="text-[10px] text-zinc-600">{previewCountInfo}</span>
             )}
           </div>
           {isRunning && status?.url && (
@@ -241,7 +301,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          {!isStarting && (
+          {!isStartingPhase && (
             <button
               onClick={handleRefresh}
               className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors"
@@ -265,7 +325,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
               {analyzing ? 'Analyzing...' : isFailed || isTimedOut ? 'Retry' : 'Start Preview'}
             </button>
           )}
-          {(isRunning || isStarting) && (
+          {(isRunning || isStartingPhase) && (
             <button
               onClick={handleStop}
               disabled={loading}
@@ -294,17 +354,17 @@ export default function PreviewTab({ runId }: { runId: string }) {
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
           )
-        ) : isStarting ? (
+        ) : isStartingPhase ? (
           <div className="flex-1 flex items-center justify-center h-full">
             <div className="text-center space-y-2">
               <span className="inline-block h-6 w-6 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin" />
-              <p className="text-sm text-zinc-400">Starting {TYPE_LABELS[projectType] ?? projectType} server...</p>
+              <p className="text-sm text-zinc-400">{STATUS_MESSAGES[status!.status] ?? 'Starting...'}</p>
               {dbInfo && (
                 <p className="text-xs text-accent-cyan">
                   {dbInfo.emoji} {dbInfo.label} database auto-configured
                 </p>
               )}
-              <p className="text-xs text-zinc-600">This may take a moment for the first run</p>
+              <p className="text-xs text-zinc-600">This preview will automatically shut down in 10 minutes</p>
             </div>
           </div>
         ) : (isFailed || isTimedOut) ? (

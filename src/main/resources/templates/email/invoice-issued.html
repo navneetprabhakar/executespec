@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Invoice</title></head>
+<body style="font-family:sans-serif;background:#0f1117;color:#e2e8f0;padding:40px">
+  <div style="max-width:480px;margin:0 auto;background:#1a1f2e;border-radius:12px;padding:32px">
+    <h1 style="color:#8b5cf6;margin:0 0 8px">executespec</h1>
+    <h2 style="margin:0 0 24px;font-size:20px">Your Invoice</h2>
+    <p>Hi <span th:text="${firstName}">there</span>,</p>
+    <p>Your invoice <strong th:text="${invoiceNumber}">ES-2526-0001</strong> has been generated.</p>
+    <table style="width:100%;margin:16px 0;border-collapse:collapse">
+      <tr>
+        <td style="padding:8px 0;color:#94a3b8">Invoice Number</td>
+        <td style="padding:8px 0;text-align:right;font-weight:600" th:text="${invoiceNumber}">ES-2526-0001</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#94a3b8;border-top:1px solid #2d3748">Total Amount</td>
+        <td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #2d3748" th:text="${totalFormatted}">₹0.00</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#94a3b8;border-top:1px solid #2d3748">Status</td>
+        <td style="padding:8px 0;text-align:right;font-weight:600;color:#22c55e;border-top:1px solid #2d3748">PAID</td>
+      </tr>
+    </table>
+    <p>The PDF invoice is attached to this email for your records.</p>
+    <a th:href="${baseUrl + '/invoices'}" href="#"
+       style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;
+              padding:12px 28px;border-radius:8px;font-weight:600;margin:16px 0">
+      View All Invoices
+    </a>
+    <hr style="border:1px solid #2d3748;margin:24px 0"/>
+    <p style="color:#64748b;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#8b5cf6" href="#">executespec.ai</a></p>
+  </div>
+</body>
+</html>

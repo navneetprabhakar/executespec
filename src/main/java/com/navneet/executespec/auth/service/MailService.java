@@ -14,6 +14,8 @@ import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
+import org.springframework.core.io.ByteArrayResource;
+
 import java.io.ByteArrayOutputStream;
 import java.util.Base64;
 import java.util.Properties;
@@ -158,6 +160,52 @@ public class MailService {
                 "email/new-user-alert", ctx);
     }
 
+    @Async
+    public void sendWelcomeEmail(String toEmail, String firstName, String tier) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("tier", tier);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, "Welcome to executespec!", "email/welcome", ctx);
+    }
+
+    @Async
+    public void sendTierUpgradeEmail(String toEmail, String firstName, String planName, String tier) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("planName", planName);
+        ctx.setVariable("tier", tier);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, "Your executespec plan has been upgraded", "email/tier-upgraded", ctx);
+    }
+
+    @Async
+    public void sendInvoiceEmail(String toEmail, String firstName, String invoiceNumber,
+                                  long totalAmountPaise, byte[] pdfBytes, String pdfFilename) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("invoiceNumber", invoiceNumber);
+        ctx.setVariable("totalFormatted", String.format("₹%.2f", totalAmountPaise / 100.0));
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtmlWithAttachment(toEmail, "Invoice " + invoiceNumber + " — executespec",
+                "email/invoice-issued", ctx, pdfBytes, pdfFilename, "application/pdf");
+    }
+
+    @Async
+    public void sendDunningReminder(String toEmail, String firstName, String planName, String urgency) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("planName", planName);
+        ctx.setVariable("urgency", urgency);
+        ctx.setVariable("baseUrl", baseUrl);
+        String subject = switch (urgency) {
+            case "FINAL" -> "Final notice: Update your payment — executespec";
+            case "URGENT" -> "Action required: Payment issue — executespec";
+            default -> "Payment reminder — executespec";
+        };
+        sendHtml(toEmail, subject, "email/dunning-reminder", ctx);
+    }
+
     // ── private helpers ──────────────────────────────────────────────────────
 
     private void sendHtml(String to, String subject, String template, Context ctx) {
@@ -165,6 +213,15 @@ public class MailService {
             sendViaSmtp(to, subject, template, ctx);
         } else {
             sendViaGmailApi(to, subject, template, ctx);
+        }
+    }
+
+    private void sendHtmlWithAttachment(String to, String subject, String template, Context ctx,
+                                          byte[] attachmentBytes, String attachmentName, String contentType) {
+        if ("smtp".equals(transport)) {
+            sendViaSmtpWithAttachment(to, subject, template, ctx, attachmentBytes, attachmentName, contentType);
+        } else {
+            sendViaGmailApiWithAttachment(to, subject, template, ctx, attachmentBytes, attachmentName, contentType);
         }
     }
 
@@ -188,6 +245,30 @@ public class MailService {
             log.info("Email sent to {} via SMTP — subject: {}", to, subject);
         } catch (Exception e) {
             log.warn("Failed to send email to {} via SMTP (subject: {}): {}", to, subject, e.getMessage());
+        }
+    }
+
+    private void sendViaSmtpWithAttachment(String to, String subject, String template, Context ctx,
+                                              byte[] attachmentBytes, String attachmentName, String contentType) {
+        if (smtpSession == null) {
+            log.warn("SMTP not configured — skipping email to {} (subject: {})", to, subject);
+            return;
+        }
+        try {
+            String html = templateEngine.process(template, ctx);
+
+            MimeMessage message = new MimeMessage(smtpSession);
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            helper.setFrom(fromEmail);
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(html, true);
+            helper.addAttachment(attachmentName, new ByteArrayResource(attachmentBytes), contentType);
+
+            Transport.send(message);
+            log.info("Email with attachment sent to {} via SMTP — subject: {}", to, subject);
+        } catch (Exception e) {
+            log.warn("Failed to send email with attachment to {} via SMTP (subject: {}): {}", to, subject, e.getMessage());
         }
     }
 
@@ -223,6 +304,42 @@ public class MailService {
             log.info("Email sent to {} via Gmail API — subject: {}", to, subject);
         } catch (Exception e) {
             log.warn("Failed to send email to {} via Gmail API (subject: {}): {}", to, subject, e.getMessage());
+        }
+    }
+
+    private void sendViaGmailApiWithAttachment(String to, String subject, String template, Context ctx,
+                                                 byte[] attachmentBytes, String attachmentName, String contentType) {
+        if (!gmailOAuthService.isAvailable()) {
+            log.warn("Gmail API unavailable — skipping email to {} (subject: {})", to, subject);
+            return;
+        }
+        try {
+            String html = templateEngine.process(template, ctx);
+
+            Session session = Session.getDefaultInstance(new Properties());
+            MimeMessage mimeMessage = new MimeMessage(session);
+            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
+            helper.setFrom(gmailOAuthService.getSenderEmail());
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(html, true);
+            helper.addAttachment(attachmentName, new ByteArrayResource(attachmentBytes), contentType);
+
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            mimeMessage.writeTo(buffer);
+            String raw = Base64.getUrlEncoder()
+                    .withoutPadding()
+                    .encodeToString(buffer.toByteArray());
+
+            Message gmailMsg = new Message();
+            gmailMsg.setRaw(raw);
+            gmailOAuthService.getService()
+                    .users().messages().send("me", gmailMsg)
+                    .execute();
+
+            log.info("Email with attachment sent to {} via Gmail API — subject: {}", to, subject);
+        } catch (Exception e) {
+            log.warn("Failed to send email with attachment to {} via Gmail API (subject: {}): {}", to, subject, e.getMessage());
         }
     }
 }

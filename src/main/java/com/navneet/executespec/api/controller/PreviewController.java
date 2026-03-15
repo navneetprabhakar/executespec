@@ -1,8 +1,11 @@
 package com.navneet.executespec.api.controller;
 
+import com.navneet.executespec.auth.entity.TierConfig;
+import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.deployment.preview.*;
+import com.navneet.executespec.state.StateStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +24,8 @@ public class PreviewController {
 
     private final PreviewService previewService;
     private final RunAccessGuard guard;
+    private final StateStore stateStore;
+    private final TierConfigRepository tierConfigRepo;
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
@@ -32,7 +37,11 @@ public class PreviewController {
             String databaseType,
             String errorMessage,
             String backendUrl,
-            String frontendUrl
+            String frontendUrl,
+            String expiresAt,
+            long ttlRemainingSeconds,
+            int previewStartCount,
+            int maxPreviewStarts
     ) {}
 
     public record PreviewLogsDto(
@@ -104,7 +113,7 @@ public class PreviewController {
         } catch (PreviewException e) {
             log.warn("Preview start failed for run {}: {}", runId, e.getMessage());
             return ResponseEntity.ok(new PreviewStatusDto(
-                    runId, "FAILED", null, null, null, e.getMessage(), null, null
+                    runId, "FAILED", null, null, null, e.getMessage(), null, null, null, 0, 0, 0
             ));
         }
     }
@@ -136,25 +145,32 @@ public class PreviewController {
     // ── Mapping ──────────────────────────────────────────────────────────────
 
     private PreviewStatusDto toDto(String runId, PreviewSession session) {
-        if (session == null) {
-            return new PreviewStatusDto(runId, "IDLE", null, null, null, null, null, null);
-        }
+        var run = stateStore.findRun(runId).orElse(null);
+        int startCount = run != null ? run.getPreviewStartCount() : 0;
+        String tier = run != null && run.getOrgId() != null ? "PRO" : "FREE"; // simplified tier detection
+        // Look up actual user tier from the creating user if available
+        int maxStarts = tierConfigRepo.findById(tier)
+                .map(TierConfig::getMaxPreviewStarts)
+                .orElse(3);
 
-        // Map internal statuses for frontend display
-        String status = switch (session.status()) {
-            case ANALYZING, BUILDING, DB_STARTING -> "STARTING";
-            default -> session.status().name();
-        };
+        if (session == null) {
+            return new PreviewStatusDto(runId, "IDLE", null, null, null, null, null, null, null, 0,
+                    startCount, maxStarts);
+        }
 
         return new PreviewStatusDto(
                 session.runId(),
-                status,
+                session.status().name(),
                 session.url(),
                 session.projectType() != null ? session.projectType().name() : null,
                 session.databaseType() != null ? session.databaseType().name() : null,
                 session.errorMessage(),
                 null,
-                null
+                null,
+                session.expiresAt() != null ? session.expiresAt().toString() : null,
+                session.ttlRemainingSeconds(),
+                startCount,
+                maxStarts
         );
     }
 }

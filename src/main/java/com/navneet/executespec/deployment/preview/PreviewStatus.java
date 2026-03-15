@@ -3,11 +3,12 @@ package com.navneet.executespec.deployment.preview;
 public enum PreviewStatus {
     IDLE,
     ANALYZING,     // detecting DB, env vars
-    BUILDING,
-    DB_STARTING,   // waiting for database healthcheck
-    STARTING,      // waiting for app readiness
+    BUILDING,      // Docker build
+    PUSHING,       // pushing image to Artifact Registry
+    DEPLOYING,     // deploying to Cloud Run
+    STARTING,      // waiting for app readiness (health check)
     RUNNING,
     FAILED,
     STOPPED,
-    TIMED_OUT      // 5-minute total startup deadline exceeded
+    TIMED_OUT      // total startup deadline exceeded
 }
