@@ -131,7 +131,37 @@ if [ -n "$DEPLOY_BUCKET" ]; then
   fi
 fi
 
-# ── 6c. Derive public URL and CORS origins from environment ─────────────────
+# ── 6c. Load API keys from GCS (survives VM reboots) ─────────────────────
+#
+# Upload once:
+#   gsutil cp api-keys gs://<DEPLOY_BUCKET>/config/api-keys
+#
+# Format (plain key=value):
+#   ANTHROPIC_API_KEY=sk-ant-...
+#   OPENAI_API_KEY=sk-proj-...
+#   GOOGLE_API_KEY=AIza...
+#   GITHUB_PAT=ghp_...
+
+ANTHROPIC_API_KEY=""
+OPENAI_API_KEY=""
+GOOGLE_API_KEY=""
+GITHUB_PAT=""
+if [ -n "$DEPLOY_BUCKET" ]; then
+  API_KEYS_FILE="/tmp/api-keys"
+  if gsutil -q stat "gs://${DEPLOY_BUCKET}/config/api-keys" 2>/dev/null; then
+    gsutil cp "gs://${DEPLOY_BUCKET}/config/api-keys" "$API_KEYS_FILE"
+    ANTHROPIC_API_KEY=$(grep '^ANTHROPIC_API_KEY=' "$API_KEYS_FILE" | cut -d= -f2-)
+    OPENAI_API_KEY=$(grep '^OPENAI_API_KEY=' "$API_KEYS_FILE" | cut -d= -f2-)
+    GOOGLE_API_KEY=$(grep '^GOOGLE_API_KEY=' "$API_KEYS_FILE" | cut -d= -f2-)
+    GITHUB_PAT=$(grep '^GITHUB_PAT=' "$API_KEYS_FILE" | cut -d= -f2-)
+    rm -f "$API_KEYS_FILE"
+    log "API keys loaded from GCS (${#ANTHROPIC_API_KEY} / ${#OPENAI_API_KEY} / ${#GOOGLE_API_KEY} / ${#GITHUB_PAT} chars)"
+  else
+    log "WARN: No API keys in GCS — backend will fail to call LLMs"
+  fi
+fi
+
+# ── 6d. Derive public URL and CORS origins from environment ─────────────────
 
 if [ "$ES_ENV" = "prod" ]; then
   APP_PUBLIC_URL="https://app.executespec.ai"
@@ -169,6 +199,12 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=${SMTP_USERNAME}
 SMTP_PASSWORD=${SMTP_PASSWORD}
+
+# API Keys (loaded from GCS)
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+OPENAI_API_KEY=${OPENAI_API_KEY}
+GOOGLE_API_KEY=${GOOGLE_API_KEY}
+GITHUB_PAT=${GITHUB_PAT}
 
 # App
 SPRING_PROFILES_ACTIVE=${ES_ENV:-prod}
