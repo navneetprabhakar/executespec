@@ -135,20 +135,56 @@ jobs:
           cat > /tmp/env-patch.sh << 'SCRIPT'
           #!/bin/bash
           # Upsert a key=value into the env file
+          ENV_FILE="/opt/app/executespec.env"
+          touch "$ENV_FILE"
+          chmod 600 "$ENV_FILE"
+
           upsert() {
             local key="${1%%=*}"
             local kv="$1"
-            if grep -q "^${key}=" /opt/app/executespec.env 2>/dev/null; then
-              sed -i "s|^${key}=.*|${kv}|" /opt/app/executespec.env
+            if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+              sed -i "s|^${key}=.*|${kv}|" "$ENV_FILE"
             else
-              echo "${kv}" >> /opt/app/executespec.env
+              echo "${kv}" >> "$ENV_FILE"
             fi
           }
+
+          # ── App settings ──────────────────────────────────────────────
           upsert "CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173"
           upsert "DASHBOARD_URL=$1"
           upsert "APP_BASE_URL=$1"
           upsert "MAIL_TRANSPORT=smtp"
           upsert "MAIL_FROM=admin@executespec.ai"
+
+          # ── API keys from GCS (never committed to repo) ──────────────
+          DEPLOY_BUCKET="$2"
+          if [ -n "$DEPLOY_BUCKET" ]; then
+            API_KEYS_FILE="/tmp/api-keys-$$"
+            if gsutil -q stat "gs://${DEPLOY_BUCKET}/config/api-keys" 2>/dev/null; then
+              gsutil cp "gs://${DEPLOY_BUCKET}/config/api-keys" "$API_KEYS_FILE" 2>/dev/null
+              while IFS= read -r line; do
+                # Skip comments and blank lines
+                [[ -z "$line" || "$line" == \#* ]] && continue
+                upsert "$line"
+              done < "$API_KEYS_FILE"
+              rm -f "$API_KEYS_FILE"
+              echo "API keys loaded from GCS"
+            else
+              echo "WARN: gs://${DEPLOY_BUCKET}/config/api-keys not found — keys must already be in env file"
+            fi
+
+            # ── SMTP credentials from GCS ──────────────────────────────
+            SMTP_FILE="/tmp/smtp-creds-$$"
+            if gsutil -q stat "gs://${DEPLOY_BUCKET}/config/smtp-credentials" 2>/dev/null; then
+              gsutil cp "gs://${DEPLOY_BUCKET}/config/smtp-credentials" "$SMTP_FILE" 2>/dev/null
+              while IFS= read -r line; do
+                [[ -z "$line" || "$line" == \#* ]] && continue
+                upsert "$line"
+              done < "$SMTP_FILE"
+              rm -f "$SMTP_FILE"
+              echo "SMTP credentials loaded from GCS"
+            fi
+          fi
           SCRIPT
           chmod +x /tmp/env-patch.sh
 
@@ -166,7 +202,7 @@ jobs:
               set -e
               sudo mkdir -p /opt/app/releases
               sudo gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar /opt/app/releases/
-              sudo bash /tmp/env-patch.sh '${{ env.APP_PUBLIC_URL }}'
+              sudo bash /tmp/env-patch.sh '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy'
               rm -f /tmp/env-patch.sh
               sudo ln -sf /opt/app/releases/app-${{ github.sha }}.jar /opt/app/app.jar
               echo '${{ github.sha }}' | sudo tee /opt/app/RUNNING_SHA
