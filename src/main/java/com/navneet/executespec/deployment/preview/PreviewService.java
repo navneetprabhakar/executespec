@@ -110,10 +110,19 @@ public class PreviewService {
             throw new PreviewException("Run must be complete to preview (current status: " + run.getStatus() + ")");
         }
 
-        // Guard: idempotent — return existing session if active
+        // Guard: idempotent — return existing session if still running.
+        // If FAILED or TIMED_OUT, remove it so the user can retry.
         PreviewSession existing = active.get(runId);
         if (existing != null) {
-            return existing;
+            if (existing.status() == PreviewStatus.FAILED
+                    || existing.status() == PreviewStatus.TIMED_OUT) {
+                // Clean up stale failed session so retry starts fresh
+                active.remove(runId);
+                cleanupOnFailure(runId, existing.cloudRunServiceName());
+                log.info("Cleared failed preview session for run {} — allowing retry", runId);
+            } else {
+                return existing;
+            }
         }
 
         // Guard: concurrent preview limit
