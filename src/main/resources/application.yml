@@ -77,8 +77,8 @@ agent:
     compact-pct: 0.35  # compact at 70k tokens input (was 0.75 = 150k — accumulated too much history)
     hard-stop-pct: 0.55 # hard-stop at 110k (was 0.90 = 180k)
   concurrency:
-    max-runs: 10   # Gate-waiting runs release their slot; this limits actively computing runs only
-    max-task-duration-minutes: 15  # Wall-clock time limit per task (replaces iteration-based caps)
+    max-runs: 50   # Temporarily increased for load testing (was 10)
+    max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
     safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
   github:
     pat: ${GITHUB_PAT:}
