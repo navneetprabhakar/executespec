@@ -85,19 +85,12 @@ jobs:
           echo "${{ github.sha }}" | gsutil cp - ${{ env.DEPLOY_BUCKET }}/CURRENT_SHA
           echo "Uploaded: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
 
-      # ── Resolve MIG instance name (may change on recreation) ─────────────
-      - name: Resolve MIG instance
+      # ── Set static instance name (standalone VM — no MIG) ──────────────
+      - name: Set instance name
         run: |
-          MIG_NAME="${{ env.DEPLOY_ENV == 'prod' && 'executespec-prod-mig' || 'executespec-dev-mig' }}"
-          INSTANCE=$(gcloud compute instance-groups managed list-instances "$MIG_NAME" \
-            --zone ${{ env.GCE_ZONE }} \
-            --format="value(NAME)" 2>/dev/null | head -1)
-          if [ -z "$INSTANCE" ]; then
-            echo "::error::No running instance found in MIG $MIG_NAME"
-            exit 1
-          fi
+          INSTANCE="${{ env.DEPLOY_ENV == 'prod' && 'executespec-prod-vm' || 'executespec-dev-vm' }}"
           echo "GCE_INSTANCE_RESOLVED=$INSTANCE" >> $GITHUB_ENV
-          echo "Resolved MIG instance: $INSTANCE"
+          echo "Target instance: $INSTANCE"
 
       # ── Ensure validator toolchains on GCE (idempotent) ───────────────────
       # The code validator needs Node.js (npx/tsc/eslint) and Python3 (mypy/ruff/pytest)

@@ -23,11 +23,6 @@ variable "machine_type" {
   default = "e2-standard-2"
 }
 
-variable "instance_count" {
-  type    = number
-  default = 1
-}
-
 variable "boot_disk_size_gb" {
   type    = number
   default = 50
