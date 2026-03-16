@@ -4,6 +4,7 @@ import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.StateStore.MetricsData;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -21,15 +22,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * Lightweight health endpoint consumed by MIG/LB health checks
  * and by the dashboard header (for real-time server status badge).
  *
- * <p>GET /api/health → always 200 (JVM is alive). DB status is cached
- * and checked asynchronously to avoid connection pool exhaustion from
- * frequent health-check calls.
- *
- * <p>GET /api/health/ready → 200 if DB reachable, 503 otherwise.
- *
- * <p>The MIG auto-healer and load-balancer health checks use /api/health (liveness)
- * which never returns 503, preventing a death-spiral where a transient DB issue
- * causes the MIG to continuously recreate VMs.
+ * <h3>Endpoints</h3>
+ * <ul>
+ *   <li>GET /api/health — Liveness probe. Always 200 if JVM alive. Zero DB/Redis calls.
+ *       DB + Redis status are cached (refreshed every 30s in background).
+ *       MIG auto-healer MUST use this endpoint.</li>
+ *   <li>GET /api/health/ready — Readiness probe. Checks DB live. Returns 503 if DB down.
+ *       LB backend service should use this to stop routing traffic when DB is unreachable.</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/health")
@@ -37,56 +37,58 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class HealthController {
 
-    /** Wall-clock instant when the JVM started. Used to compute uptime. */
     private static final Instant START_TIME = Instant.now();
 
-    /** Cache DB status for 30 seconds to avoid pool exhaustion from frequent health checks. */
-    private static final long DB_CHECK_INTERVAL_MS = 30_000;
+    /** Cache interval for DB/Redis/metrics checks — prevents pool exhaustion from frequent probes. */
+    private static final long CACHE_INTERVAL_MS = 30_000;
 
-    private final DataSource    dataSource;
-    private final StateStore    stateStore;
+    private final DataSource dataSource;
+    private final StateStore stateStore;
+    private final RedisConnectionFactory redisConnectionFactory;
 
-    // Cached DB status — prevents connection pool exhaustion when MIG/LB
-    // health checks call /api/health every 15-30 seconds
+    // ── Cached state (refreshed every 30s) ───────────────────────────────────
     private final AtomicBoolean cachedDbUp = new AtomicBoolean(false);
-    private final AtomicReference<Instant> lastDbCheck = new AtomicReference<>(Instant.EPOCH);
+    private final AtomicBoolean cachedRedisUp = new AtomicBoolean(false);
+    private final AtomicReference<MetricsData> cachedMetrics =
+        new AtomicReference<>(new MetricsData(0L, 0L, 0L, 0L, 0L, 0L, 0L));
+    private final AtomicReference<Instant> lastCacheRefresh = new AtomicReference<>(Instant.EPOCH);
 
     /**
      * Liveness probe — always 200 if the JVM is running.
-     * Used by MIG health check and load balancer.
-     * DB status is cached and refreshed every 30s to avoid pool exhaustion.
+     * No inline DB or Redis calls — all data is cached.
+     * Used by MIG health check to prevent death-spiral on transient failures.
      */
     @GetMapping
     public ResponseEntity<Map<String, Object>> health() {
-        boolean dbUp = getCachedDbStatus();
+        refreshCacheIfStale();
 
-        // Uptime
         long uptimeMs = Duration.between(START_TIME, Instant.now()).toMillis();
-        String uptimeFmt = formatUptime(uptimeMs);
+        boolean dbUp = cachedDbUp.get();
+        boolean redisUp = cachedRedisUp.get();
+        MetricsData m = cachedMetrics.get();
 
-        // Run metrics — safe: never throws, caught internally in StateStore
-        MetricsData m = safeMetrics();
+        String status = (dbUp && redisUp) ? "UP" : "DEGRADED";
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("status",       dbUp ? "UP" : "DEGRADED");
+        body.put("status",       status);
         body.put("uptimeMs",     uptimeMs);
-        body.put("uptime",       uptimeFmt);
+        body.put("uptime",       formatUptime(uptimeMs));
         body.put("activeRuns",   m.activeRuns());
         body.put("queuedRuns",   m.queuedRuns());
         body.put("totalRuns",    m.totalRuns());
         body.put("completedRuns",m.completedRuns());
         body.put("failedRuns",   m.failedRuns());
         body.put("db",           dbUp ? "UP" : "DOWN");
+        body.put("redis",        redisUp ? "UP" : "DOWN");
         body.put("timestamp",    Instant.now().toString());
 
-        // Always 200 — JVM is alive. MIG/LB must not kill the VM
-        // just because the DB is transiently unreachable.
         return ResponseEntity.ok(body);
     }
 
     /**
-     * Readiness probe — 200 only if the DB is reachable.
-     * Use this for traffic routing decisions, NOT for MIG auto-healing.
+     * Readiness probe — 200 only if DB is reachable.
+     * LB backend service should use this for traffic routing decisions.
+     * Does an inline DB check (not cached) for accuracy.
      */
     @GetMapping("/ready")
     public ResponseEntity<Map<String, Object>> ready() {
@@ -101,47 +103,39 @@ public class HealthController {
             : ResponseEntity.status(503).body(body);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Cached refresh ───────────────────────────────────────────────────────
 
-    /**
-     * Returns cached DB status. Only performs an actual DB check every
-     * {@link #DB_CHECK_INTERVAL_MS} ms to prevent connection pool exhaustion
-     * from frequent MIG/LB health check calls.
-     */
-    private boolean getCachedDbStatus() {
-        Instant last = lastDbCheck.get();
-        if (Duration.between(last, Instant.now()).toMillis() > DB_CHECK_INTERVAL_MS) {
-            // Time to refresh — but don't block other callers
-            if (lastDbCheck.compareAndSet(last, Instant.now())) {
-                try {
-                    cachedDbUp.set(checkDatabase());
-                } catch (Exception e) {
-                    cachedDbUp.set(false);
-                }
+    private void refreshCacheIfStale() {
+        Instant last = lastCacheRefresh.get();
+        if (Duration.between(last, Instant.now()).toMillis() > CACHE_INTERVAL_MS) {
+            if (lastCacheRefresh.compareAndSet(last, Instant.now())) {
+                try { cachedDbUp.set(checkDatabase()); } catch (Exception e) { cachedDbUp.set(false); }
+                try { cachedRedisUp.set(checkRedis()); } catch (Exception e) { cachedRedisUp.set(false); }
+                try { cachedMetrics.set(stateStore.computeMetrics()); } catch (Exception e) { /* keep old */ }
             }
         }
-        return cachedDbUp.get();
     }
+
+    // ── Live checks (used by refresh + readiness) ────────────────────────────
 
     private boolean checkDatabase() {
         try (var conn = dataSource.getConnection()) {
-            return conn.isValid(2);           // 2-second validation timeout
+            return conn.isValid(2);
         } catch (Exception e) {
             log.warn("Health DB check failed: {}", e.getMessage());
             return false;
         }
     }
 
-    private MetricsData safeMetrics() {
-        try {
-            return stateStore.computeMetrics();
+    private boolean checkRedis() {
+        try (var conn = redisConnectionFactory.getConnection()) {
+            return "PONG".equals(conn.ping());
         } catch (Exception e) {
-            log.debug("Health metrics fetch failed: {}", e.getMessage());
-            return new MetricsData(0L, 0L, 0L, 0L, 0L, 0L, 0L);
+            log.warn("Health Redis check failed: {}", e.getMessage());
+            return false;
         }
     }
 
-    /** Formats milliseconds as "Xh Ym Zs" — human-readable for the dashboard. */
     private String formatUptime(long ms) {
         long totalSec = ms / 1000;
         long h = totalSec / 3600;

@@ -48,13 +48,14 @@ resource "google_compute_health_check" "lb" {
   name                = "${var.name_prefix}-lb-health"
   project             = var.project_id
   check_interval_sec  = 15
-  timeout_sec         = 5
+  timeout_sec         = 10       # was 5s — too aggressive; DB check can take 2-3s under load
   healthy_threshold   = 2
   unhealthy_threshold = 3
 
   http_health_check {
     port         = 8080
-    request_path = "/api/health"
+    request_path = "/api/health/ready"   # readiness probe — returns 503 when DB is down
+    # MIG uses /api/health (liveness — always 200). LB uses /ready to stop routing when DB is down.
   }
 }
 

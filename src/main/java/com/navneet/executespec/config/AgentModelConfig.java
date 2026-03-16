@@ -4,6 +4,8 @@ import com.google.genai.Client;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
@@ -69,7 +71,13 @@ public class AgentModelConfig {
 
     private ChatModel resolveModel(String provider) {
         return switch (provider.toLowerCase()) {
-            case "anthropic" -> ctx.getBean(AnthropicChatModel.class);
+            case "anthropic" -> {
+                AnthropicChatModel model = ctx.getBean(AnthropicChatModel.class);
+                if (model == null) {
+                    throw new IllegalStateException("Anthropic provider requested but ANTHROPIC_API_KEY not configured");
+                }
+                yield model;
+            }
             case "openai"    -> {
                 OpenAiChatModel model = ctx.getBean(OpenAiChatModel.class);
                 if (model == null) {
@@ -79,6 +87,33 @@ public class AgentModelConfig {
             }
             default -> throw new IllegalArgumentException("Unknown provider: " + provider);
         };
+    }
+
+    /**
+     * System-level Anthropic bean — only created when ANTHROPIC_API_KEY is configured.
+     * Auto-config is excluded (requires non-empty key at startup); we create manually
+     * so the app can start without an Anthropic key (graceful degradation on MIG restart).
+     * When absent, LlmRouter skips Anthropic in the fallback chain.
+     */
+    @Bean
+    public AnthropicChatModel anthropicChatModel(
+            @Value("${spring.ai.anthropic.api-key:}") String apiKey,
+            @Value("${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}") String model,
+            @Value("${spring.ai.anthropic.chat.options.max-tokens:16000}") int maxTokens) {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("[AgentModelConfig] No ANTHROPIC_API_KEY configured — Anthropic provider DISABLED. "
+                   + "Runs will fail until the key is provided via Secret Manager or env file.");
+            return null;
+        }
+        log.info("[AgentModelConfig] Creating system Anthropic bean ({})", model);
+        AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
+        return AnthropicChatModel.builder()
+                .anthropicApi(api)
+                .defaultOptions(AnthropicChatOptions.builder()
+                        .model(model)
+                        .maxTokens(maxTokens)
+                        .build())
+                .build();
     }
 
     /**

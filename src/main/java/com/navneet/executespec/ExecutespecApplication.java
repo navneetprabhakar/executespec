@@ -4,6 +4,7 @@ import com.navneet.executespec.deployment.DeploymentProperties;
 import com.navneet.executespec.integration.IntegrationProperties;
 import com.navneet.executespec.harness.PipelineHarness;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
@@ -24,12 +25,14 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import java.util.Scanner;
 
 @SpringBootApplication(exclude = {
-    // Google Gemini — only used via manual LlmRouter calls, not auto-configured beans
+    // ── Anthropic — excluded so app can start without ANTHROPIC_API_KEY ──────
+    // Bean created manually in AgentModelConfig with graceful degradation.
+    AnthropicChatAutoConfiguration.class,
+    // ── Google Gemini — only used via manual LlmRouter calls ─────────────────
     GoogleGenAiChatAutoConfiguration.class,
     GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
     GoogleGenAiTextEmbeddingAutoConfiguration.class,
-    // OpenAI — exclude ALL auto-configs; we create the chat bean manually
-    // in AgentModelConfig with graceful degradation when OPENAI_API_KEY is empty
+    // ── OpenAI — all auto-configs excluded; chat bean created manually ────────
     OpenAiChatAutoConfiguration.class,
     OpenAiAudioSpeechAutoConfiguration.class,
     OpenAiAudioTranscriptionAutoConfiguration.class,
