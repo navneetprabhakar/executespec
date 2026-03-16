@@ -43,7 +43,7 @@ public class CloudRunClient {
             "--memory", props.cloudRun().memory(),
             "--max-instances", String.valueOf(props.cloudRun().maxInstances()),
             "--port", "8080",
-            "--startup-cpu-boost",
+            "--cpu-boost",
             "--quiet",
             "--format", "json"
         ));
@@ -93,7 +93,7 @@ public class CloudRunClient {
             "--min-instances", "0",
             "--max-instances", "1",
             "--port", "8080",
-            "--startup-cpu-boost",
+            "--cpu-boost",
             "--allow-unauthenticated",
             "--no-cpu-throttling",
             "--labels", "managed-by=executespec-preview",
