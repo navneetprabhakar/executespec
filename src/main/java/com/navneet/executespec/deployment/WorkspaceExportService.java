@@ -36,6 +36,7 @@ public class WorkspaceExportService {
     private final StateStore             stateStore;
     private final GcsWorkspaceStore      gcsStore;
     private final DevDockerfileGenerator dockerfileGen;
+    private final WorkspaceRestoreService restoreService;
 
     /**
      * Excluded patterns — internal agent machinery, build artifacts,
@@ -129,10 +130,12 @@ public class WorkspaceExportService {
      * Called from RunController GET /api/runs/{runId}/download?format=repo
      */
     public byte[] exportAsRepoZip(String runId) throws IOException {
-        Path workspacePath = workspaceRoot(runId);
-        if (!Files.isDirectory(workspacePath)) {
-            throw new IllegalStateException("Workspace not found for run " + runId);
+        Path resolved = workspaceRoot(runId);
+        if (!Files.isDirectory(resolved)) {
+            // Try restoring from GCS before giving up
+            resolved = restoreService.ensureWorkspaceAvailable(runId);
         }
+        final Path workspacePath = resolved;
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(baos)) {

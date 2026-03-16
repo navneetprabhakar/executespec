@@ -1137,6 +1137,22 @@ public class StateStore {
         });
     }
 
+    /**
+     * Returns terminal runs whose local workspace needs cleanup (already uploaded
+     * to GCS or not). Used by the modified WorkspaceArchiveJob.
+     */
+    public List<PipelineRun> findRunsToCleanup(Instant cutoff) {
+        return runRepo.findRunsToCleanup(cutoff, PageRequest.of(0, 50));
+    }
+
+    /**
+     * Returns terminal runs without a GCS workspace key. Used by the 5-minute
+     * fallback sweep in WorkspaceGcsUploadListener.
+     */
+    public List<PipelineRun> findTerminalRunsWithoutGcsKey(Instant cutoff) {
+        return runRepo.findTerminalRunsWithoutGcsKey(cutoff, PageRequest.of(0, 50));
+    }
+
     // ── Tech stack detection ─────────────────────────────────
 
     /**

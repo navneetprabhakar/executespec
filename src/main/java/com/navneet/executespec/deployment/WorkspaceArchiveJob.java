@@ -59,13 +59,13 @@ public class WorkspaceArchiveJob {
         int archiveAfterHours = props.workspace().archiveAfterHours();
         Instant cutoff = Instant.now().minus(archiveAfterHours, ChronoUnit.HOURS);
 
-        List<PipelineRun> candidates = stateStore.findRunsToArchive(cutoff);
+        List<PipelineRun> candidates = stateStore.findRunsToCleanup(cutoff);
         if (candidates.isEmpty()) {
-            log.debug("[WorkspaceArchiveJob] No workspaces to archive");
+            log.debug("[WorkspaceArchiveJob] No workspaces to archive/cleanup");
             return;
         }
 
-        log.info("[WorkspaceArchiveJob] Archiving {} workspace(s) to GCS (completed before {})",
+        log.info("[WorkspaceArchiveJob] Processing {} workspace(s) for archive/cleanup (completed before {})",
             candidates.size(), cutoff);
 
         int archived = 0;
@@ -89,25 +89,30 @@ public class WorkspaceArchiveJob {
     // ── Internal ──────────────────────────────────────────────────────────────
 
     private void archiveRun(String runId) throws IOException {
+        PipelineRun run = stateStore.findRun(runId).orElse(null);
+        if (run == null) return;
+
+        if (run.getGcsWorkspaceKey() != null) {
+            // Already uploaded to GCS by WorkspaceGcsUploadListener — just clean up local
+            stateStore.markGcsArchived(runId, run.getGcsWorkspaceKey());
+            deleteLocalWorkspace(runId);
+            log.info("[WorkspaceArchiveJob] Cleaned up local workspace for already-uploaded run {}", runId);
+            return;
+        }
+
+        // Legacy path: upload + delete
         log.info("[WorkspaceArchiveJob] Archiving run {}", runId);
 
-        // 1. Build zip from local workspace (reuses existing zip logic in exportService)
         Path zipPath = exportService.exportWorkspace(runId);
         try {
-            // 2. Upload zip to GCS
             String gcsKey = gcsStore.uploadZip(runId, zipPath);
-
-            // 3. Persist GCS key + archived timestamp in DB
             stateStore.markGcsArchived(runId, gcsKey);
-
-            // 4. Delete local workspace directory (only after successful GCS upload)
             deleteLocalWorkspace(runId);
 
             log.info("[WorkspaceArchiveJob] Archived run {} → gs://{}/{}",
                 runId, props.workspace().gcsBucket(), gcsKey);
 
         } finally {
-            // Clean up temp zip regardless of success/failure
             try { Files.deleteIfExists(zipPath); }
             catch (IOException ex) {
                 log.warn("[WorkspaceArchiveJob] Could not delete temp zip {}: {}", zipPath, ex.getMessage());

@@ -8,6 +8,7 @@ import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageException;
 import com.google.cloud.storage.StorageOptions;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -33,22 +34,26 @@ import java.util.concurrent.TimeUnit;
  *   <li>{@code roles/iam.serviceAccountTokenCreator} — generate signed URLs</li>
  * </ul>
  *
- * <p>GCS object key format: {@code workspaces/{runId}.zip}
+ * <p>GCS object key format: {@code {env}/workspace/{runId}.zip}
  */
 @Slf4j
 @Service
 public class GcsWorkspaceStore {
 
-    private static final String KEY_PREFIX = "workspaces/";
+    /** Legacy prefix for backward-compatible reads. */
+    private static final String LEGACY_KEY_PREFIX = "workspaces/";
     private static final String KEY_SUFFIX = ".zip";
 
     private final Storage storage;
     private final DeploymentProperties props;
+    private final String environment;
 
-    public GcsWorkspaceStore(DeploymentProperties props) throws IOException {
+    public GcsWorkspaceStore(DeploymentProperties props,
+                             @Value("${spring.profiles.active:dev}") String environment) throws IOException {
         this.props = props;
+        this.environment = environment;
         this.storage = StorageOptions.getDefaultInstance().getService();
-        log.info("[GcsWorkspaceStore] Initialised — bucket={}", bucket());
+        log.info("[GcsWorkspaceStore] Initialised — bucket={}, env={}", bucket(), environment);
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -83,6 +88,9 @@ public class GcsWorkspaceStore {
      * Downloads a GCS object to a temp file and returns the path.
      * Caller is responsible for deleting the temp file.
      *
+     * <p>If the given key is not found, tries the legacy {@code workspaces/{runId}.zip}
+     * prefix as a migration fallback.
+     *
      * @param gcsKey the object key returned by {@link #uploadZip}
      * @param runId  used only for naming the temp file
      */
@@ -91,8 +99,18 @@ public class GcsWorkspaceStore {
         Path tempFile = Files.createTempFile("gcs-workspace-" + shortId, ".zip");
         tempFile.toFile().deleteOnExit();
 
-        log.info("[GcsWorkspaceStore] Downloading gs://{}/{} → {}", bucket(), gcsKey, tempFile);
-        byte[] bytes = storage.readAllBytes(BlobId.of(bucket(), gcsKey));
+        // Try the stored key first; fall back to legacy prefix if not found
+        String effectiveKey = gcsKey;
+        if (!exists(gcsKey)) {
+            String legacyKey = LEGACY_KEY_PREFIX + runId + KEY_SUFFIX;
+            if (exists(legacyKey)) {
+                log.info("[GcsWorkspaceStore] Key {} not found, using legacy key {}", gcsKey, legacyKey);
+                effectiveKey = legacyKey;
+            }
+        }
+
+        log.info("[GcsWorkspaceStore] Downloading gs://{}/{} → {}", bucket(), effectiveKey, tempFile);
+        byte[] bytes = storage.readAllBytes(BlobId.of(bucket(), effectiveKey));
         Files.write(tempFile, bytes);
 
         log.info("[GcsWorkspaceStore] Download complete: {} bytes", bytes.length);
@@ -147,9 +165,9 @@ public class GcsWorkspaceStore {
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    /** Object key for a given run: {@code workspaces/{runId}.zip} */
-    public static String objectKey(String runId) {
-        return KEY_PREFIX + runId + KEY_SUFFIX;
+    /** Object key for a given run: {@code {env}/workspace/{runId}.zip} */
+    public String objectKey(String runId) {
+        return environment + "/workspace/" + runId + KEY_SUFFIX;
     }
 
     private String bucket() {

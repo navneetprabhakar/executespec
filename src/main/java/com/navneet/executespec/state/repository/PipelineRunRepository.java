@@ -82,4 +82,31 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
         ORDER BY r.completedAt ASC
         """)
     List<PipelineRun> findRunsToArchive(@Param("cutoff") Instant cutoff, Pageable pageable);
+
+    /**
+     * Finds terminal runs whose local workspace should be cleaned up.
+     * Includes runs already uploaded to GCS (gcsWorkspaceKey set) but not yet
+     * locally deleted (gcsArchivedAt still null).
+     */
+    @Query("""
+        SELECT r FROM PipelineRun r
+        WHERE r.status IN ('COMPLETE', 'FAILED', 'PARTIAL', 'CANCELLED')
+          AND r.completedAt < :cutoff
+          AND r.gcsArchivedAt IS NULL
+        ORDER BY r.completedAt ASC
+        """)
+    List<PipelineRun> findRunsToCleanup(@Param("cutoff") Instant cutoff, Pageable pageable);
+
+    /**
+     * Finds terminal runs that have NOT been uploaded to GCS yet.
+     * Used by the 5-minute fallback sweep in WorkspaceGcsUploadListener.
+     */
+    @Query("""
+        SELECT r FROM PipelineRun r
+        WHERE r.status IN ('COMPLETE', 'FAILED', 'PARTIAL', 'CANCELLED')
+          AND r.completedAt < :cutoff
+          AND r.gcsWorkspaceKey IS NULL
+        ORDER BY r.completedAt ASC
+        """)
+    List<PipelineRun> findTerminalRunsWithoutGcsKey(@Param("cutoff") Instant cutoff, Pageable pageable);
 }

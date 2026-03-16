@@ -92,6 +92,9 @@ public class PipelineHarness {
     // ── JIRA/Confluence context extraction ─────────────────────────────────
     private final com.navneet.executespec.integration.context.ReferenceExtractorService referenceExtractorService;
 
+    // ── GCS workspace restore (on-demand after VM restart) ────────────────
+    private final com.navneet.executespec.deployment.WorkspaceRestoreService restoreService;
+
     // ── Async infrastructure ──────────────────────────────────────────────────
 
     /**
@@ -1092,6 +1095,9 @@ public class PipelineHarness {
             String previousStatus = run.getStatus();
 
             try {
+                // Ensure workspace is available (may restore from GCS after VM restart)
+                restoreService.ensureWorkspaceAvailable(runId);
+
                 // Set run to WORKING
                 run.setStatus("WORKING");
                 run.setCurrentGate(null);
