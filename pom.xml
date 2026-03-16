@@ -159,6 +159,34 @@
       <version>2.40.0</version>
     </dependency>
 
+    <!-- Google Cloud Run Admin v2 — deploy engine: deploy to user's Cloud Run -->
+    <dependency>
+      <groupId>com.google.cloud</groupId>
+      <artifactId>google-cloud-run</artifactId>
+      <version>0.48.0</version>
+    </dependency>
+
+    <!-- Google Cloud Build — deploy engine: build images in user's GCP project -->
+    <dependency>
+      <groupId>com.google.cloud</groupId>
+      <artifactId>google-cloud-build</artifactId>
+      <version>3.50.0</version>
+    </dependency>
+
+    <!-- Apache Commons Compress — tar.gz for Cloud Build source upload -->
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-compress</artifactId>
+      <version>1.26.1</version>
+    </dependency>
+
+    <!-- Google Cloud Artifact Registry — deploy engine: manage user's container repos -->
+    <dependency>
+      <groupId>com.google.cloud</groupId>
+      <artifactId>google-cloud-artifact-registry</artifactId>
+      <version>1.46.0</version>
+    </dependency>
+
     <!-- Google Cloud Secret Manager — externalized secrets (API keys, credentials) -->
     <dependency>
       <groupId>com.google.cloud</groupId>
