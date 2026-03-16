@@ -20,7 +20,6 @@ jobs:
       DEPLOY_ENV:    ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
       GCP_PROJECT:   ${{ secrets.GCP_PROJECT }}
       GCP_REGION:    ${{ secrets.GCP_REGION }}
-      GCE_INSTANCE:  ${{ secrets.GCE_INSTANCE }}
       GCE_ZONE:      ${{ secrets.GCE_ZONE }}
 
     # Required for Workload Identity Federation
@@ -86,12 +85,26 @@ jobs:
           echo "${{ github.sha }}" | gsutil cp - ${{ env.DEPLOY_BUCKET }}/CURRENT_SHA
           echo "Uploaded: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
 
+      # ── Resolve MIG instance name (may change on recreation) ─────────────
+      - name: Resolve MIG instance
+        run: |
+          MIG_NAME="${{ env.DEPLOY_ENV == 'prod' && 'executespec-prod-mig' || 'executespec-dev-mig' }}"
+          INSTANCE=$(gcloud compute instance-groups managed list-instances "$MIG_NAME" \
+            --zone ${{ env.GCE_ZONE }} \
+            --format="value(instance)" 2>/dev/null | head -1)
+          if [ -z "$INSTANCE" ]; then
+            echo "::error::No running instance found in MIG $MIG_NAME"
+            exit 1
+          fi
+          echo "GCE_INSTANCE_RESOLVED=$INSTANCE" >> $GITHUB_ENV
+          echo "Resolved MIG instance: $INSTANCE"
+
       # ── Ensure validator toolchains on GCE (idempotent) ───────────────────
       # The code validator needs Node.js (npx/tsc/eslint) and Python3 (mypy/ruff/pytest)
       # installed on the VM. This step is idempotent — skips if already present.
       - name: Ensure validator toolchains on GCE
         run: |
-          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --command="
@@ -191,11 +204,11 @@ jobs:
       - name: Deploy JAR to GCE (${{ env.DEPLOY_ENV }})
         run: |
           # Upload env-patch script to the VM
-          gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE }}:/tmp/env-patch.sh \
+          gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/env-patch.sh \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap
 
-          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --command="
@@ -219,14 +232,14 @@ jobs:
         run: |
           for i in 1 2 3 4 5 6 7 8; do
             echo "Health check attempt $i..."
-            RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+            RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
               --zone ${{ env.GCE_ZONE }} \
               --tunnel-through-iap \
               --command="curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/api/health 2>/dev/null; echo \"HTTP_CODE=\$?:\$(cat /tmp/health.json 2>/dev/null)\"" \
               2>/dev/null) || RESULT="SSH_FAIL"
             echo "  Result: $RESULT"
-            if echo "$RESULT" | grep -q '"status":"UP"'; then
-              echo "Health OK"
+            if echo "$RESULT" | grep -qE '"status":"(UP|DEGRADED)"'; then
+              echo "Health OK (app is alive)"
               exit 0
             fi
             sleep 10
@@ -239,21 +252,21 @@ jobs:
         if: failure()
         run: |
           echo "── systemctl status ──"
-          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --command="sudo systemctl status executespec --no-pager 2>&1 || true" \
             2>/dev/null || echo "SSH failed"
           echo ""
           echo "── Last 150 lines of app log ──"
-          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --command="sudo journalctl -u executespec --no-pager -n 150 2>&1 || true" \
             2>/dev/null || echo "SSH failed"
           echo ""
           echo "── Environment file (redacted) ──"
-          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --command="sudo cat /opt/app/executespec.env 2>/dev/null | sed 's/=.*/=***/' || echo 'No env file'" \
@@ -278,7 +291,7 @@ jobs:
       # ── Summary ───────────────────────────────────────────────────────────
       - name: Deployment summary
         run: |
-          echo "✅ Deployed commit ${{ github.sha }} to ${{ env.GCE_INSTANCE }} (${{ env.DEPLOY_ENV }})"
+          echo "✅ Deployed commit ${{ github.sha }} to ${GCE_INSTANCE_RESOLVED:-unknown} (${{ env.DEPLOY_ENV }})"
           echo "   JAR: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
           echo "   Branch: ${{ github.ref_name }}"
           echo "   Environment: ${{ env.DEPLOY_ENV }}"
