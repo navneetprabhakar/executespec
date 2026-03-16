@@ -295,7 +295,8 @@ public class PreviewService {
 
             // Build env vars: inject embedded DB config if DB detected + user env vars
             Map<String, String> deployEnvVars = new HashMap<>(envVars);
-            deployEnvVars.put("PORT", "8080");
+            // PORT is reserved by Cloud Run (auto-set to 8080) — do not include it
+            deployEnvVars.remove("PORT");
             if (dbType != null) {
                 injectEmbeddedDbConfig(type, dbType, deployEnvVars);
             }
