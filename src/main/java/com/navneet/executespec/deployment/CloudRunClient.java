@@ -147,7 +147,38 @@ public class CloudRunClient {
         }
 
         log.info("Cloud Run preview deployed: {} → {}", serviceName, serviceUrl);
+
+        // Ensure public access — --allow-unauthenticated may silently fail
+        ensurePublicAccess(serviceName);
+
         return new DeployResult(serviceUrl, null);
+    }
+
+    /**
+     * Explicitly set allUsers → roles/run.invoker on the service.
+     * This is a best-effort fallback if --allow-unauthenticated failed during deploy.
+     */
+    private void ensurePublicAccess(String serviceName) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                "gcloud", "run", "services", "add-iam-policy-binding", serviceName,
+                "--member=allUsers",
+                "--role=roles/run.invoker",
+                "--project", props.gcpProject(),
+                "--region", props.gcpRegion(),
+                "--quiet"
+            ).redirectErrorStream(true);
+            Process process = pb.start();
+            String output = new String(process.getInputStream().readAllBytes()).trim();
+            int exit = process.waitFor();
+            if (exit != 0) {
+                log.warn("Failed to set public access on {}: {}", serviceName, output);
+            } else {
+                log.info("Public access set on Cloud Run service: {}", serviceName);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to set public access on {}: {}", serviceName, e.getMessage());
+        }
     }
 
     /**
