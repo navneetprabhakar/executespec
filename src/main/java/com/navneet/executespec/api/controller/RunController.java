@@ -124,11 +124,18 @@ public class RunController {
         guard.requireAuthenticated(userDetails);
         var visSpec = runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember());
 
-        // "mine" scope: filter to only the current user's runs
+        // scope=mine  → only the current user's runs
+        // scope=org   → only runs in the user's org (useful for SUPER_ADMIN to see org-only view)
+        // scope=all   → all runs (SUPER_ADMIN only — default for super admin when no scope)
         if ("mine".equals(scope)) {
             Specification<PipelineRun> mineSpec = (root, query, cb) ->
                     cb.equal(root.get("createdByUserId"), userDetails.getUser().getId());
             visSpec = visSpec.and(mineSpec);
+        } else if ("org".equals(scope) && userDetails.getUser().getOrgId() != null) {
+            String orgId = userDetails.getUser().getOrgId();
+            Specification<PipelineRun> orgSpec = (root, query, cb) ->
+                    cb.equal(root.get("orgId"), orgId);
+            visSpec = visSpec.and(orgSpec);
         }
 
         Page<PipelineRun> runs = stateStore.listRuns(status, projectId, PageRequest.of(page, size), visSpec);

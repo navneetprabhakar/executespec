@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, FolderOpen, Users, User } from 'lucide-react';
+import { Plus, FolderOpen, Users, User, Globe } from 'lucide-react';
 import RunCard from './RunCard';
 import { RunCardSkeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
 import NewRunModal from './NewRunModal';
 import { useRunStore } from '@/stores/useRunStore';
-import { useAuthStore, selectIsOrgMember } from '@/stores/useAuthStore';
+import { useAuthStore, selectIsOrgMember, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
 
@@ -24,6 +24,7 @@ export default function RunList() {
     setActiveRunId, fetchRuns,
   } = useRunStore();
   const isOrgMember = useAuthStore(selectIsOrgMember);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [showModal, setShowModal] = useState(false);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
 
@@ -43,21 +44,9 @@ export default function RunList() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Scope toggle — org members can switch between My Runs / Org Runs */}
-      {isOrgMember && (
+      {/* Scope toggle — SUPER_ADMIN: 3 views; org members: 2 views */}
+      {(isSuperAdmin || isOrgMember) && (
         <div className="flex items-center gap-1 px-4 py-2 border-b border-white/[0.06] flex-shrink-0">
-          <button
-            onClick={() => setScopeFilter(null)}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
-              scopeFilter === null
-                ? 'bg-accent-violet text-white'
-                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
-            )}
-          >
-            <Users className="h-3 w-3" />
-            Org Runs
-          </button>
           <button
             onClick={() => setScopeFilter('mine')}
             className={cn(
@@ -70,6 +59,32 @@ export default function RunList() {
             <User className="h-3 w-3" />
             My Runs
           </button>
+          <button
+            onClick={() => setScopeFilter(isSuperAdmin ? 'org' : null)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+              (isSuperAdmin ? scopeFilter === 'org' : scopeFilter === null)
+                ? 'bg-accent-violet text-white'
+                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+            )}
+          >
+            <Users className="h-3 w-3" />
+            Org Runs
+          </button>
+          {isSuperAdmin && (
+            <button
+              onClick={() => setScopeFilter(null)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+                scopeFilter === null
+                  ? 'bg-accent-violet text-white'
+                  : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+              )}
+            >
+              <Globe className="h-3 w-3" />
+              All Runs
+            </button>
+          )}
         </div>
       )}
 

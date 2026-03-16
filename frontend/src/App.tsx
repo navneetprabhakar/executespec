@@ -34,6 +34,9 @@ import AuditPage from '@/pages/AuditPage';
 import InvoicesPage from '@/pages/InvoicesPage';
 import AccountingPage from '@/pages/AccountingPage';
 
+// Deploy page
+import DeploymentsPage from '@/pages/DeploymentsPage';
+
 import { useAuthStore } from '@/stores/useAuthStore';
 
 export default function App() {
@@ -66,6 +69,7 @@ export default function App() {
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="audit" element={<AuditPage />} />
+          <Route path="deployments" element={<DeploymentsPage />} />
           <Route path="settings" element={<SettingsPage />} />
 
           {/* Org pages */}
