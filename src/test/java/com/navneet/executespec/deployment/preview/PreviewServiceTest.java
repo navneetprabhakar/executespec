@@ -6,6 +6,7 @@ import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.ArtifactRegistryClient;
 import com.navneet.executespec.deployment.CloudRunClient;
+import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -47,6 +48,7 @@ class PreviewServiceTest {
     @Mock SseBroadcaster broadcaster;
     @Mock StateStore stateStore;
     @Mock TierConfigRepository tierConfigRepo;
+    @Mock WorkspaceRestoreService restoreService;
 
     PreviewProperties props;
     AgentProperties agentProps;
@@ -67,8 +69,14 @@ class PreviewServiceTest {
         freeTier.setMaxPreviewStarts(-1);
         when(tierConfigRepo.findById(any())).thenReturn(Optional.of(freeTier));
 
+        // Default: restoreService returns workspace path (workspace exists locally)
+        when(restoreService.ensureWorkspaceAvailable(any())).thenAnswer(inv -> {
+            String runId = inv.getArgument(0);
+            return workspaceRoot.resolve(runId);
+        });
+
         service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo);
+                artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService);
     }
 
     @AfterEach
@@ -107,7 +115,7 @@ class PreviewServiceTest {
         void throwsWhenDisabled() {
             props.setEnabled(false);
             service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                    artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo);
+                    artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService);
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
                     .isInstanceOf(PreviewException.class)
