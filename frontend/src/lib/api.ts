@@ -197,10 +197,11 @@ export interface ModelComparisonData {
 
 // ── Runs ────────────────────────────────────────────────────────────────────
 
-export const getRuns = (params?: { status?: string; projectId?: string }) => {
+export const getRuns = (params?: { status?: string; projectId?: string; scope?: string }) => {
   const qs = new URLSearchParams();
   if (params?.status)    qs.set('status',    params.status);
   if (params?.projectId) qs.set('projectId', params.projectId);
+  if (params?.scope)     qs.set('scope',     params.scope);
   const q = qs.toString();
   return req<RunSummary[]>(`/runs${q ? `?${q}` : ''}`);
 };
@@ -788,6 +789,9 @@ export const inviteMember = (body: { email: string; orgRole?: string; projectIds
   req<{ message: string; status: string }>('/org/invite', { method: 'POST', body: JSON.stringify(body) });
 
 export const getOrgInvitations = () => req<OrgInvitation[]>('/org/me/invitations');
+
+export const resendInvitation = (id: string) =>
+  req<{ message: string }>(`/org/me/invitations/${id}/resend`, { method: 'POST' });
 
 export const acceptInvite = (token: string) =>
   req<{ message: string }>(`/org/accept-invite?token=${token}`, { method: 'POST' });

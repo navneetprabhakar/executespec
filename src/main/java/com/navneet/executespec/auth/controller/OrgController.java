@@ -153,6 +153,15 @@ public class OrgController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/me/invitations/{id}/resend")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<Map<String, String>> resendInvitation(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable String id) {
+        invitationService.resendInvitation(id, userDetails.getUser().getId());
+        return ResponseEntity.ok(Map.of("message", "Invitation resent successfully"));
+    }
+
     @PostMapping("/accept-invite")
     public ResponseEntity<Map<String, String>> acceptInvite(
             @RequestParam String token,

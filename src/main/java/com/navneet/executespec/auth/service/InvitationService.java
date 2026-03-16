@@ -348,6 +348,44 @@ public class InvitationService {
         return invitation;
     }
 
+    /**
+     * Resend an invitation email. Resets expiry to 7 days from now.
+     * Works for PENDING and EXPIRED invitations (re-activates expired ones).
+     */
+    @Transactional
+    public void resendInvitation(String invitationId, String actorUserId) {
+        OrgInvitation invitation = invitationRepo.findById(invitationId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
+
+        if ("ACCEPTED".equals(invitation.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invitation has already been accepted");
+        }
+        if ("REJECTED".equals(invitation.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invitation was rejected");
+        }
+        if ("ESCALATED".equals(invitation.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Invitation is awaiting super-admin approval and cannot be resent");
+        }
+
+        // Re-activate expired invitations, reset expiry for pending ones
+        invitation.setStatus("PENDING");
+        invitation.setExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+        invitationRepo.save(invitation);
+
+        Org org = orgRepo.findById(invitation.getOrgId()).orElseThrow();
+        mailService.sendOrgInviteEmail(invitation.getInvitedEmail(), org.getName(), invitation.getToken());
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("INVITATION_RESENT")
+                .entityType("INVITATION").entityId(invitationId)
+                .orgId(invitation.getOrgId()).actorId(actorUserId)
+                .newValue("{\"email\":\"" + invitation.getInvitedEmail() + "\"}")
+                .build());
+
+        log.info("Invitation {} resent to {} by {}", invitationId, invitation.getInvitedEmail(), actorUserId);
+    }
+
     public List<OrgInvitation> listEscalated() {
         return invitationRepo.findByStatus("ESCALATED");
     }

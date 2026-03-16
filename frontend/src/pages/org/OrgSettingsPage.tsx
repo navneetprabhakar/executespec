@@ -173,6 +173,17 @@ export default function OrgSettingsPage() {
     }
   };
 
+  const handleResendInvitation = async (id: string) => {
+    try {
+      const resp = await api.resendInvitation(id);
+      setInviteMsg(resp.message);
+      const updated = await api.getOrgInvitations().catch(() => invitations);
+      setInvitations(updated);
+    } catch (err: any) {
+      setInviteMsg('Error: ' + (err.message ?? 'Failed to resend'));
+    }
+  };
+
   if (loading) return <div className="p-8 text-slate-400">Loading…</div>;
 
   // Show Create Org form if user has no org
@@ -266,12 +277,23 @@ export default function OrgSettingsPage() {
                     <span className="text-white text-sm">{inv.invitedEmail}</span>
                     <span className="ml-2 text-xs text-slate-500">{inv.orgRole}</span>
                   </div>
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    inv.status === 'ESCALATED' ? 'bg-amber-900/40 text-amber-400' :
-                    inv.status === 'ACCEPTED' ? 'bg-green-900/40 text-green-400' :
-                    'bg-slate-700 text-slate-400'}`}>
-                    {inv.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      inv.status === 'ESCALATED' ? 'bg-amber-900/40 text-amber-400' :
+                      inv.status === 'ACCEPTED' ? 'bg-green-900/40 text-green-400' :
+                      inv.status === 'EXPIRED' ? 'bg-red-900/40 text-red-400' :
+                      'bg-slate-700 text-slate-400'}`}>
+                      {inv.status}
+                    </span>
+                    {(inv.status === 'PENDING' || inv.status === 'EXPIRED') && (
+                      <button
+                        onClick={() => handleResendInvitation(inv.id)}
+                        className="text-xs text-purple-400 hover:text-purple-300 font-medium"
+                      >
+                        Resend
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

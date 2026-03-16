@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Gift, Package, ShoppingCart, Clock, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/stores/useAuthStore';
+import { useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import BillingProfileForm from '@/components/billing/BillingProfileForm';
 import { useUiStore } from '@/stores/useUiStore';
 import {
@@ -20,7 +20,11 @@ import { RazorpayOrderCheckout } from '@/components/billing/RazorpayOrderCheckou
 export default function BillingPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const { addToast } = useUiStore();
+  const isAdmin = isOrgAdmin || isSuperAdmin;
+  const isOrgUser = !!user?.orgId;
 
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -147,7 +151,7 @@ export default function BillingPage() {
                 </span>
               )}
             </div>
-            {!isFree && (
+            {!isFree && user?.tier !== 'ENTERPRISE' && (
               <button
                 onClick={() => navigate('/plans')}
                 className="text-sm text-accent-violet hover:text-accent-violet/80 transition-colors"
@@ -305,8 +309,8 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Cancel */}
-        {isActive && !sub.cancelAtPeriodEnd && (
+        {/* Cancel — admin only for org accounts */}
+        {isActive && !sub.cancelAtPeriodEnd && (!isOrgUser || isAdmin) && (
           <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6">
             <button
               onClick={handleCancel}
@@ -335,8 +339,8 @@ export default function BillingPage() {
         />
       )}
 
-      {/* Billing profile (GST details) */}
-      <BillingProfileForm />
+      {/* Billing profile (GST details) — admin only for org accounts */}
+      {(!isOrgUser || isAdmin) && <BillingProfileForm />}
     </div>
   );
 }

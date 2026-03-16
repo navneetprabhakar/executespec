@@ -31,6 +31,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -108,16 +109,28 @@ public class RunController {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));
     }
 
-    /** List runs, optionally filtered by status and/or projectId. Paginated (default page=0, size=20). */
+    /**
+     * List runs, optionally filtered by status, projectId, and scope.
+     * scope=mine restricts to the current user's runs (within org visibility).
+     */
     @GetMapping
     public ResponseEntity<List<RunSummary>> list(
             @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String projectId,
+            @RequestParam(required = false) String scope,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         guard.requireAuthenticated(userDetails);
         var visSpec = runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember());
+
+        // "mine" scope: filter to only the current user's runs
+        if ("mine".equals(scope)) {
+            Specification<PipelineRun> mineSpec = (root, query, cb) ->
+                    cb.equal(root.get("createdByUserId"), userDetails.getUser().getId());
+            visSpec = visSpec.and(mineSpec);
+        }
+
         Page<PipelineRun> runs = stateStore.listRuns(status, projectId, PageRequest.of(page, size), visSpec);
         return ResponseEntity.ok(runs.getContent().stream().map(mapper::toSummary).toList());
     }

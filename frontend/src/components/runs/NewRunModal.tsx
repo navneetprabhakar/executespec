@@ -30,7 +30,7 @@ type Mode = 'compose' | 'chat';
 export default function NewRunModal({ onClose }: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
   const [goal, setGoal] = useState('');
-  const [fastMode, setFastMode] = useState(false);
+  const [fastMode, setFastMode] = useState(true);
   const [showGitHub, setShowGitHub] = useState(false);
   const [model, setModel] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -281,7 +281,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
                 <Zap className={cn('h-3.5 w-3.5 transition-colors', fastMode ? 'text-accent-amber' : 'text-zinc-500')} />
                 <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
                   Fast Mode
-                  <span className="text-xs text-zinc-600 ml-1.5">(Auto Approved)</span>
+                  <span className="text-xs text-zinc-600 ml-1.5">(Auto Approved — Recommended)</span>
                 </span>
               </div>
               <span

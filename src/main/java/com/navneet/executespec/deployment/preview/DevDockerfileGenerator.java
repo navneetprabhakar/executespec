@@ -93,6 +93,11 @@ public class DevDockerfileGenerator {
             return layout.hasFrontend() ? layout.frontendType() : layout.backendType();
         }
 
+        // 5. Static HTML — fallback if any .html file exists in workspace root
+        if (hasStaticHtml(workspace)) {
+            return PreviewProjectType.STATIC_HTML;
+        }
+
         return null;
     }
 
@@ -121,6 +126,7 @@ public class DevDockerfileGenerator {
             case SPRING_BOOT -> springBootDockerfile();
             case PYTHON -> pythonDockerfile(workspace);
             case FULL_STACK -> nodeFrontendDockerfile(workspace); // fallback
+            case STATIC_HTML -> staticHtmlDockerfile();
         };
     }
 
@@ -751,6 +757,30 @@ public class DevDockerfileGenerator {
             }
         }
         return 3000;
+    }
+
+    // ── Static HTML support ────────────────────────────────────────────────
+
+    private boolean hasStaticHtml(Path workspace) {
+        try (Stream<Path> files = Files.list(workspace)) {
+            return files.anyMatch(p -> p.getFileName().toString().toLowerCase().endsWith(".html"));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private String staticHtmlDockerfile() {
+        return """
+                FROM nginx:alpine
+                WORKDIR /usr/share/nginx/html
+                LABEL preview=true
+                COPY . .
+                RUN rm -f /etc/nginx/conf.d/default.conf
+                RUN echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; }' \
+                    > /etc/nginx/conf.d/default.conf
+                EXPOSE 8080
+                CMD ["nginx", "-g", "daemon off;"]
+                """;
     }
 
     // ── Helper methods ──────────────────────────────────────────────────────
