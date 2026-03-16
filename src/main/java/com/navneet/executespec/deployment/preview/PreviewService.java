@@ -6,6 +6,7 @@ import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.ArtifactRegistryClient;
 import com.navneet.executespec.deployment.CloudRunClient;
+import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -41,6 +42,7 @@ public class PreviewService {
     private final StateStore stateStore;
     private final AgentProperties agentProps;
     private final TierConfigRepository tierConfigRepo;
+    private final WorkspaceRestoreService restoreService;
 
     /** runId → session */
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
@@ -56,7 +58,8 @@ public class PreviewService {
                           SseBroadcaster broadcaster,
                           StateStore stateStore,
                           AgentProperties agentProps,
-                          TierConfigRepository tierConfigRepo) {
+                          TierConfigRepository tierConfigRepo,
+                          WorkspaceRestoreService restoreService) {
         this.dockerfileGen = dockerfileGen;
         this.databaseDetector = databaseDetector;
         this.envVarDetector = envVarDetector;
@@ -67,6 +70,7 @@ public class PreviewService {
         this.stateStore = stateStore;
         this.agentProps = agentProps;
         this.tierConfigRepo = tierConfigRepo;
+        this.restoreService = restoreService;
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -75,7 +79,7 @@ public class PreviewService {
      * Analyze workspace for database and env var requirements (pre-start step).
      */
     public PreviewAnalysis analyze(String runId) {
-        Path workspace = Path.of(agentProps.getWorkspace(), runId);
+        Path workspace = restoreService.ensureWorkspaceAvailable(runId);
         DatabaseType dbType = databaseDetector.detect(workspace);
         List<EnvVarDetector.DetectedEnvVar> envVars = envVarDetector.detect(workspace);
 
@@ -138,8 +142,8 @@ public class PreviewService {
         run.setPreviewStartCount(run.getPreviewStartCount() + 1);
         stateStore.saveRun(run);
 
-        // Detect project type
-        Path workspace = Path.of(agentProps.getWorkspace(), runId);
+        // Detect project type (restore from GCS if needed)
+        Path workspace = restoreService.ensureWorkspaceAvailable(runId);
         PreviewProjectType type = dockerfileGen.detect(workspace);
         if (type == null) {
             throw new PreviewException("Unsupported project type. Use Deploy to Cloud Run instead.");

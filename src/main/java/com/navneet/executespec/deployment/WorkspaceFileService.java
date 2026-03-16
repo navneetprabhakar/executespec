@@ -31,6 +31,7 @@ public class WorkspaceFileService {
     private final AgentProperties agentProps;
     private final StateStore stateStore;
     private final GitHubRepoService gitHubRepoService;
+    private final WorkspaceRestoreService restoreService;
 
     private static final long MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 
@@ -55,6 +56,14 @@ public class WorkspaceFileService {
             return listLocalFiles(root);
         }
 
+        // Try restoring from GCS before falling back to GitHub
+        try {
+            root = restoreService.ensureWorkspaceAvailable(runId);
+            return listLocalFiles(root);
+        } catch (Exception e) {
+            log.debug("[WorkspaceFileService] GCS restore failed for run {}: {}", runId, e.getMessage());
+        }
+
         // Fallback: serve from GitHub if repo URL exists
         return listFromGitHub(runId);
     }
@@ -77,6 +86,14 @@ public class WorkspaceFileService {
         Path root = workspaceRoot(runId);
         if (Files.isDirectory(root)) {
             return readLocalFile(root, relativePath);
+        }
+
+        // Try restoring from GCS before falling back to GitHub
+        try {
+            root = restoreService.ensureWorkspaceAvailable(runId);
+            return readLocalFile(root, relativePath);
+        } catch (Exception e) {
+            log.debug("[WorkspaceFileService] GCS restore failed for run {}: {}", runId, e.getMessage());
         }
 
         // Fallback: serve from GitHub if repo URL exists

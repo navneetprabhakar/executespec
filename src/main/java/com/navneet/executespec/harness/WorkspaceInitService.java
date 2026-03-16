@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ import java.util.List;
 public class WorkspaceInitService {
 
     private final AgentProperties props;
+    private final WorkspaceRestoreService restoreService;
 
     /**
      * Creates and initialises a fresh, isolated workspace for {@code runId}.
@@ -141,7 +143,7 @@ public class WorkspaceInitService {
      * @param targetRunId ID of the new run whose workspace will receive the copy
      */
     public void copyFromRun(String sourceRunId, String targetRunId) throws Exception {
-        Path source = runWorkspacePath(sourceRunId);
+        Path resolvedSource = runWorkspacePath(sourceRunId);
         Path target = runWorkspacePath(targetRunId);
 
         if (Files.isDirectory(target.resolve(".git"))) {
@@ -149,11 +151,21 @@ public class WorkspaceInitService {
             return;
         }
 
-        if (!Files.isDirectory(source)) {
-            log.warn("Source workspace for run {} does not exist at {}; falling back to empty workspace", sourceRunId, source);
-            ensureRunWorkspace(targetRunId);
-            return;
+        if (!Files.isDirectory(resolvedSource)) {
+            // Try restoring source workspace from GCS before falling back to empty
+            try {
+                resolvedSource = restoreService.ensureWorkspaceAvailable(sourceRunId);
+                log.info("Restored source workspace for run {} from GCS", sourceRunId);
+            } catch (Exception e) {
+                log.warn("Source workspace for run {} not found locally or in GCS ({}); falling back to empty workspace",
+                    sourceRunId, e.getMessage());
+                ensureRunWorkspace(targetRunId);
+                return;
+            }
         }
+
+        // Effectively final for use in inner classes
+        final Path source = resolvedSource;
 
         // ── 1. Get the list of tracked files from the source workspace ──
         ProcessBuilder pb = new ProcessBuilder("git", "ls-files")
