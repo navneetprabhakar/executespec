@@ -13,7 +13,7 @@ domain           = "executespec.ai"
 subdomain_prefix = "dev"   # → dev.executespec.ai
 
 # ── Compute (smaller for dev) ───────────────────────────────────────────────
-machine_type      = "e2-standard-4"   # 4 vCPU, 16 GB RAM (~$98/mo)
+machine_type      = "n2-standard-4"   # 4 vCPU, 16 GB RAM (~$142/mo)
 boot_disk_size_gb = 30
 boot_disk_type    = "pd-balanced"
 
