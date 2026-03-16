@@ -10,7 +10,7 @@ interface RunStore {
   error: string | null;
   statusFilter: string;
   projectFilter: string | null;
-  scopeFilter: string | null; // null = all org runs, 'mine' = my runs only
+  scopeFilter: string | null; // 'mine' = my runs (default), null = all visible runs, 'org' = org runs (super admin)
 
   setStatusFilter: (s: string) => void;
   setProjectFilter: (projectId: string | null) => void;
@@ -42,7 +42,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
   error: null,
   statusFilter: 'ALL',
   projectFilter: null,
-  scopeFilter: null,
+  scopeFilter: 'mine',
 
   setStatusFilter: (s) => set({ statusFilter: s }),
   setProjectFilter: (projectId) => set({ projectFilter: projectId }),
