@@ -45,7 +45,7 @@ public class SecurityConfig {
                 // Razorpay webhook (secured by HMAC signature, not JWT)
                 .requestMatchers(HttpMethod.POST, "/api/webhooks/razorpay").permitAll()
                 // Public health check
-                .requestMatchers("/api/health").permitAll()
+                .requestMatchers("/api/health", "/api/health/**").permitAll()
                 // Integration webhooks (external — secured by signature, not JWT)
                 .requestMatchers("/api/integrations/*/webhook").permitAll()
                 // Slack OAuth callback (external redirect — no JWT)
