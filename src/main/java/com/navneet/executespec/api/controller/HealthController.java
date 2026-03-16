@@ -14,20 +14,22 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Lightweight health endpoint consumed by supervisor.sh (for process monitoring)
+ * Lightweight health endpoint consumed by MIG/LB health checks
  * and by the dashboard header (for real-time server status badge).
  *
- * <p>GET /api/health → always 200 (JVM is alive). Body includes db status.
+ * <p>GET /api/health → always 200 (JVM is alive). DB status is cached
+ * and checked asynchronously to avoid connection pool exhaustion from
+ * frequent health-check calls.
+ *
  * <p>GET /api/health/ready → 200 if DB reachable, 503 otherwise.
  *
- * <p>The MIG auto-healer and load-balancer health checks must use /api/health (liveness)
- * NOT /api/health/ready, to avoid a death-spiral where a transient DB issue causes
- * the MIG to continuously recreate VMs.
- *
- * <p>No Spring Boot Actuator required — intentionally minimal so the supervisor
- * can parse the response with a simple {@code curl -sf} call.
+ * <p>The MIG auto-healer and load-balancer health checks use /api/health (liveness)
+ * which never returns 503, preventing a death-spiral where a transient DB issue
+ * causes the MIG to continuously recreate VMs.
  */
 @RestController
 @RequestMapping("/api/health")
@@ -38,17 +40,25 @@ public class HealthController {
     /** Wall-clock instant when the JVM started. Used to compute uptime. */
     private static final Instant START_TIME = Instant.now();
 
+    /** Cache DB status for 30 seconds to avoid pool exhaustion from frequent health checks. */
+    private static final long DB_CHECK_INTERVAL_MS = 30_000;
+
     private final DataSource    dataSource;
     private final StateStore    stateStore;
+
+    // Cached DB status — prevents connection pool exhaustion when MIG/LB
+    // health checks call /api/health every 15-30 seconds
+    private final AtomicBoolean cachedDbUp = new AtomicBoolean(false);
+    private final AtomicReference<Instant> lastDbCheck = new AtomicReference<>(Instant.EPOCH);
 
     /**
      * Liveness probe — always 200 if the JVM is running.
      * Used by MIG health check and load balancer.
-     * DB status is included in the body for informational purposes only.
+     * DB status is cached and refreshed every 30s to avoid pool exhaustion.
      */
     @GetMapping
     public ResponseEntity<Map<String, Object>> health() {
-        boolean dbUp = checkDatabase();
+        boolean dbUp = getCachedDbStatus();
 
         // Uptime
         long uptimeMs = Duration.between(START_TIME, Instant.now()).toMillis();
@@ -92,6 +102,26 @@ public class HealthController {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Returns cached DB status. Only performs an actual DB check every
+     * {@link #DB_CHECK_INTERVAL_MS} ms to prevent connection pool exhaustion
+     * from frequent MIG/LB health check calls.
+     */
+    private boolean getCachedDbStatus() {
+        Instant last = lastDbCheck.get();
+        if (Duration.between(last, Instant.now()).toMillis() > DB_CHECK_INTERVAL_MS) {
+            // Time to refresh — but don't block other callers
+            if (lastDbCheck.compareAndSet(last, Instant.now())) {
+                try {
+                    cachedDbUp.set(checkDatabase());
+                } catch (Exception e) {
+                    cachedDbUp.set(false);
+                }
+            }
+        }
+        return cachedDbUp.get();
+    }
 
     private boolean checkDatabase() {
         try (var conn = dataSource.getConnection()) {
