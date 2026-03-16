@@ -1,18 +1,22 @@
-# ── GCE Instance Template ────────────────────────────────────────────────────
+# ── GCE Instance (standalone — no MIG) ───────────────────────────────────────
 
-resource "google_compute_instance_template" "app" {
-  name_prefix  = "${var.name_prefix}-"
+resource "google_compute_instance" "app" {
+  name         = "${var.name_prefix}-vm"
   project      = var.project_id
+  zone         = var.zone
   machine_type = var.machine_type
-  region       = var.region
   tags         = ["executespec-server"]
 
-  disk {
-    source_image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
-    auto_delete  = true
-    boot         = true
-    disk_size_gb = var.boot_disk_size_gb
-    disk_type    = var.boot_disk_type
+  # Allow metadata/config changes without destroying the VM
+  allow_stopping_for_update = true
+  desired_status            = "RUNNING"
+
+  boot_disk {
+    initialize_params {
+      image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
+      size  = var.boot_disk_size_gb
+      type  = var.boot_disk_type
+    }
   }
 
   network_interface {
@@ -31,13 +35,13 @@ resource "google_compute_instance_template" "app" {
     startup-script = file("${path.module}/../../scripts/startup.sh")
 
     # Application configuration injected into systemd environment file
-    es-environment     = var.environment
-    es-db-host         = var.db_host
-    es-db-name         = var.db_name
-    es-db-user         = var.db_user
-    es-db-password     = var.db_password
-    es-redis-host      = var.redis_host
-    es-redis-port      = var.redis_port
+    es-environment      = var.environment
+    es-db-host          = var.db_host
+    es-db-name          = var.db_name
+    es-db-user          = var.db_user
+    es-db-password      = var.db_password
+    es-redis-host       = var.redis_host
+    es-redis-port       = var.redis_port
     es-deploy-bucket    = var.deploy_bucket
     es-workspace-bucket = var.workspace_bucket
     es-ar-region        = var.region
@@ -46,55 +50,21 @@ resource "google_compute_instance_template" "app" {
   }
 
   labels = var.labels
-
-  lifecycle {
-    create_before_destroy = true
-  }
 }
 
-# ── Managed Instance Group ──────────────────────────────────────────────────
+# ── Unmanaged Instance Group (for LB backend) ────────────────────────────────
+# The LB backend service needs an instance group to route traffic.
+# An unmanaged group with our single VM preserves the existing LB wiring.
 
-resource "google_compute_instance_group_manager" "app" {
-  name               = "${var.name_prefix}-mig"
-  project            = var.project_id
-  zone               = var.zone
-  base_instance_name = "${var.name_prefix}-vm"
-  target_size        = var.instance_count
+resource "google_compute_instance_group" "app" {
+  name    = "${var.name_prefix}-group"
+  project = var.project_id
+  zone    = var.zone
 
-  version {
-    instance_template = google_compute_instance_template.app.id
-  }
+  instances = [google_compute_instance.app.id]
 
   named_port {
     name = "http"
     port = 8080
-  }
-
-  auto_healing_policies {
-    health_check      = google_compute_health_check.app.id
-    initial_delay_sec = 600  # 10 min — covers pkg install + JAR download + Flyway migrations + Spring startup
-  }
-
-  update_policy {
-    type                  = "PROACTIVE"
-    minimal_action        = "REPLACE"
-    max_surge_fixed       = 1
-    max_unavailable_fixed = 0
-  }
-}
-
-# ── Health Check ────────────────────────────────────────────────────────────
-
-resource "google_compute_health_check" "app" {
-  name                = "${var.name_prefix}-health"
-  project             = var.project_id
-  check_interval_sec  = 30
-  timeout_sec         = 10
-  healthy_threshold   = 2
-  unhealthy_threshold = 3
-
-  http_health_check {
-    port         = 8080
-    request_path = "/api/health"
   }
 }

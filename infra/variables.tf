@@ -47,12 +47,6 @@ variable "machine_type" {
   default     = "e2-standard-2"
 }
 
-variable "instance_count" {
-  description = "Number of GCE instances (MIG target size)"
-  type        = number
-  default     = 1
-}
-
 variable "boot_disk_size_gb" {
   description = "Boot disk size in GB"
   type        = number

@@ -1,14 +1,9 @@
 output "instance_group" {
   description = "Instance group self_link (for load balancer backend)"
-  value       = google_compute_instance_group_manager.app.instance_group
+  value       = google_compute_instance_group.app.self_link
 }
 
 output "instance_name" {
-  description = "Base instance name"
-  value       = google_compute_instance_group_manager.app.base_instance_name
-}
-
-output "template_id" {
-  description = "Instance template ID"
-  value       = google_compute_instance_template.app.id
+  description = "VM instance name"
+  value       = google_compute_instance.app.name
 }

@@ -128,7 +128,6 @@ module "compute" {
   name_prefix       = local.name_prefix
   environment       = var.environment
   machine_type      = var.machine_type
-  instance_count    = var.instance_count
   boot_disk_size_gb = var.boot_disk_size_gb
   boot_disk_type    = var.boot_disk_type
   network_id        = module.network.network_id

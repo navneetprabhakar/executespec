@@ -13,8 +13,7 @@ domain           = "executespec.ai"
 subdomain_prefix = "app"   # → app.executespec.ai
 
 # ── Compute (production-grade) ──────────────────────────────────────────────
-machine_type      = "n2-standard-4"   # 4 vCPU, 16 GB RAM (~$97/mo each)
-instance_count    = 2                  # 2 instances for HA
+machine_type      = "n2-standard-4"   # 4 vCPU, 16 GB RAM (~$97/mo)
 boot_disk_size_gb = 50
 boot_disk_type    = "pd-ssd"
 
