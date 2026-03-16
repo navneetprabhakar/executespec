@@ -69,7 +69,7 @@ resource "google_compute_instance_group_manager" "app" {
 
   auto_healing_policies {
     health_check      = google_compute_health_check.app.id
-    initial_delay_sec = 300  # 5 min for initial startup
+    initial_delay_sec = 600  # 10 min — covers pkg install + JAR download + Flyway migrations + Spring startup
   }
 
   update_policy {

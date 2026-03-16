@@ -16,6 +16,13 @@ spring:
     driver-class-name: org.postgresql.Driver
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: 20          # default 10 is too low — 8 scheduled jobs + health checks + user traffic
+      minimum-idle: 5                # keep warm connections ready
+      connection-timeout: 10000      # 10s — fail fast instead of 30s default blocking
+      idle-timeout: 300000           # 5 min — reclaim idle connections
+      max-lifetime: 600000           # 10 min — rotate connections before DB-side timeouts
+      validation-timeout: 3000       # 3s — quick validation for health checks
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
