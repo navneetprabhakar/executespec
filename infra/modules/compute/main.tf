@@ -38,8 +38,11 @@ resource "google_compute_instance_template" "app" {
     es-db-password     = var.db_password
     es-redis-host      = var.redis_host
     es-redis-port      = var.redis_port
-    es-deploy-bucket   = var.deploy_bucket
+    es-deploy-bucket    = var.deploy_bucket
     es-workspace-bucket = var.workspace_bucket
+    es-ar-region        = var.region
+    es-ar-repo          = "${var.name_prefix}-docker"
+    es-ar-host          = "${var.region}-docker.pkg.dev"
   }
 
   labels = var.labels

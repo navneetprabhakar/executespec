@@ -49,7 +49,7 @@ class PreviewSessionTest {
         var session = new PreviewSession(
                 "run-1", "es-preview-run1", PreviewProjectType.SPRING_BOOT, DatabaseType.POSTGRESQL,
                 PreviewStatus.BUILDING, "https://es-preview-run1-xyz.run.app",
-                "us-central1-docker.pkg.dev/proj/repo/preview-run1-123", "some error",
+                "asia-south1-docker.pkg.dev/proj/repo/preview-run1-123", "some error",
                 Instant.now(), Instant.now().plusSeconds(900)
         );
 
@@ -59,7 +59,7 @@ class PreviewSessionTest {
         assertThat(session.databaseType()).isEqualTo(DatabaseType.POSTGRESQL);
         assertThat(session.status()).isEqualTo(PreviewStatus.BUILDING);
         assertThat(session.url()).isEqualTo("https://es-preview-run1-xyz.run.app");
-        assertThat(session.imageUri()).isEqualTo("us-central1-docker.pkg.dev/proj/repo/preview-run1-123");
+        assertThat(session.imageUri()).isEqualTo("asia-south1-docker.pkg.dev/proj/repo/preview-run1-123");
         assertThat(session.errorMessage()).isEqualTo("some error");
     }
 

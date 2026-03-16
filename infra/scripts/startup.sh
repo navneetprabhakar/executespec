@@ -96,6 +96,16 @@ if ! command -v gsutil &>/dev/null; then
   apt-get install -y -qq google-cloud-sdk
 fi
 
+# ── 5b. Docker → Artifact Registry auth ──────────────────────────────────────
+# Configure Docker credential helper for Artifact Registry.
+# This must run on every boot — MIG VM recreation wipes ~/.docker/config.json.
+
+log "Phase 5b: Docker ↔ Artifact Registry auth"
+AR_REGION=$(meta "es-ar-region")
+AR_REGION="${AR_REGION:-asia-south1}"
+gcloud auth configure-docker "${AR_REGION}-docker.pkg.dev" --quiet 2>/dev/null \
+  || log "WARN: gcloud auth configure-docker failed — preview pushes may fail"
+
 # ── 6. Read metadata and write environment file ─────────────────────────────
 
 log "Phase 6: Environment configuration"
@@ -112,6 +122,8 @@ REDIS_HOST=$(meta "es-redis-host")
 REDIS_PORT=$(meta "es-redis-port")
 DEPLOY_BUCKET=$(meta "es-deploy-bucket")
 WORKSPACE_BUCKET=$(meta "es-workspace-bucket")
+AR_REPO=$(meta "es-ar-repo")
+AR_HOST=$(meta "es-ar-host")
 
 # ── 6b. Load SMTP credentials from GCS (if uploaded) ──────────────────────
 
@@ -208,6 +220,11 @@ GITHUB_PAT=${GITHUB_PAT}
 
 # GCP (for Secret Manager + runtime config)
 GCP_PROJECT=$(curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/project/project-id" 2>/dev/null || echo "")
+GCP_REGION=${AR_REGION}
+
+# Artifact Registry
+AR_REPOSITORY=${AR_REPO}
+AR_HOST=${AR_HOST}
 
 # App
 SPRING_PROFILES_ACTIVE=${ES_ENV:-prod}

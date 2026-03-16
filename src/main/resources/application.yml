@@ -125,10 +125,10 @@ agent:
   deployment:
     enabled: true
     gcp-project: ${GCP_PROJECT:cs-poc-wndx76juxpe1pups25gw6tj}
-    gcp-region: us-central1
+    gcp-region: ${GCP_REGION:asia-south1}
     artifact-registry:
-      repository: agent-demos
-      host: us-central1-docker.pkg.dev
+      repository: ${AR_REPOSITORY:executespec-dev-docker}
+      host: ${AR_HOST:asia-south1-docker.pkg.dev}
     cloud-run:
       cpu: "1"
       memory: 512Mi
