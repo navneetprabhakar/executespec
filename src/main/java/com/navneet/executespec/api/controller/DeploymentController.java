@@ -1,5 +1,6 @@
 package com.navneet.executespec.api.controller;
 
+import com.navneet.executespec.api.dto.DeployConfirmRequest;
 import com.navneet.executespec.api.dto.DeployRequest;
 import com.navneet.executespec.api.dto.DeploymentDetail;
 import com.navneet.executespec.api.dto.DeploymentSummary;
@@ -9,8 +10,10 @@ import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.deployment.analyzer.DeploymentAnalyzer;
 import com.navneet.executespec.deployment.analyzer.DeploymentDecisionEngine;
+import com.navneet.executespec.deployment.analyzer.DeploymentPath;
 import com.navneet.executespec.deployment.analyzer.InfrastructureManifest;
 import com.navneet.executespec.deployment.credential.CredentialService;
+import com.navneet.executespec.deployment.engine.DeployEngineOrchestrator;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.Deployment;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -48,6 +51,7 @@ public class DeploymentController {
     private final WorkspaceRestoreService workspaceRestore;
     private final StateStore stateStore;
     private final CredentialService credentialService;
+    private final DeployEngineOrchestrator deployEngine;
 
     @PostMapping
     public ResponseEntity<DeploymentSummary> deploy(
@@ -181,5 +185,98 @@ public class DeploymentController {
                 "decision", decision,
                 "hasGcpCredentials", hasCredentials
         ));
+    }
+
+    // ── Deploy Engine: Confirm & Deploy ───────────────────────────────────────
+
+    /**
+     * Confirm a deployment after analysis. The user has chosen a path and
+     * provided environment variables. Initiates the async deployment pipeline.
+     */
+    @PostMapping("/confirm")
+    public ResponseEntity<DeploymentSummary> confirm(
+            @RequestBody DeployConfirmRequest request,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(request.runId(), userDetails);
+        String userId = userDetails.getUser().getId();
+
+        try {
+            DeploymentPath path = DeploymentPath.valueOf(request.deploymentPath());
+
+            if (path != DeploymentPath.CLOUD_RUN_DIRECT) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Only CLOUD_RUN_DIRECT is currently supported. "
+                                + "COMPOSE_ON_VM and MANAGED_INFRASTRUCTURE coming soon.");
+            }
+
+            String region = request.region() != null ? request.region() : "us-central1";
+            int port = request.appPort() != null ? request.appPort() : 8080;
+
+            Deployment d = deployEngine.deployCloudRunDirect(
+                    request.runId(), userId, region,
+                    request.envVars(), request.manifestJson(),
+                    request.healthCheckPath(), port);
+
+            return ResponseEntity.accepted().body(DeploymentSummary.from(d));
+
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Invalid deploymentPath: " + request.deploymentPath()
+                            + ". Must be CLOUD_RUN_DIRECT, COMPOSE_ON_VM, or MANAGED_INFRASTRUCTURE.");
+        }
+    }
+
+    // ── Deploy Engine: Rollback ───────────────────────────────────────────────
+
+    /**
+     * Rollback a deploy-engine deployment to a previous revision.
+     * Uses user's GCP credentials (not system ADC).
+     */
+    @PostMapping("/{id}/engine-rollback")
+    public ResponseEntity<Void> engineRollback(
+            @PathVariable String id,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        Deployment d = deploymentRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Deployment not found: " + id));
+        guard.requireRunAccess(d.getRunId(), userDetails);
+
+        try {
+            deployEngine.rollback(id, userDetails.getUser().getId());
+            return ResponseEntity.ok().build();
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Rollback failed: " + e.getMessage());
+        }
+    }
+
+    // ── Deploy Engine: Destroy ────────────────────────────────────────────────
+
+    /**
+     * Destroy a deploy-engine deployment — delete Cloud Run service and image
+     * from the user's GCP project.
+     */
+    @DeleteMapping("/{id}/engine-destroy")
+    public ResponseEntity<Void> engineDestroy(
+            @PathVariable String id,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        Deployment d = deploymentRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Deployment not found: " + id));
+        guard.requireRunAccess(d.getRunId(), userDetails);
+
+        try {
+            deployEngine.destroy(id, userDetails.getUser().getId());
+            return ResponseEntity.noContent().build();
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Destroy failed: " + e.getMessage());
+        }
     }
 }

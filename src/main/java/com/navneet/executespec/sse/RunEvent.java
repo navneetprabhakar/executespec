@@ -96,6 +96,36 @@ public record RunEvent(
         return new RunEvent("DEPLOY_DELETED", runId, null, version + "|" + reason, Instant.now());
     }
 
+    // ── Deploy Engine events (Path A/B/C — user's GCP project) ─────────────────
+
+    public static RunEvent engineDeployStarted(String runId, String version, String path) {
+        return new RunEvent("ENGINE_DEPLOY_STARTED", runId, null,
+                version + "|" + path, Instant.now());
+    }
+
+    public static RunEvent enginePhase(String runId, String phase, String message) {
+        return new RunEvent("ENGINE_PHASE", runId, null,
+                phase + "|" + message, Instant.now());
+    }
+
+    public static RunEvent engineBuilding(String runId, String version) {
+        return new RunEvent("ENGINE_BUILDING", runId, null, version, Instant.now());
+    }
+
+    public static RunEvent engineDeploying(String runId, String version) {
+        return new RunEvent("ENGINE_DEPLOYING", runId, null, version, Instant.now());
+    }
+
+    public static RunEvent engineDeployLive(String runId, String version, String serviceUrl) {
+        return new RunEvent("ENGINE_DEPLOY_LIVE", runId, null,
+                version + "|" + serviceUrl, Instant.now());
+    }
+
+    public static RunEvent engineDeployFailed(String runId, String version, String error) {
+        return new RunEvent("ENGINE_DEPLOY_FAILED", runId, null,
+                version + "|" + error, Instant.now());
+    }
+
     // ── Tier 8: Compile + API spec + preview events ───────────────────────────
 
     public static RunEvent apiSpecReady(String runId) {
