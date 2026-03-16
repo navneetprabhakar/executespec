@@ -10,9 +10,11 @@ interface RunStore {
   error: string | null;
   statusFilter: string;
   projectFilter: string | null;
+  scopeFilter: string | null; // null = all org runs, 'mine' = my runs only
 
   setStatusFilter: (s: string) => void;
   setProjectFilter: (projectId: string | null) => void;
+  setScopeFilter: (scope: string | null) => void;
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
@@ -40,9 +42,11 @@ export const useRunStore = create<RunStore>((set, get) => ({
   error: null,
   statusFilter: 'ALL',
   projectFilter: null,
+  scopeFilter: null,
 
   setStatusFilter: (s) => set({ statusFilter: s }),
   setProjectFilter: (projectId) => set({ projectFilter: projectId }),
+  setScopeFilter: (scope) => set({ scopeFilter: scope }),
 
   setActiveRunId: (id) => {
     set({ activeRunId: id, activeRun: null });
@@ -53,10 +57,11 @@ export const useRunStore = create<RunStore>((set, get) => ({
   fetchRuns: async () => {
     set({ loading: true, error: null });
     try {
-      const { statusFilter, projectFilter } = get();
+      const { statusFilter, projectFilter, scopeFilter } = get();
       const runs = await api.getRuns({
         status: statusFilter === 'ALL' ? undefined : statusFilter,
         projectId: projectFilter ?? undefined,
+        scope: scopeFilter ?? undefined,
       });
       set({ runs, loading: false });
     } catch (e: any) {

@@ -56,28 +56,36 @@ export default function BillingProfileForm() {
 
   if (!profile) return null;
 
+  const inputClasses =
+    'w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 ' +
+    'placeholder:text-zinc-600 focus:border-accent-violet/50 focus:outline-none focus:ring-1 focus:ring-accent-violet/20 transition-colors';
+
+  const labelClasses = 'mb-1 block text-xs font-medium text-zinc-400';
+
   const field = (label: string, key: keyof BillingProfile, placeholder?: string) => (
     <div>
-      <label className="mb-1 block text-xs text-slate-400">{label}</label>
+      <label className={labelClasses}>{label}</label>
       <input
         value={(profile[key] as string) || ''}
         onChange={(e) => setProfile({ ...profile, [key]: e.target.value })}
         placeholder={placeholder}
-        className="w-full rounded-md border border-surface-600 bg-surface-700 px-3 py-2 text-sm text-slate-200
-                   placeholder:text-slate-500 focus:border-violet-500 focus:outline-none"
+        className={inputClasses}
       />
     </div>
   );
 
   return (
-    <div className="rounded-xl border border-surface-700 bg-surface-800 p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-200">Billing Details</h3>
+    <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6 mt-6">
+      <div className="mb-5 flex items-center justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-zinc-100">Billing Details</h3>
+          <p className="text-xs text-zinc-500 mt-0.5">GST and invoicing information</p>
+        </div>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium
-                     text-white hover:bg-violet-500 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg bg-accent-violet px-3.5 py-1.5 text-xs font-semibold
+                     text-white hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
         >
           <Save className="h-3.5 w-3.5" />
           {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
@@ -93,12 +101,11 @@ export default function BillingProfileForm() {
         {field('City', 'city')}
 
         <div>
-          <label className="mb-1 block text-xs text-slate-400">State</label>
+          <label className={labelClasses}>State</label>
           <select
             value={profile.stateCode || ''}
             onChange={(e) => handleStateChange(e.target.value)}
-            className="w-full rounded-md border border-surface-600 bg-surface-700 px-3 py-2 text-sm text-slate-200
-                       focus:border-violet-500 focus:outline-none"
+            className={inputClasses}
           >
             <option value="">Select state</option>
             {INDIAN_STATES.map(s => (
@@ -110,12 +117,11 @@ export default function BillingProfileForm() {
         {field('Postal Code', 'postalCode')}
 
         <div>
-          <label className="mb-1 block text-xs text-slate-400">Country</label>
+          <label className={labelClasses}>Country</label>
           <select
             value={profile.country || 'IN'}
             onChange={(e) => setProfile({ ...profile, country: e.target.value })}
-            className="w-full rounded-md border border-surface-600 bg-surface-700 px-3 py-2 text-sm text-slate-200
-                       focus:border-violet-500 focus:outline-none"
+            className={inputClasses}
           >
             <option value="IN">India</option>
             <option value="US">United States</option>
@@ -125,12 +131,11 @@ export default function BillingProfileForm() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-slate-400">Preferred Currency</label>
+          <label className={labelClasses}>Preferred Currency</label>
           <select
             value={profile.preferredCurrency || 'INR'}
             onChange={(e) => setProfile({ ...profile, preferredCurrency: e.target.value })}
-            className="w-full rounded-md border border-surface-600 bg-surface-700 px-3 py-2 text-sm text-slate-200
-                       focus:border-violet-500 focus:outline-none"
+            className={inputClasses}
           >
             <option value="INR">INR (Indian Rupee)</option>
             <option value="USD">USD (US Dollar)</option>

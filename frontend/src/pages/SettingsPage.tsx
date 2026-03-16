@@ -172,6 +172,7 @@ export default function SettingsPage() {
 
   // Load org data for ORG_ADMIN users so we can show org-level key status
   const isOrgAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
+  const isOrgDeveloper = !!user?.orgId && !isOrgAdmin;
   useEffect(() => {
     if (isOrgAdmin) {
       api.getMyOrg().then(setOrg).catch(() => {});
@@ -306,8 +307,23 @@ export default function SettingsPage() {
         </div>
       </GlassPanel>
 
+      {/* ── Org developer notice ──────────────────────────────────────────── */}
+      {isOrgDeveloper && (
+        <GlassPanel className="px-5 py-4">
+          <div className="flex items-center gap-3">
+            <Building2 className="h-5 w-5 text-accent-violet flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-zinc-200">Integrations Managed at Org Level</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                All integrations are now managed at the org level. Please connect with your Org Admin.
+              </p>
+            </div>
+          </div>
+        </GlassPanel>
+      )}
+
       {/* ── GitHub ─────────────────────────────────────────────────────────── */}
-      <IntegrationCard
+      {!isOrgDeveloper && <IntegrationCard
         icon={<Github className="h-4 w-4 text-zinc-400" />}
         title="GitHub Integration"
         statusBadge={user?.hasGithubPat
@@ -364,7 +380,7 @@ export default function SettingsPage() {
             )}
           </div>
         </form>
-      </IntegrationCard>
+      </IntegrationCard>}
 
       {/* ── AI Provider Keys (requires canManageAiKeys) ─────────────────────── */}
       {permissions?.canManageAiKeys && (
@@ -414,12 +430,14 @@ export default function SettingsPage() {
       )}
 
       {/* ── JIRA/Confluence note ──────────────────────────────────────────── */}
-      <GlassPanel className="px-5 py-3">
-        <p className="text-xs text-zinc-500">
-          JIRA and Confluence integrations are now managed at the org level.
-          Go to <a href="/integrations" className="text-accent-violet hover:text-accent-violet/80 underline">Integrations</a> to configure them.
-        </p>
-      </GlassPanel>
+      {!isOrgDeveloper && (
+        <GlassPanel className="px-5 py-3">
+          <p className="text-xs text-zinc-500">
+            JIRA and Confluence integrations are now managed at the org level.
+            Go to <a href="/integrations" className="text-accent-violet hover:text-accent-violet/80 underline">Integrations</a> to configure them.
+          </p>
+        </GlassPanel>
+      )}
 
       {/* ── Organisation AI Keys (ORG_ADMIN only) ──────────────────────────── */}
       {isOrgAdmin && <OrgAiKeyCard org={org} onSaved={setOrg} />}

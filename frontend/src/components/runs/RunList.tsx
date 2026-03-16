@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, FolderOpen } from 'lucide-react';
+import { Plus, FolderOpen, Users, User } from 'lucide-react';
 import RunCard from './RunCard';
 import { RunCardSkeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
@@ -20,6 +20,7 @@ export default function RunList() {
     runs, loading, activeRunId,
     statusFilter, setStatusFilter,
     projectFilter, setProjectFilter,
+    scopeFilter, setScopeFilter,
     setActiveRunId, fetchRuns,
   } = useRunStore();
   const isOrgMember = useAuthStore(selectIsOrgMember);
@@ -33,15 +34,45 @@ export default function RunList() {
     }
   }, [isOrgMember]);
 
-  // Re-fetch whenever either filter changes
+  // Re-fetch whenever any filter changes
   useEffect(() => {
     fetchRuns();
     const interval = setInterval(fetchRuns, 5000);
     return () => clearInterval(interval);
-  }, [statusFilter, projectFilter]);
+  }, [statusFilter, projectFilter, scopeFilter]);
 
   return (
     <div className="flex flex-col h-full">
+      {/* Scope toggle — org members can switch between My Runs / Org Runs */}
+      {isOrgMember && (
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-white/[0.06] flex-shrink-0">
+          <button
+            onClick={() => setScopeFilter(null)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+              scopeFilter === null
+                ? 'bg-accent-violet text-white'
+                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+            )}
+          >
+            <Users className="h-3 w-3" />
+            Org Runs
+          </button>
+          <button
+            onClick={() => setScopeFilter('mine')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+              scopeFilter === 'mine'
+                ? 'bg-accent-violet text-white'
+                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+            )}
+          >
+            <User className="h-3 w-3" />
+            My Runs
+          </button>
+        </div>
+      )}
+
       {/* Status filter bar */}
       <div className="flex items-center gap-1.5 px-4 py-3 border-b border-white/[0.06] overflow-x-auto flex-shrink-0">
         {FILTERS.map((f) => (
