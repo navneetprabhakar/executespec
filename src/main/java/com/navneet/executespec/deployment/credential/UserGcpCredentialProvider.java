@@ -14,7 +14,7 @@ import java.util.Optional;
  * Resolves a user's stored GCP credentials into a {@link GoogleCredentials} object
  * that can be used to authenticate GCP API calls on the user's behalf.
  * <p>
- * This is the bridge between the credential storage layer and GCP client libraries.
+ * Resolution order: project-scoped credential → user-level default → not found.
  */
 @Service
 @RequiredArgsConstructor
@@ -25,13 +25,19 @@ public class UserGcpCredentialProvider {
     private final CredentialEncryptionService encryptionService;
 
     /**
-     * Load and decrypt the user's GCP credentials, returning a usable GoogleCredentials object.
-     *
-     * @param userId the user whose credentials to load
-     * @return GoogleCredentials if stored and valid, empty otherwise
+     * Load and decrypt the user's GCP credentials (user-level default).
      */
     public Optional<GoogleCredentials> getCredentials(String userId) {
-        return credentialRepo.findByUserIdAndCloudProvider(userId, "GCP")
+        return resolveCredential(userId, null)
+                .map(this::decryptToGoogleCredentials);
+    }
+
+    /**
+     * Load credentials with project-scoped resolution.
+     * Tries: project-level → user default.
+     */
+    public Optional<GoogleCredentials> getCredentials(String userId, String projectId) {
+        return resolveCredential(userId, projectId)
                 .map(this::decryptToGoogleCredentials);
     }
 
@@ -46,18 +52,49 @@ public class UserGcpCredentialProvider {
     }
 
     /**
+     * Load credentials with project scope or throw if not found.
+     */
+    public GoogleCredentials getCredentialsOrThrow(String userId, String projectId) {
+        return getCredentials(userId, projectId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No GCP credentials found for user " + userId
+                                + (projectId != null ? " (project: " + projectId + ")" : "")
+                                + ". Please upload a service account key first."));
+    }
+
+    /**
      * Get the GCP project ID associated with the user's stored credentials.
      */
     public Optional<String> getGcpProjectId(String userId) {
-        return credentialRepo.findByUserIdAndCloudProvider(userId, "GCP")
+        return resolveCredential(userId, null)
                 .map(DeploymentCredential::getGcpProjectId);
     }
 
     /**
-     * Check if a user has stored GCP credentials.
+     * Get GCP project ID with project-scoped resolution.
+     */
+    public Optional<String> getGcpProjectId(String userId, String projectId) {
+        return resolveCredential(userId, projectId)
+                .map(DeploymentCredential::getGcpProjectId);
+    }
+
+    /**
+     * Check if a user has stored GCP credentials (any scope).
      */
     public boolean hasCredentials(String userId) {
         return credentialRepo.existsByUserId(userId);
+    }
+
+    /**
+     * Resolve credential: project-level → user default.
+     */
+    private Optional<DeploymentCredential> resolveCredential(String userId, String projectId) {
+        if (projectId != null) {
+            var projectCred = credentialRepo.findByUserIdAndProjectIdAndCloudProvider(
+                    userId, projectId, "GCP");
+            if (projectCred.isPresent()) return projectCred;
+        }
+        return credentialRepo.findUserDefault(userId, "GCP");
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────

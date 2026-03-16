@@ -56,4 +56,12 @@ public class TierConfig {
     /** Max preview starts per run. FREE=3, PRO=10, ENT=-1 (unlimited). */
     @Column(name = "max_preview_starts", nullable = false)
     private int maxPreviewStarts = 3;
+
+    /** Whether this tier can use the deploy engine. FREE=false, PRO/ENT=true. */
+    @Column(name = "can_deploy", nullable = false)
+    private boolean canDeploy = false;
+
+    /** Max active deployments. 0=disabled, -1=unlimited. FREE=0, PRO=5, ENT=-1. */
+    @Column(name = "max_deployments", nullable = false)
+    private int maxDeployments = 0;
 }
