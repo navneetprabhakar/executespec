@@ -6,7 +6,14 @@ import com.navneet.executespec.api.dto.DeploymentSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.deployment.DeploymentService;
+import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.deployment.analyzer.DeploymentAnalyzer;
+import com.navneet.executespec.deployment.analyzer.DeploymentDecisionEngine;
+import com.navneet.executespec.deployment.analyzer.InfrastructureManifest;
+import com.navneet.executespec.deployment.credential.CredentialService;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.Deployment;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRepo;
 import com.navneet.executespec.state.repository.DeploymentRepository;
 import com.navneet.executespec.state.repository.RunRepoRepository;
@@ -19,7 +26,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Deployment CRUD endpoints. Disabled by default — set {@code agent.deployment.enabled=true} to activate.
@@ -34,6 +43,11 @@ public class DeploymentController {
     private final DeploymentRepository deploymentRepo;
     private final RunRepoRepository runRepoRepo;
     private final RunAccessGuard guard;
+    private final DeploymentAnalyzer deploymentAnalyzer;
+    private final DeploymentDecisionEngine decisionEngine;
+    private final WorkspaceRestoreService workspaceRestore;
+    private final StateStore stateStore;
+    private final CredentialService credentialService;
 
     @PostMapping
     public ResponseEntity<DeploymentSummary> deploy(
@@ -124,5 +138,48 @@ public class DeploymentController {
         guard.requireOrgAdmin(userDetails);
         return deploymentRepo.findByStatus(Deployment.DeployStatus.LIVE)
             .stream().map(DeploymentSummary::from).toList();
+    }
+
+    // ── Deploy Engine: Analyze ────────────────────────────────────────────────
+
+    /**
+     * Analyze a run's workspace to determine infrastructure requirements
+     * and available deployment paths.
+     */
+    @PostMapping("/analyze")
+    public ResponseEntity<?> analyze(
+            @RequestParam String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+
+        PipelineRun run = stateStore.findRun(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found: " + runId));
+        if (!"COMPLETE".equals(run.getStatus()) && !"FAILED".equals(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Run must be complete before analyzing for deployment. Current status: " + run.getStatus());
+        }
+
+        // Ensure workspace is available (restore from GCS if needed)
+        Path workspace;
+        try {
+            workspace = workspaceRestore.ensureWorkspaceAvailable(runId);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to access workspace: " + e.getMessage());
+        }
+
+        // Run analysis
+        InfrastructureManifest manifest = deploymentAnalyzer.analyze(workspace);
+        DeploymentDecisionEngine.DeploymentDecision decision = decisionEngine.decide(manifest);
+
+        // Check if user has GCP credentials
+        String userId = userDetails.getUser().getId();
+        boolean hasCredentials = credentialService.getCredentialSummary(userId).isPresent();
+
+        return ResponseEntity.ok(Map.of(
+                "manifest", manifest,
+                "decision", decision,
+                "hasGcpCredentials", hasCredentials
+        ));
     }
 }
