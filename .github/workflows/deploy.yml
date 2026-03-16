@@ -91,7 +91,7 @@ jobs:
           MIG_NAME="${{ env.DEPLOY_ENV == 'prod' && 'executespec-prod-mig' || 'executespec-dev-mig' }}"
           INSTANCE=$(gcloud compute instance-groups managed list-instances "$MIG_NAME" \
             --zone ${{ env.GCE_ZONE }} \
-            --format="value(instance)" 2>/dev/null | head -1)
+            --format="value(NAME)" 2>/dev/null | head -1)
           if [ -z "$INSTANCE" ]; then
             echo "::error::No running instance found in MIG $MIG_NAME"
             exit 1
