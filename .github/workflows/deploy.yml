@@ -107,7 +107,7 @@ jobs:
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --strict-host-key-checking=no \
             --command="
               set -e
 
@@ -208,12 +208,12 @@ jobs:
           gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/env-patch.sh \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no"
+            --strict-host-key-checking=no
 
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --strict-host-key-checking=no \
             --command="
               set -e
               sudo mkdir -p /opt/app/releases
@@ -258,7 +258,7 @@ jobs:
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --strict-host-key-checking=no \
             --command="sudo systemctl status executespec --no-pager 2>&1 || true" \
             2>/dev/null || echo "SSH failed"
           echo ""
@@ -266,7 +266,7 @@ jobs:
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --strict-host-key-checking=no \
             --command="sudo journalctl -u executespec --no-pager -n 150 2>&1 || true" \
             2>/dev/null || echo "SSH failed"
           echo ""
@@ -274,7 +274,7 @@ jobs:
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
+            --strict-host-key-checking=no \
             --command="sudo cat /opt/app/executespec.env 2>/dev/null | sed 's/=.*/=***/' || echo 'No env file'" \
             2>/dev/null || echo "SSH failed"
 
