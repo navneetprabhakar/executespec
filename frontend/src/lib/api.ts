@@ -178,13 +178,80 @@ export interface FeasibilityReport {
 }
 
 export interface DeploymentSummary {
-  id: number;
+  id: string;
   runId: string;
+  versionTag: string;
   status: string;
   strategy: string;
   serviceUrl: string;
+  revisionName: string;
   createdAt: string;
-  expiresAt: string;
+  ttlExpiresAt: string;
+}
+
+// ── Deploy Engine Types ──────────────────────────────────────────────────────
+
+export interface RequiredPermission {
+  role: string;
+  label: string;
+  reason: string;
+  required: boolean;
+}
+
+export interface PermissionCheck {
+  role: string;
+  label: string;
+  required: boolean;
+  granted: boolean;
+  detail: string;
+}
+
+export interface CredentialSummary {
+  id: string;
+  gcpProjectId: string;
+  serviceAccountEmail: string;
+  projectId: string | null;
+  createdAt: string;
+  validatedAt: string | null;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  issues: string[];
+  gcpProjectId: string | null;
+  permissionChecks: PermissionCheck[];
+}
+
+export interface DeployAnalysisResult {
+  manifest: {
+    projectType: string;
+    language: string;
+    framework: string;
+    buildTool: string;
+    detectedPort: number;
+    healthCheckPath: string;
+    databases: string[];
+    caches: string[];
+    queues: string[];
+    storageServices: string[];
+    envVars: string[];
+    isStateless: boolean;
+    hasHealthCheck: boolean;
+    hasDockerfile: boolean;
+    dockerfilePath: string | null;
+  };
+  decision: {
+    recommendedPath: string;
+    availablePaths: Array<{
+      path: string;
+      label: string;
+      description: string;
+      available: boolean;
+      reason: string;
+    }>;
+    reasoning: string;
+  };
+  hasGcpCredentials: boolean;
 }
 
 export interface TimelineData {
@@ -305,11 +372,67 @@ export const getDeployments = () => req<DeploymentSummary[]>('/deployments');
 export const createDeployment = (body: { runId: string; strategy?: string }) =>
   req<DeploymentSummary>('/deployments', { method: 'POST', body: JSON.stringify(body) });
 
-export const deleteDeployment = (id: number) =>
+export const deleteDeployment = (id: string) =>
   req<void>(`/deployments/${id}`, { method: 'DELETE' });
 
-export const rollbackDeployment = (id: number) =>
+export const rollbackDeployment = (id: string) =>
   req<DeploymentSummary>(`/deployments/${id}/rollback`, { method: 'POST' });
+
+// ── Deploy Engine ────────────────────────────────────────────────────────────
+
+export const analyzeForDeploy = (runId: string) =>
+  req<DeployAnalysisResult>(`/deployments/analyze?runId=${encodeURIComponent(runId)}`, { method: 'POST' });
+
+export const confirmDeploy = (body: {
+  runId: string;
+  deploymentPath: string;
+  region?: string;
+  envVars?: Record<string, string>;
+  manifestJson?: string;
+  healthCheckPath?: string;
+  appPort?: number;
+}) =>
+  req<DeploymentSummary>('/deployments/confirm', { method: 'POST', body: JSON.stringify(body) });
+
+export const engineRollback = (id: string) =>
+  req<void>(`/deployments/${id}/engine-rollback`, { method: 'POST' });
+
+export const engineDestroy = (id: string) =>
+  req<void>(`/deployments/${id}/engine-destroy`, { method: 'DELETE' });
+
+export const getDeploymentDetail = (id: string) =>
+  req<DeploymentSummary>(`/deployments/${id}`);
+
+// ── GCP Credentials ──────────────────────────────────────────────────────────
+
+export const getRequiredPermissions = () =>
+  req<RequiredPermission[]>('/credentials/gcp/required-permissions');
+
+export const storeGcpCredential = (json: string, projectId?: string) => {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return req<CredentialSummary>(`/credentials/gcp${qs}`, {
+    method: 'POST',
+    body: json,
+  });
+};
+
+export const getGcpCredential = (projectId?: string) => {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return req<CredentialSummary | null>(`/credentials/gcp${qs}`);
+};
+
+export const listGcpCredentials = () =>
+  req<CredentialSummary[]>('/credentials/gcp/all');
+
+export const validateGcpCredential = (projectId?: string) => {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return req<ValidationResult>(`/credentials/gcp/validate${qs}`);
+};
+
+export const deleteGcpCredential = (projectId?: string) => {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return req<{ message: string }>(`/credentials/gcp${qs}`, { method: 'DELETE' });
+};
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 
