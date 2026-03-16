@@ -8,7 +8,12 @@ import java.util.UUID;
 
 /**
  * Stores encrypted GCP service account credentials for deploying
- * to a user's own cloud project. One credential per user per cloud provider.
+ * to a user's own cloud project.
+ * <p>
+ * Credentials can be scoped to an ExecuteSpec project (different teams → different GCP projects)
+ * or stored as user-level defaults (projectId = null).
+ * <p>
+ * Resolution order: project-level credential → user-level default → not found.
  */
 @Entity
 @Table(name = "deployment_credential")
@@ -23,6 +28,13 @@ public class DeploymentCredential {
 
     @Column(name = "user_id", nullable = false)
     private String userId;
+
+    /**
+     * Optional: scopes this credential to a specific ExecuteSpec project.
+     * Null means this is the user's default credential (used when no project-level one exists).
+     */
+    @Column(name = "project_id")
+    private String projectId;
 
     @Column(name = "cloud_provider", nullable = false)
     @Builder.Default
@@ -54,12 +66,25 @@ public class DeploymentCredential {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /**
+     * Create a user-level default credential (no project scope).
+     */
     public static DeploymentCredential create(String userId, byte[] encryptedData,
+                                                String gcpProjectId, String serviceAccountEmail) {
+        return create(userId, null, encryptedData, gcpProjectId, serviceAccountEmail);
+    }
+
+    /**
+     * Create a credential, optionally scoped to an ExecuteSpec project.
+     */
+    public static DeploymentCredential create(String userId, String projectId,
+                                                byte[] encryptedData,
                                                 String gcpProjectId, String serviceAccountEmail) {
         var now = Instant.now();
         return DeploymentCredential.builder()
                 .id(UUID.randomUUID().toString())
                 .userId(userId)
+                .projectId(projectId)
                 .cloudProvider("GCP")
                 .credentialType("SERVICE_ACCOUNT_KEY")
                 .encryptedData(encryptedData)

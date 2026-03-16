@@ -2,20 +2,28 @@ package com.navneet.executespec.deployment.credential;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.resourcemanager.v3.ProjectsClient;
+import com.google.cloud.resourcemanager.v3.ProjectsSettings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 /**
  * Manages lifecycle of user GCP deployment credentials:
  * store, validate, retrieve, delete.
+ * <p>
+ * Credentials can be:
+ * <ul>
+ *   <li><b>User-level default</b>: projectId = null — used when no project-level credential exists</li>
+ *   <li><b>Project-scoped</b>: tied to an ExecuteSpec project — different teams can deploy to different GCP projects</li>
+ * </ul>
+ * Resolution order: project-level → user-level default → not found.
  */
 @Service
 @RequiredArgsConstructor
@@ -27,22 +35,70 @@ public class CredentialService {
     private final UserGcpCredentialProvider credentialProvider;
     private final ObjectMapper objectMapper;
 
+    // ── Required GCP Permissions ──────────────────────────────────────────────
+
+    /**
+     * GCP IAM roles/permissions required for the deploy engine.
+     * Displayed to the user BEFORE they upload credentials so they can
+     * configure the service account correctly.
+     */
+    public static final List<RequiredPermission> REQUIRED_PERMISSIONS = List.of(
+            new RequiredPermission(
+                    "roles/run.admin",
+                    "Cloud Run Admin",
+                    "Create, update, and delete Cloud Run services in your project",
+                    true),
+            new RequiredPermission(
+                    "roles/cloudbuild.builds.editor",
+                    "Cloud Build Editor",
+                    "Submit and view Cloud Build jobs for building container images",
+                    true),
+            new RequiredPermission(
+                    "roles/artifactregistry.admin",
+                    "Artifact Registry Admin",
+                    "Create repos and push/pull container images",
+                    true),
+            new RequiredPermission(
+                    "roles/storage.admin",
+                    "Storage Admin",
+                    "Create and manage GCS buckets for build source uploads",
+                    true),
+            new RequiredPermission(
+                    "roles/iam.serviceAccountUser",
+                    "Service Account User",
+                    "Allow Cloud Build and Cloud Run to act as the service account",
+                    true),
+            new RequiredPermission(
+                    "roles/compute.admin",
+                    "Compute Engine Admin",
+                    "Provision VMs for Docker Compose deployments (Path B only)",
+                    false)
+    );
+
+    /**
+     * Returns the static list of required permissions with descriptions.
+     * Shown to the user before they upload credentials.
+     */
+    public List<RequiredPermission> getRequiredPermissions() {
+        return REQUIRED_PERMISSIONS;
+    }
+
+    // ── Store ─────────────────────────────────────────────────────────────────
+
     /**
      * Store (or replace) a user's GCP service account key.
-     * Parses the JSON to extract project_id and client_email, then encrypts and stores.
-     *
-     * @param userId           the user storing the credential
-     * @param serviceAccountJson the raw JSON key file content
-     * @return summary of stored credential (never includes the key itself)
+     * Optionally scoped to an ExecuteSpec project.
      */
     @Transactional
-    public CredentialSummary storeCredential(String userId, String serviceAccountJson) {
+    public CredentialSummary storeCredential(String userId, String projectId,
+                                              String serviceAccountJson) {
         // 1. Parse JSON to extract metadata
         JsonNode root;
         try {
             root = objectMapper.readTree(serviceAccountJson);
         } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid JSON — please upload a valid GCP service account key file");
+            throw new IllegalArgumentException(
+                    "Invalid JSON — please upload a valid GCP service account key file");
         }
 
         String type = textOrNull(root, "type");
@@ -52,60 +108,96 @@ public class CredentialService {
                             + "Please upload a GCP service account key (not an OAuth client or API key).");
         }
 
-        String projectId = textOrNull(root, "project_id");
+        String gcpProjectId = textOrNull(root, "project_id");
         String clientEmail = textOrNull(root, "client_email");
         String privateKeyId = textOrNull(root, "private_key_id");
 
-        if (projectId == null || clientEmail == null || privateKeyId == null) {
+        if (gcpProjectId == null || clientEmail == null || privateKeyId == null) {
             throw new IllegalArgumentException(
                     "Service account key is missing required fields (project_id, client_email, private_key_id)");
         }
 
         // 2. Encrypt the raw JSON
-        byte[] encrypted = encryptionService.encrypt(serviceAccountJson.getBytes(StandardCharsets.UTF_8));
+        byte[] encrypted = encryptionService.encrypt(
+                serviceAccountJson.getBytes(StandardCharsets.UTF_8));
 
-        // 3. Upsert: delete existing if present, then create
-        credentialRepo.findByUserIdAndCloudProvider(userId, "GCP")
-                .ifPresent(existing -> credentialRepo.delete(existing));
+        // 3. Upsert: delete existing for this user+project combo, then create
+        if (projectId != null) {
+            credentialRepo.findByUserIdAndProjectIdAndCloudProvider(userId, projectId, "GCP")
+                    .ifPresent(credentialRepo::delete);
+        } else {
+            credentialRepo.findUserDefault(userId, "GCP")
+                    .ifPresent(credentialRepo::delete);
+        }
 
         DeploymentCredential credential = DeploymentCredential.create(
-                userId, encrypted, projectId, clientEmail);
+                userId, projectId, encrypted, gcpProjectId, clientEmail);
         credentialRepo.save(credential);
 
-        log.info("Stored GCP credential for user {} — project={}, sa={}", userId, projectId, clientEmail);
+        log.info("Stored GCP credential for user {} — project={}, gcpProject={}, sa={}",
+                userId, projectId, gcpProjectId, clientEmail);
 
-        return new CredentialSummary(
-                credential.getId(),
-                projectId,
-                clientEmail,
-                credential.getCreatedAt().toString(),
-                credential.getValidatedAt() != null ? credential.getValidatedAt().toString() : null
-        );
+        return toSummary(credential);
     }
 
     /**
-     * Validate that stored credentials can actually authenticate to GCP.
+     * Store user-level default credential (backward compatible).
+     */
+    @Transactional
+    public CredentialSummary storeCredential(String userId, String serviceAccountJson) {
+        return storeCredential(userId, null, serviceAccountJson);
+    }
+
+    // ── Validate ──────────────────────────────────────────────────────────────
+
+    /**
+     * Validate that stored credentials can authenticate to GCP and have the
+     * required permissions. Returns per-permission validation status.
      */
     @Transactional
     public ValidationResult validateCredential(String userId) {
-        var credOpt = credentialRepo.findByUserIdAndCloudProvider(userId, "GCP");
-        if (credOpt.isEmpty()) {
-            return new ValidationResult(false, List.of("No GCP credentials stored"), null);
+        return validateCredential(userId, null);
+    }
+
+    /**
+     * Validate credentials for a specific project scope.
+     */
+    @Transactional
+    public ValidationResult validateCredential(String userId, String projectId) {
+        DeploymentCredential cred = resolveCredential(userId, projectId);
+        if (cred == null) {
+            return new ValidationResult(false, List.of("No GCP credentials stored"),
+                    null, List.of());
         }
 
-        var cred = credOpt.get();
         List<String> issues = new ArrayList<>();
+        List<PermissionCheck> permissionChecks = new ArrayList<>();
 
         try {
             GoogleCredentials credentials = credentialProvider.getCredentialsOrThrow(userId);
-            // Try to refresh the access token — this validates the key is still active
+            // Try to refresh the access token — validates the key is active
             credentials.refreshIfExpired();
 
-            // Mark as validated
+            // Basic auth works — now check individual permissions
+            permissionChecks = checkPermissions(credentials, cred.getGcpProjectId());
+
+            // Count failed required permissions
+            long failedRequired = permissionChecks.stream()
+                    .filter(p -> p.required() && !p.granted())
+                    .count();
+            if (failedRequired > 0) {
+                issues.add(failedRequired + " required permission(s) missing");
+            }
+
+            // Mark as validated (even if some permissions missing — auth itself works)
             cred.markValidated();
             credentialRepo.save(cred);
 
-            log.info("GCP credential validated for user {} — project={}", userId, cred.getGcpProjectId());
+            log.info("GCP credential validated for user {} — project={}, checks={}/{}",
+                    userId, cred.getGcpProjectId(),
+                    permissionChecks.stream().filter(PermissionCheck::granted).count(),
+                    permissionChecks.size());
+
         } catch (Exception e) {
             issues.add("Authentication failed: " + e.getMessage());
             log.warn("GCP credential validation failed for user {}: {}", userId, e.getMessage());
@@ -114,34 +206,146 @@ public class CredentialService {
         return new ValidationResult(
                 issues.isEmpty(),
                 issues,
-                cred.getGcpProjectId()
+                cred.getGcpProjectId(),
+                permissionChecks
         );
     }
 
     /**
-     * Get credential summary without sensitive data.
+     * Check individual GCP permissions using the IAM testPermissions API.
+     */
+    private List<PermissionCheck> checkPermissions(GoogleCredentials credentials,
+                                                    String gcpProjectId) {
+        List<PermissionCheck> results = new ArrayList<>();
+
+        try {
+            // Use the Resource Manager API to test permissions on the project
+            ProjectsSettings settings = ProjectsSettings.newBuilder()
+                    .setCredentialsProvider(FixedCredentialsProvider.create(credentials))
+                    .build();
+
+            try (ProjectsClient projectsClient = ProjectsClient.create(settings)) {
+                String resource = "projects/" + gcpProjectId;
+
+                // Map roles to specific permissions we can test
+                Map<String, List<String>> rolePermissions = Map.of(
+                        "roles/run.admin", List.of("run.services.create", "run.services.delete",
+                                "run.services.update", "run.services.setIamPolicy"),
+                        "roles/cloudbuild.builds.editor", List.of("cloudbuild.builds.create",
+                                "cloudbuild.builds.get"),
+                        "roles/artifactregistry.admin", List.of(
+                                "artifactregistry.repositories.create",
+                                "artifactregistry.repositories.get"),
+                        "roles/storage.admin", List.of("storage.buckets.create",
+                                "storage.objects.create"),
+                        "roles/iam.serviceAccountUser", List.of("iam.serviceAccounts.actAs")
+                );
+
+                // Test all permissions in one batch
+                List<String> allPermissions = rolePermissions.values().stream()
+                        .flatMap(List::stream)
+                        .toList();
+
+                var response = projectsClient.testIamPermissions(resource, allPermissions);
+                Set<String> grantedPermissions = new HashSet<>(response.getPermissionsList());
+
+                // Build results per role
+                for (RequiredPermission req : REQUIRED_PERMISSIONS) {
+                    List<String> permsForRole = rolePermissions.getOrDefault(req.role(), List.of());
+                    if (permsForRole.isEmpty()) {
+                        // Optional role with no testable permissions (e.g., compute.admin)
+                        results.add(new PermissionCheck(
+                                req.role(), req.label(), req.required(),
+                                true, "Not tested (optional for this path)"));
+                        continue;
+                    }
+
+                    boolean allGranted = permsForRole.stream().allMatch(grantedPermissions::contains);
+                    List<String> missing = permsForRole.stream()
+                            .filter(p -> !grantedPermissions.contains(p))
+                            .toList();
+
+                    results.add(new PermissionCheck(
+                            req.role(), req.label(), req.required(),
+                            allGranted,
+                            allGranted ? "All permissions granted"
+                                    : "Missing: " + String.join(", ", missing)));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Permission check failed (auth may still work): {}", e.getMessage());
+            // Return unknown status for all
+            for (RequiredPermission req : REQUIRED_PERMISSIONS) {
+                results.add(new PermissionCheck(
+                        req.role(), req.label(), req.required(),
+                        false, "Could not verify: " + e.getMessage()));
+            }
+        }
+
+        return results;
+    }
+
+    // ── Retrieve ──────────────────────────────────────────────────────────────
+
+    /**
+     * Get credential summary (no sensitive data). Resolves project → user default.
      */
     public Optional<CredentialSummary> getCredentialSummary(String userId) {
-        return credentialRepo.findByUserIdAndCloudProvider(userId, "GCP")
-                .map(c -> new CredentialSummary(
-                        c.getId(),
-                        c.getGcpProjectId(),
-                        c.getServiceAccountEmail(),
-                        c.getCreatedAt().toString(),
-                        c.getValidatedAt() != null ? c.getValidatedAt().toString() : null
-                ));
+        return getCredentialSummary(userId, null);
+    }
+
+    public Optional<CredentialSummary> getCredentialSummary(String userId, String projectId) {
+        DeploymentCredential cred = resolveCredential(userId, projectId);
+        return Optional.ofNullable(cred).map(this::toSummary);
     }
 
     /**
-     * Delete stored credentials for a user.
+     * List all credentials for a user (all project-scoped + default).
      */
+    public List<CredentialSummary> listCredentials(String userId) {
+        return credentialRepo.findByUserIdOrderByProjectIdAsc(userId).stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    // ── Delete ────────────────────────────────────────────────────────────────
+
     @Transactional
     public void deleteCredential(String userId) {
-        credentialRepo.findByUserIdAndCloudProvider(userId, "GCP")
-                .ifPresent(c -> {
-                    credentialRepo.delete(c);
-                    log.info("Deleted GCP credential for user {}", userId);
-                });
+        deleteCredential(userId, null);
+    }
+
+    @Transactional
+    public void deleteCredential(String userId, String projectId) {
+        if (projectId != null) {
+            credentialRepo.findByUserIdAndProjectIdAndCloudProvider(userId, projectId, "GCP")
+                    .ifPresent(c -> {
+                        credentialRepo.delete(c);
+                        log.info("Deleted project-scoped GCP credential for user {} project {}", userId, projectId);
+                    });
+        } else {
+            credentialRepo.findUserDefault(userId, "GCP")
+                    .ifPresent(c -> {
+                        credentialRepo.delete(c);
+                        log.info("Deleted default GCP credential for user {}", userId);
+                    });
+        }
+    }
+
+    // ── Resolution ────────────────────────────────────────────────────────────
+
+    /**
+     * Resolve credential: project-level → user-level default → null.
+     */
+    private DeploymentCredential resolveCredential(String userId, String projectId) {
+        if (projectId != null) {
+            // Try project-scoped first
+            var projectCred = credentialRepo.findByUserIdAndProjectIdAndCloudProvider(
+                    userId, projectId, "GCP");
+            if (projectCred.isPresent()) return projectCred.get();
+        }
+        // Fall back to user default
+        return credentialRepo.findUserDefault(userId, "GCP").orElse(null);
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
@@ -150,6 +354,7 @@ public class CredentialService {
             String id,
             String gcpProjectId,
             String serviceAccountEmail,
+            String projectId,         // null = user-level default
             String createdAt,
             String validatedAt
     ) {}
@@ -157,10 +362,37 @@ public class CredentialService {
     public record ValidationResult(
             boolean valid,
             List<String> issues,
-            String gcpProjectId
+            String gcpProjectId,
+            List<PermissionCheck> permissionChecks
+    ) {}
+
+    public record RequiredPermission(
+            String role,
+            String label,
+            String reason,
+            boolean required          // false = optional (e.g., Compute for Path B only)
+    ) {}
+
+    public record PermissionCheck(
+            String role,
+            String label,
+            boolean required,
+            boolean granted,
+            String detail
     ) {}
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private CredentialSummary toSummary(DeploymentCredential c) {
+        return new CredentialSummary(
+                c.getId(),
+                c.getGcpProjectId(),
+                c.getServiceAccountEmail(),
+                c.getProjectId(),
+                c.getCreatedAt().toString(),
+                c.getValidatedAt() != null ? c.getValidatedAt().toString() : null
+        );
+    }
 
     private String textOrNull(JsonNode node, String field) {
         JsonNode child = node.get(field);

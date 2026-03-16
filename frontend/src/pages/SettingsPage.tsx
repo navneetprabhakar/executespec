@@ -307,23 +307,24 @@ export default function SettingsPage() {
         </div>
       </GlassPanel>
 
-      {/* ── Org developer notice ──────────────────────────────────────────── */}
+      {/* ── Org developer notice (JIRA/Confluence/Slack only — GitHub PAT is user-level) */}
       {isOrgDeveloper && (
         <GlassPanel className="px-5 py-4">
           <div className="flex items-center gap-3">
             <Building2 className="h-5 w-5 text-accent-violet flex-shrink-0" />
             <div>
-              <p className="text-sm font-medium text-zinc-200">Integrations Managed at Org Level</p>
+              <p className="text-sm font-medium text-zinc-200">JIRA, Confluence & Slack Managed at Org Level</p>
               <p className="text-xs text-zinc-500 mt-0.5">
-                All integrations are now managed at the org level. Please connect with your Org Admin.
+                JIRA, Confluence and Slack integrations are managed by your Org Admin.
+                GitHub PAT is configured individually below.
               </p>
             </div>
           </div>
         </GlassPanel>
       )}
 
-      {/* ── GitHub ─────────────────────────────────────────────────────────── */}
-      {!isOrgDeveloper && <IntegrationCard
+      {/* ── GitHub (user-level — shown to all users, not org-admin gated) ── */}
+      <IntegrationCard
         icon={<Github className="h-4 w-4 text-zinc-400" />}
         title="GitHub Integration"
         statusBadge={user?.hasGithubPat
@@ -380,7 +381,7 @@ export default function SettingsPage() {
             )}
           </div>
         </form>
-      </IntegrationCard>}
+      </IntegrationCard>
 
       {/* ── AI Provider Keys (requires canManageAiKeys) ─────────────────────── */}
       {permissions?.canManageAiKeys && (

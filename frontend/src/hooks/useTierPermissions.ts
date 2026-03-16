@@ -32,6 +32,10 @@ export interface TierPermissions {
   maxApplySuggestions: number;
   /** Max preview starts per run. -1 = unlimited. */
   maxPreviewStarts: number;
+  /** Whether user can use the deploy engine. PRO/Enterprise only. */
+  canDeploy: boolean;
+  /** Max active deployments. 0 = disabled, -1 = unlimited. */
+  maxDeployments: number;
 }
 
 /** Convenience hook — reads permissions from the auth store. */

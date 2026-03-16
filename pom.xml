@@ -187,6 +187,13 @@
       <version>1.46.0</version>
     </dependency>
 
+    <!-- Google Cloud Resource Manager — deploy engine: IAM permission validation -->
+    <dependency>
+      <groupId>com.google.cloud</groupId>
+      <artifactId>google-cloud-resourcemanager</artifactId>
+      <version>1.40.0</version>
+    </dependency>
+
     <!-- Google Cloud Secret Manager — externalized secrets (API keys, credentials) -->
     <dependency>
       <groupId>com.google.cloud</groupId>

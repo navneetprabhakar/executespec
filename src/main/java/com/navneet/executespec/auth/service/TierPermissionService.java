@@ -58,7 +58,10 @@ public class TierPermissionService {
             int maxOrgMembers,
             int currentOrgMembers,
             int maxApplySuggestions,
-            int maxPreviewStarts
+            int maxPreviewStarts,
+            // Deploy engine
+            boolean canDeploy,
+            int maxDeployments
     ) {}
 
     // ── Main entry point ────────────────────────────────────────────────────
@@ -115,7 +118,9 @@ public class TierPermissionService {
                 -1,    // maxMembers = unlimited
                 0,     // currentMembers = irrelevant
                 -1,    // maxApplySuggestions = unlimited
-                -1     // maxPreviewStarts = unlimited
+                -1,    // maxPreviewStarts = unlimited
+                true,  // canDeploy
+                -1     // maxDeployments = unlimited
         );
     }
 
@@ -144,7 +149,9 @@ public class TierPermissionService {
                 -1,    // maxMembers
                 0,     // currentMembers
                 0,     // maxApplySuggestions
-                0      // maxPreviewStarts
+                0,     // maxPreviewStarts
+                false, // canDeploy
+                0      // maxDeployments
         );
     }
 
@@ -164,6 +171,8 @@ public class TierPermissionService {
         int currentMembers = (int) orgMemberRepo.countByOrgId(org.getId());
         int maxApply = resolveMaxApplySuggestions(org.getTier());
         int maxPreviews = resolveMaxPreviewStarts(org.getTier());
+        boolean canDeploy = resolveCanDeploy(org.getTier());
+        int maxDeploys = resolveMaxDeployments(org.getTier());
 
         if (isOrgAdmin) {
             // ORG_ADMIN (PRO or ENTERPRISE) — full access except cost breakdown (super admin only)
@@ -186,11 +195,12 @@ public class TierPermissionService {
                     false, // canExportGstr (finance + super admin)
                     false, // canManageSellerConfig
                     true,  // canManageBillingProfile
-                    limit, used, maxMembers, currentMembers, maxApply, maxPreviews
+                    limit, used, maxMembers, currentMembers, maxApply, maxPreviews,
+                    canDeploy, maxDeploys
             );
         }
 
-        // DEVELOPER in org (PRO or ENTERPRISE) — limited: chat + token usage + view members
+        // DEVELOPER in org (PRO or ENTERPRISE) — limited: chat + token usage + view members + deploy
         return new TierPermissions(
                 false, // canManageAiKeys
                 false, // canViewPricing
@@ -210,7 +220,8 @@ public class TierPermissionService {
                 false, // canExportGstr
                 false, // canManageSellerConfig
                 false, // canManageBillingProfile
-                limit, used, maxMembers, currentMembers, maxApply, maxPreviews
+                limit, used, maxMembers, currentMembers, maxApply, maxPreviews,
+                canDeploy, maxDeploys  // deploy available to all org members
         );
     }
 
@@ -239,7 +250,9 @@ public class TierPermissionService {
                 false, // canExportGstr
                 false, // canManageSellerConfig
                 true,  // canManageBillingProfile (own profile)
-                limit, used, -1, 0, maxApply, maxPreviews
+                limit, used, -1, 0, maxApply, maxPreviews,
+                false, // canDeploy (FREE users cannot deploy)
+                0      // maxDeployments
         );
     }
 
@@ -273,5 +286,25 @@ public class TierPermissionService {
         return tierConfigRepo.findById(tier.toUpperCase())
                 .map(TierConfig::getMaxPreviewStarts)
                 .orElse(3);
+    }
+
+    /**
+     * Resolve whether deploy is enabled for the given tier.
+     */
+    private boolean resolveCanDeploy(String tier) {
+        if (tier == null) return false;
+        return tierConfigRepo.findById(tier.toUpperCase())
+                .map(TierConfig::isCanDeploy)
+                .orElse(false);
+    }
+
+    /**
+     * Resolve max active deployments from tier_config for the given tier.
+     */
+    private int resolveMaxDeployments(String tier) {
+        if (tier == null) return 0;
+        return tierConfigRepo.findById(tier.toUpperCase())
+                .map(TierConfig::getMaxDeployments)
+                .orElse(0);
     }
 }
