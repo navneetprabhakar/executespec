@@ -19,7 +19,12 @@ import java.util.Map;
  * Lightweight health endpoint consumed by supervisor.sh (for process monitoring)
  * and by the dashboard header (for real-time server status badge).
  *
- * <p>GET /api/health → 200 with JSON body on UP, 503 if DB is unreachable.
+ * <p>GET /api/health → always 200 (JVM is alive). Body includes db status.
+ * <p>GET /api/health/ready → 200 if DB reachable, 503 otherwise.
+ *
+ * <p>The MIG auto-healer and load-balancer health checks must use /api/health (liveness)
+ * NOT /api/health/ready, to avoid a death-spiral where a transient DB issue causes
+ * the MIG to continuously recreate VMs.
  *
  * <p>No Spring Boot Actuator required — intentionally minimal so the supervisor
  * can parse the response with a simple {@code curl -sf} call.
@@ -36,6 +41,11 @@ public class HealthController {
     private final DataSource    dataSource;
     private final StateStore    stateStore;
 
+    /**
+     * Liveness probe — always 200 if the JVM is running.
+     * Used by MIG health check and load balancer.
+     * DB status is included in the body for informational purposes only.
+     */
     @GetMapping
     public ResponseEntity<Map<String, Object>> health() {
         boolean dbUp = checkDatabase();
@@ -59,6 +69,23 @@ public class HealthController {
         body.put("db",           dbUp ? "UP" : "DOWN");
         body.put("timestamp",    Instant.now().toString());
 
+        // Always 200 — JVM is alive. MIG/LB must not kill the VM
+        // just because the DB is transiently unreachable.
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * Readiness probe — 200 only if the DB is reachable.
+     * Use this for traffic routing decisions, NOT for MIG auto-healing.
+     */
+    @GetMapping("/ready")
+    public ResponseEntity<Map<String, Object>> ready() {
+        boolean dbUp = checkDatabase();
+        Map<String, Object> body = Map.of(
+            "status", dbUp ? "READY" : "NOT_READY",
+            "db", dbUp ? "UP" : "DOWN",
+            "timestamp", Instant.now().toString()
+        );
         return dbUp
             ? ResponseEntity.ok(body)
             : ResponseEntity.status(503).body(body);
