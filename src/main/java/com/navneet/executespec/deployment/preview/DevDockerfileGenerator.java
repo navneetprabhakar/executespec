@@ -152,9 +152,10 @@ public class DevDockerfileGenerator {
         // Node backend: 3000 → $PORT (EXPOSE line)
         dockerfile = dockerfile.replace("EXPOSE 5173", "EXPOSE 8080");
         dockerfile = dockerfile.replace("EXPOSE 3000", "EXPOSE 8080");
-        // Python: --port 8000 → --port $PORT
+        // Python: --port 8000 → --port $PORT (both shell form and JSON exec form)
         dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
-        dockerfile = dockerfile.replace(":8000", ":${PORT:-8080}");
+        dockerfile = dockerfile.replace("\"--port\", \"8000\"", "\"--port\", \"8080\"");
+        dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:8080");
         // Spring Boot already uses 8080 by default
 
         return dockerfile;
