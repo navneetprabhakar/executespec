@@ -220,7 +220,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4"
       style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)' }}
       onClick={onClose}
     >

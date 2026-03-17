@@ -29,8 +29,8 @@ export default function ChangePasswordModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl bg-[#1a1f2e] border border-slate-700 p-8 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl bg-[#1a1f2e] border border-slate-700 p-8 shadow-2xl overflow-y-auto" style={{ maxHeight: '95dvh' }}>
         <h2 className="mb-2 text-xl font-bold text-white">Change your password</h2>
         <p className="mb-6 text-sm text-slate-400">
           Your account requires a password change before you can continue.

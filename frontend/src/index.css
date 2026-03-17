@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Mobile / iOS Safari fixes ──────────────────────────────────────────── */
+html, body, #root {
+  height: 100dvh;
+}
+
+/* Prevent iOS auto-zoom on input focus (triggers when font-size < 16px) */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select {
+    font-size: max(16px, 1em) !important;
+  }
+}
+
 :root {
   --background: #0A0A0F;
   --foreground: #E4E4E7;

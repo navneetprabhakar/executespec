@@ -179,7 +179,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4"
       style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)' }}
       onClick={onClose}
     >
@@ -193,7 +193,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
           'w-full rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl overflow-hidden flex flex-col',
           mode === 'chat' ? 'max-w-xl' : 'max-w-xl',
         )}
-        style={{ maxHeight: mode === 'chat' ? '80vh' : undefined }}
+        style={{ maxHeight: mode === 'chat' ? 'min(95dvh, 80vh)' : '95dvh' }}
       >
         {/* ── Header ───────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] flex-shrink-0">
@@ -223,7 +223,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
                 {msgCount}/{MAX_MESSAGES}
               </span>
             )}
-            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+            <button onClick={onClose} className="p-2 -m-1 text-zinc-500 hover:text-zinc-300">
               <X className="h-4 w-4" />
             </button>
           </div>

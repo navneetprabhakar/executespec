@@ -1,4 +1,4 @@
-import { Search, Zap } from 'lucide-react';
+import { Menu, Search, Zap } from 'lucide-react';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { useSseStore } from '@/stores/useSseStore';
@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
 
 export default function Header() {
-  const { setCommandPaletteOpen } = useUiStore();
+  const { setCommandPaletteOpen, mobileSidebarOpen, setMobileSidebarOpen } = useUiStore();
   const runs = useRunStore((s) => s.runs);
   const activeRunId = useRunStore((s) => s.activeRunId);
   const sseStatus = useSseStore((s) => s.status);
@@ -17,6 +17,15 @@ export default function Header() {
 
   return (
     <header className="flex items-center h-12 px-4 gap-3 bg-surface-1 border-b border-white/[0.06] flex-shrink-0 z-10">
+      {/* Mobile hamburger menu */}
+      <button
+        onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+        className="md:hidden p-2 -ml-2 text-zinc-400 hover:text-white transition-colors"
+        aria-label="Toggle menu"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
       {/* SSE status */}
       <div className="flex items-center gap-1.5 text-xs">
         <span className={cn(
@@ -49,7 +58,7 @@ export default function Header() {
       {/* Command palette trigger */}
       <button
         onClick={() => setCommandPaletteOpen(true)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-sm text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+        className="flex items-center gap-2 px-3 py-2 md:py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-sm text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
       >
         <Search className="h-3.5 w-3.5" />
         <span className="hidden md:block">Search...</span>

@@ -21,6 +21,15 @@ export default {
           cyan: '#06B6D4',
         },
       },
+      height: {
+        dvh: '100dvh',
+      },
+      minHeight: {
+        dvh: '100dvh',
+      },
+      maxHeight: {
+        dvh: '100dvh',
+      },
       fontFamily: {
         sans: ['Geist Sans', 'system-ui', 'sans-serif'],
         mono: ['Geist Mono', 'JetBrains Mono', 'monospace'],
