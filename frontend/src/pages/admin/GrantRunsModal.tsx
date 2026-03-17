@@ -46,12 +46,13 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4"
       style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.65)' }}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl p-6 space-y-5"
+        className="w-full max-w-md rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl p-6 space-y-5 overflow-y-auto"
+        style={{ maxHeight: '95dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -60,7 +61,7 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
             <Gift className="h-4 w-4 text-accent-emerald" />
             Grant Bonus Runs
           </h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-2 -m-1">
             <X className="h-4 w-4" />
           </button>
         </div>

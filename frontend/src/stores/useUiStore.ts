@@ -8,11 +8,13 @@ export interface Toast {
 
 interface UiStore {
   sidebarExpanded: boolean;
+  mobileSidebarOpen: boolean;
   commandPaletteOpen: boolean;
   activeTab: string;
   toasts: Toast[];
 
   setSidebarExpanded: (v: boolean) => void;
+  setMobileSidebarOpen: (v: boolean) => void;
   setCommandPaletteOpen: (v: boolean) => void;
   setActiveTab: (t: string) => void;
   addToast: (t: Omit<Toast, 'id'>) => void;
@@ -23,11 +25,13 @@ let toastSeq = 0;
 
 export const useUiStore = create<UiStore>((set) => ({
   sidebarExpanded: false,
+  mobileSidebarOpen: false,
   commandPaletteOpen: false,
   activeTab: 'overview',
   toasts: [],
 
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
+  setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
   setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
   setActiveTab: (t) => set({ activeTab: t }),
 

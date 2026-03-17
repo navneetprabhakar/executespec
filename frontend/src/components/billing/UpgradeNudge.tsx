@@ -20,8 +20,8 @@ export function UpgradeNudge({ isOpen, onClose, currentTier, metric, current, ma
   const nextLimit = currentTier === 'FREE' ? 50 : 500;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-8 text-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-black/50">
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-8 text-center overflow-y-auto" style={{ maxHeight: '95dvh' }}>
         <div className="text-4xl mb-4">{'\u{1F680}'}</div>
         <h2 className="text-xl font-bold text-gray-900">
           You've used all your {metricLabel}

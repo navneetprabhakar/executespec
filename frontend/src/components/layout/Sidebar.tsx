@@ -1,9 +1,9 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban, ClipboardList,
-  Receipt, Calculator, Rocket, ArrowUpCircle,
+  Receipt, Calculator, Rocket, ArrowUpCircle, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -11,6 +11,8 @@ import { useAuthStore, selectIsOrgAdmin, selectIsOrgMember } from '@/stores/useA
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import { UsageBadge } from '@/components/billing/UsageBadge';
 import { useRunStore } from '@/stores/useRunStore';
+import { useUiStore } from '@/stores/useUiStore';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import * as api from '@/lib/api';
 import type { ProjectDto } from '@/lib/api';
 import { fetchBillingStatus } from '@/lib/billing-api';
@@ -21,7 +23,11 @@ const ICON_MAP: Record<string, React.ElementType> = {
 };
 
 export default function Sidebar() {
-  const [expanded, setExpanded] = useState(false);
+  const [hoverExpanded, setHoverExpanded] = useState(false);
+  const isMobile = useIsMobile();
+  const mobileSidebarOpen = useUiStore((s) => s.mobileSidebarOpen);
+  const setMobileSidebarOpen = useUiStore((s) => s.setMobileSidebarOpen);
+
   const isAdmin = useAuthStore(selectIsOrgAdmin);
   const isOrgMember = useAuthStore(selectIsOrgMember);
   const permissions = useTierPermissions();
@@ -44,14 +50,25 @@ export default function Sidebar() {
     fetchBillingStatus().then((s) => setTier(s.plan?.tier ?? 'FREE')).catch(() => {});
   }, []);
 
+  // Lock body scroll when mobile drawer is open
+  useEffect(() => {
+    if (isMobile && mobileSidebarOpen) {
+      document.body.classList.add('overflow-hidden');
+      return () => document.body.classList.remove('overflow-hidden');
+    }
+  }, [isMobile, mobileSidebarOpen]);
+
+  // Close mobile drawer when switching to desktop
+  useEffect(() => {
+    if (!isMobile && mobileSidebarOpen) setMobileSidebarOpen(false);
+  }, [isMobile, mobileSidebarOpen, setMobileSidebarOpen]);
+
   const visibleItems = useMemo(
     () => NAV_ITEMS.filter((item) => {
       if (item.adminOnly && !isAdmin) return false;
-      // Hide nav items that require a tier permission the user doesn't have
       if (item.requiredPermission && permissions) {
         return !!permissions[item.requiredPermission as keyof typeof permissions];
       }
-      // If permissions haven't loaded yet, hide permission-gated items by default
       if (item.requiredPermission && !permissions) return false;
       return true;
     }),
@@ -59,23 +76,24 @@ export default function Sidebar() {
   );
 
   const handleProjectClick = (projectId: string) => {
-    // Toggle: if already selected, clear the filter
     if (projectFilter === projectId) {
       setProjectFilter(null);
     } else {
       setProjectFilter(projectId);
     }
     navigate('/');
+    if (isMobile) setMobileSidebarOpen(false);
   };
 
-  return (
-    <motion.aside
-      animate={{ width: expanded ? 220 : 64 }}
-      transition={{ duration: 0.2, ease: 'easeInOut' }}
-      onMouseEnter={() => setExpanded(true)}
-      onMouseLeave={() => setExpanded(false)}
-      className="relative flex flex-col h-full bg-surface-1 border-r border-white/[0.06] overflow-hidden z-20 flex-shrink-0"
-    >
+  // On mobile, labels are always visible; on desktop, controlled by hover
+  const expanded = isMobile ? true : hoverExpanded;
+
+  const closeMobileDrawer = () => setMobileSidebarOpen(false);
+
+  // ── Shared sidebar content ─────────────────────────────────────────────
+
+  const sidebarContent = (
+    <>
       {/* Logo */}
       <div className="flex items-center h-12 px-4 border-b border-white/[0.06] flex-shrink-0">
         <div className="h-6 w-6 rounded-md bg-accent-violet flex items-center justify-center flex-shrink-0">
@@ -88,6 +106,15 @@ export default function Sidebar() {
         >
           ExecuteSpec
         </motion.span>
+        {/* Mobile close button */}
+        {isMobile && (
+          <button
+            onClick={closeMobileDrawer}
+            className="ml-auto p-2 -mr-2 text-zinc-400 hover:text-white"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       {/* Nav items */}
@@ -99,6 +126,7 @@ export default function Sidebar() {
               key={item.path}
               to={item.path}
               end={item.path === '/'}
+              onClick={isMobile ? closeMobileDrawer : undefined}
               className={({ isActive }) =>
                 cn(
                   'relative flex items-center h-10 px-4 gap-3 rounded-none transition-colors',
@@ -131,7 +159,7 @@ export default function Sidebar() {
           );
         })}
 
-        {/* Projects section — visible only for org members with projects */}
+        {/* Projects section */}
         {isOrgMember && projects.length > 0 && (
           <>
             <div className="px-4 pt-4 pb-1">
@@ -189,7 +217,7 @@ export default function Sidebar() {
       >
         {tier && tier !== 'ENTERPRISE' && (
           <button
-            onClick={() => navigate('/billing')}
+            onClick={() => { navigate('/billing'); if (isMobile) closeMobileDrawer(); }}
             className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs font-medium bg-accent-violet/15 text-accent-violet hover:bg-accent-violet/25 transition-colors"
           >
             <ArrowUpCircle className="h-3.5 w-3.5 flex-shrink-0" />
@@ -213,6 +241,54 @@ export default function Sidebar() {
           System healthy
         </motion.span>
       </div>
+    </>
+  );
+
+  // ── Mobile: slide-out drawer overlay ───────────────────────────────────
+
+  if (isMobile) {
+    return (
+      <AnimatePresence>
+        {mobileSidebarOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              key="sidebar-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-40 bg-black/60"
+              onClick={closeMobileDrawer}
+            />
+            {/* Drawer */}
+            <motion.aside
+              key="sidebar-drawer"
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="fixed top-0 left-0 bottom-0 z-50 w-[280px] flex flex-col bg-surface-1 border-r border-white/[0.06] overflow-hidden"
+            >
+              {sidebarContent}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    );
+  }
+
+  // ── Desktop: hover-expand sidebar (unchanged behavior) ─────────────────
+
+  return (
+    <motion.aside
+      animate={{ width: expanded ? 220 : 64 }}
+      transition={{ duration: 0.2, ease: 'easeInOut' }}
+      onMouseEnter={() => setHoverExpanded(true)}
+      onMouseLeave={() => setHoverExpanded(false)}
+      className="relative flex flex-col h-full bg-surface-1 border-r border-white/[0.06] overflow-hidden z-20 flex-shrink-0"
+    >
+      {sidebarContent}
     </motion.aside>
   );
 }

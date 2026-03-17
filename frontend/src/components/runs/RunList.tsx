@@ -50,7 +50,7 @@ export default function RunList() {
           <button
             onClick={() => setScopeFilter('mine')}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-full text-xs font-medium transition-colors',
               scopeFilter === 'mine'
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -62,7 +62,7 @@ export default function RunList() {
           <button
             onClick={() => setScopeFilter(isSuperAdmin ? 'org' : null)}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-full text-xs font-medium transition-colors',
               (isSuperAdmin ? scopeFilter === 'org' : scopeFilter === null)
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -75,7 +75,7 @@ export default function RunList() {
             <button
               onClick={() => setScopeFilter(null)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+                'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-full text-xs font-medium transition-colors',
                 scopeFilter === null
                   ? 'bg-accent-violet text-white'
                   : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -95,7 +95,7 @@ export default function RunList() {
             key={f}
             onClick={() => setStatusFilter(f)}
             className={cn(
-              'px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+              'px-3 py-2 md:py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
               statusFilter === f
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -113,7 +113,7 @@ export default function RunList() {
           <button
             onClick={() => setProjectFilter(null)}
             className={cn(
-              'px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2.5 py-1.5 md:py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === null
                 ? 'bg-zinc-700 text-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
@@ -124,7 +124,7 @@ export default function RunList() {
           <button
             onClick={() => setProjectFilter('__none__')}
             className={cn(
-              'px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2.5 py-1.5 md:py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === '__none__'
                 ? 'bg-zinc-600 text-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
@@ -139,7 +139,7 @@ export default function RunList() {
                 key={p.id}
                 onClick={() => setProjectFilter(p.id)}
                 className={cn(
-                  'px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+                  'px-2.5 py-1.5 md:py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
                   projectFilter === p.id
                     ? 'bg-accent-violet text-white'
                     : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'

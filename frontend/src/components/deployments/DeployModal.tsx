@@ -32,7 +32,7 @@ export default function DeployModal({ onClose, onRefresh }: DeployModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4"
       style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)' }}
       onClick={onClose}
     >
@@ -40,13 +40,14 @@ export default function DeployModal({ onClose, onRefresh }: DeployModalProps) {
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl p-6 space-y-4"
+        className="w-full max-w-md rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl p-6 space-y-4 overflow-y-auto"
+        style={{ maxHeight: '95dvh' }}
       >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-white flex items-center gap-2">
             <Rocket className="h-4 w-4 text-accent-violet" /> Deploy to Cloud Run
           </h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-2 -m-1"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="space-y-3">

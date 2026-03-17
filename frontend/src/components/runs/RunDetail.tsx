@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, GitMerge, Trash2, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play, HelpCircle, Send, Loader2 } from 'lucide-react';
+import { ArrowLeft, X, GitMerge, Trash2, AlertTriangle, Download, Wand2, RotateCcw, Pause, Play, HelpCircle, Send, Loader2 } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
@@ -132,6 +132,15 @@ export default function RunDetail() {
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           className="flex flex-col h-full bg-surface-1 border-l border-white/[0.06]"
         >
+          {/* Mobile back button */}
+          <button
+            onClick={() => setActiveRunId(null)}
+            className="md:hidden flex items-center gap-1.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white border-b border-white/[0.06] transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to runs
+          </button>
+
           {/* Header */}
           <div className="flex items-start justify-between px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
             <div className="flex items-start gap-2.5 min-w-0">
@@ -143,7 +152,7 @@ export default function RunDetail() {
                 </div>
               </div>
             </div>
-            <button onClick={() => setActiveRunId(null)} className="text-zinc-500 hover:text-zinc-300 flex-shrink-0 ml-2">
+            <button onClick={() => setActiveRunId(null)} className="text-zinc-500 hover:text-zinc-300 flex-shrink-0 ml-2 p-1.5 -m-1">
               <X className="h-4 w-4" />
             </button>
           </div>
