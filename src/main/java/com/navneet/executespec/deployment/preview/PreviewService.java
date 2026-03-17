@@ -303,8 +303,10 @@ public class PreviewService {
                 injectEmbeddedDbConfig(type, dbType, deployEnvVars);
             }
 
+            // Cloud Run Dockerfile (generateForCloudRun) patches all ports to 8080,
+            // so always tell Cloud Run to probe port 8080.
             var deployResult = cloudRun.deployPreview(serviceName, imageUri,
-                    props.getCloudRunCpu(), props.getCloudRunMemory(), deployEnvVars);
+                    props.getCloudRunCpu(), props.getCloudRunMemory(), deployEnvVars, 8080);
 
             // Phase 6: Health check
             checkDeadline(deadline, "health check");

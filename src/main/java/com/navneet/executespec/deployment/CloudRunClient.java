@@ -99,9 +99,13 @@ public class CloudRunClient {
     public DeployResult deployPreview(String serviceName, String imageUri, String cpu, String memory,
                                        Map<String, String> envVars)
             throws IOException, InterruptedException {
+        return deployPreview(serviceName, imageUri, cpu, memory, envVars, 8080);
+    }
 
-        // Randomize container port to avoid Cloud Run caching issues with failed revisions
-        int containerPort = ThreadLocalRandom.current().nextInt(8000, 9000);
+    public DeployResult deployPreview(String serviceName, String imageUri, String cpu, String memory,
+                                       Map<String, String> envVars, int containerPort)
+            throws IOException, InterruptedException {
+
         log.info("Preview deploy: service={}, port={}, image={}", serviceName, containerPort, imageUri);
 
         List<String> cmd = new ArrayList<>(List.of(
