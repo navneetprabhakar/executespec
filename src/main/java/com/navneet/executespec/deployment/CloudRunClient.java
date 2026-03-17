@@ -51,19 +51,33 @@ public class CloudRunClient {
             cmd.add("--allow-unauthenticated");
         }
 
-        ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+        ProcessBuilder pb = new ProcessBuilder(cmd);
         Process process = pb.start();
-        String output = new String(process.getInputStream().readAllBytes()).trim();
+        // Read stdout and stderr separately — gcloud writes progress text to stderr
+        String stdout = new String(process.getInputStream().readAllBytes()).trim();
+        String stderr = new String(process.getErrorStream().readAllBytes()).trim();
         int exit = process.waitFor();
 
+        String combined = (stdout + "\n" + stderr).trim();
         if (exit != 0) {
-            if (output.contains("UNAUTHENTICATED") || output.contains("token has been expired")) {
+            if (combined.contains("UNAUTHENTICATED") || combined.contains("token has been expired")) {
                 throw new IOException("GCP auth expired. Run: gcloud auth login");
             }
-            throw new IOException("Cloud Run deploy failed: " + output);
+            throw new IOException("Cloud Run deploy failed: " + combined);
         }
 
-        JsonNode root = objectMapper.readTree(output);
+        // Extract JSON from stdout — gcloud may prefix progress text before the JSON object
+        String jsonStr = stdout;
+        int jsonStart = jsonStr.indexOf('{');
+        if (jsonStart > 0) {
+            jsonStr = jsonStr.substring(jsonStart);
+        }
+        if (jsonStr.isEmpty() || !jsonStr.startsWith("{")) {
+            log.warn("No JSON output from gcloud run deploy. stdout={}, stderr={}", stdout, stderr);
+            return new DeployResult(null, null);
+        }
+
+        JsonNode root = objectMapper.readTree(jsonStr);
         String serviceUrl = root.path("status").path("url").asText(null);
         String revisionName = root.path("status").path("latestReadyRevisionName").asText(null);
 

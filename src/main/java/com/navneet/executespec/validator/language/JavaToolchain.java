@@ -46,7 +46,14 @@ public class JavaToolchain implements LanguageToolchain {
         if (isMaven) {
             args = List.of("mvn", "compile", "-q", "-B", "-f", projectRoot.resolve("pom.xml").toString());
         } else if (isGradle) {
-            args = List.of("./gradlew", "compileJava", "-q");
+            String gradleCmd = resolveGradleCommand(projectRoot);
+            if (gradleCmd == null) {
+                log.warn("Gradle project detected but no gradle/gradlew available — skipping type check");
+                return GateResult.builder().gate(ValidationGate.TYPE_CHECK).passed(true)
+                        .duration(Duration.ZERO).errors(Collections.emptyList())
+                        .rawOutput("Gradle project detected but gradle/gradlew not available — skipping type check").build();
+            }
+            args = List.of(gradleCmd, "compileJava", "-q", "--no-daemon");
         } else {
             return GateResult.builder().gate(ValidationGate.TYPE_CHECK).passed(true)
                     .duration(Duration.ZERO).errors(Collections.emptyList())
@@ -76,6 +83,33 @@ public class JavaToolchain implements LanguageToolchain {
         String fileName = filePath.getFileName().toString().replace(".java", "");
         String testClassName = fileName + "Test";
 
+        boolean isMaven = Files.exists(projectRoot.resolve("pom.xml"));
+        boolean isGradle = Files.exists(projectRoot.resolve("build.gradle"))
+                || Files.exists(projectRoot.resolve("build.gradle.kts"));
+
+        if (!isMaven && !isGradle) {
+            return GateResult.builder().gate(ValidationGate.UNIT_TEST).passed(true)
+                    .duration(Duration.ZERO).errors(Collections.emptyList())
+                    .rawOutput("No build tool detected — skipping tests").build();
+        }
+
+        if (isGradle) {
+            String gradleCmd = resolveGradleCommand(projectRoot);
+            if (gradleCmd == null) {
+                return GateResult.builder().gate(ValidationGate.UNIT_TEST).passed(true)
+                        .duration(Duration.ZERO).errors(Collections.emptyList())
+                        .rawOutput("Gradle project but gradle/gradlew not available — skipping tests").build();
+            }
+            ProcessResult result = processExecutor.execute(ProcessCommand.builder()
+                    .args(List.of(gradleCmd, "test", "-q", "--no-daemon"))
+                    .workingDir(projectRoot).timeout(timeout).build());
+            List<ValidationError> errors = result.isSuccess()
+                    ? Collections.emptyList() : testOutputParser.parse(result.getOutput());
+            return GateResult.builder().gate(ValidationGate.UNIT_TEST).passed(result.isSuccess())
+                    .duration(result.getDuration()).errors(errors).rawOutput(result.getOutput()).build();
+        }
+
+        // Maven path
         if (!Files.exists(projectRoot.resolve("pom.xml"))) {
             return GateResult.builder().gate(ValidationGate.UNIT_TEST).passed(true)
                     .duration(Duration.ZERO).errors(Collections.emptyList())
@@ -112,5 +146,25 @@ public class JavaToolchain implements LanguageToolchain {
                 .workingDir(Path.of(System.getProperty("user.dir")))
                 .timeout(Duration.ofSeconds(5)).build());
         return r.isSuccess();
+    }
+
+    /**
+     * Resolve gradle command: prefer project's gradlew wrapper, fall back to system gradle.
+     * Returns null if neither is available.
+     */
+    private String resolveGradleCommand(Path projectRoot) {
+        Path gradlew = projectRoot.resolve("gradlew");
+        if (Files.isExecutable(gradlew)) {
+            return gradlew.toString();
+        }
+        // Try system gradle
+        ProcessResult r = processExecutor.execute(ProcessCommand.builder()
+                .args(List.of("gradle", "--version"))
+                .workingDir(projectRoot)
+                .timeout(Duration.ofSeconds(5)).build());
+        if (r.isSuccess()) {
+            return "gradle";
+        }
+        return null;
     }
 }
