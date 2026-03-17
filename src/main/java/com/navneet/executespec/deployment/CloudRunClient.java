@@ -122,6 +122,11 @@ public class CloudRunClient {
             "--allow-unauthenticated",
             "--no-cpu-throttling",
             "--timeout", "600",
+            // Startup probe: give the container up to 5 minutes (period 10s × threshold 30) to start.
+            // Default Cloud Run startup timeout (~240s) is too short for Spring Boot / heavy Node apps.
+            "--startup-probe",
+            "httpGet.path=/,httpGet.port=" + containerPort
+                    + ",initialDelaySeconds=5,periodSeconds=10,timeoutSeconds=5,failureThreshold=30",
             "--labels", "managed-by=executespec-preview",
             "--quiet",
             "--format", "json"
