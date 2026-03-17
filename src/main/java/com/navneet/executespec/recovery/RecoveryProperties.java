@@ -37,6 +37,12 @@ public class RecoveryProperties {
     /** Minutes of run inactivity (no active tasks) before watchdog triggers recovery. */
     private int orphanedRunThresholdMinutes = 5;
 
+    // ── Auto-resume on startup ────────────────────────────────────────────
+    /** Auto-resume non-terminal runs when application starts (after deployment). */
+    private boolean autoResumeOnStartup = true;
+    /** Seconds to wait after ApplicationReadyEvent before querying for resumable runs. */
+    private int startupResumeDelaySeconds = 30;
+
     // ── Transient retry config ────────────────────────────────────────────────
     private int maxTransientRetries = 3;
     private int rateLimitBackoffSeconds = 30;

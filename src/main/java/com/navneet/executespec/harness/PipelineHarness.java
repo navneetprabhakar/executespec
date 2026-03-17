@@ -611,11 +611,139 @@ public class PipelineHarness {
         return true;
     }
 
+    // ── Startup auto-resume ───────────────────────────────────────────────────
+
+    /**
+     * Called by {@link StartupRunResumer} for each non-terminal run discovered after restart.
+     * Routes to the correct resume path based on run status. Acquires a semaphore slot
+     * (blocking if at capacity) to respect concurrency limits.
+     */
+    public void resumeOnStartup(PipelineRun run) {
+        String runId = run.getRunId();
+        String status = run.getStatus();
+
+        // Resolve API keys for this run's owner
+        ResolvedKeys keys = apiKeyResolver.resolve(run.getCreatedByUserId());
+        runKeyStore.put(runId, keys);
+
+        broadcaster.emit(runId, RunEvent.log(runId, "harness",
+            "♻️ Resuming after server restart (was " + status + ")"));
+
+        executor.submit(() -> {
+            boolean acquired = false;
+            try {
+                runSlots.acquire();
+                acquired = true;
+
+                // Re-fetch — status may have changed while waiting for a slot
+                PipelineRun fresh = stateStore.findRun(runId).orElse(run);
+                String freshStatus = fresh.getStatus();
+
+                switch (freshStatus) {
+                    case "PLANNING" -> {
+                        // Re-run full pipeline from scratch
+                        executeRunAsync(runId, fresh.getUserRequest());
+                    }
+                    case "AWAITING_APPROVAL" -> {
+                        // Plan exists, re-enter gate polling
+                        resumeFromPlanGate(fresh);
+                    }
+                    case "WORKING", "STUCK" -> {
+                        if ("STUCK".equals(freshStatus)) {
+                            fresh.setStatus("WORKING");
+                            stateStore.saveRun(fresh);
+                            broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+                        }
+                        runResumeAsync(fresh);
+                    }
+                    case "REVIEWING" -> {
+                        // All tasks done, re-run reviewer → merge gate
+                        doReviewAndMerge(fresh, true, true);
+                    }
+                    case "AWAITING_MERGE" -> {
+                        // Review done, re-enter merge gate (skip re-review)
+                        doReviewAndMerge(fresh, true, false);
+                    }
+                    default -> {
+                        log.info("Run {} now in terminal status {} — skipping resume", runId, freshStatus);
+                        return; // don't hold slot
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while waiting for slot to resume run {}", runId);
+            } catch (Exception e) {
+                log.error("Error resuming run {} on startup: {}", runId, e.getMessage(), e);
+                stateStore.markFailed(runId, "Startup resume failed: " + e.getMessage());
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                broadcaster.complete(runId);
+            } finally {
+                if (acquired) runSlots.release();
+            }
+        });
+    }
+
+    /**
+     * Re-enters the plan-approval gate for a run in AWAITING_APPROVAL.
+     * The plan already exists in DB; we just need to re-poll the gate (decision may be in Redis).
+     */
+    private void resumeFromPlanGate(PipelineRun run) {
+        String runId = run.getRunId();
+
+        broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_APPROVAL"));
+        String planGateId = stateStore.recordGateOpened(runId, "PLAN_APPROVAL");
+        broadcaster.emit(runId, RunEvent.gateOpened(runId, "PLAN_APPROVAL"));
+
+        // Re-check skipApproval flag (integration runs)
+        PipelineRun current = stateStore.findRun(runId).orElse(run);
+        boolean planApproved;
+
+        if (current.isSkipApproval()) {
+            planApproved = true;
+            stateStore.recordGateResolved(planGateId, true);
+            broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-approved (integration run)"));
+            log.info("Plan gate auto-approved for integration run {} on startup resume", runId);
+        } else {
+            // Release slot while waiting at gate — don't block other runs
+            log.info("[resumeFromPlanGate] Run {} entering plan-approval gate — releasing compute slot", runId);
+            runSlots.release();
+            try {
+                planApproved = gateStore.awaitPlanGate(runId);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } finally {
+                try { runSlots.acquire(); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+            stateStore.recordGateResolved(planGateId, planApproved);
+        }
+
+        if (!planApproved) {
+            PipelineRun checkPaused = stateStore.findRun(runId).orElse(null);
+            if (checkPaused != null && "PAUSED".equals(checkPaused.getStatus())) {
+                log.info("Run {} was paused during plan gate — exiting cleanly", runId);
+                return;
+            }
+            stateStore.markRejected(runId, "Rejected at plan approval gate");
+            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+            eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Rejected at plan approval gate"));
+            broadcaster.complete(runId);
+            return;
+        }
+
+        stateStore.markApproved(runId);
+        broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+
+        // Continue with task execution
+        runResumeAsync(current);
+    }
+
     /**
      * Async continuation of resumeRun: workers → compiler → reviewer → merge gate.
      * Closely follows runRetryAsync but uses sequentialTaskExecutor for tiered parallel execution.
      */
-    private void runResumeAsync(PipelineRun run) {
+    void runResumeAsync(PipelineRun run) {
         String runId = run.getRunId();
 
         // Re-resolve API keys (user may have updated keys while paused)
