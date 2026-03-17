@@ -110,6 +110,7 @@ public class CloudRunClient {
             "--cpu-boost",
             "--allow-unauthenticated",
             "--no-cpu-throttling",
+            "--timeout", "300",
             "--labels", "managed-by=executespec-preview",
             "--quiet",
             "--format", "json"
