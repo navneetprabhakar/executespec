@@ -10,6 +10,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -121,20 +123,22 @@ public class CloudRunClient {
             "--format", "json"
         ));
 
-        // Inject env vars (PORT is reserved by Cloud Run — set automatically via --port flag)
+        // Inject env vars via YAML file to avoid shell escaping issues with special chars
+        Path envFile = null;
         if (envVars != null && !envVars.isEmpty()) {
-            envVars.remove("PORT"); // Cloud Run sets this automatically
+            envVars.remove("PORT"); // Cloud Run sets this automatically via --port flag
             if (!envVars.isEmpty()) {
-                StringBuilder envFlag = new StringBuilder();
-                envVars.forEach((k, v) -> {
-                    if (!envFlag.isEmpty()) envFlag.append(",");
-                    envFlag.append(k).append("=").append(v);
-                });
-                cmd.add("--set-env-vars");
-                cmd.add(envFlag.toString());
+                StringBuilder yaml = new StringBuilder();
+                envVars.forEach((k, v) -> yaml.append(k).append(": '")
+                        .append(v.replace("'", "''")).append("'\n"));
+                envFile = Files.createTempFile("cr-env-", ".yaml");
+                Files.writeString(envFile, yaml.toString());
+                cmd.add("--env-vars-file");
+                cmd.add(envFile.toString());
             }
         }
 
+        try {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         Process process = pb.start();
         // Read stdout and stderr separately — gcloud writes progress text to stderr
@@ -175,6 +179,11 @@ public class CloudRunClient {
         ensurePublicAccess(serviceName);
 
         return new DeployResult(serviceUrl, null);
+        } finally {
+            if (envFile != null) {
+                try { Files.deleteIfExists(envFile); } catch (Exception ignored) {}
+            }
+        }
     }
 
     /**
