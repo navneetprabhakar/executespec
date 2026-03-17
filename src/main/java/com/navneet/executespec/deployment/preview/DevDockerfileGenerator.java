@@ -156,11 +156,27 @@ public class DevDockerfileGenerator {
         // Use shell form (not JSON exec) so $PORT expands at runtime.
         dockerfile = dockerfile.replace("EXPOSE 5173", "EXPOSE 8080");
         dockerfile = dockerfile.replace("EXPOSE 3000", "EXPOSE 8080");
+        dockerfile = dockerfile.replace("EXPOSE 8000", "EXPOSE 8080");
+        // Vite: --port NNNN → --port ${PORT:-8080}
+        dockerfile = dockerfile.replace("--port 5173", "--port ${PORT:-8080}");
+        dockerfile = dockerfile.replace("--port 3000", "--port ${PORT:-8080}");
         // Python
         dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
         dockerfile = dockerfile.replace("\"--port\", \"8000\"", "\"--port\", \"8080\"");
         dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:${PORT:-8080}");
-        // Spring Boot reads PORT env var automatically
+        // Node backend with exec form: convert to shell form so PORT is respected
+        // CMD ["npm", "start"] → CMD PORT=${PORT:-8080} npm start
+        dockerfile = dockerfile.replace("CMD [\"npm\", \"start\"]",
+                "CMD PORT=${PORT:-8080} npm start");
+        dockerfile = dockerfile.replace("CMD [\"npm\", \"run\", \"dev\"]",
+                "CMD PORT=${PORT:-8080} npm run dev");
+        // Node backend with explicit main file
+        dockerfile = dockerfile.replaceAll(
+                "CMD \\[\"node\", \"([^\"]+)\"\\]",
+                "CMD PORT=${PORT:-8080} node $1");
+        // Spring Boot reads server.port from PORT env var automatically (via Spring convention)
+        // Full-stack: Cloud Run only supports one port — use frontend port for preview
+        dockerfile = dockerfile.replaceAll("EXPOSE \\d+ \\d+", "EXPOSE 8080");
 
         return dockerfile;
     }
