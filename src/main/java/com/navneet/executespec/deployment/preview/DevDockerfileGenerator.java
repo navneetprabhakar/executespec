@@ -174,7 +174,28 @@ public class DevDockerfileGenerator {
         dockerfile = dockerfile.replaceAll(
                 "CMD \\[\"node\", \"([^\"]+)\"\\]",
                 "CMD PORT=${PORT:-8080} node $1");
-        // Spring Boot reads server.port from PORT env var automatically (via Spring convention)
+        // Django: exec-form with host:port — must convert to shell form so $PORT expands
+        // CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"] → shell form
+        dockerfile = dockerfile.replace(
+                "CMD [\"python\", \"manage.py\", \"runserver\", \"0.0.0.0:${PORT:-8080}\"]",
+                "CMD python manage.py runserver 0.0.0.0:${PORT:-8080}");
+        // FastAPI/uvicorn: exec-form with --port — convert to shell form
+        dockerfile = dockerfile.replaceAll(
+                "CMD \\[\"uvicorn\", \"([^\"]+)\", \"--host\", \"0\\.0\\.0\\.0\", \"--port\", \"8080\"\\]",
+                "CMD uvicorn $1 --host 0.0.0.0 --port ${PORT:-8080}");
+        // Flask: exec-form with --port — convert to shell form
+        dockerfile = dockerfile.replace(
+                "CMD [\"flask\", \"run\", \"--host\", \"0.0.0.0\", \"--port\", \"8080\"]",
+                "CMD flask run --host 0.0.0.0 --port ${PORT:-8080}");
+        // Generic Python: exec-form — convert to shell form so PORT env var is available
+        dockerfile = dockerfile.replaceAll(
+                "CMD \\[\"python\", \"([^\"]+)\"\\]",
+                "CMD python $1");
+        // Spring Boot: pass SERVER_PORT so non-default-port projects bind correctly.
+        // (Spring Boot does NOT read PORT env var — only SERVER_PORT.)
+        dockerfile = dockerfile.replace(
+                "CMD [\"mvn\", \"spring-boot:run\", \"-DskipTests\", \"-q\"]",
+                "CMD SERVER_PORT=${PORT:-8080} mvn spring-boot:run -DskipTests -q");
         // Full-stack: Cloud Run only supports one port — use frontend port for preview
         dockerfile = dockerfile.replaceAll("EXPOSE \\d+ \\d+", "EXPOSE 8080");
 
