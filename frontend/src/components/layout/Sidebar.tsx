@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban, ClipboardList,
-  Receipt, Calculator, Rocket,
+  Receipt, Calculator, Rocket, ArrowUpCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -13,6 +13,7 @@ import { UsageBadge } from '@/components/billing/UsageBadge';
 import { useRunStore } from '@/stores/useRunStore';
 import * as api from '@/lib/api';
 import type { ProjectDto } from '@/lib/api';
+import { fetchBillingStatus } from '@/lib/billing-api';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   LayoutDashboard, BarChart3, DollarSign, Plug, ClipboardList, Settings,
@@ -30,6 +31,7 @@ export default function Sidebar() {
   const setProjectFilter = useRunStore((s) => s.setProjectFilter);
 
   const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [tier, setTier] = useState<string>('');
 
   useEffect(() => {
     if (!isOrgMember) return;
@@ -37,6 +39,10 @@ export default function Sidebar() {
       .then((p) => setProjects(p.filter((proj) => proj.status === 'ACTIVE')))
       .catch(() => setProjects([]));
   }, [isOrgMember]);
+
+  useEffect(() => {
+    fetchBillingStatus().then((s) => setTier(s.plan?.tier ?? 'FREE')).catch(() => {});
+  }, []);
 
   const visibleItems = useMemo(
     () => NAV_ITEMS.filter((item) => {
@@ -175,12 +181,21 @@ export default function Sidebar() {
         )}
       </nav>
 
-      {/* Usage badge */}
+      {/* Upgrade button + Usage badge */}
       <motion.div
         animate={{ opacity: expanded ? 1 : 0, height: expanded ? 'auto' : 0 }}
         transition={{ duration: 0.1 }}
-        className="px-4 py-2 border-t border-white/[0.06] overflow-hidden"
+        className="px-3 py-2 border-t border-white/[0.06] overflow-hidden space-y-2"
       >
+        {tier && tier !== 'ENTERPRISE' && (
+          <button
+            onClick={() => navigate('/billing')}
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs font-medium bg-accent-violet/15 text-accent-violet hover:bg-accent-violet/25 transition-colors"
+          >
+            <ArrowUpCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>Upgrade{tier === 'FREE' ? ' to Pro' : ''}</span>
+          </button>
+        )}
         <UsageBadge />
       </motion.div>
 
