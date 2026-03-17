@@ -110,7 +110,7 @@ export default function Sidebar() {
         {isMobile && (
           <button
             onClick={closeMobileDrawer}
-            className="ml-auto p-2 -mr-2 text-zinc-400 hover:text-white"
+            className="ml-auto min-h-[44px] min-w-[44px] flex items-center justify-center -mr-2 text-zinc-400 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
@@ -269,6 +269,7 @@ export default function Sidebar() {
               exit={{ x: -280 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
               className="fixed top-0 left-0 bottom-0 z-50 w-[280px] flex flex-col bg-surface-1 border-r border-white/[0.06] overflow-hidden"
+              style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
             >
               {sidebarContent}
             </motion.aside>
