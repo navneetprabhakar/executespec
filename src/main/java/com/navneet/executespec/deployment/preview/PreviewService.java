@@ -258,7 +258,9 @@ public class PreviewService {
             // Phase 2: Generate Cloud Run-compatible Dockerfile
             checkDeadline(deadline, "Dockerfile generation");
             Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
-            Files.writeString(workspace.resolve("Dockerfile"), dockerfileGen.generateForCloudRun(type, workspace));
+            String generatedDockerfile = dockerfileGen.generateForCloudRun(type, workspace);
+            log.info("Preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
+            Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
 
             // Phase 3: Docker build
             checkDeadline(deadline, "Docker build");

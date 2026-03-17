@@ -138,9 +138,18 @@ public class DevDockerfileGenerator {
     public String generateForCloudRun(PreviewProjectType type, Path workspace) {
         String dockerfile = generate(type, workspace);
 
-        // Add ENV PORT=8080 after FROM line if not already present
+        // Add ENV PORT=8080 — for multi-stage builds, add before the LAST FROM (final stage)
         if (!dockerfile.contains("ENV PORT")) {
-            dockerfile = dockerfile.replaceFirst("(FROM [^\n]+\n)", "$1ENV PORT=8080\n");
+            // Find the last FROM line and inject ENV PORT after it
+            int lastFrom = dockerfile.lastIndexOf("FROM ");
+            if (lastFrom >= 0) {
+                int endOfLine = dockerfile.indexOf('\n', lastFrom);
+                if (endOfLine >= 0) {
+                    dockerfile = dockerfile.substring(0, endOfLine + 1)
+                            + "ENV PORT=8080\n"
+                            + dockerfile.substring(endOfLine + 1);
+                }
+            }
         }
 
         // Replace hardcoded port references with $PORT for Cloud Run compatibility
