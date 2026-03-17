@@ -29,6 +29,8 @@ import {
   Clock, Coins, Cpu, RefreshCw, FolderKanban, X, Plus, User, Wrench, Loader2,
 } from 'lucide-react';
 import hljs from 'highlight.js';
+import Editor from '@monaco-editor/react';
+import type { editor as monacoEditor } from 'monaco-editor';
 
 const BASE_TABS = [
   { value: 'overview',  label: 'Overview' },
@@ -1114,11 +1116,29 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
-// ── IDE file viewer ───────────────────────────────────────────────────────────
+// ── Monaco language map (superset of hljs map) ───────────────────────────────
+const MONACO_LANG_MAP: Record<string, string> = {
+  java: 'java', kt: 'kotlin', py: 'python', js: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript', html: 'html', css: 'css', scss: 'scss',
+  json: 'json', yml: 'yaml', yaml: 'yaml', xml: 'xml', md: 'markdown',
+  sql: 'sql', sh: 'shell', bash: 'shell', dockerfile: 'dockerfile', toml: 'ini',
+  rs: 'rust', go: 'go', rb: 'ruby', php: 'php', gradle: 'groovy', tf: 'hcl',
+  properties: 'ini', txt: 'plaintext', cfg: 'ini', env: 'ini',
+};
+
+function getMonacoLanguage(filePath: string): string {
+  const name = filePath.split('/').pop()?.toLowerCase() ?? '';
+  if (name === 'dockerfile') return 'dockerfile';
+  const ext = name.includes('.') ? name.split('.').pop()! : '';
+  return MONACO_LANG_MAP[ext] ?? 'plaintext';
+}
+
+// ── IDE file viewer (Monaco-based with native folding) ────────────────────────
 function IDEFileViewer({
   filePath, content, loading,
 }: { filePath: string | null; content: string; loading: boolean }) {
   const [copied, setCopied] = useState(false);
+  const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -1126,6 +1146,55 @@ function IDEFileViewer({
       setTimeout(() => setCopied(false), 2000);
     });
   };
+
+  // Auto-collapse imports and collapse methods when file has >5 methods
+  const handleEditorMount = useCallback((editor: monacoEditor.IStandaloneCodeEditor) => {
+    editorRef.current = editor;
+
+    // Wait for folding ranges to be computed by Monaco's built-in provider
+    setTimeout(() => {
+      try {
+        const model = editor.getModel();
+        if (!model) return;
+
+        const lineCount = model.getLineCount();
+        // Don't fold small files (< 10 lines)
+        if (lineCount < 10) return;
+
+        // Detect import block: consecutive lines starting with 'import' at the top
+        let importEnd = 0;
+        for (let i = 1; i <= Math.min(lineCount, 60); i++) {
+          const line = model.getLineContent(i).trim();
+          if (line.startsWith('import ') || line.startsWith('from ') || line === '') {
+            if (line.startsWith('import ') || line.startsWith('from ')) importEnd = i;
+          } else if (importEnd > 0) {
+            break;
+          }
+        }
+
+        // Collapse import block if it's 3+ lines
+        if (importEnd >= 3) {
+          editor.trigger('fold', 'editor.fold', { selectionLines: [1] });
+        }
+
+        // Count methods to decide on auto-collapse
+        const text = model.getValue();
+        // Rough method count: lines matching common method/function signatures
+        const methodPatterns = /^\s*(public|private|protected|static|async|export)?\s*(function|def |class |void |[A-Z]\w+\s+\w+\s*\()/gm;
+        const methodCount = (text.match(methodPatterns) || []).length;
+
+        // If >5 methods, fold all then unfold the top level (class)
+        if (methodCount > 5) {
+          editor.trigger('fold', 'editor.foldAll', {});
+          // Unfold top-level (line 1) so class/module is visible
+          editor.trigger('fold', 'editor.unfold', { selectionLines: [1] });
+          // Also unfold imports line to keep them visible (they'll be separately folded)
+        }
+      } catch {
+        // Folding is best-effort — don't break the viewer
+      }
+    }, 300);
+  }, [content]);
 
   if (!filePath) {
     return (
@@ -1137,11 +1206,8 @@ function IDEFileViewer({
   }
 
   const fileName = filePath.split('/').pop()!;
-  const language = getLanguage(filePath);
-  const highlightedHtml = loading ? '' : highlightCode(content, language);
-  const lines = loading ? [] : highlightedHtml.split('\n');
-  // Remove trailing empty line that split often adds
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  const monacoLang = getMonacoLanguage(filePath);
+  const hljsLang = getLanguage(filePath);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -1165,37 +1231,66 @@ function IDEFileViewer({
             ? <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">Copied</span></>
             : <><Copy className="h-3 w-3" /><span>Copy</span></>}
         </button>
+        {/* Fold controls */}
+        <button
+          onClick={() => editorRef.current?.trigger('fold', 'editor.foldAll', {})}
+          title="Collapse All"
+          className="flex items-center gap-1 px-2 py-2 text-xs text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0"
+        >
+          <ChevronsDownUp className="h-3 w-3" />
+        </button>
+        <button
+          onClick={() => editorRef.current?.trigger('fold', 'editor.unfoldAll', {})}
+          title="Expand All"
+          className="flex items-center gap-1 px-2 py-2 text-xs text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0"
+        >
+          <ChevronsUpDown className="h-3 w-3" />
+        </button>
         {/* language badge */}
         <span className="px-3 py-2 text-[10px] font-mono text-zinc-600 flex-shrink-0">
-          {language}
+          {hljsLang}
         </span>
       </div>
 
-      {/* ── Code area ── */}
-      <div className="flex-1 overflow-auto bg-[#0d0d14]">
+      {/* ── Code area (Monaco editor — read-only with native folding) ── */}
+      <div className="flex-1 overflow-hidden bg-[#0d0d14]">
         {loading ? (
           <div className="p-4 text-sm text-zinc-500 animate-pulse">Loading…</div>
         ) : (
-          <table className="w-full border-collapse text-xs font-mono leading-[1.6]">
-            <tbody>
-              {lines.map((lineHtml, i) => (
-                <tr key={i} className="group hover:bg-white/[0.025]">
-                  {/* line number gutter */}
-                  <td
-                    className="select-none text-right pr-4 pl-4 text-zinc-600 group-hover:text-zinc-500 w-[1%] whitespace-nowrap align-top pt-0"
-                    style={{ userSelect: 'none', minWidth: '2.8rem' }}
-                  >
-                    {i + 1}
-                  </td>
-                  {/* code line */}
-                  <td
-                    className="pl-2 pr-6 text-zinc-200 whitespace-pre align-top"
-                    dangerouslySetInnerHTML={{ __html: lineHtml || '&nbsp;' }}
-                  />
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Editor
+            key={filePath}
+            language={monacoLang}
+            value={content}
+            theme="vs-dark"
+            onMount={handleEditorMount}
+            options={{
+              readOnly: true,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              fontSize: 12,
+              lineNumbers: 'on',
+              folding: true,
+              foldingStrategy: 'auto',
+              showFoldingControls: 'always',
+              wordWrap: 'off',
+              renderLineHighlight: 'line',
+              contextmenu: false,
+              domReadOnly: true,
+              cursorStyle: 'line-thin',
+              scrollbar: {
+                verticalScrollbarSize: 6,
+                horizontalScrollbarSize: 6,
+              },
+              overviewRulerLanes: 0,
+              hideCursorInOverviewRuler: true,
+              overviewRulerBorder: false,
+              guides: {
+                indentation: true,
+                bracketPairs: true,
+              },
+              padding: { top: 8 },
+            }}
+          />
         )}
       </div>
     </div>

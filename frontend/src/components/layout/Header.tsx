@@ -20,7 +20,7 @@ export default function Header() {
       {/* Mobile hamburger menu */}
       <button
         onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        className="md:hidden p-2 -ml-2 text-zinc-400 hover:text-white transition-colors"
+        className="md:hidden min-h-[44px] min-w-[44px] flex items-center justify-center -ml-2 text-zinc-400 hover:text-white transition-colors"
         aria-label="Toggle menu"
       >
         <Menu className="h-5 w-5" />

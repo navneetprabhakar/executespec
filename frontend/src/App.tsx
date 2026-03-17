@@ -38,9 +38,13 @@ import AccountingPage from '@/pages/AccountingPage';
 import DeploymentsPage from '@/pages/DeploymentsPage';
 
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
 
 export default function App() {
   const { loadMe } = useAuthStore();
+
+  // iOS Safari: scroll focused input into view when soft keyboard opens
+  useKeyboardScroll();
 
   useEffect(() => {
     // Try to restore session from access_token or refresh cookie on mount
