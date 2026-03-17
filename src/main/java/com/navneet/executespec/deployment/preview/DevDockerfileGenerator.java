@@ -138,9 +138,9 @@ public class DevDockerfileGenerator {
     public String generateForCloudRun(PreviewProjectType type, Path workspace) {
         String dockerfile = generate(type, workspace);
 
-        // Add ENV PORT=8080 — for multi-stage builds, add before the LAST FROM (final stage)
+        // Cloud Run sets PORT env var automatically via --port flag.
+        // Ensure container reads it at runtime. Add ENV PORT as fallback default.
         if (!dockerfile.contains("ENV PORT")) {
-            // Find the last FROM line and inject ENV PORT after it
             int lastFrom = dockerfile.lastIndexOf("FROM ");
             if (lastFrom >= 0) {
                 int endOfLine = dockerfile.indexOf('\n', lastFrom);
@@ -152,20 +152,15 @@ public class DevDockerfileGenerator {
             }
         }
 
-        // Replace hardcoded port references with $PORT for Cloud Run compatibility
-        // Vite: --port 5173 → --port $PORT
-        dockerfile = dockerfile.replace("--port\", \"5173\"", "--port\", \"${PORT:-8080}\"");
-        dockerfile = dockerfile.replace("--port 5173", "--port ${PORT:-8080}");
-        // serve: -l 5173 → -l $PORT
-        dockerfile = dockerfile.replace("-l\", \"5173\"", "-l\", \"${PORT:-8080}\"");
-        // Node backend: 3000 → $PORT (EXPOSE line)
+        // Replace hardcoded ports with $PORT for Cloud Run compatibility.
+        // Use shell form (not JSON exec) so $PORT expands at runtime.
         dockerfile = dockerfile.replace("EXPOSE 5173", "EXPOSE 8080");
         dockerfile = dockerfile.replace("EXPOSE 3000", "EXPOSE 8080");
-        // Python: --port 8000 → --port $PORT (both shell form and JSON exec form)
+        // Python
         dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
         dockerfile = dockerfile.replace("\"--port\", \"8000\"", "\"--port\", \"8080\"");
-        dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:8080");
-        // Spring Boot already uses 8080 by default
+        dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:${PORT:-8080}");
+        // Spring Boot reads PORT env var automatically
 
         return dockerfile;
     }
@@ -195,19 +190,20 @@ public class DevDockerfileGenerator {
                 || Files.exists(workspace.resolve("vite.config.ts"));
 
         if (hasViteConfig) {
+            // Shell form so $PORT expands at runtime (Cloud Run sets PORT env var)
             cmd = """
-                    CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]""";
+                    CMD npx vite --host 0.0.0.0 --port ${PORT:-8080}""";
         } else {
             JsonNode pkg = parsePackageJson(workspace);
             boolean hasDevScript = pkg != null && pkg.has("scripts")
                     && pkg.get("scripts").has("dev");
             if (hasDevScript) {
                 cmd = """
-                        CMD ["npm", "run", "dev"]""";
+                        CMD PORT=${PORT:-8080} npm run dev""";
             } else {
                 cmd = """
                         RUN npm install -g serve
-                        CMD ["npx", "serve", "-s", ".", "-l", "5173"]""";
+                        CMD npx serve -s . -l ${PORT:-8080}""";
             }
         }
 
@@ -780,16 +776,18 @@ public class DevDockerfileGenerator {
     }
 
     private String staticHtmlDockerfile() {
+        // Use envsubst to inject PORT at runtime (Cloud Run sets PORT env var)
         return """
                 FROM nginx:alpine
                 WORKDIR /usr/share/nginx/html
                 LABEL preview=true
+                ENV PORT=8080
                 COPY . .
-                RUN rm -f /etc/nginx/conf.d/default.conf
-                RUN echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; }' \
-                    > /etc/nginx/conf.d/default.conf
+                RUN rm -f /etc/nginx/conf.d/default.conf && mkdir -p /etc/nginx/templates
+                RUN printf 'server { listen ${PORT}; root /usr/share/nginx/html; index index.html; try_files $$uri $$uri/ /index.html; }' \
+                    > /etc/nginx/templates/default.conf.template
                 EXPOSE 8080
-                CMD ["nginx", "-g", "daemon off;"]
+                CMD sh -c "envsubst '$$PORT' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
                 """;
     }
 

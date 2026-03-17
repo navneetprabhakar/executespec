@@ -13,6 +13,7 @@ import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 @Slf4j
@@ -97,6 +98,10 @@ public class CloudRunClient {
                                        Map<String, String> envVars)
             throws IOException, InterruptedException {
 
+        // Randomize container port to avoid Cloud Run caching issues with failed revisions
+        int containerPort = ThreadLocalRandom.current().nextInt(8000, 9000);
+        log.info("Preview deploy: service={}, port={}, image={}", serviceName, containerPort, imageUri);
+
         List<String> cmd = new ArrayList<>(List.of(
             "gcloud", "run", "deploy", serviceName,
             "--image", imageUri,
@@ -106,25 +111,28 @@ public class CloudRunClient {
             "--memory", memory,
             "--min-instances", "0",
             "--max-instances", "1",
-            "--port", "8080",
+            "--port", String.valueOf(containerPort),
             "--cpu-boost",
             "--allow-unauthenticated",
             "--no-cpu-throttling",
-            "--timeout", "300",
+            "--timeout", "600",
             "--labels", "managed-by=executespec-preview",
             "--quiet",
             "--format", "json"
         ));
 
-        // Inject env vars
+        // Inject env vars (PORT is reserved by Cloud Run — set automatically via --port flag)
         if (envVars != null && !envVars.isEmpty()) {
-            StringBuilder envFlag = new StringBuilder();
-            envVars.forEach((k, v) -> {
-                if (!envFlag.isEmpty()) envFlag.append(",");
-                envFlag.append(k).append("=").append(v);
-            });
-            cmd.add("--set-env-vars");
-            cmd.add(envFlag.toString());
+            envVars.remove("PORT"); // Cloud Run sets this automatically
+            if (!envVars.isEmpty()) {
+                StringBuilder envFlag = new StringBuilder();
+                envVars.forEach((k, v) -> {
+                    if (!envFlag.isEmpty()) envFlag.append(",");
+                    envFlag.append(k).append("=").append(v);
+                });
+                cmd.add("--set-env-vars");
+                cmd.add(envFlag.toString());
+            }
         }
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
