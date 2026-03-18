@@ -249,7 +249,7 @@ public class DevDockerfileGenerator {
                 WORKDIR /app
                 LABEL preview=true
                 COPY package*.json ./
-                RUN npm install --ignore-scripts && npm rebuild
+                RUN npm install
                 COPY . .
                 EXPOSE 5173
                 """ + cmd.stripLeading() + "\n";
@@ -282,7 +282,7 @@ public class DevDockerfileGenerator {
                 LABEL preview=true
                 ENV HOST=0.0.0.0
                 COPY package*.json ./
-                RUN npm install --ignore-scripts && npm rebuild
+                RUN npm install
                 COPY . .
                 EXPOSE 3000
                 """ + cmd.stripLeading() + "\n";
@@ -814,18 +814,17 @@ public class DevDockerfileGenerator {
     }
 
     private String staticHtmlDockerfile() {
-        // Use envsubst to inject PORT at runtime (Cloud Run sets PORT env var)
+        // Cloud Run always maps to container port 8080. Hardcode in nginx config at build time.
         return """
                 FROM nginx:alpine
                 WORKDIR /usr/share/nginx/html
                 LABEL preview=true
-                ENV PORT=8080
                 COPY . .
-                RUN rm -f /etc/nginx/conf.d/default.conf && mkdir -p /etc/nginx/templates
-                RUN printf 'server { listen ${PORT}; root /usr/share/nginx/html; index index.html; try_files $$uri $$uri/ /index.html; }' \
-                    > /etc/nginx/templates/default.conf.template
+                RUN rm -f /etc/nginx/conf.d/default.conf \
+                    && printf 'server {\\n  listen 8080;\\n  root /usr/share/nginx/html;\\n  index index.html;\\n  try_files \\$uri \\$uri/ /index.html;\\n}\\n' \
+                       > /etc/nginx/conf.d/default.conf
                 EXPOSE 8080
-                CMD sh -c "envsubst '$$PORT' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+                CMD ["nginx", "-g", "daemon off;"]
                 """;
     }
 
