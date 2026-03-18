@@ -12,6 +12,8 @@ interface UiStore {
   commandPaletteOpen: boolean;
   activeTab: string;
   toasts: Toast[];
+  /** Pre-filled goal for NewRunModal — set by RunConversation "Implement as New Run". */
+  pendingNewRunGoal: string | null;
 
   setSidebarExpanded: (v: boolean) => void;
   setMobileSidebarOpen: (v: boolean) => void;
@@ -19,6 +21,7 @@ interface UiStore {
   setActiveTab: (t: string) => void;
   addToast: (t: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
+  setPendingNewRunGoal: (goal: string | null) => void;
 }
 
 let toastSeq = 0;
@@ -29,11 +32,13 @@ export const useUiStore = create<UiStore>((set) => ({
   commandPaletteOpen: false,
   activeTab: 'overview',
   toasts: [],
+  pendingNewRunGoal: null,
 
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
   setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
   setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
   setActiveTab: (t) => set({ activeTab: t }),
+  setPendingNewRunGoal: (goal) => set({ pendingNewRunGoal: goal }),
 
   addToast: (t) => {
     const id = String(++toastSeq);

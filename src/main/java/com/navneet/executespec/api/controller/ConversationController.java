@@ -28,7 +28,7 @@ import java.util.List;
 @Slf4j
 public class ConversationController {
 
-    private static final int MAX_MESSAGES = 10;
+    private static final int MAX_MESSAGES = 50;
 
     private static final String SYSTEM_PROMPT = """
             You are a requirements analyst helping a software engineer clarify their project idea \

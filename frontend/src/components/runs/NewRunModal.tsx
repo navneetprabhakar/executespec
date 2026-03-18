@@ -13,6 +13,7 @@ import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
 
 interface NewRunModalProps {
   onClose: () => void;
+  initialGoal?: string;
 }
 
 const MODELS = [
@@ -23,13 +24,13 @@ const MODELS = [
   { value: 'gemini-2.5-pro',            label: 'Gemini 2.5 Pro' },
 ];
 
-const MAX_MESSAGES = 10;
+const MAX_MESSAGES = 50;
 
 type Mode = 'compose' | 'chat';
 
-export default function NewRunModal({ onClose }: NewRunModalProps) {
+export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
-  const [goal, setGoal] = useState('');
+  const [goal, setGoal] = useState(initialGoal ?? '');
   const [fastMode, setFastMode] = useState(false);
   const [showGitHub, setShowGitHub] = useState(false);
   const [model, setModel] = useState('');
@@ -253,7 +254,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
               />
             )}
 
-            {/* Refine with AI button */}
+            {/* Build My Spec button */}
             <button
               onClick={enterChat}
               disabled={!goal.trim()}
@@ -265,7 +266,7 @@ export default function NewRunModal({ onClose }: NewRunModalProps) {
               )}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Refine with AI
+              Build My Spec
             </button>
 
             {/* Fast Mode toggle */}

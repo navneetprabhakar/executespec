@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Loader2, Rocket, MessageSquare, Lock, Bug, Lightbulb, Code2, Wrench } from 'lucide-react';
-import { getRunChat, sendRunChatMessage, iterateRun, applyToRun } from '@/lib/api';
+import { Send, Loader2, Rocket, MessageSquare, Lock, Bug, Lightbulb, Code2, Wrench, FileText } from 'lucide-react';
+import { getRunChat, sendRunChatMessage, applyToRun } from '@/lib/api';
 import type { RunChatMessage, ChatResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useRunStore } from '@/stores/useRunStore';
@@ -9,7 +9,7 @@ import { useUiStore } from '@/stores/useUiStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 
-const MAX_MESSAGES = 10;
+const MAX_MESSAGES = 50;
 
 interface Props {
   runId: string;
@@ -44,11 +44,13 @@ export default function RunConversation({ runId }: Props) {
   const [applyInput, setApplyInput]     = useState('');
   const [error, setError]               = useState<string | null>(null);
   const [loading, setLoading]           = useState(true);
+  const [compiledSpec, setCompiledSpec] = useState<string | null>(null);
+  const [showCompiledSpec, setShowCompiledSpec] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const { setActiveRunId, fetchRuns } = useRunStore();
   const activeRun = useRunStore((s) => s.activeRun);
-  const { addToast } = useUiStore();
+  const { addToast, setPendingNewRunGoal } = useUiStore();
 
   // Tier gate — show upgrade prompt if chat is not available on the user's plan
   if (permissions && !permissions.canUseChat) {
@@ -138,24 +140,13 @@ export default function RunConversation({ runId }: Props) {
     }
   };
 
-  const handleIterate = async () => {
+  const handleIterate = () => {
     const req = iterateInput.trim() || buildSuggestedRequest();
-    if (!req || iterating) return;
+    if (!req) return;
 
-    setIterating(true);
-    setError(null);
-    try {
-      const { runId: newRunId } = await iterateRun(runId, req);
-      // Refresh sidebar so the new run appears, then navigate to it
-      await fetchRuns();
-      setActiveRunId(newRunId);
-      setShowIterateBox(false);
-      setIterating(false);
-      addToast({ type: 'success', message: `Iteration run launched: ${newRunId.slice(0, 8)}` });
-    } catch (e: any) {
-      setError(e.message ?? 'Failed to create iteration run. Please try again.');
-      setIterating(false);
-    }
+    // Open NewRunModal pre-filled with the goal instead of launching directly
+    setPendingNewRunGoal(req);
+    setShowIterateBox(false);
   };
 
   const handleApply = async () => {
@@ -212,6 +203,34 @@ export default function RunConversation({ runId }: Props) {
     return lastUserMsg?.content ?? '';
   };
 
+  /** Compile all discussed improvements into a consolidated spec message. */
+  const compileSpec = () => {
+    const assistantMsgs = messages.filter((m) => m.role === 'assistant');
+    if (assistantMsgs.length === 0) return;
+
+    const userMsgs = messages.filter((m) => m.role === 'user');
+    const original = activeRun?.userRequest ?? '';
+
+    let spec = `**Original Goal:** ${original}\n\n**Improvements discussed:**\n`;
+    userMsgs.forEach((m, i) => {
+      spec += `${i + 1}. ${m.content.slice(0, 200)}${m.content.length > 200 ? '...' : ''}\n`;
+    });
+
+    // Extract key suggestions from assistant responses
+    spec += `\n**AI Recommendations:**\n`;
+    assistantMsgs.forEach((m) => {
+      const lines = m.content.split('\n').filter((l) =>
+        /^\s*[-*\d]/.test(l) || /\*\*/.test(l)
+      );
+      if (lines.length > 0) {
+        spec += lines.slice(0, 5).join('\n') + '\n';
+      }
+    });
+
+    setCompiledSpec(spec.trim());
+    setShowCompiledSpec(true);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -261,6 +280,17 @@ export default function RunConversation({ runId }: Props) {
                   {activeRun.applySuggestionCount ?? 0}/{permissions.maxApplySuggestions}
                 </span>
               )}
+            </button>
+          )}
+
+          {/* Compile as Spec — consolidate discussed improvements */}
+          {hasConversation && messages.length >= 2 && (
+            <button
+              onClick={compileSpec}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all bg-amber-500/15 text-amber-400 hover:bg-amber-500/25"
+            >
+              <FileText className="h-3 w-3" />
+              Compile as Spec
             </button>
           )}
 
@@ -381,6 +411,43 @@ export default function RunConversation({ runId }: Props) {
                     ? <><Loader2 className="h-3 w-3 animate-spin" /> Creating run&hellip;</>
                     : <><Rocket className="h-3 w-3" /> Start New Run</>
                   }
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Compiled Spec panel */}
+      <AnimatePresence>
+        {showCompiledSpec && compiledSpec && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden border-b border-white/[0.06] flex-shrink-0"
+          >
+            <div className="px-4 py-3 space-y-2 bg-amber-500/[0.03]">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-amber-400">Compiled Spec</span>
+                <button onClick={() => setShowCompiledSpec(false)} className="text-xs text-zinc-500 hover:text-zinc-300">Close</button>
+              </div>
+              <div className="text-xs text-zinc-300 whitespace-pre-wrap bg-white/[0.03] rounded-lg p-3 max-h-48 overflow-y-auto">
+                <MarkdownContent content={compiledSpec} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => { setApplyInput(compiledSpec); setShowApplyBox(true); setShowCompiledSpec(false); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500"
+                >
+                  <Wrench className="h-3 w-3" /> Apply to Run
+                </button>
+                <button
+                  onClick={() => { setPendingNewRunGoal(compiledSpec); setShowCompiledSpec(false); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-accent-violet text-white hover:bg-accent-violet/90"
+                >
+                  <Rocket className="h-3 w-3" /> Launch as New Run
                 </button>
               </div>
             </div>
