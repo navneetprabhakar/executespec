@@ -49,7 +49,7 @@ public class DockerExecutor {
         long start = System.currentTimeMillis();
         try {
             var result = exec(
-                    List.of("docker", "build", "-t", tag, "."),
+                    List.of("docker", "build", "--platform", "linux/amd64", "-t", tag, "."),
                     Duration.ofSeconds(BUILD_TIMEOUT_SECONDS),
                     contextDir);
 
