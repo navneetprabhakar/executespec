@@ -7,6 +7,7 @@ import EmptyState from '@/components/shared/EmptyState';
 import NewRunModal from './NewRunModal';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsOrgMember, selectIsSuperAdmin } from '@/stores/useAuthStore';
+import { useUiStore } from '@/stores/useUiStore';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
 
@@ -27,6 +28,12 @@ export default function RunList() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [showModal, setShowModal] = useState(false);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
+  const { pendingNewRunGoal, setPendingNewRunGoal } = useUiStore();
+
+  // Open modal when a pending goal is set (e.g., from RunConversation "Implement as New Run")
+  useEffect(() => {
+    if (pendingNewRunGoal) setShowModal(true);
+  }, [pendingNewRunGoal]);
 
   // Load projects once (for org members only)
   useEffect(() => {
@@ -191,7 +198,12 @@ export default function RunList() {
         <Plus className="h-5 w-5 text-white" />
       </motion.button>
 
-      {showModal && <NewRunModal onClose={() => setShowModal(false)} />}
+      {showModal && (
+        <NewRunModal
+          initialGoal={pendingNewRunGoal ?? undefined}
+          onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }}
+        />
+      )}
     </div>
   );
 }

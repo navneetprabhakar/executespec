@@ -8,7 +8,7 @@ import {
   getFiles, getFile,
   getOpenApiSpec,
   getProjects, createProject, updateRunProject,
-  applyToRun,
+  applyToRun, editRunPlan,
 } from '@/lib/api';
 import type { RunDetail, AgentTokenEntry, ProjectDto } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
@@ -632,6 +632,8 @@ function PlanTab({ run }: { run: RunDetail }) {
     );
   }
 
+  const canEdit = run.status === 'AWAITING_APPROVAL';
+
   return (
     <div className="space-y-4">
       {plan.plan_summary && (
@@ -647,7 +649,7 @@ function PlanTab({ run }: { run: RunDetail }) {
             Tasks ({plan.tasks.length})
           </h4>
           {plan.tasks.map((t: any, i: number) => (
-            <PlanTaskCard key={t.task_id ?? i} task={t} index={i} />
+            <PlanTaskCard key={t.task_id ?? i} task={t} index={i} runId={run.runId} canEdit={canEdit} />
           ))}
         </div>
       )}
@@ -657,9 +659,13 @@ function PlanTab({ run }: { run: RunDetail }) {
 
 // ── Plan task card (expandable) ───────────────────────────────────────────────
 
-function PlanTaskCard({ task: t, index: i }: { task: any; index: number }) {
+function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index: number; runId: string; canEdit: boolean }) {
   const [objExpanded, setObjExpanded] = useState(false);
   const [critExpanded, setCritExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const { addToast } = useUiStore();
   const TRUNCATE = 220;
 
   const objective  = t.objective ?? '';
@@ -680,14 +686,24 @@ function PlanTaskCard({ task: t, index: i }: { task: any; index: number }) {
           </span>
           <p className="text-sm font-medium text-zinc-200 leading-snug">{t.title}</p>
         </div>
-        <span className={cn(
-          'text-[10px] font-medium px-1.5 py-0.5 rounded flex-shrink-0',
-          t.complexity === 'HIGH'   ? 'text-accent-rose bg-accent-rose/10' :
-          t.complexity === 'MEDIUM' ? 'text-accent-amber bg-accent-amber/10' :
-                                      'text-accent-emerald bg-accent-emerald/10'
-        )}>
-          {t.complexity ?? 'MEDIUM'}
-        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {canEdit && !editing && (
+            <button
+              onClick={() => setEditing(true)}
+              className="text-[10px] text-zinc-500 hover:text-accent-blue transition-colors"
+            >
+              Edit
+            </button>
+          )}
+          <span className={cn(
+            'text-[10px] font-medium px-1.5 py-0.5 rounded',
+            t.complexity === 'HIGH'   ? 'text-accent-rose bg-accent-rose/10' :
+            t.complexity === 'MEDIUM' ? 'text-accent-amber bg-accent-amber/10' :
+                                        'text-accent-emerald bg-accent-emerald/10'
+          )}>
+            {t.complexity ?? 'MEDIUM'}
+          </span>
+        </div>
       </div>
 
       {/* ── Body ── */}
@@ -748,6 +764,49 @@ function PlanTaskCard({ task: t, index: i }: { task: any; index: number }) {
             </div>
           )}
         </div>
+
+        {/* Inline task edit */}
+        {editing && (
+          <div className="px-3 py-2.5 border-t border-white/[0.04] space-y-2">
+            <textarea
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder={`How should "${t.title}" be changed?`}
+              rows={2}
+              className="w-full rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                disabled={submitting || !feedback.trim()}
+                onClick={async () => {
+                  setSubmitting(true);
+                  try {
+                    const taskFeedback = `Change task "${t.title}": ${feedback.trim()}`;
+                    await editRunPlan(runId, taskFeedback);
+                    setFeedback('');
+                    setEditing(false);
+                    addToast({ type: 'success', message: 'Plan updated with task feedback' });
+                    await useRunStore.getState().fetchRun(runId);
+                  } catch (e: any) {
+                    addToast({ type: 'error', message: e.message });
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+                className="px-2.5 py-1 text-[10px] font-medium rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 disabled:opacity-50"
+              >
+                {submitting ? 'Updating…' : 'Update Task'}
+              </button>
+              <button
+                onClick={() => { setEditing(false); setFeedback(''); }}
+                className="px-2.5 py-1 text-[10px] font-medium rounded text-zinc-400 hover:text-zinc-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

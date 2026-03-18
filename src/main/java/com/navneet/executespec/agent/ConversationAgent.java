@@ -47,7 +47,7 @@ import java.util.Set;
 public class ConversationAgent {
 
     /** Maximum number of USER messages allowed per run conversation. */
-    public static final int MAX_MESSAGES = 10;
+    public static final int MAX_MESSAGES = 50;
 
     private static final String PRIMARY_PROVIDER = "anthropic";
     private static final String PRIMARY_MODEL    = ModelConstants.SONNET;
