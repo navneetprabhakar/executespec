@@ -183,9 +183,10 @@ Full API reference: see memory file `api-endpoints.md`
 - Chat copilot + apply suggestion (chat/review improvements on same run)
 - Observability: Micrometer traces + custom metrics (30+ meters) + structured logging
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
+- GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
+- Metrics wired into services: PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
 
 ### In Progress
-- GCP Cloud Monitoring metrics exporter (bean not yet wired)
 - Deploy Engine v2 (Paths B & C: Docker Compose on VM, Terraform + Managed Services — 0-10% done)
 
 ### Known Tech Debt

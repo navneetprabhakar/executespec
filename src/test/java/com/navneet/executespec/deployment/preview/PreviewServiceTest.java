@@ -49,6 +49,7 @@ class PreviewServiceTest {
     @Mock StateStore stateStore;
     @Mock TierConfigRepository tierConfigRepo;
     @Mock WorkspaceRestoreService restoreService;
+    @Mock io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     PreviewProperties props;
     AgentProperties agentProps;
@@ -76,7 +77,7 @@ class PreviewServiceTest {
         });
 
         service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService);
+                artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
     }
 
     @AfterEach
@@ -115,7 +116,7 @@ class PreviewServiceTest {
         void throwsWhenDisabled() {
             props.setEnabled(false);
             service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                    artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService);
+                    artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
                     .isInstanceOf(PreviewException.class)

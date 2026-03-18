@@ -1,856 +1,799 @@
-# ExecuteSpec — Product Requirements Document (PRD)
+# ExecuteSpec - Product Requirements Document
 
-> **Version**: 2.0
-> **Date**: 2026-03-15
-> **Status**: Living Document
-> **Audience**: Product Managers, SEMs, TLs, Business Stakeholders
-
----
-
-## Table of Contents
-
-1. [Product Vision](#1-product-vision)
-2. [Problem Statement](#2-problem-statement)
-3. [Target Users & Personas](#3-target-users--personas)
-4. [Feature Overview](#4-feature-overview)
-5. [User Journeys](#5-user-journeys)
-6. [System Architecture](#6-system-architecture)
-7. [Data Model](#7-data-model)
-8. [API Surface](#8-api-surface)
-9. [Non-Functional Requirements](#9-non-functional-requirements)
-10. [Monetization & Tiers](#10-monetization--tiers)
-11. [Success Metrics](#11-success-metrics)
-12. [Risks & Mitigations](#12-risks--mitigations)
+> **Version:** 3.0
+> **Last Updated:** 2026-03-18
+> **Status:** Production (v1)
+> **Author:** Navneet Prabhakar
 
 ---
 
-## 1. Product Vision
+## 1. Executive Summary
 
-**ExecuteSpec** is an autonomous software engineering platform that transforms natural language specifications into production-ready code. Users describe what they want to build; ExecuteSpec plans, implements, validates, reviews, and deploys — all autonomously.
+**ExecuteSpec** is an autonomous coding platform that transforms natural language requirements into production-ready code through a multi-agent AI pipeline. Users describe what they want built, and the system plans, implements, validates, reviews, and deploys the code -- with human approval gates at critical decision points.
 
-**One-liner**: *"Describe it. We build it."*
+The platform serves individual developers, teams, and enterprises through a tiered SaaS model with integrated billing, role-based access, and deployment to Google Cloud.
 
 ### Value Proposition
 
-| For | Who | ExecuteSpec |
-|-----|-----|-------------|
-| Solo developers | Want to prototype fast | Generates full-stack apps from a description |
-| Engineering teams | Need to reduce boilerplate work | Handles implementation of well-defined tasks |
-| Product managers | Have specs but no bandwidth | Converts PRDs into working code |
-| CTOs / Tech leads | Want to evaluate AI coding | Provides governed, auditable AI coding with org controls |
+| For | Value |
+|-----|-------|
+| **Solo developers** | Skip boilerplate -- describe a feature, get working code in minutes |
+| **Teams** | Standardized code quality via automated validation and review gates |
+| **Enterprises** | BYOK (Bring Your Own Keys), audit trails, org-scoped projects, GST-compliant invoicing |
 
 ---
 
-## 2. Problem Statement
+## 2. Product Architecture
 
-### Current State
-- Developers spend 60-70% of time on boilerplate, scaffolding, and well-understood patterns
-- AI coding assistants (Copilot, Cursor) require developer-in-the-loop for every decision
-- No existing product handles end-to-end: plan → code → validate → review → deploy
+### 2.1 System Overview
 
-### Desired State
-- Users submit a natural language goal and receive working, reviewed, deployable code
-- The system autonomously handles planning, multi-file implementation, code validation, review, and conflict resolution
-- Users maintain control via approval gates (plan review, merge review) without micromanaging
-
----
-
-## 3. Target Users & Personas
-
-### Persona 1: Solo Developer ("Alex")
-- **Tier**: FREE → PRO
-- **Goal**: Rapid prototyping, learning, building side projects
-- **Usage pattern**: 3-5 runs/week, simple single-service apps
-- **Key feature**: Instant preview, GitHub push
-
-### Persona 2: Engineering Lead ("Priya")
-- **Tier**: PRO (Org Admin)
-- **Goal**: Accelerate team's development velocity on defined tasks
-- **Usage pattern**: 50-100 runs/month across team, complex multi-file changes
-- **Key feature**: Org management, project grouping, JIRA/Confluence integration, Slack notifications
-
-### Persona 3: Enterprise Architect ("James")
-- **Tier**: ENTERPRISE
-- **Goal**: Evaluate and govern AI-assisted development at scale
-- **Usage pattern**: Unlimited runs, BYOK (bring your own keys), SSO integration
-- **Key feature**: Audit trail, domain enforcement, custom API keys, cost control
-
----
-
-## 4. Feature Overview
-
-### 4.1 Core Pipeline
-
-```mermaid
-graph LR
-    A[User Goal] --> B[Reference Extraction]
-    B --> C[Planning Agent]
-    C --> D{Plan Approval Gate}
-    D -->|Approved| E[Task Execution]
-    D -->|Rejected| Z[Run Failed]
-    E --> F[Code Validation]
-    F -->|Pass| G[Compiler Check]
-    F -->|Fail| E
-    G --> H[Review Agent]
-    H --> I{Merge Gate}
-    I -->|Merge| J[Git Merge]
-    I -->|Rework| E
-    I -->|Decline| Z
-    J --> K[Post-Merge Processing]
-    K --> L[Run Complete]
+```
+User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
+                                       |                    |
+                                       +-- PostgreSQL       +-- PlannerAgent (Sonnet)
+                                       +-- Redis            +-- WorkerAgent (Haiku)
+                                       +-- GitHub           +-- CompilerAgent (Haiku)
+                                       +-- Razorpay         +-- ReviewerAgentV2 (Haiku)
+                                                            +-- ConversationAgent (Haiku)
+                                                            +-- Post-merge Agents
 ```
 
-### 4.2 Feature Matrix
+### 2.2 Technology Stack
 
-| Feature | FREE | PRO | ENTERPRISE |
-|---------|------|-----|------------|
-| Runs per month | 5 | 100 | Unlimited* |
-| Concurrent runs | 1 | 3 | 10 |
-| Preview deployments | 3/run | 10/run | Unlimited |
-| Concurrent previews | 1 | 3 | 10 |
-| Chat copilot | - | Yes | Yes |
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | React 18, TypeScript 5.3, Vite 5, Tailwind CSS 3.4, Zustand, Monaco Editor |
+| **Backend** | Java 21, Spring Boot 3.3, Spring AI 1.1.0 |
+| **Database** | PostgreSQL (Cloud SQL), Redis (Memorystore) |
+| **AI Providers** | Anthropic (Claude), Google (Gemini), OpenAI (GPT) -- 3-provider fallback |
+| **Infrastructure** | GCP Mumbai (asia-south1) -- Cloud Run, GCE, Artifact Registry, GCS |
+| **Payments** | Razorpay (subscriptions + one-time orders) |
+| **Observability** | Micrometer + OpenTelemetry, Grafana/Tempo (local), Cloud Trace/Monitoring (prod) |
+
+### 2.3 Multi-Agent Pipeline
+
+```
+POST /api/runs
+  |
+  v
+Reference Extraction (JIRA/Confluence context enrichment)
+  |
+  v
+[Optional] Clarification Gate -- user provides missing context
+  |
+  v
+PlannerAgent (Claude Sonnet) -- natural language -> structured task plan
+  |
+  v
+Plan Approval Gate -- user reviews & approves/rejects plan
+  |
+  v
+SequentialTaskExecutor
+  +-- WorkerAgent per task (Claude Haiku, escalates to Sonnet/Opus on stall)
+  |     +-- Tool dispatch: readFile, writeFile, shell, git, diff
+  |     +-- 15-min wall-clock limit, stall detection at 5min
+  |     +-- Sliding window: first 2 + last 18 messages (context control)
+  |     +-- Token truncation: readFile 8K, shell 6K, diff 5K chars
+  |
+  +-- CodeValidator (pluggable gate chain: SYNTAX -> TYPE -> LINT -> TEST)
+       +-- Java: javac, Checkstyle
+       +-- TypeScript: tsc, eslint
+       +-- Python: mypy, pylint
+       +-- React: eslint, component tests
+  |
+  v
+CompilerAgent -- compile & fix build errors (up to 3 iterations)
+  |
+  v
+ReviewerAgentV2 -- two-phase agentic review (INSPECT -> FIX)
+  |
+  v
+Merge Gate -- user chooses: MERGE / DECLINE / REWORK / IMPLEMENT_SUGGESTIONS
+  |
+  v
+GitMergeService (progressive merge per task -> main branch)
+  |
+  v
+Post-Merge Agents (async, non-blocking)
+  +-- ContextAgent -- extract context for follow-up runs
+  +-- PromptOptimiserAgent -- improve system prompts
+  +-- ApiTestSuiteAgent -- generate OpenAPI spec + integration tests
+  +-- SlackNotificationService -- Block Kit messages to configured channels
+  +-- GitHub Push -- auto-push to configured repo
+```
+
+### 2.4 LLM Router & Model Matrix
+
+The system uses a 3-provider fallback chain with tier-based model escalation:
+
+| Chain | Primary | Fallback 1 | Fallback 2 |
+|-------|---------|-----------|-----------|
+| ARCHITECT | Claude Opus 4.6 | Gemini 2.5 Pro | GPT-4o |
+| CAPABLE | Claude Sonnet 4.6 | Gemini 3.1 Flash Lite | GPT-4o |
+| UTILITY | Claude Haiku 4.5 | Gemini 3.1 Flash Lite | GPT-4o Mini |
+
+| Agent | Default Model | Escalation Path |
+|-------|--------------|-----------------|
+| PlannerAgent | Sonnet | -- |
+| WorkerAgent | Haiku | Haiku -> Sonnet -> Opus (on stall/retry) |
+| CompilerAgent | Haiku | -- |
+| ReviewerAgentV2 | Haiku | -- |
+| ConversationAgent | Haiku | -- |
+| ContextAgent | Haiku | -- |
+| PromptOptimiserAgent | Haiku | -- |
+| ApiTestSuiteAgent | Haiku | -- |
+
+---
+
+## 3. Tiers & Pricing
+
+### 3.1 Tier Matrix
+
+| Capability | FREE | PRO | ENTERPRISE |
+|-----------|------|-----|------------|
+| Monthly runs | 5 | 100 | Unlimited |
+| Concurrent runs | 1 | 3 | 10+ |
+| Chat copilot | No | 10 msgs/run | Unlimited |
 | Apply suggestions | 2/run | 10/run | Unlimited |
-| Organization | - | Yes (10 members) | Yes (unlimited) |
-| Projects | - | Yes | Yes |
-| JIRA/Confluence | - | Yes (admin) | Yes |
-| Slack notifications | - | Yes | Yes |
-| Audit trail | - | - | Yes |
-| BYOK (API keys) | - | Admin only | Yes |
-| GitHub integration | Yes | Yes | Yes |
-| Instant preview | Yes | Yes | Yes |
-| Cloud Run deployment | Yes | Yes | Yes |
+| Preview starts | 3/run | 10/run | Unlimited |
+| Deployments | 0 | 5 active | Unlimited |
+| Org members | -- | 10 (1 admin) | Unlimited (multi-admin) |
+| AI key management | System only | SYSTEM / OWN_KEYS / HYBRID | Full BYOK |
+| Integrations (JIRA, Slack) | No | Yes | Yes |
+| Audit logs | No | No | Yes (ORG_ADMIN) |
+| Domain enforcement | -- | Optional | Enforced |
+| Run visibility | Own runs only | Org runs | All org runs |
 
-*Unlimited requires BYOK (`apiKeysProvided=true`)
+### 3.2 Run Top-Up Credits
+
+Users can purchase additional run credits beyond their monthly limit:
+
+- **TopupPackage** -- Admin-configurable packages (e.g., "50 runs for INR 2,499")
+- **Purchased runs** -- Never expire
+- **Admin-granted bonus runs** -- Expire after 90 days (configurable)
+- **Consumption** -- FIFO (oldest credits used first)
+- **Enforcement** -- `TierEnforcementService` (429) + `UsageTrackingService` (402)
+
+### 3.3 Invoicing & GST Compliance
+
+- Sequential invoice numbering (ES-2526-0001)
+- SAC code 998314 (IT software services)
+- Tax breakdown: CGST + SGST (intra-state) or IGST (inter-state)
+- Billing profile with GSTIN, PAN, address
+- Double-entry accounting ledger
+- GSTR-1 export for GST filing
+- Credit notes and void support
 
 ---
 
-## 5. User Journeys
+## 4. Role-Based Access & User Journeys
 
-### Journey 1: First Run (New User Onboarding)
+### 4.1 Role Hierarchy
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant App as ExecuteSpec
-    participant Email as Email Service
-    participant Agent as AI Pipeline
-    participant CR as Cloud Run
-
-    User->>App: POST /register (email, password, name)
-    App->>Email: Send verification email
-    Email->>User: Click verification link
-    User->>App: GET /verify-email?token=xxx
-    App->>User: Auto-login → Dashboard
-
-    User->>App: Click "New Run"
-    User->>App: Enter goal: "Build a React todo app with Express backend"
-    User->>App: Submit run
-
-    App->>Agent: PlannerAgent.plan()
-    Agent->>App: TaskPlan (3 tasks)
-    App->>User: SSE: Plan ready for review
-
-    User->>App: Review plan → Click "Approve"
-    App->>Agent: Execute tasks sequentially
-
-    loop For each task
-        Agent->>Agent: WorkerAgent writes code
-        Agent->>Agent: CodeValidator validates
-        Agent->>Agent: Merge to main branch
-    end
-
-    Agent->>Agent: CompilerAgent verifies build
-    Agent->>Agent: ReviewerAgent reviews code
-    App->>User: SSE: Review ready
-
-    User->>App: Click "Merge"
-    App->>User: Run COMPLETE
-
-    User->>App: Click "Preview"
-    App->>CR: Build → Push → Deploy
-    CR->>User: Preview URL (10 min TTL)
 ```
-
-### Journey 2: Team Workflow (Org User with JIRA)
-
-```mermaid
-sequenceDiagram
-    actor Admin as Org Admin
-    actor Dev as Developer
-    participant App as ExecuteSpec
-    participant JIRA as JIRA
-    participant Slack as Slack
-
-    Admin->>App: Create Organization
-    Admin->>App: Configure JIRA credentials
-    Admin->>App: Connect Slack workspace
-    Admin->>App: Invite Developer
-
-    Dev->>App: Accept invite → Join org
-
-    JIRA->>App: Webhook: Issue moved to "Ready for Coding"
-    App->>App: Extract issue context (summary, description, AC)
-    App->>App: Auto-create run with JIRA context
-
-    App->>Slack: "New run started from JIRA-123"
-
-    App->>App: Plan → Execute → Validate → Review
-    App->>Slack: "Run complete — 3 tasks, all passed"
-
-    Dev->>App: View run → Review changes
-    Dev->>App: Chat with copilot: "Can you add input validation?"
-    Dev->>App: Click "Apply to Run"
-    App->>App: Generate mini-plan → Execute → Validate
-
-    Dev->>App: Click "Push to GitHub"
-    App->>App: Create repo "swift-ember" → Push code
-```
-
-### Journey 3: Post-Completion Iteration
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant App as ExecuteSpec
-    participant Chat as Chat Copilot
-    participant Pipeline as Pipeline
-
-    User->>App: View completed run
-    User->>Chat: "The login form should validate email format"
-    Chat->>User: "I suggest adding email regex validation..."
-
-    User->>App: Click "Apply to Run"
-    App->>Pipeline: Generate suggestion plan (≤6 tasks)
-    Pipeline->>Pipeline: Execute new tasks only
-    Pipeline->>Pipeline: Compile check
-    Pipeline->>Pipeline: Review new changes
-
-    alt Preview was active
-        Pipeline->>Pipeline: Auto-restart preview
-    end
-
-    App->>User: Updated run with applied changes
-    User->>App: Click "Preview" → See updated app
-```
-
-### Journey 4: Billing & Top-Up
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant App as ExecuteSpec
-    participant Razorpay as Razorpay
-
-    User->>App: Run submission fails (429: quota exceeded)
-    User->>App: Navigate to Billing page
-    User->>App: View "Buy Extra Runs" section
-    User->>App: Select "25 Runs - $11.99"
-
-    App->>Razorpay: Create order
-    Razorpay->>User: Checkout modal
-    User->>Razorpay: Complete payment
-    Razorpay->>App: Webhook: order.paid
-
-    App->>App: Credit 25 runs to user (FIFO tracking)
-    App->>User: "25 runs added to your account"
-    User->>App: Submit run → Success (bonus run consumed)
-```
-
-### Journey 5: Preview Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE : No preview active
-
-    IDLE --> ANALYZING : User clicks "Start Preview"
-    ANALYZING --> BUILDING : Dependencies detected
-    BUILDING --> PUSHING : Docker image built
-    PUSHING --> DEPLOYING : Image pushed to AR
-    DEPLOYING --> STARTING : Cloud Run service created
-    STARTING --> RUNNING : Health check passed
-
-    RUNNING --> TIMED_OUT : 10-min TTL expires
-    RUNNING --> IDLE : User clicks "Stop"
-    RUNNING --> FAILED : Runtime error
-
-    TIMED_OUT --> IDLE : Cleanup job deletes service
-    FAILED --> IDLE : User retries
-
-    note right of RUNNING
-        Countdown timer visible
-        Amber warning at <2 min
-    end note
+SUPER_ADMIN (global -- full system access)
+  |
+  +-- FINANCE (global -- invoicing, accounting, GST)
+  |
+  +-- USER (global default)
+       |
+       +-- ORG_ADMIN (org-level -- settings, members, keys, integrations)
+       |    |
+       |    +-- BILLING_ADMIN (org-level -- subscriptions, top-ups)
+       |    |
+       |    +-- PROJECT_ADMIN (project-level -- project settings, members)
+       |
+       +-- DEVELOPER (org-level default)
+       |
+       +-- PROJECT_DEVELOPER (project-level default)
 ```
 
 ---
 
-## 6. System Architecture
+### 4.2 FREE User Journey
 
-### 6.1 High-Level Architecture
+**Persona:** Solo developer exploring the platform.
 
-```mermaid
-graph TB
-    subgraph "Client Layer"
-        Browser[React SPA<br/>Vite 5 / Tailwind]
-    end
+```
+1. REGISTER
+   POST /api/auth/register -> email verification link
+   Verify email -> account active, tier = FREE
 
-    subgraph "Load Balancer"
-        LB[HTTPS LB<br/>Cookie Affinity<br/>600s timeout]
-    end
+2. FIRST RUN
+   "Build a React todo app with local storage"
+   POST /api/runs (goal, source=WEB)
+   -> PlannerAgent generates task plan
+   -> User reviews plan in UI, clicks "Approve"
+   -> WorkerAgent creates files (App.tsx, TodoList.tsx, etc.)
+   -> CompilerAgent validates build
+   -> ReviewerAgentV2 reviews code quality
+   -> User clicks "Merge" at merge gate
+   -> Code merged to main, workspace ready
 
-    subgraph "Compute Layer (GCE MIG)"
-        subgraph "Instance 1"
-            SB1[Spring Boot 3.3<br/>Java 21 / ZGC]
-        end
-        subgraph "Instance 2"
-            SB2[Spring Boot 3.3<br/>Java 21 / ZGC]
-        end
-    end
+3. PREVIEW
+   Click "Preview" -> Cloud Run ephemeral container
+   10-minute TTL with countdown timer
+   3 preview starts per run (FREE limit)
 
-    subgraph "Data Layer"
-        PG[(PostgreSQL 15<br/>Cloud SQL)]
-        Redis[(Redis<br/>Memorystore)]
-        GCS[(GCS Buckets<br/>Workspaces + Deploy)]
-    end
+4. DOWNLOAD
+   GET /api/runs/{id}/download -> zip file of workspace
 
-    subgraph "AI Providers"
-        Anthropic[Anthropic API<br/>Claude 3.5/4]
-        OpenAI[OpenAI API<br/>GPT-4o]
-        Google[Google AI<br/>Gemini 2.5]
-    end
+5. HIT LIMITS
+   After 5 runs/month -> "Upgrade to PRO" nudge
+   Cannot use chat copilot
+   Cannot deploy to production
+   Sees only own runs
 
-    subgraph "External Services"
-        CR[Cloud Run<br/>Preview + Deploy]
-        AR[Artifact Registry<br/>Docker Images]
-        GH[GitHub API<br/>Repo Management]
-        RP[Razorpay<br/>Payments]
-        SL[Slack API<br/>Notifications]
-        JR[JIRA / Confluence<br/>Context]
-    end
-
-    Browser --> LB
-    LB --> SB1
-    LB --> SB2
-    SB1 --> PG
-    SB1 --> Redis
-    SB1 --> GCS
-    SB2 --> PG
-    SB2 --> Redis
-    SB2 --> GCS
-    SB1 --> Anthropic
-    SB1 --> OpenAI
-    SB1 --> Google
-    SB1 --> CR
-    SB1 --> AR
-    SB1 --> GH
-    SB1 --> RP
-    SB1 --> SL
-    SB1 --> JR
+6. UPGRADE PATH
+   /plans page -> Razorpay checkout -> PRO tier activated
 ```
 
-### 6.2 Pipeline Architecture
-
-```mermaid
-graph TB
-    subgraph "Pipeline Harness"
-        Submit[Run Submission<br/>Quota Check]
-        RefExtract[Reference Extractor<br/>JIRA/Confluence]
-        Planner[Planner Agent<br/>Claude Sonnet]
-        PlanGate{Plan Approval<br/>Redis Gate}
-        Executor[Sequential Task Executor<br/>Topological Sort]
-        Compiler[Compiler Agent<br/>Claude Haiku]
-        Reviewer[Reviewer Agent V2<br/>Claude Haiku]
-        MergeGate{Merge Gate<br/>Redis Gate}
-        Merge[Git Merge Service<br/>4-tier conflict resolution]
-        PostMerge[Post-Merge Orchestrator]
-    end
-
-    subgraph "Per-Task Execution"
-        Worker[Worker Agent<br/>15-min time limit]
-        Validator[Code Validator<br/>SYNTAX→TYPE→LINT→TEST]
-        Retry{Retry?<br/>Max 3}
-        Escalate[Model Escalation<br/>FAST→CAPABLE→POWER]
-    end
-
-    subgraph "Post-Merge Agents"
-        Context[Context Agent<br/>Update CODEBASE_CONTEXT.md]
-        PromptOpt[Prompt Optimiser<br/>Every 10 runs]
-        ApiTest[API Test Suite<br/>Generate OpenAPI]
-        Slack[Slack Notification<br/>Block Kit messages]
-    end
-
-    Submit --> RefExtract --> Planner --> PlanGate
-    PlanGate -->|Approved| Executor
-    PlanGate -->|Rejected| Failed[FAILED]
-
-    Executor --> Worker --> Validator
-    Validator -->|Pass| Merge
-    Validator -->|Fail| Retry
-    Retry -->|Yes| Escalate --> Worker
-    Retry -->|No| Failed
-
-    Executor --> Compiler --> Reviewer --> MergeGate
-    MergeGate -->|Merge| Merge
-    MergeGate -->|Rework| Executor
-    MergeGate -->|Decline| Failed
-
-    Merge --> PostMerge
-    PostMerge --> Context
-    PostMerge --> PromptOpt
-    PostMerge --> ApiTest
-    PostMerge --> Slack
-```
-
-### 6.3 LLM Provider Routing
-
-```mermaid
-graph LR
-    subgraph "Fallback Chains"
-        direction TB
-        A1[ARCHITECT] --> A2[Claude Opus] --> A3[Gemini 2.5 Pro] --> A4[GPT-4o]
-        C1[CAPABLE] --> C2[Claude Sonnet] --> C3[Gemini Flash] --> C4[GPT-4o]
-        U1[UTILITY] --> U2[Claude Haiku] --> U3[Gemini Flash] --> U4[GPT-4o Mini]
-    end
-
-    subgraph "Model Router"
-        direction TB
-        LOW[LOW complexity] --> FAST[FAST tier]
-        MED[MEDIUM complexity] --> FAST
-        HIGH[HIGH complexity] --> CAPABLE[CAPABLE tier]
-    end
-
-    subgraph "Retry Escalation"
-        direction TB
-        R1[Attempt 1-2] --> Stay[Same tier]
-        R3[Attempt 3] --> Up[Escalate tier]
-    end
-```
+**Permissions:**
+- Can create runs (5/month, 1 concurrent)
+- Can preview (3 starts/run)
+- Cannot chat, deploy, or create orgs
+- Sees only own runs
+- System AI keys only
 
 ---
 
-## 7. Data Model
+### 4.3 PRO Developer Journey
 
-### 7.1 Core Entity Relationships
+**Persona:** Developer on a team, member of an organization.
 
-```mermaid
-erDiagram
-    APP_USER ||--o{ PIPELINE_RUN : creates
-    APP_USER ||--o| ORG : belongs_to
-    ORG ||--o{ ORG_MEMBER : has
-    ORG ||--o{ PROJECT : owns
-    ORG ||--o{ ORG_INVITATION : sends
-    PROJECT ||--o{ PROJECT_MEMBER : has
-    PROJECT ||--o{ PIPELINE_RUN : groups
+```
+1. ONBOARDING
+   Receives org invitation email from ORG_ADMIN
+   POST /api/org/accept-invite -> joins org as DEVELOPER
+   Inherits org tier (PRO) and shared settings
 
-    PIPELINE_RUN ||--o{ AGENT_TASK : contains
-    PIPELINE_RUN ||--o{ AGENT_MESSAGE : logs
-    PIPELINE_RUN ||--|| PREVIEW_SESSION : previews
-    AGENT_TASK ||--o{ FILE_LOCK : acquires
+2. CREATE PROJECT
+   POST /api/projects (name, description)
+   Assign team members to project
 
-    APP_USER {
-        string id PK
-        string email UK
-        string password_hash
-        string global_role
-        string tier
-        string org_id FK
-        int personal_run_count
-        string github_pat
-        string anthropic_api_key
-    }
+3. SUBMIT RUN WITH CONTEXT
+   "Implement the user authentication flow from JIRA ticket AUTH-42"
+   System detects JIRA reference -> fetches issue details
+   If vague: Clarification Gate -> user provides JIRA key
+   Enriched context passed to PlannerAgent
 
-    ORG {
-        string id PK
-        string name
-        string tier
-        string domain_patterns
-        string key_source_mode
-        int monthly_run_count
-        int monthly_run_limit_override
-    }
+4. FAST MODE (skip gates)
+   Toggle "Fast Mode" in NewRunModal
+   -> skipApproval=true, autoMerge=true
+   -> Pipeline runs end-to-end without human gates
 
-    PIPELINE_RUN {
-        string run_id PK
-        string status
-        string goal
-        string created_by_user_id FK
-        string org_id FK
-        string project_id FK
-        int preview_start_count
-        int apply_suggestion_count
-    }
+5. CHAT COPILOT
+   POST /api/runs/{runId}/chat "Can you also add password reset?"
+   ConversationAgent responds with suggestions
+   "Apply" button -> creates new worker tasks on same run
 
-    AGENT_TASK {
-        string task_id PK
-        string run_id FK
-        string status
-        string complexity
-        string depends_on
-        int attempt
-    }
+6. REVIEW & ITERATE
+   Reviewer recommends REWORK on 2 issues
+   Click "Rework" -> WorkerAgent re-runs flagged tasks
+   Click "Implement Suggestions" -> apply review fixes
+   Max 10 apply suggestions per run (PRO limit)
+
+7. DEPLOY
+   POST /api/deployments/analyze -> detect requirements
+   POST /api/deployments/confirm -> Cloud Run Direct deployment
+   5 active deployments max
+
+8. GITHUB INTEGRATION
+   Settings page -> save GitHub PAT + owner
+   Runs auto-push to configured repo on merge
+   Manual: POST /api/runs/{runId}/push-github
+
+9. SLACK NOTIFICATIONS
+   Configured by ORG_ADMIN
+   Receives run events in project-linked Slack channels
+   Verbosity: BRIEF / NORMAL / DETAILED
 ```
 
-### 7.2 Billing Entity Relationships
-
-```mermaid
-erDiagram
-    APP_USER ||--o| BILLING_SUBSCRIPTION : has
-    BILLING_SUBSCRIPTION }|--|| BILLING_PLAN : uses
-    APP_USER ||--o{ RUN_TOPUP : purchases
-    ORG ||--o{ RUN_TOPUP : receives
-    APP_USER ||--o{ BILLING_USAGE : tracks
-
-    BILLING_PLAN {
-        string id PK
-        string name
-        string tier
-        string key_mode
-        string period
-        string razorpay_plan_id
-        long base_amount_inr
-        long base_amount_usd
-        int run_limit
-    }
-
-    BILLING_SUBSCRIPTION {
-        string id PK
-        string user_id FK
-        string plan_id FK
-        string gateway_subscription_id
-        string status
-        timestamp current_period_end
-        int total_seats
-    }
-
-    RUN_TOPUP {
-        string id PK
-        string user_id FK
-        string org_id FK
-        int quantity
-        int remaining
-        string source
-        string status
-        timestamp expires_at
-    }
-
-    TOPUP_PACKAGE {
-        string id PK
-        string name
-        int run_count
-        long amount_inr
-        long amount_usd
-        boolean active
-    }
-```
+**Permissions:**
+- 100 runs/month, 3 concurrent
+- Chat copilot (10 msgs/run)
+- 10 apply suggestions/run, 10 preview starts/run
+- 5 active deployments
+- Sees all org runs
+- Can manage own AI keys (if org allows HYBRID/OWN_KEYS)
+- Cannot manage org settings, integrations, or billing
 
 ---
 
-## 8. API Surface
+### 4.4 ORG_ADMIN Journey
 
-### 8.1 API Categories
+**Persona:** Team lead or CTO managing the organization.
 
-| Category | Endpoints | Auth Required |
-|----------|-----------|---------------|
-| Run Lifecycle | 11 | Yes (JWT) |
-| Run Data | 9 | Yes |
-| Preview & Deploy | 8 | Yes |
-| Chat & Apply | 3 | Yes |
-| Auth & Settings | 16 | Partial |
-| Organization | 12 | Yes (ORG_ADMIN) |
-| Projects | 7 | Yes |
-| Billing | 10 | Yes |
-| Integrations | 12 | Yes |
-| Admin | 16 | Yes (SUPER_ADMIN) |
-| **Total** | **~104** | |
+```
+1. CREATE ORG
+   POST /api/org (name, domain)
+   Becomes ORG_ADMIN automatically
 
-### 8.2 Core Run API Flow
+2. CONFIGURE AI KEYS
+   PUT /api/org/me/settings/key-source -> SYSTEM / OWN_KEYS / HYBRID
+   PUT /api/org/me/settings/ai-keys -> org-level Anthropic, OpenAI, Google keys
+   Keys encrypted at rest, used as fallback after user keys
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant API as REST API
-    participant SSE as SSE Stream
-    participant Pipeline as Pipeline
+3. INVITE TEAM
+   POST /api/org/invite (email, role)
+   PRO: max 10 members, 1 admin
+   ENTERPRISE: unlimited members, multiple admins
+   Domain enforcement: OPEN (anyone) or ENFORCED (org domain only)
+   Common domain blocking (gmail, hotmail) -- ENTERPRISE always on
 
-    C->>API: POST /api/runs {goal, plannerModel, ...}
-    API-->>C: 202 {runId}
-    C->>SSE: GET /api/runs/{id}/events (EventSource)
+4. MANAGE MEMBERS
+   GET /api/org/me/members -> list with roles
+   PUT /api/org/me/members/{userId}/role -> change to BILLING_ADMIN, DEVELOPER
+   PUT /api/org/me/members/{userId}/suspend -> suspend/unsuspend
+   DELETE /api/org/me/members/{userId} -> remove from org
 
-    Pipeline->>SSE: PLANNING event
-    Pipeline->>SSE: PLAN_READY event
-    C->>API: POST /api/runs/{id}/approve {approved: true}
-    Pipeline->>SSE: WORKING event
-    Pipeline->>SSE: TASK_STARTED / TASK_COMPLETED events
-    Pipeline->>SSE: VALIDATION_PASSED events
-    Pipeline->>SSE: REVIEWING event
-    Pipeline->>SSE: REVIEW_READY event
-    C->>API: POST /api/runs/{id}/merge {decision: "MERGE"}
-    Pipeline->>SSE: COMPLETE event
+5. CREATE PROJECTS
+   POST /api/projects -> project scoping for runs
+   POST /api/projects/{id}/members -> assign developers
+   Runs tagged with projectId for filtering and reporting
 
-    C->>API: POST /api/runs/{id}/preview/start
-    API-->>C: {status: "ANALYZING", expiresAt: "..."}
-    Pipeline->>SSE: PREVIEW_BUILDING / PREVIEW_DEPLOYING
-    Pipeline->>SSE: PREVIEW_RUNNING {url: "*.run.app"}
+6. CONFIGURE INTEGRATIONS
+   Settings -> JIRA credentials (URL, email, API token)
+   Settings -> Confluence credentials (URL, email, API token)
+   Validate connection before saving
+   Enable webhook triggers from JIRA/Confluence
+
+7. CONFIGURE SLACK
+   GET /api/slack/install -> OAuth flow
+   POST /api/slack/projects/{projectId}/channels -> link project to channel
+   PUT verbosity (BRIEF/NORMAL/DETAILED)
+   Test notification before going live
+
+8. MONITOR & AUDIT
+   /audit -> Activity audit trail (35+ event types)
+   Filter by user, action, date range
+   Events: user_created, role_changed, org_updated, invitation_sent,
+           project_created, run_submitted, settings_updated, etc.
+
+9. VIEW METRICS & COSTS
+   /dashboard -> Token usage by provider/model
+   Cost breakdown per run, per user
+   Model comparison charts (latency, tokens, cost)
 ```
 
----
-
-## 9. Non-Functional Requirements
-
-### 9.1 Performance
-
-| Metric | Target | Current |
-|--------|--------|---------|
-| Run submission latency | < 2s | ~1s |
-| Plan generation (Sonnet) | < 30s | 10-25s |
-| Task execution (per task) | < 15 min | 2-12 min |
-| Preview deploy time | < 5 min | 2-4 min |
-| SSE event latency | < 500ms | ~200ms |
-| API response (p95) | < 200ms | ~100ms |
-
-### 9.2 Scalability
-
-| Dimension | Current | Design Limit |
-|-----------|---------|--------------|
-| Concurrent runs | 10 (per instance) | 20 (2x MIG) |
-| Active previews | 20 | 50 (Cloud Run) |
-| Users | ~100 | ~10,000 |
-| Runs/day | ~200 | ~2,000 |
-| Workspace size | < 100MB | GCS archive |
-
-### 9.3 Reliability
-
-| Metric | Target |
-|--------|--------|
-| Uptime SLA | 99.5% |
-| Data durability | 99.99% (Cloud SQL + GCS) |
-| Recovery time (RTO) | < 15 min (MIG auto-heal) |
-| Stuck run detection | < 30 min |
-
-### 9.4 Security
-
-- JWT (HS256) with 24h access / 7d refresh tokens
-- RBAC: SUPER_ADMIN, ORG_ADMIN, BILLING_ADMIN, DEVELOPER
-- Workspace sandbox: `safeResolve()` prevents path traversal
-- Shell sandbox: configurable command allow/blocklist
-- API keys: encrypted at rest (application.yml env vars)
-- Domain enforcement: ENTERPRISE mandatory, PRO optional
+**Permissions:**
+- All DEVELOPER permissions plus:
+- Manage org settings, members, domains
+- Configure AI keys and key source mode
+- Set up integrations (JIRA, Confluence, Slack)
+- View audit logs, pricing, metrics, cost breakdown, token usage
 
 ---
 
-## 10. Monetization & Tiers
+### 4.5 BILLING_ADMIN Journey
 
-### 10.1 Tier Comparison
+**Persona:** Finance team member managing subscriptions and payments.
 
-```mermaid
-graph LR
-    subgraph "FREE"
-        F1[5 runs/month]
-        F2[1 concurrent]
-        F3[No org]
-        F4[3 previews/run]
-    end
+```
+1. SUBSCRIBE
+   /plans -> select PRO plan
+   POST /api/billing/subscribe -> Razorpay checkout
+   POST /api/billing/verify -> activate subscription
+   Seat-based pricing (included seats + per-seat add-on)
 
-    subgraph "PRO ($X/month)"
-        P1[100 runs/month]
-        P2[3 concurrent]
-        P3[Org: 10 members]
-        P4[JIRA + Slack]
-        P5[10 previews/run]
-    end
+2. MANAGE SUBSCRIPTION
+   GET /api/billing/status -> current plan, usage, renewal date
+   POST /api/billing/seats -> add/remove seats
+   POST /api/billing/cancel -> cancel at period end
 
-    subgraph "ENTERPRISE (Custom)"
-        E1[Unlimited runs]
-        E2[10 concurrent]
-        E3[Unlimited members]
-        E4[Full audit trail]
-        E5[BYOK required]
-    end
+3. BUY RUN CREDITS
+   GET /api/billing/topup/packages -> available packages
+   POST /api/billing/topup/purchase -> Razorpay one-time order
+   POST /api/billing/topup/verify -> credits added to org
+   Credits consumed FIFO (oldest first)
 
-    FREE --> PRO --> ENTERPRISE
+4. BILLING PROFILE
+   PUT /api/billing/profile -> GSTIN, PAN, address, currency
+   Required for GST-compliant invoicing
+
+5. VIEW INVOICES
+   GET /api/billing/invoices -> list with tax breakdown
+   GET /api/billing/invoices/{id}/pdf -> download invoice PDF
+   Invoice types: SUBSCRIPTION, TOPUP, CREDIT_NOTE
+
+6. TRACK USAGE
+   /billing -> QuotaUsageBar showing runs used / remaining
+   Monthly reset on subscription renewal
+   Top-up credits shown separately (never expire)
 ```
 
-### 10.2 Revenue Streams
-
-1. **Subscriptions**: Monthly/annual plans via Razorpay
-2. **Top-up credits**: One-time run pack purchases (10/25/50 runs)
-3. **Seat licenses**: Per-seat pricing for PRO tier
-4. **Enterprise contracts**: Custom pricing with SLAs
-
-### 10.3 Cost Structure (Per Run)
-
-| Component | Estimated Cost |
-|-----------|---------------|
-| Planner (Sonnet) | $0.05 - $0.15 |
-| Workers (Haiku × 3-6) | $0.10 - $0.40 |
-| Reviewer (Haiku) | $0.02 - $0.05 |
-| Compiler (Haiku) | $0.01 - $0.03 |
-| Preview (Cloud Run, 10 min) | $0.014 |
-| **Total per run** | **$0.18 - $0.63** |
+**Permissions:**
+- All DEVELOPER permissions plus:
+- Manage subscriptions (subscribe, cancel, update seats)
+- Purchase run top-up credits
+- Update billing profile (GSTIN, address)
+- View invoices and download PDFs
 
 ---
 
-## 11. Success Metrics
+### 4.6 PROJECT_ADMIN Journey
 
-### 11.1 North Star Metric
-**Successful runs per week** — runs that reach COMPLETE status without user intervention (auto-merge enabled).
+**Persona:** Tech lead managing a specific project within the org.
 
-### 11.2 Key Metrics
+```
+1. PROJECT SETUP
+   POST /api/projects (name, description, repoUrl)
+   Link to GitHub repository for code context
 
-| Metric | Definition | Target |
-|--------|-----------|--------|
-| Run success rate | COMPLETE / total runs | > 75% |
-| First-try pass rate | COMPLETE without retries | > 50% |
-| Preview adoption | Runs with preview started | > 40% |
-| Apply adoption | Runs with applied suggestions | > 20% |
-| Time to first preview | Submit → preview URL | < 10 min |
-| User retention (7-day) | Return within 7 days | > 60% |
-| Free → PRO conversion | Monthly conversion rate | > 5% |
-| NPS | Net Promoter Score | > 40 |
+2. TEAM MANAGEMENT
+   POST /api/projects/{id}/members -> add developers
+   DELETE /api/projects/{id}/members/{userId} -> remove
+   Members see only project-scoped runs
 
-### 11.3 Operational Metrics
+3. DEPLOYMENT CREDENTIALS
+   Configure project-specific GCP credentials (V31)
+   Separate from user-level defaults
+   Used for project-scoped Cloud Run deployments
 
-| Metric | Monitor | Alert Threshold |
-|--------|---------|----------------|
-| Stuck runs | StuckRunMonitor (2 min cycle) | > 5 concurrent |
-| LLM error rate | ProviderHealthTracker | > 10% (5 min window) |
-| Preview failure rate | PreviewService | > 30% |
-| Orphaned Cloud Run services | Cleanup job (30 min) | > 10 |
-| API latency (p99) | Actuator metrics | > 5s |
+4. SLACK CHANNEL LINKING
+   POST /api/slack/projects/{projectId}/channels
+   Configure per-project notification channels
+   Set verbosity level per channel
 
----
-
-## 12. Risks & Mitigations
-
-### 12.1 Technical Risks
-
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| LLM API outage | All runs fail | Medium | 3-provider fallback chains |
-| LLM cost spike | Margin erosion | Medium | Token budgets, cache-aware pricing |
-| Prompt injection | Unexpected code | Low | Workspace sandbox, shell policy |
-| Cloud Run quota | No previews | Low | Service cleanup, per-user limits |
-| PostgreSQL failure | Total outage | Very Low | Cloud SQL HA, automated backups |
-
-### 12.2 Business Risks
-
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Low code quality | User churn | Medium | Multi-stage validation (4 gates), model escalation |
-| Competitor entry | Market share loss | High | Focus on end-to-end value (plan → deploy) |
-| API key abuse | Financial loss | Low | Tier limits, rate limiting, BYOK option |
-| Compliance (GDPR) | Legal exposure | Medium | Data residency controls, audit trail |
-
-### 12.3 Known Limitations (v2.0)
-
-1. **Single org per user** — users can only belong to one organization
-2. **No real-time collaboration** — only one user can approve/review a run
-3. **No IDE integration** — web-only interface (no VS Code extension yet)
-4. **Preview logs are placeholder** — real Cloud Run logs not yet fetched
-5. **No SSR/SSG preview** — static builds only for frontend previews
-6. **English-only** — prompts and UI are English; no i18n support
-
----
-
-## Appendix A: Run State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> QUEUED : Run submitted (quota OK)
-    QUEUED --> PLANNING : Slot acquired
-
-    PLANNING --> AWAITING_CLARIFICATION : Vague JIRA/Confluence ref
-    AWAITING_CLARIFICATION --> PLANNING : User provides ref / skips
-
-    PLANNING --> AWAITING_APPROVAL : Plan generated
-    PLANNING --> FAILED : Planner error
-
-    AWAITING_APPROVAL --> WORKING : User approves
-    AWAITING_APPROVAL --> FAILED : User rejects
-
-    WORKING --> REVIEWING : All tasks complete
-    WORKING --> PARTIAL : Some tasks failed
-    WORKING --> PAUSED : User pauses
-    WORKING --> FAILED : All tasks failed
-
-    PAUSED --> WORKING : User resumes
-
-    REVIEWING --> AWAITING_MERGE : Review complete
-    REVIEWING --> FAILED : Reviewer error
-
-    AWAITING_MERGE --> COMPLETE : User merges
-    AWAITING_MERGE --> PARTIAL : User declines
-    AWAITING_MERGE --> WORKING : User requests rework
-    AWAITING_MERGE --> WORKING : User implements suggestions
-
-    PARTIAL --> WORKING : User retries task
-    COMPLETE --> [*]
-    FAILED --> [*]
+5. RUN MANAGEMENT
+   Filter runs by project
+   PATCH /api/runs/{runId}/project -> reassign run to project
+   View project-specific metrics and costs
 ```
 
-## Appendix B: RBAC Permission Matrix
-
-```mermaid
-graph TB
-    subgraph "Global Roles"
-        SA[SUPER_ADMIN<br/>Full system access]
-        U[USER<br/>Own data + org scoped]
-    end
-
-    subgraph "Org Roles"
-        OA[ORG_ADMIN<br/>Settings, projects, members<br/>API keys, integrations]
-        BA[BILLING_ADMIN<br/>Cost/usage, billing, tier]
-        D[DEVELOPER<br/>Submit runs, view org data]
-    end
-
-    subgraph "Project Roles"
-        PA[PROJECT_ADMIN<br/>Project settings, members]
-        PD[PROJECT_DEVELOPER<br/>View/create runs]
-    end
-
-    SA --> OA
-    OA --> PA
-    U --> D
-    D --> PD
-```
-
-## Appendix C: Integration Architecture
-
-```mermaid
-graph TB
-    subgraph "Inbound"
-        JW[JIRA Webhook]
-        CW[Confluence Webhook]
-        SW[ServiceNow Webhook]
-        PW[PagerDuty Webhook]
-        RW[Razorpay Webhook]
-    end
-
-    subgraph "Integration Manager"
-        IM[IntegrationManager<br/>Route + Dedup]
-        RE[ReferenceExtractor<br/>Context Enrichment]
-    end
-
-    subgraph "Outbound"
-        JIRA_OUT[JIRA Status Updates]
-        SLACK_OUT[Slack Block Kit Messages]
-        GH_OUT[GitHub Repo Push]
-    end
-
-    JW --> IM
-    CW --> IM
-    SW --> IM
-    PW --> IM
-    RW --> IM
-
-    IM --> RE
-    RE --> Pipeline[Pipeline Harness]
-
-    Pipeline --> JIRA_OUT
-    Pipeline --> SLACK_OUT
-    Pipeline --> GH_OUT
-```
+**Permissions:**
+- All DEVELOPER permissions plus:
+- Manage project members and settings
+- Link Slack channels to project
+- Manage project-scoped deployment credentials
 
 ---
 
-*This PRD is a living document. Last updated: 2026-03-15.*
+### 4.7 SUPER_ADMIN Journey
+
+**Persona:** Platform operator (admin@executespec.ai).
+
+```
+1. USER MANAGEMENT
+   GET /api/admin/users -> all users with tier, status, org
+   PUT /api/admin/users/{id}/status -> enable/disable user
+   PUT /api/admin/users/{id}/tier -> change tier (FREE/PRO/ENTERPRISE)
+   PUT /api/admin/users/{id}/role -> assign global role (SUPER_ADMIN/FINANCE)
+   POST /api/admin/users/{id}/grant-runs -> grant bonus runs (with expiry)
+
+2. ORG MANAGEMENT
+   GET /api/admin/orgs -> all orgs with tier, member count
+   PUT /api/admin/orgs/{id}/status -> enable/disable org
+   PUT /api/admin/orgs/{id}/tier -> change org tier
+   PUT /api/admin/orgs/{id}/run-limit -> set custom run limit
+   POST /api/admin/orgs/{id}/grant-runs -> grant org bonus runs
+
+3. TIER CONFIGURATION
+   GET /api/admin/tier-config -> current tier limits
+   PUT /api/admin/tier-config/{tier} -> update limits:
+     monthlyRunLimit, concurrentRunLimit, maxChatMessages,
+     maxApplySuggestions, maxPreviewStarts, maxDeployments, canDeploy
+
+4. TOP-UP PACKAGE MANAGEMENT
+   CRUD on /api/admin/topup-packages
+   Configure name, run count, INR/USD pricing
+
+5. MODEL PRICING
+   GET /api/pricing -> pricing table (per provider/model)
+   PUT /api/pricing/{provider}/{model} -> update input/output token prices
+
+6. GLOBAL AUDIT
+   GET /api/admin/audit-logs -> all activity across platform
+   Filter by user, org, event type, date range
+
+7. PLATFORM MONITORING
+   Grafana dashboards (local) / Cloud Monitoring (prod)
+   30+ custom metrics + standard auto-instrumented
+   All runs visible regardless of org/project scoping
+```
+
+**Permissions:**
+- Unlimited everything (-1 for all limits)
+- Full access to all runs, users, orgs
+- Tier and pricing configuration
+- Global audit log access
+
+---
+
+### 4.8 FINANCE Role Journey
+
+**Persona:** Accountant managing invoicing and GST compliance.
+
+```
+1. INVOICE MANAGEMENT
+   GET /api/billing/invoices (admin) -> all invoices across users
+   POST /api/admin/invoices/{id}/send -> email invoice to user
+   POST /api/admin/invoices/{id}/void -> void invoice
+   POST /api/admin/invoices/{id}/credit-note -> issue credit note
+
+2. SELLER CONFIGURATION
+   GET /api/admin/seller-config -> ExecuteSpec's business details
+   PUT /api/admin/seller-config -> update GSTIN, PAN, address
+
+3. REVENUE REPORTING
+   GET /api/accounting/revenue -> revenue summary by period
+   Breakdown: subscriptions, top-ups, credit notes
+
+4. GST COMPLIANCE
+   GET /api/accounting/gst-summary -> CGST/SGST/IGST totals
+   GET /api/accounting/gstr1-export -> GSTR-1 filing data
+
+5. ACCOUNTING LEDGER
+   /accounting page -> double-entry journal entries
+   Entry types: REVENUE, GST_OUTPUT, ACCOUNTS_RECEIVABLE, BANK, REFUND
+   Each invoice generates corresponding journal entries
+```
+
+**Permissions:**
+- View all invoices, send/void/credit-note
+- Update seller configuration (company GST details)
+- Access revenue reports and GST summaries
+- Export GSTR-1 data for compliance
+
+---
+
+## 5. Feature Inventory
+
+### 5.1 Core Pipeline
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Plan generation | Done | PlannerAgent (Sonnet) converts NL to task plan |
+| Plan approval gate | Done | Redis-backed, 500ms polling, 2h TTL |
+| Sequential task execution | Done | Virtual threads, context propagation |
+| Worker code generation | Done | XML tool_call format, manual dispatch |
+| Code validation | Done | Pluggable gate chain (Java/TS/Python/React) |
+| Model escalation | Done | HAIKU -> SONNET -> OPUS on stall/retry |
+| Compiler agent | Done | Compile & fix (3 iterations) |
+| Agentic reviewer | Done | Two-phase: INSPECT -> FIX |
+| Merge gate | Done | MERGE / DECLINE / REWORK / IMPLEMENT_SUGGESTIONS |
+| Progressive merge | Done | Per-task branch merge to main |
+| Post-merge agents | Done | Context, optimizer, API test suite |
+| Task retry | Done | Retry individual failed tasks |
+| Run pause/resume | Done | Graceful pause with state preservation |
+| Auto-resume on startup | Done | Resumes non-terminal runs after deploy |
+| Stall detection | Done | 5min no output -> model escalation |
+| 15-min time limit | Done | Wall-clock limit per task |
+
+### 5.2 Integrations
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| JIRA context extraction | Done | Auto-detect keys, fetch issue details |
+| Confluence extraction | Done | Fetch page content for enrichment |
+| Clarification gate | Done | Pause pipeline, ask for missing context |
+| GitHub push | Done | Auto-push on merge |
+| Slack notifications | Done | Block Kit, per-project channels, verbosity |
+| JIRA/Confluence webhooks | Done | Auto-submit runs from events |
+| ServiceNow adapter | Done | Incident/change request integration |
+| PagerDuty adapter | Done | Incident response integration |
+
+### 5.3 Preview & Deploy
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Cloud Run preview | Done | 10-min ephemeral containers |
+| Dockerfile auto-detect | Done | Node/React/Spring Boot/Python/Full-stack/Static HTML/Monorepo |
+| Path A: Cloud Run Direct | Done | Simple containerized deployment |
+| Path B: Docker Compose on VM | 0-10% | Multi-container with persistent storage |
+| Path C: Terraform + Managed | 0-10% | Cloud SQL + LB + auto-scaling |
+| Rollback | Done | Instant rollback to previous revision |
+| Deployment credentials | Done | Per-user, per-project GCP creds |
+
+### 5.4 Auth & Organizations
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| JWT auth | Done | Access 24h, refresh 7d |
+| RBAC | Done | 8 roles across 3 levels |
+| Org management | Done | Create, invite, domain enforcement |
+| Project scoping | Done | Member management, run filtering |
+| Activity audit | Done | 35+ event types |
+| API key management | Done | User + org + system fallback |
+
+### 5.5 Billing
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Razorpay subscriptions | Done | Monthly/annual, seat-based |
+| Run top-up credits | Done | Packs + admin grants, FIFO |
+| GST invoicing | Done | Sequential numbering, tax breakdown, PDF |
+| Double-entry accounting | Done | Journal entries per transaction |
+| GSTR-1 export | Done | Compliance filing data |
+
+### 5.6 Observability
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Distributed tracing | Done | Micrometer + OTel spans across phases |
+| Custom metrics | Done | 30+ meters (runs, LLM, tasks, preview, deploy) |
+| Standard metrics | Done | HTTP, JVM, HikariCP, Redis, Spring AI |
+| Structured logging | Done | JSON with traceId/spanId |
+| Local stack | Done | Grafana + Prometheus + Tempo |
+| GCP export | Done | Cloud Trace + Cloud Monitoring |
+| Pre-built dashboards | Done | ExecuteSpec Overview + JVM/HTTP |
+| Browser tracing | Done | OTel Web SDK |
+
+---
+
+## 6. Frontend Pages & Navigation
+
+| Route | Page | Accessible By |
+|-------|------|--------------|
+| `/` | RunsPage -- run list, submit new run | All authenticated |
+| `/dashboard` | DashboardPage -- analytics, model comparison | PRO+ |
+| `/pricing` | PricingPage -- public pricing info | All |
+| `/plans` | PlansPage -- subscription management | All |
+| `/billing` | BillingPage -- usage, invoices, top-ups | BILLING_ADMIN+ |
+| `/integrations` | IntegrationsPage -- JIRA, Confluence, Slack | PRO+ ORG_ADMIN |
+| `/settings` | SettingsPage -- GitHub, AI keys, JIRA, Confluence | All authenticated |
+| `/audit` | AuditPage -- activity audit trail | ORG_ADMIN, SUPER_ADMIN |
+| `/invoices` | InvoicesPage -- invoice management | FINANCE |
+| `/accounting` | AccountingPage -- ledger, GST, revenue | FINANCE |
+| `/deployments` | DeploymentsPage -- deployment history | PRO+ |
+| `/admin` | AdminPage -- user/org/tier management | SUPER_ADMIN |
+
+### Key UI Components
+
+- **NewRunModal** -- Goal input, repo selection, model override, Fast Mode toggle
+- **RunDetail** -- Live task graph, agent logs, file viewer (Monaco), timeline
+- **PreviewTab** -- Cloud Run preview with 10-min countdown, build logs
+- **RunConversation** -- Chat copilot with apply suggestion
+- **TaskGraph** -- Visual task dependency graph
+- **DeployWizardModal** -- Guided deployment flow
+- **CommandPalette** -- Keyboard navigation (Cmd+K)
+
+---
+
+## 7. Database Schema
+
+### 7.1 Migrations Summary (V1-V31)
+
+| Range | Scope |
+|-------|-------|
+| V1-V3 | Core schema, tenant_id, cost/cache |
+| V4-V7 | Auth, admin seed, tiers, password fix |
+| V8-V9 | GitHub, conversations, iteration |
+| V10-V14 | AI keys, GCS, merge conflicts, key source |
+| V17-V20 | Auto-merge, org integrations, token breakdown, Slack |
+| V21 | Tier permissions (max members, domain enforcement) |
+| V22 | Activity audit (35+ event types) |
+| V23-V26 | Billing core, usage alerts, free tier backfill, run top-up |
+| V27 | Apply suggestion limits |
+| V28 | Invoicing & GST accounting (6 new tables) |
+| V29 | Preview limits |
+| V30-V31 | Deploy engine, project-scoped credentials |
+
+---
+
+## 8. Infrastructure
+
+### 8.1 GCP Resources
+
+| Service | Usage |
+|---------|-------|
+| GCE | App server (systemd, asia-south1) |
+| Cloud SQL | PostgreSQL 15 (private IP, auto-backup) |
+| Memorystore | Redis 7 (gate coordination + caching) |
+| Cloud Run | Ephemeral previews (10-min TTL) |
+| Artifact Registry | Docker images |
+| Cloud Storage | Workspace archives |
+| Cloud Trace | Distributed tracing (OTel) |
+| Cloud Monitoring | Custom + standard metrics |
+| Cloud Logging | Structured JSON logs |
+| Secret Manager | API keys, DB passwords |
+| Cloud IAP | Admin SSH access |
+| Load Balancer | HTTPS termination (managed SSL) |
+
+### 8.2 Service Account Roles
+
+| Role | Purpose |
+|------|---------|
+| `roles/cloudsql.client` | Cloud SQL access |
+| `roles/secretmanager.secretAccessor` | Read secrets |
+| `roles/logging.logWriter` | Structured logs |
+| `roles/monitoring.metricWriter` | Custom metrics |
+| `roles/cloudtrace.agent` | Trace spans |
+| `roles/artifactregistry.writer` | Docker push |
+| `roles/compute.instanceAdmin.v1` | Instance management |
+| `roles/iap.tunnelResourceAccessor` | SSH via IAP |
+| `roles/storage.objectAdmin` | GCS read/write |
+
+---
+
+## 9. Observability
+
+### 9.1 Span Hierarchy
+
+```
+executespec.run (root)
+  +-- executespec.run.phase.planning
+  +-- executespec.run.phase.approval_gate
+  +-- executespec.run.phase.working
+  |     +-- executespec.tier
+  |     +-- executespec.task
+  |     |     +-- executespec.task.iteration
+  |     |     +-- executespec.tool.dispatch
+  |     |     +-- executespec.llm.call
+  +-- executespec.run.phase.compile
+  +-- executespec.run.phase.review
+  +-- executespec.run.phase.merge_gate
+  +-- executespec.run.phase.post_merge
+```
+
+### 9.2 Key Custom Metrics
+
+| Metric | Type | Tags |
+|--------|------|------|
+| `executespec.run.total` | Counter | status |
+| `executespec.run.duration` | Timer | status |
+| `executespec.llm.calls` | Counter | provider, model |
+| `executespec.llm.duration` | Timer | provider, model |
+| `executespec.llm.tokens.input/output` | Counter | provider, model |
+| `executespec.llm.errors` | Counter | provider, error_type |
+| `executespec.handover.duration` | Timer | from_phase, to_phase |
+| `executespec.preview.*` | Counter/Timer | -- |
+| `executespec.deploy.*` | Counter/Timer | -- |
+
+### 9.3 Pre-built Dashboards
+
+1. **ExecuteSpec Overview** -- 18 panels: runs, LLM latency/tokens/errors, tasks, handovers, gates, preview/deploy lifecycle
+2. **JVM & HTTP** -- 8 panels: HTTP rate/latency, JVM heap/GC, threads, HikariCP, Redis
+
+---
+
+## 10. Security
+
+### 10.1 Authentication
+- JWT (RS256): access 24h, refresh 7d (httpOnly cookie)
+- Email verification required
+- Password policy: min 8 chars, forced change for admin
+
+### 10.2 Authorization
+- RBAC: 8 roles across global, org, project levels
+- RunAccessGuard + RunVisibilitySpec: query-level filtering
+- TierPermissionService: feature flags per user/tier
+
+### 10.3 Data Protection
+- API keys encrypted at rest
+- GCP deployment credentials encrypted (V30)
+- Secret Manager for production keys
+- HTTPS enforced (managed SSL)
+- Configurable CORS
+
+---
+
+## 11. Current State & Roadmap
+
+### Working (Production)
+- Full multi-agent pipeline with all gates and recovery
+- 3-provider LLM fallback with model escalation
+- Cloud Run previews with auto-detect Dockerfile generation
+- JWT auth with RBAC (8 roles, 3 levels)
+- Razorpay billing (subscriptions + top-up credits)
+- GST-compliant invoicing with double-entry accounting
+- JIRA/Confluence/Slack/GitHub integrations
+- Chat copilot with apply suggestion
+- Activity audit trail (35+ events)
+- Full observability stack (traces, metrics, structured logs)
+- Cloud Run Direct deployment (Path A)
+
+### In Progress
+| Feature | Progress |
+|---------|----------|
+| Deploy Engine Path B (Docker Compose on VM) | 0-10% |
+| Deploy Engine Path C (Terraform + Managed Services) | 0-10% |
+
+### Known Tech Debt
+- V3 migration type mismatch (`actual_cost_usd` DOUBLE PRECISION)
+- Branch retry RefAlreadyExistsException fallback
+- Gate-loss on restart mitigation (activeResumeGuard)
+
+---
+
+*Document generated 2026-03-18. For implementation details, see CLAUDE.md and memory files.*
