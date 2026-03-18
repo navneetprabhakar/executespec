@@ -11,9 +11,15 @@ import com.navneet.executespec.state.repository.RunRepoRepository;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
+import com.navneet.executespec.config.CustomMetricsConfig;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -34,13 +40,14 @@ public class DeploymentService {
     private final DeploymentGitHubService gitHubService;
     private final SseBroadcaster sseBroadcaster;
     private final StateStore stateStore;
+    private final MeterRegistry meterRegistry;
 
     public DeploymentService(DeploymentProperties props, AgentProperties agentProps,
                               DeploymentRepository deploymentRepo, RunRepoRepository runRepoRepo,
                               DockerfileGenerator dockerfileGenerator,
                               ArtifactRegistryClient artifactRegistry, CloudRunClient cloudRun,
                               DeploymentGitHubService gitHubService, SseBroadcaster sseBroadcaster,
-                              StateStore stateStore) {
+                              StateStore stateStore, MeterRegistry meterRegistry) {
         this.props = props;
         this.agentProps = agentProps;
         this.deploymentRepo = deploymentRepo;
@@ -51,6 +58,7 @@ public class DeploymentService {
         this.gitHubService = gitHubService;
         this.sseBroadcaster = sseBroadcaster;
         this.stateStore = stateStore;
+        this.meterRegistry = meterRegistry;
     }
 
     @PostConstruct
@@ -163,6 +171,11 @@ public class DeploymentService {
     private void executeDeployPipeline(Deployment deployment, PipelineRun run,
                                         Path workspacePath, RunRepo.RepoMode repoMode,
                                         String repoUrl, String repoName) {
+        Metrics.ACTIVE_DEPLOYS.incrementAndGet();
+        Counter.builder(DEPLOY_TOTAL).register(meterRegistry).increment();
+        java.time.Instant deployStart = java.time.Instant.now();
+        java.time.Instant buildPhaseStart = null;
+        java.time.Instant healthCheckStart = null;
         try {
             // ── Phase 1: GitHub (optional) ──
             RunRepo repo = handleGitHub(deployment, run, workspacePath, repoMode, repoUrl, repoName);
@@ -170,6 +183,7 @@ public class DeploymentService {
             deploymentRepo.save(deployment);
 
             // ── Phase 2: Docker build ──
+            buildPhaseStart = java.time.Instant.now();
             deployment.setStatus(DeployStatus.BUILDING);
             deploymentRepo.save(deployment);
             sseBroadcaster.emit(deployment.getRunId(),
@@ -195,7 +209,14 @@ public class DeploymentService {
             CloudRunClient.DeployResult deployResult =
                 cloudRun.deploy(deployment.getServiceName(), deployment.getImageUri());
 
+            // Record build duration (phases 2-4)
+            if (buildPhaseStart != null) {
+                Timer.builder(DEPLOY_BUILD_DURATION).register(meterRegistry)
+                        .record(java.time.Duration.between(buildPhaseStart, java.time.Instant.now()));
+            }
+
             // ── Phase 5: Health check ──
+            healthCheckStart = java.time.Instant.now();
             if (!cloudRun.healthCheck(deployResult.serviceUrl())) {
                 throw new IOException(
                     "Post-deploy health check failed — service returned 5xx at "
@@ -210,16 +231,29 @@ public class DeploymentService {
                 RunEvent.deployLive(deployment.getRunId(), deployment.getVersionTag(),
                     deployResult.serviceUrl()));
 
+            // Record health check duration
+            if (healthCheckStart != null) {
+                Timer.builder(DEPLOY_HEALTH_CHECK_DURATION).register(meterRegistry)
+                        .record(java.time.Duration.between(healthCheckStart, java.time.Instant.now()));
+            }
+            // Record total deploy duration
+            Timer.builder(DEPLOY_DURATION).register(meterRegistry)
+                    .record(java.time.Duration.between(deployStart, java.time.Instant.now()));
+
             log.info("Deployment LIVE: {} → {} (revision: {})",
                 deployment.getVersionTag(), deployResult.serviceUrl(), deployResult.revisionName());
 
         } catch (Exception e) {
             log.error("Deployment failed: {}", deployment.getVersionTag(), e);
+            Counter.builder(DEPLOY_FAILURES).tag("reason", e.getClass().getSimpleName())
+                    .register(meterRegistry).increment();
             deployment.markFailed(e.getMessage());
             deploymentRepo.save(deployment);
             sseBroadcaster.emit(deployment.getRunId(),
                 RunEvent.deployFailed(deployment.getRunId(), deployment.getVersionTag(),
                     e.getMessage()));
+        } finally {
+            Metrics.ACTIVE_DEPLOYS.decrementAndGet();
         }
     }
 

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- ── Local dev: readable console with trace/span IDs ───────────────────── -->
+    <springProfile name="!gcp">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [traceId=%X{traceId:-} spanId=%X{spanId:-}] - %msg%n</pattern>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE" />
+        </root>
+    </springProfile>
+
+    <!-- ── GCP production: structured JSON for Cloud Logging ─────────────────── -->
+    <springProfile name="gcp">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!-- GCP Cloud Logging auto-parses severity, message, and custom fields -->
+                <fieldNames>
+                    <timestamp>timestamp</timestamp>
+                    <message>message</message>
+                    <logger>logger</logger>
+                    <thread>thread</thread>
+                    <level>severity</level>
+                    <levelValue>[ignore]</levelValue>
+                </fieldNames>
+                <!-- Inject trace/span IDs from Micrometer MDC for Cloud Trace correlation -->
+                <provider class="net.logstash.logback.composite.loggingevent.MdcJsonProvider">
+                    <includeMdcKeyName>traceId</includeMdcKeyName>
+                    <includeMdcKeyName>spanId</includeMdcKeyName>
+                </provider>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="JSON" />
+        </root>
+    </springProfile>
+
+</configuration>

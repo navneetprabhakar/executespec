@@ -17,6 +17,8 @@ import com.navneet.executespec.tool.GitTool;
 import com.navneet.executespec.tool.ShellTool;
 import com.navneet.executespec.tool.ToolResult;
 import com.navneet.executespec.tool.WorkspaceContext;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -62,6 +64,7 @@ public class WorkerAgent {
     private final LlmRouter llmRouter;
     private final ResourceLoader resourceLoader;
     private final LlmOutputParser outputParser;
+    private final ObservationRegistry observationRegistry;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -138,6 +141,15 @@ public class WorkerAgent {
         try { // outer try: always clear WorkspaceContext on exit
         try {
             while (Instant.now().isBefore(deadline) && iteration < safetyIterationCap) {
+
+                Observation iterObs = Observation.createNotStarted("executespec.task.iteration", observationRegistry)
+                        .lowCardinalityKeyValue("task.id", taskId)
+                        .lowCardinalityKeyValue("run.id", runId)
+                        .lowCardinalityKeyValue("iteration.number", String.valueOf(iteration))
+                        .lowCardinalityKeyValue("iteration.model", model)
+                        .lowCardinalityKeyValue("iteration.provider", provider)
+                        .start();
+                try {
 
                 // Drain inbox at start of each iteration; inject as user turn if non-null
                 String inboxContent = inboxService.drainInbox(agentId, runId);
@@ -243,6 +255,12 @@ public class WorkerAgent {
                 totalCacheWriteTokens += cacheWriteTok;
                 justCompacted = false;
 
+                // Record token usage on the current iteration observation
+                iterObs.highCardinalityKeyValue("input_tokens", String.valueOf(inputTok));
+                iterObs.highCardinalityKeyValue("output_tokens", String.valueOf(outputTok));
+                iterObs.highCardinalityKeyValue("cache_read_tokens", String.valueOf(cacheReadTok));
+                iterObs.highCardinalityKeyValue("cache_write_tokens", String.valueOf(cacheWriteTok));
+
                 String cacheNote = buildCacheNote(lr.response());
                 stateStore.logMessage(runId, agentId, "state",
                         "TOOL_CALL", "Iteration " + iteration +
@@ -283,11 +301,20 @@ public class WorkerAgent {
                     if (!toolCalls.isEmpty()) {
                         StringBuilder results = new StringBuilder();
                         for (ParsedToolCall tc : toolCalls) {
+                            Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
+                                    .lowCardinalityKeyValue("tool.name", tc.name())
+                                    .lowCardinalityKeyValue("task.id", taskId)
+                                    .lowCardinalityKeyValue("run.id", runId)
+                                    .start();
+                            try {
                             stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
                             String result = dispatchTool(tc, runId, taskId);
                             if (isFileWriteTool(tc.name())) fileWritesSinceCheck++;
                             results.append("[").append(tc.name()).append(" result]\n<output>\n")
                                    .append(result).append("\n</output>\n\n");
+                            } finally {
+                                toolObs.stop();
+                            }
                         }
                         messages.add(new UserMessage(results.toString().trim()));
                         continue; // next iteration — do NOT add the "continue" prompt below
@@ -363,6 +390,10 @@ public class WorkerAgent {
                                 (int) (budget.usagePct() * 100), taskId);
                     case OK -> {
                         /* nothing */ }
+                }
+
+                } finally {
+                    iterObs.stop();
                 }
             }
         } catch (MidTaskProviderFailureException e) {

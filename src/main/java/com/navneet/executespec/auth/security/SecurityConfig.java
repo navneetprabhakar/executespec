@@ -46,6 +46,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/webhooks/razorpay").permitAll()
                 // Public health check
                 .requestMatchers("/api/health", "/api/health/**").permitAll()
+                // Actuator endpoints (health, metrics, prometheus)
+                .requestMatchers("/actuator/**").permitAll()
                 // Integration webhooks (external — secured by signature, not JWT)
                 .requestMatchers("/api/integrations/*/webhook").permitAll()
                 // Slack OAuth callback (external redirect — no JWT)

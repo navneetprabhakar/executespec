@@ -8,6 +8,44 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** Status code → human-readable fallback messages */
+const STATUS_MESSAGES: Record<number, string> = {
+  400: 'Invalid request. Please check your input and try again.',
+  401: 'Your session has expired. Please log in again.',
+  402: 'You\'ve reached your plan limit. Please upgrade or purchase additional runs.',
+  403: 'You don\'t have permission to perform this action.',
+  404: 'The requested resource was not found.',
+  409: 'This action conflicts with the current state. Please refresh and try again.',
+  422: 'The request could not be processed. Please check your input.',
+  429: 'Too many requests. Please wait a moment and try again.',
+  500: 'Something went wrong on our end. Please try again later.',
+  502: 'The server is temporarily unavailable. Please try again shortly.',
+  503: 'The service is temporarily unavailable. Please try again shortly.',
+};
+
+/**
+ * Extracts a human-readable error message from a backend response.
+ * Tries to parse JSON body for 'message' or 'error' fields,
+ * falls back to known status messages, then to the raw body.
+ */
+function parseErrorMessage(status: number, raw: string): string {
+  // Try to extract message from JSON body (Spring Boot error format)
+  if (raw) {
+    try {
+      const json = JSON.parse(raw);
+      // Spring's BillingException / ResponseStatusException include 'message'
+      if (json.message && typeof json.message === 'string') return json.message;
+      // Some endpoints return { error: "..." }
+      if (json.error && typeof json.error === 'string' && json.error !== 'Payment Required' && json.error !== 'Forbidden') return json.error;
+    } catch {
+      // Not JSON — use raw text if it's short and readable
+      if (raw.length < 200 && !raw.startsWith('<') && !raw.startsWith('{')) return raw;
+    }
+  }
+  // Fall back to status-based friendly message
+  return STATUS_MESSAGES[status] ?? `Request failed (${status}). Please try again.`;
+}
+
 export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, {
     headers: { 'Content-Type': 'application/json', ...authHeader(), ...opts?.headers },
@@ -15,8 +53,8 @@ export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
     ...opts,
   });
   if (!res.ok) {
-    const msg = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${msg}`);
+    const raw = await res.text().catch(() => '');
+    throw new Error(parseErrorMessage(res.status, raw));
   }
   if (res.status === 204) return undefined as unknown as T;
   // Handle Spring returning 200 OK with an empty body (e.g. approve/merge endpoints)
@@ -32,8 +70,8 @@ async function reqText(url: string): Promise<string> {
     credentials: 'include',
   });
   if (!res.ok) {
-    const msg = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${msg}`);
+    const raw = await res.text().catch(() => '');
+    throw new Error(parseErrorMessage(res.status, raw));
   }
   return res.text();
 }

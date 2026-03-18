@@ -26,6 +26,14 @@ import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.tool.FileLockTool;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.GitTool;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
+import com.navneet.executespec.config.CustomMetricsConfig;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +41,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -95,6 +104,12 @@ public class PipelineHarness {
     // ── GCS workspace restore (on-demand after VM restart) ────────────────
     private final com.navneet.executespec.deployment.WorkspaceRestoreService restoreService;
 
+    // ── Distributed tracing (Micrometer Observation API) ────────────────────
+    private final ObservationRegistry observationRegistry;
+
+    // ── Micrometer metrics registry ──────────────────────────────────────────
+    private final MeterRegistry meterRegistry;
+
     // ── Async infrastructure ──────────────────────────────────────────────────
 
     /**
@@ -107,6 +122,12 @@ public class PipelineHarness {
     private Semaphore runSlots;
     /** Thread pool for async pipeline execution (unbounded — threads block on semaphore). */
     private ExecutorService executor;
+
+    /**
+     * Guards against double-handling of a run by both GateFallback and StartupRunResumer.
+     * Key = runId; presence means a thread is already processing the resume.
+     */
+    private final ConcurrentHashMap<String, Boolean> activeResumeGuard = new ConcurrentHashMap<>();
 
     /** Single scanner for CLI stdin path — avoids buffering issues. */
     private final Scanner stdin = new Scanner(System.in);
@@ -274,6 +295,7 @@ public class PipelineHarness {
 
         if (!runSlots.tryAcquire()) {
             // No slot available right now — queue the run
+            Metrics.QUEUED_RUNS.incrementAndGet();
             run.setStatus("QUEUED");
             run.setQueuePosition(countQueued() + 1);
             stateStore.save(run);
@@ -286,6 +308,7 @@ public class PipelineHarness {
                 try {
                     runSlots.acquire();
                     acquired = true;
+                    Metrics.QUEUED_RUNS.decrementAndGet();
                     PipelineRun r = stateStore.findRun(runId).orElse(queuedRun);
                     r.setStatus("PLANNING");
                     r.setQueuePosition(0);
@@ -387,26 +410,31 @@ public class PipelineHarness {
             log.debug("SSE emit failed on merge gate resolve for run {} — client likely disconnected", runId);
         }
 
-        // Gate-loss fallback: if no pipeline thread picks up the Redis key within 3 seconds
-        // (e.g., server was restarted while waiting on the gate), consume the orphaned key
-        // and handle the decision directly on a fresh thread.
+        // Gate-loss fallback: the normal pipeline thread resolves via in-memory future
+        // almost instantly. Wait one poll cycle (500ms) to let it consume the key first.
+        // If the key is still in Redis after that, the pipeline thread is dead — handle directly.
+        // The activeResumeGuard prevents double-handling with StartupRunResumer.
         executor.submit(() -> {
-            try {
-                Thread.sleep(3000);
-                MergeDecision orphaned = gateStore.consumeMergeGateIfPending(runId);
-                if (orphaned != null) {
-                    PipelineRun run = stateStore.findRun(runId).orElse(null);
-                    if (run != null && "AWAITING_MERGE".equals(run.getStatus())) {
-                        log.info("[GateFallback] No pipeline thread for run {} — handling {} directly", runId, orphaned);
+            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            MergeDecision orphaned = gateStore.consumeMergeGateIfPending(runId);
+            if (orphaned != null) {
+                PipelineRun run = stateStore.findRun(runId).orElse(null);
+                if (run != null && "AWAITING_MERGE".equals(run.getStatus())) {
+                    if (activeResumeGuard.putIfAbsent(runId, Boolean.TRUE) != null) {
+                        log.info("[GateFallback] Run {} already being resumed — skipping fallback", runId);
+                        return;
+                    }
+                    log.info("[GateFallback] No pipeline thread for run {} — handling {} directly", runId, orphaned);
+                    try {
                         if (orphaned == MergeDecision.MERGE) {
-                            doReviewAndMerge(run, false, false); // no slot held, skip review, merge directly
+                            doReviewAndMerge(run, false, false);
                         } else {
-                            doReviewAndMerge(run, false, false); // reopen gate loop
+                            doReviewAndMerge(run, false, false);
                         }
+                    } finally {
+                        activeResumeGuard.remove(runId);
                     }
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
             }
         });
 
@@ -630,6 +658,16 @@ public class PipelineHarness {
             "♻️ Resuming after server restart (was " + status + ")"));
 
         executor.submit(() -> {
+            // Guard: if the gate fallback thread is already handling this run, skip.
+            if (activeResumeGuard.putIfAbsent(runId, Boolean.TRUE) != null) {
+                log.info("[resumeOnStartup] Run {} already being handled by gate fallback — skipping", runId);
+                return;
+            }
+
+            Observation resumeObs = Observation.createNotStarted("executespec.run.resume_on_startup", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .lowCardinalityKeyValue("resume.from_status", status)
+                .start();
             boolean acquired = false;
             try {
                 runSlots.acquire();
@@ -671,13 +709,17 @@ public class PipelineHarness {
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                resumeObs.error(e);
                 log.warn("Interrupted while waiting for slot to resume run {}", runId);
             } catch (Exception e) {
+                resumeObs.error(e);
                 log.error("Error resuming run {} on startup: {}", runId, e.getMessage(), e);
                 stateStore.markFailed(runId, "Startup resume failed: " + e.getMessage());
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 broadcaster.complete(runId);
             } finally {
+                resumeObs.stop();
+                activeResumeGuard.remove(runId);
                 if (acquired) runSlots.release();
             }
         });
@@ -745,6 +787,10 @@ public class PipelineHarness {
      */
     void runResumeAsync(PipelineRun run) {
         String runId = run.getRunId();
+
+        Observation resumeObs = Observation.createNotStarted("executespec.run.resume", observationRegistry)
+            .lowCardinalityKeyValue("run.id", runId)
+            .start();
 
         // Re-resolve API keys (user may have updated keys while paused)
         ResolvedKeys resolvedKeys = apiKeyResolver.resolve(run.getCreatedByUserId());
@@ -950,13 +996,16 @@ public class PipelineHarness {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            resumeObs.error(e);
             stateStore.markFailed(runId, "Resume interrupted: " + e.getMessage());
             broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
         } catch (Exception e) {
             log.error("Resume of run {} failed: {}", runId, e.getMessage(), e);
+            resumeObs.error(e);
             stateStore.markFailed(runId, "Resume failed: " + e.getMessage());
             broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
         } finally {
+            resumeObs.stop();
             broadcaster.complete(runId);
             runKeyStore.remove(runId);
         }
@@ -1336,6 +1385,16 @@ public class PipelineHarness {
 
     private void executeRunAsync(String runId, String userRequest) {
         log.info("Executing async run {}", runId);
+        Metrics.ACTIVE_RUNS.incrementAndGet();
+        Instant metricsRunStart = Instant.now();
+
+        // ── Root observation span for the entire run ────────────────────────
+        PipelineRun runForSource = stateStore.findRun(runId).orElse(null);
+        String source = runForSource != null ? runForSource.getSourceType() : null;
+        Observation runObs = Observation.createNotStarted("executespec.run", observationRegistry)
+            .lowCardinalityKeyValue("run.id", runId)
+            .lowCardinalityKeyValue("source", source != null ? source : "api")
+            .start();
 
         // Initialise this run's isolated workspace (workspace/{runId}/) before doing anything else.
         // Priority order:
@@ -1441,43 +1500,71 @@ public class PipelineHarness {
 
         try {
             // ── 1. Plan ────────────────────────────────────────────────────
-            // Pass the stored plannerModel so UI model-overrides are honoured.
-            // run was already fetched from DB above, no extra DB call needed.
-            TaskPlan plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
-            stateStore.savePlan(runId, plan);
-            broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_APPROVAL"));
+            Observation planObs = Observation.createNotStarted("executespec.run.phase.planning", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .start();
+            TaskPlan plan;
+            try (Observation.Scope planScope = planObs.openScope()) {
+                // Pass the stored plannerModel so UI model-overrides are honoured.
+                // run was already fetched from DB above, no extra DB call needed.
+                plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
+                stateStore.savePlan(runId, plan);
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_APPROVAL"));
+            } catch (Exception e) {
+                planObs.error(e);
+                throw e;
+            } finally {
+                planObs.stop();
+            }
+            Instant planEnd = Instant.now();
+            Instant planGateStart = Instant.now();
 
             // ── 2. Plan approval gate ──────────────────────────────────────
-            String planGateId = stateStore.recordGateOpened(runId, "PLAN_APPROVAL");
-            broadcaster.emit(runId, RunEvent.gateOpened(runId, "PLAN_APPROVAL"));
-
+            Observation gateObs = Observation.createNotStarted("executespec.run.phase.approval_gate", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .start();
             boolean planApproved;
-            // Re-fetch the run: the controller may have set skipApproval / model overrides
-            // after submitRun() returned but before we reach this point.
-            run = stateStore.findRun(runId).orElse(run);
+            try (Observation.Scope gateScope = gateObs.openScope()) {
+                String planGateId = stateStore.recordGateOpened(runId, "PLAN_APPROVAL");
+                broadcaster.emit(runId, RunEvent.gateOpened(runId, "PLAN_APPROVAL"));
 
-            // Tier 7: integration-triggered runs may skip the human approval gate
-            if (run.isSkipApproval()) {
-                planApproved = true;
-                stateStore.recordGateResolved(planGateId, true);
-                broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-approved (integration run)"));
-                log.info("Plan gate auto-approved for integration run {}", runId);
-            } else {
-                // Release the compute slot while the run is idle at the approval gate.
-                // Gate-waiting runs must not block new submissions from starting.
-                log.info("[PipelineHarness] Run {} entering plan-approval gate — releasing compute slot", runId);
-                runSlots.release();
-                try {
-                    // Poll Redis every 500 ms — works across any MIG instance
-                    planApproved = gateStore.awaitPlanGate(runId);  // throws InterruptedException → outer catch
-                } finally {
-                    try { runSlots.acquire(); }
-                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                // Re-fetch the run: the controller may have set skipApproval / model overrides
+                // after submitRun() returned but before we reach this point.
+                run = stateStore.findRun(runId).orElse(run);
+
+                // Tier 7: integration-triggered runs may skip the human approval gate
+                if (run.isSkipApproval()) {
+                    planApproved = true;
+                    stateStore.recordGateResolved(planGateId, true);
+                    broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-approved (integration run)"));
+                    log.info("Plan gate auto-approved for integration run {}", runId);
+                } else {
+                    // Release the compute slot while the run is idle at the approval gate.
+                    // Gate-waiting runs must not block new submissions from starting.
+                    log.info("[PipelineHarness] Run {} entering plan-approval gate — releasing compute slot", runId);
+                    runSlots.release();
+                    try {
+                        // Poll Redis every 500 ms — works across any MIG instance
+                        planApproved = gateStore.awaitPlanGate(runId);  // throws InterruptedException → outer catch
+                    } finally {
+                        try { runSlots.acquire(); }
+                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    }
+                    log.info("[PipelineHarness] Run {} plan-approval gate resolved — compute slot reacquired", runId);
+                    // Record gate resolution on the pipeline thread (it owns the local planGateId)
+                    stateStore.recordGateResolved(planGateId, planApproved);
                 }
-                log.info("[PipelineHarness] Run {} plan-approval gate resolved — compute slot reacquired", runId);
-                // Record gate resolution on the pipeline thread (it owns the local planGateId)
-                stateStore.recordGateResolved(planGateId, planApproved);
+            } catch (Exception e) {
+                gateObs.error(e);
+                throw e;
+            } finally {
+                gateObs.stop();
             }
+            Instant approvalEnd = Instant.now();
+            Timer.builder(GATE_WAIT_TIME).tag("gate", "plan_approval")
+                    .register(meterRegistry).record(java.time.Duration.between(planGateStart, approvalEnd));
+            Timer.builder(HANDOVER_DURATION).tag("from_phase", "planning").tag("to_phase", "approval_gate")
+                    .register(meterRegistry).record(java.time.Duration.between(planEnd, approvalEnd));
 
             if (!planApproved) {
                 // Guard: if run was paused (not rejected), don't overwrite PAUSED with FAILED
@@ -1497,43 +1584,71 @@ public class PipelineHarness {
             broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
 
             // ── 3. Workers ─────────────────────────────────────────────────
-            List<AgentTask> tasks = stateStore.getPendingTasks(runId);
-            try {
-                initAgentContext(runId, mapper.writeValueAsString(plan));
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException("Cannot serialize plan", e);
-            }
-
-            // Filter out legacy system tasks (generate_preview, generate_openapi_spec)
-            // that may still exist in old plans stored in the DB.
-            List<AgentTask> workerTasks = tasks.stream()
-                .filter(t -> !isSystemTask(t))
-                .toList();
-
-            // Validate file ownership — detect overlap before workers start
-            validateFileOwnership(workerTasks, runId);
-
-            // === SEQUENTIAL EXECUTION WITH VALIDATION + MODEL ROUTING ===
-            SequentialTaskExecutor.SequentialExecutionResult execResult =
-                sequentialTaskExecutor.execute(run, workerTasks);
-            List<WorkerReport> reports = execResult.reports();
-
-            if (execResult.hasFailures()) {
-                log.warn("Run {} has {} failed tasks out of {}",
-                    runId, execResult.failedTasks().size(), execResult.totalTasks());
-                if (execResult.completedTasks().isEmpty()) {
-                    stateStore.markFailed(runId, "All tasks failed validation");
-                    broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                    return;
+            Observation workObs = Observation.createNotStarted("executespec.run.phase.working", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .start();
+            List<AgentTask> tasks;
+            List<WorkerReport> reports;
+            try (Observation.Scope workScope = workObs.openScope()) {
+                tasks = stateStore.getPendingTasks(runId);
+                try {
+                    initAgentContext(runId, mapper.writeValueAsString(plan));
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException("Cannot serialize plan", e);
                 }
-            }
 
-            // Auto-complete generate_openapi_spec (backwards compat with old plans that still
-            // carry this task in the DB).  ApiTestSuiteAgent generates the real spec post-merge.
-            markOpenapiTaskComplete(runId, tasks);
+                // Filter out legacy system tasks (generate_preview, generate_openapi_spec)
+                // that may still exist in old plans stored in the DB.
+                List<AgentTask> workerTasks = tasks.stream()
+                    .filter(t -> !isSystemTask(t))
+                    .toList();
+
+                // Validate file ownership — detect overlap before workers start
+                validateFileOwnership(workerTasks, runId);
+
+                // === SEQUENTIAL EXECUTION WITH VALIDATION + MODEL ROUTING ===
+                SequentialTaskExecutor.SequentialExecutionResult execResult =
+                    sequentialTaskExecutor.execute(run, workerTasks);
+                reports = execResult.reports();
+
+                if (execResult.hasFailures()) {
+                    log.warn("Run {} has {} failed tasks out of {}",
+                        runId, execResult.failedTasks().size(), execResult.totalTasks());
+                    if (execResult.completedTasks().isEmpty()) {
+                        stateStore.markFailed(runId, "All tasks failed validation");
+                        broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                        return;
+                    }
+                }
+
+                // Auto-complete generate_openapi_spec (backwards compat with old plans that still
+                // carry this task in the DB).  ApiTestSuiteAgent generates the real spec post-merge.
+                markOpenapiTaskComplete(runId, tasks);
+            } catch (Exception e) {
+                workObs.error(e);
+                throw e;
+            } finally {
+                workObs.stop();
+            }
+            Instant workEnd = Instant.now();
+            Timer.builder(HANDOVER_DURATION).tag("from_phase", "approval_gate").tag("to_phase", "working")
+                    .register(meterRegistry).record(java.time.Duration.between(approvalEnd, workEnd));
 
             // ── Tier 8: Compile & Fix (non-fatal, sync before reviewer) ───
-            compilerAgent.runCompileAndFix(runId);
+            Observation compileObs = Observation.createNotStarted("executespec.run.phase.compile", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .start();
+            try (Observation.Scope compileScope = compileObs.openScope()) {
+                compilerAgent.runCompileAndFix(runId);
+            } catch (Exception e) {
+                compileObs.error(e);
+                throw e;
+            } finally {
+                compileObs.stop();
+            }
+            Instant compileEnd = Instant.now();
+            Timer.builder(HANDOVER_DURATION).tag("from_phase", "working").tag("to_phase", "compile")
+                    .register(meterRegistry).record(java.time.Duration.between(workEnd, compileEnd));
 
             // ── Merge-gate eligibility: only open when all WORKER tasks complete ──
             // Worker tasks = all tasks except the preview task (its BLOCKED status
@@ -1593,119 +1708,158 @@ public class PipelineHarness {
             List<WorkerReport> currentReports = new ArrayList<>(reports);
             PipelineRun currentRun = run;
 
-            stateStore.markReviewing(runId);
-            broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
-            currentRun = stateStore.findRun(runId).orElse(currentRun);
-            review = reviewerAgent.review(currentRun, currentReports);
-            stateStore.saveReview(runId, review);
+            Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .start();
+            try (Observation.Scope reviewScope = reviewObs.openScope()) {
+                stateStore.markReviewing(runId);
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+                currentRun = stateStore.findRun(runId).orElse(currentRun);
+                review = reviewerAgent.review(currentRun, currentReports);
+                stateStore.saveReview(runId, review);
 
-            boolean reviewerRework = "REWORK".equalsIgnoreCase(review.getRecommendation());
-            if (reviewerRework) {
-                log.info("Run {} — reviewer recommends REWORK: {} — presenting to user at merge gate",
-                    runId, review.getSummary());
-                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                    "⚠️ Reviewer recommends REWORK: " + review.getSummary()
-                    + "\nUse the 'Rework' button to apply fixes, or 'Merge' to override."));
+                boolean reviewerRework = "REWORK".equalsIgnoreCase(review.getRecommendation());
+                if (reviewerRework) {
+                    log.info("Run {} — reviewer recommends REWORK: {} — presenting to user at merge gate",
+                        runId, review.getSummary());
+                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                        "⚠️ Reviewer recommends REWORK: " + review.getSummary()
+                        + "\nUse the 'Rework' button to apply fixes, or 'Merge' to override."));
+                }
+            } catch (Exception e) {
+                reviewObs.error(e);
+                throw e;
+            } finally {
+                reviewObs.stop();
             }
+            Instant reviewEnd = Instant.now();
+            Timer.builder(HANDOVER_DURATION).tag("from_phase", "compile").tag("to_phase", "review")
+                    .register(meterRegistry).record(java.time.Duration.between(compileEnd, reviewEnd));
 
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
+            Instant mergeGateStart = Instant.now();
 
             // ── 5. Merge gate ──────────────────────────────────────────────
-            gateStore.clearMergeGate(runId); // discard any stale key from a previous attempt
-            String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
-            broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
-
+            Observation mergeGateObs = Observation.createNotStarted("executespec.run.phase.merge_gate", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .start();
             MergeDecision mergeDecision;
-            if (run.isAutoMerge()) {
-                mergeDecision = MergeDecision.MERGE;
-                stateStore.recordGateResolved(mergeGateId, true);
-                broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-merged (autoMerge flag)"));
-                log.info("Merge gate auto-resolved for run {}", runId);
-            } else {
-                // Release the compute slot while the run is idle at the merge gate.
-                // Gate-waiting runs must not block new submissions from starting.
-                log.info("[PipelineHarness] Run {} entering merge gate — releasing compute slot", runId);
-                runSlots.release();
-                try {
-                    // Poll Redis every 500 ms — works across any MIG instance
-                    mergeDecision = gateStore.awaitMergeGate(runId);  // throws InterruptedException → outer catch
-                } finally {
-                    try { runSlots.acquire(); }
-                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            try (Observation.Scope mergeGateScope = mergeGateObs.openScope()) {
+                gateStore.clearMergeGate(runId); // discard any stale key from a previous attempt
+                String mergeGateId = stateStore.recordGateOpened(runId, "MERGE_APPROVAL");
+                broadcaster.emit(runId, RunEvent.gateOpened(runId, "MERGE_APPROVAL"));
+
+                if (run.isAutoMerge()) {
+                    mergeDecision = MergeDecision.MERGE;
+                    stateStore.recordGateResolved(mergeGateId, true);
+                    broadcaster.emit(runId, RunEvent.gateResolved(runId, true, "Auto-merged (autoMerge flag)"));
+                    log.info("Merge gate auto-resolved for run {}", runId);
+                } else {
+                    // Release the compute slot while the run is idle at the merge gate.
+                    // Gate-waiting runs must not block new submissions from starting.
+                    log.info("[PipelineHarness] Run {} entering merge gate — releasing compute slot", runId);
+                    runSlots.release();
+                    try {
+                        // Poll Redis every 500 ms — works across any MIG instance
+                        mergeDecision = gateStore.awaitMergeGate(runId);  // throws InterruptedException → outer catch
+                    } finally {
+                        try { runSlots.acquire(); }
+                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    }
+                    log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
+                    // Record gate resolution on the pipeline thread (it owns the local mergeGateId)
+                    stateStore.recordGateResolved(mergeGateId, mergeDecision == MergeDecision.MERGE);
                 }
-                log.info("[PipelineHarness] Run {} merge gate resolved — compute slot reacquired", runId);
-                // Record gate resolution on the pipeline thread (it owns the local mergeGateId)
-                stateStore.recordGateResolved(mergeGateId, mergeDecision == MergeDecision.MERGE);
+            } catch (Exception e) {
+                mergeGateObs.error(e);
+                throw e;
+            } finally {
+                mergeGateObs.stop();
             }
+            Instant mergeGateEnd = Instant.now();
+            Timer.builder(GATE_WAIT_TIME).tag("gate", "merge_approval")
+                    .register(meterRegistry).record(java.time.Duration.between(mergeGateStart, mergeGateEnd));
+            Timer.builder(HANDOVER_DURATION).tag("from_phase", "review").tag("to_phase", "merge_gate")
+                    .register(meterRegistry).record(java.time.Duration.between(reviewEnd, mergeGateEnd));
 
             if (mergeDecision == MergeDecision.MERGE) {
-                // Merge first, then mark COMPLETE immediately so that any subsequent failure
-                // (GitHub push, cost save) does NOT revert the run to FAILED — the code IS
-                // successfully merged at this point.
-                List<String> conflicted = mergeService.mergeAll(runId, stateStore.getAllTasks(runId));
-                lockTool.releaseAll(runId);
+                Observation postMergeObs = Observation.createNotStarted("executespec.run.phase.post_merge", observationRegistry)
+                    .lowCardinalityKeyValue("run.id", runId)
+                    .start();
+                try (Observation.Scope postMergeScope = postMergeObs.openScope()) {
+                    // Merge first, then mark COMPLETE immediately so that any subsequent failure
+                    // (GitHub push, cost save) does NOT revert the run to FAILED — the code IS
+                    // successfully merged at this point.
+                    List<String> conflicted = mergeService.mergeAll(runId, stateStore.getAllTasks(runId));
+                    lockTool.releaseAll(runId);
 
-                if (!conflicted.isEmpty()) {
-                    // Some branches had merge conflicts — mark those tasks FAILED so the user
-                    // can retry them via the TaskCard retry button, and mark the run PARTIAL.
-                    List<AgentTask> allTasksForConflict = stateStore.getAllTasks(runId);
-                    allTasksForConflict.stream()
-                        .filter(t -> conflicted.contains(t.getBranchName()))
-                        .forEach(t -> {
-                            stateStore.failTask(t.getTaskId(),
-                                "Merge conflict — this task's output conflicted with another task's changes. "
-                                + "Retry this task to regenerate the changes cleanly.");
-                            broadcaster.emit(runId, RunEvent.taskStatus(runId, t.getTaskId(), "FAILED"));
-                        });
-                    String conflictReason = "Merge conflict in " + conflicted.size() + " task branch(es): "
-                        + String.join(", ", conflicted) + ". Retry the highlighted tasks.";
-                    stateStore.markPartial(runId, conflictReason);
-                    broadcaster.emit(runId, RunEvent.log(runId, "harness", "⚠️ " + conflictReason));
-                    broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
-                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, conflictReason));
-                    log.warn("Async run {} — partial merge: {}", runId, conflictReason);
-                    return;
-                }
-
-                // ── Post-merge compile validation ──────────────────────────
-                // Run compile-and-fix again after all branches are merged.
-                // Catches semantic conflicts (e.g., renamed methods, conflicting imports)
-                // that pass textual merge but break compilation.
-                try {
-                    var postMergeCompile = compilerAgent.runCompileAndFix(runId);
-                    if (!postMergeCompile.passed() && !postMergeCompile.skipped()) {
-                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
-                            "⚠️ Post-merge compile failed: " + postMergeCompile.errorSummary()
-                            + " — proceeding with merge (non-blocking)."));
+                    if (!conflicted.isEmpty()) {
+                        // Some branches had merge conflicts — mark those tasks FAILED so the user
+                        // can retry them via the TaskCard retry button, and mark the run PARTIAL.
+                        List<AgentTask> allTasksForConflict = stateStore.getAllTasks(runId);
+                        allTasksForConflict.stream()
+                            .filter(t -> conflicted.contains(t.getBranchName()))
+                            .forEach(t -> {
+                                stateStore.failTask(t.getTaskId(),
+                                    "Merge conflict — this task's output conflicted with another task's changes. "
+                                    + "Retry this task to regenerate the changes cleanly.");
+                                broadcaster.emit(runId, RunEvent.taskStatus(runId, t.getTaskId(), "FAILED"));
+                            });
+                        String conflictReason = "Merge conflict in " + conflicted.size() + " task branch(es): "
+                            + String.join(", ", conflicted) + ". Retry the highlighted tasks.";
+                        stateStore.markPartial(runId, conflictReason);
+                        broadcaster.emit(runId, RunEvent.log(runId, "harness", "⚠️ " + conflictReason));
+                        broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+                        eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, conflictReason));
+                        log.warn("Async run {} — partial merge: {}", runId, conflictReason);
+                        return;
                     }
-                } catch (Exception compileEx) {
-                    log.warn("Post-merge compile failed for run {}: {}", runId, compileEx.getMessage());
+
+                    // ── Post-merge compile validation ──────────────────────────
+                    // Run compile-and-fix again after all branches are merged.
+                    // Catches semantic conflicts (e.g., renamed methods, conflicting imports)
+                    // that pass textual merge but break compilation.
+                    try {
+                        var postMergeCompile = compilerAgent.runCompileAndFix(runId);
+                        if (!postMergeCompile.passed() && !postMergeCompile.skipped()) {
+                            broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                                "⚠️ Post-merge compile failed: " + postMergeCompile.errorSummary()
+                                + " — proceeding with merge (non-blocking)."));
+                        }
+                    } catch (Exception compileEx) {
+                        log.warn("Post-merge compile failed for run {}: {}", runId, compileEx.getMessage());
+                    }
+
+                    stateStore.markComplete(runId);
+                    saveActualCost(runId);
+                    broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
+                    log.info("Async run {} complete — merged to main", runId);
+
+                    // GitHub push is non-blocking — failure does not revert COMPLETE status
+                    try {
+                        pushToGitHubIfConfigured(currentRun);
+                    } catch (Exception pushEx) {
+                        log.warn("GitHub push failed for run {} (run is COMPLETE): {}", runId, pushEx.getMessage());
+                        broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                            "⚠️ GitHub push failed (run is COMPLETE, code was merged locally): "
+                            + pushEx.getMessage()));
+                    }
+
+                    // Publish MergeCompleted — PostMergeOrchestrator handles post-merge agents
+                    final PipelineRun completedRun = stateStore.findRun(runId).orElse(currentRun);
+                    boolean hadFailures = currentReports.stream()
+                        .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
+                                       "partial".equalsIgnoreCase(r.getStatus()));
+                    eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                        runId, completedRun, currentReports, review, hadFailures));
+                    // Publish RunCompleted for integration outbound adapters
+                    eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+                } catch (Exception e) {
+                    postMergeObs.error(e);
+                    throw e;
+                } finally {
+                    postMergeObs.stop();
                 }
-
-                stateStore.markComplete(runId);
-                saveActualCost(runId);
-                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
-                log.info("Async run {} complete — merged to main", runId);
-
-                // GitHub push is non-blocking — failure does not revert COMPLETE status
-                try {
-                    pushToGitHubIfConfigured(currentRun);
-                } catch (Exception pushEx) {
-                    log.warn("GitHub push failed for run {} (run is COMPLETE): {}", runId, pushEx.getMessage());
-                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                        "⚠️ GitHub push failed (run is COMPLETE, code was merged locally): "
-                        + pushEx.getMessage()));
-                }
-
-                // Publish MergeCompleted — PostMergeOrchestrator handles post-merge agents
-                final PipelineRun completedRun = stateStore.findRun(runId).orElse(currentRun);
-                boolean hadFailures = currentReports.stream()
-                    .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
-                                   "partial".equalsIgnoreCase(r.getStatus()));
-                eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                    runId, completedRun, currentReports, review, hadFailures));
-                // Publish RunCompleted for integration outbound adapters
-                eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
 
             } else if (mergeDecision == MergeDecision.IMPLEMENT_SUGGESTIONS) {
                 // User clicked "Implement Suggestions" — run worker tasks with suggestion
@@ -1741,6 +1895,7 @@ public class PipelineHarness {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            runObs.error(e);
             // Guard: don't overwrite PAUSED with FAILED
             PipelineRun intState = stateStore.findRun(runId).orElse(null);
             if (intState != null && "PAUSED".equals(intState.getStatus())) {
@@ -1753,6 +1908,7 @@ public class PipelineHarness {
             }
         } catch (Exception e) {
             log.error("Async run {} failed: {}", runId, e.getMessage(), e);
+            runObs.error(e);
             // Guard: don't overwrite PAUSED with FAILED
             PipelineRun exState = stateStore.findRun(runId).orElse(null);
             if (exState != null && "PAUSED".equals(exState.getStatus())) {
@@ -1763,6 +1919,20 @@ public class PipelineHarness {
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
             }
         } finally {
+            Metrics.ACTIVE_RUNS.decrementAndGet();
+            // Record run duration and count
+            String finalStatus = "UNKNOWN";
+            try {
+                PipelineRun finalRun = stateStore.findRun(runId).orElse(null);
+                if (finalRun != null) finalStatus = finalRun.getStatus();
+            } catch (Exception ignored) {}
+            java.time.Duration runDuration = java.time.Duration.between(metricsRunStart, Instant.now());
+            Timer.builder(RUN_DURATION).tag("status", finalStatus)
+                    .register(meterRegistry).record(runDuration);
+            Counter.builder(RUN_TOTAL).tag("status", finalStatus)
+                    .register(meterRegistry).increment();
+
+            runObs.stop();
             broadcaster.complete(runId);
             runKeyStore.remove(runId);  // clean up per-run API keys
         }
