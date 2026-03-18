@@ -42,6 +42,7 @@ public class StateStore {
     private final RunRecoveryRepository recoveryRepo;
     private final PromptAuditRepository promptAuditRepo;
     private final AppUserRepository appUserRepo;
+    private final PlanVersionRepository planVersionRepo;
 
     // ── Run lifecycle ─────────────────────────────────────────
 
@@ -115,6 +116,8 @@ public class StateStore {
             .taskJson(toJson(t))
             .compactionCount(0)
             .build()));
+
+        savePlanVersion(runId, "PLANNER", null);
     }
 
     public void markApproved(String runId) {
@@ -122,6 +125,42 @@ public class StateStore {
         run.setStatus("WORKING");
         run.setCurrentGate(null);
         runRepo.save(run);
+    }
+
+    // ── Plan versioning ──────────────────────────────────────
+
+    public void savePlanVersion(String runId, String source, String createdBy) {
+        PipelineRun run = findRun(runId).orElseThrow();
+        if (run.getPlanJson() == null) return;
+        planVersionRepo.save(com.navneet.executespec.state.entity.PlanVersion.builder()
+            .id(java.util.UUID.randomUUID().toString())
+            .runId(runId)
+            .version(run.getPlanVersion())
+            .planJson(run.getPlanJson())
+            .source(source)
+            .createdBy(createdBy)
+            .createdAt(java.time.Instant.now())
+            .build());
+    }
+
+    public void incrementPlanVersion(String runId) {
+        PipelineRun run = findRun(runId).orElseThrow();
+        run.setPlanVersion(run.getPlanVersion() + 1);
+        save(run);
+    }
+
+    /**
+     * Deletes all PENDING tasks for a run, then saves a new plan and creates
+     * fresh tasks from it. Used when the user edits the plan at the approval gate.
+     */
+    public void recreateTasksFromPlan(String runId, TaskPlan plan) {
+        List<AgentTask> existingTasks = getTasksForRun(runId);
+        for (AgentTask task : existingTasks) {
+            if ("PENDING".equals(task.getStatus())) {
+                taskRepo.deleteById(task.getTaskId());
+            }
+        }
+        savePlan(runId, plan);
     }
 
     public void markRejected(String runId, String reason) {

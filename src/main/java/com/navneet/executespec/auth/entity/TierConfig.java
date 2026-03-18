@@ -57,6 +57,10 @@ public class TierConfig {
     @Column(name = "max_preview_starts", nullable = false)
     private int maxPreviewStarts = 3;
 
+    /** Max automatic run-level retries on failure. FREE=0, PRO=2, ENT=3. */
+    @Column(name = "max_run_auto_retries", nullable = false)
+    private int maxRunAutoRetries = 0;
+
     /** Whether this tier can use the deploy engine. FREE=false, PRO/ENT=true. */
     @Column(name = "can_deploy", nullable = false)
     private boolean canDeploy = false;

@@ -60,7 +60,7 @@ spring:
         api-key: ${GOOGLE_API_KEY:AIzaSyALFxfueAKS7kXXp-2h7wflYY0QN1Q958c}          # empty default — Gemini is 3rd fallback only
         chat:
           options:
-            model: gemini-3.1-flash-lite-preview         # default; ARCHITECT chain overrides to gemini-2.5-pro
+            model: gemini-3-flash-preview                 # default UTILITY; CAPABLE uses flash-lite, ARCHITECT uses customtools
 
 agent:
   workspace: ./workspace

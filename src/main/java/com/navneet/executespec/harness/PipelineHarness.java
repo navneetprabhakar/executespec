@@ -98,6 +98,10 @@ public class PipelineHarness {
     private final ApiKeyResolver apiKeyResolver;
     private final RunKeyStore runKeyStore;
 
+    // ── Auto-retry infrastructure ──────────────────────────────────────────
+    private final com.navneet.executespec.auth.repository.TierConfigRepository tierConfigRepo;
+    private final com.navneet.executespec.auth.repository.OrgRepository orgRepo;
+
     // ── JIRA/Confluence context extraction ─────────────────────────────────
     private final com.navneet.executespec.integration.context.ReferenceExtractorService referenceExtractorService;
 
@@ -142,6 +146,74 @@ public class PipelineHarness {
             return t;
         });
         log.info("PipelineHarness ready — max concurrent runs: {}", maxRuns);
+    }
+
+    // ── Auto-retry ───────────────────────────────────────────────────────────
+
+    private boolean autoRetryRunIfEligible(PipelineRun run) {
+        // Look up tier
+        String tier = "FREE";
+        if (run.getOrgId() != null) {
+            var org = orgRepo.findById(run.getOrgId());
+            if (org.isPresent()) tier = org.get().getTier();
+        }
+
+        int maxRetries = tierConfigRepo.findById(tier)
+            .map(com.navneet.executespec.auth.entity.TierConfig::getMaxRunAutoRetries)
+            .orElse(0);
+
+        if (run.getRunRetryCount() >= maxRetries) {
+            log.info("Run {} — auto-retry exhausted ({}/{})", run.getRunId(), run.getRunRetryCount(), maxRetries);
+            return false;
+        }
+
+        // Don't retry user-rejected runs
+        if (run.getFailureReason() != null &&
+            (run.getFailureReason().contains("Rejected") || run.getFailureReason().contains("declined"))) {
+            return false;
+        }
+
+        log.info("Run {} — auto-retrying ({}/{})", run.getRunId(), run.getRunRetryCount() + 1, maxRetries);
+
+        // Create a new run as retry
+        PipelineRun retryRun = stateStore.createRun(run.getUserRequest(), run.getSourceType(),
+            run.getRepoUrl(), run.getRepoMode(),
+            run.getPlannerModel(), run.getWorkerModel(), run.getReviewerModel());
+        retryRun.setRunRetryCount(run.getRunRetryCount() + 1);
+        retryRun.setCreatedByUserId(run.getCreatedByUserId());
+        retryRun.setOrgId(run.getOrgId());
+        retryRun.setProjectId(run.getProjectId());
+        retryRun.setSourceRunId(run.getRunId());
+        if (run.isSkipApproval()) retryRun.setSkipApproval(true);
+        if (run.isAutoMerge()) retryRun.setAutoMerge(true);
+        if (run.getGithubPat() != null) retryRun.setGithubPat(run.getGithubPat());
+        if (run.getGithubOwner() != null) retryRun.setGithubOwner(run.getGithubOwner());
+        stateStore.save(retryRun);
+
+        // Update failed run with retry link
+        run.setFailureReason(run.getFailureReason() + " — auto-retrying as " + retryRun.getRunId());
+        stateStore.save(run);
+
+        broadcaster.emit(run.getRunId(), RunEvent.log(run.getRunId(), "harness",
+            "Auto-retrying as run " + retryRun.getRunId() + " (attempt " + retryRun.getRunRetryCount() + "/" + maxRetries + ")"));
+
+        // Submit the retry run
+        String retryRunId = retryRun.getRunId();
+        executor.submit(() -> {
+            boolean acquired = false;
+            try {
+                runSlots.acquire();
+                acquired = true;
+                executeRunAsync(retryRunId, run.getUserRequest());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                stateStore.markFailed(retryRunId, "Interrupted during auto-retry");
+            } finally {
+                if (acquired) runSlots.release();
+            }
+        });
+
+        return true;
     }
 
     // ── CLI path ─────────────────────────────────────────────────────────────
@@ -1617,6 +1689,8 @@ public class PipelineHarness {
                     if (execResult.completedTasks().isEmpty()) {
                         stateStore.markFailed(runId, "All tasks failed validation");
                         broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                        PipelineRun failedRunAllTasks = stateStore.findRun(runId).orElse(run);
+                        if (autoRetryRunIfEligible(failedRunAllTasks)) return;
                         return;
                     }
                 }
@@ -1668,6 +1742,7 @@ public class PipelineHarness {
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
                 PipelineRun failedRun = stateStore.findRun(runId).orElse(run);
                 recoveryService.autoRestartIfTransient(failedRun, reports);
+                if (autoRetryRunIfEligible(failedRun)) return;
                 return;
             }
 
@@ -1691,6 +1766,8 @@ public class PipelineHarness {
                 stateStore.markPartial(runId, partialReason);
                 broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, partialReason));
+                PipelineRun partialRun = stateStore.findRun(runId).orElse(run);
+                if (autoRetryRunIfEligible(partialRun)) return;
                 return;
             }
 
@@ -1917,6 +1994,8 @@ public class PipelineHarness {
                 stateStore.markFailed(runId, e.getMessage());
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
+                PipelineRun failedRunEx = stateStore.findRun(runId).orElse(null);
+                if (failedRunEx != null) autoRetryRunIfEligible(failedRunEx);
             }
         } finally {
             Metrics.ACTIVE_RUNS.decrementAndGet();
