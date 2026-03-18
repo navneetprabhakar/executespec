@@ -16,10 +16,10 @@ import { trace, SpanStatusCode } from '@opentelemetry/api';
  * In production, the backend forwards them to GCP Cloud Trace.
  */
 export function initTelemetry() {
-  // Skip telemetry in development unless explicitly enabled
+  // Only enable telemetry when an absolute OTLP endpoint is configured
   const otlpEndpoint = (import.meta as any).env?.VITE_OTEL_ENDPOINT as string | undefined;
-  if (!otlpEndpoint && (import.meta as any).env?.DEV) {
-    console.debug('[OTel] Telemetry disabled in dev (set VITE_OTEL_ENDPOINT to enable)');
+  if (!otlpEndpoint) {
+    console.debug('[OTel] Telemetry disabled (set VITE_OTEL_ENDPOINT to enable)');
     return;
   }
 
@@ -29,7 +29,7 @@ export function initTelemetry() {
   });
 
   const exporter = new OTLPTraceExporter({
-    url: otlpEndpoint || '/api/otel/v1/traces',
+    url: otlpEndpoint,
   });
 
   const provider = new WebTracerProvider({

@@ -1074,6 +1074,17 @@ export const adminUpdateTopupPackage = (id: string, body: Partial<TopupPackageAd
 export const adminDeleteTopupPackage = (id: string) =>
   req<{ message: string }>(`/admin/topup-packages/${id}`, { method: 'DELETE' });
 
+// ── Plan Editing & Versioning ──────────────────────────────────────────────
+
+export const editRunPlan = (runId: string, feedback: string) =>
+  req<{ status: string; version: number }>(`/runs/${runId}/edit-plan`, {
+    method: 'POST',
+    body: JSON.stringify({ feedback }),
+  });
+
+export const getPlanVersions = (runId: string) =>
+  req<any[]>(`/runs/${runId}/plan-versions`);
+
 // Task execution graph
 export interface TaskGraphNode {
   taskId: string;

@@ -101,10 +101,11 @@ public class RunConversationController {
                     "Post-run chat is not available on your current plan. Upgrade to PRO or ENTERPRISE.");
         }
 
-        // Only allow chat on completed runs
-        if (!"COMPLETE".equals(run.getStatus()) && !"PARTIAL".equals(run.getStatus())) {
+        // Allow chat on completed runs and at review/merge gates
+        var chatStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "AWAITING_MERGE", "REVIEWING");
+        if (!chatStatuses.contains(run.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Conversation is only available for COMPLETE or PARTIAL runs");
+                "Conversation is only available for completed or reviewing runs");
         }
 
         // Count existing user messages (chat_message_count includes both user + assistant)
@@ -181,10 +182,11 @@ public class RunConversationController {
                     "Apply suggestion is not available on your current plan. Upgrade to PRO or ENTERPRISE.");
         }
 
-        // Only allow on completed runs
-        if (!"COMPLETE".equals(run.getStatus()) && !"PARTIAL".equals(run.getStatus())) {
+        // Allow on completed runs and at review/merge gates
+        var applyStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "AWAITING_MERGE", "REVIEWING");
+        if (!applyStatuses.contains(run.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Apply is only available for COMPLETE or PARTIAL runs");
+                    "Apply is only available for completed or reviewing runs");
         }
 
         // Check no tasks are currently executing
@@ -233,6 +235,10 @@ public class RunConversationController {
                     "compiledGoal", e.getCompiledGoal()
             ));
         }
+
+        // Save current plan version before modifying
+        stateStore.savePlanVersion(runId, source == ApplySource.COPILOT ? "COPILOT" : "REVIEW", userId);
+        stateStore.incrementPlanVersion(runId);
 
         // Append tasks to existing plan
         int applyIndex = run.getApplySuggestionCount() + 1;

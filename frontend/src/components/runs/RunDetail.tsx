@@ -8,7 +8,7 @@ import { RunTimeline } from '@/components/run/RunTimeline';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
-import { downloadWorkspace, type ReviewReport } from '@/lib/api';
+import { downloadWorkspace, editRunPlan, type ReviewReport } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function RunDetail() {
@@ -24,6 +24,9 @@ export default function RunDetail() {
   const [clarificationInput, setClarificationInput] = useState('');
   const [clarifying, setClarifying] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [planFeedback, setPlanFeedback] = useState('');
+  const [submittingPlanEdit, setSubmittingPlanEdit] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
   const sseEntries = useSseStore((s) => s.entries);
 
@@ -159,16 +162,68 @@ export default function RunDetail() {
 
           {/* Gate banner */}
           {activeRun.status === 'AWAITING_APPROVAL' && (
-            <GateBanner
-              message="Review the plan and approve to continue"
-              icon={<AlertTriangle className="h-4 w-4 text-accent-amber" />}
-              onApprove={() => handle(() => approveRun(activeRun.runId, true), 'Run approved')}
-              onReject={() => handle(() => approveRun(activeRun.runId, false), 'Run rejected')}
-              confirming={confirming}
-              setConfirming={setConfirming}
-              approveLabel="Approve Plan"
-              rejectLabel="Reject"
-            />
+            <>
+              <GateBanner
+                message="Review the plan and approve to continue"
+                icon={<AlertTriangle className="h-4 w-4 text-accent-amber" />}
+                onApprove={() => handle(() => approveRun(activeRun.runId, true), 'Run approved')}
+                onReject={() => handle(() => approveRun(activeRun.runId, false), 'Run rejected')}
+                confirming={confirming}
+                setConfirming={setConfirming}
+                approveLabel="Approve Plan"
+                rejectLabel="Reject"
+              />
+              {/* Edit Plan feedback area */}
+              <div className="px-4 pb-3">
+                {!editingPlan ? (
+                  <button
+                    onClick={() => setEditingPlan(true)}
+                    className="text-xs text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
+                  >
+                    Edit Plan
+                  </button>
+                ) : (
+                  <div className="space-y-2 mt-1">
+                    <textarea
+                      value={planFeedback}
+                      onChange={(e) => setPlanFeedback(e.target.value)}
+                      placeholder="Describe what to change in the plan..."
+                      rows={3}
+                      className="w-full rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        disabled={submittingPlanEdit || !planFeedback.trim()}
+                        onClick={async () => {
+                          setSubmittingPlanEdit(true);
+                          try {
+                            await editRunPlan(activeRun.runId, planFeedback.trim());
+                            setPlanFeedback('');
+                            setEditingPlan(false);
+                            addToast({ type: 'success', message: 'Plan updated — review the new tasks' });
+                            if (activeRunId) await useRunStore.getState().fetchRun(activeRunId);
+                          } catch (e: any) {
+                            addToast({ type: 'error', message: e.message });
+                          } finally {
+                            setSubmittingPlanEdit(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium rounded-md bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                      >
+                        {submittingPlanEdit && <Loader2 className="h-3 w-3 animate-spin" />}
+                        Submit Feedback
+                      </button>
+                      <button
+                        onClick={() => { setEditingPlan(false); setPlanFeedback(''); }}
+                        className="px-3 py-1.5 text-xs font-medium rounded-md text-zinc-400 hover:text-zinc-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
           )}
           {activeRun.status === 'AWAITING_CLARIFICATION' && (
             <ClarificationBanner

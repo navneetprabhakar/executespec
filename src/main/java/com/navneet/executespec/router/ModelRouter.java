@@ -29,12 +29,12 @@ public class ModelRouter {
             ModelTier.FAST, Map.of(
                     LlmProvider.ANTHROPIC, "claude-haiku-4-5-20251001",
                     LlmProvider.OPENAI, "gpt-4o-mini",
-                    LlmProvider.GEMINI, "gemini-3.1-flash-lite-preview"
+                    LlmProvider.GEMINI, "gemini-3-flash-preview"
             ),
             ModelTier.CAPABLE, Map.of(
                     LlmProvider.ANTHROPIC, "claude-sonnet-4-6",
                     LlmProvider.OPENAI, "gpt-4o",
-                    LlmProvider.GEMINI, "gemini-3.1-pro-preview-customtools"
+                    LlmProvider.GEMINI, "gemini-3.1-flash-lite-preview"
             ),
             ModelTier.POWER, Map.of(
                     LlmProvider.ANTHROPIC, "claude-opus-4-6",

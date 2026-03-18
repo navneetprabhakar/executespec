@@ -18,6 +18,9 @@ export function UsageBadge() {
   const runsUsage = status.usage.find(u => u.metric === 'RUNS');
   if (!runsUsage) return null;
 
+  // Hide entirely for unlimited tiers (ENTERPRISE: max = -1)
+  if (runsUsage.max === -1) return null;
+
   const pct = runsUsage.pctUsed;
   const color = pct > 90 ? 'text-red-400' : pct > 70 ? 'text-amber-400' : 'text-zinc-500';
 

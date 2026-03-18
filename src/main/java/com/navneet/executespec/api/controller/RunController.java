@@ -64,6 +64,10 @@ public class RunController {
     private final RunVisibilitySpec runVisibilitySpec;
     private final RunAccessGuard guard;
     private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
+    private final com.navneet.executespec.state.repository.PlanVersionRepository planVersionRepo;
+    private final com.navneet.executespec.agent.PlannerAgent plannerAgent;
+    private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
+    private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
 
     /** Submit a new run. Returns immediately with the run summary (status may be PLANNING or QUEUED). */
     @PostMapping
@@ -581,6 +585,60 @@ public class RunController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                 "Failed to read file: " + e.getMessage());
         }
+    }
+
+    // ── Plan Versioning ──────────────────────────────────────────────────────
+
+    @GetMapping("/{runId}/plan-versions")
+    public ResponseEntity<List<com.navneet.executespec.state.entity.PlanVersion>> getPlanVersions(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+        return ResponseEntity.ok(planVersionRepo.findByRunIdOrderByVersionDesc(runId));
+    }
+
+    @PostMapping("/{runId}/edit-plan")
+    public ResponseEntity<Map<String, Object>> editPlan(
+            @PathVariable String runId,
+            @RequestBody com.navneet.executespec.api.dto.EditPlanRequest req,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        if (!"AWAITING_APPROVAL".equals(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Plan can only be edited during the approval phase");
+        }
+
+        if (req.feedback() == null || req.feedback().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Feedback is required");
+        }
+
+        // Save current plan as version before editing
+        stateStore.savePlanVersion(runId, "USER_EDIT", userDetails.getUser().getId());
+
+        // Re-plan with feedback
+        com.navneet.executespec.agent.model.TaskPlan newPlan = plannerAgent.replanWithFeedback(
+            run.getUserRequest(), run.getPlanJson(), req.feedback(), runId);
+
+        // Delete old tasks, save new plan + tasks
+        stateStore.recreateTasksFromPlan(runId, newPlan);
+        stateStore.incrementPlanVersion(runId);
+
+        // Audit
+        activityAuditService.record(com.navneet.executespec.auth.entity.ActivityAudit.builder()
+            .eventType("PLAN_EDITED")
+            .entityType("RUN")
+            .entityId(runId)
+            .actorId(userDetails.getUser().getId())
+            .metadata("Feedback: " + req.feedback().substring(0, Math.min(req.feedback().length(), 500)))
+            .build());
+
+        // Emit SSE event so frontend refreshes
+        broadcaster.emit(runId, com.navneet.executespec.sse.RunEvent.log(runId, "harness",
+            "Plan edited by user — tasks regenerated"));
+
+        return ResponseEntity.ok(Map.of("status", "plan_updated", "runId", runId,
+            "version", run.getPlanVersion() + 1));
     }
 
     // ── Task Execution Graph ──────────────────────────────────────────────────

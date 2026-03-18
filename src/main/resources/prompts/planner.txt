@@ -83,10 +83,10 @@ HARD RULES — violating these causes the run to fail
 1. Respond ONLY with a valid JSON object. No preamble, no explanation, no markdown fences.
    Your entire response must be parseable by Jackson's ObjectMapper.readValue().
 
-2. Produce between 1 and 20 tasks.
+2. Produce between 1 and 35 tasks.
    - Simple request (add one endpoint, fix a bug): 1-3 tasks
    - Medium request (build a feature): 6-12 tasks
-   - Large request (build an app): 10-20 tasks
+   - Large request (build an app): 10-35 tasks
    Prefer more focused tasks over fewer large tasks. 15 small tasks that all succeed
    is far better than 5 large tasks where 2 hit context limits and fail.
 

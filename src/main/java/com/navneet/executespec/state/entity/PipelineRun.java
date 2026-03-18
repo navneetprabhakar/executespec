@@ -192,6 +192,16 @@ public class PipelineRun {
     @Column(name = "preview_start_count", columnDefinition = "integer default 0")
     private int previewStartCount = 0;
 
+    /** Current plan version (incremented on each plan edit / apply-suggestion). */
+    @Builder.Default
+    @Column(name = "plan_version")
+    private int planVersion = 1;
+
+    /** How many times this run has been auto-retried at the run level (distinct from per-task retry). */
+    @Builder.Default
+    @Column(name = "run_retry_count", columnDefinition = "integer default 0")
+    private int runRetryCount = 0;
+
     // ── GCS workspace archiving ────────────────────────────────────────────────
 
     /**

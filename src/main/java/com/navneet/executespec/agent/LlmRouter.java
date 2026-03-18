@@ -76,7 +76,7 @@ public class LlmRouter {
 
     private static final List<String[]> UTILITY_CHAIN = List.of(
         new String[]{"anthropic", "claude-haiku-4-5-20251001"},
-        new String[]{"google",    "gemini-3.1-flash-lite-preview"},
+        new String[]{"google",    "gemini-3-flash-preview"},
         new String[]{"openai",    "gpt-4o-mini"}
     );
 
@@ -90,7 +90,8 @@ public class LlmRouter {
         Map.entry("gpt-4o-mini",                            UTILITY_CHAIN),
         Map.entry("gpt-4o",                                 CAPABLE_CHAIN),
         Map.entry("gemini-3.1-pro-preview-customtools",     ARCHITECT_CHAIN),
-        Map.entry("gemini-3.1-flash-lite-preview",          CAPABLE_CHAIN)
+        Map.entry("gemini-3.1-flash-lite-preview",          CAPABLE_CHAIN),
+        Map.entry("gemini-3-flash-preview",                 UTILITY_CHAIN)
     );
 
     private final ApplicationContext ctx;

@@ -53,7 +53,11 @@ public class ModelPricingInitializer {
             },
             new Object[]{
                 "google", "gemini-3.1-flash-lite-preview", 0.25, 1.50,
-                "2nd fallback — Anthropic outage/rate-limit auto-switch (CAPABLE + UTILITY chains). Fastest Gemini 3 model. Released Mar 2026."
+                "2nd fallback — Anthropic outage/rate-limit auto-switch (CAPABLE chain). Released Mar 2026."
+            },
+            new Object[]{
+                "google", "gemini-3-flash-preview", 0.15, 0.60,
+                "2nd fallback — Anthropic outage/rate-limit auto-switch (UTILITY chain). Gemini 3.0 flash. Released Mar 2026."
             },
             // ── OpenAI — 3rd fallback (OpenAI public pricing Mar 2026) ───────────────────
             new Object[]{

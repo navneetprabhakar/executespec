@@ -47,6 +47,9 @@ public class PlannerAgent {
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
 
+    @Value("classpath:prompts/planner_edit.txt")
+    private Resource plannerEditPrompt;
+
     public TaskPlan plan(String userRequest, String runId, String modelOverride) {
         log.info("Planner starting for run {}", runId);
 
@@ -107,6 +110,11 @@ public class PlannerAgent {
                         responseContent.length() > 200 ? responseContent.substring(0, 200) + "..." : responseContent);
 
                 TaskPlan plan = outputParser.parse(responseContent, TaskPlan.class);
+
+                if (plan.getTasks() != null && plan.getTasks().size() > 35) {
+                    log.warn("Plan has {} tasks — truncating to 35", plan.getTasks().size());
+                    plan.setTasks(plan.getTasks().subList(0, 35));
+                }
 
                 stateStore.logMessage(runId, "planner", "harness",
                         "COMPLETION_REPORT",
@@ -189,6 +197,69 @@ public class PlannerAgent {
                 log.warn("Feasibility planner invalid JSON (attempt {}): {}", attempt, e.getMessage());
                 if (attempt == 3)
                     throw new RuntimeException("Feasibility planner failed 3 times", e);
+            }
+        }
+        throw new RuntimeException("Should not reach here");
+    }
+
+    /**
+     * Re-plans with user feedback — used when the user edits the plan at the approval gate.
+     */
+    public TaskPlan replanWithFeedback(String originalGoal, String existingPlanJson, String feedback, String runId) {
+        log.info("Planner re-planning with feedback for run {}", runId);
+        String editPromptText;
+        try {
+            editPromptText = plannerEditPrompt.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot load planner_edit prompt", e);
+        }
+
+        String systemPrompt = editPromptText
+            .replace("{goal}", originalGoal)
+            .replace("{existingPlan}", existingPlanJson)
+            .replace("{feedback}", feedback);
+
+        String model = resolveModelName(props.getRoles().getPlanner());
+        String provider = resolveProviderFromModel(model);
+
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                String msg = attempt == 1
+                    ? "Revise the plan based on the feedback provided."
+                    : "IMPORTANT: Your previous response was not valid JSON. Respond ONLY with a valid JSON object.";
+
+                Prompt prompt = new Prompt(
+                    List.of(new SystemMessage(systemPrompt), new UserMessage(msg)));
+                LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(provider, model, prompt,
+                    runId, "planner", FallbackMode.IMMEDIATE, 0, false);
+                ChatResponse response = lr.response();
+
+                String responseContent = response.getResult().getOutput().getText();
+
+                // Track tokens
+                try {
+                    int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
+                    int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
+                    stateStore.addTokensToRun(runId, inTok, outTok);
+                    stateStore.setAgentTokens(runId, "planner", inTok, outTok, lr.provider(), lr.model());
+                } catch (Exception ex) {
+                    log.warn("[Planner] Could not extract token counts: {}", ex.getMessage());
+                }
+
+                TaskPlan plan = outputParser.parse(responseContent, TaskPlan.class);
+
+                if (plan.getTasks() != null && plan.getTasks().size() > 35) {
+                    log.warn("Edited plan has {} tasks — truncating to 35", plan.getTasks().size());
+                    plan.setTasks(plan.getTasks().subList(0, 35));
+                }
+
+                log.info("Planner re-plan produced {} tasks", plan.getTasks().size());
+                return plan;
+
+            } catch (JsonProcessingException e) {
+                log.warn("Planner re-plan returned invalid JSON on attempt {}: {}", attempt, e.getMessage());
+                if (attempt == 3)
+                    throw new RuntimeException("Planner re-plan failed 3 times to return valid JSON", e);
             }
         }
         throw new RuntimeException("Should not reach here");
