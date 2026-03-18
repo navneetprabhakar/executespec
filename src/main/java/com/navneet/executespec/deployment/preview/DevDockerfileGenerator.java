@@ -478,12 +478,12 @@ public class DevDockerfileGenerator {
         // Install frontend deps
         if (fe != null) {
             sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install --ignore-scripts && npm rebuild\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
         }
         // Install backend deps
         if (be != null) {
             sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
-            sb.append("RUN cd ").append(be).append(" && npm install --ignore-scripts && npm rebuild\n");
+            sb.append("RUN cd ").append(be).append(" && npm install\n");
         }
 
         sb.append("COPY . .\n");
@@ -523,7 +523,7 @@ public class DevDockerfileGenerator {
         // Install frontend Node deps
         if (fe != null) {
             sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install --ignore-scripts && npm rebuild\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
         }
 
         sb.append("COPY . .\n");
@@ -565,7 +565,7 @@ public class DevDockerfileGenerator {
         // Install frontend Node deps
         if (fe != null) {
             sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install --ignore-scripts && npm rebuild\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
         }
 
         sb.append("COPY . .\n");
@@ -693,8 +693,9 @@ public class DevDockerfileGenerator {
             }
         }
 
-        // Install — use workspaces flag, and ignore-scripts to prevent recursive install hooks
-        sb.append("RUN npm install --ignore-scripts\n");
+        // Install all workspace deps — do NOT use --ignore-scripts here since
+        // workspace binary linking (e.g., vite, tsc) requires postinstall hooks
+        sb.append("RUN npm install\n");
 
         // Copy all source code
         sb.append("COPY . .\n");

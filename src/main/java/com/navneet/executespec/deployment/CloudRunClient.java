@@ -245,7 +245,10 @@ public class CloudRunClient {
             return List.of();
         }
 
-        return output.isBlank() ? List.of() : List.of(output.split("\n"));
+        if (output.isBlank()) return List.of();
+        return java.util.Arrays.stream(output.split("\n"))
+            .filter(line -> !line.isBlank() && !line.startsWith("WARNING") && !line.startsWith("ERROR"))
+            .toList();
     }
 
     /**
