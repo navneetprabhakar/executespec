@@ -30,7 +30,7 @@ public class ArtifactRegistryClient {
 
         String imageTag = fullImageUri(versionTag);
 
-        ProcessBuilder pb = new ProcessBuilder("docker", "build", "-t", imageTag, ".")
+        ProcessBuilder pb = new ProcessBuilder("docker", "build", "--platform", "linux/amd64", "-t", imageTag, ".")
             .directory(workspacePath.toFile())
             .redirectErrorStream(true);
 
