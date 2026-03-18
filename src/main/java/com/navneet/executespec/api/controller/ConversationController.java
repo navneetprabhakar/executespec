@@ -1,4 +1,5 @@
 package com.navneet.executespec.api.controller;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.LlmRouter.FallbackMode;
@@ -74,12 +75,12 @@ public class ConversationController {
         }
 
         var options = AnthropicChatOptions.builder()
-                .model("claude-haiku-4-5-20251001")
+                .model(ModelConstants.HAIKU)
                 .maxTokens(512)
                 .build();
 
         var response = llmRouter.callWithFallback(
-                "anthropic", "claude-haiku-4-5-20251001",
+                "anthropic", ModelConstants.HAIKU,
                 new Prompt(springMessages, options),
                 "conversation", "conversation-api",
                 FallbackMode.IMMEDIATE, 0, false);

@@ -1,4 +1,5 @@
 package com.navneet.executespec.agent;
+import com.navneet.executespec.config.ModelConstants;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,8 +36,8 @@ public class ConflictResolverAgent {
     @Value("classpath:prompts/conflict-resolver.txt")
     private Resource promptTemplate;
 
-    private static final String HAIKU_MODEL = "claude-haiku-4-5-20251001";
-    private static final String SONNET_MODEL = "claude-sonnet-4-6";
+    private static final String HAIKU_MODEL = ModelConstants.HAIKU;
+    private static final String SONNET_MODEL = ModelConstants.SONNET;
     private static final int MAX_OUTPUT_TOKENS = 8192;
 
     /**

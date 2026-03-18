@@ -1,4 +1,5 @@
 package com.navneet.executespec.agent;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -189,8 +190,8 @@ public class ReviewerAgent {
      *  Used only when the UI sends no model override. */
     private String resolveModelName(String provider) {
         return switch (provider.toLowerCase()) {
-            case "openai"  -> "gpt-4o-mini";
-            default        -> "claude-haiku-4-5-20251001"; // anthropic — UTILITY chain
+            case "openai"  -> ModelConstants.GPT4O_MINI;
+            default        -> ModelConstants.HAIKU; // anthropic — UTILITY chain
         };
     }
 

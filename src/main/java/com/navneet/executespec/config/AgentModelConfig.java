@@ -1,4 +1,5 @@
 package com.navneet.executespec.config;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.google.genai.Client;
 import lombok.RequiredArgsConstructor;
@@ -152,7 +153,7 @@ public class AgentModelConfig {
         Client client = Client.builder().apiKey(apiKey).build();
         return GoogleGenAiChatModel.builder()
                 .genAiClient(client)
-                .defaultOptions(GoogleGenAiChatOptions.builder().model("gemini-3.1-flash-lite-preview").build())
+                .defaultOptions(GoogleGenAiChatOptions.builder().model(ModelConstants.GEMINI_CAPABLE).build())
                 .build();
     }
 }

@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.config.ModelConstants;
 import com.navneet.executespec.state.InboxService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -63,35 +64,35 @@ public class LlmRouter {
     // ── Provider fallback chains (3-provider: Anthropic → Gemini → OpenAI) ──────
 
     private static final List<String[]> ARCHITECT_CHAIN = List.of(
-        new String[]{"anthropic", "claude-opus-4-6"},
-        new String[]{"google",    "gemini-3.1-pro-preview-customtools"},
-        new String[]{"openai",    "gpt-4o"}
+        new String[]{"anthropic", ModelConstants.OPUS},
+        new String[]{"google",    ModelConstants.GEMINI_ARCHITECT},
+        new String[]{"openai",    ModelConstants.GPT4O}
     );
 
     private static final List<String[]> CAPABLE_CHAIN = List.of(
-        new String[]{"anthropic", "claude-sonnet-4-6"},
-        new String[]{"google",    "gemini-3.1-flash-lite-preview"},
-        new String[]{"openai",    "gpt-4o"}
+        new String[]{"anthropic", ModelConstants.SONNET},
+        new String[]{"google",    ModelConstants.GEMINI_CAPABLE},
+        new String[]{"openai",    ModelConstants.GPT4O}
     );
 
     private static final List<String[]> UTILITY_CHAIN = List.of(
-        new String[]{"anthropic", "claude-haiku-4-5-20251001"},
-        new String[]{"google",    "gemini-3-flash-preview"},
-        new String[]{"openai",    "gpt-4o-mini"}
+        new String[]{"anthropic", ModelConstants.HAIKU},
+        new String[]{"google",    ModelConstants.GEMINI_UTILITY},
+        new String[]{"openai",    ModelConstants.GPT4O_MINI}
     );
 
     private static final Map<String, List<String[]>> MODEL_CHAIN = Map.ofEntries(
-        Map.entry("claude-opus-4-6",                        ARCHITECT_CHAIN),
-        Map.entry("claude-opus-4-5",                        ARCHITECT_CHAIN),  // legacy alias
-        Map.entry("claude-sonnet-4-6",                      CAPABLE_CHAIN),
-        Map.entry("claude-sonnet-4-5",                      CAPABLE_CHAIN),    // legacy alias
-        Map.entry("claude-haiku-4-5-20251001",              UTILITY_CHAIN),
-        Map.entry("claude-haiku-4-5",                       UTILITY_CHAIN),    // legacy alias
-        Map.entry("gpt-4o-mini",                            UTILITY_CHAIN),
-        Map.entry("gpt-4o",                                 CAPABLE_CHAIN),
-        Map.entry("gemini-3.1-pro-preview-customtools",     ARCHITECT_CHAIN),
-        Map.entry("gemini-3.1-flash-lite-preview",          CAPABLE_CHAIN),
-        Map.entry("gemini-3-flash-preview",                 UTILITY_CHAIN)
+        Map.entry(ModelConstants.OPUS,              ARCHITECT_CHAIN),
+        Map.entry(ModelConstants.OPUS_LEGACY,       ARCHITECT_CHAIN),
+        Map.entry(ModelConstants.SONNET,            CAPABLE_CHAIN),
+        Map.entry(ModelConstants.SONNET_LEGACY,     CAPABLE_CHAIN),
+        Map.entry(ModelConstants.HAIKU,             UTILITY_CHAIN),
+        Map.entry(ModelConstants.HAIKU_LEGACY,      UTILITY_CHAIN),
+        Map.entry(ModelConstants.GPT4O_MINI,        UTILITY_CHAIN),
+        Map.entry(ModelConstants.GPT4O,             CAPABLE_CHAIN),
+        Map.entry(ModelConstants.GEMINI_ARCHITECT,  ARCHITECT_CHAIN),
+        Map.entry(ModelConstants.GEMINI_CAPABLE,    CAPABLE_CHAIN),
+        Map.entry(ModelConstants.GEMINI_UTILITY,    UTILITY_CHAIN)
     );
 
     private final ApplicationContext ctx;

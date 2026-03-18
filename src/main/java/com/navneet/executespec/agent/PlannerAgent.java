@@ -1,4 +1,5 @@
 package com.navneet.executespec.agent;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -317,8 +318,8 @@ public class PlannerAgent {
      */
     private String resolveModelName(String provider) {
         return switch (provider.toLowerCase()) {
-            case "openai" -> "gpt-4o";
-            default -> "claude-sonnet-4-6"; // anthropic — strong reasoning at lower cost
+            case "openai" -> ModelConstants.GPT4O;
+            default -> ModelConstants.SONNET; // anthropic — strong reasoning at lower cost
         };
     }
 

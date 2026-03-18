@@ -1,4 +1,5 @@
 package com.navneet.executespec.state;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -660,7 +661,7 @@ public class StateStore {
         Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
         for (AgentTask t : allTasks) {
             String key = (t.getProvider() != null ? t.getProvider() : "anthropic") + "/"
-                       + (t.getModel() != null ? t.getModel() : "claude-sonnet-4-6");
+                       + (t.getModel() != null ? t.getModel() : ModelConstants.SONNET);
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
         }
 
@@ -702,7 +703,7 @@ public class StateStore {
         Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
         for (AgentTask t : allTasks) {
             String key = (t.getProvider() != null ? t.getProvider() : "anthropic") + "/"
-                       + (t.getModel() != null ? t.getModel() : "claude-sonnet-4-6");
+                       + (t.getModel() != null ? t.getModel() : ModelConstants.SONNET);
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
         }
 

@@ -1,4 +1,5 @@
 package com.navneet.executespec.recovery;
+import com.navneet.executespec.config.ModelConstants;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -56,8 +57,8 @@ public class RecoveryProperties {
 
     // ── Escalation ladder ─────────────────────────────────────────────────────
     private Map<String, String> capableModels = new HashMap<>(Map.of(
-        "anthropic", "claude-haiku-4-5-20251001",
-        "openai",    "gpt-4o"
+        "anthropic", ModelConstants.HAIKU,
+        "openai",    ModelConstants.GPT4O
     ));
 
     private Map<String, String> alternateProvider = new HashMap<>(Map.of(

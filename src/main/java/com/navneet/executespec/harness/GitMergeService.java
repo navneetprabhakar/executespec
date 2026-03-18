@@ -1,4 +1,5 @@
 package com.navneet.executespec.harness;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -248,7 +249,7 @@ public class GitMergeService {
                     highestOutcome = MergeOutcome.RESOLVED_LLM;
                 }
                 recordConflict(runId, task.getTaskId(), conflictPath, "TEXTUAL",
-                    "AUTO_HAIKU", "claude-haiku-4-5-20251001");
+                    "AUTO_HAIKU", ModelConstants.HAIKU);
                 continue;
             }
 
@@ -262,7 +263,7 @@ public class GitMergeService {
                 resolvedFiles.add(conflictPath);
                 highestOutcome = MergeOutcome.ESCALATED;
                 recordConflict(runId, task.getTaskId(), conflictPath, "TEXTUAL",
-                    "AUTO_SONNET", "claude-sonnet-4-6");
+                    "AUTO_SONNET", ModelConstants.SONNET);
                 continue;
             }
 
