@@ -8,6 +8,8 @@ import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.ShellTool;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -55,6 +57,7 @@ public class CompilerAgent {
     private final CompilerProperties compilerProps;
     private final ObjectMapper mapper;
     private final StateStore stateStore;
+    private final ObservationRegistry observationRegistry;
 
     @Value("classpath:prompts/compiler.txt")
     private Resource compilerPrompt;
@@ -70,13 +73,23 @@ public class CompilerAgent {
      * Non-fatal: catches all exceptions and always returns a {@link CompileResult}.
      */
     public CompileResult runCompileAndFix(String runId) {
+        Observation obs = Observation.createNotStarted("executespec.run.phase.compile", observationRegistry)
+            .lowCardinalityKeyValue("run.id", runId != null ? runId : "unknown")
+            .start();
         try {
-            return doCompileAndFix(runId);
+            CompileResult result = doCompileAndFix(runId);
+            obs.lowCardinalityKeyValue("outcome", result.passed() ? "passed" : "failed");
+            obs.highCardinalityKeyValue("attempts", String.valueOf(result.attempts()));
+            return result;
         } catch (Exception e) {
+            obs.lowCardinalityKeyValue("outcome", "error");
+            obs.error(e);
             log.error("CompilerAgent unexpected error for run {}: {}", runId, e.getMessage(), e);
             broadcaster.emit(runId, RunEvent.log(runId, "compiler",
                     "⚠️ CompilerAgent internal error: " + e.getMessage() + " — proceeding anyway"));
             return CompileResult.failed(0, e.getMessage());
+        } finally {
+            obs.stop();
         }
     }
 

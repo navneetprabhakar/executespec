@@ -48,6 +48,8 @@ resource "google_project_service" "apis" {
     "iap.googleapis.com",
     "secretmanager.googleapis.com",
     "servicenetworking.googleapis.com",
+    "cloudtrace.googleapis.com",
+    "monitoring.googleapis.com",
   ])
 
   project            = var.project_id

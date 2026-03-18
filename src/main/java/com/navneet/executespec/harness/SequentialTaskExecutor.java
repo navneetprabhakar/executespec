@@ -15,6 +15,15 @@ import com.navneet.executespec.tool.GitTool;
 import com.navneet.executespec.validator.CodeValidator;
 import com.navneet.executespec.validator.model.*;
 import com.navneet.executespec.validator.prompt.RetryPromptBuilder;
+import io.micrometer.context.ContextSnapshotFactory;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
+import com.navneet.executespec.config.CustomMetricsConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -60,6 +69,8 @@ public class SequentialTaskExecutor {
     private final GitTool gitTool;
     private final GitMergeService mergeService;
     private final ObjectMapper mapper;
+    private final ObservationRegistry observationRegistry;
+    private final MeterRegistry meterRegistry;
 
     @Value("${executespec.validator.max-retries:3}")
     private int maxRetries;
@@ -120,6 +131,13 @@ public class SequentialTaskExecutor {
         for (int tierIdx = 0; tierIdx < tiers.size(); tierIdx++) {
             List<AgentTask> tierTasks = tiers.get(tierIdx);
 
+            Observation tierObs = Observation.createNotStarted("executespec.tier", observationRegistry)
+                    .lowCardinalityKeyValue("tier.index", String.valueOf(tierIdx))
+                    .lowCardinalityKeyValue("run.id", runId)
+                    .lowCardinalityKeyValue("tier.task.count", String.valueOf(tierTasks.size()))
+                    .start();
+            try {
+
             // Filter out tasks whose dependencies have failed
             List<AgentTask> executable = new ArrayList<>();
             for (AgentTask task : tierTasks) {
@@ -150,11 +168,13 @@ public class SequentialTaskExecutor {
                 List<Thread> threads = new ArrayList<>();
                 for (AgentTask task : executable) {
                     final int tier = tierIdx;
+                    // Capture observation context so virtual threads propagate trace IDs
+                    var snapshot = ContextSnapshotFactory.builder().build().captureAll();
                     Thread vt = Thread.ofVirtual()
                             .name("worker-tier" + tier + "-" + task.getTaskId())
-                            .start(() -> executeSingleTask(task, run, defaultModel, level,
+                            .start(snapshot.wrap(() -> executeSingleTask(task, run, defaultModel, level,
                                     availableProviders, allReports, completed, failed,
-                                    previouslyMerged, mergedTaskIds, mergeLock));
+                                    previouslyMerged, mergedTaskIds, mergeLock)));
                     threads.add(vt);
                 }
 
@@ -172,6 +192,10 @@ public class SequentialTaskExecutor {
 
             log.info("Tier {} complete: {}/{} tasks succeeded overall, {} failed",
                     tierIdx, completed.size(), tasks.size(), failed.size());
+
+            } finally {
+                tierObs.stop();
+            }
         }
 
         log.info("Tiered execution complete: {}/{} tasks succeeded (merged: {})",
@@ -190,6 +214,15 @@ public class SequentialTaskExecutor {
                                     Set<String> mergedTaskIds, Object mergeLock) {
         String runId = run.getRunId();
         String taskId = task.getTaskId();
+
+        Instant taskMetricsStart = Instant.now();
+        String metricsTaskOutcome = "UNKNOWN";
+        Observation taskObs = Observation.createNotStarted("executespec.task", observationRegistry)
+                .lowCardinalityKeyValue("task.id", taskId)
+                .lowCardinalityKeyValue("run.id", runId)
+                .lowCardinalityKeyValue("task.complexity", task.getComplexity() != null ? task.getComplexity() : "MEDIUM")
+                .start();
+        try {
 
         log.info("Executing task: {} [complexity={}]",
                 taskId, task.getComplexity() != null ? task.getComplexity() : "MEDIUM");
@@ -218,12 +251,16 @@ public class SequentialTaskExecutor {
             stateStore.failTask(taskId, "Unhandled exception: " + e.getMessage());
             sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
             failed.add(task);
+            metricsTaskOutcome = "FAILED";
+            taskObs.lowCardinalityKeyValue("task.outcome", "FAILED");
             try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
             return;
         }
         allReports.add(report);
 
         String normalizedStatus = normalizeStatus(report.getStatus());
+        metricsTaskOutcome = normalizedStatus;
+        taskObs.lowCardinalityKeyValue("task.outcome", normalizedStatus);
         sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, normalizedStatus));
         log.info("  Task [{}]: {}", taskId, normalizedStatus);
 
@@ -243,6 +280,8 @@ public class SequentialTaskExecutor {
                     // Merge failed — downgrade to failed
                     completed.remove(task);
                     failed.add(task);
+                    metricsTaskOutcome = "MERGE_FAILED";
+                    taskObs.lowCardinalityKeyValue("task.outcome", "MERGE_FAILED");
                 }
             }
         } else {
@@ -253,6 +292,16 @@ public class SequentialTaskExecutor {
             } catch (Exception e) {
                 log.debug("Worktree cleanup for failed task {}: {}", taskId, e.getMessage());
             }
+        }
+
+        } finally {
+            // Record task metrics
+            java.time.Duration taskDuration = java.time.Duration.between(taskMetricsStart, Instant.now());
+            Counter.builder(TASK_TOTAL).tag("status", metricsTaskOutcome)
+                    .register(meterRegistry).increment();
+            Timer.builder(TASK_DURATION).tag("status", metricsTaskOutcome)
+                    .register(meterRegistry).record(taskDuration);
+            taskObs.stop();
         }
     }
 
@@ -626,6 +675,11 @@ public class SequentialTaskExecutor {
                             .language(lang)
                             .level(level)
                             .build());
+
+            String validationResult = result.getVerdict() == ValidationVerdict.FAIL ? "fail" : "pass";
+            Counter.builder(VALIDATION_TOTAL).tag("result", validationResult)
+                    .tag("gate", lang.name())
+                    .register(meterRegistry).increment();
 
             if (result.getVerdict() == ValidationVerdict.FAIL) {
                 return result;

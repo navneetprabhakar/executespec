@@ -1,5 +1,7 @@
 package com.navneet.executespec.billing.service;
 
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingPlanLimit;
 import com.navneet.executespec.billing.entity.BillingSubscription;
@@ -33,14 +35,19 @@ public class UsageTrackingService {
     private final BillingPlanLimitRepository limitRepo;
     private final BillingPlanRepository planRepo;
     private final RunTopupRepository runTopupRepo;
+    private final AppUserRepository userRepo;
 
     /**
      * Check if user is within limits for a given metric.
      * Throws BillingException if limit exceeded.
+     * SUPER_ADMIN is always allowed (unlimited usage).
      *
      * Call this BEFORE performing the action (e.g., before starting a run).
      */
     public void assertWithinLimits(String userId, String metric) {
+        // SUPER_ADMIN has no limits
+        AppUser user = userRepo.findById(userId).orElse(null);
+        if (user != null && "SUPER_ADMIN".equals(user.getGlobalRole())) return;
         BillingSubscription sub = subscriptionRepo.findActiveByUserId(userId).orElse(null);
 
         // Resolve plan ID — fall back to FREE plan for users who registered before billing system

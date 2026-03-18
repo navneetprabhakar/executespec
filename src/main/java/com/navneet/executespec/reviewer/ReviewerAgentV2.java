@@ -10,6 +10,8 @@ import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.*;
 import com.navneet.executespec.router.*;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -78,6 +80,7 @@ public class ReviewerAgentV2 {
     private final GitTool gitTool;
     private final ObjectMapper mapper;
     private final LlmOutputParser outputParser;
+    private final ObservationRegistry observationRegistry;
 
     @Value("classpath:prompts/reviewer-v2.txt")
     private Resource reviewerV2Prompt;
@@ -97,6 +100,23 @@ public class ReviewerAgentV2 {
      */
     public ReviewReportV2 review(PipelineRun run, List<AgentTask> tasks,
                                   String originalGoal, Set<LlmProvider> availableProviders) {
+        Observation obs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
+            .lowCardinalityKeyValue("run.id", run.getRunId())
+            .start();
+
+        try {
+            return doReview(run, tasks, originalGoal, availableProviders, obs);
+        } catch (Exception e) {
+            obs.error(e);
+            throw e;
+        } finally {
+            obs.stop();
+        }
+    }
+
+    private ReviewReportV2 doReview(PipelineRun run, List<AgentTask> tasks,
+                                     String originalGoal, Set<LlmProvider> availableProviders,
+                                     Observation obs) {
         Instant start = Instant.now();
         String runId = run.getRunId();
         Path workspacePath = gitTool.getWorkspacePath(runId);
@@ -201,6 +221,13 @@ public class ReviewerAgentV2 {
                 String.format("Review complete: %s (%d critical, %d minor, %d/%d auto-fixed) in %ds",
                         verdict, criticalCount, minorCount, autoFixSucceeded, autoFixAttempted,
                         reviewDuration.toSeconds())));
+
+        obs.lowCardinalityKeyValue("verdict", verdict.name());
+        obs.highCardinalityKeyValue("issues.critical", String.valueOf(criticalCount));
+        obs.highCardinalityKeyValue("issues.minor", String.valueOf(minorCount));
+        obs.highCardinalityKeyValue("autofix.attempted", String.valueOf(autoFixAttempted));
+        obs.highCardinalityKeyValue("autofix.succeeded", String.valueOf(autoFixSucceeded));
+        obs.highCardinalityKeyValue("duration.seconds", String.valueOf(reviewDuration.toSeconds()));
 
         return report;
     }

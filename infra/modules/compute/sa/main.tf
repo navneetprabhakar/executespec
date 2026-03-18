@@ -36,6 +36,13 @@ resource "google_project_iam_member" "metric_writer" {
   member  = "serviceAccount:${google_service_account.gce.email}"
 }
 
+# Write traces to Cloud Trace
+resource "google_project_iam_member" "trace_agent" {
+  project = var.project_id
+  role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${google_service_account.gce.email}"
+}
+
 # Push/pull Docker images from Artifact Registry
 resource "google_project_iam_member" "artifact_registry" {
   project = var.project_id

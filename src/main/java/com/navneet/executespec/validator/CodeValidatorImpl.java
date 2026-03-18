@@ -3,8 +3,12 @@ package com.navneet.executespec.validator;
 import com.navneet.executespec.validator.gate.GateChain;
 import com.navneet.executespec.validator.language.LanguageToolchain;
 import com.navneet.executespec.validator.model.*;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -18,9 +22,11 @@ public class CodeValidatorImpl implements CodeValidator {
 
     private final GateChain gateChain;
     private final Map<Language, LanguageToolchain> toolchainMap;
+    private final MeterRegistry meterRegistry;
 
-    public CodeValidatorImpl(GateChain gateChain, List<LanguageToolchain> toolchains) {
+    public CodeValidatorImpl(GateChain gateChain, List<LanguageToolchain> toolchains, MeterRegistry meterRegistry) {
         this.gateChain = gateChain;
+        this.meterRegistry = meterRegistry;
         this.toolchainMap = toolchains.stream()
                 .collect(Collectors.toMap(LanguageToolchain::getLanguage, Function.identity()));
         toolchainMap.forEach((lang, tc) -> {
@@ -39,6 +45,10 @@ public class CodeValidatorImpl implements CodeValidator {
         log.info("Validating file: {} [{}] level={}", request.getFilePath(), request.getLanguage(), request.getLevel());
         ValidationResult result = gateChain.execute(toolchain, request.getProjectRoot(),
                 request.getFilePath(), request.getLevel(), request.getTimeout());
+        String validationResult = result.getVerdict() == ValidationVerdict.FAIL ? "fail" : "pass";
+        Counter.builder(VALIDATION_TOTAL).tag("result", validationResult)
+                .tag("gate", request.getLanguage().name())
+                .register(meterRegistry).increment();
         log.info("Validation result for {}: {} ({} errors, {}ms)",
                 request.getFilePath(), result.getVerdict(), result.getErrors().size(), result.getTotalTime().toMillis());
         return result;

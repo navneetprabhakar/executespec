@@ -1,6 +1,8 @@
 # Health check: GET /api/health (custom HealthController — no actuator dependency)
 
 spring:
+  application:
+    name: executespec
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -289,3 +291,63 @@ logging:
   level:
     com.navneet.executespec: INFO
     org.springframework.ai: WARN
+    io.opentelemetry: WARN
+    io.micrometer.tracing: INFO
+
+# ── Observability (Actuator + OTel + Metrics) ────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when_authorized
+  tracing:
+    sampling:
+      probability: ${OTEL_SAMPLING_PROBABILITY:1.0}
+  observations:
+    annotations:
+      enabled: true
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+    metrics:
+      export:
+        enabled: ${OTEL_METRICS_ENABLED:false}
+        endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/metrics}
+        step: 60s
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.request.duration: true
+        spring.ai.chat.client.duration: true
+      minimum-expected-value:
+        http.server.request.duration: 1ms
+      maximum-expected-value:
+        http.server.request.duration: 30s
+    tags:
+      application: executespec
+      environment: ${SPRING_PROFILES_ACTIVE:local}
+
+---
+# ── GCP profile: use Cloud Trace + Cloud Monitoring instead of OTLP/Prometheus ─
+spring:
+  config:
+    activate:
+      on-profile: gcp
+
+management:
+  otlp:
+    tracing:
+      enabled: false
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    sampling:
+      probability: ${OTEL_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      enabled: false

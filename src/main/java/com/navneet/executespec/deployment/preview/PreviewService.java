@@ -11,11 +11,17 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
+import com.navneet.executespec.config.CustomMetricsConfig;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -43,6 +49,7 @@ public class PreviewService {
     private final AgentProperties agentProps;
     private final TierConfigRepository tierConfigRepo;
     private final WorkspaceRestoreService restoreService;
+    private final MeterRegistry meterRegistry;
 
     /** runId → session */
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
@@ -59,7 +66,8 @@ public class PreviewService {
                           StateStore stateStore,
                           AgentProperties agentProps,
                           TierConfigRepository tierConfigRepo,
-                          WorkspaceRestoreService restoreService) {
+                          WorkspaceRestoreService restoreService,
+                          MeterRegistry meterRegistry) {
         this.dockerfileGen = dockerfileGen;
         this.databaseDetector = databaseDetector;
         this.envVarDetector = envVarDetector;
@@ -71,6 +79,7 @@ public class PreviewService {
         this.agentProps = agentProps;
         this.tierConfigRepo = tierConfigRepo;
         this.restoreService = restoreService;
+        this.meterRegistry = meterRegistry;
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -170,6 +179,8 @@ public class PreviewService {
         active.put(runId, session);
 
         // Launch async build → push → deploy on a virtual thread
+        Metrics.ACTIVE_PREVIEWS.incrementAndGet();
+        Counter.builder(PREVIEW_STARTS).register(meterRegistry).increment();
         Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
         Thread.startVirtualThread(() -> buildPushAndDeploy(runId, workspace, type, serviceName, safeEnvVars));
 
@@ -189,6 +200,7 @@ public class PreviewService {
     public void stop(String runId) {
         PreviewSession session = active.remove(runId);
         if (session == null) return;
+        Metrics.ACTIVE_PREVIEWS.decrementAndGet();
 
         // Delete Cloud Run service
         if (session.cloudRunServiceName() != null) {
@@ -239,6 +251,9 @@ public class PreviewService {
     private void buildPushAndDeploy(String runId, Path workspace, PreviewProjectType type,
                                      String serviceName, Map<String, String> envVars) {
         Instant deadline = Instant.now().plusSeconds(props.getTotalStartupTimeoutSeconds());
+        Instant previewStart = Instant.now();
+        Instant buildStart = null;
+        Instant deployStart = null;
 
         try {
             // Phase 1: Detect database
@@ -263,6 +278,7 @@ public class PreviewService {
             Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
 
             // Phase 3: Docker build
+            buildStart = Instant.now();
             checkDeadline(deadline, "Docker build");
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
@@ -287,6 +303,11 @@ public class PreviewService {
             artifactRegistry.pushImage(imageUri);
 
             // Phase 5: Deploy to Cloud Run
+            if (buildStart != null) {
+                Timer.builder(PREVIEW_BUILD_DURATION).register(meterRegistry)
+                        .record(java.time.Duration.between(buildStart, Instant.now()));
+            }
+            deployStart = Instant.now();
             checkDeadline(deadline, "Cloud Run deploy");
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
@@ -333,9 +354,17 @@ public class PreviewService {
             broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null,
                     deployResult.serviceUrl(), Instant.now()));
 
+            if (deployStart != null) {
+                Timer.builder(PREVIEW_DEPLOY_DURATION).register(meterRegistry)
+                        .record(java.time.Duration.between(deployStart, Instant.now()));
+            }
+            Timer.builder(PREVIEW_DURATION).register(meterRegistry)
+                    .record(java.time.Duration.between(previewStart, Instant.now()));
             log.info("Preview ready for run {} at {} (db={})", runId, deployResult.serviceUrl(), dbType);
 
         } catch (DeadlineExceededException e) {
+            Counter.builder(PREVIEW_FAILURES).tag("reason", "timeout")
+                    .register(meterRegistry).increment();
             cleanupOnFailure(runId, serviceName);
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.cloudRunServiceName(), s.projectType(), s.databaseType(),
@@ -364,6 +393,8 @@ public class PreviewService {
     }
 
     private void fail(String runId, String message, String imageUri, String serviceName) {
+        Counter.builder(PREVIEW_FAILURES).tag("reason", classifyFailureReason(message))
+                .register(meterRegistry).increment();
         cleanupOnFailure(runId, serviceName);
 
         updateSession(runId, s -> new PreviewSession(
@@ -382,6 +413,16 @@ public class PreviewService {
                 log.debug("Cleanup: failed to delete Cloud Run service {}: {}", serviceName, e.getMessage());
             }
         }
+    }
+
+    private static String classifyFailureReason(String message) {
+        if (message == null) return "unknown";
+        String lower = message.toLowerCase();
+        if (lower.contains("health check")) return "health_check";
+        if (lower.contains("build") || lower.contains("docker")) return "build";
+        if (lower.contains("push")) return "push";
+        if (lower.contains("deploy")) return "deploy";
+        return "other";
     }
 
     private void updateSession(String runId, java.util.function.UnaryOperator<PreviewSession> updater) {

@@ -2,7 +2,14 @@ package com.navneet.executespec.agent;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.state.InboxService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
+import com.navneet.executespec.config.CustomMetricsConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -24,6 +31,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -88,6 +97,7 @@ public class LlmRouter {
     private final InboxService inboxService;
     private final RunKeyStore runKeyStore;
     private final AgentProperties agentProperties;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -100,85 +110,186 @@ public class LlmRouter {
     public LlmResponse callWithFallbackTracked(String primaryProvider, String primaryModel,
                                                Prompt prompt, String runId, String agentId,
                                                FallbackMode mode, int iteration, boolean justCompacted) {
-        List<String[]> chain = resolveChain(primaryModel);
-        int startIndex = findIndexInChain(chain, primaryProvider);
+        Observation llmObs = Observation.createNotStarted("executespec.llm.call", getObservationRegistry())
+            .lowCardinalityKeyValue("agent.id", agentId != null ? agentId : "unknown")
+            .lowCardinalityKeyValue("run.id", runId != null ? runId : "unknown")
+            .lowCardinalityKeyValue("fallback.mode", mode != null ? mode.name() : "unknown")
+            .start();
 
-        // Resolve per-run keys to check provider restrictions
-        ResolvedKeys runKeys = runKeyStore.get(runId);
+        try {
+            List<String[]> chain = resolveChain(primaryModel);
+            int startIndex = findIndexInChain(chain, primaryProvider);
 
-        Exception lastError = null;
-        for (int j = 0; j < chain.size(); j++) {
-            int i = (startIndex + j) % chain.size();
-            String provider = chain.get(i)[0];
-            String model    = chain.get(i)[1];
+            // Resolve per-run keys to check provider restrictions
+            ResolvedKeys runKeys = runKeyStore.get(runId);
 
-            // Skip providers disabled by org policy
-            if (runKeys != null && !runKeys.isProviderAllowed(provider)) {
-                log.info("[LlmRouter] Provider {} disabled by org policy — skipping", provider);
-                continue;
-            }
+            Exception lastError = null;
+            for (int j = 0; j < chain.size(); j++) {
+                int i = (startIndex + j) % chain.size();
+                String provider = chain.get(i)[0];
+                String model    = chain.get(i)[1];
+                Instant callStart = Instant.now();
 
-            if (j > 0) {
-                log.warn("[LlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
-                    primaryProvider, provider, agentId, iteration);
-                inboxService.sendProviderFallback(runId, agentId, primaryProvider, provider,
-                    lastError != null ? lastError.getMessage() : "unknown error");
-            }
+                llmObs.lowCardinalityKeyValue("provider", provider);
+                llmObs.lowCardinalityKeyValue("model", model);
 
-            try {
-                ChatResponse response = callWithModelOptions(provider, model, prompt, runId);
+                // Skip providers disabled by org policy
+                if (runKeys != null && !runKeys.isProviderAllowed(provider)) {
+                    log.info("[LlmRouter] Provider {} disabled by org policy — skipping", provider);
+                    continue;
+                }
+
                 if (j > 0) {
-                    log.info("[LlmRouter] Fallback succeeded: {} for {}", provider, agentId);
+                    String fromProvider = chain.get((startIndex + j - 1) % chain.size())[0];
+                    llmObs.event(Observation.Event.of("fallback",
+                        "Falling back from " + fromProvider + " to " + provider));
+                    Counter.builder(LLM_FALLBACK).tag("from", fromProvider).tag("to", provider)
+                            .register(meterRegistry).increment();
+                    log.warn("[LlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
+                        primaryProvider, provider, agentId, iteration);
+                    inboxService.sendProviderFallback(runId, agentId, primaryProvider, provider,
+                        lastError != null ? lastError.getMessage() : "unknown error");
                 }
-                return new LlmResponse(response, provider, model);
-            } catch (Exception e) {
-                if (isPerMinuteRateLimit(e)) {
-                    log.warn("[LlmRouter] Per-minute rate limit on {} for {} (iteration={}) — sleeping 15 s before retry",
-                        provider, agentId, iteration);
-                    try {
-                        Thread.sleep(15_000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new ProviderUnavailableException("Interrupted during rate-limit sleep for " + agentId);
+
+                try {
+                    ChatResponse response = callWithModelOptions(provider, model, prompt, runId);
+                    Duration callDuration = Duration.between(callStart, Instant.now());
+                    Counter.builder(LLM_CALLS).tag("provider", provider).tag("model", model)
+                            .register(meterRegistry).increment();
+                    Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
+                            .register(meterRegistry).record(callDuration);
+                    if (j > 0) {
+                        log.info("[LlmRouter] Fallback succeeded: {} for {}", provider, agentId);
                     }
+                    // Record token usage as high-cardinality keys
                     try {
-                        ChatResponse retryResponse = callWithModelOptions(provider, model, prompt, runId);
-                        log.info("[LlmRouter] Post-sleep retry succeeded: {} for {}", provider, agentId);
-                        return new LlmResponse(retryResponse, provider, model);
-                    } catch (Exception retryEx) {
-                        log.warn("[LlmRouter] Post-sleep retry also failed on {} for {}: {}",
-                            provider, agentId, retryEx.getMessage());
-                        lastError = retryEx;
+                        var usage = response.getMetadata().getUsage();
+                        Counter.builder(LLM_TOKENS_INPUT).tag("provider", provider).tag("model", model)
+                                .register(meterRegistry).increment(usage.getPromptTokens());
+                        Counter.builder(LLM_TOKENS_OUTPUT).tag("provider", provider).tag("model", model)
+                                .register(meterRegistry).increment(usage.getCompletionTokens());
+                        llmObs.highCardinalityKeyValue("tokens.prompt",
+                            String.valueOf(usage.getPromptTokens()));
+                        llmObs.highCardinalityKeyValue("tokens.completion",
+                            String.valueOf(usage.getCompletionTokens()));
+                        llmObs.highCardinalityKeyValue("tokens.total",
+                            String.valueOf(usage.getTotalTokens()));
+                    } catch (Exception tokenEx) {
+                        // token extraction is best-effort
                     }
-                } else if (isOverloaded(e)) {
-                    log.warn("[LlmRouter] Anthropic overloaded (529) for {} (iteration={}) — sleeping 30 s before retry",
-                        agentId, iteration);
-                    try {
-                        Thread.sleep(30_000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new ProviderUnavailableException("Interrupted during overload sleep for " + agentId);
+                    llmObs.lowCardinalityKeyValue("outcome", "success");
+                    return new LlmResponse(response, provider, model);
+                } catch (Exception e) {
+                    if (isPerMinuteRateLimit(e)) {
+                        llmObs.event(Observation.Event.of("rate_limit",
+                            "Per-minute rate limit on " + provider));
+                        log.warn("[LlmRouter] Per-minute rate limit on {} for {} (iteration={}) — sleeping 15 s before retry",
+                            provider, agentId, iteration);
+                        try {
+                            Thread.sleep(15_000);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new ProviderUnavailableException("Interrupted during rate-limit sleep for " + agentId);
+                        }
+                        try {
+                            ChatResponse retryResponse = callWithModelOptions(provider, model, prompt, runId);
+                            Duration retryCallDuration = Duration.between(callStart, Instant.now());
+                            Counter.builder(LLM_CALLS).tag("provider", provider).tag("model", model)
+                                    .register(meterRegistry).increment();
+                            Counter.builder(LLM_RETRY_COUNT).tag("provider", provider).tag("model", model)
+                                    .register(meterRegistry).increment();
+                            Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
+                                    .register(meterRegistry).record(retryCallDuration);
+                            log.info("[LlmRouter] Post-sleep retry succeeded: {} for {}", provider, agentId);
+                            try {
+                                var usage = retryResponse.getMetadata().getUsage();
+                                Counter.builder(LLM_TOKENS_INPUT).tag("provider", provider).tag("model", model)
+                                        .register(meterRegistry).increment(usage.getPromptTokens());
+                                Counter.builder(LLM_TOKENS_OUTPUT).tag("provider", provider).tag("model", model)
+                                        .register(meterRegistry).increment(usage.getCompletionTokens());
+                                llmObs.highCardinalityKeyValue("tokens.prompt",
+                                    String.valueOf(usage.getPromptTokens()));
+                                llmObs.highCardinalityKeyValue("tokens.completion",
+                                    String.valueOf(usage.getCompletionTokens()));
+                                llmObs.highCardinalityKeyValue("tokens.total",
+                                    String.valueOf(usage.getTotalTokens()));
+                            } catch (Exception tokenEx) {
+                                // best-effort
+                            }
+                            llmObs.lowCardinalityKeyValue("outcome", "success_after_retry");
+                            return new LlmResponse(retryResponse, provider, model);
+                        } catch (Exception retryEx) {
+                            log.warn("[LlmRouter] Post-sleep retry also failed on {} for {}: {}",
+                                provider, agentId, retryEx.getMessage());
+                            Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", "rate_limit_retry_failed")
+                                    .register(meterRegistry).increment();
+                            lastError = retryEx;
+                        }
+                    } else if (isOverloaded(e)) {
+                        llmObs.event(Observation.Event.of("overloaded",
+                            "Provider overloaded (529) on " + provider));
+                        log.warn("[LlmRouter] Anthropic overloaded (529) for {} (iteration={}) — sleeping 30 s before retry",
+                            agentId, iteration);
+                        try {
+                            Thread.sleep(30_000);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new ProviderUnavailableException("Interrupted during overload sleep for " + agentId);
+                        }
+                        try {
+                            ChatResponse retryResponse = callWithModelOptions(provider, model, prompt, runId);
+                            Duration retryCallDuration2 = Duration.between(callStart, Instant.now());
+                            Counter.builder(LLM_CALLS).tag("provider", provider).tag("model", model)
+                                    .register(meterRegistry).increment();
+                            Counter.builder(LLM_RETRY_COUNT).tag("provider", provider).tag("model", model)
+                                    .register(meterRegistry).increment();
+                            Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
+                                    .register(meterRegistry).record(retryCallDuration2);
+                            log.info("[LlmRouter] Post-overload retry succeeded: {} for {}", provider, agentId);
+                            try {
+                                var usage = retryResponse.getMetadata().getUsage();
+                                Counter.builder(LLM_TOKENS_INPUT).tag("provider", provider).tag("model", model)
+                                        .register(meterRegistry).increment(usage.getPromptTokens());
+                                Counter.builder(LLM_TOKENS_OUTPUT).tag("provider", provider).tag("model", model)
+                                        .register(meterRegistry).increment(usage.getCompletionTokens());
+                                llmObs.highCardinalityKeyValue("tokens.prompt",
+                                    String.valueOf(usage.getPromptTokens()));
+                                llmObs.highCardinalityKeyValue("tokens.completion",
+                                    String.valueOf(usage.getCompletionTokens()));
+                                llmObs.highCardinalityKeyValue("tokens.total",
+                                    String.valueOf(usage.getTotalTokens()));
+                            } catch (Exception tokenEx) {
+                                // best-effort
+                            }
+                            llmObs.lowCardinalityKeyValue("outcome", "success_after_retry");
+                            return new LlmResponse(retryResponse, provider, model);
+                        } catch (Exception retryEx) {
+                            log.warn("[LlmRouter] Post-overload retry also failed on {} for {}: {}",
+                                provider, agentId, retryEx.getMessage());
+                            Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", "overload_retry_failed")
+                                    .register(meterRegistry).increment();
+                            lastError = retryEx;
+                        }
+                    } else {
+                        log.warn("[LlmRouter] Provider {} failed for {} (non-rate-limit, iteration={}): {}",
+                            provider, agentId, iteration, e.getMessage());
+                        Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", "provider_error")
+                                .register(meterRegistry).increment();
+                        lastError = e;
                     }
-                    try {
-                        ChatResponse retryResponse = callWithModelOptions(provider, model, prompt, runId);
-                        log.info("[LlmRouter] Post-overload retry succeeded: {} for {}", provider, agentId);
-                        return new LlmResponse(retryResponse, provider, model);
-                    } catch (Exception retryEx) {
-                        log.warn("[LlmRouter] Post-overload retry also failed on {} for {}: {}",
-                            provider, agentId, retryEx.getMessage());
-                        lastError = retryEx;
-                    }
-                } else {
-                    log.warn("[LlmRouter] Provider {} failed for {} (non-rate-limit, iteration={}): {}",
-                        provider, agentId, iteration, e.getMessage());
-                    lastError = e;
                 }
             }
-        }
 
-        throw new ProviderUnavailableException(
-            "All providers in chain exhausted for agent " + agentId + ". Last error: "
-            + (lastError != null ? lastError.getMessage() : "none"));
+            llmObs.lowCardinalityKeyValue("outcome", "all_providers_exhausted");
+            throw new ProviderUnavailableException(
+                "All providers in chain exhausted for agent " + agentId + ". Last error: "
+                + (lastError != null ? lastError.getMessage() : "none"));
+        } catch (Exception e) {
+            llmObs.error(e);
+            throw e;
+        } finally {
+            llmObs.stop();
+        }
     }
 
     /**
