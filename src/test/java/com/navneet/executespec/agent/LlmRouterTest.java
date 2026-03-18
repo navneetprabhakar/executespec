@@ -26,6 +26,7 @@ class LlmRouterTest {
     @Mock private InboxService inboxService;
     @Mock private RunKeyStore runKeyStore;
     @Mock private com.navneet.executespec.config.AgentProperties agentProperties;
+    @Mock private io.micrometer.core.instrument.MeterRegistry meterRegistry;
     @Mock private AnthropicChatModel anthropicChatModel;
     @Mock private ChatResponse chatResponse;
 
@@ -33,7 +34,7 @@ class LlmRouterTest {
 
     @BeforeEach
     void setUp() {
-        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties);
+        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties, meterRegistry);
     }
 
     @Nested
