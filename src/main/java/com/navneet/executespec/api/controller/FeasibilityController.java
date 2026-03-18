@@ -1,4 +1,5 @@
 package com.navneet.executespec.api.controller;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.navneet.executespec.agent.CostEstimator;
 import com.navneet.executespec.agent.PlannerAgent;
@@ -82,8 +83,8 @@ public class FeasibilityController {
 
     private String defaultModel(String provider) {
         return switch (provider.toLowerCase()) {
-            case "openai"  -> "gpt-4o-mini";
-            default        -> "claude-haiku-4-5-20251001";
+            case "openai"  -> ModelConstants.GPT4O_MINI;
+            default        -> ModelConstants.HAIKU;
         };
     }
 }

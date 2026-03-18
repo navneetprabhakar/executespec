@@ -1,5 +1,6 @@
 package com.navneet.executespec.router;
 
+import com.navneet.executespec.config.ModelConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,19 +28,19 @@ public class ModelRouter {
 
     private static final Map<ModelTier, Map<LlmProvider, String>> MODEL_MATRIX = Map.of(
             ModelTier.FAST, Map.of(
-                    LlmProvider.ANTHROPIC, "claude-haiku-4-5-20251001",
-                    LlmProvider.OPENAI, "gpt-4o-mini",
-                    LlmProvider.GEMINI, "gemini-3-flash-preview"
+                    LlmProvider.ANTHROPIC, ModelConstants.HAIKU,
+                    LlmProvider.OPENAI, ModelConstants.GPT4O_MINI,
+                    LlmProvider.GEMINI, ModelConstants.GEMINI_UTILITY
             ),
             ModelTier.CAPABLE, Map.of(
-                    LlmProvider.ANTHROPIC, "claude-sonnet-4-6",
-                    LlmProvider.OPENAI, "gpt-4o",
-                    LlmProvider.GEMINI, "gemini-3.1-flash-lite-preview"
+                    LlmProvider.ANTHROPIC, ModelConstants.SONNET,
+                    LlmProvider.OPENAI, ModelConstants.GPT4O,
+                    LlmProvider.GEMINI, ModelConstants.GEMINI_CAPABLE
             ),
             ModelTier.POWER, Map.of(
-                    LlmProvider.ANTHROPIC, "claude-opus-4-6",
-                    LlmProvider.OPENAI, "gpt-4o",
-                    LlmProvider.GEMINI, "gemini-3.1-pro-preview-customtools"
+                    LlmProvider.ANTHROPIC, ModelConstants.OPUS,
+                    LlmProvider.OPENAI, ModelConstants.GPT4O,
+                    LlmProvider.GEMINI, ModelConstants.GEMINI_ARCHITECT
             )
     );
 

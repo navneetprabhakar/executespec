@@ -30,7 +30,7 @@ type Mode = 'compose' | 'chat';
 export default function NewRunModal({ onClose }: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
   const [goal, setGoal] = useState('');
-  const [fastMode, setFastMode] = useState(true);
+  const [fastMode, setFastMode] = useState(false);
   const [showGitHub, setShowGitHub] = useState(false);
   const [model, setModel] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');

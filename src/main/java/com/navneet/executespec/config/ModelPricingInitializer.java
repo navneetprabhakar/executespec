@@ -1,5 +1,6 @@
 package com.navneet.executespec.config;
 
+import com.navneet.executespec.config.ModelConstants;
 import com.navneet.executespec.pricing.ModelPricing;
 import com.navneet.executespec.pricing.ModelPricingId;
 import com.navneet.executespec.pricing.ModelPricingRepository;
@@ -35,38 +36,38 @@ public class ModelPricingInitializer {
         List<Object[]> defaults = List.of(
             // ── Anthropic — primary provider (Anthropic public pricing Mar 2026) ─────────
             new Object[]{
-                "anthropic", "claude-opus-4-6", 15.00, 75.00,
-                "✅ PRIMARY — Planner (ARCHITECT chain). With prompt caching: writes 1.25x, reads 0.10x."
+                "anthropic", ModelConstants.OPUS, 15.00, 75.00,
+                "PRIMARY — Planner (ARCHITECT chain). With prompt caching: writes 1.25x, reads 0.10x."
             },
             new Object[]{
-                "anthropic", "claude-sonnet-4-6", 3.00, 15.00,
-                "✅ PRIMARY — Workers (CAPABLE chain). With prompt caching: writes 1.25x, reads 0.10x."
+                "anthropic", ModelConstants.SONNET, 3.00, 15.00,
+                "PRIMARY — Workers (CAPABLE chain). With prompt caching: writes 1.25x, reads 0.10x."
             },
             new Object[]{
-                "anthropic", "claude-haiku-4-5-20251001", 0.80, 4.00,
-                "✅ PRIMARY — Reviewer + context agent + optimiser (UTILITY chain)."
+                "anthropic", ModelConstants.HAIKU, 0.80, 4.00,
+                "PRIMARY — Reviewer + context agent + optimiser (UTILITY chain)."
             },
             // ── Google Gemini — 2nd fallback (Google AI pricing Mar 2026) ────────────────
             new Object[]{
-                "google", "gemini-3.1-pro-preview-customtools", 2.00, 12.00,
-                "2nd fallback — Anthropic outage/rate-limit auto-switch (ARCHITECT chain). 1M ctx, 66K output. Released Feb 2026."
+                "google", ModelConstants.GEMINI_ARCHITECT, 2.00, 12.00,
+                "2nd fallback — ARCHITECT chain. 1M ctx, 66K output."
             },
             new Object[]{
-                "google", "gemini-3.1-flash-lite-preview", 0.25, 1.50,
-                "2nd fallback — Anthropic outage/rate-limit auto-switch (CAPABLE chain). Released Mar 2026."
+                "google", ModelConstants.GEMINI_CAPABLE, 0.25, 1.50,
+                "2nd fallback — CAPABLE chain."
             },
             new Object[]{
-                "google", "gemini-3-flash-preview", 0.15, 0.60,
-                "2nd fallback — Anthropic outage/rate-limit auto-switch (UTILITY chain). Gemini 3.0 flash. Released Mar 2026."
+                "google", ModelConstants.GEMINI_UTILITY, 0.15, 0.60,
+                "2nd fallback — UTILITY chain. Gemini 3.0 flash."
             },
             // ── OpenAI — 3rd fallback (OpenAI public pricing Mar 2026) ───────────────────
             new Object[]{
-                "openai", "gpt-4o", 2.50, 10.00,
-                "3rd fallback — Gemini outage/rate-limit auto-switch (CAPABLE + ARCHITECT chains)"
+                "openai", ModelConstants.GPT4O, 2.50, 10.00,
+                "3rd fallback — CAPABLE + ARCHITECT chains"
             },
             new Object[]{
-                "openai", "gpt-4o-mini", 0.15, 0.60,
-                "3rd fallback — Gemini outage/rate-limit auto-switch (UTILITY chain)"
+                "openai", ModelConstants.GPT4O_MINI, 0.15, 0.60,
+                "3rd fallback — UTILITY chain"
             }
         );
 

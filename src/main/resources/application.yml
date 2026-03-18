@@ -115,7 +115,7 @@ agent:
       openai: anthropic
   context:
     enabled: true
-    model: claude-haiku-4-5-20251001   # The Scout: text summarization, no code generation
+    # model: uses ModelConstants.HAIKU (Scout: text summarization)
     provider: anthropic
     run-interval: 1
   optimiser:
@@ -124,7 +124,7 @@ agent:
     analysis-window-runs: 20
     failure-rate-threshold: 0.20
     pattern-min-occurrences: 2
-    model: claude-haiku-4-5-20251001   # The Scout: pattern analysis, text edits only
+    # model: uses ModelConstants.HAIKU (Scout: pattern analysis)
     provider: anthropic
   deployment:
     enabled: true
@@ -156,11 +156,11 @@ agent:
     enabled: true
     max-attempts: 3
     timeout-seconds: 300
-    model: claude-haiku-4-5-20251001    # haiku: fast, budget-friendly compiler error analysis
+    # model: uses ModelConstants.HAIKU (compiler error analysis)
     provider: anthropic
   api-test-suite:
     enabled: true
-    model: claude-haiku-4-5-20251001    # haiku: fast, budget-friendly OpenAPI spec generation
+    # model: uses ModelConstants.HAIKU (OpenAPI spec generation)
     provider: anthropic
 
   preview:
@@ -171,25 +171,21 @@ agent:
     enabled: true             # Master switch — set true to register /api/integrations/* endpoints
     jira:
       enabled: false
-      base-url: ${JIRA_BASE_URL:}
-      email: ${JIRA_EMAIL:}
-      api-token: ${JIRA_API_TOKEN:}
+      # Credentials resolved from org table (per-org, configured via Settings UI)
       webhook-secret: ${JIRA_WEBHOOK_SECRET:}
       trigger-status: "Ready for Coding"   # issue status name that fires the pipeline
       in-progress-status: "In Progress"    # transition to on run start (null = skip)
       in-review-status: "In Review"        # transition to on run complete (null = skip)
       reopen-status: "Backlog"             # transition to on run failed (null = skip)
-      dashboard-url: http://localhost:8080
-      skip-approval: true
+      dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
+      skip-approval: false
     confluence:
       enabled: false
-      base-url: ${CONFLUENCE_BASE_URL:}
-      email: ${CONFLUENCE_EMAIL:}
-      api-token: ${CONFLUENCE_API_TOKEN:}
+      # Credentials resolved from org table (per-org, configured via Settings UI)
       trigger-label: "agent-run"           # page label that fires the pipeline
       space-key: "KAN"                     # default space for child pages
-      dashboard-url: http://localhost:8080
-      skip-approval: true
+      dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
+      skip-approval: false
     servicenow:
       enabled: false
       base-url: ${SNOW_BASE_URL:}

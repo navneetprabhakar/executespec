@@ -22,9 +22,12 @@ public class IntegrationProperties {
     @Data
     public static class JiraConfig {
         private boolean enabled = false;
-        private String baseUrl;
-        private String email;
-        private String apiToken;
+        /** @deprecated Use per-org credentials from org table (Settings UI). Kept for backward compat with env vars. */
+        @Deprecated private String baseUrl;
+        /** @deprecated Use per-org credentials from org table (Settings UI). */
+        @Deprecated private String email;
+        /** @deprecated Use per-org credentials from org table (Settings UI). */
+        @Deprecated private String apiToken;
         private String webhookSecret;
         private String triggerStatus = "Ready for Coding";
         private String inProgressStatus;    // transition on run start (null = skip)
@@ -37,9 +40,12 @@ public class IntegrationProperties {
     @Data
     public static class ConfluenceConfig {
         private boolean enabled = false;
-        private String baseUrl;
-        private String email;
-        private String apiToken;
+        /** @deprecated Use per-org credentials from org table (Settings UI). Kept for backward compat with env vars. */
+        @Deprecated private String baseUrl;
+        /** @deprecated Use per-org credentials from org table (Settings UI). */
+        @Deprecated private String email;
+        /** @deprecated Use per-org credentials from org table (Settings UI). */
+        @Deprecated private String apiToken;
         private String triggerLabel = "agent-run";
         private String spaceKey = "ENG";
         private String dashboardUrl = "http://localhost:8080";

@@ -1,4 +1,5 @@
 package com.navneet.executespec.agent;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.ReviewReport;
@@ -49,7 +50,7 @@ public class ConversationAgent {
     public static final int MAX_MESSAGES = 10;
 
     private static final String PRIMARY_PROVIDER = "anthropic";
-    private static final String PRIMARY_MODEL    = "claude-sonnet-4-6";
+    private static final String PRIMARY_MODEL    = ModelConstants.SONNET;
     private static final int    MAX_OUTPUT_TOKENS = 4096;
     private static final int    MAX_CONTEXT_CHARS = 32_000; // ~8000 tokens of workspace context
     private static final int    MAX_FILE_CHARS    = 3000;   // per source file

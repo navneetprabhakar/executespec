@@ -1,4 +1,5 @@
 package com.navneet.executespec.config;
+import com.navneet.executespec.config.ModelConstants;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -83,7 +84,7 @@ public class AgentProperties {
         private boolean enabled      = true;
         private int maxAttempts      = 3;
         private int timeoutSeconds   = 300;
-        private String model         = "claude-haiku-4-5-20251001";
+        private String model         = ModelConstants.HAIKU;
         private String provider      = "anthropic";
     }
 
@@ -93,7 +94,7 @@ public class AgentProperties {
     @Data
     public static class ApiTestSuite {
         private boolean enabled = true;
-        private String model    = "claude-haiku-4-5-20251001";
+        private String model    = ModelConstants.HAIKU;
         private String provider = "anthropic";
     }
 

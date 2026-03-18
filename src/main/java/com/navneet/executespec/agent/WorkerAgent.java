@@ -1,4 +1,5 @@
 package com.navneet.executespec.agent;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -85,7 +86,7 @@ public class WorkerAgent {
 
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
-        String model = task.getAssignedModel() != null ? task.getAssignedModel() : "claude-haiku-4-5-20251001";
+        String model = task.getAssignedModel() != null ? task.getAssignedModel() : ModelConstants.HAIKU;
         String provider = resolveProvider(model);
         String agentId = "worker-" + taskId;
         String complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
@@ -576,9 +577,9 @@ public class WorkerAgent {
      */
     private String escalateModel(String currentModel) {
         return switch (currentModel) {
-            case "claude-haiku-4-5-20251001", "claude-haiku-4-5" -> "claude-sonnet-4-6";
-            case "claude-sonnet-4-6", "claude-sonnet-4-5" -> "claude-opus-4-6";
-            case "gpt-4o-mini" -> "gpt-4o";
+            case ModelConstants.HAIKU, ModelConstants.HAIKU_LEGACY -> ModelConstants.SONNET;
+            case ModelConstants.SONNET, ModelConstants.SONNET_LEGACY -> ModelConstants.OPUS;
+            case ModelConstants.GPT4O_MINI -> ModelConstants.GPT4O;
             default -> currentModel; // already at max or unknown — no change
         };
     }

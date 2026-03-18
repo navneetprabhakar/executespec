@@ -1,4 +1,5 @@
 package com.navneet.executespec.harness;
+import com.navneet.executespec.config.ModelConstants;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -2935,7 +2936,7 @@ public class PipelineHarness {
             .filter(t -> OPENAPI_TASK_ID.equals(t.getTaskId()))
             .findFirst()
             .ifPresent(t -> {
-                String model  = t.getAssignedModel() != null ? t.getAssignedModel() : "claude-haiku-4-5-20251001";
+                String model  = t.getAssignedModel() != null ? t.getAssignedModel() : ModelConstants.HAIKU;
                 String branch = "agent/" + runId.substring(0, 8) + "/" + OPENAPI_TASK_ID;
                 if (!stateStore.lockTask(t.getTaskId(), model, branch)) {
                     // Already locked (may be a retry) — still ensure it is COMPLETE
