@@ -18,6 +18,8 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.recovery.RecoveryProperties;
 import com.navneet.executespec.recovery.RunRecoveryService;
+import com.navneet.executespec.report.model.ReportInput;
+import com.navneet.executespec.compiler.CompileResult;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -98,6 +100,9 @@ public class PipelineHarness {
     // ── Multi-tenant API key routing ──────────────────────────────────────────
     private final ApiKeyResolver apiKeyResolver;
     private final RunKeyStore runKeyStore;
+
+    // ── Validation report ──────────────────────────────────────────────────
+    private final com.navneet.executespec.report.ValidationReportService validationReportService;
 
     // ── Auto-retry infrastructure ──────────────────────────────────────────
     private final com.navneet.executespec.auth.repository.TierConfigRepository tierConfigRepo;
@@ -971,6 +976,9 @@ public class PipelineHarness {
                     + "\nUse the 'Rework' button to apply fixes, or 'Merge' to override."));
             }
 
+            // ── 6b. Validation Report (non-fatal) ────────────────────────
+            generateValidationReport(runId, freshRun, allReports, review, null);
+
             // ── 7. Merge gate ───────────────────────────────────────────────
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
             gateStore.clearMergeGate(runId);
@@ -1217,6 +1225,8 @@ public class PipelineHarness {
                     PipelineRun freshRun = stateStore.findRun(runId).orElse(run);
                     review = reviewerAgent.review(freshRun, reports);
                     stateStore.saveReview(runId, review);
+                    // Validation Report (non-fatal)
+                    generateValidationReport(runId, freshRun, reports, review, null);
                     needsReview = false;
                 }
 
@@ -1710,11 +1720,12 @@ public class PipelineHarness {
                     .register(meterRegistry).record(java.time.Duration.between(approvalEnd, workEnd));
 
             // ── Tier 8: Compile & Fix (non-fatal, sync before reviewer) ───
+            CompileResult mainCompileResult = null;
             Observation compileObs = Observation.createNotStarted("executespec.run.phase.compile", observationRegistry)
                 .lowCardinalityKeyValue("run.id", runId)
                 .start();
             try (Observation.Scope compileScope = compileObs.openScope()) {
-                compilerAgent.runCompileAndFix(runId);
+                mainCompileResult = compilerAgent.runCompileAndFix(runId);
             } catch (Exception e) {
                 compileObs.error(e);
                 throw e;
@@ -1813,6 +1824,9 @@ public class PipelineHarness {
             Instant reviewEnd = Instant.now();
             Timer.builder(HANDOVER_DURATION).tag("from_phase", "compile").tag("to_phase", "review")
                     .register(meterRegistry).record(java.time.Duration.between(compileEnd, reviewEnd));
+
+            // ── 4b. Validation Report (non-fatal) ────────────────────────
+            generateValidationReport(runId, currentRun, currentReports, review, mainCompileResult);
 
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
             Instant mergeGateStart = Instant.now();
@@ -2336,6 +2350,9 @@ public class PipelineHarness {
                     "⚠️ Reviewer recommends REWORK: " + review.getSummary()
                     + "\nUse the 'Rework' button to apply fixes, or 'Merge' to override."));
             }
+
+            // ── 5b. Validation Report (non-fatal) ────────────────────────
+            generateValidationReport(runId, freshRun, currentRetryReports, review, null);
 
             // ── 6. Merge gate ──────────────────────────────────────────────
             broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_MERGE"));
@@ -2964,5 +2981,28 @@ public class PipelineHarness {
      */
     private void clearGateSync(String runId) {
         stateStore.findRun(runId).ifPresent(r -> { r.setCurrentGate(null); stateStore.save(r); });
+    }
+
+    /**
+     * Generates a validation report for the run (non-fatal).
+     * Called after review completes and before the merge gate opens.
+     */
+    private void generateValidationReport(String runId, PipelineRun run,
+                                           List<WorkerReport> reports,
+                                           ReviewReport review,
+                                           CompileResult compileResult) {
+        Observation reportObs = Observation.createNotStarted("executespec.run.phase.report", observationRegistry)
+            .lowCardinalityKeyValue("run.id", runId)
+            .start();
+        try (Observation.Scope reportScope = reportObs.openScope()) {
+            ReportInput input = new ReportInput(run, reports, review, compileResult, stateStore.getAllTasks(runId));
+            validationReportService.generateAndPersist(runId, input);
+            broadcaster.emit(runId, RunEvent.log(runId, "report", "✅ Validation report generated"));
+        } catch (Exception e) {
+            reportObs.error(e);
+            log.warn("Validation report generation failed for run {} — continuing to merge gate", runId, e);
+        } finally {
+            reportObs.stop();
+        }
     }
 }

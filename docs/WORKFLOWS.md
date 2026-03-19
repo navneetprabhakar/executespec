@@ -74,9 +74,10 @@ flowchart TD
     X --> Y
 
     Z --> AA[ReviewerAgent — code review]
-    AA --> AB{autoMerge?}
+    AA --> AAB[ValidationReportAgent — quality summary]
+    AAB --> AB{autoMerge?}
     AB -->|Yes| AC[Auto-approve merge]
-    AB -->|No| AD[Merge Approval Gate — User reviews]
+    AB -->|No| AD[Merge Approval Gate — User reviews + report]
     AD -->|Approve| AC
     AD -->|Reject| AE[❌ Run stays in REVIEW]
     AC --> AF[GitMergeService — final merge to main]
@@ -117,6 +118,8 @@ sequenceDiagram
     S->>U: 🔧 Compiling
     P->>S: REVIEW_READY
     S->>U: 📝 Review ready
+    P->>S: REPORT_GENERATED
+    S->>U: 📊 Validation report ready
     U->>P: POST /merge
     P->>S: MERGE_COMPLETED
     S->>U: 🎉 Merged!

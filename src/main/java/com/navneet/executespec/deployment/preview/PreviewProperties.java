@@ -13,9 +13,12 @@ public class PreviewProperties {
     private int totalStartupTimeoutSeconds = 300;  // 5-minute total deadline for entire preview startup
     private int previewTtlMinutes = 10;            // auto-shutdown after N minutes
 
-    // Cloud Run config for preview services
-    private String cloudRunCpu = "1";
-    private String cloudRunMemory = "512Mi";
+    // Docker Compose port range
+    private int portRangeStart = 10000;
+    private int portRangeEnd = 10100;
+
+    // Caddy reverse proxy domain (wildcard: *.{previewDomain})
+    private String previewDomain = "preview.executespec.ai";
 
     private ConcurrencyConfig concurrency = new ConcurrencyConfig();
 

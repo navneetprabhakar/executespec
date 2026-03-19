@@ -338,6 +338,42 @@ docker system prune -f --filter "until=24h" 2>/dev/null || true
 CRONEOF
 chmod +x /etc/cron.daily/docker-cleanup
 
+# ── 11. Caddy reverse proxy for previews ────────────────────────────────────
+
+log "Phase 11: Caddy reverse proxy"
+
+if ! command -v caddy &>/dev/null; then
+  log "Installing Caddy..."
+  apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+  apt-get update -qq
+  apt-get install -y -qq caddy
+fi
+log "Caddy: $(caddy version 2>/dev/null || echo 'installed')"
+
+# Write Caddy config for preview routing.
+# The "preview" server listens on :443 for *.preview.executespec.ai.
+# Routes are added/removed dynamically via the admin API (localhost:2019).
+# For now, use a simple Caddyfile with on-demand TLS.
+GCP_PROJECT=$(meta "gcp-project" || echo "executespecv1")
+cat > /etc/caddy/Caddyfile << CADDYEOF
+{
+    admin localhost:2019
+}
+
+*.preview.executespec.ai {
+    tls {
+        on_demand
+    }
+    respond "Preview not found" 404
+}
+CADDYEOF
+
+systemctl enable caddy
+systemctl restart caddy
+log "Caddy configured and started"
+
 # ── Done ────────────────────────────────────────────────────────────────────
 
 log "Startup script complete. Environment: ${ES_ENV:-unknown}"

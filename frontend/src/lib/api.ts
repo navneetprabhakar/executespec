@@ -1150,3 +1150,84 @@ export const getAuditLogs = (params: {
   const base = params.orgScoped ? '/org/me/audit-logs' : '/admin/audit-logs';
   return req<AuditLogPage>(`${base}?${qs.toString()}`);
 };
+
+// ── Validation Reports ──────────────────────────────────────────────────
+
+export interface ReportIssue {
+  description: string;
+  severity: 'WOULD_BREAK_BUILD' | 'WOULD_FAIL_REVIEW' | 'WOULD_CAUSE_BUG' | 'WOULD_FAIL_LINT';
+  fix: string | null;
+  stage: 'CODE_VALIDATOR' | 'COMPILER_AGENT' | 'REVIEWER_AGENT';
+  filePath: string | null;
+}
+
+export interface ValidationReportData {
+  id: string;
+  runId: string;
+  filesGenerated: number;
+  languages: string[];
+  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'FAILED';
+  issues: ReportIssue[];
+  checksPassed: string[];
+  reportMarkdown: string;
+  modelUsed: string;
+  createdAt: string;
+  issuesCaught: number;
+  buildBreakers: number;
+  reviewFailures: number;
+  productionBugs: number;
+  lintFailures: number;
+  isShared: boolean;
+  shareUrl: string | null;
+}
+
+export interface SharedReportData {
+  filesGenerated: number;
+  languages: string[];
+  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'FAILED';
+  issues: ReportIssue[];
+  checksPassed: string[];
+  reportMarkdown: string;
+  createdAt: string;
+}
+
+export const getValidationReport = async (runId: string): Promise<ValidationReportData | null> => {
+  try {
+    return await req<ValidationReportData>(`/runs/${runId}/report`);
+  } catch {
+    return null;
+  }
+};
+
+export const shareValidationReport = (runId: string) =>
+  req<{ shareToken: string; shareUrl: string }>(`/runs/${runId}/report/share`, { method: 'POST' });
+
+export const getSharedReport = async (shareToken: string): Promise<SharedReportData | null> => {
+  try {
+    const res = await fetch(`${BASE}/reports/shared/${shareToken}`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+};
+
+export const downloadValidationReportPdf = async (runId: string): Promise<void> => {
+  const res = await fetch(`${BASE}/runs/${runId}/report/pdf`, {
+    headers: { ...authHeader() },
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const raw = await res.text().catch(() => '');
+    throw new Error(parseErrorMessage(res.status, raw));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `validation-report-${runId.substring(0, 8)}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};

@@ -4,8 +4,6 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.config.AgentProperties;
-import com.navneet.executespec.deployment.ArtifactRegistryClient;
-import com.navneet.executespec.deployment.CloudRunClient;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -43,13 +41,15 @@ class PreviewServiceTest {
     @Mock DevDockerfileGenerator dockerfileGen;
     @Mock DatabaseDetector databaseDetector;
     @Mock EnvVarDetector envVarDetector;
-    @Mock ArtifactRegistryClient artifactRegistry;
-    @Mock CloudRunClient cloudRun;
+    @Mock ComposeFileGenerator composeFileGen;
+    @Mock ComposeExecutor composeExecutor;
     @Mock SseBroadcaster broadcaster;
     @Mock StateStore stateStore;
     @Mock TierConfigRepository tierConfigRepo;
     @Mock WorkspaceRestoreService restoreService;
     @Mock io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
+    PreviewPortPool portPool;
 
     PreviewProperties props;
     AgentProperties agentProps;
@@ -65,6 +65,8 @@ class PreviewServiceTest {
         agentProps = new AgentProperties();
         agentProps.setWorkspace(workspaceRoot.toString());
 
+        portPool = new PreviewPortPool(props);
+
         // Default: tier config returns unlimited preview starts (don't block tests)
         TierConfig freeTier = new TierConfig();
         freeTier.setMaxPreviewStarts(-1);
@@ -77,7 +79,7 @@ class PreviewServiceTest {
         });
 
         service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
+                composeFileGen, composeExecutor, portPool, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
     }
 
     @AfterEach
@@ -116,7 +118,7 @@ class PreviewServiceTest {
         void throwsWhenDisabled() {
             props.setEnabled(false);
             service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                    artifactRegistry, cloudRun, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
+                    composeFileGen, composeExecutor, portPool, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
                     .isInstanceOf(PreviewException.class)
@@ -229,7 +231,7 @@ class PreviewServiceTest {
             PreviewSession s2 = service.start(runId, freeUser()); // idempotent
 
             assertThat(s2.runId()).isEqualTo(s1.runId());
-            assertThat(s2.cloudRunServiceName()).isEqualTo(s1.cloudRunServiceName());
+            assertThat(s2.composeProjectName()).isEqualTo(s1.composeProjectName());
         }
     }
 

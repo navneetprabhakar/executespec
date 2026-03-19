@@ -37,13 +37,11 @@ const DB_LABELS: Record<string, { label: string; emoji: string }> = {
 const FULL_STACK_TYPES = new Set(['FULL_STACK', 'FULLSTACK']);
 
 /** Statuses that indicate the preview is starting up (intermediate phases) */
-const STARTING_STATUSES = new Set(['ANALYZING', 'BUILDING', 'PUSHING', 'DEPLOYING', 'STARTING']);
+const STARTING_STATUSES = new Set(['ANALYZING', 'BUILDING', 'STARTING']);
 
 const STATUS_MESSAGES: Record<string, string> = {
   ANALYZING: 'Analyzing project...',
-  BUILDING: 'Building container...',
-  PUSHING: 'Pushing image to registry...',
-  DEPLOYING: 'Deploying to Cloud Run...',
+  BUILDING: 'Building & starting containers...',
   STARTING: 'Waiting for application...',
 };
 

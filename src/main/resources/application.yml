@@ -218,10 +218,13 @@ agent:
 # ── Cloud Run-based preview ─────────────────────────────────────────────────
 preview:
   enabled: true
-  total-startup-timeout-seconds: 300   # 5-minute total deadline (covers build + push + deploy + health check)
+  total-startup-timeout-seconds: 300   # 5-minute total deadline (covers build + start + health check)
   preview-ttl-minutes: 10              # auto-shutdown after 10 minutes
-  cloud-run-cpu: "1"
-  cloud-run-memory: "512Mi"
+  port-range-start: 10000              # Docker Compose host port range
+  port-range-end: 10100
+  preview-domain: preview.executespec.ai  # wildcard domain (*.preview.executespec.ai)
+  proxy:
+    enabled: false                     # set true on GCE VM with Caddy installed
   concurrency:
     free-max: 1
     pro-max: 3
