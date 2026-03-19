@@ -9,7 +9,7 @@
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
 - **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews, GCE for main app
-- **Multi-agent pipeline:** Orchestrator (PipelineHarness) → PlannerAgent (Sonnet) → WorkerAgent per task (Haiku) → CompilerAgent → ReviewerAgentV2 → GitMergeService
+- **Multi-agent pipeline:** Orchestrator (PipelineHarness) → PlannerAgent (Sonnet) → WorkerAgent per task (Haiku) → CompilerAgent → ReviewerAgentV2 → ValidationReportAgent → GitMergeService
 - **LLM Router:** 3-provider fallback chains (Anthropic → Google → OpenAI) with tier-based model escalation (FAST → CAPABLE → POWER)
 - **Gate system:** Redis-backed approval gates (plan + merge) with 500ms polling, 2h TTL
 - **Progressive merge:** Each task merged to main immediately after validation
@@ -28,7 +28,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V31)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V34)
 
 ## Patterns: MUST Follow
 
@@ -112,6 +112,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
 | GET | `/api/runs/{id}/events` | SSE event stream |
 
+### Validation Report
+| GET | `/api/runs/{id}/report` | Get validation report |
+| GET | `/api/runs/{id}/report/pdf` | Download report as PDF |
+| POST | `/api/runs/{id}/report/share` | Generate share link |
+| GET | `/api/reports/shared/{token}` | Public shared report (no auth) |
+
 ### Preview & Deploy
 | POST | `/api/runs/{id}/preview/start` | Start Cloud Run preview |
 | DELETE | `/api/runs/{id}/preview/stop` | Stop preview |
@@ -145,12 +151,18 @@ Full API reference: see memory file `api-endpoints.md`
 | Code validator | `validator/CodeValidatorImpl.java` |
 | Compiler agent | `compiler/CompilerAgent.java` |
 | Reviewer agent | `reviewer/ReviewerAgentV2.java` |
+| Validation report | `report/ValidationReportService.java`, `report/ValidationReportGenerator.java` |
+| Report controller | `report/ValidationReportController.java` |
+| Report PDF | `report/ValidationReportPdfService.java` |
+| Report entity | `report/entity/ValidationReport.java` |
+| Report frontend | `frontend/src/components/runs/ValidationReportPanel.tsx` |
+| Shared report page | `frontend/src/pages/SharedReportPage.tsx` |
 | Preview (Cloud Run) | `deployment/preview/PreviewService.java` |
 | Deployment service | `deployment/DeploymentService.java` |
 | Tier permissions | `auth/service/TierPermissionService.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Slack integration | `integration/slack/SlackNotificationService.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V31) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V34) |
 | LLM prompts | `resources/prompts/*.txt` |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
@@ -166,13 +178,14 @@ Full API reference: see memory file `api-endpoints.md`
 | Planner | PlannerAgent | `claude-sonnet-4-6` |
 | Worker | WorkerAgent, CompilerAgent, ApiTestSuiteAgent | `claude-haiku-4-5-20251001` |
 | Reviewer | ReviewerAgentV2 | `claude-haiku-4-5-20251001` |
+| Report | ValidationReportGenerator | `claude-haiku-4-5-20251001` |
 | Scout | ContextAgent, PromptOptimiserAgent | `claude-haiku-4-5-20251001` |
 | Chat | ConversationAgent | `claude-haiku-4-5-20251001` |
 
 ## Current State
 
 ### Working
-- Full pipeline: plan → approve → work → compile → review → merge (with progressive merge)
+- Full pipeline: plan → approve → work → compile → review → **validation report** → merge (with progressive merge)
 - Multi-provider LLM routing with automatic fallback (Anthropic → Google → OpenAI)
 - 15-minute wall-clock worker time limit with stall detection and model escalation
 - Cloud Run previews with 10-min TTL and countdown timer

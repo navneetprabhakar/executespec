@@ -130,6 +130,25 @@ PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → 
 - Single LLM call with IMMEDIATE fallback
 - ReviewerAgentV2 (optional): two-phase agentic review with tool-use inspection and auto-fix
 
+### 7b. ValidationReportAgent
+
+**Purpose:** Generate a user-facing quality summary of pipeline findings. Runs after ReviewerAgent, before Merge Gate.
+
+**Requirements:**
+- Aggregate existing pipeline data: WorkerReports, CompileResult, ReviewReport, task list
+- Single LLM call (Haiku via LlmCallGuard) to generate markdown report
+- CRITICAL: Frame as CI/CD quality gate — never mention AI, models, LLMs, or agents
+- Extract issues from: ReviewReport.taskReviews[].issues[], CompileResult errors, boundary violations, acceptance criteria failures
+- Classify pipeline result: PASSED, PASSED_WITH_FIXES, FAILED
+- Persist to `validation_report` table (one per run, replace on rework)
+- Non-fatal: on failure, log warning and continue to merge gate
+- Share: generate UUID token for public URL (no auth required, whitelisted in SecurityConfig)
+- PDF export: server-side PDF generation via `ValidationReportPdfService`
+- Frontend: collapsible panel in RunDetail with severity badges, markdown report, all individual issues with scroll
+- OTel span: `executespec.run.phase.report`
+- Metrics: `executespec.report.generated`, `executespec.report.generation_duration`, `executespec.report.errors`, `executespec.report.issues_caught`, `executespec.report.shared`
+- API endpoints: `GET /api/runs/{id}/report`, `GET /api/runs/{id}/report/pdf`, `POST /api/runs/{id}/report/share`, `GET /api/reports/shared/{token}`
+
 ### 8. GitMergeService
 
 **Purpose:** Merge task branches to main with conflict resolution.

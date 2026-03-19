@@ -54,6 +54,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/integrations/slack/oauth/callback").permitAll()
                 // SSE streaming (authenticated via ?token= query param)
                 .requestMatchers("/api/runs/*/events").permitAll()
+                // Public shared validation reports (no auth)
+                .requestMatchers(HttpMethod.GET, "/api/reports/shared/*").permitAll()
                 // Static frontend assets (SPA)
                 .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

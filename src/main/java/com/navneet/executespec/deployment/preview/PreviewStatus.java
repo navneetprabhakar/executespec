@@ -2,10 +2,8 @@ package com.navneet.executespec.deployment.preview;
 
 public enum PreviewStatus {
     IDLE,
-    ANALYZING,     // detecting DB, env vars
-    BUILDING,      // Docker build
-    PUSHING,       // pushing image to Artifact Registry
-    DEPLOYING,     // deploying to Cloud Run
+    ANALYZING,     // detecting DB, env vars, project type
+    BUILDING,      // docker compose up --build (build + start)
     STARTING,      // waiting for app readiness (health check)
     RUNNING,
     FAILED,

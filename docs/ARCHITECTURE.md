@@ -216,6 +216,12 @@ graph TB
             R_ISSUES --> R_FIX[Phase 2: Auto-Fix<br/>Optional]
             R_FIX --> R_REPORT[ReviewReport<br/>MERGE/REWORK]
         end
+
+        subgraph "ValidationReportAgent (non-fatal)"
+            VR_INPUT[WorkerReports + CompileResult<br/>+ ReviewReport + Tasks] --> VR_LLM[Claude Haiku<br/>via LlmCallGuard]
+            VR_LLM --> VR_OUT[Markdown Report<br/>+ Structured Issues<br/>+ PDF Download]
+            VR_OUT --> VR_DB[(validation_report<br/>table)]
+        end
     end
 ```
 
@@ -482,6 +488,7 @@ graph TB
 | VALIDATION_PASSED / VALIDATION_FAILED | Code validation |
 | MODEL_ESCALATED | Retry with upgraded model |
 | REVIEWING | Review phase |
+| REPORT_GENERATED | Validation report ready (non-fatal) |
 | REVIEW_READY | Awaiting merge decision |
 | COMPLETE / FAILED / PARTIAL | Terminal states |
 | PREVIEW_ANALYZING / BUILDING / PUSHING / DEPLOYING / RUNNING | Preview phases |

@@ -5,12 +5,12 @@ import java.time.Instant;
 
 public record PreviewSession(
         String runId,
-        String cloudRunServiceName,
+        String composeProjectName,   // docker compose --project-name value
         PreviewProjectType projectType,
         DatabaseType databaseType,
         PreviewStatus status,
-        String url,                  // Cloud Run *.run.app URL
-        String imageUri,             // AR image URI (for cleanup)
+        String url,                  // https://{short-id}.preview.executespec.ai
+        int hostPort,                // allocated host port (for cleanup)
         String errorMessage,
         Instant startedAt,
         Instant expiresAt

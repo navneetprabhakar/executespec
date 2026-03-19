@@ -88,6 +88,13 @@ CompilerAgent -- compile & fix build errors (up to 3 iterations)
 ReviewerAgentV2 -- two-phase agentic review (INSPECT -> FIX)
   |
   v
+ValidationReportAgent -- LLM-generated quality summary (non-fatal)
+  +-- Aggregates: WorkerReports, CompileResult, ReviewReport, tasks
+  +-- Framed as CI/CD quality gate (never mentions AI/models)
+  +-- Persisted to validation_report table
+  +-- Shareable via public URL, downloadable as PDF
+  |
+  v
 Merge Gate -- user chooses: MERGE / DECLINE / REWORK / IMPLEMENT_SUGGESTIONS
   |
   v
@@ -551,6 +558,7 @@ SUPER_ADMIN (global -- full system access)
 | Model escalation | Done | HAIKU -> SONNET -> OPUS on stall/retry |
 | Compiler agent | Done | Compile & fix (3 iterations) |
 | Agentic reviewer | Done | Two-phase: INSPECT -> FIX |
+| Validation report | Done | LLM-generated quality summary with share & PDF export |
 | Merge gate | Done | MERGE / DECLINE / REWORK / IMPLEMENT_SUGGESTIONS |
 | Progressive merge | Done | Per-task branch merge to main |
 | Post-merge agents | Done | Context, optimizer, API test suite |
@@ -722,6 +730,7 @@ executespec.run (root)
   |     |     +-- executespec.llm.call
   +-- executespec.run.phase.compile
   +-- executespec.run.phase.review
+  +-- executespec.run.phase.report
   +-- executespec.run.phase.merge_gate
   +-- executespec.run.phase.post_merge
 ```

@@ -68,10 +68,11 @@ User Request (REST / Webhook)
 4. **SequentialTaskExecutor** — Executes tasks in order. Per task: creates worktree → runs WorkerAgent → validates code → retries with error feedback + model escalation on failure → progressive merge to main.
 5. **CompilerAgent** — Post-worker compilation validation (up to 3 rounds).
 6. **ReviewerAgent** — Code review with CRITICAL/MINOR issue classification.
-7. **Merge Approval Gate** — Human reviews code + review findings. Can bypass via `autoMerge` flag.
-8. **GitMergeService** — Final merge with 4-tier conflict resolution.
-9. **Post-merge** — ContextAgent (docs), PromptOptimiserAgent (prompt tuning), ApiTestSuiteAgent (OpenAPI spec).
-10. **SlackNotificationService** — Listens for RunEvent via @EventListener, pushes Block Kit messages to configured Slack channels.
+7. **ValidationReportAgent** — LLM-generated quality summary (non-fatal). Aggregates pipeline data, framed as CI/CD quality gate. Persisted to DB, shareable via public URL, downloadable as PDF.
+8. **Merge Approval Gate** — Human reviews code + review findings + validation report. Can bypass via `autoMerge` flag.
+9. **GitMergeService** — Final merge with 4-tier conflict resolution.
+10. **Post-merge** — ContextAgent (docs), PromptOptimiserAgent (prompt tuning), ApiTestSuiteAgent (OpenAPI spec).
+11. **SlackNotificationService** — Listens for RunEvent via @EventListener, pushes Block Kit messages to configured Slack channels.
 
 **Decoupled services (REST-triggered, not in pipeline):**
 - `LocalPreviewService` — ProcessBuilder-based dev server

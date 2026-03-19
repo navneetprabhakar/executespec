@@ -37,6 +37,9 @@ import AccountingPage from '@/pages/AccountingPage';
 // Deploy page
 import DeploymentsPage from '@/pages/DeploymentsPage';
 
+// Public pages
+import SharedReportPage from '@/pages/SharedReportPage';
+
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
 
@@ -60,6 +63,9 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/accept-invite" element={<AcceptInvitePage />} />
+
+      {/* ── Public shared pages ── */}
+      <Route path="/reports/shared/:shareToken" element={<SharedReportPage />} />
 
       {/* ── Protected app routes ── */}
       <Route element={<ProtectedRoute />}>

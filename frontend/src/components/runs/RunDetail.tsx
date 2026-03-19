@@ -4,6 +4,7 @@ import { ArrowLeft, X, GitMerge, Trash2, AlertTriangle, Download, Wand2, RotateC
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
+import ValidationReportPanel from './ValidationReportPanel';
 import { RunTimeline } from '@/components/run/RunTimeline';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
@@ -514,6 +515,9 @@ export default function RunDetail() {
               </button>
             </div>
           </div>
+
+          {/* Validation Report */}
+          <ValidationReportPanel runId={activeRun.runId} status={activeRun.status} />
 
           {/* Tabs */}
           <div className="flex-1 overflow-hidden">

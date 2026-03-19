@@ -36,7 +36,7 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 ### Core Capabilities
 
 - **Natural language to code:** Users submit a goal in plain English; the system produces a complete, working codebase.
-- **Multi-agent pipeline:** Planner, Worker, Compiler, Reviewer, and post-merge agents each handle a distinct phase.
+- **Multi-agent pipeline:** Planner, Worker, Compiler, Reviewer, Validation Report, and post-merge agents each handle a distinct phase.
 - **Human-in-the-loop gates:** Plan approval and merge approval gates give humans oversight before code is committed.
 - **Automatic validation:** Per-task code validation with model escalation on failure.
 - **Progressive merge:** Each task's branch is merged to main immediately after completion, enabling early conflict detection.
@@ -176,6 +176,9 @@ All packages are under `com.navneet.executespec`.
 | `validator/model/` | Validation data models |
 | `validator/prompt/` | RetryPromptBuilder (builds error feedback for retries) |
 | `compiler/` | CompilerAgent (post-worker build validation + LLM-powered fix) |
+| `report/` | ValidationReportService, ValidationReportGenerator, ValidationReportPdfService, ValidationReportController |
+| `report/entity/` | ValidationReport (JPA entity), PipelineResult enum |
+| `report/model/` | ReportInput, ValidationReportDTO, ValidationReportShareDTO, ReportIssueDTO |
 | `context/` | ContextAgent (post-merge codebase context updater), ContextAgentScanner, ContextAgentProperties |
 | `optimiser/` | PromptOptimiserAgent (self-improving prompt system), PromptPatternAnalyser, PromptAuditService |
 | `apitests/` | ApiTestSuiteAgent (post-merge OpenAPI spec generation) |
@@ -298,6 +301,17 @@ ReviewerAgent.review(run, workerReports)
   --> LlmRouter.callWithFallback()
   --> Parse ReviewReport JSON
   --> Retry up to 3 times on invalid JSON
+```
+
+**Step 7b: Validation Report (non-fatal)**
+```
+ValidationReportService.generateAndPersist(runId, reportInput)
+  --> Aggregate: WorkerReports + CompileResult + ReviewReport + tasks
+  --> LlmCallGuard.call() with Haiku model
+  --> Parse markdown report
+  --> Persist to validation_report table
+  --> Non-fatal: on failure, log warning and continue
+  --> OTel span: executespec.run.phase.report
 ```
 
 **Step 8: Merge Gate**
