@@ -12,6 +12,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +68,12 @@ public class PreviewController {
 
     public record PreviewStartRequest(
             Map<String, String> envVars
+    ) {}
+
+    public record ApiDocsProbeResult(
+            boolean found,
+            String path,
+            String contentType
     ) {}
 
     // ── Endpoints ────────────────────────────────────────────────────────────
@@ -140,6 +151,60 @@ public class PreviewController {
                 ? List.of()
                 : Arrays.asList(raw.split("\n"));
         return ResponseEntity.ok(new PreviewLogsDto(runId, logLines));
+    }
+
+    /**
+     * Probe the running preview container for common API documentation endpoints.
+     * This server-side proxy avoids CORS issues when the frontend checks for
+     * OpenAPI / Swagger UI pages on the preview container.
+     */
+    @GetMapping("/{runId}/preview/probe-api-docs")
+    public ResponseEntity<ApiDocsProbeResult> probeApiDocs(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+
+        PreviewSession session = previewService.getStatus(runId);
+        if (session == null || session.status() != PreviewStatus.RUNNING || session.hostPort() <= 0) {
+            return ResponseEntity.ok(new ApiDocsProbeResult(false, null, null));
+        }
+
+        String[] probePaths = {
+            "/v3/api-docs",         // SpringDoc OpenAPI 3
+            "/api-docs",            // Swagger/SpringDoc default
+            "/swagger.json",        // Swagger 2
+            "/openapi.json",        // OpenAPI 3 common
+            "/docs",                // FastAPI default
+            "/swagger-ui.html",     // Spring Boot classic
+            "/swagger-ui/index.html", // SpringDoc Swagger UI
+        };
+
+        try (var client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(2))
+                .version(HttpClient.Version.HTTP_1_1)
+                .build()) {
+
+            for (String path : probePaths) {
+                try {
+                    var request = HttpRequest.newBuilder()
+                            .uri(URI.create("http://localhost:" + session.hostPort() + path))
+                            .timeout(Duration.ofSeconds(3))
+                            .GET()
+                            .build();
+                    var response = client.send(request, HttpResponse.BodyHandlers.discarding());
+                    if (response.statusCode() >= 200 && response.statusCode() < 400) {
+                        String ct = response.headers().firstValue("content-type").orElse("");
+                        String type = ct.contains("json") ? "json" : ct.contains("html") ? "html" : "other";
+                        log.info("API docs found for run {} at path {} ({})", runId, path, type);
+                        return ResponseEntity.ok(new ApiDocsProbeResult(true, path, type));
+                    }
+                } catch (Exception e) {
+                    // Probe failed for this path — try next
+                }
+            }
+        }
+
+        return ResponseEntity.ok(new ApiDocsProbeResult(false, null, null));
     }
 
     // ── Mapping ──────────────────────────────────────────────────────────────
