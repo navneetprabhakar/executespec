@@ -218,7 +218,7 @@ agent:
 # ── Cloud Run-based preview ─────────────────────────────────────────────────
 preview:
   enabled: true
-  total-startup-timeout-seconds: 300   # 5-minute total deadline (covers build + start + health check)
+  total-startup-timeout-seconds: 480   # 8-minute total deadline (Spring Boot cold builds need extra time)
   preview-ttl-minutes: 10              # auto-shutdown after 10 minutes
   port-range-start: 10000              # Docker Compose host port range
   port-range-end: 10100

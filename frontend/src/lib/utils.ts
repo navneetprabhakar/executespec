@@ -35,6 +35,7 @@ export function relativeTime(iso: string): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-export function truncate(s: string, n: number): string {
+export function truncate(s: string | null | undefined, n: number): string {
+  if (s == null || typeof s !== 'string') return '';
   return s.length > n ? s.slice(0, n) + '…' : s;
 }

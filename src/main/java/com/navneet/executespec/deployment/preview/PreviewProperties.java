@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 public class PreviewProperties {
 
     private boolean enabled = true;
-    private int totalStartupTimeoutSeconds = 300;  // 5-minute total deadline for entire preview startup
+    private int totalStartupTimeoutSeconds = 480;  // 8-minute total deadline (Spring Boot cold builds need extra time)
     private int previewTtlMinutes = 10;            // auto-shutdown after N minutes
 
     // Docker Compose port range

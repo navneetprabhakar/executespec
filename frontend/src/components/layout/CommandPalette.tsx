@@ -70,7 +70,7 @@ export default function CommandPalette() {
                       <CmdItem
                         key={r.runId}
                         icon={<LayoutDashboard className="h-4 w-4" />}
-                        label={`Run ${r.runId.slice(0, 8)} — ${r.userRequest.slice(0, 40)}`}
+                        label={`Run ${r.runId.slice(0, 8)} — ${(r.userRequest ?? '').slice(0, 40)}`}
                         onSelect={() => {
                           setCommandPaletteOpen(false);
                           navigate('/');

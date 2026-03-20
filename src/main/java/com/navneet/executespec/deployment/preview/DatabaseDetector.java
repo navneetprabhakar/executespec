@@ -52,6 +52,11 @@ public class DatabaseDetector {
     private static final Pattern GENERIC_DB = Pattern.compile(
             "spring-boot-starter-data-jpa|typeorm|sequelize|prisma|sqlalchemy|django\\.db|knex|drizzle-orm");
 
+    // Embedded databases — if present, do NOT inject external DB sidecar
+    private static final Pattern EMBEDDED_DB = Pattern.compile(
+            "jdbc:h2:|jdbc:sqlite:|jdbc:hsqldb:|jdbc:derby:|org\\.h2\\.|sqlite-jdbc|hsqldb|" +
+            "better-sqlite3|sql\\.js|sqlite3|:memory:|pysqlite|aiosqlite");
+
     /**
      * Scan workspace for database dependencies.
      *
@@ -60,6 +65,13 @@ public class DatabaseDetector {
      */
     public DatabaseType detect(Path workspacePath) {
         if (workspacePath == null || !Files.isDirectory(workspacePath)) {
+            return null;
+        }
+
+        // Check for embedded databases FIRST — if found, skip external DB injection entirely.
+        // Apps using H2/SQLite/HSQLDB work out of the box without a DB sidecar.
+        if (usesEmbeddedDb(workspacePath)) {
+            log.info("Embedded database detected — skipping external DB sidecar");
             return null;
         }
 
@@ -239,6 +251,42 @@ public class DatabaseDetector {
         }
 
         return null;
+    }
+
+    /**
+     * Check if the project uses an embedded/in-memory database (H2, SQLite, HSQLDB, Derby).
+     * If so, the app works without an external DB sidecar and we should NOT inject one.
+     */
+    private boolean usesEmbeddedDb(Path dir) {
+        // Check Spring config files
+        for (String fileName : new String[]{
+                "src/main/resources/application.yml",
+                "src/main/resources/application.yaml",
+                "src/main/resources/application.properties"}) {
+            String content = readSafe(dir.resolve(fileName));
+            if (content != null && EMBEDDED_DB.matcher(content).find()) return true;
+        }
+        // Check Maven/Gradle for H2/SQLite dependency
+        for (String depFile : new String[]{"pom.xml", "build.gradle", "build.gradle.kts"}) {
+            String content = readSafe(dir.resolve(depFile));
+            if (content != null && (content.contains("com.h2database") || content.contains("org.xerial")
+                    || content.contains("sqlite-jdbc") || content.contains("hsqldb"))) return true;
+        }
+        // Check Node.js for SQLite packages
+        String pkg = readSafe(dir.resolve("package.json"));
+        if (pkg != null && (pkg.contains("better-sqlite3") || pkg.contains("sql.js")
+                || pkg.contains("sqlite3") || pkg.contains("@sqlite.org"))) return true;
+        // Check Python for SQLite (sqlite:/// in config or pysqlite in deps)
+        for (String pyFile : new String[]{"requirements.txt", "pyproject.toml"}) {
+            String content = readSafe(dir.resolve(pyFile));
+            if (content != null && (content.contains("aiosqlite") || content.contains("pysqlite"))) return true;
+        }
+        // Check for sqlite:/// in any common config file
+        for (String cfg : new String[]{".env", ".env.example", "config.py", "settings.py"}) {
+            String content = readSafe(dir.resolve(cfg));
+            if (content != null && content.contains("sqlite:///")) return true;
+        }
+        return false;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

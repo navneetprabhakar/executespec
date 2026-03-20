@@ -75,6 +75,7 @@ public class PreviewService {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NORMAL)
+            .version(HttpClient.Version.HTTP_1_1) // Force HTTP/1.1 — dev servers (Vite, Flask) may not support HTTP/2
             .build();
 
     public PreviewService(DevDockerfileGenerator dockerfileGen,
@@ -142,8 +143,9 @@ public class PreviewService {
             throw new PreviewException("Run must be complete to preview (current status: " + run.getStatus() + ")");
         }
 
-        // Guard: idempotent — return existing session if still running.
+        // Guard: idempotent — return existing session if still active.
         // If FAILED or TIMED_OUT, remove it so the user can retry.
+        // If ANALYZING/BUILDING/STARTING/RUNNING, return as-is (no restart).
         PreviewSession existing = active.get(runId);
         if (existing != null) {
             if (existing.status() == PreviewStatus.FAILED
@@ -153,6 +155,7 @@ public class PreviewService {
                 active.remove(runId);
                 log.info("Cleared failed preview session for run {} — allowing retry", runId);
             } else {
+                // ANALYZING, BUILDING, STARTING, RUNNING — return current state, don't restart
                 return existing;
             }
         }
@@ -283,6 +286,9 @@ public class PreviewService {
             // Phase 2: Generate Dockerfile (standard, no Cloud Run port patching)
             checkDeadline(deadline, "Dockerfile generation");
             Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+            // Backup user's docker-compose/Dockerfile if they exist (our generated ones take precedence)
+            backupIfExists(workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
+            backupIfExists(workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
             String generatedDockerfile = dockerfileGen.generate(type, workspace);
             log.info("Preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
             Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
@@ -482,6 +488,21 @@ public class PreviewService {
             return true;
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /**
+     * Rename a file if it exists — used to backup user-generated docker-compose/Dockerfile
+     * before we overwrite with our generated ones.
+     */
+    private void backupIfExists(Path source, Path dest) {
+        try {
+            if (Files.exists(source)) {
+                Files.move(source, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                log.info("Backed up user file: {} -> {}", source.getFileName(), dest.getFileName());
+            }
+        } catch (IOException e) {
+            log.warn("Failed to backup {}: {}", source, e.getMessage());
         }
     }
 
