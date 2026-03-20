@@ -77,7 +77,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
   }, [step]);
 
   const filteredRuns = runs.filter((r) =>
-    r.userRequest.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (r.userRequest ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     r.runId.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -312,7 +312,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                             : 'border-white/[0.06] bg-surface-1 hover:border-white/[0.12]'
                         )}
                       >
-                        <p className="text-sm text-zinc-200 line-clamp-2">{run.userRequest}</p>
+                        <p className="text-sm text-zinc-200 line-clamp-2">{run.userRequest ?? ''}</p>
                         <div className="flex items-center gap-3 mt-1.5">
                           <span className="text-[10px] font-mono text-zinc-600">{run.runId.slice(0, 12)}</span>
                           {run.completedAt && (

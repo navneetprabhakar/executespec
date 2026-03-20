@@ -81,7 +81,7 @@ async function reqText(url: string): Promise<string> {
 export interface RunSummary {
   runId: string;
   status: string;
-  userRequest: string;
+  userRequest: string | null;
   plannerModel: string;
   workerModel: string;
   reviewerModel: string;

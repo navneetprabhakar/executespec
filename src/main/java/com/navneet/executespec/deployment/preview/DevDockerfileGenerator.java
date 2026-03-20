@@ -47,9 +47,15 @@ public class DevDockerfileGenerator {
      * Returns null if unsupported.
      */
     public PreviewProjectType detect(Path workspace) {
-        // 1. Spring Boot (check before package.json in case both exist)
+        // 1. Spring Boot — Maven or Gradle (check before package.json in case both exist)
         Path pomXml = workspace.resolve("pom.xml");
         if (Files.exists(pomXml) && fileContainsPattern(pomXml, "spring-boot-starter")) {
+            return PreviewProjectType.SPRING_BOOT;
+        }
+        Path buildGradle = workspace.resolve("build.gradle");
+        Path buildGradleKts = workspace.resolve("build.gradle.kts");
+        if ((Files.exists(buildGradle) && fileContainsPattern(buildGradle, "spring-boot"))
+                || (Files.exists(buildGradleKts) && fileContainsPattern(buildGradleKts, "spring-boot"))) {
             return PreviewProjectType.SPRING_BOOT;
         }
 
@@ -63,11 +69,14 @@ public class DevDockerfileGenerator {
                     return detectMonorepoType(pkg, workspace);
                 }
 
-                JsonNode deps = pkg.get("dependencies");
-                if (deps != null) {
-                    for (String backendDep : NODE_BACKEND_DEPS) {
-                        if (deps.has(backendDep)) {
-                            return PreviewProjectType.NODE_BACKEND;
+                // Check both dependencies and devDependencies for backend frameworks
+                for (String field : List.of("dependencies", "devDependencies")) {
+                    JsonNode deps = pkg.get(field);
+                    if (deps != null) {
+                        for (String backendDep : NODE_BACKEND_DEPS) {
+                            if (deps.has(backendDep)) {
+                                return PreviewProjectType.NODE_BACKEND;
+                            }
                         }
                     }
                 }
@@ -123,7 +132,7 @@ public class DevDockerfileGenerator {
         return switch (type) {
             case NODE_FRONTEND -> nodeFrontendDockerfile(workspace);
             case NODE_BACKEND -> nodeBackendDockerfile(workspace);
-            case SPRING_BOOT -> springBootDockerfile();
+            case SPRING_BOOT -> springBootDockerfile(workspace);
             case PYTHON -> pythonDockerfile(workspace);
             case FULL_STACK -> nodeFrontendDockerfile(workspace); // fallback
             case STATIC_HTML -> staticHtmlDockerfile();
@@ -225,23 +234,23 @@ public class DevDockerfileGenerator {
         String cmd;
         boolean hasViteConfig = Files.exists(workspace.resolve("vite.config.js"))
                 || Files.exists(workspace.resolve("vite.config.ts"));
+        JsonNode pkg = parsePackageJson(workspace);
+        boolean hasDevScript = pkg != null && pkg.has("scripts")
+                && pkg.get("scripts").has("dev");
 
-        if (hasViteConfig) {
-            // Shell form so $PORT expands at runtime (Cloud Run sets PORT env var)
-            cmd = """
-                    CMD npx vite --host 0.0.0.0 --port ${PORT:-8080}""";
+        if (hasViteConfig || hasDevScript) {
+            // Always use vite with explicit --host and --port to ensure container accessibility
+            cmd = "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\"]";
         } else {
-            JsonNode pkg = parsePackageJson(workspace);
-            boolean hasDevScript = pkg != null && pkg.has("scripts")
-                    && pkg.get("scripts").has("dev");
-            if (hasDevScript) {
-                cmd = """
-                        CMD PORT=${PORT:-8080} npm run dev""";
-            } else {
-                cmd = """
-                        RUN npm install -g serve
-                        CMD npx serve -s . -l ${PORT:-8080}""";
-            }
+            cmd = """
+                    RUN npm install -g serve
+                    CMD ["npx", "serve", "-s", ".", "-l", "5173"]""";
+        }
+
+        // Ensure vite is installed at build time (npx auto-download at runtime is too slow)
+        String viteInstall = "";
+        if (cmd.contains("vite") && !fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) {
+            viteInstall = " && npm install vite";
         }
 
         return """
@@ -249,10 +258,10 @@ public class DevDockerfileGenerator {
                 WORKDIR /app
                 LABEL preview=true
                 COPY package*.json ./
-                RUN npm install
-                COPY . .
-                EXPOSE 5173
-                """ + cmd.stripLeading() + "\n";
+                RUN npm install""" + viteInstall + "\n" +
+                "COPY . .\n" +
+                "EXPOSE 5173\n" +
+                cmd.stripLeading() + "\n";
     }
 
     private String nodeBackendDockerfile(Path workspace) {
@@ -265,15 +274,10 @@ public class DevDockerfileGenerator {
         } else if (pkg != null && pkg.has("main")) {
             String main = pkg.get("main").asText("index.js");
             cmd = "CMD [\"node\", \"" + main + "\"]";
-        } else if (Files.exists(workspace.resolve("server.js"))) {
-            cmd = """
-                    CMD ["node", "server.js"]""";
-        } else if (Files.exists(workspace.resolve("app.js"))) {
-            cmd = """
-                    CMD ["node", "app.js"]""";
         } else {
-            cmd = """
-                    CMD ["node", "index.js"]""";
+            // Scan for common Node entry points
+            String entryFile = findNodeEntryPoint(workspace);
+            cmd = "CMD [\"node\", \"" + entryFile + "\"]";
         }
 
         return """
@@ -288,15 +292,31 @@ public class DevDockerfileGenerator {
                 """ + cmd.stripLeading() + "\n";
     }
 
-    private String springBootDockerfile() {
+    private String springBootDockerfile(Path workspace) {
+        boolean isGradle = Files.exists(workspace.resolve("build.gradle"))
+                || Files.exists(workspace.resolve("build.gradle.kts"));
+
+        if (isGradle) {
+            return """
+                    FROM eclipse-temurin:21
+                    WORKDIR /app
+                    LABEL preview=true
+                    COPY . .
+                    RUN chmod +x gradlew 2>/dev/null || true
+                    EXPOSE 8080
+                    CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gradle bootRun --no-daemon; fi"]
+                    """;
+        }
+
         return """
                 FROM eclipse-temurin:21
                 WORKDIR /app
                 LABEL preview=true
                 RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
                 COPY pom.xml .
-                RUN mvn dependency:go-offline -q -B
-                COPY src/ src/
+                RUN mvn dependency:go-offline -q -B || true
+                COPY . .
+                RUN mvn compile -DskipTests -q -B || true
                 EXPOSE 8080
                 CMD ["mvn", "spring-boot:run", "-DskipTests", "-q"]
                 """;
@@ -311,31 +331,47 @@ public class DevDockerfileGenerator {
             // Django
             cmd = """
                     CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]""";
+        } else if (hasDependency(workspace, "fastapi")) {
+            // FastAPI — check requirements.txt first, then scan source files
+            String fastApiFile = findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(");
+            String module = (fastApiFile != null) ? fastApiFile.replace(".py", "") : "main";
+            cmd = "CMD [\"uvicorn\", \"" + module + ":app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]";
+        } else if (hasDependency(workspace, "flask")) {
+            // Flask — check requirements.txt first, then scan source files
+            String flaskFile = findPythonFileWithPattern(workspace, "from flask", "import flask", "Flask(");
+            if (flaskFile != null) {
+                envLine = "ENV FLASK_APP=" + flaskFile + "\n";
+            }
+            cmd = """
+                    CMD ["flask", "run", "--host", "0.0.0.0", "--port", "8000"]""";
         } else {
-            // Check for FastAPI
+            // Check source files as fallback (framework not in requirements)
             String fastApiFile = findPythonFileWithPattern(workspace, "from fastapi", "import fastapi");
             if (fastApiFile != null) {
                 String module = fastApiFile.replace(".py", "");
                 cmd = "CMD [\"uvicorn\", \"" + module + ":app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]";
             } else {
-                // Check for Flask
                 String flaskFile = findPythonFileWithPattern(workspace, "from flask", "import flask");
                 if (flaskFile != null) {
                     envLine = "ENV FLASK_APP=" + flaskFile + "\n";
                     cmd = """
                             CMD ["flask", "run", "--host", "0.0.0.0", "--port", "8000"]""";
-                } else if (Files.exists(workspace.resolve("main.py"))) {
-                    cmd = """
-                            CMD ["python", "main.py"]""";
-                } else if (Files.exists(workspace.resolve("app.py"))) {
-                    cmd = """
-                            CMD ["python", "app.py"]""";
                 } else {
-                    cmd = """
-                            CMD ["python", "app.py"]""";
+                    String entryFile = findPythonEntryPoint(workspace);
+                    cmd = "CMD [\"python\", \"" + entryFile + "\"]";
                 }
             }
         }
+
+        // Safety net: set ALL common host/port env vars for Python web frameworks.
+        // Different apps read different env var names:
+        //   flask run CLI     → FLASK_RUN_HOST, FLASK_RUN_PORT
+        //   app.run()         → FLASK_HOST, FLASK_PORT (custom, but common pattern)
+        //   uvicorn           → HOST, PORT
+        //   generic           → HOST, PORT
+        envLine += "ENV FLASK_RUN_HOST=0.0.0.0 FLASK_RUN_PORT=8000 " +
+                   "FLASK_HOST=0.0.0.0 FLASK_PORT=8000 " +
+                   "HOST=0.0.0.0 PORT=8000\n";
 
         // Resolve install step
         String installStep;
@@ -475,10 +511,16 @@ public class DevDockerfileGenerator {
         var sb = new StringBuilder();
         sb.append("FROM node:20-alpine\nWORKDIR /app\nLABEL preview=true\n");
 
-        // Install frontend deps
+        // Install frontend deps + ensure vite is available for dev server
         if (fe != null) {
             sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install");
+            // If vite isn't in dependencies, install it explicitly (npx auto-install is too slow)
+            Path fePkg = workspace.resolve(fe).resolve("package.json");
+            if (Files.exists(fePkg) && !fileContainsPattern(fePkg, "\"vite\"")) {
+                sb.append(" && npm install vite");
+            }
+            sb.append("\n");
         }
         // Install backend deps
         if (be != null) {
@@ -586,8 +628,8 @@ public class DevDockerfileGenerator {
                     String flaskFile = findPythonFileWithPattern(beDir, "from flask", "import flask");
                     if (flaskFile != null) {
                         pythonCmd = "FLASK_APP=" + flaskFile + " flask run --host 0.0.0.0 --port 8000";
-                    } else if (Files.exists(beDir.resolve("main.py"))) {
-                        pythonCmd = "python main.py";
+                    } else {
+                        pythonCmd = "python " + findPythonEntryPoint(beDir);
                     }
                 }
             }
@@ -814,14 +856,15 @@ public class DevDockerfileGenerator {
     }
 
     private String staticHtmlDockerfile() {
-        // Cloud Run always maps to container port 8080. Hardcode in nginx config at build time.
+        // Use echo with proper escaping. printf '\$uri' produces literal \$uri (bug).
+        // echo '...$uri...' with single quotes preserves $uri correctly.
         return """
                 FROM nginx:alpine
                 WORKDIR /usr/share/nginx/html
                 LABEL preview=true
                 COPY . .
                 RUN rm -f /etc/nginx/conf.d/default.conf \
-                    && printf 'server {\\n  listen 8080;\\n  root /usr/share/nginx/html;\\n  index index.html;\\n  try_files \\$uri \\$uri/ /index.html;\\n}\\n' \
+                    && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html index.htm; location / { try_files $uri $uri/ /index.html =404; } }' \
                        > /etc/nginx/conf.d/default.conf
                 EXPOSE 8080
                 CMD ["nginx", "-g", "daemon off;"]
@@ -854,6 +897,19 @@ public class DevDockerfileGenerator {
         return false;
     }
 
+    /**
+     * Check if a Python dependency exists in requirements.txt or pyproject.toml.
+     * More reliable than scanning source files (catches package imports in subdirectories).
+     */
+    private boolean hasDependency(Path workspace, String packageName) {
+        Path reqFile = workspace.resolve("requirements.txt");
+        if (Files.exists(reqFile) && fileContainsPattern(reqFile, packageName)) {
+            return true;
+        }
+        Path pyproject = workspace.resolve("pyproject.toml");
+        return Files.exists(pyproject) && fileContainsPattern(pyproject, packageName);
+    }
+
     private List<Path> findPythonFiles(Path workspace) {
         try (Stream<Path> stream = Files.list(workspace)) {
             return stream
@@ -883,5 +939,37 @@ public class DevDockerfileGenerator {
             }
         }
         return null;
+    }
+
+    /**
+     * Find the Node.js entry point file. Checks common names in priority order.
+     */
+    private String findNodeEntryPoint(Path workspace) {
+        String[] candidates = {"index.js", "server.js", "app.js", "main.js",
+                               "index.mjs", "server.mjs", "app.mjs",
+                               "src/index.js", "src/server.js", "src/app.js",
+                               "src/index.mjs", "src/server.mjs"};
+        for (String name : candidates) {
+            if (Files.exists(workspace.resolve(name))) return name;
+        }
+        // Last resort
+        return "index.js";
+    }
+
+    /**
+     * Find the Python entry point file. Checks common names first,
+     * then scans for files containing {@code if __name__}.
+     */
+    private String findPythonEntryPoint(Path workspace) {
+        // Priority order of common entry point names
+        String[] candidates = {"main.py", "app.py", "run.py", "server.py", "wsgi.py", "index.py"};
+        for (String name : candidates) {
+            if (Files.exists(workspace.resolve(name))) return name;
+        }
+        // Scan for any .py with if __name__ == "__main__"
+        String mainFile = findPythonFileWithPattern(workspace, "if __name__");
+        if (mainFile != null) return mainFile;
+        // Last resort
+        return "app.py";
     }
 }

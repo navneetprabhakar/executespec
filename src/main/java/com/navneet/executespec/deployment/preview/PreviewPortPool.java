@@ -23,7 +23,10 @@ public class PreviewPortPool {
     private final ConcurrentHashMap<String, Integer> allocations = new ConcurrentHashMap<>();
 
     /**
-     * Allocate the next free port in the configured range for the given run.
+     * Allocate a free port for the given run.
+     * Uses OS ephemeral port assignment (ServerSocket(0)) to avoid conflicts
+     * with firewalls, TIME_WAIT states, and other processes.
+     * Falls back to configured range if ephemeral allocation fails.
      * Idempotent — returns existing allocation if already allocated.
      *
      * @throws PreviewException if no ports are available
@@ -33,24 +36,51 @@ public class PreviewPortPool {
         Integer existing = allocations.get(runId);
         if (existing != null) return existing;
 
+        // Strategy 1: Let OS pick a free ephemeral port (most reliable)
+        int port = allocateEphemeralPort();
+        if (port > 0) {
+            allocations.put(runId, port);
+            log.info("Allocated ephemeral port {} for preview run {}", port, runId);
+            return port;
+        }
+
+        // Strategy 2: Scan configured range as fallback
         int start = props.getPortRangeStart();
         int end = props.getPortRangeEnd();
-
-        for (int port = start; port <= end; port++) {
-            if (!allocations.containsValue(port) && isPortAvailable(port)) {
-                allocations.put(runId, port);
-                log.info("Allocated port {} for preview run {}", port, runId);
-                return port;
+        for (int p = start; p <= end; p++) {
+            if (!allocations.containsValue(p) && isPortAvailable(p)) {
+                allocations.put(runId, p);
+                log.info("Allocated range port {} for preview run {}", p, runId);
+                return p;
             }
         }
 
-        throw new PreviewException("No preview ports available (range " + start + "-" + end
-                + ", " + allocations.size() + " active). All ports in range are either allocated or in use by other processes.");
+        throw new PreviewException("No preview ports available — ephemeral allocation failed and range "
+                + start + "-" + end + " exhausted (" + allocations.size() + " active).");
+    }
+
+    /**
+     * Let the OS assign a free ephemeral port. Binds to port 0, reads the
+     * assigned port, then closes the socket. The port may be reused by Docker
+     * before another process grabs it (small race window, but much more
+     * reliable than scanning a fixed range).
+     */
+    private int allocateEphemeralPort() {
+        try (ServerSocket ss = new ServerSocket(0)) {
+            ss.setReuseAddress(true);
+            int port = ss.getLocalPort();
+            // Avoid very low ports or ports already tracked by us
+            if (port > 1024 && !allocations.containsValue(port)) {
+                return port;
+            }
+        } catch (IOException e) {
+            log.warn("Ephemeral port allocation failed: {}", e.getMessage());
+        }
+        return -1;
     }
 
     /**
      * Verify that a port is actually free on the host by attempting to bind to it.
-     * Returns false if another process is already listening on the port.
      */
     private boolean isPortAvailable(int port) {
         try (ServerSocket ss = new ServerSocket(port)) {

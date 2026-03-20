@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #1a1a2e; padding: 40px; }
+
+        /* Header */
+        .header { margin-bottom: 24px; border-bottom: 3px solid #10b981; padding-bottom: 16px; }
+        .brand { font-size: 20px; font-weight: bold; color: #10b981; }
+        .brand-sub { font-size: 10px; color: #64748b; margin-top: 2px; }
+        .title { font-size: 22px; font-weight: bold; color: #1a1a2e; margin-top: 12px; }
+        .meta { font-size: 10px; color: #64748b; margin-top: 4px; }
+
+        /* Summary box */
+        .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 16px; margin-bottom: 20px; }
+        .summary-row { display: inline-block; margin-right: 24px; }
+        .summary-label { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .summary-value { font-size: 14px; font-weight: bold; color: #1a1a2e; margin-top: 2px; }
+
+        /* Result badge */
+        .result-passed { color: #059669; }
+        .result-fixes { color: #d97706; }
+        .result-failed { color: #dc2626; }
+
+        /* Section headings */
+        .section-title { font-size: 12px; font-weight: bold; color: #10b981; text-transform: uppercase;
+                          letter-spacing: 1px; margin: 20px 0 8px; border-bottom: 2px solid #10b981; padding-bottom: 4px; }
+
+        /* Issues table */
+        .issues-table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        .issues-table th { background: #f1f5f9; color: #475569; font-size: 9px; text-transform: uppercase;
+                            padding: 6px 8px; text-align: left; border-bottom: 2px solid #e2e8f0; }
+        .issues-table td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-size: 10px; vertical-align: top; }
+
+        /* Severity badges */
+        .severity { font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+        .sev-build { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .sev-bug { background: #fff7ed; color: #d97706; border: 1px solid #fed7aa; }
+        .sev-review { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
+        .sev-lint { background: #f4f4f5; color: #71717a; border: 1px solid #d4d4d8; }
+
+        /* Checks */
+        .check-item { display: inline-block; margin-right: 16px; margin-bottom: 6px; font-size: 10px; color: #059669; }
+        .check-icon { color: #10b981; font-weight: bold; }
+
+        /* Report markdown (pre-rendered as plain text) */
+        .report-body { font-size: 11px; line-height: 1.6; color: #334155; white-space: pre-wrap; margin: 10px 0; }
+
+        /* Footer */
+        .footer { margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 12px; color: #94a3b8;
+                   font-size: 9px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <div class="brand">ExecuteSpec</div>
+    <div class="brand-sub">Don't prompt. Specify.</div>
+    <div class="title">Validation Report</div>
+    <div class="meta">
+        Run: <span th:text="${runId}">run-id</span>
+        &nbsp;&bull;&nbsp;
+        Generated: <span th:text="${generatedAt}">2026-03-19</span>
+    </div>
+</div>
+
+<!-- Summary -->
+<div class="summary-box">
+    <div class="summary-row">
+        <div class="summary-label">Files</div>
+        <div class="summary-value" th:text="${filesGenerated}">12</div>
+    </div>
+    <div class="summary-row">
+        <div class="summary-label">Languages</div>
+        <div class="summary-value" th:text="${languages}">Java, TypeScript</div>
+    </div>
+    <div class="summary-row">
+        <div class="summary-label">Issues Caught</div>
+        <div class="summary-value" th:text="${issueCount}">3</div>
+    </div>
+    <div class="summary-row">
+        <div class="summary-label">Result</div>
+        <div class="summary-value">
+            <span th:if="${pipelineResult == 'PASSED'}" class="result-passed">PASSED</span>
+            <span th:if="${pipelineResult == 'PASSED_WITH_FIXES'}" class="result-fixes">PASSED WITH FIXES</span>
+            <span th:if="${pipelineResult == 'FAILED'}" class="result-failed">FAILED</span>
+        </div>
+    </div>
+</div>
+
+<!-- Checks Passed -->
+<div th:if="${not #lists.isEmpty(checksPassed)}">
+    <div class="section-title">Checks Passed</div>
+    <div style="margin: 8px 0 16px;">
+        <span th:each="check : ${checksPassed}" class="check-item">
+            <span class="check-icon">&#10003;</span>
+            <span th:text="${check}">COMPILATION</span>
+        </span>
+    </div>
+</div>
+
+<!-- Issues -->
+<div th:if="${not #lists.isEmpty(issues)}">
+    <div class="section-title">Issues Caught &amp; Fixed</div>
+    <table class="issues-table">
+        <thead>
+            <tr>
+                <th style="width:20%">Severity</th>
+                <th style="width:50%">Description</th>
+                <th style="width:15%">Stage</th>
+                <th style="width:15%">File</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr th:each="issue : ${issues}">
+                <td>
+                    <span th:if="${issue.severity == 'WOULD_BREAK_BUILD'}" class="severity sev-build">BUILD BREAKER</span>
+                    <span th:if="${issue.severity == 'WOULD_CAUSE_BUG'}" class="severity sev-bug">BUG RISK</span>
+                    <span th:if="${issue.severity == 'WOULD_FAIL_REVIEW'}" class="severity sev-review">REVIEW ISSUE</span>
+                    <span th:if="${issue.severity == 'WOULD_FAIL_LINT'}" class="severity sev-lint">LINT ISSUE</span>
+                </td>
+                <td>
+                    <span th:text="${issue.description}">Issue description</span>
+                    <div th:if="${issue.fix != null}" style="color:#059669;margin-top:2px;font-size:9px;">
+                        Fix: <span th:text="${issue.fix}">fix text</span>
+                    </div>
+                </td>
+                <td style="font-size:9px;color:#64748b;" th:text="${issue.stage}">REVIEWER_AGENT</td>
+                <td style="font-size:9px;color:#64748b;word-break:break-all;" th:text="${issue.filePath ?: '-'}">file.java</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Report Body -->
+<div th:if="${reportText != null and !reportText.isEmpty()}">
+    <div class="section-title">Full Report</div>
+    <div class="report-body" th:text="${reportText}">Report markdown rendered as text</div>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    Generated by ExecuteSpec &bull; <span th:text="${generatedAt}">2026-03-19</span>
+</div>
+
+</body>
+</html>

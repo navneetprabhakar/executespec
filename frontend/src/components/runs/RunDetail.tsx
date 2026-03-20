@@ -73,7 +73,7 @@ export default function RunDetail() {
     setReRunning(true);
     try {
       const newRunId = await createRun({
-        userRequest: activeRun.userRequest,
+        userRequest: activeRun.userRequest ?? '',
         ...(activeRun.projectId ? { projectId: activeRun.projectId } : {}),
       });
       setActiveRunId(newRunId);
@@ -294,26 +294,7 @@ export default function RunDetail() {
                 </div>
               )}
 
-              {/* Post-merge suggestions + Implement Suggestions button */}
-              {review && review.postMergeSuggestions && review.postMergeSuggestions.length > 0 && (
-                <div className="p-3 rounded-lg border border-accent-amber/30 bg-accent-amber/5">
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <p className="text-xs font-medium text-accent-amber">
-                      💡 {review.postMergeSuggestions.length} Suggestion{review.postMergeSuggestions.length !== 1 ? 's' : ''}
-                    </p>
-                    <button
-                      onClick={() => handle(() => implementSuggestions(activeRun.runId), 'Implementing suggestions…')}
-                      className="flex items-center gap-1.5 flex-shrink-0 rounded-md bg-accent-amber/20 hover:bg-accent-amber/30 border border-accent-amber/30 px-2.5 py-1 text-xs font-medium text-accent-amber transition-colors"
-                    >
-                      <Wand2 className="h-3 w-3" />
-                      Implement
-                    </button>
-                  </div>
-                  <ul className="text-xs text-accent-amber/80 space-y-0.5 list-disc list-inside">
-                    {review.postMergeSuggestions.map((s, i) => <li key={i}>{s}</li>)}
-                  </ul>
-                </div>
-              )}
+              {/* Post-merge suggestions hidden — validation report covers this */}
 
               {/* Rework button — shown when reviewer recommends REWORK */}
               {review && review.recommendation === 'REWORK' && (
@@ -422,7 +403,7 @@ export default function RunDetail() {
                     {resuming ? 'Resuming…' : 'Resume'}
                   </button>
                   <button
-                    onClick={() => { setEditingGoal(true); setNewGoal(activeRun.userRequest); }}
+                    onClick={() => { setEditingGoal(true); setNewGoal(activeRun.userRequest ?? ''); }}
                     className="flex items-center gap-1.5 rounded-md bg-orange-400/20 hover:bg-orange-400/30 border border-orange-400/30 px-3 py-1.5 text-xs font-medium text-orange-400 transition-colors"
                   >
                     Edit Goal & Restart

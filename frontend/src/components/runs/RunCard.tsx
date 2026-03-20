@@ -46,10 +46,10 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
             <span className="text-xs text-zinc-600">{relativeTime(run.startedAt)}</span>
           </div>
           <p className="text-sm text-zinc-200 line-clamp-2 leading-snug">
-            {truncate(run.userRequest, 120)}
+            {truncate(run.userRequest ?? '', 120)}
           </p>
           <TechBadges
-            userRequest={run.userRequest}
+            userRequest={run.userRequest ?? ''}
             runStatus={run.status}
             techStack={run.techStack}
             className="mt-1.5"

@@ -924,17 +924,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
         </div>
       )}
 
-      {/* Post-merge suggestions */}
-      {Array.isArray(review.post_merge_suggestions) && review.post_merge_suggestions.length > 0 && (
-        <div className="space-y-1">
-          <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Post-merge Suggestions</h4>
-          <ul className="space-y-1">
-            {review.post_merge_suggestions.map((s: string, i: number) => (
-              <li key={i} className="text-sm text-zinc-400 pl-3 border-l border-white/[0.06]">{s}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Post-merge suggestions hidden — validation report covers this */}
 
       {/* Apply Review button */}
       {isApplyable && permissions?.canUseChat && (
