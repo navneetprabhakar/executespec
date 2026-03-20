@@ -10,6 +10,7 @@ import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewSession;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -81,6 +82,7 @@ public class ConversationAgent {
     private final WorkspaceFileService workspaceFileService;
     private final PreviewService previewService;
     private final ObjectMapper objectMapper;
+    private final StateStore stateStore;
 
     /**
      * Sends a user message in the context of a completed run and returns the assistant reply.
@@ -122,6 +124,16 @@ public class ConversationAgent {
             run.getRunId(), "conversation",
             LlmRouter.FallbackMode.IMMEDIATE, 0, false
         );
+
+        // Track tokens for billing accuracy
+        try {
+            int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
+            int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
+            stateStore.addTokensToRun(run.getRunId(), inTok, outTok);
+            log.debug("[ConversationAgent] chat tokens: run={} in={} out={}", run.getRunId(), inTok, outTok);
+        } catch (Exception e) {
+            log.warn("[ConversationAgent] Failed to track chat tokens for run {}: {}", run.getRunId(), e.getMessage());
+        }
 
         String reply = response.getResult().getOutput().getText();
         log.debug("[ConversationAgent] run={} reply length={}", run.getRunId(), reply != null ? reply.length() : 0);
@@ -202,6 +214,16 @@ public class ConversationAgent {
                 run.getRunId(), "suggestion-plan",
                 LlmRouter.FallbackMode.IMMEDIATE, 0, false
         );
+
+        // Track tokens for billing accuracy
+        try {
+            int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
+            int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
+            stateStore.addTokensToRun(run.getRunId(), inTok, outTok);
+            log.debug("[ConversationAgent] suggestion-plan tokens: run={} in={} out={}", run.getRunId(), inTok, outTok);
+        } catch (Exception e) {
+            log.warn("[ConversationAgent] Failed to track suggestion-plan tokens for run {}: {}", run.getRunId(), e.getMessage());
+        }
 
         String raw = response.getResult().getOutput().getText();
         if (raw == null || raw.isBlank()) {

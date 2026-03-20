@@ -114,10 +114,22 @@ public class ApiTestSuiteAgent {
                 new SystemMessage(system),
                 new UserMessage("Generate OpenAPI 3.0 YAML for these controllers:\n\n" + controllerContent)));
 
-        String yaml = llmRouter.callWithFallback(
+        var llmResponse = llmRouter.callWithFallback(
                 props.getProvider(), props.getModel(),
                 prompt, runId, "api-test-suite",
-                LlmRouter.FallbackMode.IMMEDIATE, 0, false).getResult().getOutput().getText();
+                LlmRouter.FallbackMode.IMMEDIATE, 0, false);
+
+        // Track tokens for billing accuracy
+        try {
+            int inTok = llmResponse.getMetadata().getUsage().getPromptTokens().intValue();
+            int outTok = llmResponse.getMetadata().getUsage().getCompletionTokens().intValue();
+            stateStore.addTokensToRun(runId, inTok, outTok);
+            log.debug("ApiTestSuiteAgent tokens: run={} in={} out={}", runId, inTok, outTok);
+        } catch (Exception e) {
+            log.warn("ApiTestSuiteAgent: failed to track tokens for run {}: {}", runId, e.getMessage());
+        }
+
+        String yaml = llmResponse.getResult().getOutput().getText();
 
         // Strip markdown fences if LLM added them
         yaml = yaml.trim()

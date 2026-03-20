@@ -39,7 +39,6 @@ const BASE_TABS = [
   { value: 'graph',     label: 'Graph' },
   { value: 'log',       label: 'Live Log' },
   { value: 'code',      label: 'Code' },
-  { value: 'review',    label: 'Review' },
 ];
 
 export default function RunDetailTabs() {
@@ -150,10 +149,6 @@ export default function RunDetailTabs() {
 
         <Tabs.Content value="plan" className="h-full overflow-y-auto p-4">
           <PlanTab run={activeRun} />
-        </Tabs.Content>
-
-        <Tabs.Content value="review" className="h-full overflow-y-auto p-4">
-          <ReviewTab run={activeRun} />
         </Tabs.Content>
 
         <Tabs.Content value="code" className="h-full overflow-hidden">

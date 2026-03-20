@@ -10,6 +10,7 @@ import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.*;
+import com.navneet.executespec.state.StateStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class ValidationReportService {
     private final ValidationReportGenerator generator;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final StateStore stateStore;
 
     /**
      * Main entry point — called after ReviewerAgent completes, before MergeGate.
@@ -67,6 +69,13 @@ public class ValidationReportService {
                 .outputTokens(llmResult.outputTokens())
                 .generationTimeMs(System.currentTimeMillis() - startTime)
                 .build();
+
+            // Accumulate report tokens into run total for billing accuracy
+            try {
+                stateStore.addTokensToRun(runId, llmResult.inputTokens(), llmResult.outputTokens());
+            } catch (Exception tokenEx) {
+                log.warn("Failed to accumulate report tokens to run {}: {}", runId, tokenEx.getMessage());
+            }
 
             // Delete any existing report for this run (rework edge case)
             repository.findByRunId(runId).ifPresent(existing -> repository.delete(existing));

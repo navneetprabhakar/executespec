@@ -145,9 +145,20 @@ public class PromptOptimiserAgent {
             new UserMessage(userMessage)
         ));
 
-        return llmCallGuard
-            .call(prompt, props.getModel(), "prompt-optimiser-" + run.getRunId(), run.getRunId())
-            .getResult().getOutput().getText();
+        var response = llmCallGuard
+            .call(prompt, props.getModel(), "prompt-optimiser-" + run.getRunId(), run.getRunId());
+
+        // Track tokens for billing accuracy
+        try {
+            int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
+            int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
+            stateStore.addTokensToRun(run.getRunId(), inTok, outTok);
+            log.debug("PromptOptimiser tokens: run={} in={} out={}", run.getRunId(), inTok, outTok);
+        } catch (Exception e) {
+            log.warn("PromptOptimiser: failed to track tokens for run {}: {}", run.getRunId(), e.getMessage());
+        }
+
+        return response.getResult().getOutput().getText();
     }
 
     private boolean shouldRun() {
