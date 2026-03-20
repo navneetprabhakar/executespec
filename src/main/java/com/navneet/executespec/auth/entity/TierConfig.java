@@ -53,9 +53,9 @@ public class TierConfig {
     @Column(name = "max_apply_suggestions", nullable = false)
     private int maxApplySuggestions = 2;
 
-    /** Max preview starts per run. FREE=3, PRO=10, ENT=-1 (unlimited). */
+    /** Max preview starts per run. FREE=2, PRO=5, ENT=-1 (unlimited). */
     @Column(name = "max_preview_starts", nullable = false)
-    private int maxPreviewStarts = 3;
+    private int maxPreviewStarts = 2;
 
     /** Max automatic run-level retries on failure. FREE=0, PRO=2, ENT=3. */
     @Column(name = "max_run_auto_retries", nullable = false)

@@ -10,7 +10,7 @@ import {
   Filter, AlertTriangle, Database, Eye, EyeOff, X, Shield, Clock,
 } from 'lucide-react';
 
-const BACKEND_ONLY = new Set(['SPRING_BOOT', 'GRADLE']);
+const BACKEND_ONLY = new Set(['SPRING_BOOT', 'GRADLE', 'NODE_BACKEND', 'PYTHON']);
 
 const TYPE_LABELS: Record<string, string> = {
   SPRING_BOOT: 'Spring Boot',
@@ -601,6 +601,16 @@ function EnvConfigDialog({
 
 // ── Backend-only preview (OpenAPI viewer + health) ─────────────────────────────
 
+/** Common API doc paths to probe on preview containers. */
+const OPENAPI_PATHS = [
+  '/api-docs',              // Swagger/SpringDoc default
+  '/v3/api-docs',           // SpringDoc OpenAPI 3
+  '/swagger.json',          // Swagger 2
+  '/openapi.json',          // OpenAPI 3 common
+  '/docs',                  // FastAPI default
+  '/swagger-ui.html',       // Spring Boot classic
+];
+
 function BackendPreview({
   runId,
   url,
@@ -610,6 +620,96 @@ function BackendPreview({
   url: string;
   openapiSpec: string | null;
 }) {
+  const [liveSpecUrl, setLiveSpecUrl] = useState<string | null>(null);
+  const [probing, setProbing] = useState(true);
+
+  // Probe the preview container for common OpenAPI/Swagger paths
+  useEffect(() => {
+    let cancelled = false;
+    setProbing(true);
+    (async () => {
+      for (const path of OPENAPI_PATHS) {
+        if (cancelled) return;
+        try {
+          const res = await fetch(url + path, { method: 'GET', signal: AbortSignal.timeout(3000) });
+          if (res.ok) {
+            const contentType = res.headers.get('content-type') ?? '';
+            // If it returns HTML (like /docs for FastAPI or /swagger-ui.html), use iframe
+            if (contentType.includes('html')) {
+              setLiveSpecUrl(url + path);
+              setProbing(false);
+              return;
+            }
+            // If it returns JSON, use Swagger UI with that URL
+            if (contentType.includes('json')) {
+              setLiveSpecUrl(url + path);
+              setProbing(false);
+              return;
+            }
+          }
+        } catch {
+          // continue probing
+        }
+      }
+      setProbing(false);
+    })();
+    return () => { cancelled = true; };
+  }, [url]);
+
+  // Case 1: Found a live docs page on the preview container — iframe it
+  if (liveSpecUrl) {
+    const contentIsHtml = liveSpecUrl.includes('/docs') || liveSpecUrl.includes('.html');
+    if (contentIsHtml) {
+      return (
+        <iframe
+          src={liveSpecUrl}
+          className="w-full h-full border-0"
+          title="API Documentation"
+          sandbox="allow-scripts allow-same-origin allow-forms"
+        />
+      );
+    }
+    // JSON spec found — render Swagger UI pointed at the preview container's spec URL
+    const swaggerHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>API Documentation</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #1a1a2e; }
+    .swagger-ui { background: #1a1a2e; }
+    .swagger-ui .topbar { display: none; }
+    .swagger-ui .info { margin: 20px 0 10px; }
+    .swagger-ui .scheme-container { background: transparent; box-shadow: none; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"><\/script>
+  <script>
+    SwaggerUIBundle({
+      url: '${liveSpecUrl}',
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: 'BaseLayout',
+      deepLinking: true,
+      defaultModelsExpandDepth: 0,
+    });
+  <\/script>
+</body>
+</html>`;
+    return (
+      <iframe
+        srcDoc={swaggerHtml}
+        className="w-full h-full border-0"
+        title="API Documentation"
+        sandbox="allow-scripts allow-same-origin"
+      />
+    );
+  }
+
+  // Case 2: Use the ExecuteSpec-side OpenAPI spec (generated after merge)
   if (openapiSpec) {
     const swaggerHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -627,7 +727,7 @@ function BackendPreview({
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"><\/script>
   <script>
     SwaggerUIBundle({
       url: '/api/runs/${runId}/openapi.yaml',
@@ -637,10 +737,9 @@ function BackendPreview({
       deepLinking: true,
       defaultModelsExpandDepth: 0,
     });
-  </script>
+  <\/script>
 </body>
 </html>`;
-
     return (
       <iframe
         srcDoc={swaggerHtml}
@@ -651,6 +750,7 @@ function BackendPreview({
     );
   }
 
+  // Case 3: Still probing or no docs found
   return (
     <div className="h-full flex items-center justify-center">
       <div className="text-center space-y-3 px-8">
@@ -664,10 +764,13 @@ function BackendPreview({
         <p className="text-xs text-zinc-500">
           Backend API is live at <code className="font-mono text-zinc-300">{url}</code>
         </p>
-        <p className="text-xs text-zinc-600">
-          No OpenAPI spec found. The spec is auto-generated after merge —
-          if this is a fresh run, try refreshing in a moment.
-        </p>
+        {probing ? (
+          <p className="text-xs text-zinc-600 animate-pulse">Probing for API documentation...</p>
+        ) : (
+          <p className="text-xs text-zinc-600">
+            No API documentation endpoint found. Try adding Swagger/OpenAPI to your project.
+          </p>
+        )}
         <a
           href={url}
           target="_blank"

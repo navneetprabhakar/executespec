@@ -3,6 +3,7 @@ package com.navneet.executespec.context;
 import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.recovery.LlmCallGuard;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -27,6 +28,7 @@ public class ContextAgent {
     private final ContextAgentScanner scanner;
     private final LlmCallGuard llmCallGuard;
     private final ContextAgentProperties props;
+    private final StateStore stateStore;
 
     @Value("${agent.workspace}")
     private String workspaceRoot;
@@ -35,10 +37,11 @@ public class ContextAgent {
     private Resource promptTemplate;
 
     public ContextAgent(ContextAgentScanner scanner, LlmCallGuard llmCallGuard,
-                        ContextAgentProperties props) {
+                        ContextAgentProperties props, StateStore stateStore) {
         this.scanner = scanner;
         this.llmCallGuard = llmCallGuard;
         this.props = props;
+        this.stateStore = stateStore;
     }
 
     public void runAsync(PipelineRun run, List<WorkerReport> workerReports,
@@ -89,9 +92,20 @@ public class ContextAgent {
             new UserMessage(userMessage)
         ));
 
-        return llmCallGuard
-            .call(prompt, props.getModel(), "context-agent-" + run.getRunId(), run.getRunId())
-            .getResult().getOutput().getText();
+        var response = llmCallGuard
+            .call(prompt, props.getModel(), "context-agent-" + run.getRunId(), run.getRunId());
+
+        // Track tokens for billing accuracy
+        try {
+            int inTok = response.getMetadata().getUsage().getPromptTokens().intValue();
+            int outTok = response.getMetadata().getUsage().getCompletionTokens().intValue();
+            stateStore.addTokensToRun(run.getRunId(), inTok, outTok);
+            log.debug("ContextAgent tokens: run={} in={} out={}", run.getRunId(), inTok, outTok);
+        } catch (Exception e) {
+            log.warn("ContextAgent: failed to track tokens for run {}: {}", run.getRunId(), e.getMessage());
+        }
+
+        return response.getResult().getOutput().getText();
     }
 
     private String buildUserMessage(ContextAgentInput input) {
