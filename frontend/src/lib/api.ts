@@ -595,6 +595,15 @@ export const getMessages = (runId: string) =>
 export const getOpenApiSpec = (runId: string) =>
   reqText(`/runs/${runId}/openapi.yaml`);
 
+/** Probe the preview container for API documentation endpoints (server-side proxy). */
+export interface ApiDocsProbeResult {
+  found: boolean;
+  path: string | null;
+  contentType: string | null;  // 'json' | 'html' | 'other'
+}
+export const probeApiDocs = (runId: string): Promise<ApiDocsProbeResult> =>
+  req<ApiDocsProbeResult>(`/runs/${runId}/preview/probe-api-docs`);
+
 // ── Cloud Run Preview ─────────────────────────────────────────────────────────
 
 export interface LocalPreviewStatus {
