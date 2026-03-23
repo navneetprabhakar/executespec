@@ -206,6 +206,108 @@ public class MailService {
         sendHtml(toEmail, subject, "email/dunning-reminder", ctx);
     }
 
+    // ── Usage report emails ─────────────────────────────────────────────────
+
+    @Async
+    public void sendUserUsageReport(String toEmail, String firstName, String periodLabel,
+                                     String periodRange,
+                                     com.navneet.executespec.report.UsageReportService.UserUsageData data) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("period", periodLabel);
+        ctx.setVariable("periodRange", periodRange);
+        populateUsageContext(ctx, data.totalRuns(), data.completedRuns(), data.failedRuns(),
+                data.totalInputTokens(), data.totalOutputTokens(), data.estimatedCostUsd(),
+                data.prevTotalRuns(), data.prevTotalTokens(), data.prevCostUsd(), data.projects());
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, "Your " + periodLabel.toLowerCase() + " usage report — executespec",
+                "email/usage-report-user", ctx);
+    }
+
+    @Async
+    public void sendOrgUsageReport(String toEmail, String orgName, String periodLabel,
+                                    String periodRange,
+                                    com.navneet.executespec.report.UsageReportService.OrgUsageData data) {
+        Context ctx = new Context();
+        ctx.setVariable("orgName", orgName);
+        ctx.setVariable("period", periodLabel);
+        ctx.setVariable("periodRange", periodRange);
+        ctx.setVariable("memberCount", data.memberCount());
+        populateUsageContext(ctx, data.totalRuns(), data.completedRuns(), data.failedRuns(),
+                data.totalInputTokens(), data.totalOutputTokens(), data.estimatedCostUsd(),
+                data.prevTotalRuns(), data.prevTotalTokens(), data.prevCostUsd(), data.projects());
+
+        // Top users with percentage bars
+        int maxRuns = data.topUsers().isEmpty() ? 1
+                : data.topUsers().stream().mapToInt(com.navneet.executespec.report.UsageReportService.TopUser::runCount).max().orElse(1);
+        var topUsersWithPct = data.topUsers().stream()
+                .map(u -> java.util.Map.of(
+                        "name", u.name(), "email", u.email(),
+                        "runCount", u.runCount(),
+                        "tokens", formatTokens(u.tokens()),
+                        "pct", Math.max(5, (int) (u.runCount() * 100.0 / maxRuns))))
+                .toList();
+        ctx.setVariable("topUsers", topUsersWithPct);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, orgName + " — " + periodLabel.toLowerCase() + " usage report — executespec",
+                "email/usage-report-org", ctx);
+    }
+
+    private void populateUsageContext(Context ctx, int totalRuns, int completed, int failed,
+                                       long inTok, long outTok, double cost,
+                                       int prevRuns, long prevTokens, double prevCost,
+                                       java.util.List<com.navneet.executespec.report.UsageReportService.ProjectBreakdown> projects) {
+        ctx.setVariable("totalRuns", totalRuns);
+        ctx.setVariable("completedRuns", completed);
+        ctx.setVariable("failedRuns", failed);
+        long totalTokens = inTok + outTok;
+        ctx.setVariable("totalTokens", formatTokens(totalTokens));
+        ctx.setVariable("estimatedCost", String.format("$%.2f", cost));
+
+        // Percentages for bar chart
+        int completedPct = totalRuns > 0 ? (int) (completed * 100.0 / totalRuns) : 0;
+        int failedPct = totalRuns > 0 ? (int) (failed * 100.0 / totalRuns) : 0;
+        ctx.setVariable("completedPct", completedPct);
+        ctx.setVariable("failedPct", failedPct);
+
+        // Delta comparisons
+        ctx.setVariable("runsDelta", formatDelta(totalRuns, prevRuns));
+        ctx.setVariable("runsDeltaPositive", totalRuns >= prevRuns);
+        ctx.setVariable("tokensDelta", formatDelta(totalTokens, prevTokens));
+        ctx.setVariable("tokensDeltaPositive", totalTokens >= prevTokens);
+        ctx.setVariable("costDelta", formatDelta(cost, prevCost));
+        ctx.setVariable("costDeltaPositive", cost >= prevCost);
+
+        // Projects with percentage bars
+        int maxProjectRuns = projects.isEmpty() ? 1
+                : projects.stream().mapToInt(com.navneet.executespec.report.UsageReportService.ProjectBreakdown::runs).max().orElse(1);
+        var projectsWithPct = projects.stream()
+                .map(p -> java.util.Map.of(
+                        "name", p.projectName(),
+                        "runs", p.runs(),
+                        "tokens", formatTokens(p.tokens()),
+                        "pct", Math.max(5, (int) (p.runs() * 100.0 / maxProjectRuns))))
+                .toList();
+        ctx.setVariable("projects", projectsWithPct);
+        ctx.setVariable("hasProjects", !projects.isEmpty());
+    }
+
+    private String formatTokens(long tokens) {
+        if (tokens >= 1_000_000) return String.format("%.1fM", tokens / 1_000_000.0);
+        if (tokens >= 1_000) return String.format("%.1fK", tokens / 1_000.0);
+        return String.valueOf(tokens);
+    }
+
+    private String formatDelta(double current, double previous) {
+        if (previous == 0) return current > 0 ? "+100%" : "—";
+        double pct = ((current - previous) / previous) * 100;
+        return (pct >= 0 ? "+" : "") + String.format("%.0f%%", pct);
+    }
+
+    private String formatDelta(long current, long previous) {
+        return formatDelta((double) current, (double) previous);
+    }
+
     // ── private helpers ──────────────────────────────────────────────────────
 
     private void sendHtml(String to, String subject, String template, Context ctx) {

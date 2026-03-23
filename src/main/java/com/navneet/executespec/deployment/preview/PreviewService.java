@@ -353,14 +353,25 @@ public class PreviewService {
                 }
             }
 
-            // Phase 5: Add Caddy route (if proxy is available)
+            // Phase 5: Build preview URL
+            // Priority: Caddy proxy → Spring Boot proxy (PreviewProxyFilter) → fallback host → localhost
             String previewUrl;
             if (caddyProxy != null) {
                 caddyProxy.addRoute(runId, hostPort);
                 previewUrl = caddyProxy.buildUrl(runId);
+            } else if (props.getProxy().isEnabled()) {
+                // Spring Boot preview proxy mode — PreviewProxyFilter handles preview-*.executespec.ai
+                // Traffic flows: LB → Spring Boot :8080 → PreviewProxyFilter → localhost:{port}
+                String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
+                previewUrl = "https://preview-" + shortId + "." + props.getPreviewDomain();
             } else {
-                // Fallback: direct port access (local dev or no Caddy)
-                previewUrl = "http://localhost:" + hostPort;
+                // Fallback: direct port access (local dev only).
+                String fallbackHost = props.getFallbackHost();
+                if (fallbackHost != null && !fallbackHost.isBlank()) {
+                    previewUrl = fallbackHost + ":" + hostPort;
+                } else {
+                    previewUrl = "http://localhost:" + hostPort;
+                }
             }
 
             // Phase 6: Health check

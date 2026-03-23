@@ -21,4 +21,8 @@ public interface AppUserRepository extends JpaRepository<AppUser, String> {
 
     @Query("SELECT u FROM AppUser u WHERE u.orgId = :orgId AND u.status = 'ACTIVE'")
     List<AppUser> findActiveByOrgId(@Param("orgId") String orgId);
+
+    /** Solo users: active, no org (FREE tier individuals). */
+    @Query("SELECT u FROM AppUser u WHERE u.status = 'ACTIVE' AND u.orgId IS NULL")
+    List<AppUser> findActiveSoloUsers();
 }

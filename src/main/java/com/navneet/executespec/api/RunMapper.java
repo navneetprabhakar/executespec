@@ -47,7 +47,9 @@ public class RunMapper {
             r.getKeySource(),
             r.getTechStack(),
             resolveProjectName(r.getProjectId()),
-            resolveCreatorName(r.getCreatedByUserId())
+            resolveCreatorName(r.getCreatedByUserId()),
+            r.getRunTitle(),
+            r.getRunSummary()
         );
     }
 
@@ -132,6 +134,8 @@ public class RunMapper {
             .createdByName(resolveCreatorName(r.getCreatedByUserId()))
             .agentTokens(buildAgentTokens(r))
             .applySuggestionCount(r.getApplySuggestionCount())
+            .runTitle(r.getRunTitle())
+            .runSummary(r.getRunSummary())
             .build();
     }
 

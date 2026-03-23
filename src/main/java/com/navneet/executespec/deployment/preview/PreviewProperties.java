@@ -17,10 +17,25 @@ public class PreviewProperties {
     private int portRangeStart = 10000;
     private int portRangeEnd = 10100;
 
-    // Caddy reverse proxy domain (wildcard: *.{previewDomain})
-    private String previewDomain = "preview.executespec.ai";
+    // Preview domain — URLs are: preview-{shortId}.{previewDomain}
+    private String previewDomain = "executespec.ai";
+
+    /**
+     * Fallback base URL when Caddy proxy is disabled (e.g. "http://dev.executespec.ai").
+     * Used to build preview URLs as {fallbackHost}:{port} so browsers on the dev server
+     * can reach the Docker container directly. Null = use http://localhost (local dev only).
+     */
+    private String fallbackHost;
+
+    private ProxyConfig proxy = new ProxyConfig();
 
     private ConcurrencyConfig concurrency = new ConcurrencyConfig();
+
+    @Data
+    public static class ProxyConfig {
+        /** Enable Spring Boot preview proxy (PreviewProxyFilter). Set true on server. */
+        private boolean enabled = false;
+    }
 
     @Data
     public static class ConcurrencyConfig {

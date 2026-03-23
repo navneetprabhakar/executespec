@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Manages dynamic reverse proxy routes in Caddy via its admin API (localhost:2019).
  * Only active when deployed on a server with Caddy (preview.proxy.enabled=true).
  *
- * Each route maps {runId-short}.preview.executespec.ai → reverse_proxy localhost:{port}
+ * Each route maps preview-{runId-short}.executespec.ai → reverse_proxy localhost:{port}
  */
 @Component
 @Slf4j
@@ -41,7 +41,7 @@ public class CaddyProxyManager {
      */
     public void addRoute(String runId, int port) {
         String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
-        String host = shortId + "." + props.getPreviewDomain();
+        String host = "preview-" + shortId + "." + props.getPreviewDomain();
 
         // Caddy JSON config for a route
         String routeJson = """
@@ -113,6 +113,6 @@ public class CaddyProxyManager {
      */
     public String buildUrl(String runId) {
         String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
-        return "https://" + shortId + "." + props.getPreviewDomain();
+        return "https://preview-" + shortId + "." + props.getPreviewDomain();
     }
 }

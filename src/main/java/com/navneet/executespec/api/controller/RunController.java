@@ -509,6 +509,7 @@ public class RunController {
                     .body(resource);
 
             } catch (IllegalStateException e) {
+                log.warn("Workspace not available for run {}: {}", id, e.getMessage());
                 // Path 3: GitHub fallback
                 if (run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
                     String[] ownerRepo = com.navneet.executespec.repo.GitHubRepoService.extractOwnerRepo(run.getRepoUrl());
@@ -521,7 +522,8 @@ public class RunController {
                             .build();
                     }
                 }
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Workspace not available for download. " + e.getMessage());
             }
 
         } catch (ResponseStatusException e) {

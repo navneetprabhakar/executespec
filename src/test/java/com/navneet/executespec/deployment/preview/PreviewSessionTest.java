@@ -15,7 +15,7 @@ class PreviewSessionTest {
     void expiredSession() {
         var session = new PreviewSession(
                 "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, null,
-                PreviewStatus.RUNNING, "https://run1.preview.executespec.ai", 10000, null,
+                PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now().minusSeconds(3600), Instant.now().minusSeconds(60)
         );
         assertThat(session.isExpired()).isTrue();
@@ -26,7 +26,7 @@ class PreviewSessionTest {
     void activeSession() {
         var session = new PreviewSession(
                 "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, null,
-                PreviewStatus.RUNNING, "https://run1.preview.executespec.ai", 10000, null,
+                PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now(), Instant.now().plusSeconds(3600)
         );
         assertThat(session.isExpired()).isFalse();
@@ -37,7 +37,7 @@ class PreviewSessionTest {
     void noExpirySession() {
         var session = new PreviewSession(
                 "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, null,
-                PreviewStatus.RUNNING, "https://run1.preview.executespec.ai", 10000, null,
+                PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now(), null
         );
         assertThat(session.isExpired()).isFalse();
@@ -48,7 +48,7 @@ class PreviewSessionTest {
     void recordFieldAccess() {
         var session = new PreviewSession(
                 "run-1", "es-preview-run1", PreviewProjectType.SPRING_BOOT, DatabaseType.POSTGRESQL,
-                PreviewStatus.BUILDING, "https://run1.preview.executespec.ai",
+                PreviewStatus.BUILDING, "https://preview-run1.executespec.ai",
                 10042, "some error",
                 Instant.now(), Instant.now().plusSeconds(900)
         );
@@ -58,7 +58,7 @@ class PreviewSessionTest {
         assertThat(session.projectType()).isEqualTo(PreviewProjectType.SPRING_BOOT);
         assertThat(session.databaseType()).isEqualTo(DatabaseType.POSTGRESQL);
         assertThat(session.status()).isEqualTo(PreviewStatus.BUILDING);
-        assertThat(session.url()).isEqualTo("https://run1.preview.executespec.ai");
+        assertThat(session.url()).isEqualTo("https://preview-run1.executespec.ai");
         assertThat(session.hostPort()).isEqualTo(10042);
         assertThat(session.errorMessage()).isEqualTo("some error");
     }
@@ -68,7 +68,7 @@ class PreviewSessionTest {
     void sessionWithDatabase() {
         var session = new PreviewSession(
                 "run-db", "es-preview-rundb", PreviewProjectType.NODE_BACKEND, DatabaseType.MYSQL,
-                PreviewStatus.RUNNING, "https://rundb.preview.executespec.ai", 10001, null,
+                PreviewStatus.RUNNING, "https://preview-rundb.executespec.ai", 10001, null,
                 Instant.now(), Instant.now().plusSeconds(3600)
         );
 
@@ -81,7 +81,7 @@ class PreviewSessionTest {
     void ttlRemainingActive() {
         var session = new PreviewSession(
                 "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, null,
-                PreviewStatus.RUNNING, "https://run1.preview.executespec.ai", 10000, null,
+                PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now(), Instant.now().plusSeconds(600)
         );
         assertThat(session.ttlRemainingSeconds()).isGreaterThan(0);
@@ -92,7 +92,7 @@ class PreviewSessionTest {
     void ttlRemainingExpired() {
         var session = new PreviewSession(
                 "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, null,
-                PreviewStatus.RUNNING, "https://run1.preview.executespec.ai", 10000, null,
+                PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now().minusSeconds(700), Instant.now().minusSeconds(100)
         );
         assertThat(session.ttlRemainingSeconds()).isEqualTo(0);

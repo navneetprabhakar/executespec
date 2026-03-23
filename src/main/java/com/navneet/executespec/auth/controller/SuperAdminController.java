@@ -51,6 +51,19 @@ public class SuperAdminController {
     private final ActivityAuditService auditService;
     private final RunTopupService runTopupService;
     private final TopupPackageRepository topupPackageRepo;
+    private final com.navneet.executespec.report.UsageReportService usageReportService;
+
+    // ── Usage Reports ──────────────────────────────────────────────────────────
+
+    @PostMapping("/usage-reports/trigger")
+    public ResponseEntity<Map<String, Object>> triggerUsageReports(@RequestBody Map<String, String> body) {
+        String period = body.getOrDefault("period", "WEEKLY").toUpperCase();
+        if (!List.of("WEEKLY", "MONTHLY").contains(period)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "period must be WEEKLY or MONTHLY");
+        }
+        int count = usageReportService.triggerReports(period);
+        return ResponseEntity.ok(Map.of("emailsSent", count, "period", period));
+    }
 
     // ── Users ─────────────────────────────────────────────────────────────────
 

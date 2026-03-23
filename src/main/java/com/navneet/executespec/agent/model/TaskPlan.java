@@ -18,6 +18,7 @@ import java.util.List;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public class TaskPlan {
 
+    private String planTitle;
     private String planSummary;
     private List<TaskDefinition> tasks;
 }

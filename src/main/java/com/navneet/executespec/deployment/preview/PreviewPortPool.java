@@ -107,4 +107,20 @@ public class PreviewPortPool {
     public int getPort(String runId) {
         return allocations.getOrDefault(runId, -1);
     }
+
+    /**
+     * Find the port allocated for a runId that starts with the given prefix.
+     * Used by PreviewProxyFilter to resolve short IDs (first 8 chars of runId)
+     * from preview-*.executespec.ai Host headers.
+     *
+     * @return allocated port, or -1 if no match found
+     */
+    public int findPortByPrefix(String prefix) {
+        for (var entry : allocations.entrySet()) {
+            if (entry.getKey().startsWith(prefix)) {
+                return entry.getValue();
+            }
+        }
+        return -1;
+    }
 }
