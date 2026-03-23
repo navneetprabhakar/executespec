@@ -45,9 +45,20 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
             <span className="font-mono text-xs text-zinc-400">{run.runId.slice(0, 12)}</span>
             <span className="text-xs text-zinc-600">{relativeTime(run.startedAt)}</span>
           </div>
-          <p className="text-sm text-zinc-200 line-clamp-2 leading-snug">
-            {truncate(run.userRequest ?? '', 120)}
-          </p>
+          {run.runTitle ? (
+            <>
+              <p className="text-sm font-medium text-zinc-100 line-clamp-1">
+                {run.runTitle}
+              </p>
+              <p className="text-xs text-zinc-400 line-clamp-1 leading-snug mt-0.5">
+                {run.runSummary ?? truncate(run.userRequest ?? '', 100)}
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-zinc-200 line-clamp-2 leading-snug">
+              {truncate(run.userRequest ?? '', 120)}
+            </p>
+          )}
           <TechBadges
             userRequest={run.userRequest ?? ''}
             runStatus={run.status}

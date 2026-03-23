@@ -239,6 +239,7 @@ OUTPUT FORMAT
 Respond with exactly this JSON structure:
 
 {
+  "plan_title": "Short project name, 3-8 words (e.g. Todo REST API, React Dashboard with Charts)",
   "plan_summary": "One sentence describing what this plan builds overall",
   "tasks": [
     {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail } from 'lucide-react';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
@@ -7,7 +7,7 @@ import { useUiStore } from '@/stores/useUiStore';
 import AdminInviteModal from './AdminInviteModal';
 import GrantRunsModal from './GrantRunsModal';
 
-type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages';
+type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages' | 'reports';
 
 const TIER_LABEL: Record<string, string> = { FREE: 'Free', PRO: 'Team', ENTERPRISE: 'Enterprise' };
 const STATUS_COLOR: Record<string, string> = {
@@ -53,6 +53,24 @@ function AdminPageInner() {
   const [editingPkg, setEditingPkg] = useState<api.TopupPackageAdmin | null>(null);
   const [newPkg, setNewPkg] = useState(false);
   const [pkgForm, setPkgForm] = useState({ name: '', runCount: '', amountInr: '', amountUsd: '', sortOrder: '' });
+
+  // ── Usage Reports state ──────────────────────────────────────────────────
+  const [reportSending, setReportSending] = useState<'WEEKLY' | 'MONTHLY' | null>(null);
+  const [reportResult, setReportResult] = useState<{ emailsSent: number; period: string } | null>(null);
+
+  const triggerReport = async (period: 'WEEKLY' | 'MONTHLY') => {
+    setReportSending(period);
+    setReportResult(null);
+    try {
+      const result = await api.adminTriggerUsageReport(period);
+      setReportResult(result);
+      addToast({ type: 'success', message: `Queued ${result.emailsSent} usage report emails` });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message || 'Failed to trigger reports' });
+    } finally {
+      setReportSending(null);
+    }
+  };
 
   const loadUsers       = () => api.adminListUsers().then(setUsers).catch(() => {});
   const loadOrgs        = () => api.adminListOrgs().then(setOrgs).catch(() => {});
@@ -186,6 +204,7 @@ function AdminPageInner() {
     { id: 'tiers',       label: 'Tier Config',  icon: Settings2 },
     { id: 'escalations', label: 'Escalations',  icon: GitMerge,  count: escalations.length || undefined },
     { id: 'packages',    label: 'Top-Up Pkgs',  icon: Package,   count: packages.filter((p) => p.active).length },
+    { id: 'reports',     label: 'Usage Reports', icon: Mail },
   ];
 
   return (
@@ -673,6 +692,79 @@ function AdminPageInner() {
           </div>
         )}
       </div>
+
+        {/* ── USAGE REPORTS TAB ──────────────────────────────────────────── */}
+        {tab === 'reports' && (
+          <div className="space-y-6 max-w-xl">
+            <div>
+              <h2 className="text-base font-semibold text-zinc-100 mb-1">Send Usage Reports</h2>
+              <p className="text-sm text-zinc-500 leading-relaxed">
+                Sends usage report emails to <strong className="text-zinc-400">all active users</strong> and{' '}
+                <strong className="text-zinc-400">org admins</strong>. Solo users get personal reports.
+                Org admins get aggregated reports with top contributors and per-project breakdown.
+              </p>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => triggerReport('WEEKLY')}
+                disabled={reportSending !== null}
+                className={cn(
+                  'flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                  reportSending === 'WEEKLY'
+                    ? 'bg-accent-violet/20 text-accent-violet cursor-wait'
+                    : 'bg-accent-violet hover:bg-accent-violet/80 text-white',
+                  reportSending !== null && reportSending !== 'WEEKLY' && 'opacity-50 cursor-not-allowed',
+                )}
+              >
+                <Mail className="h-4 w-4" />
+                {reportSending === 'WEEKLY' ? 'Sending...' : 'Send Weekly Report'}
+              </button>
+              <button
+                onClick={() => triggerReport('MONTHLY')}
+                disabled={reportSending !== null}
+                className={cn(
+                  'flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                  reportSending === 'MONTHLY'
+                    ? 'bg-cyan-500/20 text-cyan-400 cursor-wait'
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-white',
+                  reportSending !== null && reportSending !== 'MONTHLY' && 'opacity-50 cursor-not-allowed',
+                )}
+              >
+                <Mail className="h-4 w-4" />
+                {reportSending === 'MONTHLY' ? 'Sending...' : 'Send Monthly Report'}
+              </button>
+            </div>
+
+            {reportResult && (
+              <div className="rounded-xl bg-accent-emerald/10 border border-accent-emerald/20 px-5 py-4 flex items-center gap-3">
+                <Check className="h-5 w-5 text-accent-emerald flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-accent-emerald">
+                    Queued {reportResult.emailsSent} usage report emails
+                  </p>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Period: {reportResult.period} &middot; Emails are being sent asynchronously
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-4">
+              <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">What gets sent</h3>
+              <div className="space-y-2 text-sm text-zinc-400">
+                <div className="flex items-start gap-2">
+                  <span className="text-accent-violet mt-0.5">&#9679;</span>
+                  <span><strong className="text-zinc-300">Solo users</strong> — personal run count, token usage, cost estimate, per-project breakdown, comparison with previous period</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-cyan-400 mt-0.5">&#9679;</span>
+                  <span><strong className="text-zinc-300">Org admins</strong> — aggregated org usage, top 5 contributors leaderboard, per-project breakdown, member count, period comparison</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       {showInviteModal && (
         <AdminInviteModal

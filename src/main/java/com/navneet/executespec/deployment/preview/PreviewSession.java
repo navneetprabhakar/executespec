@@ -9,7 +9,7 @@ public record PreviewSession(
         PreviewProjectType projectType,
         DatabaseType databaseType,
         PreviewStatus status,
-        String url,                  // https://{short-id}.preview.executespec.ai
+        String url,                  // https://preview-{short-id}.executespec.ai
         int hostPort,                // allocated host port (for cleanup)
         String errorMessage,
         Instant startedAt,

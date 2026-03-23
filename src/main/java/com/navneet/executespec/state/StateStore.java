@@ -102,6 +102,8 @@ public class StateStore {
         });
 
         run.setPlanJson(toJson(plan));
+        if (plan.getPlanTitle() != null)   run.setRunTitle(plan.getPlanTitle());
+        if (plan.getPlanSummary() != null) run.setRunSummary(plan.getPlanSummary());
         run.setStatus("AWAITING_APPROVAL");
         run.setCurrentGate("PLAN_APPROVAL");
         run.setTechStack(detectTechStack(plan, run.getUserRequest()));

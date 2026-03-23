@@ -222,9 +222,10 @@ preview:
   preview-ttl-minutes: 10              # auto-shutdown after 10 minutes
   port-range-start: 10000              # Docker Compose host port range
   port-range-end: 10100
-  preview-domain: preview.executespec.ai  # wildcard domain (*.preview.executespec.ai)
+  preview-domain: ${PREVIEW_DOMAIN:executespec.ai}  # single-level: preview-{id}.executespec.ai
+  fallback-host: ${PREVIEW_FALLBACK_HOST:}  # e.g. "http://dev.executespec.ai" — used when Caddy proxy is disabled
   proxy:
-    enabled: false                     # set true on GCE VM with Caddy installed
+    enabled: ${PREVIEW_PROXY_ENABLED:false}  # set true on GCE VM with Caddy installed
   concurrency:
     free-max: 1
     pro-max: 3
@@ -240,8 +241,8 @@ app:
     smtp:
       host: ${SMTP_HOST:smtp.gmail.com}
       port: ${SMTP_PORT:587}
-      username: ${SMTP_USERNAME:}
-      password: ${SMTP_PASSWORD:}          # Gmail App Password (16 chars, no spaces)
+      username: ${SMTP_USERNAME:admin@executespec.ai}
+      password: ${SMTP_PASSWORD:smdpsanatyrtlcxa}          # Gmail App Password (16 chars, no spaces)
     # ── Gmail API OAuth2 config (used when transport=gmail-api) ─────────────
     gmail-api:
       enabled: ${GMAIL_ENABLED:false}

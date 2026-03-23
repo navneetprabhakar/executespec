@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Usage Report</title></head>
+<body style="font-family:'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e2e8f0;padding:40px 16px;margin:0">
+  <div style="max-width:560px;margin:0 auto">
+
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:12px 12px 0 0;padding:28px 32px">
+      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700">executespec</h1>
+      <p style="color:rgba(255,255,255,0.8);margin:6px 0 0;font-size:14px">
+        <span th:text="${period}">Weekly</span> Usage Report
+      </p>
+      <p style="color:rgba(255,255,255,0.6);margin:4px 0 0;font-size:12px" th:text="${periodRange}">
+        Mar 14 – Mar 21, 2026
+      </p>
+    </div>
+
+    <!-- Body -->
+    <div style="background:#1a1f2e;border-radius:0 0 12px 12px;padding:32px">
+
+      <p style="margin:0 0 24px;font-size:14px">
+        Hi <span th:text="${firstName}">there</span>, here's your usage summary:
+      </p>
+
+      <!-- Stat Cards (3-up) -->
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
+        <tr>
+          <td width="33%" style="padding:0 4px 0 0;vertical-align:top">
+            <div style="background:#0f1117;border-radius:8px;padding:16px;text-align:center;border:1px solid #2d3748">
+              <div style="font-size:32px;font-weight:800;color:#8b5cf6;line-height:1" th:text="${totalRuns}">42</div>
+              <div style="font-size:10px;color:#94a3b8;margin-top:6px;text-transform:uppercase;letter-spacing:0.5px">Runs</div>
+              <div th:style="'font-size:11px;margin-top:6px;font-weight:600;color:' + (${runsDeltaPositive} ? '#22c55e' : '#ef4444')"
+                   th:text="${runsDelta}">+15%</div>
+            </div>
+          </td>
+          <td width="33%" style="padding:0 2px;vertical-align:top">
+            <div style="background:#0f1117;border-radius:8px;padding:16px;text-align:center;border:1px solid #2d3748">
+              <div style="font-size:32px;font-weight:800;color:#06b6d4;line-height:1" th:text="${totalTokens}">1.2M</div>
+              <div style="font-size:10px;color:#94a3b8;margin-top:6px;text-transform:uppercase;letter-spacing:0.5px">Tokens</div>
+              <div th:style="'font-size:11px;margin-top:6px;font-weight:600;color:' + (${tokensDeltaPositive} ? '#22c55e' : '#ef4444')"
+                   th:text="${tokensDelta}">+8%</div>
+            </div>
+          </td>
+          <td width="33%" style="padding:0 0 0 4px;vertical-align:top">
+            <div style="background:#0f1117;border-radius:8px;padding:16px;text-align:center;border:1px solid #2d3748">
+              <div style="font-size:32px;font-weight:800;color:#f59e0b;line-height:1" th:text="${estimatedCost}">$12</div>
+              <div style="font-size:10px;color:#94a3b8;margin-top:6px;text-transform:uppercase;letter-spacing:0.5px">Est. Cost</div>
+              <div th:style="'font-size:11px;margin-top:6px;font-weight:600;color:' + (${costDeltaPositive} ? '#22c55e' : '#ef4444')"
+                   th:text="${costDelta}">+5%</div>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Run Status Bar -->
+      <div style="margin-bottom:24px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Run Outcomes</div>
+        <div style="background:#334155;border-radius:6px;height:28px;overflow:hidden;display:flex" th:if="${totalRuns > 0}">
+          <div th:style="'width:' + ${completedPct} + '%;background:linear-gradient(90deg,#22c55e,#16a34a);height:100%'"></div>
+          <div th:style="'width:' + ${failedPct} + '%;background:linear-gradient(90deg,#ef4444,#dc2626);height:100%'"></div>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:6px;font-size:11px">
+          <span style="color:#22c55e">&#9679; Completed: <span th:text="${completedRuns}">38</span></span>
+          <span style="color:#ef4444">&#9679; Failed: <span th:text="${failedRuns}">4</span></span>
+        </div>
+      </div>
+
+      <!-- Project Breakdown -->
+      <div th:if="${hasProjects}" style="margin-bottom:24px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">By Project</div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px">
+          <tr th:each="p : ${projects}">
+            <td style="padding:6px 8px 6px 0;color:#e2e8f0;white-space:nowrap" th:text="${p.name}">My Project</td>
+            <td style="padding:6px 8px;color:#94a3b8;text-align:right;white-space:nowrap">
+              <span th:text="${p.runs}">10</span> runs
+            </td>
+            <td style="padding:6px 0;width:40%">
+              <div style="background:#334155;border-radius:3px;height:14px;overflow:hidden">
+                <div th:style="'width:' + ${p.pct} + '%;background:linear-gradient(90deg,#8b5cf6,#6d28d9);height:100%;border-radius:3px'"></div>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- CTA -->
+      <div style="text-align:center;margin-top:28px">
+        <a th:href="${baseUrl + '/runs'}" href="#"
+           style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;
+                  padding:12px 32px;border-radius:8px;font-weight:600;font-size:14px">
+          View Dashboard
+        </a>
+      </div>
+
+      <!-- Footer -->
+      <hr style="border:1px solid #2d3748;margin:28px 0 16px"/>
+      <p style="color:#64748b;font-size:11px;text-align:center;margin:0">
+        &copy; 2026 executespec &middot;
+        <a th:href="${baseUrl}" style="color:#8b5cf6;text-decoration:none" href="#">executespec.ai</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

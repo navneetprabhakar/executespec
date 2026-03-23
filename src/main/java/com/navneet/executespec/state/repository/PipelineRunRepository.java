@@ -67,6 +67,43 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId AND r.startedAt >= :since")
     Long sumOutputTokensByOrgIdAndStartedAtAfter(@Param("orgId") String orgId, @Param("since") Instant since);
 
+    // ── Usage report queries (date-range + per-user/org) ───────────────────────
+
+    long countByCreatedByUserIdAndStartedAtBetween(String userId, Instant start, Instant end);
+
+    long countByCreatedByUserIdAndStatusAndStartedAtBetween(String userId, String status, Instant start, Instant end);
+
+    @Query("SELECT COALESCE(SUM(r.totalInputTokens),0) FROM PipelineRun r WHERE r.createdByUserId = :uid AND r.startedAt BETWEEN :s AND :e")
+    Long sumInputTokensByUserAndDateRange(@Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
+
+    @Query("SELECT COALESCE(SUM(r.totalOutputTokens),0) FROM PipelineRun r WHERE r.createdByUserId = :uid AND r.startedAt BETWEEN :s AND :e")
+    Long sumOutputTokensByUserAndDateRange(@Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
+
+    long countByOrgIdAndStartedAtBetween(String orgId, Instant start, Instant end);
+
+    long countByOrgIdAndStatusAndStartedAtBetween(String orgId, String status, Instant start, Instant end);
+
+    @Query("SELECT COALESCE(SUM(r.totalInputTokens),0) FROM PipelineRun r WHERE r.orgId = :oid AND r.startedAt BETWEEN :s AND :e")
+    Long sumInputTokensByOrgAndDateRange(@Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end);
+
+    @Query("SELECT COALESCE(SUM(r.totalOutputTokens),0) FROM PipelineRun r WHERE r.orgId = :oid AND r.startedAt BETWEEN :s AND :e")
+    Long sumOutputTokensByOrgAndDateRange(@Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end);
+
+    @Query("SELECT r.createdByUserId, COUNT(r), COALESCE(SUM(r.totalInputTokens + r.totalOutputTokens),0) FROM PipelineRun r WHERE r.orgId = :oid AND r.startedAt BETWEEN :s AND :e GROUP BY r.createdByUserId ORDER BY COUNT(r) DESC")
+    List<Object[]> topUsersByRunCount(@Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end, Pageable pageable);
+
+    @Query("SELECT r.projectId, COUNT(r), COALESCE(SUM(r.totalInputTokens + r.totalOutputTokens),0) FROM PipelineRun r WHERE r.orgId = :oid AND r.startedAt BETWEEN :s AND :e AND r.projectId IS NOT NULL GROUP BY r.projectId ORDER BY COUNT(r) DESC")
+    List<Object[]> projectBreakdownByOrg(@Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end);
+
+    @Query("SELECT r.projectId, COUNT(r), COALESCE(SUM(r.totalInputTokens + r.totalOutputTokens),0) FROM PipelineRun r WHERE r.createdByUserId = :uid AND r.startedAt BETWEEN :s AND :e AND r.projectId IS NOT NULL GROUP BY r.projectId ORDER BY COUNT(r) DESC")
+    List<Object[]> projectBreakdownByUser(@Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
+
+    // ── Run title backfill ────────────────────────────────────────────────────
+
+    /** Finds runs that have a plan but no run_title yet (for one-time backfill on startup). */
+    @Query("SELECT r FROM PipelineRun r WHERE r.runTitle IS NULL AND r.planJson IS NOT NULL AND r.planJson <> ''")
+    List<PipelineRun> findRunsWithoutTitle();
+
     // ── GCS workspace archiving ───────────────────────────────────────────────
 
     /**
