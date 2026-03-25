@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ProviderHealthTracker {
 
     private static final int UNHEALTHY_THRESHOLD = 3;
-    private static final Duration RECOVERY_WINDOW = Duration.ofMinutes(5);
+    private static final Duration RECOVERY_WINDOW = Duration.ofSeconds(60);
 
     private final Map<LlmProvider, ProviderStatus> statusMap = new ConcurrentHashMap<>();
 

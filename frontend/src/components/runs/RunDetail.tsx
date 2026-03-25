@@ -5,6 +5,8 @@ import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
 import ValidationReportPanel from './ValidationReportPanel';
+import TestProgressTracker from './TestProgressTracker';
+import TestReportPanel from './TestReportPanel';
 import { RunTimeline } from '@/components/run/RunTimeline';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
@@ -497,8 +499,14 @@ export default function RunDetail() {
             </div>
           </div>
 
+          {/* Test Progress Tracker (real-time SSE) */}
+          <TestProgressTracker runId={activeRun.runId} status={activeRun.status} />
+
           {/* Validation Report */}
           <ValidationReportPanel runId={activeRun.runId} status={activeRun.status} />
+
+          {/* Test Report (after execution) */}
+          <TestReportPanel runId={activeRun.runId} status={activeRun.status} />
 
           {/* Tabs */}
           <div className="flex-1 overflow-hidden">

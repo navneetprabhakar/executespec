@@ -178,4 +178,50 @@ public record RunEvent(
     public static RunEvent reviewComplete(String runId, String verdict, String summary) {
         return new RunEvent("REVIEW_COMPLETE", runId, null, verdict + "|" + summary, Instant.now());
     }
+
+    // ── Test Generation Pipeline events ─────────────────────────────────────
+
+    public static RunEvent testGenStarted(String runId) {
+        return new RunEvent("TEST_GEN_STARTED", runId, null, null, Instant.now());
+    }
+
+    public static RunEvent testPlanningStarted(String runId) {
+        return new RunEvent("TEST_PLANNING_STARTED", runId, null, null, Instant.now());
+    }
+
+    public static RunEvent testPlanningCompleted(String runId, int taskCount) {
+        return new RunEvent("TEST_PLANNING_COMPLETED", runId, null, String.valueOf(taskCount), Instant.now());
+    }
+
+    public static RunEvent testGenerationStarted(String runId, int taskCount) {
+        return new RunEvent("TEST_GENERATION_STARTED", runId, null, String.valueOf(taskCount), Instant.now());
+    }
+
+    public static RunEvent testCompilationStarted(String runId) {
+        return new RunEvent("TEST_COMPILATION_STARTED", runId, null, null, Instant.now());
+    }
+
+    public static RunEvent testCompilationPassed(String runId, String message) {
+        return new RunEvent("TEST_COMPILATION_PASSED", runId, null, message, Instant.now());
+    }
+
+    public static RunEvent testCompilationFailed(String runId, String message) {
+        return new RunEvent("TEST_COMPILATION_FAILED", runId, null, message, Instant.now());
+    }
+
+    public static RunEvent testExecutionStarted(String runId) {
+        return new RunEvent("TEST_EXECUTION_STARTED", runId, null, null, Instant.now());
+    }
+
+    public static RunEvent testExecutionSkipped(String runId, String reason) {
+        return new RunEvent("TEST_EXECUTION_SKIPPED", runId, null, reason, Instant.now());
+    }
+
+    public static RunEvent testReportReady(String runId, String reportJson) {
+        return new RunEvent("TEST_REPORT_READY", runId, null, reportJson, Instant.now());
+    }
+
+    public static RunEvent testPipelineFailed(String runId, String error) {
+        return new RunEvent("TEST_PIPELINE_FAILED", runId, null, error, Instant.now());
+    }
 }

@@ -36,6 +36,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Routes LLM calls with provider fallback guardrails.
@@ -63,22 +65,25 @@ public class LlmRouter {
 
     // ── Provider fallback chains (3-provider: Anthropic → Gemini → OpenAI) ──────
 
+    // ── Provider fallback chains: Anthropic → Gemini → OpenAI (fixed priority) ──
+    // Gemini uses GA model strings; fallback chain handles unavailability gracefully.
+
     private static final List<String[]> ARCHITECT_CHAIN = List.of(
         new String[]{"anthropic", ModelConstants.OPUS},
-        new String[]{"google",    ModelConstants.GEMINI_ARCHITECT},
+        new String[]{"google",    ModelConstants.GEMINI_PRO},
         new String[]{"openai",    ModelConstants.GPT4O}
     );
 
     private static final List<String[]> CAPABLE_CHAIN = List.of(
         new String[]{"anthropic", ModelConstants.SONNET},
-        new String[]{"google",    ModelConstants.GEMINI_CAPABLE},
+        new String[]{"google",    ModelConstants.GEMINI_PRO},
         new String[]{"openai",    ModelConstants.GPT4O}
     );
 
     private static final List<String[]> UTILITY_CHAIN = List.of(
         new String[]{"anthropic", ModelConstants.HAIKU},
-        new String[]{"google",    ModelConstants.GEMINI_UTILITY},
-        new String[]{"openai",    ModelConstants.GPT4O_MINI}
+        new String[]{"google",    ModelConstants.GEMINI_FLASH},
+        new String[]{"openai",    ModelConstants.GPT5_4_MINI}
     );
 
     private static final Map<String, List<String[]>> MODEL_CHAIN = Map.ofEntries(
@@ -88,12 +93,26 @@ public class LlmRouter {
         Map.entry(ModelConstants.SONNET_LEGACY,     CAPABLE_CHAIN),
         Map.entry(ModelConstants.HAIKU,             UTILITY_CHAIN),
         Map.entry(ModelConstants.HAIKU_LEGACY,      UTILITY_CHAIN),
-        Map.entry(ModelConstants.GPT4O_MINI,        UTILITY_CHAIN),
+        Map.entry(ModelConstants.GPT5_4_MINI,       UTILITY_CHAIN),
+        Map.entry(ModelConstants.GPT4O_MINI,        UTILITY_CHAIN),  // legacy compat
         Map.entry(ModelConstants.GPT4O,             CAPABLE_CHAIN),
-        Map.entry(ModelConstants.GEMINI_ARCHITECT,  ARCHITECT_CHAIN),
-        Map.entry(ModelConstants.GEMINI_CAPABLE,    CAPABLE_CHAIN),
-        Map.entry(ModelConstants.GEMINI_UTILITY,    UTILITY_CHAIN)
+        Map.entry(ModelConstants.GEMINI_PRO,        CAPABLE_CHAIN),
+        Map.entry(ModelConstants.GEMINI_FLASH,      UTILITY_CHAIN),
+        // Legacy preview model strings (backward compat for in-flight runs)
+        Map.entry("gemini-3.1-pro-preview-customtools", ARCHITECT_CHAIN),
+        Map.entry("gemini-3.1-flash-lite-preview",      CAPABLE_CHAIN),
+        Map.entry("gemini-3-flash-preview",             UTILITY_CHAIN)
     );
+
+    /**
+     * Global circuit breaker: max LLM calls per run before killing the run.
+     * If a single run exceeds this, something is fundamentally wrong (spec/prompt issue).
+     *
+     * TODO: Explore per-tier circuit breakers (e.g., max 60 FAST calls, max 30 CAPABLE, max 10 POWER)
+     * Current: single global cap of 100 across all tiers
+     */
+    private static final int MAX_LLM_CALLS_PER_RUN = 100;
+    private final ConcurrentHashMap<String, AtomicInteger> runCallCounters = new ConcurrentHashMap<>();
 
     private final ApplicationContext ctx;
     private final InboxService inboxService;
@@ -112,6 +131,21 @@ public class LlmRouter {
     public LlmResponse callWithFallbackTracked(String primaryProvider, String primaryModel,
                                                Prompt prompt, String runId, String agentId,
                                                FallbackMode mode, int iteration, boolean justCompacted) {
+        // ── Circuit breaker: kill run if total LLM calls exceed cap ──
+        if (runId != null) {
+            int callCount = runCallCounters
+                    .computeIfAbsent(runId, k -> new AtomicInteger(0))
+                    .incrementAndGet();
+            if (callCount > MAX_LLM_CALLS_PER_RUN) {
+                log.error("[LlmRouter] Circuit breaker tripped for run {} — {} LLM calls exceeded limit of {}",
+                        runId, callCount, MAX_LLM_CALLS_PER_RUN);
+                throw new CircuitBreakerException(
+                        "Run terminated — exceeded maximum iteration limit (" + MAX_LLM_CALLS_PER_RUN +
+                        " calls). This usually indicates a spec problem, not a model problem. " +
+                        "Review your input and try again.");
+            }
+        }
+
         Observation llmObs = Observation.createNotStarted("executespec.llm.call", getObservationRegistry())
             .lowCardinalityKeyValue("agent.id", agentId != null ? agentId : "unknown")
             .lowCardinalityKeyValue("run.id", runId != null ? runId : "unknown")
@@ -185,10 +219,10 @@ public class LlmRouter {
                     if (isPerMinuteRateLimit(e)) {
                         llmObs.event(Observation.Event.of("rate_limit",
                             "Per-minute rate limit on " + provider));
-                        log.warn("[LlmRouter] Per-minute rate limit on {} for {} (iteration={}) — sleeping 15 s before retry",
+                        log.warn("[LlmRouter] Per-minute rate limit on {} for {} (iteration={}) — sleeping 30 s before retry",
                             provider, agentId, iteration);
                         try {
-                            Thread.sleep(15_000);
+                            Thread.sleep(30_000);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             throw new ProviderUnavailableException("Interrupted during rate-limit sleep for " + agentId);
@@ -511,6 +545,19 @@ public class LlmRouter {
             || msg.toLowerCase().contains("overloaded");
     }
 
+    // ── Circuit breaker lifecycle ───────────────────────────────────────────────
+
+    /** Call when a run completes (success or failure) to free memory. */
+    public void clearRunCallCounter(String runId) {
+        if (runId != null) runCallCounters.remove(runId);
+    }
+
+    /** Get current LLM call count for a run (for observability). */
+    public int getRunCallCount(String runId) {
+        AtomicInteger counter = runCallCounters.get(runId);
+        return counter != null ? counter.get() : 0;
+    }
+
     // ── Exceptions ─────────────────────────────────────────────────────────────
 
     public static class ProviderUnavailableException extends RuntimeException {
@@ -519,5 +566,9 @@ public class LlmRouter {
 
     public static class MidTaskProviderFailureException extends RuntimeException {
         public MidTaskProviderFailureException(String message) { super(message); }
+    }
+
+    public static class CircuitBreakerException extends RuntimeException {
+        public CircuitBreakerException(String message) { super(message); }
     }
 }

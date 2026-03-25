@@ -19,12 +19,20 @@ public final class ModelConstants {
     public static final String SONNET_LEGACY = "claude-sonnet-4-5";
     public static final String HAIKU_LEGACY  = "claude-haiku-4-5";
 
-    // ── Google ────────────────────────────────────────────────
-    public static final String GEMINI_ARCHITECT = "gemini-3.1-pro-preview-customtools";
-    public static final String GEMINI_CAPABLE   = "gemini-3.1-flash-lite-preview";
-    public static final String GEMINI_UTILITY   = "gemini-3-flash-preview";
+    // ── Google (GA models — fallback chain handles unavailability) ──
+    public static final String GEMINI_PRO   = "gemini-3.1-pro";
+    public static final String GEMINI_FLASH = "gemini-3-flash";
+
+    // Legacy aliases for Gemini (preview model strings still in MODEL_CHAIN for backward compat)
+    public static final String GEMINI_ARCHITECT = GEMINI_PRO;
+    public static final String GEMINI_CAPABLE   = GEMINI_PRO;
+    public static final String GEMINI_UTILITY   = GEMINI_FLASH;
 
     // ── OpenAI ────────────────────────────────────────────────
-    public static final String GPT4O      = "gpt-4o";
-    public static final String GPT4O_MINI = "gpt-4o-mini";
+    public static final String GPT4O       = "gpt-4o";
+    public static final String GPT5_4_MINI = "gpt-5.4-mini";
+
+    /** @deprecated Use {@link #GPT5_4_MINI} — kept for MODEL_CHAIN backward compatibility */
+    @Deprecated
+    public static final String GPT4O_MINI  = "gpt-4o-mini";
 }

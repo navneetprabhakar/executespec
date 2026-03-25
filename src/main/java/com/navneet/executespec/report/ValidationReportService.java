@@ -10,6 +10,8 @@ import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.*;
+import com.navneet.executespec.testgen.model.TestResult;
+import com.navneet.executespec.testgen.model.TestResultStatus;
 import com.navneet.executespec.state.StateStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -207,6 +209,25 @@ public class ValidationReportService {
             }
         }
 
+        // Issues from integration test failures
+        if (input.testResults() != null) {
+            for (TestResult tr : input.testResults()) {
+                if (tr.getStatus() == TestResultStatus.FAILED || tr.getStatus() == TestResultStatus.ERROR) {
+                    String desc = "Integration test failed: " + tr.getTestMethod();
+                    if (tr.getFailureMessage() != null) {
+                        desc += " — " + truncate(tr.getFailureMessage(), 150);
+                    }
+                    issues.add(new ReportIssueDTO(
+                        desc,
+                        "WOULD_CAUSE_BUG",
+                        tr.getSuggestion(),
+                        "INTEGRATION_TEST",
+                        null
+                    ));
+                }
+            }
+        }
+
         return issues;
     }
 
@@ -251,6 +272,12 @@ public class ValidationReportService {
                 && !input.review().getMergeBlockers().isEmpty();
             if (!hasBlockers) {
                 passed.add("CODE_REVIEW");
+            }
+        }
+        // Integration tests
+        if (input.testSummary() != null && input.testSummary().getTotalTests() > 0) {
+            if (input.testSummary().getFailed() == 0 && input.testSummary().getErrors() == 0) {
+                passed.add("INTEGRATION_TESTS");
             }
         }
         return passed;

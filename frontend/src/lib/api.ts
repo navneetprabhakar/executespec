@@ -1231,6 +1231,95 @@ export const getSharedReport = async (shareToken: string): Promise<SharedReportD
   }
 };
 
+// ── Test Generation Pipeline ─────────────────────────────────────────────────
+
+export interface TestResultDetail {
+  testResultId: number;
+  testClass: string;
+  testMethod: string;
+  status: 'PASSED' | 'FAILED' | 'SKIPPED' | 'ERROR';
+  failureMessage: string | null;
+  expected: string | null;
+  actual: string | null;
+  durationMs: number;
+}
+
+export interface FailureSuggestion {
+  testClass: string;
+  testMethod: string;
+  failureMessage: string;
+  suggestion: string;
+}
+
+export interface TestReportData {
+  testPlanId: number;
+  runId: string;
+  status: string;
+  totalTests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  errors: number;
+  results: TestResultDetail[];
+  suggestions: FailureSuggestion[];
+  executionDurationMs: number;
+  previewUrl: string | null;
+}
+
+export interface TestTaskDto {
+  id: number;
+  taskName: string;
+  taskDescription: string;
+  targetEntity: string;
+  testCategory: string;
+  status: 'PENDING' | 'GENERATING' | 'COMPILED' | 'FAILED';
+  compilationError: string;
+}
+
+export interface TestPlanData {
+  testPlanId: number;
+  runId: string;
+  status: string;
+  tasks: TestTaskDto[];
+}
+
+export interface TestGraphData {
+  planStatus: string;
+  nodes: Array<{ id: string; label: string; type: string; status: string; category?: string }>;
+  edges: Array<{ from: string; to: string }>;
+  totalTasks: number;
+  completedTasks: number;
+  failedTasks: number;
+  testResults: { total: number; passed: number; failed: number };
+}
+
+export const getTestReport = async (runId: string): Promise<TestReportData | null> => {
+  try {
+    return await req<TestReportData>(`/runs/${runId}/test-report`);
+  } catch {
+    return null;
+  }
+};
+
+export const getTestPlan = async (runId: string): Promise<TestPlanData | null> => {
+  try {
+    return await req<TestPlanData>(`/runs/${runId}/test-plan`);
+  } catch {
+    return null;
+  }
+};
+
+export const getTestGraph = async (runId: string): Promise<TestGraphData | null> => {
+  try {
+    return await req<TestGraphData>(`/runs/${runId}/test-graph`);
+  } catch {
+    return null;
+  }
+};
+
+export const markTestInvalid = (testResultId: number) =>
+  req<void>(`/test-results/${testResultId}/mark-invalid`, { method: 'PUT' });
+
 export const downloadValidationReportPdf = async (runId: string): Promise<void> => {
   const res = await fetch(`${BASE}/runs/${runId}/report/pdf`, {
     headers: { ...authHeader() },

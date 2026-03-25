@@ -12,6 +12,8 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
+import com.navneet.executespec.testgen.model.TestPlan;
+import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +27,7 @@ public class RunMapper {
     private final IntegrationRunRepository integrationRunRepository;
     private final ProjectRepository projectRepository;
     private final AppUserRepository appUserRepository;
+    private final TestPlanRepository testPlanRepository;
     private final ObjectMapper objectMapper;
 
     public RunSummary toSummary(PipelineRun r) {
@@ -69,7 +72,7 @@ public class RunMapper {
                 .orElse(null);
     }
 
-    /** Builds the per-agent (planner/reviewer/compiler) token entries for the detail view. */
+    /** Builds the per-agent (planner/reviewer/compiler/test-gen) token entries for the detail view. */
     private List<RunDetail.AgentTokenEntry> buildAgentTokens(PipelineRun r) {
         List<RunDetail.AgentTokenEntry> entries = new java.util.ArrayList<>();
         int pIn  = r.getPlannerInputTokens()  != null ? r.getPlannerInputTokens()  : 0;
@@ -90,6 +93,29 @@ public class RunMapper {
             entries.add(new RunDetail.AgentTokenEntry("compiler",
                     r.getCompilerProvider(), r.getCompilerActualModel(), cIn, cOut));
         }
+
+        // Test gen pipeline tokens (from TestPlan entity)
+        testPlanRepository.findByRunId(r.getRunId()).ifPresent(tp -> {
+            int tpIn  = tp.getPlannerInputTokens()  != null ? tp.getPlannerInputTokens()  : 0;
+            int tpOut = tp.getPlannerOutputTokens() != null ? tp.getPlannerOutputTokens() : 0;
+            if (tpIn > 0 || tpOut > 0) {
+                entries.add(new RunDetail.AgentTokenEntry("test-planner",
+                        tp.getPlannerProvider(), tp.getPlannerModel(), tpIn, tpOut));
+            }
+            int twIn  = tp.getWorkerInputTokens()  != null ? tp.getWorkerInputTokens()  : 0;
+            int twOut = tp.getWorkerOutputTokens() != null ? tp.getWorkerOutputTokens() : 0;
+            if (twIn > 0 || twOut > 0) {
+                entries.add(new RunDetail.AgentTokenEntry("test-worker",
+                        tp.getWorkerProvider(), tp.getWorkerModel(), twIn, twOut));
+            }
+            int trIn  = tp.getReportInputTokens()  != null ? tp.getReportInputTokens()  : 0;
+            int trOut = tp.getReportOutputTokens() != null ? tp.getReportOutputTokens() : 0;
+            if (trIn > 0 || trOut > 0) {
+                entries.add(new RunDetail.AgentTokenEntry("test-report-gen",
+                        tp.getPlannerProvider(), tp.getPlannerModel(), trIn, trOut));
+            }
+        });
+
         return entries;
     }
 

@@ -44,20 +44,20 @@ spring:
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
         max-interval: 10000         # 10s cap
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY: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}
+      api-key: ${ANTHROPIC_API_KEY:}
       chat:
         options:
           model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
           max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
     openai:
-      api-key: ${OPENAI_API_KEY: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}
+      api-key: ${OPENAI_API_KEY:}
       chat:
         options:
           model: gpt-4o-mini
           max-tokens: 16000                  # gpt-4o / gpt-4o-mini both support 16k output
     google:
       genai:
-        api-key: ${GOOGLE_API_KEY:AIzaSyALFxfueAKS7kXXp-2h7wflYY0QN1Q958c}          # empty default — Gemini is 3rd fallback only
+        api-key: ${GOOGLE_API_KEY:}          # empty default — Gemini is 3rd fallback only
         chat:
           options:
             model: gemini-3-flash-preview                 # default UTILITY; CAPABLE uses flash-lite, ARCHITECT uses customtools
