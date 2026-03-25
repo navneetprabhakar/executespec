@@ -27,7 +27,7 @@ import java.util.Set;
 public class StartupRunResumer {
 
     private static final Set<String> RESUMABLE_STATUSES = Set.of(
-        "PLANNING", "AWAITING_APPROVAL", "WORKING", "STUCK", "REVIEWING", "AWAITING_MERGE"
+        "PLANNING", "WORKING", "STUCK", "REVIEWING"
     );
 
     /** Runs older than this are considered stale and won't be auto-resumed. */

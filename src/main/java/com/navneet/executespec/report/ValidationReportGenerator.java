@@ -8,6 +8,9 @@ import com.navneet.executespec.compiler.CompileResult;
 import com.navneet.executespec.config.ModelConstants;
 import com.navneet.executespec.recovery.LlmCallGuard;
 import com.navneet.executespec.report.model.ReportInput;
+import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import com.navneet.executespec.testgen.model.TestResult;
+import com.navneet.executespec.testgen.model.TestResultStatus;
 import com.navneet.executespec.state.entity.AgentTask;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -171,6 +174,44 @@ public class ValidationReportGenerator {
             sb.append(review.getSummary()).append("\n");
             sb.append("Recommendation: %s\n".formatted(
                 review.getRecommendation() != null ? review.getRecommendation() : "N/A"));
+        }
+
+        // Integration test results
+        TestExecutionSummary testSummary = input.testSummary();
+        if (testSummary != null && testSummary.getTotalTests() > 0) {
+            checksRun.add("INTEGRATION_TESTS");
+            if (testSummary.getFailed() == 0 && testSummary.getErrors() == 0) {
+                checksPassed.add("INTEGRATION_TESTS");
+            }
+
+            sb.append("\n## Integration Test Results\n");
+            sb.append("- Total: %d\n".formatted(testSummary.getTotalTests()));
+            sb.append("- Passed: %d\n".formatted(testSummary.getPassed()));
+            sb.append("- Failed: %d\n".formatted(testSummary.getFailed()));
+            sb.append("- Errors: %d\n".formatted(testSummary.getErrors()));
+            sb.append("- Skipped: %d\n".formatted(testSummary.getSkipped()));
+            sb.append("- Duration: %dms\n".formatted(testSummary.getExecutionDurationMs()));
+
+            if (testSummary.isAllConnectionRefused()) {
+                sb.append("- WARNING: All failures were 'Connection refused' — the preview app likely crashed during testing.\n");
+            }
+
+            // List failed tests (limit to 15)
+            List<TestResult> failures = input.testResults().stream()
+                    .filter(r -> r.getStatus() == TestResultStatus.FAILED || r.getStatus() == TestResultStatus.ERROR)
+                    .limit(15)
+                    .toList();
+            if (!failures.isEmpty()) {
+                sb.append("\n### Failed Tests\n");
+                for (TestResult tr : failures) {
+                    sb.append("- `%s`: %s\n".formatted(
+                            tr.getTestMethod(),
+                            tr.getFailureMessage() != null ? truncate(tr.getFailureMessage(), 150) : "no details"));
+                    allIssueDescriptions.add("[TEST_FAILURE] %s: %s".formatted(
+                            tr.getTestMethod(),
+                            tr.getFailureMessage() != null ? truncate(tr.getFailureMessage(), 100) : "failed"));
+                }
+            }
         }
 
         return sb.toString();

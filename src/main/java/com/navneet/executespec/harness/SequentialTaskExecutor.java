@@ -78,6 +78,17 @@ public class SequentialTaskExecutor {
     @Value("${executespec.validator.per-task-level:TYPE}")
     private String validationLevelStr;
 
+    /*
+     * TODO: Per-run cost budget — check budget before each worker attempt:
+     *   - FREE: $0.50 (fixed), PRO: $2.00 (max $10), TEAM: $5.00 (max $25), ENTERPRISE: $10.00 (max $100)
+     *   - Check: RunCostBudgetService.canAfford(runId, estimatedCost) before each attempt
+     *   - Before tier escalation: verify remaining budget covers higher-tier cost
+     *   - On budget exceeded: mark task PARTIAL, emit BUDGET_EXCEEDED SSE event
+     *   - RunCostBudgetService: initBudget(runId, tier), canAfford(runId, cost), getRemainingBudget(runId)
+     *   - Store budget in Redis (ephemeral, per-run lifetime)
+     *   - Uses CostEstimator.computeCostForRun() for running total
+     */
+
     /**
      * Result of sequential execution across all tasks.
      */

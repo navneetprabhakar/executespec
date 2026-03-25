@@ -64,6 +64,10 @@ public class PreviewService {
     @Autowired(required = false)
     private CaddyProxyManager caddyProxy;
 
+    /** Notifies the test execution pipeline that the preview is ready. */
+    @Autowired(required = false)
+    private com.navneet.executespec.testgen.TestPreviewCoordinator testPreviewCoordinator;
+
     /** runId → session */
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
 
@@ -413,6 +417,15 @@ public class PreviewService {
                     s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null,
                     previewUrl, Instant.now()));
+
+            // Notify test execution pipeline that preview is ready
+            if (testPreviewCoordinator != null) {
+                try {
+                    testPreviewCoordinator.onPreviewReady(runId, previewUrl);
+                } catch (Exception e) {
+                    log.warn("Failed to notify test coordinator for run {}: {}", runId, e.getMessage());
+                }
+            }
 
             Timer.builder(PREVIEW_DURATION).register(meterRegistry)
                     .record(Duration.between(previewStart, Instant.now()));

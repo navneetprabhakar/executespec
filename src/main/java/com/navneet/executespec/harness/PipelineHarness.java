@@ -20,6 +20,9 @@ import com.navneet.executespec.recovery.RecoveryProperties;
 import com.navneet.executespec.recovery.RunRecoveryService;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.compiler.CompileResult;
+import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
+import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -119,6 +122,19 @@ public class PipelineHarness {
 
     // ── Micrometer metrics registry ──────────────────────────────────────────
     private final MeterRegistry meterRegistry;
+
+    // ── Test generation pipeline ─────────────────────────────────────────────
+    private final com.navneet.executespec.testgen.TestGenOrchestrator testGenOrchestrator;
+    private final com.navneet.executespec.testgen.TestPreviewCoordinator testPreviewCoordinator;
+    private final com.navneet.executespec.testgen.repository.TestPlanRepository testPlanRepository;
+    private final com.navneet.executespec.testgen.repository.TestResultRepository testResultRepository;
+
+    /**
+     * Tracks in-flight test execution completions so the validation report can wait for test results.
+     * Key = runId, completed when TestExecutionCompletedEvent fires (or test pipeline fails/skips).
+     */
+    private final ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<com.navneet.executespec.testgen.model.TestExecutionSummary>>
+            testCompletionFutures = new ConcurrentHashMap<>();
 
     // ── Async infrastructure ──────────────────────────────────────────────────
 
@@ -1666,6 +1682,19 @@ public class PipelineHarness {
             stateStore.markApproved(runId);
             broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
 
+            // ── 2b. Test generation pipeline (parallel to code gen) ─────
+            try {
+                String planJson = mapper.writeValueAsString(plan);
+                // Register completion future BEFORE starting the pipeline
+                testCompletionFutures.put(runId, new CompletableFuture<>());
+                testGenOrchestrator.runTestGenPipeline(runId, run.getUserRequest(), planJson);
+                log.info("Run {} — test gen pipeline kicked off (parallel)", runId);
+            } catch (Exception e) {
+                testCompletionFutures.remove(runId);
+                log.warn("Run {} — failed to start test gen pipeline: {}", runId, e.getMessage());
+                // Non-fatal: code gen continues even if test gen fails to start
+            }
+
             // ── 3. Workers ─────────────────────────────────────────────────
             Observation workObs = Observation.createNotStarted("executespec.run.phase.working", observationRegistry)
                 .lowCardinalityKeyValue("run.id", runId)
@@ -2986,6 +3015,8 @@ public class PipelineHarness {
     /**
      * Generates a validation report for the run (non-fatal).
      * Called after review completes and before the merge gate opens.
+     * Waits up to 3 minutes for test execution to finish so test results
+     * are included in the report.
      */
     private void generateValidationReport(String runId, PipelineRun run,
                                            List<WorkerReport> reports,
@@ -2995,7 +3026,37 @@ public class PipelineHarness {
             .lowCardinalityKeyValue("run.id", runId)
             .start();
         try (Observation.Scope reportScope = reportObs.openScope()) {
-            ReportInput input = new ReportInput(run, reports, review, compileResult, stateStore.getAllTasks(runId));
+            // Wait for test execution to complete (if a test pipeline was started)
+            TestExecutionSummary testSummary = null;
+            List<TestResult> testResults = List.of();
+
+            CompletableFuture<TestExecutionSummary> testFuture = testCompletionFutures.get(runId);
+            if (testFuture != null) {
+                broadcaster.emit(runId, RunEvent.log(runId, "report",
+                        "Waiting for integration tests to finish before generating report..."));
+                try {
+                    testSummary = testFuture.get(3, TimeUnit.MINUTES);
+                    // Fetch full test results from DB
+                    var testPlan = testPlanRepository.findByRunId(runId).orElse(null);
+                    if (testPlan != null) {
+                        testResults = testResultRepository.findByTestPlanId(testPlan.getId());
+                    }
+                    log.info("Run {} — test results included in report: {}/{} passed",
+                            runId, testSummary.getPassed(), testSummary.getTotalTests());
+                } catch (TimeoutException e) {
+                    log.warn("Run {} — timed out waiting for test results (3min) — generating report without them", runId);
+                    broadcaster.emit(runId, RunEvent.log(runId, "report",
+                            "Test execution still running — generating report without test results"));
+                } catch (Exception e) {
+                    log.warn("Run {} — error waiting for test results: {} — generating report without them",
+                            runId, e.getMessage());
+                } finally {
+                    testCompletionFutures.remove(runId);
+                }
+            }
+
+            ReportInput input = new ReportInput(run, reports, review, compileResult,
+                    stateStore.getAllTasks(runId), testSummary, testResults);
             validationReportService.generateAndPersist(runId, input);
             broadcaster.emit(runId, RunEvent.log(runId, "report", "✅ Validation report generated"));
         } catch (Exception e) {
@@ -3003,6 +3064,17 @@ public class PipelineHarness {
             log.warn("Validation report generation failed for run {} — continuing to merge gate", runId, e);
         } finally {
             reportObs.stop();
+        }
+    }
+
+    // ── Test execution completion listener ───────────────────────────────────
+
+    @EventListener
+    public void onTestExecutionCompleted(TestExecutionCompletedEvent event) {
+        CompletableFuture<TestExecutionSummary> future = testCompletionFutures.get(event.runId());
+        if (future != null) {
+            future.complete(event.summary());
+            log.info("Run {} — test execution completed, report generation unblocked", event.runId());
         }
     }
 }

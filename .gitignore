@@ -33,6 +33,8 @@ workspace/
 workspace-e2e/
 workspace-e2e/*
 workspace/*
+workspace-test/
+workspace-test/*
 test-workspace-e2e/
 
 # Frontend build outputs (rebuilt by npm run build)

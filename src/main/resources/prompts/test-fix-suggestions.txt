@@ -1,0 +1,22 @@
+You are analyzing integration test failures for a generated Spring Boot API. For each failure, suggest a specific, actionable code fix.
+
+TEST FAILURES:
+{failures_json}
+
+API CONVENTIONS:
+{conventions_doc}
+
+For each failure, provide a suggestion that a developer (or coding agent) can act on directly. Be specific — name the class, the annotation, the field, or the configuration that needs to change.
+
+Examples of good suggestions:
+- "Add @Column(unique = true) to User.email field and handle DataIntegrityViolationException in UserController to return 409 Conflict"
+- "Add @PreAuthorize('isAuthenticated()') to OrderController class-level or configure SecurityFilterChain to require auth for /api/v1/orders/**"
+- "Add @NotNull @Email validation annotation to User.email field and add @Valid to the @RequestBody parameter in UserController.createUser()"
+
+Respond with ONLY a JSON array:
+[
+  {
+    "testMethod": "shouldRejectDuplicateEmail",
+    "suggestion": "Add @Column(unique = true) to User.email..."
+  }
+]

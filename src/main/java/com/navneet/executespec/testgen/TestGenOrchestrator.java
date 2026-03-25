@@ -1,0 +1,164 @@
+package com.navneet.executespec.testgen;
+
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
+import com.navneet.executespec.testgen.event.TestsReadyEvent;
+import com.navneet.executespec.testgen.model.*;
+import com.navneet.executespec.testgen.repository.TestPlanRepository;
+import com.navneet.executespec.testgen.repository.TestTaskRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+/**
+ * Orchestrates the full test generation pipeline:
+ *   plan → generate → compile → [ready for execution]
+ *
+ * Runs in parallel to the code generation pipeline on a virtual thread.
+ * Triggered after plan approval when structured input is available.
+ */
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class TestGenOrchestrator {
+
+    private final TestPlannerAgent testPlannerAgent;
+    private final TestWorkerAgent testWorkerAgent;
+    private final TestCompilationGate testCompilationGate;
+    private final TestProjectScaffold testProjectScaffold;
+    private final ApiConventionsGenerator conventionsGenerator;
+    private final TestPlanRepository testPlanRepository;
+    private final TestTaskRepository testTaskRepository;
+    private final ApplicationEventPublisher eventPublisher;
+    private final SseBroadcaster broadcaster;
+
+    /**
+     * Entry point — triggered when plan is approved.
+     * Runs on a virtual thread, parallel to code gen.
+     */
+    @Async
+    public void runTestGenPipeline(String runId, String userRequest, String planJson) {
+        try {
+            log.info("[TestGen] Starting test generation pipeline for run {}", runId);
+            emitTestEvent(runId, "TEST_GEN_STARTED", "Test generation pipeline started");
+
+            // 1. Scaffold test project
+            testProjectScaffold.scaffold(runId);
+
+            // 2. Generate conventions doc
+            String conventionsDoc = conventionsGenerator.generate(userRequest, planJson);
+
+            // 3. Plan tests
+            emitTestEvent(runId, "TEST_PLANNING_STARTED", "Planning integration tests");
+            TestPlan testPlan = testPlannerAgent.planTests(runId, userRequest, conventionsDoc);
+            List<TestTask> tasks = testTaskRepository.findByTestPlanId(testPlan.getId());
+            emitTestEvent(runId, "TEST_PLANNING_COMPLETED",
+                    "Test plan created with " + tasks.size() + " test classes");
+
+            // 4. Generate test classes sequentially
+            emitTestEvent(runId, "TEST_GENERATION_STARTED",
+                    "Generating " + tasks.size() + " test classes");
+
+            for (TestTask task : tasks) {
+                try {
+                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest);
+                } catch (Exception e) {
+                    log.error("[TestGen] Test generation failed for task {}: {}",
+                            task.getTaskName(), e.getMessage());
+                    task.setStatus(TestTaskStatus.FAILED);
+                    task.setCompilationError(e.getMessage());
+                    testTaskRepository.save(task);
+                }
+            }
+
+            // 5. Compile all generated tests together
+            emitTestEvent(runId, "TEST_COMPILATION_STARTED", "Compiling generated tests");
+            TestCompilationGate.CompilationResult compilationResult = testCompilationGate.compileTests(runId);
+
+            if (compilationResult.success()) {
+                testPlan.setStatus(TestPlanStatus.COMPILED);
+                emitTestEvent(runId, "TEST_COMPILATION_PASSED", "All tests compiled successfully");
+            } else {
+                // Mark failed tasks and try one retry per failed test
+                testCompilationGate.markFailedTasks(
+                        testPlan.getId(), compilationResult.failedClasses(), compilationResult.output());
+
+                handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest);
+
+                // Re-compile after retries
+                TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
+                if (retryResult.success()) {
+                    testPlan.setStatus(TestPlanStatus.COMPILED);
+                    emitTestEvent(runId, "TEST_COMPILATION_PASSED",
+                            "Tests compiled after retry");
+                } else {
+                    // Mark remaining failures
+                    testCompilationGate.markFailedTasks(
+                            testPlan.getId(), retryResult.failedClasses(), retryResult.output());
+
+                    // Check if any tests survived
+                    long compiledCount = testTaskRepository.findByTestPlanId(testPlan.getId()).stream()
+                            .filter(t -> t.getStatus() != TestTaskStatus.FAILED)
+                            .count();
+                    if (compiledCount > 0) {
+                        testPlan.setStatus(TestPlanStatus.COMPILED);
+                        emitTestEvent(runId, "TEST_COMPILATION_PASSED",
+                                compiledCount + " tests compiled (" +
+                                        retryResult.failedClasses().size() + " failed)");
+                    } else {
+                        testPlan.setStatus(TestPlanStatus.FAILED);
+                        emitTestEvent(runId, "TEST_COMPILATION_FAILED",
+                                "All tests failed compilation");
+                        testPlanRepository.save(testPlan);
+                        // Notify that test pipeline ended (no results)
+                        eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                                runId, testPlan.getId(), TestExecutionSummary.empty()));
+                        return;
+                    }
+                }
+            }
+
+            testPlanRepository.save(testPlan);
+
+            // 6. Publish event — tests are ready for execution
+            eventPublisher.publishEvent(new TestsReadyEvent(runId, testPlan.getId()));
+            log.info("[TestGen] Test generation complete for run {} — ready for execution", runId);
+
+        } catch (Exception e) {
+            log.error("[TestGen] Test gen pipeline failed for run {}: {}", runId, e.getMessage(), e);
+            emitTestEvent(runId, "TEST_PIPELINE_FAILED",
+                    "Test generation pipeline failed: " + e.getMessage());
+            // Notify that test pipeline ended (no results) so validation report isn't blocked
+            eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                    runId, 0L, TestExecutionSummary.empty()));
+        }
+    }
+
+    private void handleCompilationRetries(String runId, TestPlan testPlan,
+                                            String conventionsDoc, String userRequest) {
+        List<TestTask> failedTasks = testTaskRepository
+                .findByTestPlanIdAndStatus(testPlan.getId(), TestTaskStatus.FAILED);
+
+        for (TestTask task : failedTasks) {
+            if (task.getCompilationError() == null) continue;
+            try {
+                testWorkerAgent.retryWithError(runId, task, conventionsDoc, userRequest,
+                        task.getCompilationError());
+                task.setStatus(TestTaskStatus.GENERATING);
+                testTaskRepository.save(task);
+            } catch (Exception e) {
+                log.warn("[TestGen] Retry failed for {}: {}", task.getTaskName(), e.getMessage());
+                // Leave as FAILED
+            }
+        }
+    }
+
+    private void emitTestEvent(String runId, String eventType, String message) {
+        broadcaster.emit(runId, RunEvent.log(runId, null, "[TestGen] " + message));
+    }
+}

@@ -9,8 +9,9 @@ import {
   getOpenApiSpec,
   getProjects, createProject, updateRunProject,
   applyToRun, editRunPlan,
+  getTestPlan, getTestGraph,
 } from '@/lib/api';
-import type { RunDetail, AgentTokenEntry, ProjectDto } from '@/lib/api';
+import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto, TestGraphData } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import TaskCard from './TaskCard';
@@ -27,6 +28,7 @@ import {
   MessageSquare,
   ChevronsDownUp, ChevronsUpDown, Copy, Check,
   Clock, Coins, Cpu, RefreshCw, FolderKanban, X, Plus, User, Wrench, Loader2,
+  TestTube2,
 } from 'lucide-react';
 import hljs from 'highlight.js';
 import Editor from '@monaco-editor/react';
@@ -67,6 +69,20 @@ export default function RunDetailTabs() {
     if (!activeRun) return;
     loadFiles(activeRun.runId);
   }, [activeRun?.runId, filesTick, loadFiles]);
+  // Test generation tasks
+  const [testTasks, setTestTasks] = useState<TestTaskDto[]>([]);
+  const [testGraph, setTestGraph] = useState<TestGraphData | null>(null);
+
+  useEffect(() => {
+    if (!activeRun) return;
+    getTestPlan(activeRun.runId).then((plan) => {
+      if (plan) setTestTasks(plan.tasks);
+    }).catch(() => {});
+    getTestGraph(activeRun.runId).then((graph) => {
+      if (graph) setTestGraph(graph);
+    }).catch(() => {});
+  }, [activeRun?.runId, filesTick]);
+
   // Note: live task updates are driven entirely by SSE (taskStatus events → fetchRun).
   // useSse also re-fetches on reconnect to catch any events missed during a gap.
 
@@ -135,11 +151,28 @@ export default function RunDetailTabs() {
         </Tabs.Content>
 
         <Tabs.Content value="tasks" className="h-full overflow-y-auto p-4 space-y-2">
-          {activeRun.tasks.length === 0
+          {activeRun.tasks.length === 0 && testTasks.length === 0
             ? <p className="text-sm text-zinc-500">No tasks yet.</p>
-            : activeRun.tasks.map((t) => (
-                <TaskCard key={t.taskId} task={t} runId={activeRun.runId} runStatus={activeRun.status} />
-              ))
+            : (
+              <>
+                {activeRun.tasks.map((t) => (
+                  <TaskCard key={t.taskId} task={t} runId={activeRun.runId} runStatus={activeRun.status} />
+                ))}
+
+                {testTasks.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2 pt-4 pb-1 border-t border-white/[0.06]">
+                      <TestTube2 className="h-4 w-4 text-violet-400" />
+                      <span className="text-sm font-medium text-zinc-300">Test Generation Tasks</span>
+                      <span className="text-xs text-zinc-500">({testTasks.length})</span>
+                    </div>
+                    {testTasks.map((tt) => (
+                      <TestTaskCard key={tt.id} task={tt} />
+                    ))}
+                  </>
+                )}
+              </>
+            )
           }
         </Tabs.Content>
 
@@ -157,6 +190,9 @@ export default function RunDetailTabs() {
 
         <Tabs.Content value="graph" className="h-full overflow-auto p-4">
           <TaskGraph runId={activeRun.runId} />
+          {testGraph && testGraph.nodes.length > 0 && (
+            <TestGraphSection graph={testGraph} />
+          )}
         </Tabs.Content>
 
         {showTerminalTabs && (
@@ -1478,6 +1514,108 @@ function CodeTab({
           loading={loadingContent}
         />
       </div>
+    </div>
+  );
+}
+
+// ── Test Task Card (for Tasks tab) ──────────────────────────────────────────
+
+const TEST_STATUS_COLORS: Record<string, string> = {
+  PENDING: 'bg-zinc-500/20 text-zinc-400',
+  GENERATING: 'bg-amber-500/20 text-amber-400',
+  COMPILED: 'bg-emerald-500/20 text-emerald-400',
+  FAILED: 'bg-red-500/20 text-red-400',
+};
+
+function TestTaskCard({ task }: { task: TestTaskDto }) {
+  return (
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+      <div className="flex items-center gap-2">
+        <TestTube2 className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
+        <span className="text-sm text-zinc-200 font-medium truncate">{task.taskName}</span>
+        {task.testCategory && (
+          <span className="text-xs text-zinc-500 bg-zinc-800 rounded px-1.5 py-0.5">{task.testCategory}</span>
+        )}
+        <span className={cn('ml-auto text-xs rounded-full px-2 py-0.5', TEST_STATUS_COLORS[task.status] || TEST_STATUS_COLORS.PENDING)}>
+          {task.status}
+        </span>
+      </div>
+      {task.taskDescription && (
+        <p className="mt-1 ml-5.5 text-xs text-zinc-500 line-clamp-2">{task.taskDescription}</p>
+      )}
+      {task.targetEntity && (
+        <p className="mt-0.5 ml-5.5 text-xs text-zinc-600">Target: {task.targetEntity}</p>
+      )}
+      {task.status === 'FAILED' && task.compilationError && (
+        <p className="mt-1 ml-5.5 text-xs text-red-400/80 font-mono line-clamp-3">{task.compilationError}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Test Graph Section (for Graph tab) ──────────────────────────────────────
+
+const NODE_STATUS_COLORS: Record<string, string> = {
+  COMPLETED: 'border-emerald-500/50 bg-emerald-500/10',
+  COMPILED: 'border-emerald-500/50 bg-emerald-500/10',
+  PENDING: 'border-zinc-600 bg-zinc-800/50',
+  GENERATING: 'border-amber-500/50 bg-amber-500/10',
+  EXECUTING: 'border-violet-500/50 bg-violet-500/10',
+  FAILED: 'border-red-500/50 bg-red-500/10',
+};
+
+function TestGraphSection({ graph }: { graph: TestGraphData }) {
+  const agents = graph.nodes.filter(n => n.type === 'agent');
+  const workers = graph.nodes.filter(n => n.type === 'worker');
+  const gates = graph.nodes.filter(n => n.type === 'gate' || n.type === 'execution' || n.type === 'report');
+
+  return (
+    <div className="mt-6 border-t border-white/[0.06] pt-4">
+      <div className="flex items-center gap-2 mb-4">
+        <TestTube2 className="h-4 w-4 text-violet-400" />
+        <span className="text-sm font-medium text-zinc-300">Test Generation Pipeline</span>
+        {graph.testResults.total > 0 && (
+          <span className="text-xs text-zinc-500 ml-2">
+            {graph.testResults.passed}/{graph.testResults.total} passed
+          </span>
+        )}
+      </div>
+
+      {/* Pipeline flow: Planner → Workers → Compile → Execute → Report */}
+      <div className="flex flex-col gap-3">
+        {/* Planner */}
+        {agents.map(node => (
+          <GraphNode key={node.id} node={node} />
+        ))}
+
+        {/* Workers */}
+        {workers.length > 0 && (
+          <div className="ml-4 pl-4 border-l-2 border-dashed border-violet-500/30 space-y-2">
+            {workers.map(node => (
+              <GraphNode key={node.id} node={node} />
+            ))}
+          </div>
+        )}
+
+        {/* Gates: Compile, Execute, Report */}
+        {gates.map(node => (
+          <GraphNode key={node.id} node={node} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GraphNode({ node }: { node: { id: string; label: string; type: string; status: string; category?: string } }) {
+  const colors = NODE_STATUS_COLORS[node.status] || NODE_STATUS_COLORS.PENDING;
+  return (
+    <div className={cn('rounded-lg border px-3 py-2 flex items-center gap-2', colors)}>
+      <TestTube2 className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
+      <span className="text-xs text-zinc-200">{node.label}</span>
+      {node.category && (
+        <span className="text-xs text-zinc-500 bg-zinc-800/50 rounded px-1 py-0.5">{node.category}</span>
+      )}
+      <span className="ml-auto text-xs text-zinc-500">{node.status}</span>
     </div>
   );
 }

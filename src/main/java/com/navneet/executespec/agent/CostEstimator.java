@@ -8,6 +8,7 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.pricing.ModelPricingRepository;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
+import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,7 @@ public class CostEstimator {
     private final AgentProperties props;
     private final ModelPricingRepository pricingRepo;
     private final StateStore stateStore;
+    private final TestPlanRepository testPlanRepository;
 
     public record CostBreakdown(double lowUsd, double highUsd) {
         public String formatted() {
@@ -152,17 +154,17 @@ public class CostEstimator {
         return totalCost;
     }
 
-    /** Computes cost for planner/reviewer/compiler from per-agent token fields on the run. */
+    /** Computes cost for planner/reviewer/compiler/test-gen from per-agent token fields. */
     private double computeAgentCost(String runId) {
-        return stateStore.findRun(runId).map(run -> {
-            double cost = 0.0;
+        double cost = stateStore.findRun(runId).map(run -> {
+            double c = 0.0;
             // Planner
             int pIn = nvl(run.getPlannerInputTokens()), pOut = nvl(run.getPlannerOutputTokens());
             if (pIn > 0 || pOut > 0) {
                 String prov = run.getPlannerProvider() != null ? run.getPlannerProvider() : props.getRoles().getPlanner();
                 String model = run.getPlannerActualModel() != null ? run.getPlannerActualModel() : defaultModel(prov);
                 double[] rates = dbRatesForModel(prov, model);
-                cost += (pIn / 1_000_000.0) * rates[0] + (pOut / 1_000_000.0) * rates[1];
+                c += (pIn / 1_000_000.0) * rates[0] + (pOut / 1_000_000.0) * rates[1];
             }
             // Reviewer
             int rIn = nvl(run.getReviewerInputTokens()), rOut = nvl(run.getReviewerOutputTokens());
@@ -170,7 +172,7 @@ public class CostEstimator {
                 String prov = run.getReviewerProvider() != null ? run.getReviewerProvider() : props.getRoles().getReviewer();
                 String model = run.getReviewerActualModel() != null ? run.getReviewerActualModel() : defaultModel(prov);
                 double[] rates = dbRatesForModel(prov, model);
-                cost += (rIn / 1_000_000.0) * rates[0] + (rOut / 1_000_000.0) * rates[1];
+                c += (rIn / 1_000_000.0) * rates[0] + (rOut / 1_000_000.0) * rates[1];
             }
             // Compiler
             int cIn = nvl(run.getCompilerInputTokens()), cOut = nvl(run.getCompilerOutputTokens());
@@ -178,10 +180,42 @@ public class CostEstimator {
                 String prov = run.getCompilerProvider() != null ? run.getCompilerProvider() : props.getRoles().getWorker();
                 String model = run.getCompilerActualModel() != null ? run.getCompilerActualModel() : defaultModel(prov);
                 double[] rates = dbRatesForModel(prov, model);
-                cost += (cIn / 1_000_000.0) * rates[0] + (cOut / 1_000_000.0) * rates[1];
+                c += (cIn / 1_000_000.0) * rates[0] + (cOut / 1_000_000.0) * rates[1];
             }
-            return cost;
+            return c;
         }).orElse(0.0);
+
+        // Test gen pipeline costs (from TestPlan entity)
+        cost += testPlanRepository.findByRunId(runId).map(tp -> {
+            double c = 0.0;
+            // Test planner
+            int tpIn = nvl(tp.getPlannerInputTokens()), tpOut = nvl(tp.getPlannerOutputTokens());
+            if (tpIn > 0 || tpOut > 0) {
+                String prov = tp.getPlannerProvider() != null ? tp.getPlannerProvider() : "anthropic";
+                String model = tp.getPlannerModel() != null ? tp.getPlannerModel() : ModelConstants.SONNET;
+                double[] rates = dbRatesForModel(prov, model);
+                c += (tpIn / 1_000_000.0) * rates[0] + (tpOut / 1_000_000.0) * rates[1];
+            }
+            // Test worker
+            int twIn = nvl(tp.getWorkerInputTokens()), twOut = nvl(tp.getWorkerOutputTokens());
+            if (twIn > 0 || twOut > 0) {
+                String prov = tp.getWorkerProvider() != null ? tp.getWorkerProvider() : "anthropic";
+                String model = tp.getWorkerModel() != null ? tp.getWorkerModel() : ModelConstants.SONNET;
+                double[] rates = dbRatesForModel(prov, model);
+                c += (twIn / 1_000_000.0) * rates[0] + (twOut / 1_000_000.0) * rates[1];
+            }
+            // Test report gen (fix suggestions)
+            int trIn = nvl(tp.getReportInputTokens()), trOut = nvl(tp.getReportOutputTokens());
+            if (trIn > 0 || trOut > 0) {
+                String prov = tp.getPlannerProvider() != null ? tp.getPlannerProvider() : "anthropic";
+                String model = ModelConstants.HAIKU; // fix suggestions use FAST tier
+                double[] rates = dbRatesForModel(prov, model);
+                c += (trIn / 1_000_000.0) * rates[0] + (trOut / 1_000_000.0) * rates[1];
+            }
+            return c;
+        }).orElse(0.0);
+
+        return cost;
     }
 
     private int nvl(Integer v) { return v != null ? v : 0; }
