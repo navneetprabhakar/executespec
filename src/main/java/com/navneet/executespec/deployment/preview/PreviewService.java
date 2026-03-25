@@ -72,6 +72,8 @@ public class PreviewService {
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
 
     private static final Set<String> COMPLETE_STATUSES = Set.of("COMPLETE", "PARTIAL");
+    private static final Set<String> PREVIEW_ALLOWED_STATUSES = Set.of(
+            "COMPLETE", "PARTIAL", "WORKING", "REVIEWING", "AWAITING_MERGE");
     private static final String COMPOSE_PREFIX = "es-preview-";
     private static final int HEALTH_CHECK_RETRIES = 30;
     private static final int HEALTH_CHECK_INTERVAL_MS = 2000;
@@ -143,7 +145,7 @@ public class PreviewService {
         // Guard: run must exist and be complete
         PipelineRun run = stateStore.findRun(runId)
                 .orElseThrow(() -> new PreviewException("Run not found: " + runId));
-        if (!COMPLETE_STATUSES.contains(run.getStatus())) {
+        if (!PREVIEW_ALLOWED_STATUSES.contains(run.getStatus())) {
             throw new PreviewException("Run must be complete to preview (current status: " + run.getStatus() + ")");
         }
 

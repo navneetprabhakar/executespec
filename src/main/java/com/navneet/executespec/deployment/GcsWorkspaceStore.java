@@ -49,11 +49,19 @@ public class GcsWorkspaceStore {
     private final String environment;
 
     public GcsWorkspaceStore(DeploymentProperties props,
-                             @Value("${spring.profiles.active:dev}") String environment) throws IOException {
+                             @Value("${spring.profiles.active:dev}") String environment) {
         this.props = props;
         this.environment = environment;
-        this.storage = StorageOptions.getDefaultInstance().getService();
-        log.info("[GcsWorkspaceStore] Initialised — bucket={}, env={}", bucket(), environment);
+        Storage s = null;
+        try {
+            s = StorageOptions.getDefaultInstance().getService();
+            log.info("[GcsWorkspaceStore] Initialised — bucket={}, env={}", bucket(), environment);
+        } catch (Exception e) {
+            log.warn("[GcsWorkspaceStore] GCS unavailable (ADC may need refresh): {}. " +
+                    "Run 'gcloud auth application-default login' to fix. " +
+                    "Workspace archiving disabled until credentials are refreshed.", e.getMessage());
+        }
+        this.storage = s;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -66,6 +74,10 @@ public class GcsWorkspaceStore {
      * @return GCS object key (e.g. {@code workspaces/{runId}.zip})
      */
     public String uploadZip(String runId, Path zipPath) throws IOException {
+        if (storage == null) {
+            log.warn("[GcsWorkspaceStore] GCS unavailable — skipping upload for run {}", runId);
+            return null;
+        }
         String key = objectKey(runId);
         BlobId blobId = BlobId.of(bucket(), key);
         BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
@@ -95,6 +107,9 @@ public class GcsWorkspaceStore {
      * @param runId  used only for naming the temp file
      */
     public Path downloadToTemp(String gcsKey, String runId) throws IOException {
+        if (storage == null) {
+            throw new IOException("GCS unavailable — run 'gcloud auth application-default login' to fix");
+        }
         String shortId = runId.substring(0, Math.min(8, runId.length()));
         Path tempFile = Files.createTempFile("gcs-workspace-" + shortId, ".zip");
         tempFile.toFile().deleteOnExit();
@@ -129,6 +144,9 @@ public class GcsWorkspaceStore {
      * @return pre-signed HTTPS URL
      */
     public URL signedDownloadUrl(String gcsKey, Duration ttl) {
+        if (storage == null) {
+            throw new StorageException(0, "GCS unavailable — run 'gcloud auth application-default login' to fix");
+        }
         BlobInfo blobInfo = BlobInfo.newBuilder(BlobId.of(bucket(), gcsKey)).build();
         return storage.signUrl(
             blobInfo,
@@ -143,6 +161,7 @@ public class GcsWorkspaceStore {
      * Returns true if the object exists in GCS.
      */
     public boolean exists(String gcsKey) {
+        if (storage == null) return false;
         try {
             return storage.get(BlobId.of(bucket(), gcsKey)) != null;
         } catch (StorageException e) {
@@ -155,6 +174,10 @@ public class GcsWorkspaceStore {
      * Deletes an object from GCS (used by the retention cleanup job for old archives).
      */
     public void delete(String gcsKey) {
+        if (storage == null) {
+            log.warn("[GcsWorkspaceStore] GCS unavailable — skipping delete for {}", gcsKey);
+            return;
+        }
         boolean deleted = storage.delete(BlobId.of(bucket(), gcsKey));
         if (deleted) {
             log.info("[GcsWorkspaceStore] Deleted gs://{}/{}", bucket(), gcsKey);

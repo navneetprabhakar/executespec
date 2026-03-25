@@ -123,6 +123,10 @@ public class PipelineHarness {
     // ── Micrometer metrics registry ──────────────────────────────────────────
     private final MeterRegistry meterRegistry;
 
+    // ── Preview service (auto-start for test execution) ─────────────────────
+    private final com.navneet.executespec.deployment.preview.PreviewService previewService;
+    private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepository;
+
     // ── Test generation pipeline ─────────────────────────────────────────────
     private final com.navneet.executespec.testgen.TestGenOrchestrator testGenOrchestrator;
     private final com.navneet.executespec.testgen.TestPreviewCoordinator testPreviewCoordinator;
@@ -1818,6 +1822,11 @@ public class PipelineHarness {
             // they don't pollute subsequent operations or the next run.
             gitTool.pruneAllWorktrees(runId);
 
+            // ── 3c. Auto-start preview for test execution ───────────────────
+            // Launch preview in background so TestPreviewCoordinator can trigger
+            // test execution as soon as both preview + tests are ready.
+            autoStartPreview(runId, run);
+
             // ── 4. Review (single pass — no auto-REWORK) ──────────────────
             // Reviewer runs once. Its recommendation (MERGE / REWORK / PARTIAL_MERGE)
             // is shown to the user at the merge gate. The user decides whether to
@@ -3035,7 +3044,9 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.log(runId, "report",
                         "Waiting for integration tests to finish before generating report..."));
                 try {
-                    testSummary = testFuture.get(3, TimeUnit.MINUTES);
+                    // Block until tests finish — merge gate must NOT open before tests complete.
+                    // 10-minute safety cap: compile + execute against preview should complete well within this.
+                    testSummary = testFuture.get(10, TimeUnit.MINUTES);
                     // Fetch full test results from DB
                     var testPlan = testPlanRepository.findByRunId(runId).orElse(null);
                     if (testPlan != null) {
@@ -3044,9 +3055,9 @@ public class PipelineHarness {
                     log.info("Run {} — test results included in report: {}/{} passed",
                             runId, testSummary.getPassed(), testSummary.getTotalTests());
                 } catch (TimeoutException e) {
-                    log.warn("Run {} — timed out waiting for test results (3min) — generating report without them", runId);
+                    log.warn("Run {} — timed out waiting for test results (10min) — generating report without them", runId);
                     broadcaster.emit(runId, RunEvent.log(runId, "report",
-                            "Test execution still running — generating report without test results"));
+                            "⚠️ Test execution timed out (10min) — generating report without test results"));
                 } catch (Exception e) {
                     log.warn("Run {} — error waiting for test results: {} — generating report without them",
                             runId, e.getMessage());
@@ -3065,6 +3076,33 @@ public class PipelineHarness {
         } finally {
             reportObs.stop();
         }
+    }
+
+    // ── Auto-start preview for test execution ──────────────────────────────
+
+    private void autoStartPreview(String runId, PipelineRun run) {
+        Thread.ofVirtual().name("auto-preview-" + runId).start(() -> {
+            try {
+                // Look up the run creator to pass to PreviewService
+                var user = run.getCreatedByUserId() != null
+                        ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
+                        : null;
+                if (user == null) {
+                    log.warn("[AutoPreview] No user found for run {} — skipping auto-preview", runId);
+                    return;
+                }
+
+                log.info("[AutoPreview] Starting preview for run {} (for test execution)", runId);
+                broadcaster.emit(runId, RunEvent.log(runId, null,
+                        "Starting preview automatically for integration test execution..."));
+                previewService.start(runId, user);
+                // PreviewService will call testPreviewCoordinator.onPreviewReady() when ready
+            } catch (Exception e) {
+                log.warn("[AutoPreview] Failed to auto-start preview for run {}: {}", runId, e.getMessage());
+                broadcaster.emit(runId, RunEvent.log(runId, null,
+                        "⚠️ Auto-preview failed: " + e.getMessage() + " — tests may be skipped"));
+            }
+        });
     }
 
     // ── Test execution completion listener ───────────────────────────────────
