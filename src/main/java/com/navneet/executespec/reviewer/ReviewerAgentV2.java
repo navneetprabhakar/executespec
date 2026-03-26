@@ -85,7 +85,7 @@ public class ReviewerAgentV2 {
     @Value("classpath:prompts/reviewer-v2.txt")
     private Resource reviewerV2Prompt;
 
-    private static final int MAX_CRITICAL_AUTO_FIX = 5;
+    private static final int MAX_AUTO_FIX = 8;  // max issues to attempt auto-fix (both CRITICAL and MINOR)
     private static final int MAX_TOOL_CALLS = 10;
     private static final Duration REVIEW_TIMEOUT = Duration.ofMinutes(3);
 
@@ -164,17 +164,23 @@ public class ReviewerAgentV2 {
 
         int autoFixAttempted = 0;
         int autoFixSucceeded = 0;
+        int totalFixable = issues.size();
 
-        if (criticalCount > MAX_CRITICAL_AUTO_FIX) {
-            log.warn("Too many critical issues ({}) — skipping auto-fix, flagging for human review", criticalCount);
+        if (totalFixable > MAX_AUTO_FIX) {
+            log.warn("Too many issues ({}) — skipping auto-fix, flagging for human review", totalFixable);
             sseBroadcaster.emit(runId, RunEvent.log(runId, null,
-                    "Too many critical issues (" + criticalCount + ") — skipping auto-fix"));
+                    "Too many issues (" + totalFixable + ") — skipping auto-fix"));
         } else {
-            List<ReviewIssue> criticalIssues = issues.stream()
-                    .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+            // Fix ALL issues (CRITICAL first, then MINOR) — sorted so critical are fixed first
+            List<ReviewIssue> fixableIssues = issues.stream()
+                    .sorted((a, b) -> {
+                        if (a.getSeverity() == IssueSeverity.CRITICAL && b.getSeverity() != IssueSeverity.CRITICAL) return -1;
+                        if (a.getSeverity() != IssueSeverity.CRITICAL && b.getSeverity() == IssueSeverity.CRITICAL) return 1;
+                        return 0;
+                    })
                     .toList();
 
-            for (ReviewIssue issue : criticalIssues) {
+            for (ReviewIssue issue : fixableIssues) {
                 if (Duration.between(start, Instant.now()).compareTo(REVIEW_TIMEOUT) > 0) {
                     log.warn("Review timeout reached — stopping auto-fix loop");
                     break;
@@ -204,6 +210,28 @@ public class ReviewerAgentV2 {
         Duration reviewDuration = Duration.between(start, Instant.now());
         ReviewVerdict verdict = determineVerdict(issues, readmeUpdated, criticalCount, autoFixSucceeded);
 
+        // Build merge blockers from unfixed CRITICAL issues
+        List<String> mergeBlockers = issues.stream()
+                .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+                .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())
+                .map(i -> i.getId() + ": " + i.getDescription())
+                .toList();
+
+        // Post-merge suggestions from unfixed MINOR issues
+        List<String> postMergeSuggestions = issues.stream()
+                .filter(i -> i.getSeverity() == IssueSeverity.MINOR)
+                .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())
+                .map(i -> i.getDescription())
+                .toList();
+
+        // Derive confidence from verdict
+        String confidence = switch (verdict) {
+            case APPROVED -> "HIGH";
+            case APPROVED_WITH_NOTES -> "HIGH";
+            case NEEDS_FIXES -> "MEDIUM";
+            case REJECTED -> "LOW";
+        };
+
         ReviewReportV2 report = ReviewReportV2.builder()
                 .verdict(verdict)
                 .issues(issues)
@@ -215,6 +243,9 @@ public class ReviewerAgentV2 {
                 .reviewDuration(reviewDuration)
                 .reviewerModel(reviewModel.getModelName())
                 .readmeUpdated(readmeUpdated)
+                .overallConfidence(confidence)
+                .mergeBlockers(mergeBlockers)
+                .postMergeSuggestions(postMergeSuggestions)
                 .build();
 
         sseBroadcaster.emit(runId, RunEvent.log(runId, null,
@@ -362,47 +393,61 @@ public class ReviewerAgentV2 {
      *
      * @return true if fix succeeded (validation passed), false otherwise
      */
+    private static final int MAX_FIX_ATTEMPTS = 2;
+
     private boolean attemptAutoFix(PipelineRun run, Path workspacePath,
                                     ReviewIssue issue, Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
-        try {
-            // Select FAST tier for fix execution (targeted, small changes)
-            ModelSelection fixModel = modelRouter.selectFromTier(ModelTier.FAST, availableProviders);
 
-            // Create a transient fix task with proper TaskDefinition JSON
-            AgentTask fixTask = createFixTask(run, issue, fixModel);
+        // Try fix at FAST tier first, escalate to CAPABLE on retry
+        ModelTier[] tiers = { ModelTier.FAST, ModelTier.CAPABLE };
 
-            log.info("Executing auto-fix for {} using {}", issue.getId(), fixModel.getModelName());
+        for (int attempt = 0; attempt < MAX_FIX_ATTEMPTS; attempt++) {
+            ModelTier tier = tiers[Math.min(attempt, tiers.length - 1)];
+            try {
+                ModelSelection fixModel = modelRouter.selectFromTier(tier, availableProviders);
+                AgentTask fixTask = createFixTask(run, issue, fixModel);
 
-            // Execute using WorkerAgent's standard tool-use loop
-            WorkerReport fixReport = workerAgent.executeWithModel(fixTask, runId, fixModel);
+                log.info("Executing auto-fix for {} using {} (attempt {}/{})",
+                        issue.getId(), fixModel.getModelName(), attempt + 1, MAX_FIX_ATTEMPTS);
 
-            // Validate the fix
-            Language lang = detectLanguageForFile(issue.getFile());
-            if (lang != null) {
-                ValidationResult validationResult = codeValidator.validateFile(
-                        ValidateFileRequest.builder()
-                                .projectRoot(workspacePath)
-                                .filePath(Path.of(issue.getFile()))
-                                .language(lang)
-                                .level(ValidationLevel.TYPE)
-                                .build());
+                // Execute using WorkerAgent's standard tool-use loop
+                WorkerReport fixReport = workerAgent.executeWithModel(fixTask, runId, fixModel);
 
-                if (validationResult.getVerdict() == ValidationVerdict.FAIL) {
-                    log.warn("Fix for {} failed validation: {}", issue.getId(),
-                            RetryPromptBuilder.buildSummary(validationResult));
+                // Validate the fix
+                Language lang = detectLanguageForFile(issue.getFile());
+                if (lang != null) {
+                    ValidationResult validationResult = codeValidator.validateFile(
+                            ValidateFileRequest.builder()
+                                    .projectRoot(workspacePath)
+                                    .filePath(Path.of(issue.getFile()))
+                                    .language(lang)
+                                    .level(ValidationLevel.TYPE)
+                                    .build());
+
+                    if (validationResult.getVerdict() == ValidationVerdict.FAIL) {
+                        log.warn("Fix for {} failed validation (attempt {}): {}", issue.getId(),
+                                attempt + 1, RetryPromptBuilder.buildSummary(validationResult));
+                        if (attempt < MAX_FIX_ATTEMPTS - 1) {
+                            log.info("Retrying fix for {} with escalated tier", issue.getId());
+                            continue;
+                        }
+                        return false;
+                    }
+                }
+
+                // Commit the fix
+                gitTool.commitIfDirty(runId, "Auto-fix: " + issue.getId() + " — " + issue.getDescription());
+                return true;
+
+            } catch (Exception e) {
+                log.error("Auto-fix attempt {} failed for issue {}: {}", attempt + 1, issue.getId(), e.getMessage());
+                if (attempt >= MAX_FIX_ATTEMPTS - 1) {
                     return false;
                 }
             }
-
-            // Commit the fix
-            gitTool.commitIfDirty(runId, "Auto-fix: " + issue.getId() + " — " + issue.getDescription());
-            return true;
-
-        } catch (Exception e) {
-            log.error("Auto-fix failed for issue {}", issue.getId(), e);
-            return false;
         }
+        return false;
     }
 
     /**
@@ -526,7 +571,7 @@ public class ReviewerAgentV2 {
         return String.format("""
             === REVIEW FIX REQUEST ===
 
-            A code review found a CRITICAL issue that needs to be fixed.
+            A code review found an issue that needs to be fixed.
 
             Issue ID: %s
             File: %s
@@ -609,14 +654,24 @@ public class ReviewerAgentV2 {
     private ReviewVerdict determineVerdict(List<ReviewIssue> issues, boolean readmeUpdated,
                                             int criticalCount, int autoFixSucceeded) {
         if (!readmeUpdated) return ReviewVerdict.REJECTED;
-        if (criticalCount > MAX_CRITICAL_AUTO_FIX) return ReviewVerdict.REJECTED;
+        if (issues.size() > MAX_AUTO_FIX) return ReviewVerdict.REJECTED;
 
-        int unfixedCritical = criticalCount - autoFixSucceeded;
+        // Check for unfixed critical issues
+        long unfixedCritical = issues.stream()
+                .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+                .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())
+                .count();
         if (unfixedCritical > 0) return ReviewVerdict.NEEDS_FIXES;
 
-        if (issues.stream().anyMatch(i -> i.getSeverity() == IssueSeverity.MINOR)) {
-            return ReviewVerdict.APPROVED_WITH_NOTES;
-        }
+        // Check for unfixed minor issues
+        long unfixedMinor = issues.stream()
+                .filter(i -> i.getSeverity() == IssueSeverity.MINOR)
+                .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())
+                .count();
+        if (unfixedMinor > 0) return ReviewVerdict.APPROVED_WITH_NOTES;
+
+        // All issues were auto-fixed, or no issues at all
+        if (!issues.isEmpty()) return ReviewVerdict.APPROVED_WITH_NOTES;
 
         return ReviewVerdict.APPROVED;
     }

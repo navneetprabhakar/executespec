@@ -20,38 +20,27 @@ If a task would exceed these limits, SPLIT IT into smaller tasks.
 A task that touches >5 files or writes >350 lines WILL fail. Break it up.
 
 ═══════════════════════════════════════════════════════════
-TIERED PARALLEL EXECUTION RULES
+SEQUENTIAL EXECUTION MODEL
 ═══════════════════════════════════════════════════════════
-- Tasks are grouped into TIERS based on their depends_on graph:
-    Tier 0: tasks with depends_on: []  (no dependencies)
-    Tier N: tasks whose deepest dependency is in tier N-1
-- ALL tasks in the same tier run IN PARALLEL (isolated worktrees, virtual threads).
-- After every task in a tier completes, their branches merge to main.
-  The next tier then starts with full access to all previous tiers' merged output.
-- A task can see ALL prior tiers' work, but CANNOT see same-tier tasks' work
-  (they run concurrently — each in its own worktree branched from main).
-- Two tasks in the same tier MUST NOT share files (they run concurrently).
+- Tasks run ONE AT A TIME in depends_on order.
+- After each task completes, its branch is merged to main.
+  The next task starts with full access to all previous tasks' merged output.
+- Each task runs in its own isolated git worktree branched from main.
+- A task can see ALL previously completed tasks' work on main.
 
-- Order tasks from foundational to dependent (maps directly to tiers):
-  1. Project setup (pom.xml / package.json / requirements.txt) — always tier 0
-  2. Data models / DTOs / types / schemas — tier 1
-  3. Repository / data access layer — tier 2
-  4. Service / business logic (split by domain or method group) — tier 3+
-  5. API / controller layer (split by resource — one controller per task) — tier 4+
+- Order tasks from foundational to dependent:
+  1. Project setup (pom.xml / package.json / requirements.txt) — always first
+  2. Data models / DTOs / types / schemas
+  3. Repository / data access layer
+  4. Service / business logic (split by domain or method group)
+  5. API / controller layer (split by resource — one controller per task)
   6. Configuration / wiring
-  7. Tests (split by layer or class being tested) — highest tier
-  8. README update — always final tier
-
-MAXIMISE PARALLELISM:
-  Tasks at the same layer with NO dependency on each other should share the
-  same depends_on set so they land in the SAME tier and run concurrently.
-  Example: user_entity_dto and product_entity_dto both depend only on
-  project_setup → they are both tier 1 and run in parallel.
+  7. Tests (split by layer or class being tested)
+  8. README update — always last
 
 - EACH TASK MUST COMPILE ON ITS OWN. A task's worktree contains all merged work
-  from prior tiers but NOT same-tier tasks. Do not reference classes or functions
-  created by another task in the same tier — they are invisible until the next
-  tier starts.
+  from previously completed tasks. Each task must produce code that compiles
+  independently given what exists on main when it starts.
 
 TASK COMPLEXITY ASSIGNMENT:
 For each task, assign a "complexity" field with one of: LOW, MEDIUM, HIGH.
@@ -59,6 +48,31 @@ For each task, assign a "complexity" field with one of: LOW, MEDIUM, HIGH.
 - MEDIUM: controllers with moderate logic, repository implementations, standard service methods, utility classes
 - HIGH: complex business logic with multiple branching paths, services with >3 dependencies, intricate validation rules, test generation for complex services
 The complexity determines which AI model is used. Be conservative: when in doubt, mark MEDIUM not LOW.
+
+═══════════════════════════════════════════════════════════
+FUNCTIONAL COMPLETENESS — EVERY SPEC FEATURE MUST HAVE A TASK
+═══════════════════════════════════════════════════════════
+
+The #1 failure mode is a plan that sets up the project but OMITS the actual features.
+
+RULE: Read the user's spec and identify EVERY endpoint, feature, behavior, or
+component they described. Each one MUST appear as an objective in at least one task.
+
+  BAD PLAN for "Build a URL shortener with POST /shorten, GET /{code}, GET /stats/{code}":
+    Task 1: "Create requirements.txt and project scaffold"
+    ← WHERE ARE THE 3 ENDPOINTS? This plan will produce a skeleton with no functionality.
+
+  GOOD PLAN for the same spec:
+    Task 1: "Create requirements.txt, main.py scaffold, .gitignore"
+    Task 2: "Implement POST /shorten endpoint with URL storage"
+    Task 3: "Implement GET /{code} redirect and GET /stats/{code} click counter"
+
+VALIDATION CHECKLIST (do this BEFORE outputting your plan):
+  □ List every endpoint/route mentioned in the spec. Is each one covered by a task?
+  □ List every data model/entity mentioned. Is each one created by a task?
+  □ List every behavior described (auth, validation, search, etc.). Is each covered?
+  □ The project_setup task must ONLY create build files and entry point — NO business logic.
+  If any feature is missing from the plan, ADD A TASK for it.
 
 ═══════════════════════════════════════════════════════════
 HARD RULES — violating these causes the run to fail

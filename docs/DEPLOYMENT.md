@@ -25,7 +25,7 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1–V18).
+Flyway migrations run automatically on startup and create all tables (V1–V37).
 
 ### Redis Setup
 
@@ -1360,3 +1360,107 @@ If login fails, check that Flyway migrations completed successfully in the start
 ```
 sudo journalctl -u executespec | grep -i flyway
 ```
+
+---
+
+## Terraform Operations (infra/)
+
+> Previously maintained in `infra/SETUP.md` — consolidated here.
+
+### Prerequisites
+
+1. **Terraform >= 1.5**: `brew install terraform`
+2. **gcloud CLI**: `brew install --cask google-cloud-sdk`
+3. **GCP Project** `executespecv1` with billing enabled
+4. **Cloudflare** managing DNS for `executespec.ai`
+
+### One-Time Setup
+
+```bash
+gcloud auth application-default login
+gcloud config set project executespecv1
+
+# Create Terraform state bucket
+gsutil mb -l asia-south1 gs://executespec-tfstate
+gsutil versioning set on gs://executespec-tfstate
+
+# Initialize & create workspaces
+cd infra
+terraform init
+terraform workspace new dev
+terraform workspace new prod
+```
+
+### Deploy Dev Environment
+
+**Subdomain:** `dev.executespec.ai` | **Region:** `asia-south1`
+
+```bash
+terraform workspace select dev
+terraform plan  -var-file=environments/dev.tfvars -var="project_id=executespecv1"
+terraform apply -var-file=environments/dev.tfvars -var="project_id=executespecv1"
+```
+
+**DNS (Cloudflare):** A record → `dev` → `$(terraform output lb_ip)` (DNS only until SSL is ACTIVE)
+
+**Secrets → GCS:**
+```bash
+cat > /tmp/api-keys << 'EOF'
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-proj-...
+GOOGLE_API_KEY=AIza...
+GITHUB_PAT=ghp_...
+EOF
+gsutil cp /tmp/api-keys gs://executespec-dev-deploy/config/api-keys && rm /tmp/api-keys
+```
+
+**GitHub environment secrets (`development`):**
+
+| Secret | Value |
+|--------|-------|
+| `GCP_PROJECT` | `executespecv1` |
+| `GCP_REGION` | `asia-south1` |
+| `GCE_INSTANCE` | `<from gcloud compute instances list>` |
+| `GCE_ZONE` | `asia-south1-a` |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
+| `GCP_SERVICE_ACCOUNT` | `executespec-dev-gce@executespecv1.iam.gserviceaccount.com` |
+
+Deploy: `git push -u origin dev`
+Verify: `https://dev.executespec.ai/api/health`
+
+### Deploy Prod Environment
+
+**Subdomain:** `app.executespec.ai` | **Region:** `asia-south1`
+
+```bash
+terraform workspace select prod
+terraform apply -var-file=environments/prod.tfvars -var="project_id=executespecv1"
+```
+
+Same DNS/secrets/GitHub process as dev. Prod secrets also need `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `SLACK_*` secrets.
+
+Deploy: `git push origin main`
+Verify: `https://app.executespec.ai/api/health`
+
+### Useful Terraform Commands
+
+```bash
+terraform workspace show                    # current workspace
+terraform output -raw db_private_ip         # DB IP
+terraform output -raw lb_ip                 # LB IP
+terraform output -raw db_password           # DB password (sensitive)
+gcloud compute instances list --project=executespecv1 --filter="name~executespec-dev"
+gcloud compute ssh <INSTANCE> --zone=asia-south1-a --tunnel-through-iap
+sudo journalctl -u executespec -f           # app logs on VM
+```
+
+### Infrastructure Cost Estimates
+
+| Resource | Dev | Prod |
+|----------|-----|------|
+| Compute | $49/mo (e2-standard-2 ×1) | $194/mo (n2-standard-4 ×2) |
+| Cloud SQL | $25/mo (db-g1-small) | $80/mo (db-custom-2-3840 HA) |
+| Redis | $36/mo (1GB Basic) | $73/mo (1GB Standard HA) |
+| Load Balancer | $18/mo | $18/mo |
+| Cloud NAT + GCS | $4/mo | $8/mo |
+| **Total** | **~$132/mo** | **~$373/mo** |

@@ -11,11 +11,13 @@ import java.util.List;
 
 /**
  * Review report produced by {@link com.navneet.executespec.reviewer.ReviewerAgentV2}.
- * Separate from {@link com.navneet.executespec.agent.model.ReviewReport} (v1) which
- * uses recommendation-based flow (MERGE/REWORK/PARTIAL_MERGE).
  *
  * <p>V2 uses verdict-based flow (APPROVED/APPROVED_WITH_NOTES/NEEDS_FIXES/REJECTED)
- * with built-in auto-fix loop for CRITICAL issues.
+ * with built-in auto-fix loop for CRITICAL and MINOR issues.
+ *
+ * <p>Includes backward-compatible fields ({@code overallConfidence}, {@code mergeBlockers},
+ * {@code postMergeSuggestions}) so downstream consumers (ApprovalGate, ValidationReportService)
+ * can migrate incrementally from v1 ReviewReport.
  */
 @Data
 @Builder
@@ -24,7 +26,7 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ReviewReportV2 {
     private ReviewVerdict verdict;       // APPROVED, APPROVED_WITH_NOTES, NEEDS_FIXES, REJECTED
-    private List<ReviewIssue> issues;    // all issues found
+    private List<ReviewIssue> issues;    // all issues found (flat list)
     private int criticalCount;
     private int minorCount;
     private int autoFixAttempted;
@@ -33,4 +35,23 @@ public class ReviewReportV2 {
     private Duration reviewDuration;
     private String reviewerModel;        // which model did the review
     private boolean readmeUpdated;       // hard gate check
+
+    // ── V1-compatible fields (populated by ReviewerAgentV2 for downstream consumers) ──
+    private String overallConfidence;           // HIGH | MEDIUM | LOW
+    @Builder.Default
+    private List<String> mergeBlockers = List.of();
+    @Builder.Default
+    private List<String> postMergeSuggestions = List.of();
+
+    /**
+     * Maps V2 verdict to V1-style recommendation string for backward compatibility.
+     * Used by ApprovalGate and PipelineHarness REWORK checks during migration.
+     */
+    public String getRecommendationCompat() {
+        if (verdict == null) return "MERGE";
+        return switch (verdict) {
+            case APPROVED, APPROVED_WITH_NOTES -> "MERGE";
+            case NEEDS_FIXES, REJECTED -> "REWORK";
+        };
+    }
 }

@@ -191,10 +191,10 @@ graph TB
 
         subgraph "PlannerAgent"
             P_IN[User Goal + Context] --> P_LLM[Claude Sonnet<br/>CAPABLE_CHAIN]
-            P_LLM --> P_OUT[TaskPlan<br/>1-6 tasks, dependencies<br/>complexity per task]
+            P_LLM --> P_OUT[TaskPlan<br/>1-35 tasks, sequential<br/>complexity per task]
         end
 
-        subgraph "WorkerAgent (per task)"
+        subgraph "WorkerAgent (per task, sequential)"
             W_PROMPT[Task + Context<br/>+ Workspace State] --> W_LOOP
 
             subgraph "W_LOOP [15-min Time Loop]"
@@ -211,14 +211,14 @@ graph TB
         end
 
         subgraph "ReviewerAgentV2 (two-phase)"
-            R_DIFFS[All Task Diffs<br/>Cap 80k chars] --> R_INSPECT[Phase 1: Inspect<br/>Tool-use analysis]
-            R_INSPECT --> R_ISSUES[Issues List<br/>CRITICAL/MEDIUM/LOW]
-            R_ISSUES --> R_FIX[Phase 2: Auto-Fix<br/>Optional]
-            R_FIX --> R_REPORT[ReviewReport<br/>MERGE/REWORK]
+            R_DIFFS[Merged code on main] --> R_INSPECT[Phase 1: Inspect<br/>Read-only tool-use analysis]
+            R_INSPECT --> R_ISSUES[Issues List<br/>CRITICAL/MINOR]
+            R_ISSUES --> R_FIX[Phase 2: Auto-Fix<br/>FAST → CAPABLE escalation<br/>2 attempts per issue, max 8]
+            R_FIX --> R_REPORT[ReviewReportV2<br/>APPROVED/NEEDS_FIXES/REJECTED]
         end
 
         subgraph "ValidationReportAgent (non-fatal)"
-            VR_INPUT[WorkerReports + CompileResult<br/>+ ReviewReport + Tasks] --> VR_LLM[Claude Haiku<br/>via LlmCallGuard]
+            VR_INPUT[WorkerReports + CompileResult<br/>+ ReviewReport + TestResults] --> VR_LLM[Claude Haiku<br/>via LlmCallGuard]
             VR_LLM --> VR_OUT[Markdown Report<br/>+ Structured Issues<br/>+ PDF Download]
             VR_OUT --> VR_DB[(validation_report<br/>table)]
         end
@@ -318,7 +318,7 @@ graph TB
     BS --> BP
 ```
 
-### 4.2 Migration History (V1 — V29)
+### 4.2 Migration History (V1 — V37)
 
 | Version | Description | Tables Affected |
 |---------|-------------|----------------|
@@ -335,6 +335,9 @@ graph TB
 | V27 | Apply suggestion | pipeline_run, tier_config |
 | V28 | Invoicing & GST | billing_profile, invoice, etc. |
 | V29 | Preview limits | pipeline_run, tier_config |
+| V32 | Plan versions | plan_version |
+| V34 | Validation report | validation_report |
+| V37 | Test generation pipeline | test_plan, test_task, test_result |
 
 ---
 
@@ -539,4 +542,62 @@ graph TB
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-03-15.*
+## 11. Design Decision Details
+
+### Tool-Call Format
+WorkerAgent uses **XML tool calls**: `<tool_call>{"name":"...", "args":{...}}</tool_call>`. NOT Spring AI native tool calling. Reason: `@Tool` methods require `runId` which the model doesn't know. Dispatch is manual via `parseXmlToolCalls()` + `dispatchTool()` with `runId` injected automatically.
+
+### Completion Detection
+WorkerAgent response must START with `{` (strict JSON check via `looksLikeCompletionReport()`). Prevents false positives on prose containing field names.
+
+### Context Window Management
+- **Sliding window**: First 2 messages + last 18 kept per API call
+- **Progress checkpoints**: Every 15 iterations, re-inject task ID, objective, criteria
+- **Completion urgency**: At iteration 75 (5 before cap), force JSON output
+- **Pre-call token estimation**: If messages > 30, estimate tokens (chars/4), compact proactively
+- **Emergency compaction**: HARD_STOP tries compaction first; only truly stops if recently compacted
+
+### Prompt Caching
+Anthropic `SYSTEM_ONLY` strategy. Cache TTL = 5 min. `AnthropicChatOptions.builder().maxTokens(maxOut).cacheOptions(SYSTEM_ONLY)` — no toolCallbacks.
+
+### API Key Resolution
+Resolution: **user key → org key → system key** based on org's `keySourceMode`:
+- `SYSTEM`: Force platform keys only
+- `OWN_KEYS`: User/org keys required
+- `HYBRID` (default): User/org first, system fallback
+
+---
+
+## 12. WorkerAgent Tool Dispatch
+
+| Tool call name | Java method |
+|---|---|
+| readFile / read_file | `fsTool.readFile(runId, path)` |
+| writeFile / write_file | `fsTool.writeFile(runId, path, content)` |
+| editFile / edit_file | `fsTool.editFile(runId, path, oldStr, newStr)` |
+| listFiles / list_files | `fsTool.listFiles(runId, path)` |
+| searchFiles / search_files | `fsTool.searchFiles(runId, pattern, directory)` |
+| run / run_command / run_build / run_tests | `shellTool.run(runId, command, timeout)` |
+| status / git_status | `gitTool.status(runId)` |
+| diff / git_diff | `gitTool.diff(runId)` |
+| commit / git_commit | `gitTool.commit(runId, message)` |
+
+Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
+
+---
+
+## 13. Known Issues & Mitigations
+
+| Issue | Mitigation |
+|-------|-----------|
+| Branch retry fails | `GitTool.createBranch()` catches `RefAlreadyExistsException` → checkout fallback |
+| Token cost explosion | Sliding window (first 2 + last 18) + result truncation |
+| Completion false positive | `looksLikeCompletionReport()` requires response starts with `{` |
+| 80-iteration cap hit | Progress checkpoints every 15 iters + urgency at iter 75 |
+| Hard stop at 73% context | Pre-call estimation + emergency compaction |
+| Chat has no code access | ConversationAgent injects file tree, README, context, plan, review |
+| Gate lost on server restart | `approve()` → if gate missing → auto-fail with message |
+
+---
+
+*This architecture document is maintained alongside the codebase. Last updated: 2026-03-26.*

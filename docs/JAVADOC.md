@@ -1,7 +1,7 @@
 # ExecuteSpec -- Complete System Documentation
 
 **Version:** 7fedbee (main)
-**Last Updated:** 2026-03-10
+**Last Updated:** 2026-03-26
 **Stack:** Java 21, Spring Boot 3.3.0, Spring AI 1.1.0, PostgreSQL, Redis, JGit 6.9.0
 
 ---
@@ -37,7 +37,7 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 
 - **Natural language to code:** Users submit a goal in plain English; the system produces a complete, working codebase.
 - **Multi-agent pipeline:** Planner, Worker, Compiler, Reviewer, Validation Report, and post-merge agents each handle a distinct phase.
-- **Human-in-the-loop gates:** Plan approval and merge approval gates give humans oversight before code is committed.
+- **Human-in-the-loop gates:** Plan approval gate gives humans oversight before code generation begins.
 - **Automatic validation:** Per-task code validation with model escalation on failure.
 - **Progressive merge:** Each task's branch is merged to main immediately after completion, enabling early conflict detection.
 - **Multi-tenant:** Organizations, projects, tiered access, and per-user/org API key management.
@@ -115,7 +115,7 @@ User Request
     |
     v
 [3. SequentialTaskExecutor]
-    |-- For each task (topological order):
+    |-- For each task (sequential, topological order):
     |     |-- ModelRouter selects model (complexity-based)
     |     |-- WorkerAgent.execute() in isolated worktree
     |     |     |-- Agentic loop (up to 80 iterations)
@@ -130,16 +130,25 @@ User Request
 [4. CompilerAgent]  -->  compile & fix (up to 3 attempts)
     |
     v
-[5. ReviewerAgent]  -->  ReviewReport (JSON)
+[5. GitMergeService]  -->  merge all task branches to main (automatic, no gate)
     |
     v
-[6. Merge Approval Gate]  (MERGE / DECLINE / REWORK / IMPLEMENT_SUGGESTIONS)
+[6. Post-merge compile validation]
     |
     v
-[7. GitMergeService]  -->  merge all branches to main
+[7. ReviewerAgentV2]  -->  ReviewReportV2 (JSON) + auto-fix critical issues
     |
     v
-[8. Post-Merge Orchestrator]
+[8. Validation Report + Test Report]  (non-fatal, LLM summary)
+    |
+    v
+[9. Re-validate after auto-fix]  (compile + type check)
+    |
+    v
+[10. Mark COMPLETE]  -->  GitHub push
+    |
+    v
+[11. Post-Merge Orchestrator]
     |-- ContextAgent (update CODEBASE_CONTEXT.md)
     |-- PromptOptimiserAgent (improve prompts)
     \-- ApiTestSuiteAgent (generate OpenAPI spec)
@@ -204,12 +213,12 @@ All packages are under `com.navneet.executespec`.
 ### 4.1 Run Lifecycle States
 
 ```
-PLANNING --> AWAITING_CLARIFICATION --> AWAITING_APPROVAL --> WORKING --> REVIEWING --> AWAITING_MERGE --> COMPLETE
-    |               |                      |                    |            |               |
-    v               v                      v                    v            v               v
-  FAILED      (user provides ref        FAILED              PARTIAL      FAILED          PARTIAL
-               or skips)               (rejected)           (some tasks               (merge declined
-                                                             failed)                   or conflict)
+PLANNING --> AWAITING_CLARIFICATION --> AWAITING_APPROVAL --> WORKING --> REVIEWING --> COMPLETE
+    |               |                      |                    |            |
+    v               v                      v                    v            v
+  FAILED      (user provides ref        FAILED              PARTIAL      FAILED
+               or skips)               (rejected)           (some tasks
+                                                             failed)
     |
     v
   QUEUED  (waiting for compute slot)
@@ -293,36 +302,33 @@ CompilerAgent.runCompileAndFix(runId)
   --> Always returns (non-fatal)
 ```
 
-**Step 7: Review**
+**Step 7: Merge (automatic, no gate)**
 ```
-ReviewerAgent.review(run, workerReports)
-  --> Gather diffs from all task branches (capped at 80k chars)
-  --> Build user message: plan + reports + diffs + fallback notes
-  --> LlmRouter.callWithFallback()
-  --> Parse ReviewReport JSON
-  --> Retry up to 3 times on invalid JSON
+GitMergeService.mergeAll(runId, tasks)
+  --> Merge all task branches to main in topological order
+  --> Conflict resolution cascade (specialized mergers → LLM)
+  --> Post-merge compile validation
 ```
 
-**Step 7b: Validation Report (non-fatal)**
+**Step 8: Review**
+```
+ReviewerAgentV2.review(run, workerReports)
+  --> Inspect merged code on main (tool-use loop, max 10 file reads)
+  --> Produce ReviewReportV2 with verdict + issues (CRITICAL/MINOR)
+  --> Auto-fix: for each CRITICAL issue (max 8), send fix to WorkerAgent
+  --> Auto-fix retry: 2 attempts per issue (FAST → CAPABLE escalation)
+  --> Re-validate after fixes (compile + type check)
+```
+
+**Step 8b: Validation Report (non-fatal)**
 ```
 ValidationReportService.generateAndPersist(runId, reportInput)
-  --> Aggregate: WorkerReports + CompileResult + ReviewReport + tasks
+  --> Aggregate: WorkerReports + CompileResult + ReviewReportV2 + test results
   --> LlmCallGuard.call() with Haiku model
   --> Parse markdown report
   --> Persist to validation_report table
   --> Non-fatal: on failure, log warning and continue
   --> OTel span: executespec.run.phase.report
-```
-
-**Step 8: Merge Gate**
-```
-StateStore.saveReview(runId, review) --> status=AWAITING_MERGE
-  --> GateStore.awaitMergeGate(runId) (polls Redis every 500ms)
-  --> MergeDecision: MERGE | DECLINE | IMPLEMENT_SUGGESTIONS | REWORK
-  --> On MERGE: GitMergeService.mergeAll()
-  --> On DECLINE: status=PARTIAL (preserved for reopen)
-  --> On IMPLEMENT_SUGGESTIONS: re-run affected workers, re-review, loop
-  --> On REWORK: re-run flagged tasks with feedback, re-review, loop
 ```
 
 **Step 9: Post-Merge**
@@ -422,44 +428,39 @@ PostMergeOrchestrator.onMergeCompleted(event)
 - Completion detection is **strict**: response must START with `{` and contain `"task_id"` and `"status"`.
 - `escapeControlCharsInJsonStrings()` sanitizes LLM-emitted raw control characters inside JSON string values.
 
-### 5.3 ReviewerAgent
+### 5.3 ReviewerAgent (Legacy -- removed from pipeline)
 
-**File:** `agent/ReviewerAgent.java`
-**Model:** `claude-haiku-4-5-20251001` (UTILITY_CHAIN)
-**Mode:** Single LLM call (IMMEDIATE fallback)
-
-**Purpose:** Reviews all worker output by examining git diffs, worker reports, and the original plan. Produces a structured review with merge recommendation.
-
-**Key Methods:**
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `review` | `ReviewReport review(PipelineRun run, List<WorkerReport> workerReports)` | Gathers diffs from all task branches (capped at 80k chars), sends to LLM with plan and reports, parses ReviewReport JSON. |
-
-**Output:** `ReviewReport` containing:
-- `recommendation` -- MERGE / REWORK
-- `overallConfidence` -- HIGH / MEDIUM / LOW
-- `summary` -- text summary
-- `mergeBlockers` -- list of critical issues that block merge
-- `postMergeSuggestions` -- non-blocking improvements
-- `taskReviews` -- per-task reviews with issues classified as CRITICAL / MEDIUM / LOW
+**Note:** The original single-call ReviewerAgent has been fully replaced by ReviewerAgentV2 in the pipeline. See section 5.4.
 
 ### 5.4 ReviewerAgentV2
 
 **File:** `reviewer/ReviewerAgentV2.java`
-**Model:** CAPABLE tier (Sonnet-class)
+**Model:** `claude-haiku-4-5-20251001` (UTILITY_CHAIN)
 **Mode:** Two-phase agentic review
 
-**Purpose:** Enhanced reviewer with tool-use inspection and automatic fix application for critical issues.
+**Purpose:** Reviews merged code on main with tool-use inspection and automatic fix application for critical issues. Runs AFTER merge (not before).
 
 **Phases:**
 1. **Inspect Phase:** Reads file tree and selected source files via tool-use loop (max 10 tool calls). Produces a list of ReviewIssues classified as CRITICAL or MINOR.
-2. **Fix Phase:** For each CRITICAL issue (max 5), sends a fix instruction to WorkerAgent, then validates the fix via CodeValidator.
+2. **Fix Phase:** For each CRITICAL issue (max 8), sends a targeted fix instruction to WorkerAgent, then validates the fix via CodeValidator.
+
+**Verdict Enum:** `APPROVED`, `APPROVED_WITH_NOTES`, `NEEDS_FIXES`, `REJECTED`
+
+**Output:** `ReviewReportV2` containing:
+- `verdict` -- ReviewVerdict enum (APPROVED / APPROVED_WITH_NOTES / NEEDS_FIXES / REJECTED)
+- `summary` -- text summary
+- `issues` -- flat list of issues, each with `IssueSeverity` (CRITICAL / MINOR)
+- `recommendationCompat` -- maps V2 verdicts to V1-style strings for JSON compatibility
+
+**Auto-fix Details:**
+- 2 attempts per issue: FAST tier first, escalates to CAPABLE tier on retry
+- `MAX_FIX_ATTEMPTS = 2`, escalation tiers: `{ FAST, CAPABLE }`
+- Re-validates after all fixes (compile + type check)
 
 **Guardrails:**
 - Max 10 read_file/list_files calls during inspection
-- Max 5 critical issues trigger auto-fix
-- Max 1 fix attempt per critical issue
+- Max 8 critical issues trigger auto-fix
+- 2 fix attempts per critical issue (FAST -> CAPABLE escalation)
 - Total phase timeout: 3 minutes
 
 ### 5.5 CompilerAgent
@@ -671,7 +672,7 @@ Central database access layer. All run and task lifecycle operations go through 
 | `markApproved` | `void markApproved(String runId)` | Sets status=WORKING, clears currentGate. |
 | `markRejected` | `void markRejected(String runId, String reason)` | Sets status=FAILED with rejection reason. |
 | `markReviewing` | `void markReviewing(String runId)` | Sets status=REVIEWING. |
-| `saveReview` | `void saveReview(String runId, ReviewReport review)` | Saves review JSON, sets status=AWAITING_MERGE. |
+| `saveReview` | `void saveReview(String runId, ReviewReport review)` | Saves review JSON. |
 | `markComplete` | `void markComplete(String runId)` | If any tasks BLOCKED/PARTIAL, marks PARTIAL; otherwise COMPLETE. |
 | `markFailed` | `void markFailed(String runId, String reason)` | Fails run + all non-terminal tasks. |
 | `markPartial` | `void markPartial(String runId, String reason)` | Marks run PARTIAL (workers ran but some tasks incomplete). |
@@ -705,7 +706,7 @@ Central database access layer. All run and task lifecycle operations go through 
 |-------|------|-------------|
 | `runId` | `String` (PK) | UUID assigned at creation. |
 | `userRequest` | `TEXT` | Original natural language request. |
-| `status` | `String` | PLANNING, AWAITING_APPROVAL, WORKING, REVIEWING, AWAITING_MERGE, COMPLETE, FAILED, PARTIAL, QUEUED, PAUSED. |
+| `status` | `String` | PLANNING, AWAITING_APPROVAL, AWAITING_CLARIFICATION, WORKING, REVIEWING, COMPLETE, FAILED, PARTIAL, QUEUED, PAUSED. |
 | `planJson` | `TEXT` | Full TaskPlan JSON from planner. |
 | `reviewJson` | `TEXT` | ReviewReport JSON from reviewer. |
 | `plannerModel` | `String` | Model used for planning (e.g., `claude-sonnet-4-6`). |
@@ -717,7 +718,7 @@ Central database access layer. All run and task lifecycle operations go through 
 | `totalInputTokens` | `Integer` | Accumulated input tokens across all agents. |
 | `totalOutputTokens` | `Integer` | Accumulated output tokens. |
 | `actualCostUsd` | `Double` | Cache-aware actual cost computed post-run. |
-| `currentGate` | `String` | PLAN_APPROVAL, MERGE_APPROVAL, or null. |
+| `currentGate` | `String` | PLAN_APPROVAL or null (MERGE_APPROVAL removed). |
 | `skipApproval` | `boolean` | Auto-approve plan gate (integration runs). |
 | `autoRestartCount` | `int` | Times auto-restarted due to transient failures. |
 | `hasFrontend` | `boolean` | True when preview is available. |
@@ -781,11 +782,11 @@ Central orchestrator that manages the entire pipeline lifecycle. Handles both CL
 |--------|-----------|-------------|
 | `submitRun` | `PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode, String githubPat, String githubOwner)` | Creates a run, acquires a compute slot (or queues), and starts async execution. |
 | `resolvePlanGate` | `boolean resolvePlanGate(String runId, boolean approved, String comment)` | Signals the plan approval gate via Redis. Returns false if run not in AWAITING_APPROVAL. |
-| `resolveMergeGate` | `boolean resolveMergeGate(String runId, boolean approved, String comment)` | Signals the merge gate via Redis. Supports MERGE/DECLINE decisions. |
+| `resolveMergeGate` | `boolean resolveMergeGate(String runId, boolean approved, String comment)` | Legacy merge gate method (merge gate removed -- pipeline auto-merges after review). |
 | `cancelRun` | `boolean cancelRun(String runId)` | Signals open gates as rejected, marks run cancelled. |
 | `pauseRun` | `boolean pauseRun(String runId)` | Pauses a run: signals gates, cancels workers, marks PAUSED. |
 | `restartWithNewGoal` | `PipelineRun restartWithNewGoal(PipelineRun pausedRun, String newGoal)` | Creates a fresh run from a paused run with an edited goal. Carries forward credentials and settings. |
-| `reopenMergeGate` | `void reopenMergeGate(String runId)` | Re-runs reviewer and re-opens merge gate for a PARTIAL run. |
+| `reopenMergeGate` | `void reopenMergeGate(String runId)` | Legacy method (merge gate removed). |
 | `implementSuggestions` | `void implementSuggestions(String runId)` | Implements post-merge suggestions (MEDIUM/LOW issues). |
 | `reworkRun` | `void reworkRun(String runId)` | Re-runs flagged tasks with reviewer feedback. |
 | `retryPartialTask` | `void retryPartialTask(String runId, String taskId)` | Retries a single failed/partial/blocked task. |
@@ -866,7 +867,7 @@ Merges task branches into main with a multi-tier conflict resolution cascade.
 1. **SpecializedMerger** (pom.xml, YAML, package.json) -- deterministic, zero LLM cost
 2. **ConflictResolverAgent (Haiku)** -- LLM-powered, cheap
 3. **ConflictResolverAgent (Sonnet)** -- escalation for complex conflicts
-4. **FAILED** -- human retry via merge gate
+4. **FAILED** -- human intervention required
 
 **Key Methods:**
 
@@ -909,9 +910,9 @@ Routes LLM calls with 3-provider fallback chains and per-run API key injection.
 
 | Chain | Position 1 | Position 2 | Position 3 |
 |-------|-----------|-----------|-----------|
-| ARCHITECT | `claude-opus-4-6` | `gemini-3.1-pro-preview-customtools` | `gpt-4o` |
-| CAPABLE | `claude-sonnet-4-6` | `gemini-3.1-flash-lite-preview` | `gpt-4o` |
-| UTILITY | `claude-haiku-4-5-20251001` | `gemini-3.1-flash-lite-preview` | `gpt-4o-mini` |
+| ARCHITECT | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-4o` |
+| CAPABLE | `claude-sonnet-4-6` | `gemini-3.1-pro-preview` | `gpt-4o` |
+| UTILITY | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-4o-mini` |
 
 **Fallback Modes:**
 - `IMMEDIATE` -- planner/reviewer: always fallback on any error
@@ -939,15 +940,15 @@ Keys are resolved via `ApiKeyResolver` (user -> org -> system) and stored in `Ru
 
 Two-axis model selection for task execution:
 - **Axis 1 (Tier):** FAST -> CAPABLE -> POWER based on task complexity + escalation
-- **Axis 2 (Provider):** ANTHROPIC -> OPENAI -> GEMINI based on availability
+- **Axis 2 (Provider):** 4:3:3 weighted round-robin (Anthropic:Google:OpenAI) via `RoutingProperties.java`, with health-based fallback
 
 **Model Matrix:**
 
 | Tier | Anthropic | OpenAI | Gemini |
 |------|----------|--------|--------|
-| FAST | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `gemini-3.1-flash-lite-preview` |
-| CAPABLE | `claude-sonnet-4-6` | `gpt-4o` | `gemini-3.1-pro-preview-customtools` |
-| POWER | `claude-opus-4-6` | `gpt-4o` | `gemini-3.1-pro-preview-customtools` |
+| FAST | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `gemini-3-flash-preview` |
+| CAPABLE | `claude-sonnet-4-6` | `gpt-4o` | `gemini-3.1-pro-preview` |
+| POWER | `claude-opus-4-6` | `gpt-4o` | `gemini-3.1-pro-preview` |
 
 **Complexity to Tier Mapping:**
 - LOW -> FAST
@@ -1135,7 +1136,7 @@ Process-based local preview (NOT Docker). Starts the appropriate dev server dire
 | `GET` | `/api/runs` | List runs (filtered by status, projectId; paginated) | 200 |
 | `GET` | `/api/runs/{runId}` | Get run detail with tasks | 200 / 404 |
 | `POST` | `/api/runs/{runId}/approve` | Approve/reject plan gate | 200 / 404 / 409 |
-| `POST` | `/api/runs/{runId}/merge` | Approve/reject merge gate | 200 / 404 / 409 |
+| `POST` | `/api/runs/{runId}/merge` | Legacy merge gate endpoint (merge is now automatic) | 200 / 404 / 409 |
 | `POST` | `/api/runs/{runId}/retry` | Retry a failed run | 202 |
 | `POST` | `/api/runs/{runId}/pause` | Pause a running pipeline | 200 / 409 |
 | `POST` | `/api/runs/{runId}/edit-and-restart` | Edit goal of paused run and restart | 201 |
@@ -1143,7 +1144,7 @@ Process-based local preview (NOT Docker). Starts the appropriate dev server dire
 | `POST` | `/api/runs/{runId}/tasks/{taskId}/retry` | Retry a single task | 202 / 404 / 409 |
 | `POST` | `/api/runs/{runId}/implement-suggestions` | Implement reviewer suggestions | 202 / 409 |
 | `POST` | `/api/runs/{runId}/rework` | Rework flagged tasks | 202 / 409 |
-| `POST` | `/api/runs/{runId}/reopen-merge` | Reopen merge gate for PARTIAL run | 202 / 409 |
+| `POST` | `/api/runs/{runId}/reopen-merge` | Legacy endpoint (merge gate removed) | 202 / 409 |
 | `GET` | `/api/runs/{runId}/recovery` | Get recovery history | 200 |
 | `GET` | `/api/runs/{runId}/messages` | Get agent message log (last 200) | 200 |
 | `GET` | `/api/runs/{runId}/download` | Download workspace as zip | 200 / 302 (GCS) |
@@ -1313,7 +1314,7 @@ public record RunEvent(
 | `RUN_STATUS` | Run lifecycle state change | Status string (PLANNING, WORKING, etc.) |
 | `TASK_STATUS` | Task status change | Status string (WORKING, COMPLETE, FAILED, etc.) |
 | `LOG` | General log message | Log line text |
-| `GATE_OPENED` | Approval gate opened | Gate type (PLAN_APPROVAL, MERGE_APPROVAL) |
+| `GATE_OPENED` | Approval gate opened | Gate type (PLAN_APPROVAL) |
 | `GATE_RESOLVED` | Gate approved/rejected | "APPROVED" or "REJECTED" |
 | `COST_UPDATE` | Cost estimate update | Cost in USD |
 | `QUEUED` | Run queued for execution | Queue position |
@@ -1592,7 +1593,7 @@ spring:
         api-key: ${GOOGLE_API_KEY:}
         chat:
           options:
-            model: gemini-3.1-flash-lite-preview
+            model: gemini-3-flash-preview
 
 agent:
   workspace: ./workspace
@@ -1730,6 +1731,18 @@ app:
 | V18 | Org-level integration settings (admin_email, JIRA/Confluence credentials on org table) |
 | V19 | Agent token breakdown (per-task input/output token tracking) |
 | V20 | Slack integration (org_slack_integration, project_slack_channel, slack_notification_log) |
+| V21 | Tier permissions |
+| V22 | Audit |
+| V23 | Billing (Razorpay subscriptions) |
+| V24 | Usage alerts |
+| V25 | Usage backfill |
+| V26 | Top-up credits |
+| V27 | Apply suggestion |
+| V28 | Invoicing/GST |
+| V29 | Preview limits |
+| V32 | plan_version |
+| V34 | Validation report (validation_report table) |
+| V37 | Test schema (test_plan, test_task, test_result) |
 
 ### 16.2 Entity Relationship Diagram
 
@@ -2046,7 +2059,7 @@ Tier 2: ConflictResolverAgent (Haiku) -- LLM-powered, cheap
 Tier 3: ConflictResolverAgent (Sonnet) -- escalation for complex conflicts
   |
   v (if unresolved)
-Tier 4: FAILED -- human intervention required (retry via merge gate)
+Tier 4: FAILED -- human intervention required
 ```
 
 **MergeOutcome enum:** `CLEAN`, `RESOLVED_DETERMINISTIC`, `RESOLVED_LLM`, `ESCALATED`, `FAILED`
@@ -2205,7 +2218,7 @@ The system uses Java 21 virtual threads extensively:
 1. **Non-fatal agents:** CompilerAgent, ContextAgent, PromptOptimiserAgent, ApiTestSuiteAgent -- failures are logged but do not affect run status.
 2. **Provider fallback:** LlmRouter exhausts all providers in the chain before throwing `ProviderUnavailableException`.
 3. **Graceful degradation:** Merge conflicts are auto-resolved when possible; unresolvable conflicts mark individual tasks FAILED rather than the entire run.
-4. **Gate loss recovery:** If a server restarts while a run is at a gate, `performMergeOnRestart()` reconstructs everything from the database.
+4. **Gate loss recovery:** If a server restarts while a run is at a gate, the gate auto-fails with a message. Startup auto-resume is DISABLED -- users resume stuck runs manually via UI.
 5. **Auto-restart:** Transient provider failures trigger automatic restarts with configurable backoff and limits.
 
 ## Appendix D: Security Model

@@ -100,13 +100,42 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    Do not write a plan to the conversation — just think it through, then start.
 
 3. WRITE CODE
+
+   ┌─────────────────────────────────────────────────────────┐
+   │  IF YOUR TASK IS "project_setup":                       │
+   │  Your VERY FIRST write_file call MUST be pom.xml        │
+   │  (Spring Boot) or package.json (Node/React), or both    │
+   │  for full-stack. Do NOT write any controller, service,  │
+   │  model, or component file before the build file exists. │
+   │  After writing the build file, run the build to verify  │
+   │  it compiles clean before writing anything else.        │
+   │                                                         │
+   │  ALSO write a .gitignore file at the workspace root     │
+   │  matching the project language/framework:               │
+   │  • Java/Maven:   target/, *.class, *.jar, .idea/,      │
+   │                  .vscode/, *.iml                        │
+   │  • Node.js:      node_modules/, dist/, build/,          │
+   │                  .env, .env.*                           │
+   │  • Python:       __pycache__/, *.pyc, .venv/, dist/,   │
+   │                  *.egg-info/                            │
+   │  • Go:           bin/, *.exe, *.test, vendor/           │
+   │  Always include these lines at the top:                 │
+   │    .agent-context/                                      │
+   │    .env                                                 │
+   │    .env.*                                               │
+   │    !.env.example                                        │
+   └─────────────────────────────────────────────────────────┘
+
    Write complete, production-quality code.
-   Java: use Java 21 features (records, sealed classes, pattern matching, var).
-         use Spring Boot 3.x conventions unless CODEBASE_CONTEXT.md says otherwise.
-         include Javadoc on public methods.
-         use typed exceptions — not raw Exception.
+   Java:   use Java 21 features (records, sealed classes, pattern matching, var).
+           use Spring Boot 3.x conventions unless CODEBASE_CONTEXT.md says otherwise.
+           include Javadoc on public methods.
+           use typed exceptions — not raw Exception.
    Python: use type hints. follow PEP 8.
-   JS/TS: use TypeScript if the project already uses it.
+   JS/TS:  use TypeScript if the project already uses it.
+           Node.js backends MUST use PORT and CORS_ORIGIN env vars:
+             const PORT = process.env.PORT || 3001;
+             const corsOrigin = process.env.CORS_ORIGIN || '*';
 
    Write the COMPLETE file in one write_file call — not pieces.
    After writing: call git_commit immediately.
@@ -142,6 +171,17 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    If README.md does not exist, create one at the workspace root.
    At minimum, add or update a section describing the feature you implemented and any new APIs,
    endpoints, or configuration that was added.
+
+   If your task is "project_setup", your README MUST include a "## Running with Docker" section:
+
+     ## Running with Docker
+
+     ```bash
+     docker build -t app .
+     docker run -p 8080:8080 app
+     ```
+
+     Or with Docker Compose: `docker compose up`
 
    This is a HARD REQUIREMENT — the reviewer and the merge gate both check that README.md
    was modified. The merge will be blocked if README.md was not touched.

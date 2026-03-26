@@ -153,7 +153,7 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
   - JIRA: REST API `/rest/api/3/issue/{key}` — extracts summary, description (with ADF text extraction), status, acceptance criteria
   - Confluence: REST API `/wiki/rest/api/content/{id}?expand=body.storage` — strips HTML, truncates to 4000 chars
 - Vague mention detection: "jira ticket", "confluence page" without specific references → opens clarification gate
-- Clarification gate: Redis-backed (same pattern as plan/merge gates), pipeline thread blocks until user provides specific reference or skips
+- Clarification gate: Redis-backed (same pattern as plan gate), pipeline thread blocks until user provides specific reference or skips
 - Non-fatal: all fetch failures log warning and continue with original request unchanged
 - Enriched request format: original text + `\n\n---\n## Extracted Reference Context\n` + fetched content
 - SSE events: `CLARIFICATION_NEEDED`, `CLARIFICATION_RESOLVED`, `CONTEXT_EXTRACTED`

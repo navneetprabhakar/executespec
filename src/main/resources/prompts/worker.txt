@@ -194,34 +194,12 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
 
      ## Running with Docker
 
-     Build and run with Docker:
-
      ```bash
-     # Build the image
      docker build -t app .
-
-     # Run the container
      docker run -p 8080:8080 app
      ```
 
-     Or with Docker Compose:
-
-     ```bash
-     docker compose up
-     ```
-
-     The application will be available at http://localhost:8080
-
-   (The deploy agent will generate the actual Dockerfile; this section documents the expected commands.)
-
-   NODE.JS BACKEND DOCKER-FRIENDLINESS:
-   If you are writing a Node.js backend (Express/Fastify/Koa/NestJS), ensure it is
-   Docker-compatible from the start:
-   • Use process.env.PORT with a sensible fallback:  const PORT = process.env.PORT || 3001;
-   • Allow configurable CORS in production:
-       const corsOrigin = process.env.CORS_ORIGIN || '*';
-       app.use(cors({ origin: corsOrigin }));
-   This allows the deploy agent to inject PORT and CORS_ORIGIN as environment variables.
+     Or with Docker Compose: `docker compose up`
 
    This is a HARD REQUIREMENT — the reviewer and the merge gate both check that README.md
    was modified. The merge will be blocked if README.md was not touched.

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getTestReport, markTestInvalid } from '@/lib/api';
-import type { TestReportData, TestResultDetail, FailureSuggestion } from '@/lib/api';
+import { getTestReport, markTestInvalid, applyTestFixes } from '@/lib/api';
+import type { TestReportData, TestResultDetail, FailureSuggestion, RootCauseGroup } from '@/lib/api';
 import { useUiStore } from '@/stores/useUiStore';
-import { TestTube2, ChevronDown, ChevronRight, Check, X, AlertTriangle, SkipForward } from 'lucide-react';
+import { TestTube2, ChevronDown, ChevronRight, Check, X, AlertTriangle, SkipForward, Wrench, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -20,6 +20,7 @@ const STATUS_CONFIG: Record<string, { color: string; icon: typeof Check; label: 
 export default function TestReportPanel({ runId, status }: Props) {
   const [report, setReport] = useState<TestReportData | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [applyingFixes, setApplyingFixes] = useState<string | true | false>(false); // false=idle, true=all, string=signature
   const addToast = useUiStore((s) => s.addToast);
 
   const fetchReport = useCallback(async () => {
@@ -52,6 +53,23 @@ export default function TestReportPanel({ runId, status }: Props) {
     }
   };
 
+  const hasRootCauses = report.rootCauseGroups && report.rootCauseGroups.length > 0;
+  const hasFixableCauses = hasRootCauses && report.rootCauseGroups.some(g => g.hasSuggestion);
+
+  const handleApplyFixes = async (signature?: string) => {
+    setApplyingFixes(signature ?? true);
+    try {
+      await applyTestFixes(runId, signature);
+      addToast({ type: 'success', message: signature
+        ? `Fix applied for "${signature}" — re-running tests...`
+        : 'All fixes applied — re-running tests...' });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message || 'Failed to apply test fixes' });
+    } finally {
+      setApplyingFixes(false);
+    }
+  };
+
   // Group suggestions by test method for quick lookup
   const suggestionMap = new Map<string, string>();
   report.suggestions?.forEach((s: FailureSuggestion) => {
@@ -74,9 +92,21 @@ export default function TestReportPanel({ runId, status }: Props) {
         {report.failed > 0 && (
           <span className="text-xs text-red-400">({report.failed} failed)</span>
         )}
-        <span className="ml-auto text-xs text-zinc-500">
-          {passRate}% pass rate
-        </span>
+        <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          {report.failed > 0 && hasFixableCauses && (
+            <button
+              onClick={() => handleApplyFixes()}
+              disabled={!!applyingFixes}
+              className="flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors px-2 py-1 rounded border border-violet-500/30 hover:border-violet-500/50 bg-violet-500/10"
+            >
+              <Wrench className="h-3 w-3" />
+              {applyingFixes === true ? 'Applying fixes...' : 'Apply All Fixes'}
+            </button>
+          )}
+          <span className="text-xs text-zinc-500">
+            {passRate}% pass rate
+          </span>
+        </div>
       </button>
 
       {/* Expanded Content */}
@@ -94,6 +124,46 @@ export default function TestReportPanel({ runId, status }: Props) {
               </span>
             )}
           </div>
+
+          {/* Root Cause Groups */}
+          {hasRootCauses && (
+            <div className="p-3 space-y-2 border-b border-white/[0.06]">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                Root Causes ({report.rootCauseGroups.length})
+              </h4>
+              {report.rootCauseGroups.map((group: RootCauseGroup) => (
+                <div key={group.signature} className="rounded-md bg-white/[0.02] border border-white/[0.06] px-3 py-2">
+                  <div className="flex items-start gap-2">
+                    <Target className="h-3.5 w-3.5 mt-0.5 text-red-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-zinc-200">{group.signature}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20">
+                          {group.count} test{group.count !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-0.5 truncate">
+                        {group.testMethods.slice(0, 3).join(', ')}{group.count > 3 ? `, +${group.count - 3} more` : ''}
+                      </p>
+                      {group.hasSuggestion && (
+                        <p className="text-xs text-violet-300/80 mt-1">{group.suggestion}</p>
+                      )}
+                    </div>
+                    {group.hasSuggestion && (
+                      <button
+                        onClick={() => handleApplyFixes(group.signature)}
+                        disabled={!!applyingFixes}
+                        className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors px-2 py-1 rounded border border-violet-500/30 hover:border-violet-500/50 bg-violet-500/10 flex-shrink-0"
+                      >
+                        <Wrench className="h-3 w-3" />
+                        {applyingFixes === group.signature ? 'Fixing...' : 'Fix'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Results */}
           <div className="divide-y divide-white/[0.04]">

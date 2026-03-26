@@ -4,6 +4,7 @@ import com.navneet.executespec.config.ModelConstants;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.ReviewReport;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.agent.model.WorkerReport;
@@ -188,6 +189,30 @@ public class StateStore {
         run.setStatus("AWAITING_MERGE");
         run.setCurrentGate("MERGE_APPROVAL");
         runRepo.save(run);
+    }
+
+    /** Save V2 review report (used after migration to ReviewerAgentV2). */
+    public void saveReviewV2(String runId, ReviewReportV2 review) {
+        PipelineRun run = runRepo.findById(runId).orElseThrow();
+        run.setReviewJson(toJson(review));
+        run.setStatus("AWAITING_MERGE");
+        run.setCurrentGate("MERGE_APPROVAL");
+        runRepo.save(run);
+    }
+
+    /** Deserialize V2 review report from run's reviewJson field. */
+    public ReviewReportV2 getReviewReportV2(String runId) {
+        return runRepo.findById(runId)
+            .filter(r -> r.getReviewJson() != null)
+            .map(r -> {
+                try {
+                    return mapper.readValue(r.getReviewJson(), ReviewReportV2.class);
+                } catch (JsonProcessingException e) {
+                    log.warn("Failed to deserialize ReviewReportV2 for run {}: {}", runId, e.getMessage());
+                    return null;
+                }
+            })
+            .orElse(null);
     }
 
     /**

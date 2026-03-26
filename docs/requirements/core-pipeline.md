@@ -14,7 +14,7 @@ The core pipeline orchestrates multi-agent AI execution from natural language in
 
 **Requirements:**
 - Accept natural language user requests via REST API (`POST /api/runs`)
-- Orchestrate sequential phases: Plan → Approve → Work → Compile → Review → Merge → Post-merge
+- Orchestrate sequential phases: Plan → Approve → Work → Compile → Auto-merge → Review (+ auto-fix) → Report → COMPLETE
 - Limit concurrent active runs via semaphore (`max-runs: 10`)
 - Release compute slot while waiting at approval gates (gates don't consume compute)
 - Support both REST and CLI execution paths
@@ -23,10 +23,10 @@ The core pipeline orchestrates multi-agent AI execution from natural language in
 
 **Run States:**
 ```
-PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → COMPLETE
-    ↓              ↓                ↓            ↓              ↓
-  FAILED        FAILED          PARTIAL      FAILED         PARTIAL
-  QUEUED        (rejected)                                  (declined)
+PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → COMPLETE
+    ↓              ↓                ↓            ↓
+  FAILED        FAILED          PARTIAL      FAILED
+  QUEUED        (rejected)
   PAUSED
 ```
 
@@ -74,7 +74,7 @@ PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → 
   - Endpoint: `POST /api/runs/{id}/approve` with `{approved: boolean, comment: string}`
   - Display cost estimate (low/high) for informed decision
   - Support `skipApproval` flag (auto-approve for CI/integration runs)
-- **Merge Approval Gate:** Review code + review findings before merge
+- **Automatic Merge:** After review, all task branches are auto-merged (no manual gate)
   - Endpoint: `POST /api/runs/{id}/merge`
   - Support decisions: MERGE, DECLINE, IMPLEMENT_SUGGESTIONS, REWORK
   - IMPLEMENT_SUGGESTIONS: re-run affected workers
@@ -82,7 +82,7 @@ PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → 
   - Support `autoMerge` flag (auto-approve merge for CI/integration runs)
 - **Bypass Flags:**
   - `skipApproval`: bypasses the plan approval gate (auto-approves task breakdown)
-  - `autoMerge`: bypasses the merge approval gate (auto-approves merge after review)
+  - `autoMerge`: legacy flag (merge is now always automatic after review)
   - Both flags stored on PipelineRun entity; set at run submission via RunRequest
 - Gates are Redis-backed (`gate:plan:{runId}`, `gate:merge:{runId}`, TTL 2h)
 - Pipeline thread polls Redis every 500ms
@@ -132,7 +132,7 @@ PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → 
 
 ### 7b. ValidationReportAgent
 
-**Purpose:** Generate a user-facing quality summary of pipeline findings. Runs after ReviewerAgent, before Merge Gate.
+**Purpose:** Generate a user-facing quality summary of pipeline findings. Runs after ReviewerAgent, before COMPLETE.
 
 **Requirements:**
 - Aggregate existing pipeline data: WorkerReports, CompileResult, ReviewReport, task list
@@ -141,7 +141,7 @@ PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → AWAITING_MERGE → 
 - Extract issues from: ReviewReport.taskReviews[].issues[], CompileResult errors, boundary violations, acceptance criteria failures
 - Classify pipeline result: PASSED, PASSED_WITH_FIXES, FAILED
 - Persist to `validation_report` table (one per run, replace on rework)
-- Non-fatal: on failure, log warning and continue to merge gate
+- Non-fatal: on failure, log warning and continue to COMPLETE
 - Share: generate UUID token for public URL (no auth required, whitelisted in SecurityConfig)
 - PDF export: server-side PDF generation via `ValidationReportPdfService`
 - Frontend: collapsible panel in RunDetail with severity badges, markdown report, all individual issues with scroll

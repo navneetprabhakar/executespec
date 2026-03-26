@@ -34,10 +34,21 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
 
   if (!report) return null;
 
+  const RESULT_CONFIG: Record<string, { color: string; label: string }> = {
+    PASSED: { color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'Passed' },
+    PASSED_WITH_FIXES: { color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'Passed with fixes' },
+    NEEDS_ATTENTION: { color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', label: 'Needs attention' },
+    FAILED: { color: 'bg-red-500/20 text-red-400 border-red-500/30', label: 'Failed' },
+  };
+
+  const resultCfg = RESULT_CONFIG[report.pipelineResult] ?? RESULT_CONFIG.PASSED;
+
   const summaryParts: string[] = [];
   summaryParts.push(`${report.filesGenerated} file${report.filesGenerated !== 1 ? 's' : ''}`);
   if (report.languages.length > 0) summaryParts.push(report.languages.join(', '));
-  if (report.issuesCaught > 0) {
+  if (report.pipelineResult === 'NEEDS_ATTENTION') {
+    summaryParts.push(`${report.issuesCaught} unresolved issue${report.issuesCaught !== 1 ? 's' : ''}`);
+  } else if (report.issuesCaught > 0) {
     summaryParts.push(`${report.issuesCaught} issue${report.issuesCaught !== 1 ? 's' : ''} caught & fixed`);
   } else {
     summaryParts.push('Clean run, all checks passed');
@@ -73,9 +84,12 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
   return (
     <div className="mx-4 mb-3 rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden">
       {/* Collapsed header */}
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03] transition-colors"
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
       >
         {expanded
           ? <ChevronDown className="h-4 w-4 text-zinc-400 flex-shrink-0" />
@@ -83,6 +97,9 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
         }
         <Shield className="h-4 w-4 text-emerald-400 flex-shrink-0" />
         <span className="text-sm font-medium text-zinc-200">Validation Report</span>
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap', resultCfg.color)}>
+          {resultCfg.label}
+        </span>
         <span className="text-xs text-zinc-500 ml-1">{summaryParts.join(' · ')}</span>
         <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
           <button
@@ -102,7 +119,7 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
             {copied ? 'Copied' : 'Share'}
           </button>
         </div>
-      </button>
+      </div>
 
       {/* Expanded content */}
       {expanded && (

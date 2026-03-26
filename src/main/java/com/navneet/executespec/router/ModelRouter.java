@@ -1,19 +1,24 @@
 package com.navneet.executespec.router;
 
 import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.config.RoutingProperties;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 
 /**
  * Two-axis model routing:
  *   Axis 1 (Tier): FAST → CAPABLE → POWER based on task complexity + escalation
- *   Axis 2 (Provider): Fixed priority: ANTHROPIC → GEMINI → OPENAI
+ *   Axis 2 (Provider): Weighted round-robin distribution (configurable via executespec.routing.provider-weights)
  *
  * Provider failover: same tier, different provider (horizontal)
  * Tier escalation: higher tier on validation retry failure (vertical)
@@ -37,9 +42,11 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ModelRouter {
 
-    /** Fixed provider priority: Anthropic primary, Gemini fallback #1, OpenAI fallback #2. */
-    private static final List<LlmProvider> PROVIDER_PRIORITY =
-            List.of(LlmProvider.ANTHROPIC, LlmProvider.GEMINI, LlmProvider.OPENAI);
+    private static final Map<String, LlmProvider> NAME_TO_PROVIDER = Map.of(
+            "anthropic", LlmProvider.ANTHROPIC,
+            "google", LlmProvider.GEMINI,
+            "openai", LlmProvider.OPENAI
+    );
 
     private static final Map<ModelTier, Map<LlmProvider, String>> MODEL_MATRIX = Map.of(
             ModelTier.FAST, Map.of(
@@ -60,6 +67,21 @@ public class ModelRouter {
     );
 
     private final ProviderHealthTracker healthTracker;
+    private final RoutingProperties routingProperties;
+    private final MeterRegistry meterRegistry;
+
+    /** Weighted provider sequence built from config. e.g. [A,A,A,A,G,G,G,O,O,O] for 4:3:3. */
+    private List<LlmProvider> weightedSequence;
+
+    /** Round-robin counter — thread-safe, wraps naturally on overflow. */
+    private final AtomicLong roundRobinCounter = new AtomicLong(0);
+
+    @PostConstruct
+    void init() {
+        weightedSequence = buildWeightedSequence(routingProperties.getProviderWeights());
+        log.info("Provider load distribution initialized: weights={} sequence-length={}",
+                routingProperties.getProviderWeights(), weightedSequence.size());
+    }
 
     /**
      * Select model for initial task execution based on planner's complexity hint.
@@ -86,14 +108,22 @@ public class ModelRouter {
     }
 
     /**
-     * Select the best available model for a given tier.
-     * Fixed priority: ANTHROPIC → GEMINI → OPENAI.
+     * Select model using weighted round-robin distribution.
+     * Advances a counter and picks the provider from the weighted sequence.
+     * Falls through to next providers if the selected one is unhealthy.
      */
     public ModelSelection selectFromTier(ModelTier tier) {
-        for (LlmProvider provider : PROVIDER_PRIORITY) {
+        int seqLen = weightedSequence.size();
+        int startIdx = (int) (Math.abs(roundRobinCounter.getAndIncrement()) % seqLen);
+
+        // Try from the weighted position, cycling through all providers
+        for (int offset = 0; offset < seqLen; offset++) {
+            LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
             if (healthTracker.isHealthy(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
-                log.debug("Selected model: {} ({}/{})", modelName, tier, provider);
+                log.debug("Selected model: {} ({}/{}) via weighted round-robin", modelName, tier, provider);
+                meterRegistry.counter("executespec.routing.provider_selected",
+                        "provider", provider.name(), "tier", tier.name()).increment();
                 return ModelSelection.builder()
                         .tier(tier)
                         .provider(provider)
@@ -101,8 +131,9 @@ public class ModelRouter {
                         .build();
             }
         }
-        // All providers down — try Anthropic anyway (might recover)
-        LlmProvider fallback = LlmProvider.ANTHROPIC;
+
+        // All providers unhealthy — try first in weighted sequence anyway
+        LlmProvider fallback = weightedSequence.get(startIdx);
         log.warn("All providers unhealthy for tier {} — attempting {} anyway", tier, fallback);
         String modelName = MODEL_MATRIX.get(tier).get(fallback);
         return ModelSelection.builder()
@@ -135,21 +166,29 @@ public class ModelRouter {
     }
 
     /**
-     * Select the best available model for a tier, filtered by providers the org can use.
-     * Fixed priority: ANTHROPIC → GEMINI → OPENAI.
+     * Select model using weighted round-robin, filtered by providers the org can use.
      */
     public ModelSelection selectFromTier(ModelTier tier, Set<LlmProvider> availableProviders) {
-        for (LlmProvider provider : PROVIDER_PRIORITY) {
+        int seqLen = weightedSequence.size();
+        int startIdx = (int) (Math.abs(roundRobinCounter.getAndIncrement()) % seqLen);
+
+        // Try from the weighted position, cycling through all providers, filtered by availability
+        for (int offset = 0; offset < seqLen; offset++) {
+            LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
             if (availableProviders.contains(provider) && healthTracker.isHealthy(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
-                log.debug("Selected model: {} ({}/{}) from available: {}", modelName, tier, provider, availableProviders);
+                log.debug("Selected model: {} ({}/{}) from available: {} via weighted round-robin",
+                        modelName, tier, provider, availableProviders);
+                meterRegistry.counter("executespec.routing.provider_selected",
+                        "provider", provider.name(), "tier", tier.name()).increment();
                 return ModelSelection.builder()
                         .tier(tier).provider(provider).modelName(modelName).build();
             }
         }
 
         // No healthy + available provider — try first available regardless of health
-        for (LlmProvider provider : PROVIDER_PRIORITY) {
+        for (int offset = 0; offset < seqLen; offset++) {
+            LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
             if (availableProviders.contains(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
                 log.warn("No healthy provider in {} — forcing {} anyway", availableProviders, provider);
@@ -193,5 +232,37 @@ public class ModelRouter {
             case CAPABLE -> ModelTier.CAPABLE; // Never auto-escalate to POWER
             case POWER -> ModelTier.POWER;
         };
+    }
+
+    // ── Weighted sequence builder ──────────────────────────────────────────────
+
+    /**
+     * Build a flat provider list from weight config.
+     * e.g. {anthropic:4, google:3, openai:3} → [ANTHROPIC x4, GEMINI x3, OPENAI x3]
+     * Falls back to Anthropic-only if config is empty/invalid.
+     */
+    private static List<LlmProvider> buildWeightedSequence(Map<String, Integer> weights) {
+        List<LlmProvider> sequence = new ArrayList<>();
+
+        if (weights == null || weights.isEmpty()) {
+            sequence.add(LlmProvider.ANTHROPIC);
+            return sequence;
+        }
+
+        for (var entry : weights.entrySet()) {
+            LlmProvider provider = NAME_TO_PROVIDER.get(entry.getKey().toLowerCase());
+            int weight = entry.getValue() != null ? entry.getValue() : 0;
+            if (provider != null && weight > 0) {
+                for (int i = 0; i < weight; i++) {
+                    sequence.add(provider);
+                }
+            }
+        }
+
+        if (sequence.isEmpty()) {
+            sequence.add(LlmProvider.ANTHROPIC);
+        }
+
+        return List.copyOf(sequence);
     }
 }

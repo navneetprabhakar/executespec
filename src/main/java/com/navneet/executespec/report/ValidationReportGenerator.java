@@ -1,17 +1,18 @@
 package com.navneet.executespec.report;
 
-import com.navneet.executespec.agent.model.ReviewIssue;
-import com.navneet.executespec.agent.model.ReviewReport;
-import com.navneet.executespec.agent.model.TaskReview;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.compiler.CompileResult;
 import com.navneet.executespec.config.ModelConstants;
-import com.navneet.executespec.recovery.LlmCallGuard;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
 import com.navneet.executespec.state.entity.AgentTask;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -28,16 +29,13 @@ import java.util.stream.Collectors;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class ValidationReportGenerator {
 
-    private final LlmCallGuard llmCallGuard;
+    private final LlmRouter llmRouter;
 
     @Value("classpath:prompts/validation-report.txt")
     private Resource promptTemplate;
-
-    public ValidationReportGenerator(LlmCallGuard llmCallGuard) {
-        this.llmCallGuard = llmCallGuard;
-    }
 
     public record LlmReportResult(
         String markdown,
@@ -56,14 +54,16 @@ public class ValidationReportGenerator {
         ));
 
         String runId = input.run().getRunId();
-        ChatResponse response = llmCallGuard.call(prompt, ModelConstants.HAIKU,
-            "validation-report-" + runId, runId);
+        LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
+                "anthropic", ModelConstants.HAIKU, prompt, runId,
+                "validation-report", LlmRouter.FallbackMode.IMMEDIATE, 0, false);
 
+        ChatResponse response = lr.response();
         String markdown = response.getResult().getOutput().getText();
         int inTokens = response.getMetadata().getUsage().getPromptTokens().intValue();
         int outTokens = response.getMetadata().getUsage().getCompletionTokens().intValue();
 
-        return new LlmReportResult(markdown, ModelConstants.HAIKU, inTokens, outTokens);
+        return new LlmReportResult(markdown, lr.model(), inTokens, outTokens);
     }
 
     private String buildUserMessage(ReportInput input) {
@@ -112,30 +112,29 @@ public class ValidationReportGenerator {
             }
         }
 
-        // Review result
-        ReviewReport review = input.review();
+        // Review result (V2 flat issue list)
+        ReviewReportV2 review = input.review();
         List<String> allIssueDescriptions = new ArrayList<>();
         if (review != null) {
             checksRun.add("CODE_REVIEW");
-            if (review.getTaskReviews() != null) {
-                boolean hasHighSeverity = false;
-                for (TaskReview tr : review.getTaskReviews()) {
-                    if (tr.getIssues() != null) {
-                        for (ReviewIssue issue : tr.getIssues()) {
-                            String desc = "[%s] %s".formatted(
-                                issue.getSeverity() != null ? issue.getSeverity() : "MEDIUM",
-                                issue.getDescription());
-                            if (issue.getFile() != null) {
-                                desc += " (file: %s)".formatted(issue.getFile());
-                            }
-                            allIssueDescriptions.add(desc);
-                            if ("HIGH".equalsIgnoreCase(issue.getSeverity())) {
-                                hasHighSeverity = true;
-                            }
-                        }
+            if (review.getIssues() != null && !review.getIssues().isEmpty()) {
+                boolean hasCritical = false;
+                for (ReviewIssue issue : review.getIssues()) {
+                    String severity = issue.getSeverity() != null ? issue.getSeverity().name() : "MINOR";
+                    String desc = "[%s] %s".formatted(severity, issue.getDescription());
+                    if (issue.getFile() != null) {
+                        desc += " (file: %s)".formatted(issue.getFile());
+                    }
+                    if (issue.isAutoFixed() && issue.isFixSucceeded()) {
+                        desc += " [AUTO-FIXED]";
+                    }
+                    allIssueDescriptions.add(desc);
+                    if (issue.getSeverity() == IssueSeverity.CRITICAL) {
+                        hasCritical = true;
                     }
                 }
-                if (!hasHighSeverity && review.getMergeBlockers() != null && review.getMergeBlockers().isEmpty()) {
+                boolean hasBlockers = review.getMergeBlockers() != null && !review.getMergeBlockers().isEmpty();
+                if (!hasCritical && !hasBlockers) {
                     checksPassed.add("CODE_REVIEW");
                 }
             } else {
@@ -173,7 +172,7 @@ public class ValidationReportGenerator {
             sb.append("\n## Reviewer Summary\n");
             sb.append(review.getSummary()).append("\n");
             sb.append("Recommendation: %s\n".formatted(
-                review.getRecommendation() != null ? review.getRecommendation() : "N/A"));
+                review.getRecommendationCompat() != null ? review.getRecommendationCompat() : "N/A"));
         }
 
         // Integration test results

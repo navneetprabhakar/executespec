@@ -19,9 +19,9 @@ public final class ModelConstants {
     public static final String SONNET_LEGACY = "claude-sonnet-4-5";
     public static final String HAIKU_LEGACY  = "claude-haiku-4-5";
 
-    // ── Google (GA models — fallback chain handles unavailability) ──
-    public static final String GEMINI_PRO   = "gemini-3.1-pro";
-    public static final String GEMINI_FLASH = "gemini-3-flash";
+    // ── Google (preview models — fallback chain handles unavailability) ──
+    public static final String GEMINI_PRO   = "gemini-3.1-pro-preview";
+    public static final String GEMINI_FLASH = "gemini-3-flash-preview";
 
     // Legacy aliases for Gemini (preview model strings still in MODEL_CHAIN for backward compat)
     public static final String GEMINI_ARCHITECT = GEMINI_PRO;

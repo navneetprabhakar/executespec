@@ -3,10 +3,10 @@ package com.navneet.executespec.report;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.model.ReviewIssue;
-import com.navneet.executespec.agent.model.ReviewReport;
-import com.navneet.executespec.agent.model.TaskReview;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.*;
@@ -143,87 +143,82 @@ public class ValidationReportService {
     private List<ReportIssueDTO> extractIssues(ReportInput input) {
         List<ReportIssueDTO> issues = new ArrayList<>();
 
-        // Issues from reviewer
-        ReviewReport review = input.review();
-        if (review != null && review.getTaskReviews() != null) {
-            for (TaskReview tr : review.getTaskReviews()) {
-                // Review issues (severity-tagged)
-                if (tr.getIssues() != null) {
-                    for (ReviewIssue ri : tr.getIssues()) {
-                        issues.add(new ReportIssueDTO(
-                            ri.getDescription(),
-                            mapSeverity(ri.getSeverity()),
-                            null,
-                            "REVIEWER_AGENT",
-                            ri.getFile()
-                        ));
-                    }
+        // Issues from ReviewerAgentV2 (flat issue list)
+        ReviewReportV2 review = input.review();
+        if (review != null && review.getIssues() != null) {
+            for (ReviewIssue ri : review.getIssues()) {
+                String fixNote = null;
+                if (ri.isAutoFixed()) {
+                    fixNote = ri.isFixSucceeded()
+                        ? "Auto-fixed successfully"
+                        : "Auto-fix failed after retry with model escalation — unresolved";
                 }
-                // Boundary violations (task touched files outside its scope)
-                if (tr.getBoundaryViolations() != null) {
-                    for (String violation : tr.getBoundaryViolations()) {
-                        issues.add(new ReportIssueDTO(
-                            "Boundary violation in task " + tr.getTaskId() + ": " + violation,
-                            "WOULD_FAIL_REVIEW",
-                            null,
-                            "REVIEWER_AGENT",
-                            null
-                        ));
-                    }
-                }
-                // Acceptance criteria not met
-                if (!tr.isAcceptanceCriteriaMet()) {
-                    issues.add(new ReportIssueDTO(
-                        "Acceptance criteria not met for task: " + tr.getTaskId(),
-                        "WOULD_FAIL_REVIEW",
-                        null,
-                        "REVIEWER_AGENT",
-                        null
-                    ));
-                }
+                issues.add(new ReportIssueDTO(
+                    ri.getDescription(),
+                    mapSeverity(ri.getSeverity()),
+                    fixNote,
+                    "REVIEWER_AGENT",
+                    ri.getFile()
+                ));
             }
         }
+
+        // Note: mergeBlockers are derived from unfixed CRITICAL issues already in the
+        // flat issues[] list above — no need to add them again (avoids duplication).
 
         // Issues from compiler
         if (input.compileResult() != null && !input.compileResult().passed()
                 && !input.compileResult().skipped()) {
+            String compilerNote = input.compileResult().passed()
+                ? "Resolved by CompilerAgent after " + input.compileResult().attempts() + " compilation round(s)"
+                : "Compilation failed after " + input.compileResult().attempts() + " attempt(s) — unresolved errors remain";
             issues.add(new ReportIssueDTO(
                 "Compilation failed: " + truncate(input.compileResult().errorSummary(), 200),
                 "WOULD_BREAK_BUILD",
-                "Auto-fixed by CompilerAgent in " + input.compileResult().attempts() + " attempt(s)",
+                compilerNote,
                 "COMPILER_AGENT",
                 null
             ));
         }
 
-        // Merge blockers from reviewer
-        if (review != null && review.getMergeBlockers() != null) {
-            for (String blocker : review.getMergeBlockers()) {
-                issues.add(new ReportIssueDTO(
-                    blocker,
-                    "WOULD_FAIL_REVIEW",
-                    null,
-                    "REVIEWER_AGENT",
-                    null
-                ));
-            }
-        }
-
-        // Issues from integration test failures
+        // Issues from integration test failures — group by root cause
         if (input.testResults() != null) {
-            for (TestResult tr : input.testResults()) {
-                if (tr.getStatus() == TestResultStatus.FAILED || tr.getStatus() == TestResultStatus.ERROR) {
-                    String desc = "Integration test failed: " + tr.getTestMethod();
-                    if (tr.getFailureMessage() != null) {
-                        desc += " — " + truncate(tr.getFailureMessage(), 150);
+            List<TestResult> failures = input.testResults().stream()
+                .filter(tr -> tr.getStatus() == TestResultStatus.FAILED || tr.getStatus() == TestResultStatus.ERROR)
+                .toList();
+
+            if (!failures.isEmpty()) {
+                // Group by failure signature (status code pattern) to detect shared root cause
+                Map<String, List<TestResult>> grouped = failures.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(tr -> extractFailureSignature(tr.getFailureMessage())));
+
+                for (var entry : grouped.entrySet()) {
+                    List<TestResult> group = entry.getValue();
+                    if (group.size() >= 3) {
+                        // Collapse into a single root-cause issue
+                        String methods = group.stream()
+                            .map(TestResult::getTestMethod)
+                            .limit(3)
+                            .collect(java.util.stream.Collectors.joining(", "));
+                        String desc = group.size() + " integration tests failed with same root cause: "
+                            + entry.getKey()
+                            + " (e.g. " + methods + (group.size() > 3 ? ", ..." : "") + ")";
+                        // Use suggestion from first failure that has one
+                        String suggestion = group.stream()
+                            .map(TestResult::getSuggestion)
+                            .filter(s -> s != null && !s.isBlank())
+                            .findFirst().orElse(null);
+                        issues.add(new ReportIssueDTO(desc, "WOULD_CAUSE_BUG", suggestion, "INTEGRATION_TEST", null));
+                    } else {
+                        // Few failures — list individually
+                        for (TestResult tr : group) {
+                            String desc = "Integration test failed: " + tr.getTestMethod();
+                            if (tr.getFailureMessage() != null) {
+                                desc += " — " + truncate(tr.getFailureMessage(), 150);
+                            }
+                            issues.add(new ReportIssueDTO(desc, "WOULD_CAUSE_BUG", tr.getSuggestion(), "INTEGRATION_TEST", null));
+                        }
                     }
-                    issues.add(new ReportIssueDTO(
-                        desc,
-                        "WOULD_CAUSE_BUG",
-                        tr.getSuggestion(),
-                        "INTEGRATION_TEST",
-                        null
-                    ));
                 }
             }
         }
@@ -231,13 +226,11 @@ public class ValidationReportService {
         return issues;
     }
 
-    private String mapSeverity(String reviewSeverity) {
-        if (reviewSeverity == null) return "WOULD_FAIL_REVIEW";
-        return switch (reviewSeverity.toUpperCase()) {
-            case "HIGH" -> "WOULD_CAUSE_BUG";
-            case "MEDIUM" -> "WOULD_FAIL_REVIEW";
-            case "LOW" -> "WOULD_FAIL_LINT";
-            default -> "WOULD_FAIL_REVIEW";
+    private String mapSeverity(IssueSeverity severity) {
+        if (severity == null) return "WOULD_FAIL_REVIEW";
+        return switch (severity) {
+            case CRITICAL -> "WOULD_CAUSE_BUG";
+            case MINOR -> "WOULD_FAIL_REVIEW";
         };
     }
 
@@ -268,6 +261,7 @@ public class ValidationReportService {
             passed.add("COMPILATION");
         }
         if (input.review() != null) {
+            // V2: check mergeBlockers (populated from unfixed CRITICAL issues)
             boolean hasBlockers = input.review().getMergeBlockers() != null
                 && !input.review().getMergeBlockers().isEmpty();
             if (!hasBlockers) {
@@ -295,12 +289,30 @@ public class ValidationReportService {
     }
 
     private PipelineResult computeResult(List<ReportIssueDTO> issues, ReportInput input) {
+        // Compilation failure is always FAILED
         if (input.compileResult() != null && !input.compileResult().passed()
                 && !input.compileResult().skipped()) {
             return PipelineResult.FAILED;
         }
-        if (!issues.isEmpty()) return PipelineResult.PASSED_WITH_FIXES;
-        return PipelineResult.PASSED;
+
+        if (issues.isEmpty()) return PipelineResult.PASSED;
+
+        // Check if all review issues were auto-fixed successfully
+        ReviewReportV2 review = input.review();
+        if (review != null && review.getIssues() != null && !review.getIssues().isEmpty()) {
+            boolean allFixed = review.getIssues().stream()
+                    .allMatch(i -> i.isAutoFixed() && i.isFixSucceeded());
+            if (allFixed) return PipelineResult.PASSED_WITH_FIXES;
+
+            // Any unresolved CRITICAL issues → FAILED
+            boolean hasUnresolvedCritical = review.getIssues().stream()
+                    .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+                    .anyMatch(i -> !i.isAutoFixed() || !i.isFixSucceeded());
+            if (hasUnresolvedCritical) return PipelineResult.FAILED;
+        }
+
+        // Issues exist but not all resolved (e.g. MINOR unresolved, or test failures)
+        return PipelineResult.NEEDS_ATTENTION;
     }
 
     private ValidationReportDTO toDTO(ValidationReport entity) {
@@ -381,6 +393,54 @@ public class ValidationReportService {
         if (filePath.endsWith(".kt")) return "Kotlin";
         if (filePath.endsWith(".sql")) return "SQL";
         return "Other";
+    }
+
+    /**
+     * Extract a failure signature from an error message for root-cause grouping.
+     * Groups failures that share the same HTTP status code pattern, exception type,
+     * or error category so they collapse into a single root-cause issue.
+     */
+    public static String extractFailureSignature(String failureMessage) {
+        if (failureMessage == null || failureMessage.isBlank()) return "unknown failure";
+        String msg = failureMessage.trim();
+
+        // HTTP status code patterns: "expected 200 but got 404", "status 500", "HTTP 503"
+        var httpPattern = java.util.regex.Pattern.compile(
+            "(?:got|status|HTTP|responded with|returned)\\s*(\\d{3})", java.util.regex.Pattern.CASE_INSENSITIVE);
+        var httpMatcher = httpPattern.matcher(msg);
+        if (httpMatcher.find()) {
+            return "HTTP " + httpMatcher.group(1);
+        }
+
+        // Connection errors
+        if (msg.toLowerCase().contains("connection refused") || msg.toLowerCase().contains("econnrefused")) {
+            return "connection refused";
+        }
+        if (msg.toLowerCase().contains("timeout") || msg.toLowerCase().contains("timed out")) {
+            return "timeout";
+        }
+        if (msg.toLowerCase().contains("socket hang up") || msg.toLowerCase().contains("econnreset")) {
+            return "connection reset";
+        }
+
+        // Java exception type: "java.lang.NullPointerException: ..."
+        var exceptionPattern = java.util.regex.Pattern.compile("([a-zA-Z]+(?:\\.[a-zA-Z]+)*Exception)");
+        var exMatcher = exceptionPattern.matcher(msg);
+        if (exMatcher.find()) {
+            // Use simple name
+            String full = exMatcher.group(1);
+            int lastDot = full.lastIndexOf('.');
+            return lastDot >= 0 ? full.substring(lastDot + 1) : full;
+        }
+
+        // Assertion patterns: "expected X but was Y" → normalize to "assertion mismatch"
+        if (msg.toLowerCase().contains("expected") && (msg.toLowerCase().contains("but was") || msg.toLowerCase().contains("but got"))) {
+            return "assertion mismatch";
+        }
+
+        // Fallback: first 60 chars, normalized
+        String normalized = msg.replaceAll("\\s+", " ");
+        return normalized.length() <= 60 ? normalized : normalized.substring(0, 60) + "...";
     }
 
     private String truncate(String s, int maxLen) {
