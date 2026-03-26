@@ -102,7 +102,7 @@ public class RunConversationController {
         }
 
         // Allow chat on completed runs and at review/merge gates
-        var chatStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "AWAITING_MERGE", "REVIEWING");
+        var chatStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "REVIEWING");
         if (!chatStatuses.contains(run.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Conversation is only available for completed or reviewing runs");
@@ -183,7 +183,7 @@ public class RunConversationController {
         }
 
         // Allow on completed runs and at review/merge gates
-        var applyStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "AWAITING_MERGE", "REVIEWING");
+        var applyStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "REVIEWING");
         if (!applyStatuses.contains(run.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Apply is only available for completed or reviewing runs");

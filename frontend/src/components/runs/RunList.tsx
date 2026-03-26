@@ -11,7 +11,7 @@ import { useUiStore } from '@/stores/useUiStore';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
 
-const FILTERS = ['ALL', 'PLANNING', 'WORKING', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'COMPLETE', 'PAUSED', 'FAILED'];
+const FILTERS = ['ALL', 'PLANNING', 'WORKING', 'AWAITING_APPROVAL', 'COMPLETE', 'PAUSED', 'FAILED'];
 
 const toTitleCase = (s: string) =>
   s.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());

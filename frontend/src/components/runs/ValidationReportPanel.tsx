@@ -17,7 +17,7 @@ const SEVERITY_CONFIG: Record<string, { color: string; label: string }> = {
   WOULD_FAIL_LINT: { color: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30', label: 'Lint issue' },
 };
 
-const FETCH_STATUSES = new Set(['AWAITING_MERGE', 'COMPLETE', 'PARTIAL', 'FAILED']);
+const FETCH_STATUSES = new Set(['COMPLETE', 'PARTIAL', 'FAILED']);
 
 export default function ValidationReportPanel({ runId, status }: ValidationReportPanelProps) {
   const [report, setReport] = useState<ValidationReportData | null>(null);

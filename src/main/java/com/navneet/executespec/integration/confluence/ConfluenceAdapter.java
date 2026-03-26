@@ -1,12 +1,12 @@
 package com.navneet.executespec.integration.confluence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.integration.InboundAdapter;
 import com.navneet.executespec.integration.IntegrationEvent;
 import com.navneet.executespec.integration.IntegrationProperties;
 import com.navneet.executespec.integration.OutboundAdapter;
 import com.navneet.executespec.integration.WebhookSignatureException;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.extern.slf4j.Slf4j;
@@ -108,7 +108,7 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
     }
 
     @Override
-    public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReport review) {
+    public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReportV2 review) {
         String childTitle = (run.getUserRequest() != null
                 ? run.getUserRequest().lines().findFirst().orElse("Agent run")
                 : "Agent run") + " — Agent Output";
@@ -138,16 +138,17 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private String buildOutputPage(PipelineRun run, ReviewReport review) {
-        String verdict = review.getRecommendation() != null ? review.getRecommendation() : "N/A";
+    private String buildOutputPage(PipelineRun run, ReviewReportV2 review) {
+        String verdict = review.getRecommendationCompat();
         String quality = review.getOverallConfidence() != null ? review.getOverallConfidence() : "N/A";
 
-        String taskBreakdown = review.getTaskReviews() != null
-                ? review.getTaskReviews().stream()
-                        .map(t -> "- **" + t.getTaskId() + "**: " +
-                                  (t.isAcceptanceCriteriaMet() ? "✅ PASS" : "❌ FAIL"))
+        String issueBreakdown = review.getIssues() != null && !review.getIssues().isEmpty()
+                ? review.getIssues().stream()
+                        .map(i -> "- **" + i.getSeverity() + "** [" + i.getCategory() + "] " +
+                                  i.getDescription() +
+                                  (i.isAutoFixed() ? (i.isFixSucceeded() ? " ✅ Fixed" : " ❌ Fix failed") : ""))
                         .collect(Collectors.joining("\n"))
-                : "No task reviews available";
+                : "No issues found";
 
         String suggestions = review.getPostMergeSuggestions() != null
                 ? String.join("\n", review.getPostMergeSuggestions()) : "None";
@@ -159,7 +160,7 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
                 ## Review Summary
                 %s
 
-                ## Task Breakdown
+                ## Issues Found
                 %s
 
                 ## Post-merge Suggestions
@@ -169,7 +170,7 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
                 """,
                 run.getRunId(), run.getStatus(), quality,
                 review.getSummary() != null ? review.getSummary() : "",
-                taskBreakdown,
+                issueBreakdown,
                 suggestions,
                 config.getDashboardUrl(), run.getRunId());
     }

@@ -29,7 +29,7 @@ export default function TestReportPanel({ runId, status }: Props) {
   }, [runId]);
 
   useEffect(() => {
-    if (['AWAITING_MERGE', 'COMPLETE', 'PARTIAL', 'FAILED'].includes(status)) {
+    if (['COMPLETE', 'PARTIAL', 'FAILED'].includes(status)) {
       fetchReport();
     }
   }, [status, fetchReport]);
