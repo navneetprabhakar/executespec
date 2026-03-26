@@ -395,7 +395,7 @@ public class LlmRouter {
                 var builder = OpenAiChatOptions.builder().model(model);
                 if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
                 if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
-                if (maxTok != null) builder.maxTokens(maxTok);
+                if (maxTok != null) builder.maxCompletionTokens(maxTok);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }
             case "google" -> {
