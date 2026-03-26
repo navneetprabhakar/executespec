@@ -269,9 +269,9 @@ app:
 executespec:
   routing:
     provider-weights:
-      anthropic: 4
-      google: 3
-      openai: 3
+      anthropic: 10  # Workers use XML tool_call format — only Anthropic models follow it reliably
+      google: 0      # Fallback chain still works; this only affects primary selection
+      openai: 0
   validator:
     enabled: true
     per-task-validation: true
