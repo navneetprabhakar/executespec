@@ -16,6 +16,9 @@ const MODEL_ROLES: Record<string, string> = {
   'claude-haiku-4-5-20251001':              'Utility',
   'gpt-4o':                                 'Capable (3rd)',
   'gpt-4o-mini':                            'Utility (3rd)',
+  'gemini-3.1-pro-preview':                 'Architect (2nd)',
+  'gemini-3-flash-preview':                 'Fast (2nd)',
+  // Legacy preview variants (backward compat for in-flight pricing rows)
   'gemini-3.1-pro-preview-customtools':     'Architect (2nd)',
   'gemini-3.1-flash-lite-preview':          'Fast (2nd)',
 };

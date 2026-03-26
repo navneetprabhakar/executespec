@@ -112,7 +112,15 @@ public class PlannerAgent {
 
                 TaskPlan plan = outputParser.parse(responseContent, TaskPlan.class);
 
-                if (plan.getTasks() != null && plan.getTasks().size() > 35) {
+                if (plan.getTasks() == null || plan.getTasks().isEmpty()) {
+                    log.warn("Planner returned a plan with no tasks on attempt {} — retrying", attempt);
+                    if (attempt == 3) {
+                        throw new RuntimeException("Planner failed to produce any tasks after 3 attempts");
+                    }
+                    continue;
+                }
+
+                if (plan.getTasks().size() > 35) {
                     log.warn("Plan has {} tasks — truncating to 35", plan.getTasks().size());
                     plan.setTasks(plan.getTasks().subList(0, 35));
                 }

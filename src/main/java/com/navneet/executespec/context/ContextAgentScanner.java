@@ -1,6 +1,6 @@
 package com.navneet.executespec.context;
 
-import com.navneet.executespec.agent.model.ReviewReport;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +22,7 @@ public class ContextAgentScanner {
     public ContextAgentInput scan(
         PipelineRun run,
         List<WorkerReport> workerReports,
-        ReviewReport reviewReport
+        ReviewReportV2 reviewReport
     ) throws IOException {
         Path projectPath = Path.of(workspaceRoot);
         String currentDoc = readContextDoc(projectPath);
@@ -90,9 +90,9 @@ public class ContextAgentScanner {
             .collect(Collectors.toList());
     }
 
-    private String summariseReviewReport(ReviewReport report) {
+    private String summariseReviewReport(ReviewReportV2 report) {
         if (report == null) return "No reviewer report available";
-        return "Verdict: " + report.getRecommendation() + " | Summary: " + report.getSummary() +
+        return "Verdict: " + report.getRecommendationCompat() + " | Summary: " + report.getSummary() +
             (report.getMergeBlockers() != null && !report.getMergeBlockers().isEmpty()
                 ? " | Blockers: " + String.join(", ", report.getMergeBlockers()) : "");
     }

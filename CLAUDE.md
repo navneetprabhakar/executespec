@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-03-18
+> Last updated: 2026-03-26
 
 ## Architecture
 
@@ -9,9 +9,9 @@
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
 - **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews, GCE for main app
-- **Multi-agent pipeline:** Orchestrator (PipelineHarness) → PlannerAgent (Sonnet) → WorkerAgent per task (Haiku) → CompilerAgent → ReviewerAgentV2 → ValidationReportAgent → GitMergeService
-- **LLM Router:** 3-provider fallback chains (Anthropic → Google → OpenAI) with tier-based model escalation (FAST → CAPABLE → POWER)
-- **Gate system:** Redis-backed approval gates (plan + merge) with 500ms polling, 2h TTL
+- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Sonnet) → Plan Gate → SequentialTaskExecutor (Haiku per task) → CompilerAgent → Auto-merge all tasks → ReviewerAgentV2 (inspect + auto-fix) → ValidationReport → COMPLETE
+- **LLM Router:** 3-provider fallback chains (Anthropic → Google → OpenAI) with weighted round-robin (4:3:3) and tier-based model escalation (FAST → CAPABLE → POWER)
+- **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
 - **Progressive merge:** Each task merged to main immediately after validation
 - **Auth:** JWT (access 24h, refresh 7d), RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles
 - **Tiers:** FREE (5 runs/month) → PRO (100/month) → ENTERPRISE (unlimited)
@@ -28,7 +28,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V34)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V37)
 
 ## Patterns: MUST Follow
 
@@ -107,7 +107,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET | `/api/runs` | List runs (filtered by visibility + tier) |
 | GET | `/api/runs/{id}` | Run detail |
 | POST | `/api/runs/{id}/approve` | Plan gate |
-| POST | `/api/runs/{id}/merge` | Merge gate (MERGE/DECLINE/REWORK/IMPLEMENT_SUGGESTIONS) |
+| POST | `/api/runs/{id}/merge` | Merge gate (legacy — merge is now automatic) |
 | DELETE | `/api/runs/{id}` | Cancel/delete run |
 | POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
 | GET | `/api/runs/{id}/events` | SSE event stream |
@@ -162,13 +162,15 @@ Full API reference: see memory file `api-endpoints.md`
 | Tier permissions | `auth/service/TierPermissionService.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Slack integration | `integration/slack/SlackNotificationService.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V34) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V37) |
 | LLM prompts | `resources/prompts/*.txt` |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |
 | Observability stack | `observability/docker-compose.yml` |
 | OTel config | `config/ObservabilityConfig.java`, `config/CustomMetricsConfig.java` |
+| Routing config | `config/RoutingProperties.java` (provider weights 4:3:3) |
+| Test generation | `testgen/TestResultController.java` (apply-test-fixes) |
 | Infra (Terraform) | `infra/` |
 
 ## Model Matrix
@@ -185,7 +187,7 @@ Full API reference: see memory file `api-endpoints.md`
 ## Current State
 
 ### Working
-- Full pipeline: plan → approve → work → compile → review → **validation report** → merge (with progressive merge)
+- Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → review (inspect + auto-fix) → **validation report** → COMPLETE
 - Multi-provider LLM routing with automatic fallback (Anthropic → Google → OpenAI)
 - 15-minute wall-clock worker time limit with stall detection and model escalation
 - Cloud Run previews with 10-min TTL and countdown timer
@@ -206,4 +208,5 @@ Full API reference: see memory file `api-endpoints.md`
 - V3 migration type mismatch: `actual_cost_usd` must be `DOUBLE PRECISION` (not `DECIMAL(10,6)`)
 - Branch retry: `GitTool.createBranch()` catches RefAlreadyExistsException → checkout fallback
 - Gate lost on restart: approve() → if gate missing → auto-fail with message
-- StartupRunResumer can race with GateFallback on orphaned merge gates (mitigated with activeResumeGuard)
+- StartupRunResumer disabled — users resume stuck runs manually via UI
+- ReviewerAgent V1 class still wired as @Service bean but unused in pipeline (blocks deletion of reviewer.txt prompt)

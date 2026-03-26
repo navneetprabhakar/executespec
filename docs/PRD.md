@@ -1,7 +1,7 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 3.0
-> **Last Updated:** 2026-03-18
+> **Version:** 3.1
+> **Last Updated:** 2026-03-26
 > **Status:** Production (v1)
 > **Author:** Navneet Prabhakar
 
@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary
 
-**ExecuteSpec** is an autonomous coding platform that transforms natural language requirements into production-ready code through a multi-agent AI pipeline. Users describe what they want built, and the system plans, implements, validates, reviews, and deploys the code -- with human approval gates at critical decision points.
+**ExecuteSpec** is an autonomous coding platform that transforms natural language requirements into production-ready code through a multi-agent AI pipeline. Users describe what they want built, and the system plans, implements, validates, reviews, and deploys the code -- with a human approval gate at the plan stage.
 
 The platform serves individual developers, teams, and enterprises through a tiered SaaS model with integrated billing, role-based access, and deployment to Google Cloud.
 
@@ -68,7 +68,7 @@ PlannerAgent (Claude Sonnet) -- natural language -> structured task plan
 Plan Approval Gate -- user reviews & approves/rejects plan
   |
   v
-SequentialTaskExecutor
+SequentialTaskExecutor (tasks run one at a time)
   +-- WorkerAgent per task (Claude Haiku, escalates to Sonnet/Opus on stall)
   |     +-- Tool dispatch: readFile, writeFile, shell, git, diff
   |     +-- 15-min wall-clock limit, stall detection at 5min
@@ -85,7 +85,11 @@ SequentialTaskExecutor
 CompilerAgent -- compile & fix build errors (up to 3 iterations)
   |
   v
-ReviewerAgentV2 -- two-phase agentic review (INSPECT -> FIX)
+Auto-Merge -- all task branches merged to main (no manual gate)
+  |
+  v
+ReviewerAgentV2 -- inspect merged code, auto-fix issues (2 attempts, FAST->CAPABLE escalation, max 8 issues)
+  +-- Severity levels: CRITICAL / MINOR
   |
   v
 ValidationReportAgent -- LLM-generated quality summary (non-fatal)
@@ -95,29 +99,25 @@ ValidationReportAgent -- LLM-generated quality summary (non-fatal)
   +-- Shareable via public URL, downloadable as PDF
   |
   v
-Merge Gate -- user chooses: MERGE / DECLINE / REWORK / IMPLEMENT_SUGGESTIONS
+Re-validate (compile + type check after auto-fix)
   |
   v
-GitMergeService (progressive merge per task -> main branch)
-  |
-  v
-Post-Merge Agents (async, non-blocking)
+COMPLETE -> GitHub Push -> Post-Merge Agents (async, non-blocking)
   +-- ContextAgent -- extract context for follow-up runs
   +-- PromptOptimiserAgent -- improve system prompts
   +-- ApiTestSuiteAgent -- generate OpenAPI spec + integration tests
   +-- SlackNotificationService -- Block Kit messages to configured channels
-  +-- GitHub Push -- auto-push to configured repo
 ```
 
 ### 2.4 LLM Router & Model Matrix
 
-The system uses a 3-provider fallback chain with tier-based model escalation:
+The system uses a 3-provider fallback chain with tier-based model escalation and weighted round-robin load distribution (Anthropic 4 : Google 3 : OpenAI 3):
 
 | Chain | Primary | Fallback 1 | Fallback 2 |
 |-------|---------|-----------|-----------|
-| ARCHITECT | Claude Opus 4.6 | Gemini 2.5 Pro | GPT-4o |
-| CAPABLE | Claude Sonnet 4.6 | Gemini 3.1 Flash Lite | GPT-4o |
-| UTILITY | Claude Haiku 4.5 | Gemini 3.1 Flash Lite | GPT-4o Mini |
+| ARCHITECT | Claude Opus 4.6 | Gemini 3.1 Pro Preview | GPT-4o |
+| CAPABLE | Claude Sonnet 4.6 | Gemini 3 Flash Preview | GPT-4o |
+| UTILITY | Claude Haiku 4.5 | Gemini 3 Flash Preview | GPT-4o Mini |
 
 | Agent | Default Model | Escalation Path |
 |-------|--------------|-----------------|
@@ -213,9 +213,8 @@ SUPER_ADMIN (global -- full system access)
    -> User reviews plan in UI, clicks "Approve"
    -> WorkerAgent creates files (App.tsx, TodoList.tsx, etc.)
    -> CompilerAgent validates build
-   -> ReviewerAgentV2 reviews code quality
-   -> User clicks "Merge" at merge gate
-   -> Code merged to main, workspace ready
+   -> ReviewerAgentV2 reviews & auto-fixes issues
+   -> Code auto-merged to main, workspace ready
 
 3. PREVIEW
    Click "Preview" -> Cloud Run ephemeral container
@@ -264,9 +263,9 @@ SUPER_ADMIN (global -- full system access)
    If vague: Clarification Gate -> user provides JIRA key
    Enriched context passed to PlannerAgent
 
-4. FAST MODE (skip gates)
+4. FAST MODE (skip plan approval)
    Toggle "Fast Mode" in NewRunModal
-   -> skipApproval=true, autoMerge=true
+   -> skipApproval=true
    -> Pipeline runs end-to-end without human gates
 
 5. CHAT COPILOT
@@ -275,9 +274,9 @@ SUPER_ADMIN (global -- full system access)
    "Apply" button -> creates new worker tasks on same run
 
 6. REVIEW & ITERATE
-   Reviewer recommends REWORK on 2 issues
-   Click "Rework" -> WorkerAgent re-runs flagged tasks
-   Click "Implement Suggestions" -> apply review fixes
+   Reviewer auto-fixes issues (CRITICAL/MINOR severity, up to 8 issues)
+   Auto-fix: 2 attempts with FAST -> CAPABLE model escalation
+   Click "Apply Suggestions" from chat -> apply additional fixes
    Max 10 apply suggestions per run (PRO limit)
 
 7. DEPLOY
@@ -552,19 +551,18 @@ SUPER_ADMIN (global -- full system access)
 |---------|--------|-------------|
 | Plan generation | Done | PlannerAgent (Sonnet) converts NL to task plan |
 | Plan approval gate | Done | Redis-backed, 500ms polling, 2h TTL |
-| Sequential task execution | Done | Virtual threads, context propagation |
+| Sequential task execution | Done | Tasks run one at a time, virtual threads, context propagation |
 | Worker code generation | Done | XML tool_call format, manual dispatch |
 | Code validation | Done | Pluggable gate chain (Java/TS/Python/React) |
 | Model escalation | Done | HAIKU -> SONNET -> OPUS on stall/retry |
 | Compiler agent | Done | Compile & fix (3 iterations) |
-| Agentic reviewer | Done | Two-phase: INSPECT -> FIX |
+| Agentic reviewer | Done | INSPECT merged code -> auto-fix (2 attempts, FAST->CAPABLE escalation, max 8 issues, CRITICAL/MINOR severity) |
 | Validation report | Done | LLM-generated quality summary with share & PDF export |
-| Merge gate | Done | MERGE / DECLINE / REWORK / IMPLEMENT_SUGGESTIONS |
-| Progressive merge | Done | Per-task branch merge to main |
+| Auto-merge | Done | Automatic merge of all task branches to main after compile (no manual gate) |
 | Post-merge agents | Done | Context, optimizer, API test suite |
 | Task retry | Done | Retry individual failed tasks |
 | Run pause/resume | Done | Graceful pause with state preservation |
-| Auto-resume on startup | Done | Resumes non-terminal runs after deploy |
+| Manual resume | Done | Users resume stuck runs manually via UI (auto-resume disabled) |
 | Stall detection | Done | 5min no output -> model escalation |
 | 15-min time limit | Done | Wall-clock limit per task |
 
@@ -660,7 +658,7 @@ SUPER_ADMIN (global -- full system access)
 
 ## 7. Database Schema
 
-### 7.1 Migrations Summary (V1-V31)
+### 7.1 Migrations Summary (V1-V37)
 
 | Range | Scope |
 |-------|-------|
@@ -676,6 +674,8 @@ SUPER_ADMIN (global -- full system access)
 | V28 | Invoicing & GST accounting (6 new tables) |
 | V29 | Preview limits |
 | V30-V31 | Deploy engine, project-scoped credentials |
+| V34 | Validation report |
+| V35-V37 | Recent schema updates |
 
 ---
 
@@ -729,9 +729,9 @@ executespec.run (root)
   |     |     +-- executespec.tool.dispatch
   |     |     +-- executespec.llm.call
   +-- executespec.run.phase.compile
+  +-- executespec.run.phase.merge
   +-- executespec.run.phase.review
   +-- executespec.run.phase.report
-  +-- executespec.run.phase.merge_gate
   +-- executespec.run.phase.post_merge
 ```
 
@@ -780,8 +780,8 @@ executespec.run (root)
 ## 11. Current State & Roadmap
 
 ### Working (Production)
-- Full multi-agent pipeline with all gates and recovery
-- 3-provider LLM fallback with model escalation
+- Full multi-agent pipeline with plan approval gate and automatic merge
+- 3-provider LLM fallback with model escalation and 4:3:3 weighted round-robin
 - Cloud Run previews with auto-detect Dockerfile generation
 - JWT auth with RBAC (8 roles, 3 levels)
 - Razorpay billing (subscriptions + top-up credits)
@@ -801,8 +801,8 @@ executespec.run (root)
 ### Known Tech Debt
 - V3 migration type mismatch (`actual_cost_usd` DOUBLE PRECISION)
 - Branch retry RefAlreadyExistsException fallback
-- Gate-loss on restart mitigation (activeResumeGuard)
+- Startup auto-resume disabled (users resume stuck runs manually via UI)
 
 ---
 
-*Document generated 2026-03-18. For implementation details, see CLAUDE.md and memory files.*
+*Document generated 2026-03-26. For implementation details, see CLAUDE.md and memory files.*

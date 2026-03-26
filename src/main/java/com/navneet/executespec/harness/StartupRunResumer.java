@@ -26,12 +26,17 @@ import java.util.Set;
 @Slf4j
 public class StartupRunResumer {
 
+    /**
+     * Only resume runs that were actively executing when the server went down.
+     * PLANNING and AWAITING_* statuses are excluded — those runs were idle/waiting
+     * on user input, not stuck due to a server restart.
+     */
     private static final Set<String> RESUMABLE_STATUSES = Set.of(
-        "PLANNING", "WORKING", "STUCK", "REVIEWING"
+        "WORKING", "STUCK", "REVIEWING"
     );
 
     /** Runs older than this are considered stale and won't be auto-resumed. */
-    private static final Duration MAX_RUN_AGE = Duration.ofMinutes(60);
+    private static final Duration MAX_RUN_AGE = Duration.ofMinutes(30);
 
     private final PipelineHarness pipelineHarness;
     private final StateStore stateStore;
@@ -47,13 +52,10 @@ public class StartupRunResumer {
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
-        if (!recoveryProps.isEnabled() || !recoveryProps.isAutoResumeOnStartup()) {
-            log.info("Startup run resume is disabled — skipping");
-            return;
-        }
-
-        // Non-blocking: spawn virtual thread so the application finishes starting
-        Thread.ofVirtual().name("startup-run-resumer").start(this::discoverAndResume);
+        // Auto-resume disabled — users can manually resume stuck runs via the UI.
+        // Runs stuck in WORKING/STUCK/REVIEWING after a server restart will show
+        // their current status; users click "Resume" when ready.
+        log.info("Startup auto-resume is disabled — stuck runs can be resumed manually via the UI");
     }
 
     private void discoverAndResume() {

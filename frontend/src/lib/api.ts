@@ -150,9 +150,15 @@ export interface TaskReview {
 
 export interface ReviewReport {
   overallConfidence: 'HIGH' | 'MEDIUM' | 'LOW';
-  recommendation: 'MERGE' | 'REWORK' | 'PARTIAL_MERGE';
+  /** V1 field — absent in V2 reports. */
+  recommendation?: 'MERGE' | 'REWORK' | 'PARTIAL_MERGE';
+  /** V2 verdict. */
+  verdict?: 'APPROVED' | 'APPROVED_WITH_NOTES' | 'NEEDS_FIXES' | 'REJECTED';
+  /** V2 backward-compat: maps verdict to MERGE/REWORK. */
+  recommendationCompat?: string;
   summary: string;
-  taskReviews: TaskReview[];
+  taskReviews?: TaskReview[];
+  issues?: { id: string; severity: string; category: string; file: string; description: string; fixInstruction: string; autoFixed: boolean; fixSucceeded: boolean }[];
   mergeBlockers: string[];
   postMergeSuggestions: string[];
   readmeUpdated: boolean;
@@ -1185,7 +1191,7 @@ export interface ValidationReportData {
   runId: string;
   filesGenerated: number;
   languages: string[];
-  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'FAILED';
+  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'NEEDS_ATTENTION' | 'FAILED';
   issues: ReportIssue[];
   checksPassed: string[];
   reportMarkdown: string;
@@ -1203,7 +1209,7 @@ export interface ValidationReportData {
 export interface SharedReportData {
   filesGenerated: number;
   languages: string[];
-  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'FAILED';
+  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'NEEDS_ATTENTION' | 'FAILED';
   issues: ReportIssue[];
   checksPassed: string[];
   reportMarkdown: string;
@@ -1251,6 +1257,15 @@ export interface FailureSuggestion {
   suggestion: string;
 }
 
+export interface RootCauseGroup {
+  signature: string;
+  count: number;
+  testMethods: string[];
+  testResultIds: number[];
+  suggestion: string;
+  hasSuggestion: boolean;
+}
+
 export interface TestReportData {
   testPlanId: number;
   runId: string;
@@ -1261,6 +1276,7 @@ export interface TestReportData {
   skipped: number;
   errors: number;
   results: TestResultDetail[];
+  rootCauseGroups: RootCauseGroup[];
   suggestions: FailureSuggestion[];
   executionDurationMs: number;
   previewUrl: string | null;
@@ -1319,6 +1335,9 @@ export const getTestGraph = async (runId: string): Promise<TestGraphData | null>
 
 export const markTestInvalid = (testResultId: number) =>
   req<void>(`/test-results/${testResultId}/mark-invalid`, { method: 'PUT' });
+
+export const applyTestFixes = (runId: string, signature?: string) =>
+  req<void>(`/runs/${runId}/apply-test-fixes${signature ? `?signature=${encodeURIComponent(signature)}` : ''}`, { method: 'POST' });
 
 export const downloadValidationReportPdf = async (runId: string): Promise<void> => {
   const res = await fetch(`${BASE}/runs/${runId}/report/pdf`, {

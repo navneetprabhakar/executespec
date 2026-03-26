@@ -67,17 +67,17 @@ Post-run interactive features: conversational AI chat about generated code, run 
 - Accept task states: PARTIAL, BLOCKED, FAILED, PENDING, LOCKED
 - Reset task to PENDING, re-run worker
 - Auto-pick up all other incomplete sibling tasks
-- After all tasks complete: full reviewer → merge gate cycle
-- MergeCompleted event triggers PostMergeOrchestrator
+- After all tasks complete: full review → auto-merge → report cycle
+- Completed event triggers PostMergeOrchestrator
 
-### 5. Merge Gate Reopen
+### 5. Re-review (Legacy: Merge Gate Reopen)
 
-**Purpose:** Re-run reviewer and reopen merge gate for a PARTIAL/COMPLETE run.
+**Purpose:** Re-run reviewer on a PARTIAL/COMPLETE run.
 
 **Requirements:**
-- Endpoint: `POST /api/runs/{id}/reopen-merge`
-- Re-runs ReviewerAgent on current code
-- Opens new merge gate for human approval
+- Endpoint: `POST /api/runs/{id}/reopen-merge` (legacy name)
+- Re-runs ReviewerAgentV2 on current code
+- Auto-merges if review passes (no manual gate)
 
 ### 6. Implement Suggestions / Rework
 
@@ -86,10 +86,10 @@ Post-run interactive features: conversational AI chat about generated code, run 
 **Requirements:**
 - Implement Suggestions: `POST /api/runs/{id}/implement-suggestions`
   - Re-runs affected workers for MEDIUM/LOW reviewer issues
-  - Follows full review → merge cycle
+  - Follows full review → auto-merge → report cycle
 - Rework: `POST /api/runs/{id}/rework`
   - Re-runs flagged tasks with reviewer feedback injected
-  - Follows full review → merge cycle
+  - Follows full review → auto-merge → report cycle
 
 ### 7. Post-Merge Agents
 

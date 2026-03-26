@@ -34,7 +34,7 @@ flowchart TD
     C --> D{Org member?}
     D -->|Yes| E[Select Project from dropdown]
     D -->|No| F[No project selection needed]
-    E --> G[Choose options: model, skipApproval, autoMerge]
+    E --> G[Choose options: model, skipApproval]
     F --> G
     G --> H[POST /api/runs — Submit]
     H --> I[TierEnforcementService checks quota]
@@ -59,11 +59,11 @@ flowchart TD
     O -->|Reject| P[❌ Run cancelled]
     N --> Q[SequentialTaskExecutor begins]
 
-    Q --> R[For each task:]
+    Q --> R[For each task — sequential:]
     R --> S[Create git worktree]
     S --> T[WorkerAgent writes code]
     T --> U[CodeValidator runs gate chain]
-    U -->|Pass| V[Merge task branch to main]
+    U -->|Pass| V[Merge task branch to main — progressive merge]
     U -->|Fail| W[Retry with error feedback + model escalation]
     W -->|Max retries| X[Task marked PARTIAL]
     W -->|Pass| V
@@ -73,15 +73,13 @@ flowchart TD
     Y -->|No| Z[CompilerAgent — full project build]
     X --> Y
 
-    Z --> AA[ReviewerAgent — code review]
-    AA --> AAB[ValidationReportAgent — quality summary]
-    AAB --> AB{autoMerge?}
-    AB -->|Yes| AC[Auto-approve merge]
-    AB -->|No| AD[Merge Approval Gate — User reviews + report]
-    AD -->|Approve| AC
-    AD -->|Reject| AE[❌ Run stays in REVIEW]
-    AC --> AF[GitMergeService — final merge to main]
-    AF --> AG[Post-merge agents run]
+    Z --> ZA[Merge all task branches — automatic]
+    ZA --> ZB[Post-merge compile validation]
+    ZB --> AA[ReviewerAgentV2 — inspect merged code]
+    AA --> AAB[Auto-fix issues: FAST tier, then CAPABLE on retry]
+    AAB --> AAC[Re-validate after auto-fix — compile + type check]
+    AAC --> AAD[Validation Report + Test Report]
+    AAD --> AG[Post-merge agents run]
     AG --> AH([✅ Run COMPLETE — code ready])
 
     style A fill:#6366f1,color:#fff
@@ -116,13 +114,14 @@ sequenceDiagram
     end
     P->>S: COMPILATION_STARTED
     S->>U: 🔧 Compiling
-    P->>S: REVIEW_READY
-    S->>U: 📝 Review ready
+    P->>S: MERGE_COMPLETED
+    S->>U: 🔀 All branches merged (automatic)
+    P->>S: REVIEW_STARTED
+    S->>U: 📝 Reviewing merged code
+    P->>S: AUTO_FIX_APPLIED
+    S->>U: 🔧 Auto-fix applied (FAST → CAPABLE escalation)
     P->>S: REPORT_GENERATED
     S->>U: 📊 Validation report ready
-    U->>P: POST /merge
-    P->>S: MERGE_COMPLETED
-    S->>U: 🎉 Merged!
     P->>S: RUN_COMPLETED
     S->>U: ✅ All done
 ```
@@ -378,9 +377,10 @@ flowchart TD
     I -->|Pass| H
     J -->|No| L[Auto-pick up remaining incomplete tasks]
     L --> F
-    J -->|Yes| M[ReviewerAgent reviews all code]
-    M --> N[Merge Gate opens]
-    N --> O([✅ Merge and complete])
+    J -->|Yes| M[Auto-merge all branches]
+    M --> MA[ReviewerAgentV2 reviews merged code + auto-fix]
+    MA --> N[Validation Report generated]
+    N --> O([✅ Run COMPLETE])
 
     style A fill:#f59e0b,color:#000
     style O fill:#22c55e,color:#fff
@@ -573,7 +573,7 @@ flowchart LR
     subgraph "DEVELOPER"
         D1[Submit runs in assigned projects]
         D2[View runs in assigned projects]
-        D3[Approve/merge own runs]
+        D3[Approve plans for own runs]
     end
 
     subgraph "BILLING_ADMIN"
@@ -715,5 +715,5 @@ sequenceDiagram
 
 ---
 
-*Generated: 2026-03-11*
+*Updated: 2026-03-26*
 *Covers: Pipeline execution, auth, org management, integrations, Slack notifications, JIRA/Confluence context extraction, post-run features, deployment, recovery, admin workflows.*

@@ -1,6 +1,6 @@
 package com.navneet.executespec.context;
 
-import com.navneet.executespec.agent.model.ReviewReport;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.recovery.LlmCallGuard;
 import com.navneet.executespec.state.StateStore;
@@ -45,14 +45,14 @@ public class ContextAgent {
     }
 
     public void runAsync(PipelineRun run, List<WorkerReport> workerReports,
-                         ReviewReport reviewReport) {
+                         ReviewReportV2 reviewReport) {
         Thread.ofVirtual()
             .name("context-agent-" + run.getRunId())
             .start(() -> run(run, workerReports, reviewReport));
     }
 
     private void run(PipelineRun run, List<WorkerReport> workerReports,
-                     ReviewReport reviewReport) {
+                     ReviewReportV2 reviewReport) {
         if (!props.isEnabled()) return;
         log.info("Context Agent starting for run {}", run.getRunId());
 

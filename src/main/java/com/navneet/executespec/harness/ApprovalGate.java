@@ -2,9 +2,9 @@ package com.navneet.executespec.harness;
 
 import com.navneet.executespec.agent.CostEstimator;
 import com.navneet.executespec.agent.CostEstimator.CostBreakdown;
-import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,11 +58,11 @@ public class ApprovalGate {
         return input.equals("y") || input.equals("yes");
     }
 
-    public boolean requestMerge(ReviewReport review) {
+    public boolean requestMerge(ReviewReportV2 review) {
         log.info("");
         log.info("{}", "=".repeat(70));
         log.info("REVIEW COMPLETE -- {} (confidence: {})",
-            review.getRecommendation(), review.getOverallConfidence());
+            review.getRecommendationCompat(), review.getOverallConfidence());
         log.info("{}", "=".repeat(70));
         log.info("  {}", review.getSummary());
         log.info("");
