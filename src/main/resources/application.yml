@@ -91,7 +91,7 @@ agent:
     additional-allowed-commands: []
     additional-blocked-patterns: []
   recovery:
-    enabled: true
+    enabled: false   # Disabled — auto-restart/resume was restarting failed runs unexpectedly
     warn-threshold-minutes: 5
     act-threshold-minutes: 10
     max-task-retries: 1
