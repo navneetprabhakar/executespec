@@ -1,14 +1,15 @@
 package com.navneet.executespec.integration;
 
-import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.state.entity.IntegrationEventLog;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationEventLogRepository;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
+import io.micrometer.context.ContextSnapshotFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -139,7 +140,7 @@ public class IntegrationManager {
      * Runs the outbound integration callback in a virtual thread — never blocks the caller.
      */
     private void notifyOutbound(String runId, String newStatus) {
-        Thread.ofVirtual().name("integration-outbound-" + runId).start(() -> {
+        Runnable task = ContextSnapshotFactory.builder().build().captureAll().wrap(() -> {
             integrationRunRepo.findByRunId(runId).ifPresent(ir -> {
                 OutboundAdapter adapter = outboundAdapters.get(ir.getSourceType());
                 if (adapter == null) return;
@@ -157,7 +158,7 @@ public class IntegrationManager {
                     switch (newStatus) {
                         case "PLANNING" -> adapter.onRunStarted(ir, run);
                         case "COMPLETE" -> {
-                            ReviewReport review = stateStore.getReviewReport(runId);
+                            ReviewReportV2 review = stateStore.getReviewReportV2(runId);
                             if (review != null) {
                                 adapter.onRunComplete(ir, run, review);
                             } else {
@@ -174,6 +175,7 @@ public class IntegrationManager {
                 }
             });
         });
+        Thread.ofVirtual().name("integration-outbound-" + runId).start(task);
     }
 
     // ── Query methods ─────────────────────────────────────────────────────────

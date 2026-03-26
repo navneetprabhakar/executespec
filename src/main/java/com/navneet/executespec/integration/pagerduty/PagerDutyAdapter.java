@@ -1,12 +1,12 @@
 package com.navneet.executespec.integration.pagerduty;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.integration.InboundAdapter;
 import com.navneet.executespec.integration.IntegrationEvent;
 import com.navneet.executespec.integration.IntegrationProperties;
 import com.navneet.executespec.integration.OutboundAdapter;
 import com.navneet.executespec.integration.WebhookSignatureException;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.extern.slf4j.Slf4j;
@@ -122,8 +122,8 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
     }
 
     @Override
-    public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReport review) {
-        String verdict = review.getRecommendation() != null ? review.getRecommendation() : "N/A";
+    public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReportV2 review) {
+        String verdict = review.getRecommendationCompat();
         String quality = review.getOverallConfidence() != null ? review.getOverallConfidence() : "N/A";
         String recommendedActions = review.getPostMergeSuggestions() != null
                 ? String.join("\n", review.getPostMergeSuggestions()) : "None";
@@ -148,7 +148,7 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
 
         client.addNote(ir.getSourceId(), report);
 
-        if (config.isAutoResolve() && "MERGE".equals(review.getRecommendation())) {
+        if (config.isAutoResolve() && "MERGE".equals(review.getRecommendationCompat())) {
             try {
                 client.resolveIncident(ir.getSourceId());
             } catch (Exception e) {

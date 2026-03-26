@@ -73,7 +73,7 @@ public class PreviewService {
 
     private static final Set<String> COMPLETE_STATUSES = Set.of("COMPLETE", "PARTIAL");
     private static final Set<String> PREVIEW_ALLOWED_STATUSES = Set.of(
-            "COMPLETE", "PARTIAL", "WORKING", "REVIEWING", "AWAITING_MERGE");
+            "COMPLETE", "PARTIAL", "WORKING", "REVIEWING");
     private static final String COMPOSE_PREFIX = "es-preview-";
     private static final int HEALTH_CHECK_RETRIES = 30;
     private static final int HEALTH_CHECK_INTERVAL_MS = 2000;

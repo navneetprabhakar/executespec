@@ -88,9 +88,9 @@ public class PromptPatternAnalyser {
 
         long missedViolations = recentRuns.stream()
             .filter(r -> {
-                var review = stateStore.getReviewReport(r.getRunId());
+                var review = stateStore.getReviewReportV2(r.getRunId());
                 return review != null &&
-                       "MERGE".equals(review.getRecommendation()) &&
+                       "MERGE".equals(review.getRecommendationCompat()) &&
                        stateStore.getTasksForRun(r.getRunId()).stream()
                            .anyMatch(t -> "README_MISSING".equals(t.getLastLlmFailure()));
             }).count();
