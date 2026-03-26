@@ -363,14 +363,16 @@ spring:
   config:
     activate:
       on-profile: dev
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpAutoConfiguration
 
 management:
   otlp:
-    tracing:
-      endpoint: ""
     metrics:
       export:
         enabled: false
   tracing:
+    enabled: false
     sampling:
       probability: 0
