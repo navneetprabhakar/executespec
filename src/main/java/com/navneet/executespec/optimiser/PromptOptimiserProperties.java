@@ -24,6 +24,6 @@ public class PromptOptimiserProperties {
     /** Minimum occurrences of a pattern before it is acted on */
     private int patternMinOccurrences = 2;
 
-    private String model = ModelConstants.HAIKU;
+    private String model = ModelConstants.SONNET;
     private String provider = "anthropic";
 }

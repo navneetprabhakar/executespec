@@ -14,6 +14,9 @@ const MODEL_ROLES: Record<string, string> = {
   'claude-opus-4-6':                        'Architect',
   'claude-sonnet-4-6':                      'Workhorse',
   'claude-haiku-4-5-20251001':              'Utility',
+  'gpt-5.4':                                'Capable (3rd)',
+  'gpt-5.4-mini':                           'Fast (3rd)',
+  // Legacy OpenAI models (backward compat for in-flight pricing rows)
   'gpt-4o':                                 'Capable (3rd)',
   'gpt-4o-mini':                            'Utility (3rd)',
   'gemini-3.1-pro-preview':                 'Architect (2nd)',

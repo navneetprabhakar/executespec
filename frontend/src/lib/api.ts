@@ -180,6 +180,9 @@ export interface RunDetail extends RunSummary {
   integrationSource: { sourceType: string; sourceId: string; sourceUrl: string } | null;
   failureReason?: string | null;
   currentGate?: string | null;
+  /** Pre-run cost estimate range (USD). Set at plan creation. */
+  costEstimateLow?: number | null;
+  costEstimateHigh?: number | null;
   /** Actual cost in USD. Null until run completes. */
   actualCostUsd?: number | null;
   /** Per-agent (planner/reviewer/compiler) token breakdown. Empty for pre-V19 runs. */

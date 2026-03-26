@@ -25,9 +25,11 @@ public class TokenBudgetMonitor {
     private final AgentProperties props;
     private final TokenBudgetPolicy budgetPolicy = new TokenBudgetPolicy();
 
-    // Context limits by model (tokens)
-    private static final int ANTHROPIC_LIMIT = 200_000;
-    private static final int OPENAI_LIMIT     = 128_000;
+    // Context limits by model family (tokens)
+    // Floor at lowest common denominator (Anthropic 200k) for safety
+    private static final int ANTHROPIC_LIMIT  = 200_000;
+    private static final int OPENAI_LIMIT     = 200_000;  // GPT-5.4: 1.05M, GPT-5.4-mini: 400k — floor to Anthropic limit
+    private static final int GEMINI_LIMIT     = 200_000;  // Gemini: 1M+ — floor to Anthropic limit
 
     public BudgetStatus check(String model, String complexity, int lastCallInputTokens) {
         int limit = contextLimitFor(model);
@@ -83,12 +85,12 @@ public class TokenBudgetMonitor {
     public int contextLimitFor(String model) {
         if (model == null) return ANTHROPIC_LIMIT;
         String m = model.toLowerCase();
-        if (m.contains("haiku") || m.contains("sonnet") || m.contains("claude")) {
-            return ANTHROPIC_LIMIT;
-        } else if (m.contains("gpt") || m.contains("openai")) {
+        if (m.contains("gpt") || m.contains("openai")) {
             return OPENAI_LIMIT;
+        } else if (m.contains("gemini")) {
+            return GEMINI_LIMIT;
         }
-        return ANTHROPIC_LIMIT; // safe default
+        return ANTHROPIC_LIMIT; // Anthropic (claude/haiku/sonnet/opus) and safe default
     }
 
     private int softLimitFor(String complexity, AgentProperties.TokenBudget budget) {

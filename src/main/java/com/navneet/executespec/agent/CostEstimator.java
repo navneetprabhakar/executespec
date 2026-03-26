@@ -245,7 +245,7 @@ public class CostEstimator {
 
     private String defaultModel(String provider) {
         return switch (provider.toLowerCase()) {
-            case "openai"  -> ModelConstants.GPT4O_MINI;
+            case "openai"  -> ModelConstants.GPT5_4_MINI;
             default        -> ModelConstants.HAIKU;
         };
     }

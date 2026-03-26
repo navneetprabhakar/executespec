@@ -66,6 +66,12 @@ public class PipelineRun {
     private String compilerProvider;
     private String compilerActualModel;
 
+    /** Pre-run cost estimate (low/high USD range). Set at plan creation, shown at approval gate. */
+    @Column(name = "cost_estimate_low")
+    private Double costEstimateLow;
+    @Column(name = "cost_estimate_high")
+    private Double costEstimateHigh;
+
     private Double actualCostUsd;       // computed post-run with cache-aware pricing (null until complete)
 
     @Column(columnDefinition = "TEXT")

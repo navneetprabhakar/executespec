@@ -29,9 +29,12 @@ public final class ModelConstants {
     public static final String GEMINI_UTILITY   = GEMINI_FLASH;
 
     // ── OpenAI ────────────────────────────────────────────────
-    public static final String GPT4O       = "gpt-4o";
+    public static final String GPT5_4      = "gpt-5.4";
     public static final String GPT5_4_MINI = "gpt-5.4-mini";
 
+    /** @deprecated Use {@link #GPT5_4} — kept for MODEL_CHAIN backward compatibility */
+    @Deprecated
+    public static final String GPT4O       = "gpt-4o";
     /** @deprecated Use {@link #GPT5_4_MINI} — kept for MODEL_CHAIN backward compatibility */
     @Deprecated
     public static final String GPT4O_MINI  = "gpt-4o-mini";

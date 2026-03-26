@@ -10,6 +10,9 @@ import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewSession;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.router.ModelRouter;
+import com.navneet.executespec.router.ModelSelection;
+import com.navneet.executespec.router.ModelTier;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
@@ -50,11 +53,10 @@ public class ConversationAgent {
     /** Maximum number of USER messages allowed per run conversation. */
     public static final int MAX_MESSAGES = 50;
 
-    private static final String PRIMARY_PROVIDER = "anthropic";
-    private static final String PRIMARY_MODEL    = ModelConstants.SONNET;
     private static final int    MAX_OUTPUT_TOKENS = 4096;
-    private static final int    MAX_CONTEXT_CHARS = 32_000; // ~8000 tokens of workspace context
+    private static final int    MAX_CONTEXT_CHARS = 24_000; // ~6000 tokens of workspace context
     private static final int    MAX_FILE_CHARS    = 3000;   // per source file
+    private static final int    LARGE_PROJECT_FILE_THRESHOLD = 50; // compact mode above this
 
     /** Key files to auto-include in context (order matters — first found wins per category). */
     private static final List<String> ENTRY_POINT_CANDIDATES = List.of(
@@ -79,6 +81,7 @@ public class ConversationAgent {
     private static final int MAX_SUGGESTION_TASKS = 6;
 
     private final LlmRouter llmRouter;
+    private final ModelRouter modelRouter;
     private final WorkspaceFileService workspaceFileService;
     private final PreviewService previewService;
     private final ObjectMapper objectMapper;
@@ -93,7 +96,11 @@ public class ConversationAgent {
      * @return the assistant's reply text
      */
     public String chat(PipelineRun run, List<ChatMessageRecord> history, String newMessage) {
-        log.info("[ConversationAgent] run={} historySize={} model={}", run.getRunId(), history.size(), PRIMARY_MODEL);
+        ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
+        String selectedModel = selection.getModelName();
+        String selectedProvider = selection.getProvider().name().toLowerCase();
+        log.info("[ConversationAgent] run={} historySize={} model={} provider={}",
+            run.getRunId(), history.size(), selectedModel, selectedProvider);
 
         String systemPrompt = buildSystemPrompt(run);
 
@@ -112,15 +119,15 @@ public class ConversationAgent {
         // Add the current user message
         messages.add(new UserMessage(newMessage));
 
-        // Build prompt with Sonnet + max tokens
+        // Build prompt with selected model + max tokens
         var opts = org.springframework.ai.anthropic.AnthropicChatOptions.builder()
-            .model(PRIMARY_MODEL)
+            .model(selectedModel)
             .maxTokens(MAX_OUTPUT_TOKENS)
             .build();
         Prompt prompt = new Prompt(messages, opts);
 
         var response = llmRouter.callWithFallback(
-            PRIMARY_PROVIDER, PRIMARY_MODEL, prompt,
+            selectedProvider, selectedModel, prompt,
             run.getRunId(), "conversation",
             LlmRouter.FallbackMode.IMMEDIATE, 0, false
         );
@@ -152,7 +159,10 @@ public class ConversationAgent {
      * @throws ApplySuggestionTooLargeException if the LLM generates >6 tasks
      */
     public TaskPlan generateSuggestionPlan(PipelineRun run, String suggestion) {
-        log.info("[ConversationAgent] Generating suggestion plan for run={}", run.getRunId());
+        ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
+        String selectedModel = selection.getModelName();
+        String selectedProvider = selection.getProvider().name().toLowerCase();
+        log.info("[ConversationAgent] Generating suggestion plan for run={} model={}", run.getRunId(), selectedModel);
 
         String workspaceContext = buildWorkspaceContext(run.getRunId());
 
@@ -205,12 +215,12 @@ public class ConversationAgent {
         messages.add(new UserMessage("Generate a task plan for the following improvement:\n\n" + suggestion));
 
         var opts = org.springframework.ai.anthropic.AnthropicChatOptions.builder()
-                .model(PRIMARY_MODEL)
+                .model(selectedModel)
                 .maxTokens(MAX_OUTPUT_TOKENS)
                 .build();
 
         var response = llmRouter.callWithFallback(
-                PRIMARY_PROVIDER, PRIMARY_MODEL, new Prompt(messages, opts),
+                selectedProvider, selectedModel, new Prompt(messages, opts),
                 run.getRunId(), "suggestion-plan",
                 LlmRouter.FallbackMode.IMMEDIATE, 0, false
         );
@@ -438,7 +448,14 @@ public class ConversationAgent {
                 return sb.toString();
             }
 
-            // 1. File tree
+            int fileCount = files.size();
+            boolean compactMode = fileCount > LARGE_PROJECT_FILE_THRESHOLD;
+
+            if (compactMode) {
+                log.info("[ConversationAgent] Large project ({} files) — using compact context (README-based)", fileCount);
+            }
+
+            // 1. File tree (always included)
             sb.append("File tree:\n");
             for (String f : files) {
                 sb.append("  ").append(f).append('\n');
@@ -446,27 +463,30 @@ public class ConversationAgent {
             sb.append('\n');
 
             // 2. README and context docs
-            tryAppendFile(sb, runId, "README.md", "README.md", 4000);
+            tryAppendFile(sb, runId, "README.md", "README.md", compactMode ? 8000 : 4000);
             tryAppendFile(sb, runId, ".agent-context/CODEBASE_CONTEXT.md", "Codebase Context", 3000);
 
-            // 3. Config files (package.json, vite.config, etc.)
-            int included = 0;
-            for (String file : files) {
-                String fileName = file.contains("/") ? file.substring(file.lastIndexOf('/') + 1) : file;
-                if (CONFIG_FILE_NAMES.contains(fileName) && included < MAX_SOURCE_FILES) {
-                    // Skip if already included (README, context)
-                    if (file.equals("README.md") || file.startsWith(".agent-context")) continue;
-                    tryAppendFile(sb, runId, file, file, MAX_FILE_CHARS);
-                    included++;
+            // 3–4. Config files and source files (skip in compact mode)
+            if (!compactMode) {
+                // 3. Config files (package.json, vite.config, etc.)
+                int included = 0;
+                for (String file : files) {
+                    String fileName = file.contains("/") ? file.substring(file.lastIndexOf('/') + 1) : file;
+                    if (CONFIG_FILE_NAMES.contains(fileName) && included < MAX_SOURCE_FILES) {
+                        // Skip if already included (README, context)
+                        if (file.equals("README.md") || file.startsWith(".agent-context")) continue;
+                        tryAppendFile(sb, runId, file, file, MAX_FILE_CHARS);
+                        included++;
+                    }
                 }
-            }
 
-            // 4. Entry point files and key source files
-            for (String file : files) {
-                if (included >= MAX_SOURCE_FILES) break;
-                if (isKeySourceFile(file) && !isAlreadyIncluded(file)) {
-                    tryAppendFile(sb, runId, file, file, MAX_FILE_CHARS);
-                    included++;
+                // 4. Entry point files and key source files
+                for (String file : files) {
+                    if (included >= MAX_SOURCE_FILES) break;
+                    if (isKeySourceFile(file) && !isAlreadyIncluded(file)) {
+                        tryAppendFile(sb, runId, file, file, MAX_FILE_CHARS);
+                        included++;
+                    }
                 }
             }
 
