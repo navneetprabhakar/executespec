@@ -400,6 +400,14 @@ public class StateStore {
     }
 
     /** Saves the cache-aware actual cost computed post-run by CostEstimator. */
+    public void setCostEstimate(String runId, double lowUsd, double highUsd) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setCostEstimateLow(lowUsd);
+            run.setCostEstimateHigh(highUsd);
+            runRepo.save(run);
+        });
+    }
+
     public void setActualCost(String runId, double costUsd) {
         runRepo.findById(runId).ifPresent(run -> {
             run.setActualCostUsd(costUsd);
@@ -416,7 +424,6 @@ public class StateStore {
 
     public void recordCompaction(String taskId, String checkpointPath) {
         AgentTask task = taskRepo.findById(taskId).orElseThrow();
-        task.setLastCheckpointPath(checkpointPath);
         task.setCompactionCount(task.getCompactionCount() + 1);
         taskRepo.save(task);
 

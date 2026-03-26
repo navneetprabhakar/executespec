@@ -71,13 +71,13 @@ public class LlmRouter {
     private static final List<String[]> ARCHITECT_CHAIN = List.of(
         new String[]{"anthropic", ModelConstants.OPUS},
         new String[]{"google",    ModelConstants.GEMINI_PRO},
-        new String[]{"openai",    ModelConstants.GPT4O}
+        new String[]{"openai",    ModelConstants.GPT5_4}
     );
 
     private static final List<String[]> CAPABLE_CHAIN = List.of(
         new String[]{"anthropic", ModelConstants.SONNET},
         new String[]{"google",    ModelConstants.GEMINI_PRO},
-        new String[]{"openai",    ModelConstants.GPT4O}
+        new String[]{"openai",    ModelConstants.GPT5_4}
     );
 
     private static final List<String[]> UTILITY_CHAIN = List.of(
@@ -95,13 +95,13 @@ public class LlmRouter {
         Map.entry(ModelConstants.HAIKU_LEGACY,      UTILITY_CHAIN),
         Map.entry(ModelConstants.GPT5_4_MINI,       UTILITY_CHAIN),
         Map.entry(ModelConstants.GPT4O_MINI,        UTILITY_CHAIN),  // legacy compat
-        Map.entry(ModelConstants.GPT4O,             CAPABLE_CHAIN),
+        Map.entry(ModelConstants.GPT5_4,             CAPABLE_CHAIN),
+        Map.entry(ModelConstants.GPT4O,             CAPABLE_CHAIN),  // legacy compat
         Map.entry(ModelConstants.GEMINI_PRO,        CAPABLE_CHAIN),
         Map.entry(ModelConstants.GEMINI_FLASH,      UTILITY_CHAIN),
         // Legacy preview model strings (backward compat for in-flight runs)
         Map.entry("gemini-3.1-pro-preview-customtools", ARCHITECT_CHAIN),
-        Map.entry("gemini-3.1-flash-lite-preview",      CAPABLE_CHAIN),
-        Map.entry("gemini-3-flash-preview",             UTILITY_CHAIN)
+        Map.entry("gemini-3.1-flash-lite-preview",      CAPABLE_CHAIN)
     );
 
     /**

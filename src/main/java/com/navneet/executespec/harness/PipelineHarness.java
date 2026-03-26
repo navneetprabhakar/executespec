@@ -48,6 +48,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -126,6 +127,9 @@ public class PipelineHarness {
     // ── Preview service (auto-start for test execution) ─────────────────────
     private final com.navneet.executespec.deployment.preview.PreviewService previewService;
     private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepository;
+
+    // ── Language validation for existing repos ─────────────────────────────────
+    private final LanguageValidator languageValidator;
 
     // ── Test generation pipeline ─────────────────────────────────────────────
     private final com.navneet.executespec.testgen.TestGenOrchestrator testGenOrchestrator;
@@ -1337,6 +1341,22 @@ public class PipelineHarness {
         } else {
             workspaceInitService.ensureRunWorkspace(runId);
         }
+
+        // ── Language validation for existing repos ──────────────────────────
+        // Detect whether the cloned workspace uses a supported language.
+        // Fail fast with a clear message if only unsupported languages are found.
+        if ("EXISTING".equals(run.getRepoMode()) || (run.getSourceRunId() != null && !run.getSourceRunId().isBlank())) {
+            Path workspace = workspaceInitService.runWorkspacePath(runId);
+            String langError = languageValidator.detectAndValidateLanguage(workspace);
+            if (langError != null) {
+                log.warn("Language validation failed for run {}: {}", runId, langError);
+                stateStore.markFailed(runId, langError);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness", langError));
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                return;
+            }
+        }
+
         broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
         eventPublisher.publishEvent(new PipelineEvent.RunStarted(runId));
 
@@ -1409,6 +1429,16 @@ public class PipelineHarness {
                 // run was already fetched from DB above, no extra DB call needed.
                 plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
                 stateStore.savePlan(runId, plan);
+
+                // Compute and persist cost estimate for plan approval UI
+                try {
+                    var costBreakdown = costEstimator.estimate(plan);
+                    stateStore.setCostEstimate(runId, costBreakdown.lowUsd(), costBreakdown.highUsd());
+                    log.info("[Run {}] {}", runId, costBreakdown.formatted());
+                } catch (Exception ce) {
+                    log.debug("[Run {}] Could not compute cost estimate: {}", runId, ce.getMessage());
+                }
+
                 broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_APPROVAL"));
             } catch (Exception e) {
                 planObs.error(e);

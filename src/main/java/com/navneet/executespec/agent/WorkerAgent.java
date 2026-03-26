@@ -18,6 +18,8 @@ import com.navneet.executespec.tool.GitTool;
 import com.navneet.executespec.tool.ShellTool;
 import com.navneet.executespec.tool.ToolResult;
 import com.navneet.executespec.tool.WorkspaceContext;
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
@@ -66,6 +68,7 @@ public class WorkerAgent {
     private final ResourceLoader resourceLoader;
     private final LlmOutputParser outputParser;
     private final ObservationRegistry observationRegistry;
+    private final SseBroadcaster sseBroadcaster;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -353,6 +356,7 @@ public class WorkerAgent {
                                      "attempting emergency compaction", taskId,
                                     (int) (budget.usagePct() * 100));
                             stateStore.recordCompaction(taskId, "emergency-compact-at-hard-stop");
+                            sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
                             String[] compactProvider = { provider };
                             String[] compactModel   = { model };
                             messages = compact(messages, taskDef, taskId, runId,
@@ -367,6 +371,7 @@ public class WorkerAgent {
                                      "already compacted at iteration {}, cannot recover",
                                     taskId, (int) (budget.usagePct() * 100), lastCompactedIteration);
                             stateStore.recordCompaction(taskId, "hard-stop");
+                            sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
                             return withProviderModel(WorkerReport.partial(taskId,
                                     "Hard stopped at " + (int) (budget.usagePct() * 100)
                                             + "% context usage after emergency compaction failed. Resume required.",
@@ -654,6 +659,7 @@ public class WorkerAgent {
 
         fsTool.writeFile(runId, checkpointPath, checkpointContent);
         stateStore.recordCompaction(taskId, checkpointPath);
+        sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
 
         String fileContext = rebuildFileContext(runId);
 

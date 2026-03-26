@@ -33,6 +33,18 @@ export default function RunDetail() {
   const downloadRef = useRef<HTMLDivElement>(null);
   const sseEntries = useSseStore((s) => s.entries);
 
+  // Show toast when context compaction is triggered
+  const compactionShownRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const entry of sseEntries) {
+      if (entry.type === 'COMPACTION_TRIGGERED' && !compactionShownRef.current.has(entry.id)) {
+        compactionShownRef.current.add(entry.id);
+        const taskId = (entry.data?.taskId as string) || 'unknown';
+        addToast({ type: 'info', message: `Context compacted for task ${taskId}` });
+      }
+    }
+  }, [sseEntries]);
+
   // Close download dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -166,6 +178,12 @@ export default function RunDetail() {
           {/* Gate banner */}
           {activeRun.status === 'AWAITING_APPROVAL' && (
             <>
+              {(activeRun.costEstimateLow != null && activeRun.costEstimateHigh != null) && (
+                <div className="mx-4 mt-3 mb-1 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06] text-xs text-zinc-400 flex items-center gap-1.5">
+                  <span className="text-accent-amber">$</span>
+                  <span>Estimated cost: <span className="text-zinc-200 font-medium">${activeRun.costEstimateLow.toFixed(3)} – ${activeRun.costEstimateHigh.toFixed(3)}</span></span>
+                </div>
+              )}
               <GateBanner
                 message="Review the plan and approve to continue"
                 icon={<AlertTriangle className="h-4 w-4 text-accent-amber" />}
@@ -283,6 +301,16 @@ export default function RunDetail() {
               <p className="text-zinc-400 leading-relaxed">{review.summary}</p>
             </div>
           )}
+          {/* Failure reason banner */}
+          {activeRun.status === 'FAILED' && activeRun.failureReason && (
+            <div className="mx-4 mt-3 p-3 rounded-lg border border-accent-rose/30 bg-accent-rose/5">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="h-4 w-4 text-accent-rose flex-shrink-0" />
+                <p className="text-xs font-medium text-accent-rose">Run failed</p>
+              </div>
+              <p className="text-xs text-zinc-400 leading-relaxed">{activeRun.failureReason}</p>
+            </div>
+          )}
           {/* Paused banner — edit goal and restart */}
           {activeRun.status === 'PAUSED' && (
             <div className="mx-4 mt-3 p-3 rounded-lg border border-orange-400/30 bg-orange-400/5 space-y-2">
@@ -388,7 +416,7 @@ export default function RunDetail() {
             )}
             <div className="flex items-center gap-3 ml-auto">
               <button
-                onClick={() => downloadWorkspace(activeRun.runId).catch(() => {})}
+                onClick={() => handle(() => downloadWorkspace(activeRun.runId), 'Download started')}
                 className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
                 title="Download workspace as ZIP"
               >

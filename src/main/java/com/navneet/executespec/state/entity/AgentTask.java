@@ -53,9 +53,6 @@ public class AgentTask {
     @Builder.Default
     private Integer cacheWriteTokens = 0;  // Anthropic cache_creation_input_tokens (billed at 1.25x)
 
-    @Column(columnDefinition = "TEXT")
-    private String lastCheckpointPath;  // path to most recent checkpoint file
-
     // ── Tier 3 fields ─────────────────────────────────────────────────────────
     private Boolean readmeUpdated;      // null = not yet reviewed, true/false = reviewer verdict
     private String provider;            // provider used for this task (e.g. "anthropic")
@@ -69,14 +66,14 @@ public class AgentTask {
     private Instant stuckDetectedAt;
 
     @Column(name = "recovery_attempt")
-    private Integer recoveryAttempt;        // null = 0 for legacy rows
+    private Integer recoveryAttempt;
 
     // ── Tier 5 fields — LLM escalation ────────────────────────────────────────
     @Column(name = "current_provider")
-    private String currentProvider;     // null = use global config
+    private String currentProvider;
 
     @Column(name = "current_model")
-    private String currentModel;        // null = use global config
+    private String currentModel;
 
     @Column(name = "last_llm_failure")
     private String lastLlmFailure;      // LlmFailure type name or special flag

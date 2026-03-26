@@ -155,6 +155,8 @@ public class RunMapper {
             .previewStatus(r.getPreviewStatus())
             .keySource(r.getKeySource())
             .actualCostUsd(r.getActualCostUsd())
+            .costEstimateLow(r.getCostEstimateLow())
+            .costEstimateHigh(r.getCostEstimateHigh())
             .techStack(r.getTechStack())
             .projectName(resolveProjectName(r.getProjectId()))
             .createdByName(resolveCreatorName(r.getCreatedByUserId()))

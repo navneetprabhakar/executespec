@@ -155,6 +155,12 @@ public record RunEvent(
         return new RunEvent("MODEL_ESCALATED", runId, taskId, fromModel + "|" + toModel, Instant.now());
     }
 
+    // ── Compaction events ──────────────────────────────────────────────────
+
+    public static RunEvent compactionTriggered(String runId, String taskId) {
+        return new RunEvent("COMPACTION_TRIGGERED", runId, taskId, null, Instant.now());
+    }
+
     // ── Review V2 events ─────────────────────────────────────────────────────
 
     public static RunEvent reviewStarted(String runId, String model) {

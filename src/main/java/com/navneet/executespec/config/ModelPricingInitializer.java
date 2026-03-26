@@ -62,12 +62,12 @@ public class ModelPricingInitializer {
             },
             // ── OpenAI — 3rd fallback (OpenAI public pricing Mar 2026) ───────────────────
             new Object[]{
-                "openai", ModelConstants.GPT4O, 2.50, 10.00,
-                "3rd fallback — CAPABLE + ARCHITECT chains"
+                "openai", ModelConstants.GPT5_4, 2.00, 8.00,
+                "3rd fallback — CAPABLE + ARCHITECT chains (GPT-5.4, 1.05M ctx)"
             },
             new Object[]{
-                "openai", ModelConstants.GPT4O_MINI, 0.15, 0.60,
-                "3rd fallback — UTILITY chain"
+                "openai", ModelConstants.GPT5_4_MINI, 0.15, 0.60,
+                "3rd fallback — UTILITY chain (GPT-5.4-mini, 400k ctx)"
             }
         );
 

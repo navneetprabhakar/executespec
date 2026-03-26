@@ -851,6 +851,18 @@ const VERDICT_COLORS: Record<string, string> = {
   PARTIAL:  'text-accent-amber',
 };
 
+const CATEGORY_LABELS: Record<string, string> = {
+  'SPEC_MISMATCH': 'Spec Mismatch',
+  'MISSING_ENDPOINT': 'Missing Endpoint',
+  'LOGIC_ERROR': 'Logic Error',
+  'SECURITY': 'Security',
+  'ERROR_HANDLING': 'Error Handling',
+  'CROSS_TASK_MISMATCH': 'Cross-Task Mismatch',
+  'README_INCOMPLETE': 'README Incomplete',
+  'CODE_QUALITY': 'Code Quality',
+  'COMPLETENESS': 'Completeness',
+};
+
 function ReviewTab({ run }: { run: RunDetail }) {
   const permissions = useTierPermissions();
   const { addToast } = useUiStore();
@@ -938,17 +950,28 @@ function ReviewTab({ run }: { run: RunDetail }) {
               <div className="flex items-center gap-2 mb-1">
                 <span className={cn(
                   'text-xs px-1.5 py-0.5 rounded',
-                  issue.severity === 'HIGH'    ? 'text-accent-rose bg-accent-rose/10' :
-                  issue.severity === 'MEDIUM'  ? 'text-accent-amber bg-accent-amber/10' :
+                  issue.severity === 'CRITICAL' ? 'text-accent-rose bg-accent-rose/10' :
+                  issue.severity === 'MINOR'    ? 'text-accent-amber bg-accent-amber/10' :
                   'text-zinc-400 bg-zinc-400/10'
                 )}>
-                  {issue.severity ?? 'LOW'}
+                  {issue.severity ?? 'MINOR'}
                 </span>
-                <span className="text-xs text-zinc-500">{issue.category}</span>
+                <span className="text-xs text-zinc-500">{CATEGORY_LABELS[issue.category] ?? issue.category}</span>
               </div>
+              {issue.file && (
+                <p className="text-xs text-zinc-500 font-mono mt-0.5">{issue.file}</p>
+              )}
               <p className="text-sm text-zinc-300">{issue.description}</p>
-              {issue.suggestion && (
-                <p className="text-xs text-zinc-500 mt-1 italic">{issue.suggestion}</p>
+              {issue.fixInstruction && (
+                <p className="text-xs text-zinc-500 mt-1 italic">{issue.fixInstruction}</p>
+              )}
+              {issue.autoFixed && (
+                <span className={cn(
+                  'inline-block text-xs mt-1',
+                  issue.fixSucceeded ? 'text-emerald-400' : 'text-accent-rose'
+                )}>
+                  {issue.fixSucceeded ? 'Auto-fixed \u2713' : 'Auto-fix failed'}
+                </span>
               )}
             </div>
           ))}

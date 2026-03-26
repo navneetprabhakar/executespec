@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ThreadLocalRandom;
 
 
 /**
@@ -56,12 +56,12 @@ public class ModelRouter {
             ),
             ModelTier.CAPABLE, Map.of(
                     LlmProvider.ANTHROPIC, ModelConstants.SONNET,
-                    LlmProvider.OPENAI, ModelConstants.GPT4O,
+                    LlmProvider.OPENAI, ModelConstants.GPT5_4,
                     LlmProvider.GEMINI, ModelConstants.GEMINI_PRO
             ),
             ModelTier.POWER, Map.of(
                     LlmProvider.ANTHROPIC, ModelConstants.OPUS,
-                    LlmProvider.OPENAI, ModelConstants.GPT4O,
+                    LlmProvider.OPENAI, ModelConstants.GPT5_4,
                     LlmProvider.GEMINI, ModelConstants.GEMINI_PRO
             )
     );
@@ -72,9 +72,6 @@ public class ModelRouter {
 
     /** Weighted provider sequence built from config. e.g. [A,A,A,A,G,G,G,O,O,O] for 4:3:3. */
     private List<LlmProvider> weightedSequence;
-
-    /** Round-robin counter — thread-safe, wraps naturally on overflow. */
-    private final AtomicLong roundRobinCounter = new AtomicLong(0);
 
     @PostConstruct
     void init() {
@@ -108,20 +105,21 @@ public class ModelRouter {
     }
 
     /**
-     * Select model using weighted round-robin distribution.
-     * Advances a counter and picks the provider from the weighted sequence.
+     * Select model using weighted random distribution.
+     * Picks a random index from the weighted sequence, ensuring non-deterministic
+     * provider selection that respects configured weights (e.g. 4:3:3).
      * Falls through to next providers if the selected one is unhealthy.
      */
     public ModelSelection selectFromTier(ModelTier tier) {
         int seqLen = weightedSequence.size();
-        int startIdx = (int) (Math.abs(roundRobinCounter.getAndIncrement()) % seqLen);
+        int startIdx = ThreadLocalRandom.current().nextInt(seqLen);
 
-        // Try from the weighted position, cycling through all providers
+        // Try from the random position, cycling through all providers
         for (int offset = 0; offset < seqLen; offset++) {
             LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
             if (healthTracker.isHealthy(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
-                log.debug("Selected model: {} ({}/{}) via weighted round-robin", modelName, tier, provider);
+                log.debug("Selected model: {} ({}/{}) via weighted random", modelName, tier, provider);
                 meterRegistry.counter("executespec.routing.provider_selected",
                         "provider", provider.name(), "tier", tier.name()).increment();
                 return ModelSelection.builder()
@@ -132,7 +130,7 @@ public class ModelRouter {
             }
         }
 
-        // All providers unhealthy — try first in weighted sequence anyway
+        // All providers unhealthy — try random pick anyway
         LlmProvider fallback = weightedSequence.get(startIdx);
         log.warn("All providers unhealthy for tier {} — attempting {} anyway", tier, fallback);
         String modelName = MODEL_MATRIX.get(tier).get(fallback);
@@ -166,18 +164,18 @@ public class ModelRouter {
     }
 
     /**
-     * Select model using weighted round-robin, filtered by providers the org can use.
+     * Select model using weighted random, filtered by providers the org can use.
      */
     public ModelSelection selectFromTier(ModelTier tier, Set<LlmProvider> availableProviders) {
         int seqLen = weightedSequence.size();
-        int startIdx = (int) (Math.abs(roundRobinCounter.getAndIncrement()) % seqLen);
+        int startIdx = ThreadLocalRandom.current().nextInt(seqLen);
 
-        // Try from the weighted position, cycling through all providers, filtered by availability
+        // Try from the random position, cycling through all providers, filtered by availability
         for (int offset = 0; offset < seqLen; offset++) {
             LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
             if (availableProviders.contains(provider) && healthTracker.isHealthy(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
-                log.debug("Selected model: {} ({}/{}) from available: {} via weighted round-robin",
+                log.debug("Selected model: {} ({}/{}) from available: {} via weighted random",
                         modelName, tier, provider, availableProviders);
                 meterRegistry.counter("executespec.routing.provider_selected",
                         "provider", provider.name(), "tier", tier.name()).increment();

@@ -49,6 +49,10 @@ public class RunDetail {
     /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
     String keySource;
 
+    /** Pre-run cost estimate range (USD). Set at plan creation, shown at approval gate. */
+    Double costEstimateLow;
+    Double costEstimateHigh;
+
     /** Actual cost in USD computed after run completion. Null until complete. */
     Double actualCostUsd;
 

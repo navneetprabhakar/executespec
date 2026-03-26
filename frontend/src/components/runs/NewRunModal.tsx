@@ -245,6 +245,9 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                 'focus:outline-none focus:border-accent-violet/40 resize-none',
               )}
             />
+            <p className="text-xs text-zinc-500 -mt-2">
+              Supported: Java, TypeScript, React, Python, Go, Rust, HTML/CSS
+            </p>
 
             {/* Project selector — visible for org members only */}
             {isOrgMember && (
