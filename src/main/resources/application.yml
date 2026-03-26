@@ -356,3 +356,21 @@ management:
   zipkin:
     tracing:
       enabled: false
+
+---
+# ── Dev profile: disable OTLP tracing (no collector on dev VM) ───────────────
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+management:
+  otlp:
+    tracing:
+      endpoint: ""
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    sampling:
+      probability: 0
