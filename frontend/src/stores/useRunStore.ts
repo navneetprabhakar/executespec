@@ -12,9 +12,18 @@ interface RunStore {
   projectFilter: string | null;
   scopeFilter: string | null; // 'mine' = my runs (default), null = all visible runs, 'org' = org runs (super admin)
 
+  // Pagination
+  page: number;
+  pageSize: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
+
   setStatusFilter: (s: string) => void;
   setProjectFilter: (projectId: string | null) => void;
   setScopeFilter: (scope: string | null) => void;
+  setPage: (page: number) => void;
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
@@ -44,9 +53,27 @@ export const useRunStore = create<RunStore>((set, get) => ({
   projectFilter: null,
   scopeFilter: 'mine',
 
-  setStatusFilter: (s) => set({ statusFilter: s }),
-  setProjectFilter: (projectId) => set({ projectFilter: projectId }),
-  setScopeFilter: (scope) => set({ scopeFilter: scope }),
+  // Pagination defaults
+  page: 0,
+  pageSize: 20,
+  totalElements: 0,
+  totalPages: 0,
+  hasNext: false,
+  hasPrevious: false,
+
+  setStatusFilter: (s) => {
+    set({ statusFilter: s, page: 0 }); // Reset to first page on filter change
+  },
+  setProjectFilter: (projectId) => {
+    set({ projectFilter: projectId, page: 0 });
+  },
+  setScopeFilter: (scope) => {
+    set({ scopeFilter: scope, page: 0 });
+  },
+  setPage: (page) => {
+    set({ page });
+    get().fetchRuns();
+  },
 
   setActiveRunId: (id) => {
     set({ activeRunId: id, activeRun: null });
@@ -57,13 +84,23 @@ export const useRunStore = create<RunStore>((set, get) => ({
   fetchRuns: async () => {
     set({ loading: true, error: null });
     try {
-      const { statusFilter, projectFilter, scopeFilter } = get();
-      const runs = await api.getRuns({
+      const { statusFilter, projectFilter, scopeFilter, page, pageSize } = get();
+      const result = await api.getRuns({
         status: statusFilter === 'ALL' ? undefined : statusFilter,
         projectId: projectFilter ?? undefined,
         scope: scopeFilter ?? undefined,
+        page,
+        size: pageSize,
       });
-      set({ runs, loading: false });
+      set({
+        runs: result.content,
+        page: result.page,
+        totalElements: result.totalElements,
+        totalPages: result.totalPages,
+        hasNext: result.hasNext,
+        hasPrevious: result.hasPrevious,
+        loading: false,
+      });
     } catch (e: any) {
       set({ loading: false, error: e.message });
     }
@@ -80,6 +117,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   createRun: async (req) => {
     const { runId } = await api.createRun(req);
+    set({ page: 0 }); // Go to first page to see the new run
     await get().fetchRuns();
     return runId;
   },
@@ -92,7 +130,6 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   approveRun: async (id, approved) => {
     await api.approveRun(id, approved);
-    // fetchRun refreshes the detail; the runs list is kept current by SSE patchRunStatus.
     await get().fetchRun(id);
   },
 
@@ -103,12 +140,10 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   mergeRun: async (id, merge) => {
     await api.mergeRun(id, merge);
-    // fetchRun refreshes the detail; the runs list is kept current by SSE patchRunStatus.
     await get().fetchRun(id);
   },
 
   retryTask: async (runId, taskId) => {
-    // Optimistically patch task to PENDING so the UI updates immediately
     set((s) => ({
       activeRun: s.activeRun ? {
         ...s.activeRun,
@@ -122,8 +157,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   retryRun: async (runId) => {
     const newRun = await api.retryRun(runId);
+    set({ page: 0 });
     await get().fetchRuns();
-    // Switch focus to the new run
     get().setActiveRunId(newRun.runId);
     return newRun.runId;
   },
@@ -151,6 +186,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   editAndRestartRun: async (runId, newGoal) => {
     const newRun = await api.editAndRestartRun(runId, newGoal);
+    set({ page: 0 });
     await get().fetchRuns();
     get().setActiveRunId(newRun.runId);
     return newRun.runId;
