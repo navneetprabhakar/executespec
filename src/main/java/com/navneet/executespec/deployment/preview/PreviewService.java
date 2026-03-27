@@ -318,13 +318,15 @@ public class PreviewService {
                 return;
             }
 
-            // Phase 1: Generate Dockerfile
+            // Phase 1: Generate Dockerfile (Cloud Run-compatible, no ttyd for CLI projects)
             broadcaster.emit(runId, new RunEvent("PREVIEW_ANALYZING", runId, null,
                     "Generating Dockerfile...", Instant.now()));
             Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
             backupIfExists(workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
             backupIfExists(workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
-            String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
+            // Use Cloud Run-specific Dockerfile generator — handles $PORT env var,
+            // and avoids ttyd (CLI_TERMINAL) which doesn't work on Cloud Run (WebSocket + 429 on startup probe).
+            String generatedDockerfile = dockerfileGen.generateForCloudRun(type, workspace);
             log.info("Preview Dockerfile for run {} (type={}, cloud-run):\n{}", runId, type, generatedDockerfile);
             Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
 
@@ -353,9 +355,9 @@ public class PreviewService {
             broadcaster.emit(runId, new RunEvent("PREVIEW_STARTING", runId, null,
                     "Deploying to Cloud Run...", Instant.now()));
 
-            int containerPort = type.getContainerPort();
+            // Cloud Run always uses port 8080 — generateForCloudRun() normalizes all ports to 8080
             CloudRunClient.DeployResult deployResult = cloudRunClient.deployPreview(
-                    serviceName, imageUri, "1", "512Mi", envVars, containerPort);
+                    serviceName, imageUri, "1", "512Mi", envVars, 8080);
 
             String previewUrl = deployResult.serviceUrl();
             if (previewUrl == null || previewUrl.isBlank()) {
