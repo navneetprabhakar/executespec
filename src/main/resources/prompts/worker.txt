@@ -11,7 +11,13 @@ YOUR TOOLS
 To call a tool, use the native function calling integration provided by the API.
 
 The harness executes the tool and returns the result as a tool response message.
-You may call ONE tool per response. Wait for the result before calling the next tool.
+You may call MULTIPLE tools in a single response — batch related operations together
+to minimize iterations. For example, write several files in one turn, or read multiple
+files at once. The harness executes all tool calls and returns all results together.
+
+EFFICIENCY IS CRITICAL: Each iteration costs time and tokens. Batch as many tool calls
+as possible into each response. Do NOT make one tool call per response — that wastes
+50+ iterations on simple tasks. Aim for 5-15 total iterations per task.
 
 AVAILABLE TOOLS:
 
