@@ -7,6 +7,7 @@ import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.GitTool;
+import io.micrometer.context.ContextSnapshotFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -21,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -65,9 +67,10 @@ public class ApiTestSuiteAgent {
 
     /** Called post-merge via virtual thread from PipelineHarness. Non-fatal. */
     public void generateAsync(PipelineRun run) {
+        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
         Thread.ofVirtual()
                 .name("api-spec-" + run.getRunId())
-                .start(() -> safeGenerate(run));
+                .start(snapshot.wrap(() -> safeGenerate(run)));
     }
 
     // ── Implementation ────────────────────────────────────────────────────────
@@ -93,26 +96,26 @@ public class ApiTestSuiteAgent {
             return;
         }
 
-        // Find controller source files
-        List<String> controllers = findControllerFiles(ws);
-        if (controllers.isEmpty()) {
-            log.info("ApiTestSuiteAgent: no controller files — skipping spec gen for run {}", runId);
+        // Find API route/controller source files (any language)
+        List<String> apiFiles = findApiRouteFiles(ws);
+        if (apiFiles.isEmpty()) {
+            log.info("ApiTestSuiteAgent: no API route/controller files — skipping spec gen for run {}", runId);
             return;
         }
 
-        log.info("ApiTestSuiteAgent: generating OpenAPI spec for run {} ({} controller(s))",
-                runId, controllers.size());
+        log.info("ApiTestSuiteAgent: generating OpenAPI spec for run {} ({} API file(s))",
+                runId, apiFiles.size());
         broadcaster.emit(runId, RunEvent.log(runId, "api-test-suite",
-                "📄 Generating OpenAPI 3.0 spec from " + controllers.size() + " controller(s)..."));
+                "Generating OpenAPI 3.0 spec from " + apiFiles.size() + " API file(s)..."));
 
-        // Read controller source
-        String controllerContent = readFiles(runId, controllers);
+        // Read API source
+        String controllerContent = readFiles(runId, apiFiles);
 
         // Call LLM
         String system = promptResource.getContentAsString(StandardCharsets.UTF_8);
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(system),
-                new UserMessage("Generate OpenAPI 3.0 YAML for these controllers:\n\n" + controllerContent)));
+                new UserMessage("Generate OpenAPI 3.0 YAML for these backend API source files:\n\n" + controllerContent)));
 
         var llmResponse = llmRouter.callWithFallback(
                 props.getProvider(), props.getModel(),
@@ -176,19 +179,116 @@ public class ApiTestSuiteAgent {
         }
     }
 
-    private List<String> findControllerFiles(Path ws) {
+    /** Detect API route/controller files across all supported languages. */
+    private List<String> findApiRouteFiles(Path ws) {
+        // File-name patterns that strongly indicate REST API route definitions
+        Set<String> javaPatterns = Set.of("Controller.java", "Resource.java");
+        Set<String> exactNames = Set.of(
+                "routes.rb",       // Rails
+                "api.php",         // Laravel
+                "urls.py",         // Django
+                "views.py",        // Django REST
+                "main.go"          // Go (often single-file API servers)
+        );
+
         try (Stream<Path> s = Files.walk(ws)) {
-            return s.filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith(".java"))
-                    .filter(p -> {
-                        String name = p.getFileName().toString();
-                        return name.endsWith("Controller.java") || name.endsWith("Resource.java");
-                    })
-                    .map(p -> ws.relativize(p).toString())
+            List<Path> candidates = s.filter(Files::isRegularFile)
+                    .filter(p -> !p.toString().contains("node_modules"))
+                    .filter(p -> !p.toString().contains(".git"))
+                    .filter(p -> !p.toString().contains("__pycache__"))
+                    .filter(p -> !p.toString().contains("vendor"))
                     .collect(Collectors.toList());
+
+            // First pass: collect files matching name patterns
+            List<String> results = new java.util.ArrayList<>();
+            for (Path p : candidates) {
+                String name = p.getFileName().toString();
+                String rel = ws.relativize(p).toString();
+
+                // Java Spring controllers
+                if (javaPatterns.stream().anyMatch(name::endsWith)) {
+                    results.add(rel);
+                    continue;
+                }
+                // Exact name matches
+                if (exactNames.contains(name)) {
+                    results.add(rel);
+                    continue;
+                }
+                // Python: files with route decorators (FastAPI/Flask)
+                if (name.endsWith(".py") && (name.contains("route") || name.contains("api") || name.equals("app.py") || name.equals("server.py"))) {
+                    results.add(rel);
+                    continue;
+                }
+                // Node/TS: route files
+                if ((name.endsWith(".js") || name.endsWith(".ts")) && (name.contains("route") || name.contains("controller") || name.equals("server.js") || name.equals("server.ts") || name.equals("app.js") || name.equals("app.ts") || name.equals("index.js") || name.equals("index.ts"))) {
+                    results.add(rel);
+                    continue;
+                }
+                // Go: handler files
+                if (name.endsWith(".go") && (name.contains("handler") || name.contains("route") || name.contains("controller") || name.contains("api"))) {
+                    results.add(rel);
+                    continue;
+                }
+                // Rust: route/handler files
+                if (name.endsWith(".rs") && (name.contains("route") || name.contains("handler") || name.equals("main.rs") || name.equals("lib.rs"))) {
+                    results.add(rel);
+                    continue;
+                }
+                // Ruby: controllers
+                if (name.endsWith(".rb") && (name.contains("controller") || name.contains("api"))) {
+                    results.add(rel);
+                    continue;
+                }
+                // PHP: controllers
+                if (name.endsWith(".php") && (name.contains("Controller") || name.contains("controller") || name.contains("Route"))) {
+                    results.add(rel);
+                }
+            }
+
+            // If no files found by name, do content scan for route patterns in Python/Node entry files
+            if (results.isEmpty()) {
+                results = scanForRoutePatterns(ws, candidates);
+            }
+
+            return results;
         } catch (IOException e) {
             return List.of();
         }
+    }
+
+    /** Fallback: scan source files for common route decorator/function patterns. */
+    private List<String> scanForRoutePatterns(Path ws, List<Path> candidates) {
+        List<String> results = new java.util.ArrayList<>();
+        Set<String> routePatterns = Set.of(
+                "@app.route", "@app.get", "@app.post", "@router.",  // Python Flask/FastAPI
+                "app.get(", "app.post(", "app.put(", "app.delete(",  // Node Express
+                "router.get(", "router.post(",                        // Node Express Router
+                "HandleFunc(", "gin.Default(", "echo.New(",           // Go
+                "#[get(", "#[post(", "web::resource",                 // Rust Actix
+                "Route::get(", "Route::post("                         // PHP Laravel
+        );
+
+        for (Path p : candidates) {
+            String name = p.getFileName().toString();
+            if (!(name.endsWith(".py") || name.endsWith(".js") || name.endsWith(".ts") ||
+                    name.endsWith(".go") || name.endsWith(".rs") || name.endsWith(".rb") ||
+                    name.endsWith(".php"))) continue;
+
+            try {
+                String content = Files.readString(p);
+                if (content.length() > 50_000) continue; // skip large files
+                for (String pattern : routePatterns) {
+                    if (content.contains(pattern)) {
+                        results.add(ws.relativize(p).toString());
+                        break;
+                    }
+                }
+            } catch (IOException ignored) {}
+
+            if (results.size() >= 10) break; // cap to avoid reading too many files
+        }
+        return results;
     }
 
     private String readFiles(String runId, List<String> relativePaths) {

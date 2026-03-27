@@ -32,14 +32,16 @@ public class ComposeFileGenerator {
      * @param hostPort      allocated host port for the app service
      * @return path to the generated docker-compose.yml
      */
-    public Path generate(Path workspacePath, PreviewProjectType projectType,
+    public Path generate(Path workspacePath, PreviewProjectType projectType, PreviewMode previewMode,
                          DatabaseType databaseType, Map<String, String> envVars, int hostPort) {
 
-        int containerPort = projectType.getContainerPort();
+        // CLI (ttyd) and MCP (Inspector) always bind to 8080; web apps use their native port
+        int containerPort = (previewMode == PreviewMode.WEB) ? projectType.getContainerPort() : 8080;
 
-        // Determine resource limits
-        boolean heavyWeight = (projectType == PreviewProjectType.SPRING_BOOT
-                || projectType == PreviewProjectType.FULL_STACK);
+        // Determine resource limits — CLI/MCP are lightweight
+        boolean heavyWeight = previewMode == PreviewMode.WEB
+                && (projectType == PreviewProjectType.SPRING_BOOT
+                    || projectType == PreviewProjectType.FULL_STACK);
         String cpu = heavyWeight ? "1.5" : "0.5";
         String mem = heavyWeight ? "2G" : "512M";
 

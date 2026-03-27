@@ -90,6 +90,26 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.PYTHON;
         }
 
+        // 3b. Go
+        if (Files.exists(workspace.resolve("go.mod"))) {
+            return PreviewProjectType.GO;
+        }
+
+        // 3c. Rust
+        if (Files.exists(workspace.resolve("Cargo.toml"))) {
+            return PreviewProjectType.RUST;
+        }
+
+        // 3d. Ruby
+        if (Files.exists(workspace.resolve("Gemfile"))) {
+            return PreviewProjectType.RUBY;
+        }
+
+        // 3e. PHP
+        if (Files.exists(workspace.resolve("composer.json")) || hasPhpFiles(workspace)) {
+            return PreviewProjectType.PHP;
+        }
+
         // 4. Full-stack: scan subdirectories (frontend/ + backend/, client/ + server/, etc.)
         // This handles projects where frontend and backend are in separate directories
         // without npm workspaces or a root-level package.json
@@ -134,6 +154,10 @@ public class DevDockerfileGenerator {
             case NODE_BACKEND -> nodeBackendDockerfile(workspace);
             case SPRING_BOOT -> springBootDockerfile(workspace);
             case PYTHON -> pythonDockerfile(workspace);
+            case GO -> goDockerfile(workspace);
+            case RUBY -> rubyDockerfile(workspace);
+            case PHP -> phpDockerfile(workspace);
+            case RUST -> rustDockerfile(workspace);
             case FULL_STACK -> nodeFrontendDockerfile(workspace); // fallback
             case STATIC_HTML -> staticHtmlDockerfile();
         };
@@ -205,8 +229,20 @@ public class DevDockerfileGenerator {
         dockerfile = dockerfile.replace(
                 "CMD [\"mvn\", \"spring-boot:run\", \"-DskipTests\", \"-q\"]",
                 "CMD SERVER_PORT=${PORT:-8080} mvn spring-boot:run -DskipTests -q");
+        // ttyd: replace hardcoded port with $PORT for Cloud Run
+        dockerfile = dockerfile.replace("\"ttyd\", \"--port\", \"8080\"",
+                "\"sh\", \"-c\", \"ttyd --port ${PORT:-8080}\"");
+        // MCP Inspector: replace hardcoded port with $PORT
+        dockerfile = dockerfile.replace("--port 8080 --", "--port ${PORT:-8080} --");
         // Full-stack: Cloud Run only supports one port — use frontend port for preview
         dockerfile = dockerfile.replaceAll("EXPOSE \\d+ \\d+", "EXPOSE 8080");
+        // Ruby: Sinatra default 4567 → Cloud Run PORT
+        dockerfile = dockerfile.replace("EXPOSE 4567", "EXPOSE 8080");
+        dockerfile = dockerfile.replace("\"--port\", \"4567\"", "\"--port\", \"${PORT:-8080}\"");
+        // Go: already uses 8080, just ensure shell form for PORT support
+        // PHP: built-in server port
+        dockerfile = dockerfile.replace("\"php\", \"-S\", \"0.0.0.0:8080\"",
+                "\"sh\", \"-c\", \"php -S 0.0.0.0:${PORT:-8080}\"");
 
         return dockerfile;
     }
@@ -855,6 +891,112 @@ public class DevDockerfileGenerator {
         }
     }
 
+    private boolean hasPhpFiles(Path workspace) {
+        try (Stream<Path> files = Files.list(workspace)) {
+            return files.anyMatch(p -> p.getFileName().toString().toLowerCase().endsWith(".php"));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private String findRubyEntryPoint(Path workspace) {
+        // Priority order: app.rb, server.rb, main.rb, then first .rb file
+        for (String candidate : List.of("app.rb", "server.rb", "main.rb")) {
+            if (Files.exists(workspace.resolve(candidate))) {
+                return candidate;
+            }
+        }
+        try (Stream<Path> files = Files.list(workspace)) {
+            return files
+                    .filter(p -> p.getFileName().toString().endsWith(".rb"))
+                    .map(p -> p.getFileName().toString())
+                    .findFirst()
+                    .orElse("app.rb");
+        } catch (IOException e) {
+            return "app.rb";
+        }
+    }
+
+    private String goDockerfile(Path workspace) {
+        return """
+                FROM golang:1.22-alpine
+                WORKDIR /app
+                LABEL preview=true
+                COPY go.mod go.sum* ./
+                RUN go mod download 2>/dev/null || true
+                COPY . .
+                RUN go build -o server . 2>/dev/null || true
+                EXPOSE 8080
+                CMD ["sh", "-c", "if [ -f server ]; then ./server; else go run .; fi"]
+                """;
+    }
+
+    private String rubyDockerfile(Path workspace) {
+        // Detect entry file: app.rb, server.rb, main.rb, config.ru, or first .rb
+        String entryFile = findRubyEntryPoint(workspace);
+        boolean hasBundler = Files.exists(workspace.resolve("Gemfile"));
+
+        String installStep = hasBundler
+                ? "RUN apk add --no-cache build-base && bundle install"
+                : "# No Gemfile found";
+
+        // If config.ru exists, use rackup
+        if (Files.exists(workspace.resolve("config.ru"))) {
+            return """
+                    FROM ruby:3.2-alpine
+                    WORKDIR /app
+                    LABEL preview=true
+                    COPY Gemfile* ./
+                    """ + installStep + "\n" + """
+                    COPY . .
+                    EXPOSE 4567
+                    CMD ["bundle", "exec", "rackup", "--host", "0.0.0.0", "--port", "4567"]
+                    """;
+        }
+
+        return """
+                FROM ruby:3.2-alpine
+                WORKDIR /app
+                LABEL preview=true
+                COPY Gemfile* ./
+                """ + installStep + "\n" + """
+                COPY . .
+                EXPOSE 4567
+                CMD ["ruby", \"""" + entryFile + "\"]\n";
+    }
+
+    private String phpDockerfile(Path workspace) {
+        boolean hasComposer = Files.exists(workspace.resolve("composer.json"));
+        String installStep = hasComposer
+                ? "RUN curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
+                : "# No composer.json found";
+
+        return """
+                FROM php:8.2-cli
+                WORKDIR /app
+                LABEL preview=true
+                COPY . .
+                """ + installStep + "\n" + """
+                EXPOSE 8080
+                CMD ["php", "-S", "0.0.0.0:8080"]
+                """;
+    }
+
+    private String rustDockerfile(Path workspace) {
+        return """
+                FROM rust:1.77-slim
+                RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+                WORKDIR /app
+                LABEL preview=true
+                COPY Cargo.toml Cargo.lock* ./
+                RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src
+                COPY . .
+                RUN cargo build --release 2>/dev/null || true
+                EXPOSE 8080
+                CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec \\"$bin\\"; else cargo run --release; fi"]
+                """;
+    }
+
     private String staticHtmlDockerfile() {
         // Use echo with proper escaping. printf '\$uri' produces literal \$uri (bug).
         // echo '...$uri...' with single quotes preserves $uri correctly.
@@ -869,6 +1011,284 @@ public class DevDockerfileGenerator {
                 EXPOSE 8080
                 CMD ["nginx", "-g", "daemon off;"]
                 """;
+    }
+
+    // ── Preview mode detection ─────────────────────────────────────────────
+
+    /**
+     * Detect how a project should be previewed: as a web app (direct HTTP),
+     * a CLI app (wrapped by ttyd), or an MCP server (wrapped by Inspector).
+     */
+    public PreviewMode detectMode(PreviewProjectType type, Path workspace) {
+        if (isMcpProject(type, workspace)) return PreviewMode.MCP_INSPECTOR;
+        if (isCliProject(type, workspace)) return PreviewMode.CLI_TERMINAL;
+        return PreviewMode.WEB;
+    }
+
+    private boolean isMcpProject(PreviewProjectType type, Path workspace) {
+        // Node: check package.json for MCP SDK
+        if (type == PreviewProjectType.NODE_BACKEND || type == PreviewProjectType.NODE_FRONTEND) {
+            JsonNode pkg = parsePackageJson(workspace);
+            if (pkg != null) {
+                for (String field : List.of("dependencies", "devDependencies")) {
+                    JsonNode deps = pkg.get(field);
+                    if (deps != null && (deps.has("@modelcontextprotocol/sdk") || deps.has("mcp"))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        // Python: check requirements.txt / pyproject.toml for mcp package
+        if (type == PreviewProjectType.PYTHON) {
+            return hasDependency(workspace, "mcp") || hasDependency(workspace, "modelcontextprotocol");
+        }
+        return false;
+    }
+
+    private boolean isCliProject(PreviewProjectType type, Path workspace) {
+        return switch (type) {
+            case PYTHON -> {
+                // Django project → not CLI
+                if (Files.exists(workspace.resolve("manage.py"))) yield false;
+                // Web framework in deps → not CLI
+                if (hasDependency(workspace, "fastapi") || hasDependency(workspace, "flask")
+                        || hasDependency(workspace, "uvicorn") || hasDependency(workspace, "django")) {
+                    yield false;
+                }
+                // Web framework in source → not CLI
+                if (findPythonFileWithPattern(workspace, "from fastapi", "import fastapi",
+                        "from flask", "import flask", "from django") != null) {
+                    yield false;
+                }
+                yield true;
+            }
+            case GO -> !hasGoWebImports(workspace);
+            case RUST -> {
+                Path cargo = workspace.resolve("Cargo.toml");
+                if (Files.exists(cargo)) {
+                    yield !fileContainsPattern(cargo, "actix-web", "rocket", "axum", "warp", "hyper");
+                }
+                yield true;
+            }
+            case RUBY -> {
+                if (Files.exists(workspace.resolve("config.ru"))) yield false;
+                Path gemfile = workspace.resolve("Gemfile");
+                if (Files.exists(gemfile)) {
+                    yield !fileContainsPattern(gemfile, "sinatra", "rails", "rack", "roda", "hanami");
+                }
+                yield true;
+            }
+            case PHP -> {
+                Path composer = workspace.resolve("composer.json");
+                if (Files.exists(composer)) {
+                    yield !fileContainsPattern(composer, "laravel", "symfony", "slim/slim");
+                }
+                yield true;
+            }
+            // NODE_BACKEND already implies web framework detected
+            case NODE_BACKEND, NODE_FRONTEND, SPRING_BOOT, FULL_STACK, STATIC_HTML -> false;
+        };
+    }
+
+    private boolean hasGoWebImports(Path workspace) {
+        try (Stream<Path> files = Files.list(workspace)) {
+            for (Path f : files.filter(p -> p.toString().endsWith(".go")).limit(20).toList()) {
+                if (fileContainsPattern(f, "net/http", "gin-gonic", "gofiber/fiber",
+                        "labstack/echo", "go-chi/chi", "gorilla/mux")) {
+                    return true;
+                }
+            }
+        } catch (IOException e) { /* ignore */ }
+        // Also check cmd/ and internal/ subdirectories
+        for (String sub : new String[]{"cmd", "internal", "pkg"}) {
+            Path subDir = workspace.resolve(sub);
+            if (Files.isDirectory(subDir)) {
+                try (Stream<Path> files = Files.walk(subDir, 2)) {
+                    for (Path f : files.filter(p -> p.toString().endsWith(".go")).limit(20).toList()) {
+                        if (fileContainsPattern(f, "net/http", "gin-gonic", "gofiber/fiber",
+                                "labstack/echo", "go-chi/chi", "gorilla/mux")) {
+                            return true;
+                        }
+                    }
+                } catch (IOException e) { /* ignore */ }
+            }
+        }
+        return false;
+    }
+
+    // ── Mode-aware Dockerfile generation ─────────────────────────────────────
+
+    /**
+     * Generate Dockerfile content for the given project type and preview mode.
+     */
+    public String generate(PreviewProjectType type, Path workspace, PreviewMode mode) {
+        if (mode == PreviewMode.CLI_TERMINAL) return cliDockerfile(type, workspace);
+        if (mode == PreviewMode.MCP_INSPECTOR) return mcpDockerfile(type, workspace);
+        return generate(type, workspace); // existing WEB behaviour
+    }
+
+    private String cliDockerfile(PreviewProjectType type, Path workspace) {
+        return switch (type) {
+            case PYTHON -> cliPythonDockerfile(workspace);
+            case GO -> cliGoDockerfile();
+            case RUST -> cliRustDockerfile();
+            case RUBY -> cliRubyDockerfile(workspace);
+            case PHP -> cliPhpDockerfile(workspace);
+            default -> generate(type, workspace); // fallback to web
+        };
+    }
+
+    private String cliPythonDockerfile(Path workspace) {
+        String entryFile = findPythonEntryPoint(workspace);
+        String installStep;
+        if (Files.exists(workspace.resolve("requirements.txt"))) {
+            installStep = "RUN pip install --no-cache-dir -r requirements.txt";
+        } else if (Files.exists(workspace.resolve("pyproject.toml"))) {
+            installStep = "RUN pip install --no-cache-dir .";
+        } else {
+            installStep = "# No requirements file found";
+        }
+        return """
+                FROM python:3.12-slim
+                WORKDIR /app
+                LABEL preview=true
+                RUN apt-get update && apt-get install -y ttyd && rm -rf /var/lib/apt/lists/*
+                COPY requirements.txt* pyproject.toml* ./
+                """ + installStep + "\n" + """
+                COPY . .
+                EXPOSE 8080
+                CMD ["ttyd", "--port", "8080", "--writable", "python", \"""" + entryFile + "\"]\n";
+    }
+
+    private String cliGoDockerfile() {
+        return """
+                FROM golang:1.22-alpine
+                WORKDIR /app
+                LABEL preview=true
+                RUN apk add --no-cache ttyd
+                COPY go.mod go.sum* ./
+                RUN go mod download 2>/dev/null || true
+                COPY . .
+                RUN go build -o app . 2>/dev/null || true
+                EXPOSE 8080
+                CMD ["sh", "-c", "if [ -f app ]; then ttyd --port 8080 --writable ./app; else ttyd --port 8080 --writable go run .; fi"]
+                """;
+    }
+
+    private String cliRustDockerfile() {
+        return """
+                FROM rust:1.77-slim
+                RUN apt-get update && apt-get install -y pkg-config libssl-dev ttyd && rm -rf /var/lib/apt/lists/*
+                WORKDIR /app
+                LABEL preview=true
+                COPY Cargo.toml Cargo.lock* ./
+                RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src
+                COPY . .
+                RUN cargo build --release 2>/dev/null || true
+                EXPOSE 8080
+                CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec ttyd --port 8080 --writable \\"$bin\\"; else ttyd --port 8080 --writable cargo run --release; fi"]
+                """;
+    }
+
+    private String cliRubyDockerfile(Path workspace) {
+        String entryFile = findRubyEntryPoint(workspace);
+        boolean hasBundler = Files.exists(workspace.resolve("Gemfile"));
+        String installStep = hasBundler
+                ? "RUN apk add --no-cache build-base ttyd && bundle install"
+                : "RUN apk add --no-cache ttyd";
+        return """
+                FROM ruby:3.2-alpine
+                WORKDIR /app
+                LABEL preview=true
+                COPY Gemfile* ./
+                """ + installStep + "\n" + """
+                COPY . .
+                EXPOSE 8080
+                CMD ["ttyd", "--port", "8080", "--writable", "ruby", \"""" + entryFile + "\"]\n";
+    }
+
+    private String cliPhpDockerfile(Path workspace) {
+        boolean hasComposer = Files.exists(workspace.resolve("composer.json"));
+        String installStep = hasComposer
+                ? "RUN apt-get update && apt-get install -y ttyd && rm -rf /var/lib/apt/lists/* && " +
+                  "curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
+                : "RUN apt-get update && apt-get install -y ttyd && rm -rf /var/lib/apt/lists/*";
+        String entryFile = "index.php";
+        for (String candidate : new String[]{"main.php", "app.php", "index.php", "cli.php"}) {
+            if (Files.exists(workspace.resolve(candidate))) { entryFile = candidate; break; }
+        }
+        return """
+                FROM php:8.2-cli
+                WORKDIR /app
+                LABEL preview=true
+                COPY . .
+                """ + installStep + "\n" +
+                "EXPOSE 8080\n" +
+                "CMD [\"ttyd\", \"--port\", \"8080\", \"--writable\", \"php\", \"" + entryFile + "\"]\n";
+    }
+
+    // ── MCP Dockerfiles ──────────────────────────────────────────────────────
+
+    private String mcpDockerfile(PreviewProjectType type, Path workspace) {
+        if (type == PreviewProjectType.PYTHON) return mcpPythonDockerfile(workspace);
+        return mcpNodeDockerfile(workspace);
+    }
+
+    private String mcpNodeDockerfile(Path workspace) {
+        JsonNode pkg = parsePackageJson(workspace);
+        String serverCmd = "node index.js";
+        if (pkg != null) {
+            if (pkg.has("bin")) {
+                JsonNode bin = pkg.get("bin");
+                if (bin.isTextual()) {
+                    serverCmd = "node " + bin.asText();
+                } else if (bin.isObject()) {
+                    var fields = bin.fields();
+                    if (fields.hasNext()) {
+                        serverCmd = "node " + fields.next().getValue().asText();
+                    }
+                }
+            } else if (pkg.has("main")) {
+                serverCmd = "node " + pkg.get("main").asText();
+            }
+        }
+        return """
+                FROM node:20-alpine
+                WORKDIR /app
+                LABEL preview=true
+                RUN npm install -g @modelcontextprotocol/inspector
+                COPY package*.json ./
+                RUN npm install
+                COPY . .
+                EXPOSE 8080
+                ENV CLIENT_PORT=8080
+                ENV SERVER_PORT=9315
+                CMD ["sh", "-c", "npx @modelcontextprotocol/inspector --port 8080 -- """ + serverCmd + "\"]\n";
+    }
+
+    private String mcpPythonDockerfile(Path workspace) {
+        String entryFile = findPythonEntryPoint(workspace);
+        String installStep;
+        if (Files.exists(workspace.resolve("requirements.txt"))) {
+            installStep = "RUN pip install --no-cache-dir -r requirements.txt";
+        } else if (Files.exists(workspace.resolve("pyproject.toml"))) {
+            installStep = "RUN pip install --no-cache-dir .";
+        } else {
+            installStep = "# No requirements file found";
+        }
+        return """
+                FROM python:3.12-slim
+                WORKDIR /app
+                LABEL preview=true
+                RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
+                RUN npm install -g @modelcontextprotocol/inspector
+                COPY requirements.txt* pyproject.toml* ./
+                """ + installStep + "\n" + """
+                COPY . .
+                EXPOSE 8080
+                ENV CLIENT_PORT=8080
+                ENV SERVER_PORT=9315
+                CMD ["sh", "-c", "npx @modelcontextprotocol/inspector --port 8080 -- python """ + entryFile + "\"]\n";
     }
 
     // ── Helper methods ──────────────────────────────────────────────────────

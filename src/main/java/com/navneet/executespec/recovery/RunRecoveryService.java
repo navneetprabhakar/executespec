@@ -11,6 +11,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRecovery;
 import com.navneet.executespec.state.repository.RunRecoveryRepository;
 import com.navneet.executespec.tool.FileLockTool;
+import io.micrometer.context.ContextSnapshotFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -94,9 +95,10 @@ public class RunRecoveryService {
         ));
 
         final PipelineRun runRef = run;
+        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
         Thread.ofVirtual()
             .name("auto-restart-" + run.getRunId().substring(0, 8))
-            .start(() -> {
+            .start(snapshot.wrap(() -> {
                 try {
                     Thread.sleep(backoffMs);
                 } catch (InterruptedException ie) {
@@ -135,7 +137,7 @@ public class RunRecoveryService {
                     RunEvent.runRestarted(runRef.getRunId(), newRunId));
                 log.info("Auto-restarted run {} → new run {} (restart #{})",
                     runRef.getRunId(), newRunId, restartNum);
-            });
+            }));
 
         return true;
     }

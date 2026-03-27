@@ -73,7 +73,7 @@ public class PreviewService {
 
     private static final Set<String> COMPLETE_STATUSES = Set.of("COMPLETE", "PARTIAL");
     private static final Set<String> PREVIEW_ALLOWED_STATUSES = Set.of(
-            "COMPLETE", "PARTIAL", "WORKING", "REVIEWING");
+            "COMPLETE", "PARTIAL", "WORKING", "REVIEWING", "AWAITING_MERGE");
     private static final String COMPOSE_PREFIX = "es-preview-";
     private static final int HEALTH_CHECK_RETRIES = 30;
     private static final int HEALTH_CHECK_INTERVAL_MS = 2000;
@@ -199,12 +199,16 @@ public class PreviewService {
             throw new PreviewException("Unsupported project type — could not detect build system.");
         }
 
+        // Detect preview mode: WEB, CLI_TERMINAL, or MCP_INSPECTOR
+        PreviewMode mode = dockerfileGen.detectMode(type, workspace);
+        log.info("Preview mode for run {}: {} (type={})", runId, mode, type);
+
         // Create initial session
         String projectName = composeProjectName(runId);
         Duration ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
 
         PreviewSession session = new PreviewSession(
-                runId, projectName, type, null,
+                runId, projectName, type, mode, null,
                 PreviewStatus.ANALYZING, null, 0, null,
                 Instant.now(), Instant.now().plus(ttl)
         );
@@ -214,10 +218,10 @@ public class PreviewService {
         Metrics.ACTIVE_PREVIEWS.incrementAndGet();
         Counter.builder(PREVIEW_STARTS).register(meterRegistry).increment();
         Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
-        Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, projectName, safeEnvVars));
+        Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars));
 
-        log.info("Preview started for run {} (type={}, project={}, ttl={}min)",
-                runId, type, projectName, ttl.toMinutes());
+        log.info("Preview started for run {} (type={}, mode={}, project={}, ttl={}min)",
+                runId, type, mode, projectName, ttl.toMinutes());
         return session;
     }
 
@@ -269,7 +273,7 @@ public class PreviewService {
     // ── Private: build and start with Docker Compose ────────────────────────
 
     private void buildAndStart(String runId, Path workspace, PreviewProjectType type,
-                               String projectName, Map<String, String> envVars) {
+                               PreviewMode mode, String projectName, Map<String, String> envVars) {
         Instant deadline = Instant.now().plusSeconds(props.getTotalStartupTimeoutSeconds());
         Instant previewStart = Instant.now();
         int hostPort = 0;
@@ -284,7 +288,7 @@ public class PreviewService {
             if (dbType != null) {
                 log.info("Preview for run {}: detected database {}", runId, dbType);
                 updateSession(runId, s -> new PreviewSession(
-                        s.runId(), s.composeProjectName(), s.projectType(), dbType,
+                        s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), dbType,
                         PreviewStatus.ANALYZING, s.url(), s.hostPort(), null,
                         s.startedAt(), s.expiresAt()));
             }
@@ -295,21 +299,21 @@ public class PreviewService {
             // Backup user's docker-compose/Dockerfile if they exist (our generated ones take precedence)
             backupIfExists(workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
             backupIfExists(workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
-            String generatedDockerfile = dockerfileGen.generate(type, workspace);
+            String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
             log.info("Preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
             Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
 
             // Phase 3: Allocate port + generate docker-compose.yml
             checkDeadline(deadline, "compose file generation");
             hostPort = portPool.allocate(runId);
-            Path composeFile = composeFileGen.generate(workspace, type, dbType, envVars, hostPort);
+            Path composeFile = composeFileGen.generate(workspace, type, mode, dbType, envVars, hostPort);
             log.info("Preview compose file for run {} at port {}", runId, hostPort);
 
             // Phase 4: docker compose up --build (build + start containers)
             Instant buildStart = Instant.now();
             final int buildPort = hostPort;
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     PreviewStatus.BUILDING, s.url(), buildPort, null,
                     s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_BUILDING", runId, null,
@@ -384,7 +388,7 @@ public class PreviewService {
             checkDeadline(deadline, "health check");
             final int allocatedPort = hostPort;
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     PreviewStatus.STARTING, previewUrl, allocatedPort, null,
                     s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_STARTING", runId, null,
@@ -414,7 +418,7 @@ public class PreviewService {
 
             final int finalPort = hostPort;
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     PreviewStatus.RUNNING, previewUrl, finalPort, null,
                     s.startedAt(), s.expiresAt()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null,
@@ -439,7 +443,7 @@ public class PreviewService {
                     .register(meterRegistry).increment();
             cleanupOnFailure(runId, projectName, hostPort);
             updateSession(runId, s -> new PreviewSession(
-                    s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     PreviewStatus.TIMED_OUT, s.url(), s.hostPort(),
                     "Preview startup timed out after " + props.getTotalStartupTimeoutSeconds()
                             + "s during: " + e.getPhase(),
@@ -550,7 +554,7 @@ public class PreviewService {
         }
 
         updateSession(runId, s -> new PreviewSession(
-                s.runId(), s.composeProjectName(), s.projectType(), s.databaseType(),
+                s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                 PreviewStatus.FAILED, s.url(), s.hostPort(), message,
                 s.startedAt(), s.expiresAt()));
         broadcaster.emit(runId, new RunEvent("PREVIEW_FAILED", runId, null, message, Instant.now()));

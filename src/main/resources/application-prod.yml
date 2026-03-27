@@ -1,0 +1,55 @@
+# ── Prod profile: production deployment ────────────────────────────────────
+# Provider weights: Anthropic-heavy for quality, with fallback
+# Stricter concurrency limits, full observability
+# API keys: set via environment variables / Secret Manager
+
+executespec:
+  routing:
+    provider-weights:
+      anthropic: 6
+      google: 2
+      openai: 2
+
+spring:
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY}
+    openai:
+      api-key: ${OPENAI_API_KEY}
+    google:
+      genai:
+        api-key: ${GOOGLE_API_KEY:}
+
+agent:
+  concurrency:
+    max-runs: 20
+    max-task-duration-minutes: 25
+  recovery:
+    enabled: true
+    warn-threshold-minutes: 8
+    act-threshold-minutes: 15
+    max-auto-restarts: 2
+    auto-resume-on-startup: false
+
+app:
+  mail:
+    smtp:
+      password: ${SMTP_PASSWORD}
+  jwt:
+    secret: ${JWT_SECRET}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://executespec.ai}
+
+logging:
+  level:
+    com.navneet.executespec: INFO
+    org.springframework.ai: WARN
+
+management:
+  tracing:
+    sampling:
+      probability: ${OTEL_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    metrics:
+      export:
+        enabled: true

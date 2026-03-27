@@ -55,7 +55,16 @@ public class GcsWorkspaceStore {
         Storage s = null;
         try {
             s = StorageOptions.getDefaultInstance().getService();
-            log.info("[GcsWorkspaceStore] Initialised — bucket={}, env={}", bucket(), environment);
+            // Verify bucket exists — if not, disable GCS operations to prevent
+            // repeated 404 upload failures that spam logs every 5 minutes.
+            String b = bucket();
+            if (b != null && !b.isBlank() && s.get(b) == null) {
+                log.warn("[GcsWorkspaceStore] Bucket '{}' does not exist — disabling GCS workspace operations. " +
+                        "Create the bucket or set GCS_WORKSPACE_BUCKET='' to silence this.", b);
+                s = null;
+            } else {
+                log.info("[GcsWorkspaceStore] Initialised — bucket={}, env={}", b, environment);
+            }
         } catch (Exception e) {
             log.warn("[GcsWorkspaceStore] GCS unavailable (ADC may need refresh): {}. " +
                     "Run 'gcloud auth application-default login' to fix. " +

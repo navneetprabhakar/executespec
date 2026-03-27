@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.WorkerAgent;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.router.*;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -34,6 +35,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -71,6 +73,7 @@ public class SequentialTaskExecutor {
     private final ObjectMapper mapper;
     private final ObservationRegistry observationRegistry;
     private final MeterRegistry meterRegistry;
+    private final AgentProperties agentProperties;
 
     @Value("${executespec.validator.max-retries:3}")
     private int maxRetries;
@@ -189,10 +192,22 @@ public class SequentialTaskExecutor {
                     threads.add(vt);
                 }
 
-                // Wait for all tasks in this tier to complete before moving to next tier
+                // Wait for all tasks in this tier — bounded by maxTaskDurationMinutes to prevent infinite stalls
+                long joinTimeoutMs = TimeUnit.MINUTES.toMillis(
+                        agentProperties.getConcurrency().getMaxTaskDurationMinutes() + 2); // +2 min grace
                 for (Thread vt : threads) {
                     try {
-                        vt.join();
+                        vt.join(joinTimeoutMs);
+                        if (vt.isAlive()) {
+                            log.error("Worker thread {} exceeded {}min timeout — interrupting",
+                                    vt.getName(), agentProperties.getConcurrency().getMaxTaskDurationMinutes());
+                            vt.interrupt();
+                            // Give it 10s to clean up after interrupt
+                            vt.join(TimeUnit.SECONDS.toMillis(10));
+                            if (vt.isAlive()) {
+                                log.error("Worker thread {} still alive after interrupt — abandoning", vt.getName());
+                            }
+                        }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         log.error("Interrupted waiting for tier {} to complete", tierIdx);

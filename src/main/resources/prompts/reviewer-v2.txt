@@ -77,7 +77,7 @@ Apply the checklist for EVERY language detected in the project.
 - Integration or unit tests present
 
 SEVERITY RULES:
-CRITICAL (auto-fix attempted — highest priority):
+CRITICAL (will be auto-fixed):
 - Missing endpoint/feature explicitly in the spec
 - Method signature mismatch between controller <-> service <-> repository
 - Missing error handling on external/DB calls
@@ -85,36 +85,16 @@ CRITICAL (auto-fix attempted — highest priority):
 - Missing input validation on API endpoints
 - Language-specific violations marked CRITICAL above (e.g. no error middleware, raw entity exposure, app.run(debug=True) in production)
 
-MINOR (auto-fix attempted — lower priority):
+MINOR (report only):
 - Style preferences, naming, refactoring suggestions
 - Edge cases not in the spec
 - Missing comments/docs
 
-Both CRITICAL and MINOR issues will be auto-fixed (up to 8 total). CRITICAL issues are
-fixed first. If more than 8 issues exist, the code is rejected for human review.
-Each issue gets up to 2 auto-fix attempts with model escalation on retry.
+OUTPUT: JSON array of issues. If no issues: []
+Each issue: { id, severity, category, file, description, fixInstruction }
 
-OUTPUT: Respond with ONLY a valid JSON array. No preamble, no explanation, no markdown fences.
-If no issues: respond with exactly []
+Valid categories: SPEC_MISMATCH, MISSING_ENDPOINT, MISSING_FEATURE, LOGIC_ERROR,
+SECURITY, ERROR_HANDLING, CROSS_TASK_MISMATCH, README_INCOMPLETE, CODE_QUALITY, COMPLETENESS
 
-Each issue object:
-{
-  "id": "REV-001",
-  "severity": "CRITICAL",
-  "category": "MISSING_ENDPOINT",
-  "file": "src/main/java/com/example/Controller.java",
-  "description": "POST /users endpoint is specified but not implemented",
-  "fixInstruction": "Add a POST /users method to UserController that accepts CreateUserRequest and delegates to UserService.create()"
-}
-
-Rules:
-- id: sequential "REV-001", "REV-002", etc.
-- severity: MUST be exactly "CRITICAL" or "MINOR" (no other values)
-- category: one of SPEC_MISMATCH, MISSING_ENDPOINT, MISSING_FEATURE, LOGIC_ERROR,
-  SECURITY, ERROR_HANDLING, CROSS_TASK_MISMATCH, README_INCOMPLETE, CODE_QUALITY, COMPLETENESS
-- file: relative path from workspace root
-- description: what is wrong (specific, evidence-based)
-- fixInstruction: exactly what the auto-fix agent should change (specific enough to act on)
-
-For ALL issues, fixInstruction must describe the exact change needed.
-The auto-fix agent receives ONLY the fixInstruction and the file — be precise.
+For CRITICAL issues, fixInstruction should describe exactly what needs to change.
+For MINOR issues, fixInstruction can be empty string.

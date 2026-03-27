@@ -61,7 +61,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class LlmRouter {
 
-    public enum FallbackMode { IMMEDIATE, TASK_BOUNDARY }
+    public enum FallbackMode { IMMEDIATE, TASK_BOUNDARY, NO_FALLBACK }
 
     // ── Provider fallback chains (3-provider: Anthropic → Gemini → OpenAI) ──────
 
@@ -159,8 +159,12 @@ public class LlmRouter {
             // Resolve per-run keys to check provider restrictions
             ResolvedKeys runKeys = runKeyStore.get(runId);
 
+            // NO_FALLBACK mode: only try the primary provider (used when message history
+            // is provider-specific, e.g. OpenAI native tool calling with ToolResponseMessages)
+            int maxAttempts = (mode == FallbackMode.NO_FALLBACK) ? 1 : chain.size();
+
             Exception lastError = null;
-            for (int j = 0; j < chain.size(); j++) {
+            for (int j = 0; j < maxAttempts; j++) {
                 int i = (startIndex + j) % chain.size();
                 String provider = chain.get(i)[0];
                 String model    = chain.get(i)[1];

@@ -186,8 +186,8 @@ public class StateStore {
     public void saveReview(String runId, ReviewReport review) {
         PipelineRun run = runRepo.findById(runId).orElseThrow();
         run.setReviewJson(toJson(review));
-        run.setStatus("AWAITING_MERGE");
-        run.setCurrentGate("MERGE_APPROVAL");
+        // Status stays REVIEWING — merge is automatic (no gate).
+        // PipelineHarness.markComplete() advances the status after report generation.
         runRepo.save(run);
     }
 
@@ -195,8 +195,8 @@ public class StateStore {
     public void saveReviewV2(String runId, ReviewReportV2 review) {
         PipelineRun run = runRepo.findById(runId).orElseThrow();
         run.setReviewJson(toJson(review));
-        run.setStatus("AWAITING_MERGE");
-        run.setCurrentGate("MERGE_APPROVAL");
+        // Status stays REVIEWING — merge is automatic (no gate).
+        // PipelineHarness.markComplete() advances the status after report generation.
         runRepo.save(run);
     }
 

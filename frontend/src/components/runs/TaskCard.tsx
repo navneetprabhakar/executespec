@@ -67,11 +67,6 @@ export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
             {task.branchName && (
               <span className="text-xs text-zinc-600 font-mono">{task.branchName}</span>
             )}
-            {(task.model || task.assignedModel) && (
-              <span className="text-xs text-zinc-600">
-                {task.provider ? `${task.provider}/` : ''}{task.model || task.assignedModel}
-              </span>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-3 text-right flex-shrink-0">
