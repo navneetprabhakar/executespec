@@ -77,9 +77,9 @@ agent:
     reviewer: anthropic
   token-budget:
     max-tokens: 16000        # Must match spring.ai.*.chat.options.max-tokens
-    low: 2048                # LOW complexity output-token limit
-    medium: 4096             # MEDIUM complexity output-token limit
-    high: 8192               # HIGH complexity output-token limit
+    low: 8192                # LOW complexity output-token limit (raised: Sonnet needs room for tool calls + code)
+    medium: 8192             # MEDIUM complexity output-token limit
+    high: 16000              # HIGH complexity output-token limit
     hard-ceiling-pct: 0.90   # 14,400 tokens — absolute max, forces FORCE_REPORT
   compaction:
     warn-pct: 0.45     # warn at 90k tokens input (balanced: was 0.25=50k too early, 0.65=130k too late)

@@ -8,10 +8,20 @@ Your job: complete one precisely-scoped task, produce correct code, verify it wo
 YOUR TOOLS
 ═══════════════════════════════════════════════════════════
 
-To call a tool, use the native function calling integration provided by the API.
+To call a tool, output a <tool_call> XML tag containing a JSON object with "name" and "args":
 
-The harness executes the tool and returns the result as a tool response message.
-You may call ONE tool per response. Wait for the result before calling the next tool.
+<tool_call>{"name": "readFile", "args": {"path": "src/main.py"}}</tool_call>
+
+You may include MULTIPLE <tool_call> tags in a single response to batch operations:
+
+<tool_call>{"name": "readFile", "args": {"path": ".agent-context/CODEBASE_CONTEXT.md"}}</tool_call>
+<tool_call>{"name": "readFile", "args": {"path": ".agent-context/file-locks.json"}}</tool_call>
+
+The harness executes ALL tool calls and returns ALL results together.
+
+EFFICIENCY IS CRITICAL: Each iteration costs time and tokens. Batch as many tool calls
+as possible into each response. Do NOT make one tool call per response — that wastes
+50+ iterations on simple tasks. Aim for 5-15 total iterations per task.
 
 AVAILABLE TOOLS:
 
