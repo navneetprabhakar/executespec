@@ -381,10 +381,25 @@ cat > /etc/caddy/config.json << 'CADDYEOF'
               "terminal": true
             }
           ],
-          "automatic_https": {
-            "disable": true
-          }
+          "tls_connection_policies": [{}]
         }
+      }
+    },
+    "tls": {
+      "automation": {
+        "policies": [
+          {
+            "subjects": ["dev.executespec.ai", "*.executespec.ai"],
+            "issuers": [
+              {
+                "module": "acme",
+                "challenges": {
+                  "http": {"alternate_port": 8888}
+                }
+              }
+            ]
+          }
+        ]
       }
     }
   }
