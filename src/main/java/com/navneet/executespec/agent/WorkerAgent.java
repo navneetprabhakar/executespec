@@ -326,8 +326,9 @@ public class WorkerAgent {
 
                 // ── PATH B: Prompt-based tool calls (Anthropic/Google) ───────────────
                 if (assistantText != null && !assistantText.isBlank()) {
-                    log.info("[Worker {}] Iteration {} — output ({} chars)",
-                            taskId, iteration, assistantText.length());
+                    log.info("[Worker {}] Iteration {} — output ({} chars): {}",
+                            taskId, iteration, assistantText.length(),
+                            assistantText.length() <= 200 ? assistantText : assistantText.substring(0, 200) + "...");
 
                     // 1. Parse tool calls — JSON first (unified format), XML as legacy fallback
                     List<ParsedToolCall> toolCalls = parseJsonToolCalls(assistantText);
