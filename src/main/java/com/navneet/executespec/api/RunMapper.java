@@ -52,7 +52,8 @@ public class RunMapper {
             resolveProjectName(r.getProjectId()),
             resolveCreatorName(r.getCreatedByUserId()),
             r.getRunTitle(),
-            r.getRunSummary()
+            r.getRunSummary(),
+            r.getExecutionMode()
         );
     }
 
@@ -164,6 +165,7 @@ public class RunMapper {
             .applySuggestionCount(r.getApplySuggestionCount())
             .runTitle(r.getRunTitle())
             .runSummary(r.getRunSummary())
+            .executionMode(r.getExecutionMode())
             .build();
     }
 

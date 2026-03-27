@@ -1,0 +1,2 @@
+ALTER TABLE pipeline_run
+    ADD COLUMN execution_mode VARCHAR(20) NOT NULL DEFAULT 'PRODUCTION';

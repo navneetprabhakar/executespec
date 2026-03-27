@@ -174,6 +174,34 @@ public class ModelRouter {
         throw new IllegalStateException("No providers available for tier " + tier + ". Available: " + availableProviders);
     }
 
+    // ── Capped-tier overloads (for ExecutionMode tier ceilings) ────────────────
+
+    /**
+     * Select model for initial task, capped at the given tier ceiling.
+     * PROTOTYPE mode passes FAST, PRODUCTION passes POWER.
+     */
+    public ModelSelection selectForTask(TaskComplexity complexity, ModelTier ceiling,
+                                        Set<LlmProvider> availableProviders) {
+        ModelTier tier = complexityToTier(complexity);
+        ModelTier capped = tier.ordinal() > ceiling.ordinal() ? ceiling : tier;
+        return selectFromTier(capped, availableProviders);
+    }
+
+    /**
+     * Select model for retry, capped at the given tier ceiling.
+     * In PROTOTYPE mode the ceiling is FAST, preventing any escalation.
+     */
+    public ModelSelection selectForRetry(TaskComplexity complexity, int attempt,
+                                         ModelTier ceiling, Set<LlmProvider> availableProviders) {
+        ModelTier baseTier = complexityToTier(complexity);
+        ModelTier escalated = escalate(baseTier, attempt);
+        ModelTier capped = escalated.ordinal() > ceiling.ordinal() ? ceiling : escalated;
+        if (capped != escalated) {
+            log.info("Tier escalation capped: {} → {} (ceiling={})", escalated, capped, ceiling);
+        }
+        return selectFromTier(capped, availableProviders);
+    }
+
     /**
      * Map complexity hint to initial model tier.
      * FAST tier disabled — all tasks start at CAPABLE minimum for quality.

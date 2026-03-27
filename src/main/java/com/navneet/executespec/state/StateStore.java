@@ -408,6 +408,13 @@ public class StateStore {
         });
     }
 
+    public void setUiStyle(String runId, String uiStyleJson) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setUiStyle(uiStyleJson);
+            runRepo.save(run);
+        });
+    }
+
     public void setActualCost(String runId, double costUsd) {
         runRepo.findById(runId).ifPresent(run -> {
             run.setActualCostUsd(costUsd);

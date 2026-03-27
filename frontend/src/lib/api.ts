@@ -107,6 +107,8 @@ export interface RunSummary {
   runTitle?: string | null;
   /** One-sentence plan summary from the planner. Null until planning completes. */
   runSummary?: string | null;
+  /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
+  executionMode?: string | null;
 }
 
 export interface TaskSummary {
@@ -341,6 +343,7 @@ export const getRun = (id: string) =>
 
 export const createRun = (body: {
   userRequest: string;
+  executionMode?: 'PROTOTYPE' | 'PRODUCTION';
   skipApproval?: boolean;
   autoMerge?: boolean;
   modelName?: string;

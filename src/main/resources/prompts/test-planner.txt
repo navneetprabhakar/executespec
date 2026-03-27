@@ -47,4 +47,9 @@ RULES FOR TEST PLAN GENERATION:
 5. Generate a LifecycleTest that creates related entities in order (respecting FK relationships) and verifies the full flow.
 6. Generate an ErrorHandlingTest that sends malformed requests and verifies proper error responses.
 
+LIMITS — keep the test plan lean and focused:
+- Maximum 6 test classes total. Merge related concerns (e.g., combine validation + error handling for the same entity).
+- Maximum 8 test methods per class. Cover the critical paths, not every permutation.
+- For simple specs (single entity, no auth, no pagination): 2-3 test classes is sufficient.
+
 Respond with ONLY the JSON array. No markdown, no explanation, no backticks.

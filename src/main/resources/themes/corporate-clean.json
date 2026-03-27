@@ -1,0 +1,51 @@
+{
+  "id": "corporate-clean",
+  "name": "Corporate Clean",
+  "description": "Enterprise, formal, dense",
+  "tailwind": {
+    "colors": {
+      "primary": "blue-700",
+      "primary-foreground": "white",
+      "background": "white",
+      "foreground": "gray-900",
+      "card": "white",
+      "card-foreground": "gray-900",
+      "muted": "gray-100",
+      "muted-foreground": "gray-500",
+      "accent": "blue-50",
+      "accent-foreground": "blue-700",
+      "destructive": "red-600",
+      "border": "gray-200",
+      "input": "gray-200",
+      "ring": "blue-500"
+    },
+    "borderRadius": "rounded-md",
+    "fontFamily": "'IBM Plex Sans', system-ui, sans-serif"
+  },
+  "shadcn": {
+    "cssVariables": {
+      "--background": "0 0% 100%",
+      "--foreground": "220 14% 10%",
+      "--card": "0 0% 100%",
+      "--card-foreground": "220 14% 10%",
+      "--popover": "0 0% 100%",
+      "--popover-foreground": "220 14% 10%",
+      "--primary": "221 83% 40%",
+      "--primary-foreground": "0 0% 100%",
+      "--secondary": "220 14% 96%",
+      "--secondary-foreground": "220 14% 10%",
+      "--muted": "220 14% 96%",
+      "--muted-foreground": "220 9% 46%",
+      "--accent": "214 95% 96%",
+      "--accent-foreground": "221 83% 40%",
+      "--destructive": "0 72% 51%",
+      "--destructive-foreground": "0 0% 100%",
+      "--border": "220 13% 91%",
+      "--input": "220 13% 91%",
+      "--ring": "221 83% 53%",
+      "--radius": "0.375rem"
+    }
+  },
+  "density": "compact",
+  "darkMode": false
+}

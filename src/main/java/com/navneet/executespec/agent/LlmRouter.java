@@ -113,6 +113,8 @@ public class LlmRouter {
      */
     private static final int MAX_LLM_CALLS_PER_RUN = 100;
     private final ConcurrentHashMap<String, AtomicInteger> runCallCounters = new ConcurrentHashMap<>();
+    /** Per-run iteration limits (overrides MAX_LLM_CALLS_PER_RUN). Set by PipelineHarness based on ExecutionMode. */
+    private final ConcurrentHashMap<String, Integer> runCallLimits = new ConcurrentHashMap<>();
 
     private final ApplicationContext ctx;
     private final InboxService inboxService;
@@ -136,11 +138,12 @@ public class LlmRouter {
             int callCount = runCallCounters
                     .computeIfAbsent(runId, k -> new AtomicInteger(0))
                     .incrementAndGet();
-            if (callCount > MAX_LLM_CALLS_PER_RUN) {
+            int limit = runCallLimits.getOrDefault(runId, MAX_LLM_CALLS_PER_RUN);
+            if (callCount > limit) {
                 log.error("[LlmRouter] Circuit breaker tripped for run {} — {} LLM calls exceeded limit of {}",
-                        runId, callCount, MAX_LLM_CALLS_PER_RUN);
+                        runId, callCount, limit);
                 throw new CircuitBreakerException(
-                        "Run terminated — exceeded maximum iteration limit (" + MAX_LLM_CALLS_PER_RUN +
+                        "Run terminated — exceeded maximum iteration limit (" + limit +
                         " calls). This usually indicates a spec problem, not a model problem. " +
                         "Review your input and try again.");
             }
@@ -551,9 +554,17 @@ public class LlmRouter {
 
     // ── Circuit breaker lifecycle ───────────────────────────────────────────────
 
+    /** Sets a per-run iteration limit (overrides the global MAX_LLM_CALLS_PER_RUN). */
+    public void setRunCallLimit(String runId, int limit) {
+        if (runId != null) runCallLimits.put(runId, limit);
+    }
+
     /** Call when a run completes (success or failure) to free memory. */
     public void clearRunCallCounter(String runId) {
-        if (runId != null) runCallCounters.remove(runId);
+        if (runId != null) {
+            runCallCounters.remove(runId);
+            runCallLimits.remove(runId);
+        }
     }
 
     /** Get current LLM call count for a run (for observability). */

@@ -37,6 +37,14 @@ public class ConversationController {
             Your job:
             - Ask one or two focused clarifying questions per reply (tech stack, scope, auth, data, integrations).
             - Keep responses short and conversational — no walls of text.
+            - If the project has a frontend/UI component, ask the user to pick a visual style for their app. \
+            Present these options concisely: \
+            1) Minimal Light (clean, SaaS default) \
+            2) Minimal Dark (developer-facing) \
+            3) Corporate Clean (enterprise, formal) \
+            4) Startup Bold (vibrant, modern) \
+            5) Neutral Warm (editorial, content-focused). \
+            Include their choice in the REQUIREMENT SUMMARY as "Visual theme: <choice>".
             - Once the requirement is clear enough to build, produce a tidy summary prefixed with \
             "REQUIREMENT SUMMARY:" on its own line, then the consolidated spec in plain English.
 

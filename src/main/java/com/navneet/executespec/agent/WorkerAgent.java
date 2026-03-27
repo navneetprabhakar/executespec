@@ -72,6 +72,7 @@ public class WorkerAgent {
     private final LlmOutputParser outputParser;
     private final ObservationRegistry observationRegistry;
     private final SseBroadcaster sseBroadcaster;
+    private final com.navneet.executespec.harness.UiStyleResolver uiStyleResolver;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -127,7 +128,7 @@ public class WorkerAgent {
         // Per-task conversation history (WorkerAgent is a Spring singleton — no
         // instance fields)
         List<Message> messages = new ArrayList<>();
-        messages.add(new UserMessage(buildInitialUserMessage(taskDef, branchName)));
+        messages.add(new UserMessage(buildInitialUserMessage(taskDef, branchName, runId)));
 
         int totalInputTokens = 0;
         int totalOutputTokens = 0;
@@ -1077,7 +1078,7 @@ public class WorkerAgent {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private String buildInitialUserMessage(TaskDefinition task, String branchName) {
+    private String buildInitialUserMessage(TaskDefinition task, String branchName, String runId) {
         // REWORK mode: apply ONLY the specific reviewer fixes — do not redo the whole task.
         // The harness injects reworkFeedback when a reviewer returned REWORK so the worker
         // knows exactly which files and lines to touch without re-generating everything.
@@ -1107,7 +1108,7 @@ public class WorkerAgent {
                 ? "none"
                 : String.join(", ", task.getDependsOn());
 
-        return """
+        String baseAssignment = """
                 Your task assignment:
 
                 TASK ID: %s
@@ -1124,6 +1125,43 @@ public class WorkerAgent {
                 """.formatted(task.getTaskId(), task.getTitle(), task.getObjective(),
                 task.getBoundaries(), task.getOutputFormat(), task.getAcceptanceCriteria(),
                 deps, task.getComplexity(), branchName);
+
+        // Inject frontend design system constraints if this is a frontend task
+        String frontendBlock = buildFrontendBlock(task, runId);
+        if (frontendBlock != null) {
+            return baseAssignment + "\n" + frontendBlock;
+        }
+        return baseAssignment;
+    }
+
+    /**
+     * Detects if a task is frontend-related and returns the design system constraint
+     * block from the run's ui_style config. Returns null for non-frontend tasks.
+     */
+    private String buildFrontendBlock(TaskDefinition task, String runId) {
+        // Heuristic: check title and objective for frontend keywords
+        String probe = ((task.getTitle() != null ? task.getTitle() : "")
+                + " " + (task.getObjective() != null ? task.getObjective() : "")).toLowerCase();
+        boolean isFrontend = probe.contains("frontend") || probe.contains("ui component")
+                || probe.contains("react") || probe.contains("vue") || probe.contains("angular")
+                || probe.contains("page") || probe.contains("form") || probe.contains("layout")
+                || probe.contains("dashboard") || probe.contains("login") || probe.contains("register")
+                || probe.contains("navigation") || probe.contains("sidebar") || probe.contains("header")
+                || probe.contains("component") || probe.contains("css") || probe.contains("style")
+                || probe.contains("tailwind") || probe.contains("shadcn") || probe.contains("html")
+                || probe.contains("landing") || probe.contains("modal") || probe.contains("table view")
+                || probe.contains("next.js") || probe.contains("nextjs");
+        if (!isFrontend) return null;
+
+        try {
+            var run = stateStore.findRun(runId).orElse(null);
+            if (run == null) return null;
+            String uiStyleJson = run.getUiStyle();
+            return uiStyleResolver.buildFrontendConstraintBlock(uiStyleJson);
+        } catch (Exception e) {
+            log.debug("Could not load ui_style for run {}: {}", runId, e.getMessage());
+            return null;
+        }
     }
 
     private String buildProgressCheckpoint(TaskDefinition task, long elapsedMinutes, int totalMinutes) {

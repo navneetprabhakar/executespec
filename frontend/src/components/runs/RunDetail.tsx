@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2 } from 'lucide-react';
+import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
@@ -12,7 +13,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { downloadWorkspace, editRunPlan, type ReviewReport } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, describeRunStatus } from '@/lib/utils';
 
 export default function RunDetail() {
   const { activeRun, activeRunId, setActiveRunId, approveRun, clarifyRun, cancelRun, createRun, pauseRun, editAndRestartRun, resumeRun } = useRunStore();
@@ -164,10 +165,13 @@ export default function RunDetail() {
             <div className="flex items-start gap-2.5 min-w-0">
               <GlowDot status={activeRun.status} className="mt-1 flex-shrink-0" />
               <div className="min-w-0">
-                <p className="font-mono text-xs text-zinc-400">{activeRun.runId.slice(0, 16)}</p>
-                <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex items-center gap-2">
+                  <p className="font-mono text-xs text-zinc-400">{activeRun.runId.slice(0, 16)}</p>
                   <StatusBadge status={activeRun.status} />
                 </div>
+                <p className="text-xs text-zinc-500 mt-0.5 line-clamp-1">
+                  {describeRunStatus(activeRun.status, activeRun.tasks, activeRun.failureReason, activeRun.executionMode)}
+                </p>
               </div>
             </div>
             <button onClick={() => setActiveRunId(null)} className="text-zinc-500 hover:text-zinc-300 flex-shrink-0 ml-2 p-1.5 -m-1">
@@ -178,12 +182,6 @@ export default function RunDetail() {
           {/* Gate banner */}
           {activeRun.status === 'AWAITING_APPROVAL' && (
             <>
-              {(activeRun.costEstimateLow != null && activeRun.costEstimateHigh != null) && (
-                <div className="mx-4 mt-3 mb-1 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06] text-xs text-zinc-400 flex items-center gap-1.5">
-                  <span className="text-accent-amber">$</span>
-                  <span>Estimated cost: <span className="text-zinc-200 font-medium">${activeRun.costEstimateLow.toFixed(3)} – ${activeRun.costEstimateHigh.toFixed(3)}</span></span>
-                </div>
-              )}
               <GateBanner
                 message="Review the plan and approve to continue"
                 icon={<AlertTriangle className="h-4 w-4 text-accent-amber" />}
@@ -426,14 +424,8 @@ export default function RunDetail() {
             </div>
           </div>
 
-          {/* Test Progress Tracker (real-time SSE) */}
-          <TestProgressTracker runId={activeRun.runId} status={activeRun.status} />
-
-          {/* Validation Report */}
-          <ValidationReportPanel runId={activeRun.runId} status={activeRun.status} />
-
-          {/* Test Report (after execution) */}
-          <TestReportPanel runId={activeRun.runId} status={activeRun.status} />
+          {/* Reports section — scrollable on mobile to preserve tab space */}
+          <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} />
 
           {/* Tabs */}
           <div className="flex-1 overflow-hidden">
@@ -442,6 +434,43 @@ export default function RunDetail() {
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+// ── Mobile-friendly collapsible reports section ──────────────────────────
+
+function MobileCollapsibleReports({ runId, status }: { runId: string; status: string }) {
+  const isMobile = useIsMobile();
+  const [collapsed, setCollapsed] = useState(false);
+
+  // On desktop, always show reports inline (no collapsing)
+  if (!isMobile) {
+    return (
+      <>
+        <TestProgressTracker runId={runId} status={status} />
+        <ValidationReportPanel runId={runId} status={status} />
+        <TestReportPanel runId={runId} status={status} />
+      </>
+    );
+  }
+
+  return (
+    <div className="flex-shrink-0 border-b border-white/[0.06]">
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center gap-1.5 w-full px-4 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+      >
+        {collapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+        <span>Reports & Progress</span>
+      </button>
+      {!collapsed && (
+        <div className="max-h-[30vh] overflow-y-auto">
+          <TestProgressTracker runId={runId} status={status} />
+          <ValidationReportPanel runId={runId} status={status} />
+          <TestReportPanel runId={runId} status={status} />
+        </div>
+      )}
+    </div>
   );
 }
 
