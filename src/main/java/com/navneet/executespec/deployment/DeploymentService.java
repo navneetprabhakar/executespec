@@ -18,6 +18,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import static com.navneet.executespec.config.CustomMetricsConfig.*;
 import com.navneet.executespec.config.CustomMetricsConfig;
 
@@ -161,9 +162,11 @@ public class DeploymentService {
         sseBroadcaster.emit(runId,
             RunEvent.deployStarted(runId, versionTag, strategy.type().name()));
 
-        // Run async pipeline on virtual thread
-        Thread.startVirtualThread(() ->
-            executeDeployPipeline(deployment, run, workspacePath, repoMode, repoUrl, repoName));
+        // Run async pipeline on virtual thread with context propagation for tracing
+        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+        Thread.ofVirtual().name("deploy-" + runId.substring(0, 8))
+            .start(snapshot.wrap(() ->
+                executeDeployPipeline(deployment, run, workspacePath, repoMode, repoUrl, repoName)));
 
         return deployment;
     }

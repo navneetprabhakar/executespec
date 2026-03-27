@@ -11,6 +11,8 @@ Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), per
 | `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | Caddy + Cloudflare Origin Cert |
 | `cloud-run` | Dev/Prod (GCE) | Artifact Registry + Cloud Run | 5 min | Managed by Cloud Run |
 
+All subprocess commands (`gcloud`, `docker compose`) are executed with enforced process timeouts to prevent hung builds. Virtual threads used for async preview operations are wrapped with `ContextSnapshotFactory.captureAll()` to ensure traceId/spanId propagation across thread boundaries.
+
 Configured via `preview.mode` in `application.yml` (default: `docker`).
 
 **Cloud Run preview flow:** Generate Dockerfile → Build image locally → Push to Artifact Registry → Deploy to Cloud Run (min 0, max 1 instance) → Health check → Return Cloud Run URL → Auto-delete after TTL.
@@ -121,13 +123,26 @@ Configured via `preview.mode` in `application.yml` (default: `docker`).
 - **GitHub fallback:** If local workspace is deleted and GCS is not configured, redirect to GitHub archive ZIP (via GitHub API)
 - Exclude `.git/`, `node_modules/`, `target/`, `build/` from ZIP
 
+### 7. Reliability & Observability
+
+**Requirements:**
+- All subprocess commands (`gcloud`, `docker`) must have enforced timeouts: deploy operations 10 minutes, delete/rollback operations 5 minutes, list operations 2 minutes
+- Pipe buffer deadlock prevention — stdout and stderr must be read in parallel (separate threads) for all `gcloud` commands to avoid process hangs from full OS pipe buffers
+- Virtual threads must wrap runnables with `ContextSnapshotFactory.captureAll()` to ensure traceId/spanId propagation into async preview operations
+- `ACTIVE_PREVIEWS` gauge must be decremented on ALL terminal states: FAILED, TIMED_OUT, and STOPPED (not only on successful stop)
+- Cloud Run resource cleanup on preview failure — both the Cloud Run service and the Artifact Registry image must be deleted when a preview fails to start or times out
+- Cloud Run log fetching via `gcloud logging read` for the `GET /api/runs/{id}/preview/logs` endpoint, scoped to the preview's Cloud Run service name
+- API docs probing must work for both Docker mode (localhost:port) and Cloud Run mode (service URL), using the same detection logic
+- HTTP health check client must enforce a connect timeout of 10 seconds and a request timeout of 15 seconds to avoid blocking on unresponsive previews
+
 ---
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `deployment/LocalPreviewService.java` | Process-based preview |
+| `deployment/preview/PreviewService.java` | Dual-mode preview lifecycle (docker + cloud-run) |
+| `api/controller/PreviewController.java` | Preview REST endpoints (start, stop, logs, API docs probe) |
 | `deployment/DeploymentService.java` | Cloud Run deployment |
 | `deployment/DockerfileGenerator.java` | Language-specific Dockerfiles |
 | `deployment/strategy/*.java` | 11 deployment strategies |
@@ -147,3 +162,4 @@ Configured via `preview.mode` in `application.yml` (default: `docker`).
 | V8 | Per-user GitHub settings (github_pat, github_owner) |
 | V12 | GCS workspace archive columns |
 | V17 | Auto-merge flag (pipeline_run.auto_merge) |
+| V29 | Per-run preview start count limit |

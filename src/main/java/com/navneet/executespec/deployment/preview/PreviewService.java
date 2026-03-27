@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import static com.navneet.executespec.config.CustomMetricsConfig.*;
 
 import java.io.IOException;
@@ -35,19 +36,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Preview service — builds and runs ephemeral dev servers in one of two modes:
  * <ul>
- *   <li><b>docker</b> (default): Docker Compose on local machine, Caddy reverse proxy for HTTPS.</li>
+ *   <li><b>docker</b> (default): Docker Compose on local machine, Caddy reverse proxy for HTTPS.
+ *       TTL: 10 minutes.</li>
  *   <li><b>cloud-run</b>: Build image → push to Artifact Registry → deploy to GCP Cloud Run.
- *       Cloud Run provides managed HTTPS with public URLs, no proxy needed.</li>
+ *       Cloud Run provides managed HTTPS with public URLs, no proxy needed. TTL: 5 minutes.</li>
  * </ul>
  *
  * <p>Mode is configured via {@code preview.mode} property (default: "docker").
  *
- * <p>Lifecycle: IDLE → ANALYZING → BUILDING → STARTING → RUNNING → STOPPED.
+ * <p>Lifecycle: IDLE → ANALYZING → BUILDING → STARTING → RUNNING → STOPPED/FAILED/TIMED_OUT.
  * Each preview auto-expires after the configured TTL.
+ *
+ * <p><b>Reliability:</b> All subprocess commands have timeouts. Virtual threads use
+ * {@link io.micrometer.context.ContextSnapshotFactory} for trace propagation. The
+ * {@code ACTIVE_PREVIEWS} gauge is decremented on all terminal states. Cloud Run resources
+ * (service + AR image) are cleaned up on failure. Logs are available for both Docker Compose
+ * and Cloud Run modes.
  */
 @Service
 @Slf4j
@@ -238,10 +247,14 @@ public class PreviewService {
         Counter.builder(PREVIEW_STARTS).register(meterRegistry).increment();
         Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
 
+        // Capture observation context so virtual threads propagate traceId/spanId
+        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
         if (isCloudRunMode()) {
-            Thread.startVirtualThread(() -> buildAndStartCloudRun(runId, workspace, type, mode, projectName, safeEnvVars));
+            Thread.ofVirtual().name("preview-cr-" + runId.substring(0, 8))
+                    .start(snapshot.wrap(() -> buildAndStartCloudRun(runId, workspace, type, mode, projectName, safeEnvVars)));
         } else {
-            Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars));
+            Thread.ofVirtual().name("preview-docker-" + runId.substring(0, 8))
+                    .start(snapshot.wrap(() -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars)));
         }
 
         log.info("Preview started for run {} (type={}, mode={}, project={}, ttl={}min)",
@@ -282,11 +295,18 @@ public class PreviewService {
     }
 
     /**
-     * Get logs from Docker Compose for a running preview.
+     * Get logs from Docker Compose or Cloud Run for a running preview.
      */
     public String getLogs(String runId, int tailLines, String filter) {
         PreviewSession session = active.get(runId);
         if (session == null) return "";
+
+        // Cloud Run mode: fetch logs via gcloud
+        if (session.cloudRunServiceName() != null) {
+            return getCloudRunLogs(session.cloudRunServiceName(), tailLines > 0 ? tailLines : 50);
+        }
+
+        // Docker mode: fetch logs via docker compose
         if (session.composeProjectName() == null) return "Preview is still initializing...";
 
         String service = null;
@@ -296,6 +316,34 @@ public class PreviewService {
 
         String logs = composeExecutor.logs(session.composeProjectName(), service, tailLines > 0 ? tailLines : 100);
         return logs.isEmpty() ? "No logs available yet." : logs;
+    }
+
+    /**
+     * Fetch Cloud Run service logs via gcloud CLI.
+     */
+    private String getCloudRunLogs(String serviceName, int tailLines) {
+        if (cloudRunClient == null) return "Cloud Run client not available.";
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "gcloud", "logging", "read",
+                    "resource.type=cloud_run_revision AND resource.labels.service_name=" + serviceName,
+                    "--limit", String.valueOf(Math.min(tailLines, 200)),
+                    "--format", "value(textPayload)",
+                    "--freshness", "10m",
+                    "--order", "asc"
+            ).redirectErrorStream(true);
+            Process process = pb.start();
+            String output = new String(process.getInputStream().readAllBytes()).trim();
+            boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return "Log fetch timed out.";
+            }
+            return output.isEmpty() ? "No logs available yet (Cloud Run may still be starting)." : output;
+        } catch (Exception e) {
+            log.warn("Failed to fetch Cloud Run logs for {}: {}", serviceName, e.getMessage());
+            return "Failed to fetch logs: " + e.getMessage();
+        }
     }
 
     private boolean isCloudRunMode() {
@@ -409,15 +457,22 @@ public class PreviewService {
 
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            Counter.builder(PREVIEW_FAILURES).tag("reason", "cloud_run")
-                    .register(meterRegistry).increment();
+            // Store Cloud Run metadata in session so fail() can clean up
+            final String failServiceName = serviceName;
+            final String failImageUri = imageUri;
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    s.status(), s.url(), s.hostPort(), s.errorMessage(),
+                    s.startedAt(), s.expiresAt(), failServiceName, failImageUri));
             fail(runId, "Cloud Run preview failed: " + e.getMessage(), 0);
-            cleanupCloudRun(serviceName, imageUri);
         } catch (Exception e) {
-            Counter.builder(PREVIEW_FAILURES).tag("reason", "cloud_run")
-                    .register(meterRegistry).increment();
+            final String failServiceName = serviceName;
+            final String failImageUri = imageUri;
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    s.status(), s.url(), s.hostPort(), s.errorMessage(),
+                    s.startedAt(), s.expiresAt(), failServiceName, failImageUri));
             fail(runId, "Unexpected error in Cloud Run preview: " + e.getMessage(), 0);
-            cleanupCloudRun(serviceName, imageUri);
             log.error("Cloud Run preview build/start failed for run {}", runId, e);
         }
     }
@@ -611,6 +666,7 @@ public class PreviewService {
         } catch (DeadlineExceededException e) {
             Counter.builder(PREVIEW_FAILURES).tag("reason", "timeout")
                     .register(meterRegistry).increment();
+            Metrics.ACTIVE_PREVIEWS.decrementAndGet();
             cleanupOnFailure(runId, projectName, hostPort);
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
@@ -717,16 +773,22 @@ public class PreviewService {
     private void fail(String runId, String message, int hostPort) {
         Counter.builder(PREVIEW_FAILURES).tag("reason", classifyFailureReason(message))
                 .register(meterRegistry).increment();
+        Metrics.ACTIVE_PREVIEWS.decrementAndGet();
 
         PreviewSession session = active.get(runId);
         if (session != null) {
-            cleanupOnFailure(runId, session.composeProjectName(), hostPort);
+            // Cloud Run cleanup: delete service + image if this was a Cloud Run preview
+            if (session.cloudRunServiceName() != null) {
+                cleanupCloudRun(session.cloudRunServiceName(), session.imageUri());
+            } else {
+                cleanupOnFailure(runId, session.composeProjectName(), hostPort);
+            }
         }
 
         updateSession(runId, s -> new PreviewSession(
                 s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                 PreviewStatus.FAILED, s.url(), s.hostPort(), message,
-                s.startedAt(), s.expiresAt()));
+                s.startedAt(), s.expiresAt(), s.cloudRunServiceName(), s.imageUri()));
         broadcaster.emit(runId, new RunEvent("PREVIEW_FAILED", runId, null, message, Instant.now()));
         log.warn("Preview failed for run {}: {}", runId, message);
     }

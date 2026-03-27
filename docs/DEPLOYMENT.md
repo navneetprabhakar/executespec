@@ -1544,7 +1544,19 @@ gcloud compute ssh executespec-prod-vm --zone=asia-south1-a --tunnel-through-iap
 
 # Preview test (start a run, wait for COMPLETE, then start preview)
 # Preview URL will be a *.run.app Cloud Run URL
+
+# Cloud Run logs for preview debugging
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=es-preview-XXXXXXXX" \
+  --limit=50 --format="value(textPayload)" --freshness=10m --order=asc
 ```
+
+> **Reliability notes:**
+> - All `gcloud` and `docker` subprocess calls have timeouts: deploy/push = 10min, delete/rollback = 5min, list = 2min
+> - Stdout and stderr are read in parallel (via `CompletableFuture`) to prevent pipe buffer deadlock
+> - Virtual threads for preview/deploy use `ContextSnapshotFactory.captureAll().wrap()` for trace propagation
+> - `ACTIVE_PREVIEWS` gauge is decremented on ALL terminal states (FAILED, TIMED_OUT, STOPPED)
+> - Cloud Run resources (service + AR image) are cleaned up on preview failure
+> - API docs probing works for both Docker (`localhost:port`) and Cloud Run (service URL)
 
 #### Pre-Production Checklist
 

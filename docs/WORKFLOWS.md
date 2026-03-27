@@ -442,38 +442,117 @@ flowchart TD
 
 ## 10. Deployment & Preview
 
-### Local Preview
+### Preview (Dual-Mode)
+
+Preview supports two modes, configured via `preview.mode` in application properties:
+
+| Mode | Environment | Stack | TTL | URL format |
+|------|-------------|-------|-----|------------|
+| `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | `https://{subdomain}.preview.local` (Caddy) or `http://localhost:{port}` |
+| `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 5 min | `https://*.run.app` (managed HTTPS) |
 
 ```mermaid
 flowchart TD
     A([Run completes]) --> B[User opens Preview tab]
     B --> C[Click 'Start Preview']
     C --> D[POST /api/runs/{id}/preview/start]
-    D --> E[LocalPreviewService detects project type]
-    E --> F{Project type?}
-    F -->|SPRING_BOOT| G[mvn spring-boot:run]
-    F -->|FRONTEND| H[npm run dev]
-    F -->|PYTHON| I[uvicorn / flask run]
-    F -->|FULLSTACK| J[Backend + Frontend in parallel]
-    G --> K[Process started — port allocated]
-    H --> K
-    I --> K
-    J --> K
-    K --> L[Preview status: RUNNING]
-    L --> M[User views logs in real-time]
-    M --> N[User clicks preview URL]
-    N --> O([🌐 Application running in browser])
+    D --> E[PreviewService detects project type]
+    E --> F{preview.mode?}
 
-    O --> P{Done previewing?}
-    P -->|Yes| Q[Click 'Stop Preview']
-    Q --> R[DELETE /api/runs/{id}/preview/stop]
-    R --> S[Process killed, resources freed]
+    %% Docker mode (local dev)
+    F -->|docker| G[DockerfileGenerator.generate — includes ttyd for terminal]
+    G --> H[docker compose up — build + start]
+    H --> I{Caddy proxy configured?}
+    I -->|Yes| J[CaddyProxyManager registers route via admin API]
+    J --> K[HTTPS URL via Caddy reverse proxy]
+    I -->|No| L[Direct localhost:port URL]
+    K --> M[Preview status: RUNNING]
+    L --> M
+
+    %% Cloud Run mode (dev/prod)
+    F -->|cloud-run| N[DockerfileGenerator.generateForCloudRun — no ttyd]
+    N --> O[docker build — 10 min timeout]
+    O --> P[docker push to Artifact Registry — 10 min timeout]
+    P --> Q[gcloud run deploy — 10 min timeout]
+    Q --> R[Health check against Cloud Run URL]
+    R --> S[HTTPS URL returned — *.run.app]
+    S --> M
+
+    M --> T[User views logs in real-time]
+    T --> U[User clicks preview URL]
+    U --> V([Application running in browser])
+
+    V --> W{Done previewing?}
+    W -->|Yes| X[Click 'Stop Preview']
+    X --> Y[DELETE /api/runs/{id}/preview/stop]
+    Y --> Z{Mode?}
+    Z -->|docker| AA[docker compose down, Caddy route removed]
+    Z -->|cloud-run| AB[Cloud Run service deleted]
+    W -->|No action| AC[Auto-deleted after TTL — 10 min docker / 5 min cloud-run]
 
     style A fill:#6366f1,color:#fff
-    style O fill:#22c55e,color:#fff
+    style V fill:#22c55e,color:#fff
 ```
 
-### Cloud Run Deployment
+### Preview Sequence — Cloud Run Mode
+
+```mermaid
+sequenceDiagram
+    participant U as User Browser
+    participant FE as Frontend
+    participant BE as PreviewService
+    participant DG as DockerfileGenerator
+    participant AR as Artifact Registry
+    participant CR as Cloud Run
+
+    U->>FE: Click 'Start Preview'
+    FE->>BE: POST /api/runs/{id}/preview/start
+    BE->>BE: Detect project type
+    BE->>DG: generateForCloudRun(workspace, projectType)
+    DG-->>BE: Dockerfile (no ttyd)
+    BE->>BE: docker build (10 min timeout)
+    BE->>AR: docker push image (10 min timeout)
+    AR-->>BE: Push complete
+    BE->>CR: gcloud run deploy (10 min timeout)
+    CR-->>BE: Service URL (*.run.app)
+    BE->>BE: Health check against URL
+    BE-->>FE: Preview RUNNING — HTTPS URL
+    FE-->>U: Preview link available
+
+    Note over BE,CR: Auto-delete after 5-min TTL
+    BE->>CR: Delete Cloud Run service
+    CR-->>BE: Service deleted
+```
+
+### Preview Sequence — Docker Mode (Local)
+
+```mermaid
+sequenceDiagram
+    participant U as User Browser
+    participant FE as Frontend
+    participant BE as PreviewService
+    participant DG as DockerfileGenerator
+    participant DC as Docker Compose
+    participant CD as Caddy Proxy
+
+    U->>FE: Click 'Start Preview'
+    FE->>BE: POST /api/runs/{id}/preview/start
+    BE->>BE: Detect project type
+    BE->>DG: generate(workspace, projectType)
+    DG-->>BE: Dockerfile (with ttyd)
+    BE->>DC: docker compose up -d --build
+    DC-->>BE: Container running on allocated port
+    BE->>CD: Register route via Caddy admin API
+    CD-->>BE: Route active
+    BE-->>FE: Preview RUNNING — HTTPS URL
+    FE-->>U: Preview link available
+
+    Note over BE,DC: Auto-delete after 10-min TTL
+    BE->>DC: docker compose down
+    BE->>CD: Remove route
+```
+
+### Cloud Run Deployment (Permanent)
 
 ```mermaid
 flowchart TD
@@ -485,7 +564,7 @@ flowchart TD
     F --> G[Push to Artifact Registry]
     G --> H[Deploy to Cloud Run]
     H --> I[Service URL returned]
-    I --> J([🚀 Application live on Cloud Run])
+    I --> J([Application live on Cloud Run — permanent])
 
     style A fill:#6366f1,color:#fff
     style J fill:#22c55e,color:#fff
@@ -715,5 +794,5 @@ sequenceDiagram
 
 ---
 
-*Updated: 2026-03-26*
-*Covers: Pipeline execution, auth, org management, integrations, Slack notifications, JIRA/Confluence context extraction, post-run features, deployment, recovery, admin workflows.*
+*Updated: 2026-03-27*
+*Covers: Pipeline execution, auth, org management, integrations, Slack notifications, JIRA/Confluence context extraction, post-run features, deployment (dual-mode preview), recovery, admin workflows.*

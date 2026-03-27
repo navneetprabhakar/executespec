@@ -15,15 +15,34 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * Google Cloud Run API client — deploys, deletes, and manages Cloud Run services
+ * via the {@code gcloud} CLI.
+ *
+ * <p><b>Reliability:</b> All subprocess calls have timeouts:
+ * <ul>
+ *   <li>{@code deploy/deployPreview}: 10 minutes</li>
+ *   <li>{@code deleteService/deleteImage/rollback}: 5 minutes</li>
+ *   <li>{@code listPreviewServices/ensurePublicAccess}: 2 minutes</li>
+ * </ul>
+ * Stdout and stderr are read in parallel (via {@link java.util.concurrent.CompletableFuture})
+ * to prevent pipe buffer deadlock. Health check HTTP client has 10s connect timeout
+ * and 15s per-request timeout.
+ */
 @Service
 @Slf4j
 public class CloudRunClient {
 
     private final DeploymentProperties props;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
 
     public CloudRunClient(DeploymentProperties props, ObjectMapper objectMapper) {
         this.props = props;
@@ -56,10 +75,19 @@ public class CloudRunClient {
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         Process process = pb.start();
-        // Read stdout and stderr separately — gcloud writes progress text to stderr
+        // Read stdout and stderr in parallel to avoid pipe buffer deadlock.
+        var stderrFuture = CompletableFuture.supplyAsync(() -> {
+            try { return new String(process.getErrorStream().readAllBytes()).trim(); }
+            catch (Exception e) { return "stderr read failed: " + e.getMessage(); }
+        });
         String stdout = new String(process.getInputStream().readAllBytes()).trim();
-        String stderr = new String(process.getErrorStream().readAllBytes()).trim();
-        int exit = process.waitFor();
+        String stderr = stderrFuture.join();
+        boolean finished = process.waitFor(10, TimeUnit.MINUTES);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("Cloud Run deploy timed out after 10 minutes");
+        }
+        int exit = process.exitValue();
 
         String combined = (stdout + "\n" + stderr).trim();
         if (exit != 0) {
@@ -152,13 +180,18 @@ public class CloudRunClient {
         Process process = pb.start();
         // Read stdout and stderr in parallel to avoid pipe buffer deadlock.
         // gcloud writes progress text to stderr even with --format=json and --quiet.
-        var stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+        var stderrFuture = CompletableFuture.supplyAsync(() -> {
             try { return new String(process.getErrorStream().readAllBytes()).trim(); }
             catch (Exception e) { return "stderr read failed: " + e.getMessage(); }
         });
         String stdout = new String(process.getInputStream().readAllBytes()).trim();
         String stderr = stderrFuture.join();
-        int exit = process.waitFor();
+        boolean finished = process.waitFor(10, TimeUnit.MINUTES);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("Cloud Run preview deploy timed out after 10 minutes");
+        }
+        int exit = process.exitValue();
 
         String combined = (stdout + "\n" + stderr).trim();
         if (exit != 0) {
@@ -215,8 +248,13 @@ public class CloudRunClient {
             ).redirectErrorStream(true);
             Process process = pb.start();
             String output = new String(process.getInputStream().readAllBytes()).trim();
-            int exit = process.waitFor();
-            if (exit != 0) {
+            boolean finished = process.waitFor(2, TimeUnit.MINUTES);
+            if (!finished) {
+                process.destroyForcibly();
+                log.warn("Setting public access timed out for {}", serviceName);
+                return;
+            }
+            if (process.exitValue() != 0) {
                 log.warn("Failed to set public access on {}: {}", serviceName, output);
             } else {
                 log.info("Public access set on Cloud Run service: {}", serviceName);
@@ -242,9 +280,14 @@ public class CloudRunClient {
 
         Process process = pb.start();
         String output = new String(process.getInputStream().readAllBytes()).trim();
-        int exit = process.waitFor();
+        boolean finished = process.waitFor(2, TimeUnit.MINUTES);
+        if (!finished) {
+            process.destroyForcibly();
+            log.warn("Listing preview services timed out");
+            return List.of();
+        }
 
-        if (exit != 0) {
+        if (process.exitValue() != 0) {
             log.warn("Failed to list preview services: {}", output);
             return List.of();
         }
@@ -271,9 +314,13 @@ public class CloudRunClient {
 
         Process process = pb.start();
         String output = new String(process.getInputStream().readAllBytes()).trim();
-        int exit = process.waitFor();
+        boolean finished = process.waitFor(5, TimeUnit.MINUTES);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("Rollback timed out after 5 minutes for " + serviceName);
+        }
 
-        if (exit != 0) {
+        if (process.exitValue() != 0) {
             throw new IOException("Rollback failed: " + output);
         }
         log.info("Rolled back {} to revision {}", serviceName, revisionName);
@@ -302,6 +349,7 @@ public class CloudRunClient {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(serviceUrl))
+                    .timeout(java.time.Duration.ofSeconds(15))
                     .GET()
                     .build();
                 HttpResponse<Void> resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding());
@@ -328,10 +376,15 @@ public class CloudRunClient {
     private void exec(String... cmd) throws IOException, InterruptedException {
         ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
         Process p = pb.start();
-        p.getInputStream().readAllBytes();
-        int exit = p.waitFor();
-        if (exit != 0) {
-            throw new IOException("Command failed (exit " + exit + "): " + String.join(" ", cmd));
+        String output = new String(p.getInputStream().readAllBytes()).trim();
+        boolean finished = p.waitFor(5, TimeUnit.MINUTES);
+        if (!finished) {
+            p.destroyForcibly();
+            throw new IOException("Command timed out after 5 minutes: " + String.join(" ", cmd));
+        }
+        if (p.exitValue() != 0) {
+            throw new IOException("Command failed (exit " + p.exitValue() + "): "
+                    + String.join(" ", cmd) + "\n" + output);
         }
     }
 

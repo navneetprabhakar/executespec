@@ -165,7 +165,17 @@ public class PreviewController {
         guard.requireRunAccess(runId, userDetails);
 
         PreviewSession session = previewService.getStatus(runId);
-        if (session == null || session.status() != PreviewStatus.RUNNING || session.hostPort() <= 0) {
+        if (session == null || session.status() != PreviewStatus.RUNNING) {
+            return ResponseEntity.ok(new ApiDocsProbeResult(false, null, null));
+        }
+
+        // Determine base URL: Cloud Run uses the service URL, Docker uses localhost:port
+        String baseUrl;
+        if (session.cloudRunServiceName() != null && session.url() != null) {
+            baseUrl = session.url(); // Cloud Run URL (e.g., https://es-preview-xxx.run.app)
+        } else if (session.hostPort() > 0) {
+            baseUrl = "http://localhost:" + session.hostPort();
+        } else {
             return ResponseEntity.ok(new ApiDocsProbeResult(false, null, null));
         }
 
@@ -187,7 +197,7 @@ public class PreviewController {
             for (String path : probePaths) {
                 try {
                     var request = HttpRequest.newBuilder()
-                            .uri(URI.create("http://localhost:" + session.hostPort() + path))
+                            .uri(URI.create(baseUrl + path))
                             .timeout(Duration.ofSeconds(3))
                             .GET()
                             .build();

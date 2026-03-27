@@ -68,10 +68,15 @@ public class ArtifactRegistryClient {
 
         Process process = pb.start();
         String output = new String(process.getInputStream().readAllBytes()).trim();
-        int exit = process.waitFor();
+        boolean finished = process.waitFor(10, TimeUnit.MINUTES);
 
-        if (exit != 0) {
-            throw new IOException("Docker push failed (exit " + exit + "): " + tailOf(output, 500));
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("Docker push timed out after 10 minutes for " + imageTag);
+        }
+
+        if (process.exitValue() != 0) {
+            throw new IOException("Docker push failed (exit " + process.exitValue() + "): " + tailOf(output, 500));
         }
         log.info("Image pushed: {}", imageTag);
     }
