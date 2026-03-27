@@ -388,7 +388,7 @@ public class ReviewerAgentV2 {
 
     /**
      * Attempt to auto-fix a critical issue by sending a fix instruction to a worker.
-     * Uses FAST tier (fixes are targeted and small).
+     * Uses CAPABLE tier, escalates to POWER on retry.
      * Validates the fix result.
      *
      * @return true if fix succeeded (validation passed), false otherwise
@@ -399,8 +399,8 @@ public class ReviewerAgentV2 {
                                     ReviewIssue issue, Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
 
-        // Try fix at FAST tier first, escalate to CAPABLE on retry
-        ModelTier[] tiers = { ModelTier.FAST, ModelTier.CAPABLE };
+        // Start at CAPABLE (FAST tier removed), escalate to POWER on retry
+        ModelTier[] tiers = { ModelTier.CAPABLE, ModelTier.POWER };
 
         for (int attempt = 0; attempt < MAX_FIX_ATTEMPTS; attempt++) {
             ModelTier tier = tiers[Math.min(attempt, tiers.length - 1)];
