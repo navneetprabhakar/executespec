@@ -326,8 +326,9 @@ public class WorkerAgent {
 
                 // ── PATH B: Prompt-based tool calls (Anthropic/Google) ───────────────
                 if (assistantText != null && !assistantText.isBlank()) {
-                    log.info("[Worker {}] Iteration {} — output ({} chars)",
-                            taskId, iteration, assistantText.length());
+                    log.info("[Worker {}] Iteration {} — output ({} chars): {}",
+                            taskId, iteration, assistantText.length(),
+                            assistantText.length() <= 200 ? assistantText : assistantText.substring(0, 200) + "...");
 
                     // 1. Parse tool calls — JSON first (unified format), XML as legacy fallback
                     List<ParsedToolCall> toolCalls = parseJsonToolCalls(assistantText);
@@ -1018,6 +1019,7 @@ public class WorkerAgent {
                 runId, taskId,
                 (name, argsJson, rid, tid) -> dispatchTool(new ParsedToolCall(name, argsJson), rid, tid));
 
+        FallbackMode fallbackMode;
         if (isOpenAi) {
             // OpenAI: native function calling — tools defined as JSON schemas
             OpenAiChatOptions opts = OpenAiChatOptions.builder()
@@ -1026,23 +1028,27 @@ public class WorkerAgent {
                     .internalToolExecutionEnabled(false) // keep outer loop in control
                     .build();
             prompt = new Prompt(allMessages, opts);
+            // NO_FALLBACK: message history contains ToolResponseMessages
+            // that are incompatible across providers if we failover mid-task
+            fallbackMode = FallbackMode.NO_FALLBACK;
         } else {
-            // Anthropic / Google: native tool calling using AnthropicChatOptions as the base options object
+            // Anthropic / Google: prompt-based tool calling (XML <tool_call> format)
+            // Spring AI 1.1.0's internalToolExecutionEnabled(false) breaks native tool_use
+            // for Anthropic — the model receives tool schemas but can't invoke them,
+            // producing text-only "Let me read..." responses in an infinite loop.
+            // Instead: rely on tool descriptions in the system prompt + XML parsing (PATH B).
             AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                     .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                     .build();
             AnthropicChatOptions opts = AnthropicChatOptions.builder()
                     .maxTokens(maxOut)
                     .cacheOptions(cacheOpts)
-                    .toolCallbacks(callbacks)
-                    .internalToolExecutionEnabled(false)
+                    // NO toolCallbacks — tools described in prompt, parsed as XML in PATH B
                     .build();
             prompt = new Prompt(allMessages, opts);
+            // Allow provider fallback since no ToolResponseMessages in history
+            fallbackMode = FallbackMode.IMMEDIATE;
         }
-
-        // Native tool calls: NO_FALLBACK — message history contains ToolResponseMessages
-        // that are incompatible across some implementations if failed mid-task
-        FallbackMode fallbackMode = FallbackMode.NO_FALLBACK;
         return llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,
                 fallbackMode, iteration, justCompacted);
     }
