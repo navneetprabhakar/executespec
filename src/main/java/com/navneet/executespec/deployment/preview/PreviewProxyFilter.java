@@ -4,6 +4,7 @@ import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -29,12 +30,14 @@ import java.util.Set;
  * This eliminates the need for Caddy or an external IP on the VM —
  * all preview traffic flows through the existing GCP Load Balancer → port 8080.
  * <p>
- * Only active when preview.proxy.enabled=true.
+ * Only active when preview.proxy.enabled=true AND CaddyProxyManager is NOT present.
+ * When Caddy is available, it handles preview routing directly (faster, WebSocket support).
  */
 @Component
 @Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @ConditionalOnProperty(name = "preview.proxy.enabled", havingValue = "true")
+@ConditionalOnMissingBean(CaddyProxyManager.class)
 public class PreviewProxyFilter implements Filter {
 
     private final PreviewProperties props;
