@@ -116,7 +116,7 @@ agent:
     default-provider: anthropic
     capable-models:
       anthropic: claude-haiku-4-5-20251001
-      openai: gpt-4o
+      openai: gpt-5.4
     alternate-provider:
       anthropic: openai
       openai: anthropic

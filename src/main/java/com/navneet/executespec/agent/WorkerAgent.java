@@ -138,6 +138,7 @@ public class WorkerAgent {
         boolean justCompacted = false;
         int lastCompactedIteration = -999;
         int fileWritesSinceCheck = 0;  // tracks file writes for adaptive extension
+        int totalFileWrites = 0;      // total writeFile/editFile dispatches for completion validation
         int consecutiveNullResponses = 0;
         final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
 
@@ -314,7 +315,7 @@ public class WorkerAgent {
                         try {
                             stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
                             String result = dispatchTool(new ParsedToolCall(tc.name(), tc.arguments()), runId, taskId);
-                            if (isFileWriteTool(tc.name())) fileWritesSinceCheck++;
+                            if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
                             responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
                         } finally {
                             toolObs.stop();
@@ -346,7 +347,7 @@ public class WorkerAgent {
                             try {
                             stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
                             String result = dispatchTool(tc, runId, taskId);
-                            if (isFileWriteTool(tc.name())) fileWritesSinceCheck++;
+                            if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
                             results.append("[").append(tc.name()).append(" result]\n<output>\n")
                                    .append(result).append("\n</output>\n\n");
                             } finally {
@@ -359,6 +360,23 @@ public class WorkerAgent {
 
                     // 2. Strict completion detection: JSON must be the entire response
                     if (looksLikeCompletionReport(assistantText)) {
+                        // Validate: if the report claims files were created or modified but no
+                        // writeFile/editFile was dispatched, the model fabricated the report.
+                        if (totalFileWrites == 0 && reportClaimsFileChanges(assistantText)) {
+                            log.warn("[Worker {}] REJECTED fabricated completion report — claims files_created " +
+                                    "but 0 writeFile calls were dispatched. Forcing model to use tools.", taskId);
+                            stateStore.appendTaskLog(taskId, "FABRICATED_REPORT_REJECTED");
+                            messages.add(new UserMessage(
+                                    "CRITICAL ERROR: Your completion report claims files were created, but you " +
+                                    "never called the writeFile tool. Files are NOT created by describing them " +
+                                    "in text — you MUST call the writeFile tool for each file.\n\n" +
+                                    "Example:\n" +
+                                    "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"package.json\", " +
+                                    "\"content\": \"{\\n  \\\"name\\\": \\\"app\\\"\\n}\"}}</tool_call>\n\n" +
+                                    "Do NOT output a completion report until you have called writeFile for every " +
+                                    "file you need to create. Start now — call writeFile for your first file."));
+                            continue; // retry — do not accept this completion
+                        }
                         return withProviderModel(
                                 parseCompletionReport(assistantText, taskId,
                                         totalInputTokens, totalOutputTokens,
@@ -368,15 +386,26 @@ public class WorkerAgent {
                 }
 
                 // No tool calls and no completion report — prompt to continue
+                // Log the unparsed output for diagnostics
+                if (assistantText != null && !assistantText.isBlank()) {
+                    log.warn("[Worker {}] Iteration {} — output NOT parsed as tool call or completion ({} chars). " +
+                            "First 300 chars: {}", taskId, iteration, assistantText.length(),
+                            assistantText.length() <= 300 ? assistantText : assistantText.substring(0, 300) + "...");
+                }
+
                 String continuePrompt;
                 long minsLeft = Duration.between(Instant.now(), deadline).toMinutes();
                 if (minsLeft <= 3) {
                     continuePrompt = "You have approximately " + minsLeft + " minute(s) remaining. " +
                             "If you have finished all your work, output ONLY your completion JSON report now. " +
-                            "Otherwise, call the MOST IMPORTANT remaining tool using the native schema.";
+                            "Otherwise, call the MOST IMPORTANT remaining tool using <tool_call> XML tags.";
                 } else {
-                    continuePrompt = "If you have finished all your work, output ONLY your completion JSON report now. " +
-                            "Otherwise, call the next tool using the native schema.";
+                    continuePrompt = "Your response was not recognized as a tool call. To call a tool, " +
+                            "you MUST use <tool_call> XML tags. Example:\n" +
+                            "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"file.js\", " +
+                            "\"content\": \"console.log('hello');\"}}</tool_call>\n\n" +
+                            "If you have finished all your work, output ONLY your completion JSON report. " +
+                            "Otherwise, call the next tool using <tool_call> tags now.";
                 }
                 messages.add(new UserMessage(continuePrompt));
 
@@ -492,7 +521,8 @@ public class WorkerAgent {
         List<ParsedToolCall> calls = new ArrayList<>();
         Matcher m = TOOL_CALL_PATTERN.matcher(text);
         while (m.find()) {
-            String json = escapeControlCharsInJsonStrings(m.group(1).trim());
+            String rawContent = m.group(1).trim();
+            String json = escapeControlCharsInJsonStrings(rawContent);
             try {
                 JsonNode node = mapper.readTree(json);
                 String name = node.has("name") ? node.get("name").asText() : null;
@@ -501,10 +531,186 @@ public class WorkerAgent {
                     calls.add(new ParsedToolCall(name, argsJson));
                 }
             } catch (Exception e) {
-                log.warn("[Worker] Could not parse tool_call JSON: {} — {}", json, e.getMessage());
+                // Standard JSON parsing failed — likely unescaped content in writeFile/editFile.
+                // Use structural fallback parser that handles raw file content.
+                log.debug("[Worker] Standard JSON parse failed, trying structural fallback: {}", e.getMessage());
+                ParsedToolCall fallback = parseToolCallStructural(rawContent);
+                if (fallback != null) {
+                    calls.add(fallback);
+                    log.info("[Worker] Structural fallback parsed tool call: {}", fallback.name());
+                } else {
+                    log.warn("[Worker] Could not parse tool_call (both JSON and structural failed): {}",
+                            rawContent.length() > 200 ? rawContent.substring(0, 200) + "..." : rawContent);
+                }
             }
         }
         return calls;
+    }
+
+    /**
+     * Structural fallback parser for tool calls whose JSON contains unescaped file content.
+     * LLMs often emit writeFile/editFile calls where the "content" or "newStr" value has
+     * unescaped double-quotes and newlines that break standard JSON parsing.
+     *
+     * <p>This parser extracts "name" and known arg fields by scanning for structural markers
+     * rather than relying on strict JSON parsing.
+     *
+     * @param raw the raw text between {@code <tool_call>} and {@code </tool_call>}
+     * @return a ParsedToolCall if extraction succeeds, null otherwise
+     */
+    private ParsedToolCall parseToolCallStructural(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+
+        // Extract the "name" field — must be near the start and is always a simple string
+        java.util.regex.Matcher nameMatcher = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"").matcher(raw);
+        if (!nameMatcher.find()) return null;
+        String name = nameMatcher.group(1);
+
+        try {
+            switch (name) {
+                case "writeFile", "write_file" -> {
+                    // Extract "path" — simple string, always before "content"
+                    String path = extractSimpleStringField(raw, "path");
+                    if (path == null) return null;
+                    // Extract "content" — everything between the content value start and the closing of args
+                    String content = extractContentField(raw);
+                    if (content == null) return null;
+                    // Build proper JSON for args
+                    String argsJson = mapper.writeValueAsString(
+                            mapper.createObjectNode().put("path", path).put("content", content));
+                    return new ParsedToolCall(name, argsJson);
+                }
+                case "editFile", "edit_file" -> {
+                    String path = extractSimpleStringField(raw, "path");
+                    if (path == null) return null;
+                    String oldStr = extractFieldBetween(raw, "oldStr", new String[]{"newStr", "old_str"});
+                    if (oldStr == null) oldStr = extractFieldBetween(raw, "old_str", new String[]{"newStr", "new_str"});
+                    String newStr = extractLastStringField(raw, "newStr");
+                    if (newStr == null) newStr = extractLastStringField(raw, "new_str");
+                    if (oldStr == null || newStr == null) return null;
+                    String argsJson = mapper.writeValueAsString(
+                            mapper.createObjectNode().put("path", path).put("oldStr", oldStr).put("newStr", newStr));
+                    return new ParsedToolCall(name, argsJson);
+                }
+                default -> {
+                    // For non-content tools (readFile, listFiles, etc.), the JSON should have parsed fine.
+                    // If we're here, the JSON was truly malformed — give up.
+                    return null;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[Worker] Structural parse failed for '{}': {}", name, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Extract a simple string field value from JSON-like text (no embedded quotes). */
+    private String extractSimpleStringField(String text, String fieldName) {
+        java.util.regex.Matcher m = Pattern.compile(
+                "\"" + fieldName + "\"\\s*:\\s*\"([^\"]+)\"").matcher(text);
+        return m.find() ? m.group(1) : null;
+    }
+
+    /**
+     * Extract the "content" field value from a writeFile tool call.
+     * The content is everything between the opening quote after "content": and the last
+     * proper closing boundary ("}}" or "} }") of the tool call JSON.
+     */
+    private String extractContentField(String text) {
+        // Find "content" : "  (the start of the content value)
+        java.util.regex.Matcher m = Pattern.compile("\"content\"\\s*:\\s*\"").matcher(text);
+        if (!m.find()) return null;
+        int contentStart = m.end();
+
+        // The content ends at the last `"}` or `"  }` (closing of args object then outer object).
+        // Work backwards from the end of the raw text to find the content boundary.
+        String remainder = text.substring(contentStart);
+
+        // Find the closing pattern: quote followed by optional whitespace, }, optional whitespace, }
+        // We scan from the END because the content itself may contain `"}` patterns.
+        int lastClose = -1;
+        for (int i = remainder.length() - 1; i >= 0; i--) {
+            if (remainder.charAt(i) == '}') {
+                // Found a }, look for another } before it
+                for (int j = i - 1; j >= 0; j--) {
+                    char c = remainder.charAt(j);
+                    if (c == '}') {
+                        // Found }}, now look for the quote before it
+                        for (int k = j - 1; k >= 0; k--) {
+                            char q = remainder.charAt(k);
+                            if (q == '"') {
+                                lastClose = k;
+                                break;
+                            } else if (!Character.isWhitespace(q)) {
+                                break;
+                            }
+                        }
+                        break;
+                    } else if (!Character.isWhitespace(c)) {
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (lastClose < 0) return null;
+        return remainder.substring(0, lastClose);
+    }
+
+    /**
+     * Extract a field value that appears between the named field and the next known field.
+     * Used for oldStr in editFile where the content may contain unescaped quotes.
+     */
+    private String extractFieldBetween(String text, String fieldName, String[] nextFields) {
+        java.util.regex.Matcher m = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\"").matcher(text);
+        if (!m.find()) return null;
+        int start = m.end();
+
+        // Find the earliest next field
+        int end = text.length();
+        for (String next : nextFields) {
+            int idx = text.indexOf("\"" + next + "\"", start);
+            if (idx > 0 && idx < end) {
+                // Back up past the comma and whitespace
+                int boundary = idx;
+                while (boundary > start && (text.charAt(boundary - 1) == ',' ||
+                        text.charAt(boundary - 1) == '"' || Character.isWhitespace(text.charAt(boundary - 1)))) {
+                    boundary--;
+                }
+                end = boundary;
+            }
+        }
+        if (end <= start) return null;
+        String value = text.substring(start, end);
+        // Trim trailing quote if present
+        if (value.endsWith("\"")) value = value.substring(0, value.length() - 1);
+        return value;
+    }
+
+    /** Extract the last string field (like newStr) — content runs to the closing `"}}`. */
+    private String extractLastStringField(String text, String fieldName) {
+        java.util.regex.Matcher m = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\"").matcher(text);
+        if (!m.find()) return null;
+        int start = m.end();
+        String remainder = text.substring(start);
+        // Same logic as extractContentField — find closing `"}}` from end
+        for (int i = remainder.length() - 1; i >= 0; i--) {
+            if (remainder.charAt(i) == '}') {
+                for (int j = i - 1; j >= 0; j--) {
+                    if (remainder.charAt(j) == '}') {
+                        for (int k = j - 1; k >= 0; k--) {
+                            if (remainder.charAt(k) == '"') return remainder.substring(0, k);
+                            if (!Character.isWhitespace(remainder.charAt(k))) break;
+                        }
+                        break;
+                    }
+                    if (!Character.isWhitespace(remainder.charAt(j))) break;
+                }
+                break;
+            }
+        }
+        return null;
     }
 
     /**
@@ -761,6 +967,29 @@ public class WorkerAgent {
         return trimmed.startsWith("{") &&
                trimmed.contains("\"task_id\"") &&
                trimmed.contains("\"status\"");
+    }
+
+    /**
+     * Checks if a completion report JSON claims files were created or modified.
+     * Used to detect fabricated reports where the model says files_created/files_modified
+     * are non-empty but never actually called writeFile/editFile.
+     */
+    private boolean reportClaimsFileChanges(String text) {
+        if (text == null) return false;
+        return hasNonEmptyArrayField(text, "files_created") ||
+               hasNonEmptyArrayField(text, "files_modified");
+    }
+
+    private boolean hasNonEmptyArrayField(String text, String fieldName) {
+        if (!text.contains("\"" + fieldName + "\"")) return false;
+        // Non-empty = NOT [], NOT null
+        String f = "\"" + fieldName + "\"";
+        int idx = text.indexOf(f);
+        if (idx < 0) return false;
+        // Look at the value after the field name
+        String after = text.substring(idx + f.length()).stripLeading();
+        if (after.startsWith(":")) after = after.substring(1).stripLeading();
+        return !after.startsWith("[]") && !after.startsWith("null");
     }
 
     // ── Compaction ────────────────────────────────────────────────────────────

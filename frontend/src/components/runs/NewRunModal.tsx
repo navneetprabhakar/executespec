@@ -20,7 +20,7 @@ const MODELS = [
   { value: 'claude-opus-4-6',           label: 'Claude Opus 4.6 (Architect)' },
   { value: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6 (Capable)' },
   { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (Utility)' },
-  { value: 'gpt-4o',                    label: 'GPT-4o' },
+  { value: 'gpt-5.4',                    label: 'GPT-5.4' },
   { value: 'gemini-2.5-pro',            label: 'Gemini 2.5 Pro' },
 ];
 

@@ -65,7 +65,7 @@ export default function FeasibilityEstimator() {
             <option value="claude-opus-4-6">Claude Opus 4.6</option>
             <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
             <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-5.4">GPT-5.4</option>
             <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
           </select>
           <input
