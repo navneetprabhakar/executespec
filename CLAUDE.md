@@ -212,6 +212,16 @@ Full API reference: see memory file `api-endpoints.md`
 - Apply-to-run: added validation report generation step (was missing from `executeApplySuggestion()`)
 - Pagination: run list API now returns `PagedResponse<RunSummary>` with page/size/totalElements
 - Startup script: Caddy JSON config with dynamic route management via admin API
+- **Reliability fixes (deploy/preview):**
+  - All `gcloud`/`docker` subprocess commands have timeouts (deploy: 10min, delete: 5min, list: 2min)
+  - `deploy()` method fixed for pipe buffer deadlock (stdout/stderr read in parallel)
+  - ACTIVE_PREVIEWS gauge correctly decremented on ALL terminal states (FAILED, TIMED_OUT, STOPPED)
+  - `fail()` now cleans up Cloud Run resources (service + image) on preview failure
+  - `getLogs()` works for Cloud Run (fetches via `gcloud logging read`)
+  - `probeApiDocs()` works for both Docker (localhost:port) and Cloud Run (service URL)
+  - Virtual threads in PreviewService and DeploymentService wrapped with `ContextSnapshotFactory` for trace propagation
+  - `healthCheck()` HTTP client has connect timeout (10s) and per-request timeout (15s)
+  - `pushImage()` in ArtifactRegistryClient has 10-min timeout
 
 ### In Progress
 - Production deployment preparation

@@ -1,7 +1,7 @@
 # ExecuteSpec — Architecture Document
 
 > **Version**: 2.0
-> **Date**: 2026-03-15
+> **Date**: 2026-03-27
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -398,35 +398,95 @@ graph LR
     end
 ```
 
-### 6.2 Preview Deployment Flow
+### 6.2 Preview System (Dual-Mode)
+
+The preview system operates in two modes, selected by the `executespec.preview.mode` property:
+
+| Mode | Environment | TTL | Networking | Use Case |
+|------|-------------|-----|------------|----------|
+| `docker` | Local dev | 10 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
+| `cloud-run` | Dev / Prod | 5 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
+
+**Key implementation details:**
+- All subprocess commands enforce timeouts: `gcloud run deploy` 10 min, `gcloud run services delete` 5 min, `gcloud logging read` 2 min
+- Stdout/stderr streams are read in parallel threads to prevent pipe buffer deadlock
+- Virtual threads use `ContextSnapshotFactory.captureAll().wrap(runnable)` for Micrometer trace propagation
+- `ACTIVE_PREVIEWS` gauge is correctly decremented on all terminal states (success, failure, TTL expiry)
+- `probeApiDocs()` works for both modes: Docker (`localhost:{port}`) and Cloud Run (service URL)
+- `DeploymentService` also uses context-wrapped virtual threads for trace continuity
+
+#### 6.2.1 Cloud Run Preview Flow
 
 ```mermaid
 sequenceDiagram
     participant PS as PreviewService
     participant DDG as DockerfileGenerator
-    participant AR as ArtifactRegistry
+    participant AR as ArtifactRegistryClient
     participant CR as CloudRunClient
+    participant LOG as gcloud logging
 
     PS->>PS: Detect project type
     PS->>DDG: generateForCloudRun(type, workspace)
-    DDG-->>PS: Dockerfile (with $PORT)
+    Note over DDG: No ttyd — uses $PORT directly<br/>(port 8080)
+    DDG-->>PS: Dockerfile
 
     PS->>AR: buildImage(workspace, tag)
+    Note over AR: Subprocess with parallel<br/>stdout/stderr readers
     AR-->>PS: imageUri
 
     PS->>AR: pushImage(imageUri)
 
     PS->>CR: deployPreview(serviceName, imageUri, envVars)
-    Note over CR: --min-instances=0<br/>--max-instances=1<br/>--allow-unauthenticated<br/>--startup-cpu-boost
+    Note over CR: --min-instances=0<br/>--max-instances=1<br/>--port=8080<br/>--allow-unauthenticated<br/>--startup-cpu-boost<br/>Timeout: 10 min
 
     CR-->>PS: serviceUrl (*.run.app)
 
+    PS->>PS: Health check (probeApiDocs)
     PS->>PS: Update session → RUNNING
-    PS->>PS: Schedule TTL cleanup (10 min)
+    PS->>PS: Increment ACTIVE_PREVIEWS gauge
+    PS->>PS: Schedule TTL cleanup (5 min)
 
     Note over PS: After TTL expires:
     PS->>CR: deleteService(serviceName)
+    Note over CR: Timeout: 5 min
     PS->>AR: deleteImage(imageUri)
+    PS->>PS: Decrement ACTIVE_PREVIEWS gauge
+
+    Note over PS: Logs retrieval:
+    PS->>LOG: gcloud logging read (filter by service)
+    Note over LOG: Timeout: 2 min
+    LOG-->>PS: Log entries
+```
+
+#### 6.2.2 Docker Preview Flow (Local Dev)
+
+```mermaid
+sequenceDiagram
+    participant PS as PreviewService
+    participant DDG as DockerfileGenerator
+    participant DC as Docker Compose
+    participant CADDY as CaddyProxyManager
+
+    PS->>PS: Detect project type
+    PS->>DDG: generateForDocker(type, workspace)
+    Note over DDG: Includes ttyd for<br/>terminal access
+    DDG-->>PS: Dockerfile + docker-compose.yml
+
+    PS->>DC: docker compose up -d
+    DC-->>PS: Container running on localhost:{port}
+
+    PS->>CADDY: addRoute(subdomain, localhost:{port})
+    Note over CADDY: Caddy admin API<br/>JSON config + Cloudflare Origin Cert
+
+    PS->>PS: Health check (probeApiDocs → localhost:{port})
+    PS->>PS: Update session → RUNNING
+    PS->>PS: Increment ACTIVE_PREVIEWS gauge
+    PS->>PS: Schedule TTL cleanup (10 min)
+
+    Note over PS: After TTL expires:
+    PS->>DC: docker compose down
+    PS->>CADDY: removeRoute(subdomain)
+    PS->>PS: Decrement ACTIVE_PREVIEWS gauge
 ```
 
 ---
@@ -441,8 +501,8 @@ graph TB
         SEM --> POOL[CachedThreadPool<br/>Daemon threads]
         POOL --> PIPELINE[Pipeline Thread<br/>1 per run]
 
-        PIPELINE --> VT1[Virtual Thread<br/>Preview build]
-        PIPELINE --> VT2[Virtual Thread<br/>Post-merge agents]
+        PIPELINE --> VT1[Virtual Thread<br/>Preview build<br/>Context-wrapped]
+        PIPELINE --> VT2[Virtual Thread<br/>Post-merge agents<br/>Context-wrapped]
 
         PIPELINE --> GATE_POLL[Gate Polling<br/>500ms interval<br/>Redis-backed]
     end
@@ -534,7 +594,7 @@ graph TB
 | Redis gates (not in-memory) | MIG: approval REST call may hit different instance than pipeline thread | CompletableFuture maps |
 | Progressive merge (per-task) | Later tasks see previous output; reduces merge conflicts | Merge-all-at-end |
 | 15-min time limit (not iteration count) | Predictable behavior; iteration count was unintuitive | Iteration-based limits |
-| Cloud Run previews (not Docker on VM) | Ports not exposed through LB; Cloud Run gives public HTTPS URLs | Docker Compose on GCE |
+| Dual-mode previews (docker + cloud-run) | Docker Compose + Caddy for local dev; Cloud Run for hosted envs (public HTTPS, no port exposure needed) | Single-mode only |
 | 3-provider fallback chains | Resilience; no single-provider dependency | Single provider |
 | Embedded DB for preview | Cloud Run can't run sidecars; H2/SQLite sufficient for preview | Shared Cloud SQL instance |
 | ConcurrentHashMap for preview state | In-memory is fast; orphan cleanup handles restarts | Database-backed sessions |
@@ -600,4 +660,4 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-03-26.*
+*This architecture document is maintained alongside the codebase. Last updated: 2026-03-27.*

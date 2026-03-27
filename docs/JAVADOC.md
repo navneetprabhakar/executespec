@@ -192,7 +192,8 @@ All packages are under `com.navneet.executespec`.
 | `optimiser/` | PromptOptimiserAgent (self-improving prompt system), PromptPatternAnalyser, PromptAuditService |
 | `apitests/` | ApiTestSuiteAgent (post-merge OpenAPI spec generation) |
 | `recovery/` | StuckRunMonitor, RunRecoveryService, StuckRunEvaluator, StuckClassification, LlmCallGuard, EscalationService, RecoveryProperties |
-| `deployment/` | LocalPreviewService, DeploymentService, DeploymentStrategy, DockerfileGenerator, WorkspaceExportService, WorkspaceFileService, GcsWorkspaceStore |
+| `deployment/` | DeploymentService, CloudRunClient, ArtifactRegistryClient, DeploymentStrategy, DockerfileGenerator, WorkspaceExportService, WorkspaceFileService, GcsWorkspaceStore |
+| `deployment/preview/` | PreviewService (dual-mode: docker/cloud-run), PreviewProperties, PreviewSession, CaddyProxyManager, DevDockerfileGenerator, ComposeFileGenerator, ComposeExecutor, DatabaseDetector, EnvVarDetector |
 | `sse/` | Server-Sent Events: RunEvent (record + factory methods), SseBroadcaster |
 | `api/controller/` | REST controllers (see REST API Reference section) |
 | `api/dto/` | Request/response DTOs: RunSummary, RunDetail, TaskSummary, RunRequest, ApprovalRequest |
@@ -1087,37 +1088,186 @@ Pricing is DB-backed (`model_pricing` table), editable via UI/REST.
 
 ## 11. Deployment and Preview
 
-### 11.1 LocalPreviewService
+### 11.1 PreviewService
 
-**File:** `deployment/LocalPreviewService.java`
+**File:** `deployment/preview/PreviewService.java`
 
-Process-based local preview (NOT Docker). Starts the appropriate dev server directly in the workspace on a free local port.
+Dual-mode preview service that builds and runs ephemeral dev servers for completed runs. Mode is selected via the `preview.mode` property.
 
-**Project Type Detection:**
+**Dual-Mode Architecture:**
 
-| Type | Detection | Command |
-|------|-----------|---------|
-| SPRING_BOOT | `pom.xml` exists | `mvn spring-boot:run -Dserver.port={port}` |
-| GRADLE | `build.gradle` or `build.gradle.kts` | `gradle bootRun --args='--server.port={port}'` |
-| NODE | `package.json` | `npm run dev` (with PORT env var) |
-| FULLSTACK | pom.xml + package.json in `frontend/` | Backend + frontend in parallel |
-| PYTHON | `main.py` / `app.py` | `uvicorn` or `flask run` |
-| GO | `go.mod` | `go run .` |
-| RUBY | `Gemfile` | `rails server` |
-| PHP | `composer.json` | `php -S` |
-| RUST | `Cargo.toml` | `cargo run` |
-| DOTNET | `*.csproj` | `dotnet run` |
-| STATIC | `index.html` | `python -m http.server` |
+| Mode | Config Value | Infrastructure | HTTPS | URL Pattern |
+|------|-------------|----------------|-------|-------------|
+| Docker (default) | `docker` | Docker Compose on local/VM, Caddy reverse proxy | Cloudflare Origin Certificate via Caddy | `https://{runId}.preview.executespec.ai` |
+| Cloud Run | `cloud-run` | Build image, push to Artifact Registry, deploy to GCP Cloud Run | Managed by Cloud Run (automatic) | `https://es-preview-{runId8}.run.app` |
 
-**API:**
-- `startAsync(runId)` -- starts in a virtual thread, poll `getStatus()` for progress
-- `stop(runId)` -- kills all processes for a run
-- `getStatus(runId)` -- returns `PreviewState` (status, URL, projectType, processes)
-- `getLogs(runId, maxLines)` -- returns last N lines of process output from `CircularBuffer`
+**Lifecycle:** `PreviewStatus` enum: IDLE → ANALYZING → BUILDING → STARTING → RUNNING / FAILED / TIMED_OUT / STOPPED
 
-**Lifecycle:** `PreviewStatus` enum: IDLE -> STARTING -> RUNNING / FAILED / STOPPED
+**Public API:**
+- `start(runId, user, envVars)` -- starts preview on a context-wrapped virtual thread; returns immediately with ANALYZING status
+- `stop(runId)` -- tears down Docker Compose or Cloud Run service (idempotent); decrements `ACTIVE_PREVIEWS` gauge
+- `getStatus(runId)` -- returns `PreviewSession` (null if no active preview)
+- `getLogs(runId, tailLines, filter)` -- returns logs from Docker Compose (`docker compose logs`) or Cloud Run (`gcloud logging read`)
+- `analyze(runId)` -- detects database type and required env vars (pre-start step)
 
-### 11.2 GCS Workspace Archiving
+**Key Methods:**
+
+- **`buildAndStartCloudRun()`** -- Full Cloud Run preview lifecycle:
+  1. Generate Cloud Run-compatible Dockerfile (normalizes port to 8080, no ttyd for CLI projects)
+  2. Build Docker image via `ArtifactRegistryClient.buildImage()`
+  3. Push image to Artifact Registry via `ArtifactRegistryClient.pushImage()`
+  4. Deploy to Cloud Run via `CloudRunClient.deployPreview()` (1 vCPU, 512Mi, min-instances=0)
+  5. Health check via `CloudRunClient.healthCheck()` (3 retries, 5s delay)
+  6. On success: update session to RUNNING with public URL; notify `TestPreviewCoordinator`
+  7. On failure: clean up both Cloud Run service and Artifact Registry image
+
+- **`getCloudRunLogs()`** -- Fetches logs from Cloud Run via `gcloud logging read` with a 30-second timeout. Queries `resource.type=cloud_run_revision` filtered by service name, limited to the last 10 minutes of logs in ascending order.
+
+- **`cleanupCloudRun()`** -- Best-effort cleanup that deletes the Cloud Run service via `CloudRunClient.deleteService()` and the Artifact Registry image via `CloudRunClient.deleteImage()`. Exceptions are logged but not rethrown.
+
+- **`fail()`** -- Marks a preview as FAILED: increments `PREVIEW_FAILURES` counter, decrements `ACTIVE_PREVIEWS` gauge, runs cleanup (Cloud Run service + image deletion for cloud-run mode, or Docker Compose teardown + port release for docker mode), updates session status, and emits `PREVIEW_FAILED` SSE event.
+
+**Virtual Thread Context Propagation:**
+
+All virtual threads are wrapped with `ContextSnapshotFactory.captureAll().wrap()` to propagate Micrometer observation context (traceId/spanId) from the calling thread. This ensures distributed traces are connected across the async preview lifecycle:
+
+```java
+var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+Thread.ofVirtual().name("preview-cr-" + runId.substring(0, 8))
+    .start(snapshot.wrap(() -> buildAndStartCloudRun(...)));
+```
+
+**Guards:**
+- Preview must be enabled (`preview.enabled=true`)
+- Run must be in an allowed status: COMPLETE, PARTIAL, WORKING, REVIEWING, or AWAITING_MERGE
+- Concurrent preview limit per user (tier-based)
+- Per-run preview start limit (tier-based, from `TierConfig.maxPreviewStarts`)
+- Idempotent: returns existing session if already ANALYZING/BUILDING/STARTING/RUNNING; clears and retries if FAILED/TIMED_OUT
+
+**TTL Enforcement:**
+
+A `@Scheduled` method runs every 30 seconds to expire previews past their TTL (configurable via `preview.previewTtlMinutes`). Expired Docker previews are torn down via `docker compose down`; expired Cloud Run previews trigger `cleanupCloudRun()`.
+
+### 11.2 CloudRunClient
+
+**File:** `deployment/CloudRunClient.java`
+
+GCP Cloud Run CLI wrapper. All subprocess calls use bounded timeouts to prevent hung processes.
+
+**Methods and Timeouts:**
+
+| Method | Purpose | Timeout |
+|--------|---------|---------|
+| `deploy()` | Deploy/update a Cloud Run service | 10 minutes |
+| `deployPreview()` | Deploy ephemeral preview with min-instances=0 and labels | 10 minutes |
+| `healthCheck()` | GET service URL, expect status < 500 (3 retries, 5s delay) | 15s per request (10s connect) |
+| `deleteService()` | Delete a Cloud Run service | 5 minutes (via `exec()`) |
+| `deleteImage()` | Delete Artifact Registry image | 5 minutes (via `exec()`) |
+| `listPreviewServices()` | List services with `managed-by=executespec-preview` label | 2 minutes |
+| `rollbackToRevision()` | Route 100% traffic to a specific revision | 5 minutes |
+| `ensurePublicAccess()` | Set `allUsers → roles/run.invoker` IAM binding | 2 minutes |
+| `exec()` | Generic subprocess helper | 5 minutes |
+
+**Pipe Deadlock Fix:** `deploy()` and `deployPreview()` read stdout and stderr in parallel using `CompletableFuture.supplyAsync()` for the stderr stream. This prevents the OS pipe buffer from filling up and blocking the subprocess when gcloud writes large amounts of progress output to stderr.
+
+**Health Check Configuration:**
+- `HttpClient` has a 10-second connect timeout (set at construction)
+- Each request has a 15-second per-request timeout
+- 3 attempts with 5-second sleep between retries (cold-start tolerance)
+- Success: any HTTP status < 500
+
+**Preview Deploy Features:**
+- `--min-instances=0` for cost savings (scale to zero when idle)
+- `--max-instances=1` (ephemeral, single instance)
+- `--cpu-boost` for faster cold starts
+- Startup probe: `httpGet` with 5s initial delay, 10s period, 30 retries (up to 5 minutes for heavy apps)
+- Labels: `managed-by=executespec-preview` for orphan cleanup
+- Environment variables injected via temporary YAML file (avoids shell escaping issues)
+- `PORT` env var removed from user input (Cloud Run sets it automatically via `--port`)
+- Post-deploy `ensurePublicAccess()` as fallback if `--allow-unauthenticated` silently failed
+
+### 11.3 ArtifactRegistryClient
+
+**File:** `deployment/ArtifactRegistryClient.java`
+
+Docker image build and push client for GCP Artifact Registry.
+
+**Methods:**
+
+| Method | Purpose | Timeout |
+|--------|---------|---------|
+| `buildImage()` | `docker build --platform linux/amd64` in workspace | Configurable via `props.docker().buildTimeoutSeconds()` |
+| `pushImage()` | `docker push` to Artifact Registry | 10 minutes |
+| `fullImageUri()` | Returns `{host}/{project}/{repo}/{tag}` |  |
+
+**Build Output Handling:** Build logs are captured with a rolling window (max 8000 chars) to prevent OOM on large build outputs. If the build fails, the last 500 chars of output are included in the error message.
+
+**Error Detection:** Docker build checks for "Cannot connect to the Docker daemon" and provides a user-friendly message to start Docker Desktop.
+
+### 11.4 DeploymentService
+
+**File:** `deployment/DeploymentService.java`
+
+Full (permanent) deployment pipeline for completed runs. Deploys to Cloud Run with GitHub integration and multi-phase lifecycle.
+
+**Deploy Pipeline Phases:**
+1. GitHub (optional): create/push repo based on `RepoMode` (NEW, EXISTING, NONE)
+2. Docker build via `ArtifactRegistryClient.buildImage()`
+3. Push to Artifact Registry via `ArtifactRegistryClient.pushImage()`
+4. Deploy to Cloud Run via `CloudRunClient.deploy()`
+5. Health check via `CloudRunClient.healthCheck()`
+
+**Virtual Thread Context Propagation:**
+
+The async deploy pipeline runs on a virtual thread wrapped with `ContextSnapshotFactory` for trace propagation:
+
+```java
+var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+Thread.ofVirtual().name("deploy-" + runId.substring(0, 8))
+    .start(snapshot.wrap(() -> executeDeployPipeline(...)));
+```
+
+**Deployment Status Flow:** PENDING → BUILDING → PUSHING → DEPLOYING → LIVE / FAILED
+
+**Observability:** Records metrics for total deploy duration, build phase duration, health check duration, deploy failures (tagged by reason), and active deploy count.
+
+**Additional Features:**
+- `rollback(deploymentId)` -- instant traffic shift to a previous revision (no rebuild)
+- `deleteDeployment(deploymentId)` -- manual cleanup (deletes Cloud Run service + AR image)
+- `validatePrerequisites()` -- `@PostConstruct` check for Docker, gcloud auth, and GitHub PAT availability
+
+### 11.5 PreviewController
+
+**File:** `api/controller/PreviewController.java`
+
+REST controller for preview management. All endpoints require run access via `RunAccessGuard`.
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/runs/{runId}/preview/analyze` | Detect database type and required env vars |
+| `GET` | `/api/runs/{runId}/preview/status` | Get current preview session status |
+| `POST` | `/api/runs/{runId}/preview/start` | Start preview (accepts optional `envVars` map) |
+| `DELETE` | `/api/runs/{runId}/preview/stop` | Stop and tear down preview |
+| `GET` | `/api/runs/{runId}/preview/logs` | Get preview logs (supports `lines` and `filter` params) |
+| `GET` | `/api/runs/{runId}/preview/probe-api-docs` | Probe for OpenAPI/Swagger endpoints |
+
+**Dual-Mode API Docs Probe (`probeApiDocs`):**
+
+The probe endpoint works for both Docker and Cloud Run previews:
+- **Docker mode:** probes `http://localhost:{hostPort}` using the session's assigned host port
+- **Cloud Run mode:** probes the Cloud Run service URL directly (e.g., `https://es-preview-xxx.run.app`)
+
+Probes the following paths in order: `/v3/api-docs`, `/api-docs`, `/swagger.json`, `/openapi.json`, `/docs`, `/swagger-ui.html`, `/swagger-ui/index.html`. Returns the first path that responds with HTTP 2xx/3xx.
+
+**Dual-Mode Log Retrieval (`getLogs`):**
+
+The logs endpoint delegates to `PreviewService.getLogs()` which routes based on preview mode:
+- **Docker mode:** fetches via `docker compose logs` for the compose project
+- **Cloud Run mode:** fetches via `gcloud logging read` filtered by service name (last 10 minutes, max 200 lines)
+
+### 11.6 GCS Workspace Archiving
 
 - Completed run workspaces are archived to GCS after `archiveAfterHours` (default: 24)
 - Archived as zip files: `workspaces/{runId}.zip`
@@ -1197,13 +1347,16 @@ Process-based local preview (NOT Docker). Starts the appropriate dev server dire
 | `GET` | `/api/pricing` | Get all model pricing |
 | `PUT` | `/api/pricing` | Update model pricing |
 
-### 12.6 Preview Endpoints (`LocalPreviewController`)
+### 12.6 Preview Endpoints (`PreviewController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/runs/{runId}/preview` | Get preview status |
-| `POST` | `/api/runs/{runId}/preview/start` | Start preview |
-| `DELETE` | `/api/runs/{runId}/preview/stop` | Stop preview |
+| `GET` | `/api/runs/{runId}/preview/analyze` | Detect database type and required env vars (pre-start) |
+| `GET` | `/api/runs/{runId}/preview/status` | Get preview session status |
+| `POST` | `/api/runs/{runId}/preview/start` | Start preview (accepts optional `envVars` map in body) |
+| `DELETE` | `/api/runs/{runId}/preview/stop` | Stop and tear down preview |
+| `GET` | `/api/runs/{runId}/preview/logs` | Get logs (Docker Compose or Cloud Run via `gcloud logging read`) |
+| `GET` | `/api/runs/{runId}/preview/probe-api-docs` | Probe for OpenAPI/Swagger endpoints (works for both Docker and Cloud Run) |
 
 ### 12.7 Deployment Endpoints (`DeploymentController`)
 
