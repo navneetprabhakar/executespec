@@ -236,9 +236,9 @@ public class RunConversationController {
             ));
         }
 
-        // Save current plan version before modifying
-        stateStore.savePlanVersion(runId, source == ApplySource.COPILOT ? "COPILOT" : "REVIEW", userId);
+        // Increment plan version first, then save — avoids duplicate key on (run_id, version)
         stateStore.incrementPlanVersion(runId);
+        stateStore.savePlanVersion(runId, source == ApplySource.COPILOT ? "COPILOT" : "REVIEW", userId);
 
         // Append tasks to existing plan
         int applyIndex = run.getApplySuggestionCount() + 1;

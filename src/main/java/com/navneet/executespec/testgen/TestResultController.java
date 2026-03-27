@@ -202,8 +202,8 @@ public class TestResultController {
         }
 
         int applyIndex = run.getApplySuggestionCount() + 1;
-        stateStore.savePlanVersion(runId, "TEST_FIX", userDetails.getUser().getId());
         stateStore.incrementPlanVersion(runId);
+        stateStore.savePlanVersion(runId, "TEST_FIX", userDetails.getUser().getId());
         List<AgentTask> newTasks = stateStore.appendSuggestionTasks(runId, miniPlan, applyIndex, ApplySource.REVIEW);
         stateStore.incrementApplySuggestionCount(runId);
 
