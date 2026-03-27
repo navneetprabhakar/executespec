@@ -90,13 +90,18 @@ public class ConflictResolverAgent {
                 .replace("{ours_content}", truncate(ours, 6000))
                 .replace("{theirs_content}", truncate(theirs, 6000));
 
+            org.springframework.ai.anthropic.api.AnthropicCacheOptions cacheOpts = org.springframework.ai.anthropic.api.AnthropicCacheOptions.builder()
+                .strategy(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
+
             AnthropicChatOptions options = AnthropicChatOptions.builder()
                 .model(model)
                 .maxTokens(MAX_OUTPUT_TOKENS)
+                .cacheOptions(cacheOpts)
                 .build();
 
             Prompt prompt = new Prompt(
-                List.of(new UserMessage(userContent)),
+                List.of(new SystemMessage(userContent), new UserMessage("Please resolve the conflict.")),
                 options
             );
 

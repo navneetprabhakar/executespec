@@ -1,24 +1,24 @@
 package com.navneet.executespec.router;
 
 import com.navneet.executespec.config.ModelConstants;
-import com.navneet.executespec.config.RoutingProperties;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 
 
 /**
  * Two-axis model routing:
  *   Axis 1 (Tier): FAST → CAPABLE → POWER based on task complexity + escalation
- *   Axis 2 (Provider): Weighted round-robin distribution (configurable via executespec.routing.provider-weights)
+ *   Axis 2 (Provider): Fixed priority order with fallback on failure/unavailability
+ *
+ * Provider priority: Anthropic → OpenAI → Google
+ * On failure or unavailability, the next provider in the chain is tried automatically.
  *
  * Provider failover: same tier, different provider (horizontal)
  * Tier escalation: higher tier on validation retry failure (vertical)
@@ -28,24 +28,17 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * This service does NOT make LLM calls. It selects a model, and the caller
  * passes the model name to the existing LlmRouter/ChatModel for execution.
- *
- * TODO: Per-run cost budget — check budget before each worker attempt:
- *   - FREE: $0.50 (fixed), PRO: $2.00 (max $10), TEAM: $5.00 (max $25), ENTERPRISE: $10.00 (max $100)
- *   - RunCostBudgetService: initBudget(runId, tier), canAfford(runId, cost), getRemainingBudget(runId)
- *   - Before tier escalation: verify remaining budget covers higher-tier cost
- *   - On budget exceeded: mark task PARTIAL, emit BUDGET_EXCEEDED SSE event
- *   - Store budget in Redis (ephemeral, per-run lifetime)
- *   - Uses CostEstimator.computeCostForRun() for running total
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ModelRouter {
 
-    private static final Map<String, LlmProvider> NAME_TO_PROVIDER = Map.of(
-            "anthropic", LlmProvider.ANTHROPIC,
-            "google", LlmProvider.GEMINI,
-            "openai", LlmProvider.OPENAI
+    /** Fixed priority order: Anthropic first, OpenAI second, Google third. */
+    private static final List<LlmProvider> PROVIDER_PRIORITY = List.of(
+            LlmProvider.ANTHROPIC,
+            LlmProvider.OPENAI,
+            LlmProvider.GEMINI
     );
 
     private static final Map<ModelTier, Map<LlmProvider, String>> MODEL_MATRIX = Map.of(
@@ -67,17 +60,12 @@ public class ModelRouter {
     );
 
     private final ProviderHealthTracker healthTracker;
-    private final RoutingProperties routingProperties;
     private final MeterRegistry meterRegistry;
-
-    /** Weighted provider sequence built from config. e.g. [A,A,A,A,G,G,G,O,O,O] for 4:3:3. */
-    private List<LlmProvider> weightedSequence;
 
     @PostConstruct
     void init() {
-        weightedSequence = buildWeightedSequence(routingProperties.getProviderWeights());
-        log.info("Provider load distribution initialized: weights={} sequence-length={}",
-                routingProperties.getProviderWeights(), weightedSequence.size());
+        log.info("Provider routing initialized: fixed priority order {}",
+                PROVIDER_PRIORITY);
     }
 
     /**
@@ -105,21 +93,15 @@ public class ModelRouter {
     }
 
     /**
-     * Select model using weighted random distribution.
-     * Picks a random index from the weighted sequence, ensuring non-deterministic
-     * provider selection that respects configured weights (e.g. 4:3:3).
-     * Falls through to next providers if the selected one is unhealthy.
+     * Select model using fixed priority order.
+     * Picks the first healthy provider from the priority list.
+     * Falls through to next provider if the selected one is unhealthy.
      */
     public ModelSelection selectFromTier(ModelTier tier) {
-        int seqLen = weightedSequence.size();
-        int startIdx = ThreadLocalRandom.current().nextInt(seqLen);
-
-        // Try from the random position, cycling through all providers
-        for (int offset = 0; offset < seqLen; offset++) {
-            LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
+        for (LlmProvider provider : PROVIDER_PRIORITY) {
             if (healthTracker.isHealthy(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
-                log.debug("Selected model: {} ({}/{}) via weighted random", modelName, tier, provider);
+                log.debug("Selected model: {} ({}/{}) via priority order", modelName, tier, provider);
                 meterRegistry.counter("executespec.routing.provider_selected",
                         "provider", provider.name(), "tier", tier.name()).increment();
                 return ModelSelection.builder()
@@ -130,8 +112,8 @@ public class ModelRouter {
             }
         }
 
-        // All providers unhealthy — try random pick anyway
-        LlmProvider fallback = weightedSequence.get(startIdx);
+        // All providers unhealthy — try first in priority anyway
+        LlmProvider fallback = PROVIDER_PRIORITY.getFirst();
         log.warn("All providers unhealthy for tier {} — attempting {} anyway", tier, fallback);
         String modelName = MODEL_MATRIX.get(tier).get(fallback);
         return ModelSelection.builder()
@@ -164,18 +146,14 @@ public class ModelRouter {
     }
 
     /**
-     * Select model using weighted random, filtered by providers the org can use.
+     * Select model using fixed priority, filtered by providers the org can use.
      */
     public ModelSelection selectFromTier(ModelTier tier, Set<LlmProvider> availableProviders) {
-        int seqLen = weightedSequence.size();
-        int startIdx = ThreadLocalRandom.current().nextInt(seqLen);
-
-        // Try from the random position, cycling through all providers, filtered by availability
-        for (int offset = 0; offset < seqLen; offset++) {
-            LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
+        // First pass: healthy + available
+        for (LlmProvider provider : PROVIDER_PRIORITY) {
             if (availableProviders.contains(provider) && healthTracker.isHealthy(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
-                log.debug("Selected model: {} ({}/{}) from available: {} via weighted random",
+                log.debug("Selected model: {} ({}/{}) from available: {} via priority order",
                         modelName, tier, provider, availableProviders);
                 meterRegistry.counter("executespec.routing.provider_selected",
                         "provider", provider.name(), "tier", tier.name()).increment();
@@ -184,9 +162,8 @@ public class ModelRouter {
             }
         }
 
-        // No healthy + available provider — try first available regardless of health
-        for (int offset = 0; offset < seqLen; offset++) {
-            LlmProvider provider = weightedSequence.get((startIdx + offset) % seqLen);
+        // Second pass: available but unhealthy — try anyway
+        for (LlmProvider provider : PROVIDER_PRIORITY) {
             if (availableProviders.contains(provider)) {
                 String modelName = MODEL_MATRIX.get(tier).get(provider);
                 log.warn("No healthy provider in {} — forcing {} anyway", availableProviders, provider);
@@ -201,7 +178,6 @@ public class ModelRouter {
     /**
      * Map complexity hint to initial model tier.
      * LOW → FAST (Haiku), MEDIUM → CAPABLE (Sonnet), HIGH → CAPABLE (Sonnet)
-     * Quality-first: MEDIUM uses Sonnet for better output quality.
      */
     private ModelTier complexityToTier(TaskComplexity complexity) {
         return switch (complexity) {
@@ -215,52 +191,15 @@ public class ModelRouter {
      * Escalate tier based on retry attempt number.
      * Attempts 1-2: stay put. Attempt 3+: escalate one level, capped at CAPABLE.
      *
-     * FAST → CAPABLE (auto, on attempt 3)
-     * CAPABLE → CAPABLE (capped — never auto-promote to POWER)
-     * POWER → POWER (already max, manual trigger only)
-     *
      * POWER tier is reserved for manual retry via /api/runs/{id}/tasks/{taskId}/retry
-     * or explicit admin override. A task that Sonnet can't solve in 3 attempts is likely
-     * a prompt/spec problem, not a model capability problem.
+     * or explicit admin override.
      */
     private ModelTier escalate(ModelTier current, int attempt) {
         if (attempt <= 2) return current;
         return switch (current) {
             case FAST -> ModelTier.CAPABLE;
-            case CAPABLE -> ModelTier.CAPABLE; // Never auto-escalate to POWER
+            case CAPABLE -> ModelTier.CAPABLE;
             case POWER -> ModelTier.POWER;
         };
-    }
-
-    // ── Weighted sequence builder ──────────────────────────────────────────────
-
-    /**
-     * Build a flat provider list from weight config.
-     * e.g. {anthropic:4, google:3, openai:3} → [ANTHROPIC x4, GEMINI x3, OPENAI x3]
-     * Falls back to Anthropic-only if config is empty/invalid.
-     */
-    private static List<LlmProvider> buildWeightedSequence(Map<String, Integer> weights) {
-        List<LlmProvider> sequence = new ArrayList<>();
-
-        if (weights == null || weights.isEmpty()) {
-            sequence.add(LlmProvider.ANTHROPIC);
-            return sequence;
-        }
-
-        for (var entry : weights.entrySet()) {
-            LlmProvider provider = NAME_TO_PROVIDER.get(entry.getKey().toLowerCase());
-            int weight = entry.getValue() != null ? entry.getValue() : 0;
-            if (provider != null && weight > 0) {
-                for (int i = 0; i < weight; i++) {
-                    sequence.add(provider);
-                }
-            }
-        }
-
-        if (sequence.isEmpty()) {
-            sequence.add(LlmProvider.ANTHROPIC);
-        }
-
-        return List.copyOf(sequence);
     }
 }

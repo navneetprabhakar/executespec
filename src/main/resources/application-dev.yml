@@ -35,14 +35,7 @@
 # │ JIRA_WEBHOOK_SECRET    JIRA webhook secret                                 │
 # └─────────────────────────────────────────────────────────────────────────────┘
 
-# ── LLM Provider Weights & Keys ──────────────────────────────────────────────
-executespec:
-  routing:
-    provider-weights:
-      anthropic: 4
-      google: 3
-      openai: 3
-
+# ── LLM Provider Keys ────────────────────────────────────────────────────────
 spring:
   data:
     redis:

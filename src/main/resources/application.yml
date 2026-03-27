@@ -274,11 +274,6 @@ app:
       concurrent-run-limit: 10
 
 executespec:
-  routing:
-    provider-weights:
-      anthropic: 0
-      google: 0
-      openai: 10
   validator:
     enabled: true
     per-task-validation: true
