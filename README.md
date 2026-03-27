@@ -72,7 +72,7 @@ POST /api/runs  →  ReferenceExtractor (JIRA/Confluence context)
 - **Billing** — Razorpay subscriptions + run top-up credits
 - **JIRA/Confluence context extraction** — auto-detects issue keys and page URLs, enriches planner input
 - **Slack notifications** — org-level OAuth, per-project channel routing, Block Kit messages
-- **Cloud Run previews** — auto-deploy for testing, 10-min TTL
+- **Dual-mode previews** — Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 10-min TTL)
 - **Post-run AI chat** — conversation panel with workspace context injection
 - **GitHub integration** — auto-create repos, push code, clone existing repos
 - **GCP deployment** — GCE MIG + Cloud SQL + Redis + GCS + Load Balancer
@@ -95,7 +95,7 @@ POST /api/runs  →  ReferenceExtractor (JIRA/Confluence context)
 
 ## Database Migrations
 
-37 Flyway migrations (V1–V37) run automatically on startup:
+39 Flyway migrations (V1–V39) run automatically on startup:
 
 | Version | Description |
 |---------|-------------|
@@ -111,7 +111,8 @@ POST /api/runs  →  ReferenceExtractor (JIRA/Confluence context)
 | V28–V29 | Invoicing/GST, preview limits |
 | V32 | Plan versions |
 | V34 | Validation report |
-| V37 | Test generation pipeline |
+| V35–V37 | Preview starts, run title/summary, test generation |
+| V38–V39 | Test plan token tracking, cost estimate columns |
 
 ---
 

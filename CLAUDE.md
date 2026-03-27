@@ -1,14 +1,14 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-03-26
+> Last updated: 2026-03-27
 
 ## Architecture
 
 - **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.0
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
-- **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews, GCE for main app
+- **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
 - **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Sonnet) → Plan Gate → SequentialTaskExecutor (Haiku per task) → CompilerAgent → Auto-merge all tasks → ReviewerAgentV2 (inspect + auto-fix) → ValidationReport → COMPLETE
 - **LLM Router:** 3-provider fallback chains (Anthropic → Google → OpenAI) with weighted round-robin (4:3:3) and tier-based model escalation (FAST → CAPABLE → POWER)
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
@@ -28,7 +28,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V37)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V39)
 
 ## Patterns: MUST Follow
 
@@ -157,12 +157,16 @@ Full API reference: see memory file `api-endpoints.md`
 | Report entity | `report/entity/ValidationReport.java` |
 | Report frontend | `frontend/src/components/runs/ValidationReportPanel.tsx` |
 | Shared report page | `frontend/src/pages/SharedReportPage.tsx` |
-| Preview (Cloud Run) | `deployment/preview/PreviewService.java` |
+| Preview service | `deployment/preview/PreviewService.java` (dual-mode: docker/cloud-run) |
+| Preview config | `deployment/preview/PreviewProperties.java` (mode, TTL, concurrency) |
+| Caddy proxy manager | `deployment/preview/CaddyProxyManager.java` (Docker mode only) |
+| Cloud Run client | `deployment/CloudRunClient.java` |
+| Artifact Registry | `deployment/ArtifactRegistryClient.java` |
 | Deployment service | `deployment/DeploymentService.java` |
 | Tier permissions | `auth/service/TierPermissionService.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Slack integration | `integration/slack/SlackNotificationService.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V37) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V39) |
 | LLM prompts | `resources/prompts/*.txt` |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
@@ -190,7 +194,8 @@ Full API reference: see memory file `api-endpoints.md`
 - Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → review (inspect + auto-fix) → **validation report** → COMPLETE
 - Multi-provider LLM routing with automatic fallback (Anthropic → Google → OpenAI)
 - 15-minute wall-clock worker time limit with stall detection and model escalation
-- Cloud Run previews with 10-min TTL and countdown timer
+- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 10-min TTL, Caddy proxy)
+- Caddy reverse proxy with Cloudflare Origin Certificate for local/VM preview routing
 - JWT auth with RBAC, org management, project scoping
 - Razorpay billing (subscriptions + run top-up credits)
 - JIRA/Confluence context extraction and enrichment
@@ -201,8 +206,15 @@ Full API reference: see memory file `api-endpoints.md`
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
 - Metrics wired into services: PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
 
+### Recent Changes (2026-03-27)
+- Preview mode: dual-mode support — `cloud-run` for dev/prod (5-min TTL, Artifact Registry + Cloud Run), `docker` for local (10-min TTL, Docker Compose + Caddy)
+- Caddy TLS: switched from broken internal CA to Cloudflare Origin Certificate
+- Apply-to-run: added validation report generation step (was missing from `executeApplySuggestion()`)
+- Pagination: run list API now returns `PagedResponse<RunSummary>` with page/size/totalElements
+- Startup script: Caddy JSON config with dynamic route management via admin API
+
 ### In Progress
-- Deploy Engine v2 (Paths B & C: Docker Compose on VM, Terraform + Managed Services — 0-10% done)
+- Production deployment preparation
 
 ### Known Tech Debt
 - V3 migration type mismatch: `actual_cost_usd` must be `DOUBLE PRECISION` (not `DECIMAL(10,6)`)
@@ -210,3 +222,4 @@ Full API reference: see memory file `api-endpoints.md`
 - Gate lost on restart: approve() → if gate missing → auto-fail with message
 - StartupRunResumer disabled — users resume stuck runs manually via UI
 - ReviewerAgent V1 class still wired as @Service bean but unused in pipeline (blocks deletion of reviewer.txt prompt)
+- Apply-to-run: `plan_version` duplicate key error on retry (incrementPlanVersion may not be working correctly)
