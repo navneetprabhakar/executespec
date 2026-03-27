@@ -86,7 +86,7 @@ public class HealthCheckDetector {
         if (type == null) return "/";
         return switch (type) {
             case SPRING_BOOT -> "/actuator/health";
-            case NODE_BACKEND, PYTHON, GO, RUBY, PHP, RUST -> "/health";
+            case NODE_BACKEND, PYTHON, GO, RUBY, PHP, RUST, JAVA -> "/health";
             case NODE_FRONTEND, FULL_STACK, STATIC_HTML -> "/";
         };
     }

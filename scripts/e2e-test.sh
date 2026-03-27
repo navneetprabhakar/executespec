@@ -23,10 +23,8 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 declare -a LANGUAGES=(
     "Python"
     "JavaScript"
-    "Go"
     "Java"
     "TypeScript"
-    "Rust"
     "Static HTML"
     "Cancel"
 )
@@ -34,10 +32,8 @@ declare -a LANGUAGES=(
 declare -a REQUESTS=(
     "Create a Python CLI calculator with add, subtract, multiply, divide operations. Single file, no external dependencies."
     "Create a Node.js Express API with GET /health and POST /echo endpoints. Include package.json."
-    "Create a Go HTTP server with GET /ping returning JSON response. Include go.mod."
     "Create a Java Maven project with a Main class that prints hello world. Include pom.xml."
     "Create a TypeScript Node.js script that validates email addresses using regex. Include tsconfig.json and package.json."
-    "Create a Rust CLI that converts Celsius to Fahrenheit from command line args. Include Cargo.toml."
     "Create a static HTML page with CSS that shows a responsive portfolio layout. Single index.html file."
     "Build a complex microservices architecture with 20 services including API gateway, service mesh, event sourcing"
 )

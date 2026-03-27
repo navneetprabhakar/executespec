@@ -367,16 +367,15 @@ public class WorkerAgent {
                 }
 
                 // No tool calls and no completion report — prompt to continue
-                String toolHint = "{\"name\": \"...\", \"args\": {...}}";
                 String continuePrompt;
                 long minsLeft = Duration.between(Instant.now(), deadline).toMinutes();
                 if (minsLeft <= 3) {
                     continuePrompt = "You have approximately " + minsLeft + " minute(s) remaining. " +
                             "If you have finished all your work, output ONLY your completion JSON report now. " +
-                            "Otherwise, call the MOST IMPORTANT remaining tool: " + toolHint;
+                            "Otherwise, call the MOST IMPORTANT remaining tool using the native schema.";
                 } else {
                     continuePrompt = "If you have finished all your work, output ONLY your completion JSON report now. " +
-                            "Otherwise, call the next tool: " + toolHint;
+                            "Otherwise, call the next tool using the native schema.";
                 }
                 messages.add(new UserMessage(continuePrompt));
 
@@ -835,7 +834,7 @@ public class WorkerAgent {
                 Current state of files you have written:
                 %s
 
-                Continue from where you left off. Call the next tool as a JSON object: {"name": "...", "args": {...}}
+                Continue from where you left off. Call the next tool using the native tool calling schema.
                 """.formatted(safeJson(task), summary, fileContext)));
 
         log.info("Context compacted for task {}. Checkpoint: {}", taskId, checkpointPath);
@@ -1015,11 +1014,12 @@ public class WorkerAgent {
         allMessages.addAll(windowed);
 
         Prompt prompt;
+        List<ToolCallback> callbacks = WorkerToolCallbackFactory.create(
+                runId, taskId,
+                (name, argsJson, rid, tid) -> dispatchTool(new ParsedToolCall(name, argsJson), rid, tid));
+
         if (isOpenAi) {
             // OpenAI: native function calling — tools defined as JSON schemas
-            List<ToolCallback> callbacks = WorkerToolCallbackFactory.create(
-                    runId, taskId,
-                    (name, argsJson, rid, tid) -> dispatchTool(new ParsedToolCall(name, argsJson), rid, tid));
             OpenAiChatOptions opts = OpenAiChatOptions.builder()
                     .maxCompletionTokens(maxOut)
                     .toolCallbacks(callbacks)
@@ -1027,20 +1027,22 @@ public class WorkerAgent {
                     .build();
             prompt = new Prompt(allMessages, opts);
         } else {
-            // Anthropic / Google: prompt-based tool calling (XML <tool_call> format)
+            // Anthropic / Google: native tool calling using AnthropicChatOptions as the base options object
             AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                     .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                     .build();
             AnthropicChatOptions opts = AnthropicChatOptions.builder()
                     .maxTokens(maxOut)
                     .cacheOptions(cacheOpts)
+                    .toolCallbacks(callbacks)
+                    .internalToolExecutionEnabled(false)
                     .build();
             prompt = new Prompt(allMessages, opts);
         }
 
-        // OpenAI native tool calls: NO_FALLBACK — message history contains ToolResponseMessages
-        // that are incompatible with Anthropic/Google providers
-        FallbackMode fallbackMode = isOpenAi ? FallbackMode.NO_FALLBACK : FallbackMode.TASK_BOUNDARY;
+        // Native tool calls: NO_FALLBACK — message history contains ToolResponseMessages
+        // that are incompatible across some implementations if failed mid-task
+        FallbackMode fallbackMode = FallbackMode.NO_FALLBACK;
         return llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,
                 fallbackMode, iteration, justCompacted);
     }

@@ -15,6 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
@@ -52,14 +55,14 @@ public class TestWorkerAgent {
      * @return the generated Java source code
      */
     public String generateTestClass(String runId, TestTask task,
-                                     String conventionsDoc, String userRequest) {
+                                     String conventionsDoc, String userRequest, boolean isCli) {
         log.info("[TestWorker] Generating test class {} for run {}", task.getTaskName(), runId);
 
         task.setStatus(TestTaskStatus.GENERATING);
         testTaskRepository.save(task);
 
         // Build prompt
-        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest);
+        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli);
 
         // Call LLM (CAPABLE tier)
         ModelSelection model = modelRouter.selectFromTier(ModelTier.CAPABLE);
@@ -91,10 +94,10 @@ public class TestWorkerAgent {
      */
     public String retryWithError(String runId, TestTask task,
                                   String conventionsDoc, String userRequest,
-                                  String compilationError) {
+                                  String compilationError, boolean isCli) {
         log.info("[TestWorker] Retrying {} with compilation error context", task.getTaskName());
 
-        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest)
+        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli)
                 + "\n\nYour previous attempt had COMPILATION ERRORS:\n" + compilationError
                 + "\n\nFix ALL compilation errors. Output ONLY valid, compilable Java source code.";
 
@@ -117,7 +120,7 @@ public class TestWorkerAgent {
         return code;
     }
 
-    private String buildPrompt(TestTask task, String conventionsDoc, String userRequest) {
+    private String buildPrompt(TestTask task, String conventionsDoc, String userRequest, boolean isCli) {
         String testMethodsJson;
         try {
             // plan_json may contain test methods info; use task description as fallback
@@ -126,7 +129,20 @@ public class TestWorkerAgent {
             testMethodsJson = task.getTaskDescription();
         }
 
+        String testingContext = isCli 
+            ? "You are testing a Command Line Interface (CLI) application."
+            : "You are testing against a live running application via HTTP.";
+        String technicalReqs = isCli 
+            ? "- Execute the application binary/script directly within the JVM (e.g. ProcessBuilder)\n- Assume the binary or script is executable from the current working directory\n- Assert on stdout output, stderr, and exit codes\n- Use JUnit 5 and AssertJ"
+            : "- Use RestAssured for all HTTP calls\n- Base URL is configurable via system property \"app.base-url\" (default: http://localhost:8080)\n- If auth is required, implement a helper method that calls the login endpoint and caches the JWT token. Use this token in all authenticated requests.\n- Use JUnit 5 (@Test, @BeforeAll, @AfterAll, @Order, @TestMethodOrder)\n- Order test methods logically: create → read → update → delete\n- Use AssertJ for assertions (assertThat(...).isEqualTo(...))\n- Each test method must be independent OR explicitly ordered with @Order annotation\n- For CRUD tests: create a test entity in @BeforeAll, clean up in @AfterAll\n- For lifecycle tests: use @TestMethodOrder(MethodOrderer.OrderAnnotation.class)";
+        String statusCodeConventions = isCli
+            ? "CLI PROCESS CONVENTIONS:\n- Success means exit code 0\n- Error means non-zero exit code\n- Use standard string assertions on stdout to verify behavior"
+            : "HTTP STATUS CODE CONVENTIONS:\n- POST that creates a resource: expect 201 Created (NOT 200)\n- POST that performs an action (login, approve, etc.): expect 200 OK\n- GET: expect 200 OK\n- PUT/PATCH: expect 200 OK\n- DELETE: expect 200 OK or 204 No Content\n- 404 for resource not found\n- 400 or 422 for validation errors\n- 401 for unauthenticated, 403 for unauthorized\n- Always check the ACTUAL conventions doc above — if it specifies different status codes, use those instead";
+
         return loadPrompt()
+                .replace("{testing_context}", testingContext)
+                .replace("{technical_requirements}", technicalReqs)
+                .replace("{status_code_conventions}", statusCodeConventions)
                 .replace("{task_name}", task.getTaskName())
                 .replace("{task_description}", task.getTaskDescription())
                 .replace("{target_entity}", task.getTargetEntity() != null ? task.getTargetEntity() : "")
@@ -137,10 +153,17 @@ public class TestWorkerAgent {
     }
 
     private LlmRouter.LlmResponse callLlmTracked(String runId, ModelSelection model, String systemPrompt) {
+        AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
+        AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .model(model.getModelName())
+                .cacheOptions(cacheOpts)
+                .build();
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(systemPrompt),
                 new UserMessage("Generate the test class now.")
-        ));
+        ), opts);
         return llmRouter.callWithFallbackTracked(
                 model.getProvider().name().toLowerCase(), model.getModelName(),
                 prompt, runId, "test-worker",

@@ -13,6 +13,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -113,9 +116,16 @@ public class ApiTestSuiteAgent {
 
         // Call LLM
         String system = promptResource.getContentAsString(StandardCharsets.UTF_8);
+        AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
+        AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .model(props.getModel())
+                .cacheOptions(cacheOpts)
+                .build();
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(system),
-                new UserMessage("Generate OpenAPI 3.0 YAML for these backend API source files:\n\n" + controllerContent)));
+                new UserMessage("Generate OpenAPI 3.0 YAML for these backend API source files:\n\n" + controllerContent)), opts);
 
         var llmResponse = llmRouter.callWithFallback(
                 props.getProvider(), props.getModel(),
