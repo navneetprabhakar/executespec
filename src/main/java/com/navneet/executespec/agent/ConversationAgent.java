@@ -422,8 +422,11 @@ public class ConversationAgent {
                when relevant.
 
             4. **Create improvement goals** — When you identify issues or the user asks for changes,
-               describe them as actionable goals. The user can then click "Implement as New Run" to
-               apply changes via the automated pipeline.
+               describe them as actionable goals. The user has TWO options:
+               - **"Apply to Run"** (green button) — for small, targeted fixes (≤6 tasks). This appends
+                 tasks to the CURRENT run and executes them immediately. Recommend this for most improvements.
+               - **"Implement as New Run"** (violet button) — for large changes that need a full pipeline
+                 run from scratch. Only recommend this for major refactors or entirely new features.
 
             RESPONSE FORMAT:
             ─────────────────────────────
@@ -435,11 +438,14 @@ public class ConversationAgent {
               **What to change:** <specific description>
             • Be concise but thorough. Assume the user is a developer.
             • If you identify a bug or misconfiguration, lead with the diagnosis.
+            • When recommending action, guide users to click **"Apply to Run"** for small fixes
+              or **"Implement as New Run"** for large changes. Do NOT confuse the two.
 
             CONVERSATION LIMIT:
             ─────────────────────────────
-            This conversation is limited to %d messages. When suggesting substantial changes,
-            encourage the user to click "Implement as New Run" to apply them automatically.
+            This conversation is limited to %d messages. When suggesting changes,
+            encourage the user to click "Apply to Run" for targeted fixes, or
+            "Implement as New Run" for substantial rewrites.
             """.formatted(request, run.getRunId(), model, status,
                     planSection, reviewSection, failureSection,
                     previewContext, workspaceContext, MAX_MESSAGES);

@@ -615,16 +615,16 @@ public class RunController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Feedback is required");
         }
 
-        // Save current plan as version before editing
-        stateStore.savePlanVersion(runId, "USER_EDIT", userDetails.getUser().getId());
-
         // Re-plan with feedback
         com.navneet.executespec.agent.model.TaskPlan newPlan = plannerAgent.replanWithFeedback(
             run.getUserRequest(), run.getPlanJson(), req.feedback(), runId);
 
+        // Increment version first, then save — avoids duplicate key on (run_id, version)
+        stateStore.incrementPlanVersion(runId);
+        stateStore.savePlanVersion(runId, "USER_EDIT", userDetails.getUser().getId());
+
         // Delete old tasks, save new plan + tasks
         stateStore.recreateTasksFromPlan(runId, newPlan);
-        stateStore.incrementPlanVersion(runId);
 
         // Audit
         activityAuditService.record(com.navneet.executespec.auth.entity.ActivityAudit.builder()

@@ -14,6 +14,10 @@ interface UiStore {
   toasts: Toast[];
   /** Pre-filled goal for NewRunModal — set by RunConversation "Implement as New Run". */
   pendingNewRunGoal: string | null;
+  /** Whether the run list panel is collapsed to give more space to run detail. */
+  runListCollapsed: boolean;
+  /** Whether the copilot chat panel is maximized (full-width overlay). */
+  copilotMaximized: boolean;
 
   setSidebarExpanded: (v: boolean) => void;
   setMobileSidebarOpen: (v: boolean) => void;
@@ -22,6 +26,8 @@ interface UiStore {
   addToast: (t: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
   setPendingNewRunGoal: (goal: string | null) => void;
+  setRunListCollapsed: (v: boolean) => void;
+  setCopilotMaximized: (v: boolean) => void;
 }
 
 let toastSeq = 0;
@@ -33,12 +39,16 @@ export const useUiStore = create<UiStore>((set) => ({
   activeTab: 'overview',
   toasts: [],
   pendingNewRunGoal: null,
+  runListCollapsed: false,
+  copilotMaximized: false,
 
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
   setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
   setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
   setActiveTab: (t) => set({ activeTab: t }),
   setPendingNewRunGoal: (goal) => set({ pendingNewRunGoal: goal }),
+  setRunListCollapsed: (v) => set({ runListCollapsed: v }),
+  setCopilotMaximized: (v) => set({ copilotMaximized: v }),
 
   addToast: (t) => {
     const id = String(++toastSeq);

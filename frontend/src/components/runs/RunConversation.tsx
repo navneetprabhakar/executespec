@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Loader2, Rocket, MessageSquare, Lock, Bug, Lightbulb, Code2, Wrench, FileText } from 'lucide-react';
+import { Send, Loader2, Rocket, MessageSquare, Lock, Bug, Lightbulb, Code2, Wrench, FileText, Maximize2, Minimize2 } from 'lucide-react';
 import { getRunChat, sendRunChatMessage, applyToRun } from '@/lib/api';
 import type { RunChatMessage, ChatResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -51,6 +51,8 @@ export default function RunConversation({ runId }: Props) {
   const { setActiveRunId, fetchRuns } = useRunStore();
   const activeRun = useRunStore((s) => s.activeRun);
   const { addToast, setPendingNewRunGoal } = useUiStore();
+  const copilotMaximized = useUiStore((s) => s.copilotMaximized);
+  const setCopilotMaximized = useUiStore((s) => s.setCopilotMaximized);
 
   // Tier gate — show upgrade prompt if chat is not available on the user's plan
   if (permissions && !permissions.canUseChat) {
@@ -240,7 +242,10 @@ export default function RunConversation({ runId }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={cn(
+      'flex flex-col h-full',
+      copilotMaximized && 'fixed inset-0 z-50 bg-zinc-950'
+    )}>
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
@@ -248,6 +253,13 @@ export default function RunConversation({ runId }: Props) {
           <MessageSquare className="h-4 w-4 text-accent-violet" />
           <span className="text-sm font-medium text-zinc-200">Run Copilot</span>
           <span className="text-[10px] text-zinc-600 font-mono">sonnet</span>
+          <button
+            onClick={() => setCopilotMaximized(!copilotMaximized)}
+            className="ml-1 p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+            title={copilotMaximized ? 'Minimize' : 'Maximize'}
+          >
+            {copilotMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
         </div>
         <div className="flex items-center gap-3">
           {/* Message counter */}
