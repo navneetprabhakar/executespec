@@ -910,9 +910,9 @@ Routes LLM calls with 3-provider fallback chains and per-run API key injection.
 
 | Chain | Position 1 | Position 2 | Position 3 |
 |-------|-----------|-----------|-----------|
-| ARCHITECT | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-4o` |
-| CAPABLE | `claude-sonnet-4-6` | `gemini-3.1-pro-preview` | `gpt-4o` |
-| UTILITY | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-4o-mini` |
+| ARCHITECT | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
+| CAPABLE | `claude-sonnet-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
+| UTILITY | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
 
 **Fallback Modes:**
 - `IMMEDIATE` -- planner/reviewer: always fallback on any error
@@ -946,13 +946,13 @@ Two-axis model selection for task execution:
 
 | Tier | Anthropic | OpenAI | Gemini |
 |------|----------|--------|--------|
-| FAST | `claude-haiku-4-5-20251001` | `gpt-4o-mini` | `gemini-3-flash-preview` |
-| CAPABLE | `claude-sonnet-4-6` | `gpt-4o` | `gemini-3.1-pro-preview` |
-| POWER | `claude-opus-4-6` | `gpt-4o` | `gemini-3.1-pro-preview` |
+| FAST | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
+| CAPABLE | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
+| POWER | `claude-opus-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
 
 **Complexity to Tier Mapping:**
-- LOW -> FAST
-- MEDIUM -> FAST (escalates if needed)
+- LOW -> CAPABLE
+- MEDIUM -> CAPABLE
 - HIGH -> CAPABLE
 
 **Escalation Rules:**
@@ -1495,7 +1495,7 @@ Manages the model/provider escalation ladder when a task is stuck or failing.
 ```
 Level 0-1: Upgrade to capable model (same provider)
    |-- anthropic: claude-haiku-4-5 → capable model from props
-   |-- openai: gpt-4o-mini → gpt-4o
+   |-- openai: gpt-5.4-mini → gpt-5.4
    |
 Level 2: Switch to alternate provider entirely
    |-- anthropic → openai
@@ -1586,7 +1586,7 @@ spring:
       api-key: ${OPENAI_API_KEY:}
       chat:
         options:
-          model: gpt-4o-mini
+          model: gpt-5.4-mini
           max-tokens: 16000
     google:
       genai:

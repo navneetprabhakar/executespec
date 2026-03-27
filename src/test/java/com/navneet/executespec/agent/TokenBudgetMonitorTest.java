@@ -65,7 +65,7 @@ class TokenBudgetMonitorTest {
 
     @Test
     void openaiModels_use128kContextLimit() {
-        BudgetStatus status = monitor.check("gpt-4o-mini", "MEDIUM", 1_000);
+        BudgetStatus status = monitor.check("gpt-5.4-mini", "MEDIUM", 1_000);
         assertThat(status.contextLimit()).isEqualTo(128_000);
     }
 

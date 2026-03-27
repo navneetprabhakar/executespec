@@ -130,7 +130,7 @@ public class AgentModelConfig {
             log.info("[AgentModelConfig] No OPENAI_API_KEY configured — system OpenAI fallback disabled");
             return null;
         }
-        log.info("[AgentModelConfig] Creating system OpenAI bean (gpt-4o)");
+        log.info("[AgentModelConfig] Creating system OpenAI bean (gpt-5.4)");
         OpenAiApi api = OpenAiApi.builder().apiKey(apiKey).build();
         return OpenAiChatModel.builder()
                 .openAiApi(api)
