@@ -1,3 +1,10 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# ExecuteSpec — Base configuration (local development)
+# ══════════════════════════════════════════════════════════════════════════════
+# This file contains hardcoded LOCAL defaults. No environment variables needed.
+# All ${VAR} references live in profile-specific files:
+#   application-dev.yml   → dev VM (GCE)     — activate with: --spring.profiles.active=dev
+#   application-prod.yml  → production (GCE) — activate with: --spring.profiles.active=prod
 # Health check: GET /api/health (custom HealthController — no actuator dependency)
 
 spring:
@@ -5,8 +12,8 @@ spring:
     name: executespec
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host: localhost
+      port: 6379
       timeout: 2000ms
       lettuce:
         pool:
@@ -14,10 +21,10 @@ spring:
           min-idle: 2
 
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
+    url: jdbc:postgresql://localhost:5432/executespec
     driver-class-name: org.postgresql.Driver
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:postgres}
+    username: postgres
+    password: postgres
     hikari:
       maximum-pool-size: 80          # increased for 50 concurrent runs load testing (was 20)
       minimum-idle: 10               # keep warm connections ready
@@ -44,23 +51,23 @@ spring:
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
         max-interval: 10000         # 10s cap
     anthropic:
-      api-key: ${ANTHROPIC_API_KEY:}       # per-environment keys in application-{profile}.yml
+      api-key: ""                   # set via env var in profile files
       chat:
         options:
           model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
           max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
     openai:
-      api-key: ${OPENAI_API_KEY:}           # per-environment keys in application-{profile}.yml
+      api-key: ""                   # set via env var in profile files
       chat:
         options:
           model: gpt-5.4-mini
           max-tokens: 16000                  # gpt-5.4 / gpt-5.4-mini both support 16k output
     google:
       genai:
-        api-key: ${GOOGLE_API_KEY:}         # per-environment keys in application-{profile}.yml
+        api-key: ""                 # set via env var in profile files
         chat:
           options:
-            model: gemini-3-flash-preview                 # default UTILITY; CAPABLE uses flash-lite, ARCHITECT uses customtools
+            model: gemini-3-flash-preview    # default UTILITY; CAPABLE uses flash-lite, ARCHITECT uses customtools
 
 agent:
   workspace: ./workspace
@@ -83,8 +90,8 @@ agent:
     max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
     safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
   github:
-    pat: ${GITHUB_PAT:}
-    default-owner: ${GITHUB_OWNER:}
+    pat: ""
+    default-owner: ""
   shell:
     sandbox-enabled: true
     timeout-seconds: 300
@@ -128,11 +135,11 @@ agent:
     provider: anthropic
   deployment:
     enabled: true
-    gcp-project: ${GCP_PROJECT:executespecv1}
-    gcp-region: ${GCP_REGION:asia-south1}
+    gcp-project: executespecv1
+    gcp-region: asia-south1
     artifact-registry:
-      repository: ${AR_REPOSITORY:executespec-dev-docker}
-      host: ${AR_HOST:asia-south1-docker.pkg.dev}
+      repository: executespec-dev-docker
+      host: asia-south1-docker.pkg.dev
     cloud-run:
       cpu: "1"
       memory: 512Mi
@@ -148,8 +155,8 @@ agent:
       base-image: eclipse-temurin:21-jre-alpine
     workspace:
       retention-days: 30
-      gcs-bucket: ${GCS_WORKSPACE_BUCKET:executespec-workspaces}  # GCS bucket for archived workspaces
-      archive-after-hours: 24                                       # hours after completion before archiving to GCS
+      gcs-bucket: executespec-workspaces
+      archive-after-hours: 24
 
   # ── Tier 8: Compile agent, API spec generator, frontend preview ──────────────
   compiler:
@@ -172,25 +179,25 @@ agent:
     jira:
       enabled: false
       # Credentials resolved from org table (per-org, configured via Settings UI)
-      webhook-secret: ${JIRA_WEBHOOK_SECRET:}
+      webhook-secret: ""
       trigger-status: "Ready for Coding"   # issue status name that fires the pipeline
       in-progress-status: "In Progress"    # transition to on run start (null = skip)
       in-review-status: "In Review"        # transition to on run complete (null = skip)
       reopen-status: "Backlog"             # transition to on run failed (null = skip)
-      dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
+      dashboard-url: http://localhost:8080
       skip-approval: false
     confluence:
       enabled: false
       # Credentials resolved from org table (per-org, configured via Settings UI)
       trigger-label: "agent-run"           # page label that fires the pipeline
       space-key: "KAN"                     # default space for child pages
-      dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
+      dashboard-url: http://localhost:8080
       skip-approval: false
     servicenow:
       enabled: false
-      base-url: ${SNOW_BASE_URL:}
-      username: ${SNOW_USERNAME:}
-      password: ${SNOW_PASSWORD:}
+      base-url: ""
+      username: ""
+      password: ""
       trigger-categories:
         - "application"
         - "database"
@@ -199,9 +206,9 @@ agent:
       skip-approval: false
     pagerduty:
       enabled: false
-      api-token: ${PD_API_TOKEN:}
-      webhook-secret: ${PD_WEBHOOK_SECRET:}
-      from-email: ${PD_FROM_EMAIL:}        # required for PATCH requests
+      api-token: ""
+      webhook-secret: ""
+      from-email: ""        # required for PATCH requests
       trigger-types:
         - "incident.trigger"
       auto-resolve: false
@@ -209,11 +216,11 @@ agent:
       skip-approval: false
     slack:
       enabled: false
-      client-id: ${SLACK_CLIENT_ID:}
-      client-secret: ${SLACK_CLIENT_SECRET:}
-      signing-secret: ${SLACK_SIGNING_SECRET:}
-      redirect-uri: ${SLACK_REDIRECT_URI:http://localhost:8080/api/integrations/slack/oauth/callback}
-      dashboard-url: ${DASHBOARD_URL:http://localhost:8080}
+      client-id: ""
+      client-secret: ""
+      signing-secret: ""
+      redirect-uri: http://localhost:8080/api/integrations/slack/oauth/callback
+      dashboard-url: http://localhost:8080
 
 # ── Cloud Run-based preview ─────────────────────────────────────────────────
 preview:
@@ -222,10 +229,10 @@ preview:
   preview-ttl-minutes: 10              # auto-shutdown after 10 minutes
   port-range-start: 10000              # Docker Compose host port range
   port-range-end: 10100
-  preview-domain: ${PREVIEW_DOMAIN:executespec.ai}  # single-level: preview-{id}.executespec.ai
-  fallback-host: ${PREVIEW_FALLBACK_HOST:}  # e.g. "http://dev.executespec.ai" — used when Caddy proxy is disabled
+  preview-domain: executespec.ai       # single-level: preview-{id}.executespec.ai
+  fallback-host: ""                    # e.g. "http://dev.executespec.ai" — used when Caddy proxy is disabled
   proxy:
-    enabled: ${PREVIEW_PROXY_ENABLED:false}  # set true on GCE VM with Caddy installed
+    enabled: false                     # set true on GCE VM with Caddy installed
   concurrency:
     free-max: 1
     pro-max: 3
@@ -234,27 +241,27 @@ preview:
 app:
   mail:
     # Transport: "smtp" (recommended for server) or "gmail-api" (OAuth, local dev)
-    transport: ${MAIL_TRANSPORT:smtp}
-    base-url: ${APP_BASE_URL:http://localhost:5173}
-    from: ${MAIL_FROM:admin@executespec.ai}
+    transport: smtp
+    base-url: http://localhost:5173
+    from: admin@executespec.ai
     # ── SMTP config (used when transport=smtp) ──────────────────────────────
     smtp:
-      host: ${SMTP_HOST:smtp.gmail.com}
-      port: ${SMTP_PORT:587}
-      username: ${SMTP_USERNAME:admin@executespec.ai}
-      password: ${SMTP_PASSWORD:}                            # per-environment in application-{profile}.yml
+      host: smtp.gmail.com
+      port: 587
+      username: admin@executespec.ai
+      password: ""                     # set via env var in profile files
     # ── Gmail API OAuth2 config (used when transport=gmail-api) ─────────────
     gmail-api:
-      enabled: ${GMAIL_ENABLED:false}
-      credentials-path: ${GMAIL_CREDENTIALS_PATH:credentials.json}
-      tokens-dir: ${GMAIL_TOKENS_DIR:${user.home}/.executespec/gmail-tokens}
+      enabled: false
+      credentials-path: credentials.json
+      tokens-dir: ${user.home}/.executespec/gmail-tokens
       app-name: executespec
   jwt:
-    secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}                # per-environment in application-{profile}.yml
+    secret: executespec-local-dev-secret-key-must-be-at-least-256-bits-long-for-HS256
     access-token-expiry-minutes: 1440
     refresh-token-expiry-days: 7
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+    allowed-origins: http://localhost:5173
   tiers:
     free:
       monthly-run-limit: 5
@@ -281,9 +288,9 @@ executespec:
     default-timeout: 30s
 
 razorpay:
-  key-id: ${RAZORPAY_KEY_ID:}
-  key-secret: ${RAZORPAY_KEY_SECRET:}
-  webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  key-id: ""
+  key-secret: ""
+  webhook-secret: ""
   base-url: https://api.razorpay.com/v1
 
 billing:
@@ -311,17 +318,17 @@ management:
       show-details: when_authorized
   tracing:
     sampling:
-      probability: ${OTEL_SAMPLING_PROBABILITY:1.0}
+      probability: 1.0
   observations:
     annotations:
       enabled: true
   otlp:
     tracing:
-      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+      endpoint: http://localhost:4318/v1/traces
     metrics:
       export:
-        enabled: ${OTEL_METRICS_ENABLED:false}
-        endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/metrics}
+        enabled: false
+        endpoint: http://localhost:4318/v1/metrics
         step: 60s
   metrics:
     distribution:
@@ -334,7 +341,7 @@ management:
         http.server.request.duration: 30s
     tags:
       application: executespec
-      environment: ${SPRING_PROFILES_ACTIVE:local}
+      environment: local
 
 ---
 # ── GCP profile: use Cloud Trace + Cloud Monitoring instead of OTLP/Prometheus ─
@@ -352,10 +359,7 @@ management:
         enabled: false
   tracing:
     sampling:
-      probability: ${OTEL_SAMPLING_PROBABILITY:1.0}
+      probability: 1.0
   zipkin:
     tracing:
       enabled: false
-
-# ── Dev profile overrides moved to application-dev.yml ─────────────────────
-# ── Prod profile overrides in application-prod.yml ─────────────────────────

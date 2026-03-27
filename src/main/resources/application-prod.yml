@@ -1,8 +1,46 @@
-# ── Prod profile: production deployment ────────────────────────────────────
-# Provider weights: Anthropic-heavy for quality, with fallback
+# ══════════════════════════════════════════════════════════════════════════════
+# ExecuteSpec — Prod profile (production GCE deployment)
+# ══════════════════════════════════════════════════════════════════════════════
+# Activate with: --spring.profiles.active=prod
+# Provider weights: Anthropic-heavy for quality (6:2:2)
 # Stricter concurrency limits, full observability
-# API keys: set via environment variables / Secret Manager
+#
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ REQUIRED ENVIRONMENT VARIABLES                                             │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │ ANTHROPIC_API_KEY      Claude API key                                      │
+# │ OPENAI_API_KEY         OpenAI API key                                      │
+# │ JWT_SECRET             JWT signing key (≥256 bits for HS256)               │
+# │ SMTP_PASSWORD          Gmail app password for email notifications          │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │ OPTIONAL ENVIRONMENT VARIABLES                                             │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │ GOOGLE_API_KEY         Gemini API key (for LLM fallback chain)             │
+# │ GITHUB_PAT             GitHub Personal Access Token                        │
+# │ GITHUB_OWNER           Default GitHub repo owner                           │
+# │ POSTGRES_HOST          PostgreSQL host (default: localhost)                 │
+# │ POSTGRES_PORT          PostgreSQL port (default: 5432)                     │
+# │ POSTGRES_DB            PostgreSQL database (default: executespec)           │
+# │ POSTGRES_USER          PostgreSQL user (default: postgres)                 │
+# │ POSTGRES_PASSWORD      PostgreSQL password (default: postgres)             │
+# │ REDIS_HOST             Redis host (default: localhost)                     │
+# │ REDIS_PORT             Redis port (default: 6379)                          │
+# │ RAZORPAY_KEY_ID        Razorpay key ID (billing)                           │
+# │ RAZORPAY_KEY_SECRET    Razorpay key secret (billing)                       │
+# │ RAZORPAY_WEBHOOK_SECRET Razorpay webhook secret                            │
+# │ GCS_WORKSPACE_BUCKET   GCS bucket for workspaces (default: executespec-workspaces) │
+# │ CORS_ALLOWED_ORIGINS   CORS origins (default: https://executespec.ai)      │
+# │ PREVIEW_FALLBACK_HOST  Preview fallback (e.g. http://executespec.ai)       │
+# │ DASHBOARD_URL          Dashboard URL for integration links                 │
+# │ OTEL_SAMPLING_PROBABILITY  Trace sampling rate (default: 0.1)              │
+# │ OTEL_EXPORTER_OTLP_ENDPOINT  OTLP collector endpoint                      │
+# │ SLACK_CLIENT_ID        Slack app client ID                                 │
+# │ SLACK_CLIENT_SECRET    Slack app client secret                             │
+# │ SLACK_SIGNING_SECRET   Slack signing secret                                │
+# │ JIRA_WEBHOOK_SECRET    JIRA webhook secret                                 │
+# └─────────────────────────────────────────────────────────────────────────────┘
 
+# ── LLM Provider Weights & Keys ──────────────────────────────────────────────
 executespec:
   routing:
     provider-weights:
@@ -10,6 +48,25 @@ executespec:
       google: 2
       openai: 2
 
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY}
+    openai:
+      api-key: ${OPENAI_API_KEY}
+    google:
+      genai:
+        api-key: ${GOOGLE_API_KEY:}
+
+# ── Agent (stricter concurrency for prod) ─────────────────────────────────────
 agent:
   concurrency:
     max-runs: 20
@@ -20,11 +77,54 @@ agent:
     act-threshold-minutes: 15
     max-auto-restarts: 2
     auto-resume-on-startup: false
+  github:
+    pat: ${GITHUB_PAT:}
+    default-owner: ${GITHUB_OWNER:}
+  deployment:
+    gcp-project: ${GCP_PROJECT:executespecv1}
+    gcp-region: ${GCP_REGION:asia-south1}
+    artifact-registry:
+      repository: ${AR_REPOSITORY:executespec-docker}
+      host: ${AR_HOST:asia-south1-docker.pkg.dev}
+    workspace:
+      gcs-bucket: ${GCS_WORKSPACE_BUCKET:executespec-workspaces}
+  integrations:
+    jira:
+      webhook-secret: ${JIRA_WEBHOOK_SECRET:}
+      dashboard-url: ${DASHBOARD_URL:https://executespec.ai}
+    confluence:
+      dashboard-url: ${DASHBOARD_URL:https://executespec.ai}
+    slack:
+      client-id: ${SLACK_CLIENT_ID:}
+      client-secret: ${SLACK_CLIENT_SECRET:}
+      signing-secret: ${SLACK_SIGNING_SECRET:}
+      redirect-uri: ${SLACK_REDIRECT_URI:https://executespec.ai/api/integrations/slack/oauth/callback}
+      dashboard-url: ${DASHBOARD_URL:https://executespec.ai}
 
+# ── Preview ───────────────────────────────────────────────────────────────────
+preview:
+  fallback-host: ${PREVIEW_FALLBACK_HOST:http://executespec.ai}
+  proxy:
+    enabled: ${PREVIEW_PROXY_ENABLED:true}
+
+# ── App (JWT, CORS, Mail) ────────────────────────────────────────────────────
 app:
+  mail:
+    base-url: https://executespec.ai
+    smtp:
+      password: ${SMTP_PASSWORD}
+  jwt:
+    secret: ${JWT_SECRET}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://executespec.ai}
 
+# ── Billing ───────────────────────────────────────────────────────────────────
+razorpay:
+  key-id: ${RAZORPAY_KEY_ID:}
+  key-secret: ${RAZORPAY_KEY_SECRET:}
+  webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+
+# ── Observability (full tracing + metrics in prod) ────────────────────────────
 logging:
   level:
     com.navneet.executespec: INFO
@@ -35,6 +135,12 @@ management:
     sampling:
       probability: ${OTEL_SAMPLING_PROBABILITY:0.1}
   otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
     metrics:
       export:
         enabled: true
+        endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/metrics}
+  metrics:
+    tags:
+      environment: prod
