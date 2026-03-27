@@ -250,7 +250,7 @@ app:
       tokens-dir: ${GMAIL_TOKENS_DIR:${user.home}/.executespec/gmail-tokens}
       app-name: executespec
   jwt:
-    secret: ${JWT_SECRET:}                # per-environment in application-{profile}.yml
+    secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}                # per-environment in application-{profile}.yml
     access-token-expiry-minutes: 1440
     refresh-token-expiry-days: 7
   cors:
