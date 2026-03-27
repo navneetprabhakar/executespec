@@ -101,7 +101,7 @@ app:
   mail:
     base-url: https://dev.executespec.ai
     smtp:
-      password: ${SMTP_PASSWORD:}
+      password: ${SMTP_PASSWORD:smdpsanatyrtlcxa}
   jwt:
     secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}
   cors:
