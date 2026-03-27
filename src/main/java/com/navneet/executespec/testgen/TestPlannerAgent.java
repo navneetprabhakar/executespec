@@ -48,7 +48,7 @@ public class TestPlannerAgent {
      *
      * @return saved TestPlan with associated TestTask records
      */
-    public TestPlan planTests(String runId, String userRequest, String conventionsDoc) {
+    public TestPlan planTests(String runId, String userRequest, String conventionsDoc, boolean isCli) {
         log.info("[TestPlanner] Starting test planning for run {}", runId);
 
         // Create TestPlan record
@@ -59,8 +59,13 @@ public class TestPlannerAgent {
                 .build();
         testPlan = testPlanRepository.save(testPlan);
 
+        String testingContext = isCli 
+            ? "You are testing a Command Line Interface (CLI) application. Tests should verify via stdout, stderr, and exit codes."
+            : "You are testing against a LIVE RUNNING APPLICATION via HTTP calls. These are NOT unit tests.";
+
         // Build prompt
         String systemPrompt = loadPrompt()
+                .replace("{testing_context}", testingContext)
                 .replace("{user_request}", userRequest != null ? userRequest : "")
                 .replace("{conventions_doc}", conventionsDoc != null ? conventionsDoc : "");
 

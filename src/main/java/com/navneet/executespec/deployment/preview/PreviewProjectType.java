@@ -7,6 +7,7 @@ public enum PreviewProjectType {
     NODE_FRONTEND(5173),
     NODE_BACKEND(3000),
     SPRING_BOOT(8080),
+    JAVA(8080),
     PYTHON(8000),
     GO(8080),
     RUBY(4567),        // Sinatra default port
