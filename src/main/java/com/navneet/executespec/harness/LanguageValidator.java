@@ -30,19 +30,13 @@ public class LanguageValidator {
         // TypeScript / React
         "tsconfig.json", "package.json",
         // Python
-        "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile",
-        // Go
-        "go.mod",
-        // Rust
-        "Cargo.toml"
+        "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile"
     );
 
     /** File extensions belonging to supported languages. */
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(
         ".java", ".ts", ".tsx", ".js", ".jsx",
         ".py",
-        ".go",
-        ".rs",
         ".html", ".htm", ".css", ".scss", ".sass", ".less"
     );
 
@@ -54,11 +48,12 @@ public class LanguageValidator {
         ".r", ".R", ".jl", ".zig",
         ".cs", ".fs", ".vb",
         ".m", ".mm",       // Objective-C
-        ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp"  // C/C++
+        ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", // C/C++
+        ".go", ".rs"       // Go, Rust
     );
 
     public static final String SUPPORTED_LANGUAGES_LIST =
-        "Java, TypeScript, React (TSX/JSX), Python, Go, Rust, HTML/CSS";
+        "Java, TypeScript, React (TSX/JSX), Python, HTML/CSS";
 
     /**
      * Validates that the workspace contains at least one supported language.
@@ -173,6 +168,8 @@ public class LanguageValidator {
             case ".cpp", ".cc", ".cxx" -> "C++";
             case ".c", ".h" -> "C";
             case ".hpp" -> "C++";
+            case ".go" -> "Go";
+            case ".rs" -> "Rust";
             default -> ext;
         };
     }

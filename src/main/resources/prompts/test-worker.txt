@@ -15,26 +15,9 @@ USER SPECIFICATION:
 
 TECHNICAL REQUIREMENTS:
 - Package: com.executespec.tests
-- Use RestAssured for all HTTP calls
-- Base URL is configurable via system property "app.base-url" (default: http://localhost:8080)
-- If auth is required, implement a helper method that calls the login endpoint and caches the JWT token. Use this token in all authenticated requests.
-- Use JUnit 5 (@Test, @BeforeAll, @AfterAll, @Order, @TestMethodOrder)
-- Order test methods logically: create → read → update → delete
-- Use AssertJ for assertions (assertThat(...).isEqualTo(...))
-- Each test method must be independent OR explicitly ordered with @Order annotation
-- For CRUD tests: create a test entity in @BeforeAll, clean up in @AfterAll
-- For lifecycle tests: use @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+{technical_requirements}
 
-HTTP STATUS CODE CONVENTIONS:
-- POST that creates a resource: expect 201 Created (NOT 200)
-- POST that performs an action (login, approve, etc.): expect 200 OK
-- GET: expect 200 OK
-- PUT/PATCH: expect 200 OK
-- DELETE: expect 200 OK or 204 No Content
-- 404 for resource not found
-- 400 or 422 for validation errors
-- 401 for unauthenticated, 403 for unauthorized
-- Always check the ACTUAL conventions doc above — if it specifies different status codes, use those instead
+{status_code_conventions}
 
 FIELD MAPPING RULES:
 - String fields: generate realistic test values (not "test" or "string1")

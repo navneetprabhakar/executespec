@@ -52,7 +52,7 @@ public class TestCompilationGate {
             }
 
             ProcessBuilder pb = new ProcessBuilder(
-                    "mvn", "compile", "-f", pomFile.toString(), "-q"
+                    "mvn", "compile", "-f", pomFile.toString(), "-q", "-T", "1C"
             );
             pb.environment().put("JAVA_HOME", javaHome);
             pb.redirectErrorStream(true);
