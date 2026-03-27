@@ -1,0 +1,112 @@
+[
+  {
+    "index": 0,
+    "language": "Python",
+    "status": "FAILED",
+    "tasks": "0/1",
+    "duration": 40,
+    "model": "anthropic",
+    "report": "NO_REPORT|404",
+    "share": "SKIPPED",
+    "notes": "All tasks failed validation "
+  },
+  {
+    "index": 1,
+    "language": "JavaScript",
+    "status": "TIMEOUT",
+    "tasks": "?/?",
+    "duration": 601,
+    "model": "",
+    "report": "NO_REPORT",
+    "share": "NONE",
+    "notes": "Timed out after 601s "
+  },
+  {
+    "index": 2,
+    "language": "Go",
+    "status": "FAILED",
+    "tasks": "0/1",
+    "duration": 40,
+    "model": "anthropic",
+    "report": "NO_REPORT|404",
+    "share": "SKIPPED",
+    "notes": "All tasks failed validation "
+  },
+  {
+    "index": 3,
+    "language": "Java",
+    "status": "TIMEOUT",
+    "tasks": "?/?",
+    "duration": 602,
+    "model": "",
+    "report": "NO_REPORT",
+    "share": "NONE",
+    "notes": "Timed out after 602s "
+  },
+  {
+    "index": 4,
+    "language": "TypeScript",
+    "status": "TIMEOUT",
+    "tasks": "?/?",
+    "duration": 601,
+    "model": "",
+    "report": "NO_REPORT",
+    "share": "NONE",
+    "notes": "Timed out after 601s "
+  },
+  {
+    "index": 5,
+    "language": "Rust",
+    "status": "PARTIAL",
+    "tasks": "1/2",
+    "duration": 71,
+    "model": "anthropic",
+    "report": "NO_REPORT|404",
+    "share": "SKIPPED",
+    "notes": "Incomplete tasks: Implement CLI argument parsing and Celsius to Fahrenheit conversion in main.rs [PARTIAL] "
+  },
+  {
+    "index": 6,
+    "language": "Ruby",
+    "status": "COMPLETE",
+    "tasks": "1/1",
+    "duration": 220,
+    "model": "anthropic",
+    "report": "HAS_REPORT",
+    "share": "SHARE_OK",
+    "notes": " "
+  },
+  {
+    "index": 7,
+    "language": "PHP",
+    "status": "FAILED",
+    "tasks": "0/2",
+    "duration": 151,
+    "model": "anthropic",
+    "report": "NO_REPORT|404",
+    "share": "SKIPPED",
+    "notes": "All tasks failed validation "
+  },
+  {
+    "index": 8,
+    "language": "Static HTML",
+    "status": "TIMEOUT",
+    "tasks": "?/?",
+    "duration": 601,
+    "model": "",
+    "report": "NO_REPORT",
+    "share": "NONE",
+    "notes": "Timed out after 601s "
+  },
+  {
+    "index": 9,
+    "language": "Cancel",
+    "status": "PASS",
+    "tasks": "0/0",
+    "duration": 124,
+    "model": "",
+    "report": "NO_REPORT",
+    "share": "NONE",
+    "notes": "Cancel flow works "
+  }
+]
