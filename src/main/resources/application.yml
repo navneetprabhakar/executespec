@@ -222,9 +222,10 @@ agent:
       redirect-uri: http://localhost:8080/api/integrations/slack/oauth/callback
       dashboard-url: http://localhost:8080
 
-# ── Cloud Run-based preview ─────────────────────────────────────────────────
+# ── Preview ────────────────────────────────────────────────────────────────
 preview:
   enabled: true
+  mode: docker                         # "docker" (Docker Compose, local) or "cloud-run" (GCP Cloud Run)
   total-startup-timeout-seconds: 480   # 8-minute total deadline (Spring Boot cold builds need extra time)
   preview-ttl-minutes: 10              # auto-shutdown after 10 minutes
   port-range-start: 10000              # Docker Compose host port range

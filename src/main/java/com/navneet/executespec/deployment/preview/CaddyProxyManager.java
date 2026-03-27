@@ -18,7 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Manages dynamic reverse proxy routes in Caddy via its admin API (localhost:2019).
  * Only active when deployed on a server with Caddy (preview.proxy.enabled=true).
  *
- * <p>Caddy JSON config has a single server "srv0" on :443. This manager prepends
+ * <p>Caddy JSON config has a single server "srv0" on :443 with a Cloudflare Origin
+ * Certificate (no ACME). This manager prepends
  * preview routes (preview-{shortId}.executespec.ai → localhost:{port}) before the
  * catch-all dev.executespec.ai route.
  *

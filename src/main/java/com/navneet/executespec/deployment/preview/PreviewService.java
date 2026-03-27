@@ -4,6 +4,8 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.deployment.ArtifactRegistryClient;
+import com.navneet.executespec.deployment.CloudRunClient;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -35,12 +37,17 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Preview service — builds and runs ephemeral dev servers using Docker Compose
- * on the local machine. Caddy reverse proxy provides HTTPS routing via wildcard
- * domain (*.preview.executespec.ai).
+ * Preview service — builds and runs ephemeral dev servers in one of two modes:
+ * <ul>
+ *   <li><b>docker</b> (default): Docker Compose on local machine, Caddy reverse proxy for HTTPS.</li>
+ *   <li><b>cloud-run</b>: Build image → push to Artifact Registry → deploy to GCP Cloud Run.
+ *       Cloud Run provides managed HTTPS with public URLs, no proxy needed.</li>
+ * </ul>
+ *
+ * <p>Mode is configured via {@code preview.mode} property (default: "docker").
  *
  * <p>Lifecycle: IDLE → ANALYZING → BUILDING → STARTING → RUNNING → STOPPED.
- * Each preview auto-expires after the configured TTL (default 10 minutes).
+ * Each preview auto-expires after the configured TTL.
  */
 @Service
 @Slf4j
@@ -63,6 +70,14 @@ public class PreviewService {
     /** Optional — only present when preview.proxy.enabled=true (VM with Caddy). */
     @Autowired(required = false)
     private CaddyProxyManager caddyProxy;
+
+    /** Optional — for Cloud Run preview mode. */
+    @Autowired(required = false)
+    private ArtifactRegistryClient artifactRegistryClient;
+
+    /** Optional — for Cloud Run preview mode. */
+    @Autowired(required = false)
+    private CloudRunClient cloudRunClient;
 
     /** Notifies the test execution pipeline that the preview is ready. */
     @Autowired(required = false)
@@ -157,7 +172,11 @@ public class PreviewService {
             if (existing.status() == PreviewStatus.FAILED
                     || existing.status() == PreviewStatus.TIMED_OUT) {
                 // Clean up stale failed session so retry starts fresh
-                cleanupCompose(existing);
+                if (existing.cloudRunServiceName() != null) {
+                    cleanupCloudRun(existing.cloudRunServiceName(), existing.imageUri());
+                } else {
+                    cleanupCompose(existing);
+                }
                 active.remove(runId);
                 log.info("Cleared failed preview session for run {} — allowing retry", runId);
             } else {
@@ -218,7 +237,12 @@ public class PreviewService {
         Metrics.ACTIVE_PREVIEWS.incrementAndGet();
         Counter.builder(PREVIEW_STARTS).register(meterRegistry).increment();
         Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
-        Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars));
+
+        if (isCloudRunMode()) {
+            Thread.startVirtualThread(() -> buildAndStartCloudRun(runId, workspace, type, mode, projectName, safeEnvVars));
+        } else {
+            Thread.startVirtualThread(() -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars));
+        }
 
         log.info("Preview started for run {} (type={}, mode={}, project={}, ttl={}min)",
                 runId, type, mode, projectName, ttl.toMinutes());
@@ -231,18 +255,22 @@ public class PreviewService {
     }
 
     /**
-     * Stop a running preview. Tears down Docker Compose project, removes Caddy route,
-     * releases port. Idempotent.
+     * Stop a running preview. Tears down Docker Compose or Cloud Run service. Idempotent.
      */
     public void stop(String runId) {
         PreviewSession session = active.remove(runId);
         if (session == null) return;
         Metrics.ACTIVE_PREVIEWS.decrementAndGet();
 
-        cleanupCompose(session);
+        if (session.cloudRunServiceName() != null) {
+            cleanupCloudRun(session.cloudRunServiceName(), session.imageUri());
+        } else {
+            cleanupCompose(session);
+        }
 
         broadcaster.emit(runId, new RunEvent("PREVIEW_STOPPED", runId, null, null, Instant.now()));
-        log.info("Preview stopped for run {} (project={})", runId, session.composeProjectName());
+        log.info("Preview stopped for run {} (mode={})", runId,
+                session.cloudRunServiceName() != null ? "cloud-run" : "docker");
     }
 
     /**
@@ -268,6 +296,146 @@ public class PreviewService {
 
         String logs = composeExecutor.logs(session.composeProjectName(), service, tailLines > 0 ? tailLines : 100);
         return logs.isEmpty() ? "No logs available yet." : logs;
+    }
+
+    private boolean isCloudRunMode() {
+        return "cloud-run".equalsIgnoreCase(props.getMode());
+    }
+
+    // ── Private: build and start with Cloud Run ───────────────────────────
+
+    private void buildAndStartCloudRun(String runId, Path workspace, PreviewProjectType type,
+                                        PreviewMode mode, String projectName, Map<String, String> envVars) {
+        Instant previewStart = Instant.now();
+        String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
+        String serviceName = "es-preview-" + shortId;
+        String imageUri = null;
+
+        try {
+            if (artifactRegistryClient == null || cloudRunClient == null) {
+                fail(runId, "Cloud Run preview mode requires ArtifactRegistryClient and CloudRunClient beans. "
+                        + "Check GCP deployment configuration.", 0);
+                return;
+            }
+
+            // Phase 1: Generate Dockerfile
+            broadcaster.emit(runId, new RunEvent("PREVIEW_ANALYZING", runId, null,
+                    "Generating Dockerfile...", Instant.now()));
+            Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+            backupIfExists(workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
+            backupIfExists(workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
+            String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
+            log.info("Preview Dockerfile for run {} (type={}, cloud-run):\n{}", runId, type, generatedDockerfile);
+            Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+
+            // Phase 2: Build Docker image
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    PreviewStatus.BUILDING, s.url(), 0, null,
+                    s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_BUILDING", runId, null,
+                    "Building Docker image...", Instant.now()));
+
+            var buildResult = artifactRegistryClient.buildImage(workspace, "preview-" + shortId);
+            imageUri = buildResult.imageTag();
+            log.info("Preview image built for run {}: {}", runId, imageUri);
+
+            // Phase 3: Push image to Artifact Registry
+            broadcaster.emit(runId, new RunEvent("PREVIEW_BUILDING", runId, null,
+                    "Pushing image to registry...", Instant.now()));
+            artifactRegistryClient.pushImage(imageUri);
+
+            // Phase 4: Deploy to Cloud Run
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    PreviewStatus.STARTING, s.url(), 0, null,
+                    s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_STARTING", runId, null,
+                    "Deploying to Cloud Run...", Instant.now()));
+
+            int containerPort = type.getContainerPort();
+            CloudRunClient.DeployResult deployResult = cloudRunClient.deployPreview(
+                    serviceName, imageUri, "1", "512Mi", envVars, containerPort);
+
+            String previewUrl = deployResult.serviceUrl();
+            if (previewUrl == null || previewUrl.isBlank()) {
+                fail(runId, "Cloud Run deploy succeeded but returned no service URL.", 0);
+                cleanupCloudRun(serviceName, imageUri);
+                return;
+            }
+
+            // Phase 5: Health check against Cloud Run URL
+            broadcaster.emit(runId, new RunEvent("PREVIEW_STARTING", runId, null,
+                    "Waiting for Cloud Run service to be ready...", Instant.now()));
+
+            boolean healthy = cloudRunClient.healthCheck(previewUrl);
+            if (!healthy) {
+                fail(runId, "Cloud Run health check failed for " + previewUrl, 0);
+                cleanupCloudRun(serviceName, imageUri);
+                return;
+            }
+
+            // Success!
+            if (!active.containsKey(runId)) {
+                // Was stopped while starting — clean up Cloud Run
+                cleanupCloudRun(serviceName, imageUri);
+                return;
+            }
+
+            final String finalUrl = previewUrl;
+            final String finalServiceName = serviceName;
+            final String finalImageUri = imageUri;
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    PreviewStatus.RUNNING, finalUrl, 0, null,
+                    s.startedAt(), s.expiresAt(), finalServiceName, finalImageUri));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null,
+                    previewUrl, Instant.now()));
+
+            // Notify test execution pipeline
+            if (testPreviewCoordinator != null) {
+                try {
+                    testPreviewCoordinator.onPreviewReady(runId, previewUrl);
+                } catch (Exception e) {
+                    log.warn("Failed to notify test coordinator for run {}: {}", runId, e.getMessage());
+                }
+            }
+
+            Timer.builder(PREVIEW_DURATION).register(meterRegistry)
+                    .record(Duration.between(previewStart, Instant.now()));
+            log.info("Cloud Run preview ready for run {} at {}", runId, previewUrl);
+
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            Counter.builder(PREVIEW_FAILURES).tag("reason", "cloud_run")
+                    .register(meterRegistry).increment();
+            fail(runId, "Cloud Run preview failed: " + e.getMessage(), 0);
+            cleanupCloudRun(serviceName, imageUri);
+        } catch (Exception e) {
+            Counter.builder(PREVIEW_FAILURES).tag("reason", "cloud_run")
+                    .register(meterRegistry).increment();
+            fail(runId, "Unexpected error in Cloud Run preview: " + e.getMessage(), 0);
+            cleanupCloudRun(serviceName, imageUri);
+            log.error("Cloud Run preview build/start failed for run {}", runId, e);
+        }
+    }
+
+    private void cleanupCloudRun(String serviceName, String imageUri) {
+        if (cloudRunClient == null) return;
+        try {
+            if (serviceName != null) {
+                cloudRunClient.deleteService(serviceName);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to cleanup Cloud Run service {}: {}", serviceName, e.getMessage());
+        }
+        try {
+            if (imageUri != null) {
+                cloudRunClient.deleteImage(imageUri);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to cleanup image {}: {}", imageUri, e.getMessage());
+        }
     }
 
     // ── Private: build and start with Docker Compose ────────────────────────
@@ -638,11 +806,12 @@ public class PreviewService {
     }
 
     /**
-     * Orphan cleanup: find Docker Compose projects with our prefix
+     * Orphan cleanup: find Docker Compose projects and Cloud Run services with our prefix
      * that are not in our active map (e.g., from a previous server instance).
      */
     @Scheduled(fixedRate = 1800000) // every 30 minutes
     void cleanupOrphans() {
+        // Docker Compose orphans
         try {
             List<String> projects = composeExecutor.listProjects(COMPOSE_PREFIX);
             Set<String> activeProjects = ConcurrentHashMap.newKeySet();
@@ -655,7 +824,27 @@ public class PreviewService {
                 }
             }
         } catch (Exception e) {
-            log.warn("Orphan cleanup failed: {}", e.getMessage());
+            log.warn("Docker orphan cleanup failed: {}", e.getMessage());
+        }
+
+        // Cloud Run orphans
+        if (cloudRunClient != null) {
+            try {
+                List<String> services = cloudRunClient.listPreviewServices();
+                Set<String> activeServices = ConcurrentHashMap.newKeySet();
+                active.values().stream()
+                        .filter(s -> s.cloudRunServiceName() != null)
+                        .forEach(s -> activeServices.add(s.cloudRunServiceName()));
+
+                for (String service : services) {
+                    if (!activeServices.contains(service)) {
+                        log.info("Deleting orphaned Cloud Run preview service: {}", service);
+                        cloudRunClient.deleteService(service);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Cloud Run orphan cleanup failed: {}", e.getMessage());
+            }
         }
     }
 

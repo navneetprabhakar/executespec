@@ -353,10 +353,16 @@ fi
 log "Caddy: $(caddy version 2>/dev/null || echo 'installed')"
 
 # Write Caddy JSON config for preview routing.
-# Caddy listens on :443 with auto-HTTPS (self-signed/internal CA).
-# Cloudflare SSL mode = "Full" accepts any cert from origin.
+# Caddy listens on :443 with Cloudflare Origin Certificate (no ACME needed).
+# Both dev and * DNS records are Cloudflare-proxied (orange cloud).
+# Cloudflare SSL mode = "Full" — Cloudflare terminates client TLS,
+# then connects to Caddy over TLS using the origin cert.
 # Preview routes are added dynamically via admin API (localhost:2019).
 # dev.executespec.ai → Spring Boot :8080, preview-*.executespec.ai → Docker containers.
+#
+# Origin cert and key must be pre-provisioned at:
+#   /etc/caddy/origin.pem      (certificate, owned by caddy:caddy)
+#   /etc/caddy/origin-key.pem  (private key, owned by caddy:caddy, mode 640)
 cat > /etc/caddy/config.json << 'CADDYEOF'
 {
   "admin": {
@@ -380,20 +386,31 @@ cat > /etc/caddy/config.json << 'CADDYEOF'
               "terminal": true
             }
           ],
-          "tls_connection_policies": [{}]
+          "tls_connection_policies": [
+            {
+              "certificate_selection": {
+                "any_tag": ["origin"]
+              }
+            }
+          ]
         }
       }
     },
     "tls": {
+      "certificates": {
+        "load_files": [
+          {
+            "certificate": "/etc/caddy/origin.pem",
+            "key": "/etc/caddy/origin-key.pem",
+            "tags": ["origin"]
+          }
+        ]
+      },
       "automation": {
         "policies": [
           {
-            "subjects": ["dev.executespec.ai", "*.executespec.ai"],
-            "issuers": [
-              {
-                "module": "internal"
-              }
-            ]
+            "subjects": ["*.executespec.ai", "executespec.ai"],
+            "issuers": []
           }
         ]
       }

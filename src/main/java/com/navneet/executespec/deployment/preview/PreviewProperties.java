@@ -13,6 +13,9 @@ public class PreviewProperties {
     private int totalStartupTimeoutSeconds = 480;  // 8-minute total deadline (Spring Boot cold builds need extra time)
     private int previewTtlMinutes = 10;            // auto-shutdown after N minutes
 
+    /** Preview mode: "docker" (local Docker Compose) or "cloud-run" (GCP Cloud Run). */
+    private String mode = "docker";
+
     // Docker Compose port range
     private int portRangeStart = 10000;
     private int portRangeEnd = 10100;
