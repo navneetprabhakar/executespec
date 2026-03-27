@@ -10,12 +10,22 @@ public record PreviewSession(
         PreviewMode previewMode,     // WEB, CLI_TERMINAL, or MCP_INSPECTOR
         DatabaseType databaseType,
         PreviewStatus status,
-        String url,                  // https://preview-{short-id}.executespec.ai
-        int hostPort,                // allocated host port (for cleanup)
+        String url,                  // https://preview-{short-id}.executespec.ai or Cloud Run URL
+        int hostPort,                // allocated host port (for Docker cleanup; 0 for Cloud Run)
         String errorMessage,
         Instant startedAt,
-        Instant expiresAt
+        Instant expiresAt,
+        String cloudRunServiceName,  // Cloud Run service name (null for Docker mode)
+        String imageUri              // Artifact Registry image URI (null for Docker mode)
 ) {
+    /** Backward-compatible constructor for Docker mode. */
+    public PreviewSession(String runId, String composeProjectName, PreviewProjectType projectType,
+                          PreviewMode previewMode, DatabaseType databaseType, PreviewStatus status,
+                          String url, int hostPort, String errorMessage,
+                          Instant startedAt, Instant expiresAt) {
+        this(runId, composeProjectName, projectType, previewMode, databaseType, status,
+                url, hostPort, errorMessage, startedAt, expiresAt, null, null);
+    }
     public boolean isExpired() {
         return expiresAt != null && Instant.now().isAfter(expiresAt);
     }

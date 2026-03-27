@@ -87,9 +87,11 @@ agent:
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
+  mode: cloud-run
+  preview-ttl-minutes: 5
   fallback-host: ${PREVIEW_FALLBACK_HOST:https://dev.executespec.ai}
   proxy:
-    enabled: ${PREVIEW_PROXY_ENABLED:true}
+    enabled: false
 
 # ── App (JWT, CORS, Mail) ────────────────────────────────────────────────────
 app:
