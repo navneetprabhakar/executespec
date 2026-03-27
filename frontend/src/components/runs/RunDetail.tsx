@@ -384,20 +384,20 @@ export default function RunDetail() {
           </div>
 
           {/* Action bar */}
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] flex-shrink-0">
+          <div className="flex items-center gap-1 md:gap-2 px-3 md:px-4 py-2 border-b border-white/[0.06] flex-shrink-0 overflow-x-auto">
             {!['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED'].includes(activeRun.status) && (
               <>
                 <button
                   onClick={handlePause}
                   disabled={pausing}
-                  className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-orange-400 transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-orange-400 transition-colors disabled:opacity-50 whitespace-nowrap"
                 >
                   <Pause className="h-3.5 w-3.5" />
                   {pausing ? 'Pausing…' : 'Pause'}
                 </button>
                 <button
                   onClick={() => handle(() => cancelRun(activeRun.runId), 'Run cancelled')}
-                  className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-rose transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-accent-rose transition-colors whitespace-nowrap"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   Cancel
@@ -408,16 +408,16 @@ export default function RunDetail() {
               <button
                 onClick={handleReRun}
                 disabled={reRunning}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-violet transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-accent-violet transition-colors disabled:opacity-50 whitespace-nowrap"
               >
                 <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
                 {reRunning ? 'Launching…' : 'Re-run'}
               </button>
             )}
-            <div className="flex items-center gap-3 ml-auto">
+            <div className="flex items-center gap-2 ml-auto">
               <button
                 onClick={() => handle(() => downloadWorkspace(activeRun.runId), 'Download started')}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-accent-emerald transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-accent-emerald transition-colors whitespace-nowrap"
                 title="Download workspace as ZIP"
               >
                 <Download className="h-3.5 w-3.5" />

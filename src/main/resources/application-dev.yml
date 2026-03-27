@@ -83,6 +83,11 @@ agent:
       redirect-uri: ${SLACK_REDIRECT_URI:https://dev.executespec.ai/api/integrations/slack/oauth/callback}
       dashboard-url: ${DASHBOARD_URL:https://dev.executespec.ai}
 
+# ── Recovery (disabled on dev — manual control only) ────────────────────────
+agent:
+  recovery:
+    enabled: false
+
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
   fallback-host: ${PREVIEW_FALLBACK_HOST:http://dev.executespec.ai}

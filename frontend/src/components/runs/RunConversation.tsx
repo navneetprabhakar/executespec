@@ -28,7 +28,7 @@ const QUICK_ACTIONS = [
  * - Shows the conversation history with markdown rendering for assistant replies.
  * - Allows the user to ask up to MAX_MESSAGES questions about the generated code.
  * - Offers quick-action chips for common debugging/improvement tasks.
- * - Offers an "Implement as New Run" button to create an iteration run.
+ * - Offers an "Iterate as New Run" button to create an iteration run.
  */
 export default function RunConversation({ runId }: Props) {
   const permissions = useTierPermissions();
@@ -125,7 +125,7 @@ export default function RunConversation({ runId }: Props) {
       // Remove the optimistic message on failure
       setMessages((prev) => prev.slice(0, -1));
       if (e.message?.includes('429')) {
-        setError('Conversation limit reached. Click "Implement as New Run" to continue.');
+        setError('Conversation limit reached. Click "Iterate as New Run" to continue.');
       } else {
         setError(e.message ?? 'Failed to send message. Please try again.');
       }
@@ -174,7 +174,7 @@ export default function RunConversation({ runId }: Props) {
             setShowApplyBox(false);
             setShowIterateBox(true);
             setIterateInput(body.compiledGoal);
-            addToast({ type: 'info', message: 'Suggestion too large for apply. Use "Implement as New Run" instead.' });
+            addToast({ type: 'info', message: 'Suggestion too large for apply. Use "Iterate as New Run" to start fresh.' });
           } else {
             setError('Suggestion requires too many tasks. Please create a fresh run instead.');
           }
@@ -248,20 +248,20 @@ export default function RunConversation({ runId }: Props) {
     )}>
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 text-accent-violet" />
-          <span className="text-sm font-medium text-zinc-200">Run Copilot</span>
-          <span className="text-[10px] text-zinc-600 font-mono">sonnet</span>
-          <button
-            onClick={() => setCopilotMaximized(!copilotMaximized)}
-            className="ml-1 p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
-            title={copilotMaximized ? 'Minimize' : 'Maximize'}
-          >
-            {copilotMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-2 px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-accent-violet" />
+            <span className="text-sm font-medium text-zinc-200">Run Copilot</span>
+            <span className="text-[10px] text-zinc-600 font-mono">sonnet</span>
+            <button
+              onClick={() => setCopilotMaximized(!copilotMaximized)}
+              className="ml-1 p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+              title={copilotMaximized ? 'Minimize' : 'Maximize'}
+            >
+              {copilotMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </button>
+          </div>
           {/* Message counter */}
           <span className={cn(
             'text-xs font-mono tabular-nums',
@@ -269,15 +269,18 @@ export default function RunConversation({ runId }: Props) {
             userCount >= MAX_MESSAGES / 2   ? 'text-accent-amber' :
                                               'text-zinc-600'
           )}>
-            {userCount}/{MAX_MESSAGES} messages
+            {userCount}/{MAX_MESSAGES}
           </span>
+        </div>
 
+        {/* Action buttons — wrap on mobile */}
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Apply to Run button — only when run is COMPLETE/PARTIAL and has conversation */}
           {hasConversation && activeRun && ['COMPLETE', 'PARTIAL'].includes(activeRun.status) && (
             <button
               onClick={() => { setShowApplyBox((v) => !v); setShowIterateBox(false); }}
               className={cn(
-                'flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all',
+                'flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all',
                 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25',
                 (applying || iterating) && 'opacity-50 cursor-not-allowed'
               )}
@@ -299,18 +302,18 @@ export default function RunConversation({ runId }: Props) {
           {hasConversation && messages.length >= 2 && (
             <button
               onClick={compileSpec}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all bg-amber-500/15 text-amber-400 hover:bg-amber-500/25"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all bg-amber-500/15 text-amber-400 hover:bg-amber-500/25"
             >
               <FileText className="h-3 w-3" />
               Compile as Spec
             </button>
           )}
 
-          {/* Implement as New Run button */}
+          {/* Iterate as New Run button */}
           <button
             onClick={() => { setShowIterateBox((v) => !v); setShowApplyBox(false); }}
             className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all',
+              'flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all',
               'bg-accent-violet/15 text-accent-violet hover:bg-accent-violet/25',
               iterating && 'opacity-50 cursor-not-allowed'
             )}
@@ -319,7 +322,7 @@ export default function RunConversation({ runId }: Props) {
             {iterating
               ? <Loader2 className="h-3 w-3 animate-spin" />
               : <Rocket className="h-3 w-3" />}
-            Implement as New Run
+            Iterate as New Run
           </button>
         </div>
       </div>
@@ -421,7 +424,7 @@ export default function RunConversation({ runId }: Props) {
                 >
                   {iterating
                     ? <><Loader2 className="h-3 w-3 animate-spin" /> Creating run&hellip;</>
-                    : <><Rocket className="h-3 w-3" /> Start New Run</>
+                    : <><Rocket className="h-3 w-3" /> Iterate as New Run</>
                   }
                 </button>
               </div>
@@ -459,7 +462,7 @@ export default function RunConversation({ runId }: Props) {
                   onClick={() => { setPendingNewRunGoal(compiledSpec); setShowCompiledSpec(false); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-accent-violet text-white hover:bg-accent-violet/90"
                 >
-                  <Rocket className="h-3 w-3" /> Launch as New Run
+                  <Rocket className="h-3 w-3" /> Iterate as New Run
                 </button>
               </div>
             </div>
@@ -567,7 +570,7 @@ export default function RunConversation({ runId }: Props) {
               className="underline text-accent-violet hover:opacity-80"
               onClick={() => setShowIterateBox(true)}
             >
-              Implement as New Run
+              Iterate as New Run
             </button>{' '}
             to continue with a new run.
           </p>
@@ -600,7 +603,7 @@ export default function RunConversation({ runId }: Props) {
               onClick={() => handleSend()}
               disabled={!input.trim() || sending || limitReached}
               className={cn(
-                'p-1.5 rounded-lg flex-shrink-0 transition-all',
+                'p-2.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg flex-shrink-0 transition-all',
                 input.trim() && !sending
                   ? 'bg-accent-violet text-white hover:bg-accent-violet/90'
                   : 'text-zinc-600 cursor-not-allowed'

@@ -138,7 +138,7 @@ export default function RunDetailTabs() {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="ml-auto flex-shrink-0 p-2 text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-50"
+          className="ml-auto flex-shrink-0 p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-50"
           title="Refresh run data"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />

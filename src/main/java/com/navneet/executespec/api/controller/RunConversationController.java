@@ -237,8 +237,12 @@ public class RunConversationController {
         }
 
         // Increment plan version first, then save — avoids duplicate key on (run_id, version)
+        // IMPORTANT: re-fetch run after increment to avoid stale object overwriting the version
         stateStore.incrementPlanVersion(runId);
         stateStore.savePlanVersion(runId, source == ApplySource.COPILOT ? "COPILOT" : "REVIEW", userId);
+
+        // Re-fetch to pick up incremented planVersion (avoids stale write reverting it)
+        run = stateStore.findRun(runId).orElseThrow();
 
         // Update run goal text with apply identifier so the update is visible
         int applyIndex = run.getApplySuggestionCount() + 1;
