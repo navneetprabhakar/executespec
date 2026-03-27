@@ -2,7 +2,6 @@
 # ExecuteSpec — Prod profile (production GCE deployment)
 # ══════════════════════════════════════════════════════════════════════════════
 # Activate with: --spring.profiles.active=prod
-# Provider weights: Anthropic-heavy for quality (6:2:2)
 # Stricter concurrency limits, full observability
 #
 # ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -37,14 +36,7 @@
 # │ JIRA_WEBHOOK_SECRET    JIRA webhook secret                                 │
 # └─────────────────────────────────────────────────────────────────────────────┘
 
-# ── LLM Provider Weights & Keys ──────────────────────────────────────────────
-executespec:
-  routing:
-    provider-weights:
-      anthropic: 6
-      google: 2
-      openai: 2
-
+# ── LLM Provider Keys ────────────────────────────────────────────────────────
 spring:
   data:
     redis:
