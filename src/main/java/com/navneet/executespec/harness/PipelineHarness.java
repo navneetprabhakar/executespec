@@ -37,6 +37,7 @@ import com.navneet.executespec.tool.FileLockTool;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.GitTool;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
@@ -1354,8 +1355,8 @@ public class PipelineHarness {
         ExecutionMode execMode = run.getExecutionModeEnum();
         log.info("Run {} execution mode: {}", runId, execMode);
 
-        // Set per-run LLM iteration cap: PROTOTYPE=50, PRODUCTION=100
-        llmRouter.setRunCallLimit(runId, execMode.isPrototype() ? 50 : 100);
+        // Set per-run LLM iteration cap: PROTOTYPE=100, PRODUCTION=200
+        llmRouter.setRunCallLimit(runId, execMode.isPrototype() ? 100 : 200);
 
         // ── Resolve per-user/org API keys and register for this run ──────────
         // Resolution hierarchy: user key → org key → system key (application.yml).
@@ -1754,9 +1755,13 @@ public class PipelineHarness {
             // Production mode: run test gen, preview is manual.
             if (execMode.isProduction()) {
                 try {
-                    String planJson = mapper.writeValueAsString(plan);
+                    final String planJson = mapper.writeValueAsString(plan);
+                    final String userReq = run.getUserRequest();
                     testCompletionFutures.put(runId, new CompletableFuture<>());
-                    testGenOrchestrator.runTestGenPipeline(runId, run.getUserRequest(), planJson);
+                    var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+                    Thread.ofVirtual().name("testgen-" + runId).start(snapshot.wrap(() ->
+                        testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson)
+                    ));
                     log.info("Run {} — test gen pipeline kicked off (post-merge, parallel to review)", runId);
                     // Start preview so TestPreviewCoordinator can execute generated tests
                     autoStartPreview(runId, run);

@@ -109,9 +109,9 @@ public class LlmRouter {
      * If a single run exceeds this, something is fundamentally wrong (spec/prompt issue).
      *
      * TODO: Explore per-tier circuit breakers (e.g., max 60 FAST calls, max 30 CAPABLE, max 10 POWER)
-     * Current: single global cap of 100 across all tiers
+     * Current: single global cap of 200 across all tiers (PROTOTYPE=100, PRODUCTION=200)
      */
-    private static final int MAX_LLM_CALLS_PER_RUN = 100;
+    private static final int MAX_LLM_CALLS_PER_RUN = 200;
     private final ConcurrentHashMap<String, AtomicInteger> runCallCounters = new ConcurrentHashMap<>();
     /** Per-run iteration limits (overrides MAX_LLM_CALLS_PER_RUN). Set by PipelineHarness based on ExecutionMode. */
     private final ConcurrentHashMap<String, Integer> runCallLimits = new ConcurrentHashMap<>();
