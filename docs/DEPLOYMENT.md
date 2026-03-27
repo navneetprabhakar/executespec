@@ -25,7 +25,7 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1–V37).
+Flyway migrations run automatically on startup and create all tables (V1–V39).
 
 ### Redis Setup
 
@@ -1432,15 +1432,136 @@ Verify: `https://dev.executespec.ai/api/health`
 
 **Subdomain:** `app.executespec.ai` | **Region:** `asia-south1`
 
+#### Step 1: Provision Infrastructure
+
 ```bash
 terraform workspace select prod
+terraform plan  -var-file=environments/prod.tfvars -var="project_id=executespecv1"
 terraform apply -var-file=environments/prod.tfvars -var="project_id=executespecv1"
 ```
 
-Same DNS/secrets/GitHub process as dev. Prod secrets also need `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `SLACK_*` secrets.
+#### Step 2: DNS (Cloudflare)
 
-Deploy: `git push origin main`
-Verify: `https://app.executespec.ai/api/health`
+| Record | Type | Name | Content | Proxy |
+|--------|------|------|---------|-------|
+| Main app | A | `app` | `$(terraform output lb_ip)` | Proxied (orange) |
+| Preview wildcard | A | `*` | `<VM external IP>` | DNS only (grey)¹ |
+
+¹ Wildcard proxy requires Cloudflare Enterprise. Previews use Cloud Run URLs on prod (no wildcard DNS needed).
+
+**SSL/TLS Mode:** Full (not Full Strict) — uses Cloudflare Origin Certificate on origin.
+
+#### Step 3: Secrets (GCS + Secret Manager)
+
+```bash
+# API keys → GCS (fetched by startup script)
+cat > /tmp/api-keys << 'EOF'
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-proj-...
+GOOGLE_API_KEY=AIza...
+GITHUB_PAT=ghp_...
+EOF
+gsutil cp /tmp/api-keys gs://executespec-prod-deploy/config/api-keys && rm /tmp/api-keys
+
+# Billing & integrations → Secret Manager (or GCS)
+# RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET — Razorpay dashboard → API Keys
+# SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET — Slack App settings
+# SMTP_PASSWORD — email provider SMTP credentials
+```
+
+#### Step 4: Service Account Permissions
+
+The prod VM service account needs:
+
+```bash
+SA_EMAIL="executespec-prod-gce@executespecv1.iam.gserviceaccount.com"
+
+# Required roles
+for ROLE in \
+  roles/run.admin \
+  roles/artifactregistry.writer \
+  roles/artifactregistry.repoAdmin \
+  roles/iam.serviceAccountUser \
+  roles/logging.logWriter \
+  roles/monitoring.metricWriter \
+  roles/secretmanager.secretAccessor \
+  roles/cloudsql.client; do
+  gcloud projects add-iam-policy-binding executespecv1 \
+    --member="serviceAccount:$SA_EMAIL" --role="$ROLE"
+done
+```
+
+#### Step 5: GitHub Environment Secrets (`production`)
+
+| Secret | Value |
+|--------|-------|
+| `GCP_PROJECT` | `executespecv1` |
+| `GCP_REGION` | `asia-south1` |
+| `GCE_INSTANCE` | `executespec-prod-vm` |
+| `GCE_ZONE` | `asia-south1-a` |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
+| `GCP_SERVICE_ACCOUNT` | `executespec-prod-gce@executespecv1.iam.gserviceaccount.com` |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook for deploy notifications |
+
+#### Step 6: Application Config (application-prod.yml)
+
+Create `src/main/resources/application-prod.yml` if not present:
+
+```yaml
+# Preview: Cloud Run mode on prod
+preview:
+  mode: cloud-run
+  preview-ttl-minutes: 5
+  proxy:
+    enabled: false
+
+# Observability: GCP exporters
+spring:
+  profiles:
+    include: gcp
+```
+
+#### Step 7: Deploy
+
+```bash
+git push origin main    # triggers GitHub Actions → build → deploy to prod VM
+```
+
+#### Step 8: Verify
+
+```bash
+# Health check
+curl https://app.executespec.ai/api/health
+
+# Login
+curl -s -X POST https://app.executespec.ai/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@executespec.ai","password":"REDACTED_FOR_PUBLIC_RELEASE"}' | jq .token
+
+# Flyway migrations
+gcloud compute ssh executespec-prod-vm --zone=asia-south1-a --tunnel-through-iap \
+  -- 'sudo journalctl -u executespec | grep -i "flyway\|migration" | tail -20'
+
+# Preview test (start a run, wait for COMPLETE, then start preview)
+# Preview URL will be a *.run.app Cloud Run URL
+```
+
+#### Pre-Production Checklist
+
+- [ ] **Infrastructure:** Terraform apply successful, all resources provisioned
+- [ ] **DNS:** `app.executespec.ai` resolves to LB IP, SSL certificate ACTIVE
+- [ ] **Database:** Cloud SQL accessible, Flyway V1–V39 migrations complete
+- [ ] **Redis:** Memorystore accessible from VPC
+- [ ] **Secrets:** All API keys in GCS/Secret Manager (Anthropic, OpenAI, Google, GitHub)
+- [ ] **Billing:** Razorpay webhook URL → `https://app.executespec.ai/api/billing/webhook`
+- [ ] **Slack:** App installed to workspace, OAuth redirect → `https://app.executespec.ai/api/integrations/slack/oauth/callback`
+- [ ] **Monitoring:** Cloud Monitoring alerts for 5xx rate, latency > 5s, instance health
+- [ ] **IAM:** Service account has all required roles (run.admin, artifactregistry.*, etc.)
+- [ ] **Health check:** `/api/health` returns UP
+- [ ] **Auth:** Admin login works, forced password change on first login
+- [ ] **Pipeline test:** Submit a run, approve plan, verify COMPLETE status
+- [ ] **Preview test:** Start preview, verify Cloud Run URL accessible
+- [ ] **Rollback plan:** Previous JAR in GCS, can redeploy via SHA
 
 ### Useful Terraform Commands
 

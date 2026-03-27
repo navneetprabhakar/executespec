@@ -2,7 +2,20 @@
 
 ## Overview
 
-Local process-based preview for development testing, Cloud Run deployment for 11 languages, workspace management with GCS archiving, and GitHub integration for code push.
+Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), permanent Cloud Run deployment for 11 languages, workspace management with GCS archiving, and GitHub integration for code push.
+
+### Preview Mode Architecture
+
+| Mode | Environment | Infrastructure | TTL | HTTPS |
+|------|-------------|---------------|-----|-------|
+| `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | Caddy + Cloudflare Origin Cert |
+| `cloud-run` | Dev/Prod (GCE) | Artifact Registry + Cloud Run | 5 min | Managed by Cloud Run |
+
+Configured via `preview.mode` in `application.yml` (default: `docker`).
+
+**Cloud Run preview flow:** Generate Dockerfile → Build image locally → Push to Artifact Registry → Deploy to Cloud Run (min 0, max 1 instance) → Health check → Return Cloud Run URL → Auto-delete after TTL.
+
+**Docker preview flow:** Generate Dockerfile + docker-compose.yml → `docker compose up --build` → Caddy route or direct port → Health check → Return preview URL → Auto-cleanup after TTL.
 
 ---
 
