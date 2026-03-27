@@ -1468,6 +1468,15 @@ public class DevDockerfileGenerator {
      * Find the Node.js entry point file. Checks common names in priority order.
      */
     private String findNodeEntryPoint(Path workspace) {
+        // Check package.json "main" field first
+        JsonNode pkg = parsePackageJson(workspace);
+        if (pkg != null && pkg.has("main")) {
+            String mainField = pkg.get("main").asText("");
+            if (!mainField.isBlank() && Files.exists(workspace.resolve(mainField))) {
+                return mainField;
+            }
+        }
+
         String[] candidates = {"index.js", "server.js", "app.js", "main.js",
                                "index.mjs", "server.mjs", "app.mjs",
                                "src/index.js", "src/server.js", "src/app.js",
@@ -1475,8 +1484,21 @@ public class DevDockerfileGenerator {
         for (String name : candidates) {
             if (Files.exists(workspace.resolve(name))) return name;
         }
-        // Last resort
-        return "index.js";
+
+        // Scan for any .js or .mjs file at workspace root (last resort, pick first alphabetically)
+        try (var stream = Files.list(workspace)) {
+            return stream
+                    .filter(p -> {
+                        String fn = p.getFileName().toString();
+                        return fn.endsWith(".js") || fn.endsWith(".mjs");
+                    })
+                    .map(p -> p.getFileName().toString())
+                    .sorted()
+                    .findFirst()
+                    .orElse("index.js");
+        } catch (Exception e) {
+            return "index.js";
+        }
     }
 
     /**

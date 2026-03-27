@@ -1,0 +1,51 @@
+{
+  "id": "startup-bold",
+  "name": "Startup Bold",
+  "description": "Vibrant, modern, marketing-heavy",
+  "tailwind": {
+    "colors": {
+      "primary": "violet-600",
+      "primary-foreground": "white",
+      "background": "white",
+      "foreground": "slate-900",
+      "card": "white",
+      "card-foreground": "slate-900",
+      "muted": "slate-100",
+      "muted-foreground": "slate-500",
+      "accent": "violet-50",
+      "accent-foreground": "violet-700",
+      "destructive": "rose-500",
+      "border": "slate-200",
+      "input": "slate-200",
+      "ring": "violet-500"
+    },
+    "borderRadius": "rounded-xl",
+    "fontFamily": "'Space Grotesk', system-ui, sans-serif"
+  },
+  "shadcn": {
+    "cssVariables": {
+      "--background": "0 0% 100%",
+      "--foreground": "222 47% 11%",
+      "--card": "0 0% 100%",
+      "--card-foreground": "222 47% 11%",
+      "--popover": "0 0% 100%",
+      "--popover-foreground": "222 47% 11%",
+      "--primary": "263 70% 50%",
+      "--primary-foreground": "0 0% 100%",
+      "--secondary": "210 40% 96%",
+      "--secondary-foreground": "222 47% 11%",
+      "--muted": "210 40% 96%",
+      "--muted-foreground": "215 16% 47%",
+      "--accent": "263 91% 96%",
+      "--accent-foreground": "263 70% 42%",
+      "--destructive": "347 77% 50%",
+      "--destructive-foreground": "0 0% 100%",
+      "--border": "214 32% 91%",
+      "--input": "214 32% 91%",
+      "--ring": "263 70% 50%",
+      "--radius": "0.75rem"
+    }
+  },
+  "density": "spacious",
+  "darkMode": false
+}

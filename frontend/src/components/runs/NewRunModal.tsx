@@ -31,7 +31,7 @@ type Mode = 'compose' | 'chat';
 export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
   const [goal, setGoal] = useState(initialGoal ?? '');
-  const [fastMode, setFastMode] = useState(false);
+  const [executionMode, setExecutionMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PROTOTYPE');
   const [showGitHub, setShowGitHub] = useState(false);
   const [model, setModel] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -104,13 +104,25 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
   };
 
   // ── use an AI message as the goal, return to compose ─────────────────────
+
+  /** Extract only the requirement summary, stripping conversational prefix/suffix. */
+  const extractSummary = (text: string): string => {
+    // Match everything after "REQUIREMENT SUMMARY:" up to the end or a trailing
+    // conversational line (e.g. "Let me know...", "Feel free...", "Would you like...")
+    const match = text.match(/REQUIREMENT SUMMARY:\s*([\s\S]+)/i);
+    if (!match) return text.trim();
+    let body = match[1].trim();
+    // Strip trailing conversational fluff — lines starting with common AI phrases
+    body = body.replace(/\n\s*(?:Let me know|Feel free|Would you like|If you|I hope|Is there anything|Happy to|Please let|Don't hesitate|---).*/is, '').trim();
+    return body;
+  };
+
   const useAsGoal = async (text: string, messageIndex: number) => {
     const hasSummary = /REQUIREMENT SUMMARY:/i.test(text);
 
     if (hasSummary) {
       // Instant extraction — message already contains a well-formed summary
-      const cleaned = text.replace(/^REQUIREMENT SUMMARY:\s*/im, '').trim();
-      setGoal(cleaned);
+      setGoal(extractSummary(text));
       setMode('compose');
       return;
     }
@@ -121,11 +133,10 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
       const context = messages.slice(0, messageIndex + 1);
       const compilePrompt: ConversationMessage = {
         role: 'user',
-        content: 'Based on the conversation above, compile a clear, concise, actionable REQUIREMENT SUMMARY that captures all discussed requirements, constraints, and goals. Output only the requirement summary, nothing else.',
+        content: 'Compile a clear, concise, actionable requirement summary from the conversation above. Output ONLY the technical requirements — no preamble, no commentary, no trailing remarks. Start directly with the first requirement.',
       };
       const { reply } = await conversationChat([...context, compilePrompt]);
-      const cleaned = reply.replace(/^REQUIREMENT SUMMARY:\s*/im, '').trim();
-      setGoal(cleaned);
+      setGoal(extractSummary(reply));
       setMode('compose');
     } catch (e: any) {
       addToast({ type: 'error', message: `Failed to compile goals: ${e.message}` });
@@ -141,10 +152,12 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
     setLaunching(true);
     try {
       const repoMode = repoChoice === 'NONE' ? null : repoChoice;  // 'NEW' | 'EXISTING' | null
+      const isPrototype = executionMode === 'PROTOTYPE';
       const runId = await createRun({
         userRequest: goal,
-        skipApproval: fastMode,
-        autoMerge: fastMode,
+        executionMode,
+        skipApproval: isPrototype,
+        autoMerge: isPrototype,
         ...(model ? { modelName: model } : {}),
         ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
         ...(repoMode ? { repoMode } : {}),
@@ -272,31 +285,35 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               Build My Spec
             </button>
 
-            {/* Fast Mode toggle */}
+            {/* Prototype Mode toggle */}
             <div
               role="switch"
-              aria-checked={fastMode}
+              aria-checked={executionMode === 'PROTOTYPE'}
               tabIndex={0}
-              onClick={() => setFastMode(!fastMode)}
-              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setFastMode(!fastMode); } }}
+              onClick={() => setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE')}
+              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE'); } }}
               className="flex items-center justify-between cursor-pointer select-none group"
             >
               <div className="flex items-center gap-2">
-                <Zap className={cn('h-3.5 w-3.5 transition-colors', fastMode ? 'text-accent-amber' : 'text-zinc-500')} />
+                <Zap className={cn('h-3.5 w-3.5 transition-colors', executionMode === 'PROTOTYPE' ? 'text-accent-amber' : 'text-zinc-500')} />
                 <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
-                  Fast Mode
-                  <span className="text-xs text-zinc-600 ml-1.5">(Auto Approved — Recommended)</span>
+                  Prototype Mode
+                  <span className="text-xs text-zinc-600 ml-1.5">
+                    {executionMode === 'PROTOTYPE'
+                      ? '(Auto-approved, fast models, auto-preview)'
+                      : '(Plan review, full validation, code review)'}
+                  </span>
                 </span>
               </div>
               <span
                 className={cn(
                   'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
-                  fastMode ? 'bg-accent-amber' : 'bg-white/[0.10]',
+                  executionMode === 'PROTOTYPE' ? 'bg-accent-amber' : 'bg-white/[0.10]',
                 )}
               >
                 <span className={cn(
                   'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
-                  fastMode ? 'translate-x-4' : 'translate-x-0.5',
+                  executionMode === 'PROTOTYPE' ? 'translate-x-4' : 'translate-x-0.5',
                 )} />
               </span>
             </div>

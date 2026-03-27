@@ -91,6 +91,8 @@ public class RunController {
         // Pass ALL pre-async fields INTO submitRun so they're set on the entity
         // BEFORE the async pipeline thread starts (avoids race condition where the
         // pipeline thread re-loads and re-saves the run without ownership fields).
+        String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
+
         PipelineRun run = harness.submitRun(
             req.userRequest(),
             req.source() != null ? req.source() : "REST",
@@ -103,7 +105,8 @@ public class RunController {
             req.modelName(),
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
-            req.projectId()
+            req.projectId(),
+            executionMode
         );
 
         // Increment run counter after successful submission

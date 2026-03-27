@@ -4,6 +4,7 @@ import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsSuperAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   getFiles, getFile,
   getOpenApiSpec,
@@ -29,6 +30,7 @@ import {
   ChevronsDownUp, ChevronsUpDown, Copy, Check,
   Clock, Coins, Cpu, RefreshCw, FolderKanban, X, Plus, User, Wrench, Loader2,
   TestTube2,
+  Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
 import Editor from '@monaco-editor/react';
@@ -1445,6 +1447,12 @@ function CodeTab({
     ? repoUrl.replace(/\.git$/, '').replace('https://github.com/', 'https://github.com/')
     : null;
 
+  // Hooks must be called before any early returns (React rules of hooks)
+  const isMobile = useIsMobile();
+  const [maximized, setMaximized] = useState(false);
+  const [showTree, setShowTree] = useState(!isMobile);
+  useEffect(() => { setShowTree(!isMobile); }, [isMobile]);
+
   if (filesLoading) {
     return <div className="p-4 text-sm text-zinc-500">Loading files…</div>;
   }
@@ -1480,65 +1488,114 @@ function CodeTab({
 
   const tree = buildFileTree(files);
 
-  return (
-    <div className="flex h-full overflow-hidden">
+  const codeContent = (
+    <div className={cn(
+      'flex h-full overflow-hidden',
+      maximized && 'fixed inset-0 z-50 bg-surface-1'
+    )}>
       {/* ── File tree sidebar ── */}
-      <div className="w-56 flex-shrink-0 border-r border-white/[0.06] flex flex-col overflow-hidden">
-        {/* Toolbar: Expand All / Collapse All / GitHub link */}
-        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] flex-shrink-0">
-          <span className="text-[10px] text-zinc-600 uppercase tracking-widest flex-1 pl-1">Explorer</span>
-          {githubWebUrl && (
-            <a
-              href={githubWebUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="View on GitHub"
+      {showTree && (
+        <div className={cn(
+          'flex-shrink-0 border-r border-white/[0.06] flex flex-col overflow-hidden',
+          isMobile ? 'w-full absolute inset-0 z-10 bg-surface-1' : 'w-56'
+        )}>
+          {/* Toolbar: Expand All / Collapse All / GitHub link */}
+          <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] flex-shrink-0">
+            <span className="text-[10px] text-zinc-600 uppercase tracking-widest flex-1 pl-1">Explorer</span>
+            {githubWebUrl && (
+              <a
+                href={githubWebUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View on GitHub"
+                className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+              >
+                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+              </a>
+            )}
+            <button
+              title="Expand all folders"
+              onClick={() => setExpandSignal(s => s + 1)}
               className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
             >
-              <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            </a>
-          )}
-          <button
-            title="Expand all folders"
-            onClick={() => setExpandSignal(s => s + 1)}
-            className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
-          >
-            <ChevronsUpDown className="h-3 w-3" />
-          </button>
-          <button
-            title="Collapse all folders"
-            onClick={() => setCollapseSignal(s => s + 1)}
-            className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
-          >
-            <ChevronsDownUp className="h-3 w-3" />
-          </button>
-        </div>
+              <ChevronsUpDown className="h-3 w-3" />
+            </button>
+            <button
+              title="Collapse all folders"
+              onClick={() => setCollapseSignal(s => s + 1)}
+              className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+            >
+              <ChevronsDownUp className="h-3 w-3" />
+            </button>
+            {isMobile && (
+              <button
+                title="Close file tree"
+                onClick={() => setShowTree(false)}
+                className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
 
-        {/* Tree nodes */}
-        <div className="overflow-y-auto flex-1 py-1">
-          {tree.map((node) => (
-            <TreeNodeView
-              key={node.name}
-              node={node}
-              selected={selected}
-              onSelect={openFile}
-              expandSignal={expandSignal}
-              collapseSignal={collapseSignal}
-            />
-          ))}
+          {/* Tree nodes */}
+          <div className="overflow-y-auto flex-1 py-1">
+            {tree.map((node) => (
+              <TreeNodeView
+                key={node.name}
+                node={node}
+                selected={selected}
+                onSelect={(path) => {
+                  openFile(path);
+                  if (isMobile) setShowTree(false);
+                }}
+                expandSignal={expandSignal}
+                collapseSignal={collapseSignal}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── IDE viewer pane ── */}
-      <div className="flex-1 overflow-hidden">
-        <IDEFileViewer
-          filePath={selected}
-          content={content}
-          loading={loadingContent}
-        />
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {/* Mobile/maximize toolbar */}
+        {(isMobile || maximized) && (
+          <div className="flex items-center gap-1 px-2 py-1 border-b border-white/[0.06] flex-shrink-0 bg-[#0d0d14]">
+            {isMobile && !showTree && (
+              <button
+                onClick={() => setShowTree(true)}
+                className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                title="Show file tree"
+              >
+                <PanelLeftOpen className="h-3.5 w-3.5" />
+                <span>Files</span>
+              </button>
+            )}
+            <div className="flex-1" />
+            <button
+              onClick={() => setMaximized(!maximized)}
+              className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              title={maximized ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {maximized
+                ? <><Minimize2 className="h-3.5 w-3.5" /><span>Exit</span></>
+                : <><Maximize2 className="h-3.5 w-3.5" /><span>Fullscreen</span></>}
+            </button>
+          </div>
+        )}
+        <div className="flex-1 overflow-hidden">
+          <IDEFileViewer
+            filePath={selected}
+            content={content}
+            loading={loadingContent}
+          />
+        </div>
       </div>
     </div>
   );
+
+  return codeContent;
 }
 
 // ── Test Task Card (for Tasks tab) ──────────────────────────────────────────

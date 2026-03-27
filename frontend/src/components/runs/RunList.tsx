@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, FolderOpen, Users, User, Globe, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, FolderOpen, Users, User, Globe, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import RunCard from './RunCard';
 import { RunCardSkeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
@@ -30,6 +31,7 @@ export default function RunList() {
   const [showModal, setShowModal] = useState(false);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const { pendingNewRunGoal, setPendingNewRunGoal } = useUiStore();
+  const isMobile = useIsMobile();
 
   // Open modal when a pending goal is set (e.g., from RunConversation "Implement as New Run")
   useEffect(() => {
@@ -52,6 +54,17 @@ export default function RunList() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Mobile: New Run button at top */}
+      {isMobile && (
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors shadow-glow-violet"
+        >
+          <Sparkles className="h-4 w-4" />
+          New Run
+        </button>
+      )}
+
       {/* Scope toggle — SUPER_ADMIN: 3 views; org members: 2 views */}
       {(isSuperAdmin || isOrgMember) && (
         <div className="flex items-center gap-1 px-4 py-2 border-b border-white/[0.06] flex-shrink-0">
@@ -223,15 +236,17 @@ export default function RunList() {
         </div>
       )}
 
-      {/* FAB */}
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setShowModal(true)}
-        className="absolute bottom-6 right-4 h-12 w-12 rounded-full bg-accent-violet shadow-glow-violet flex items-center justify-center z-10"
-      >
-        <Plus className="h-5 w-5 text-white" />
-      </motion.button>
+      {/* FAB — desktop only (mobile has top button) */}
+      {!isMobile && (
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowModal(true)}
+          className="absolute bottom-6 right-4 h-12 w-12 rounded-full bg-accent-violet shadow-glow-violet flex items-center justify-center z-10"
+        >
+          <Plus className="h-5 w-5 text-white" />
+        </motion.button>
+      )}
 
       {showModal && (
         <NewRunModal

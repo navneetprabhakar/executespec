@@ -74,6 +74,9 @@ public class RunDetail {
     /** One-sentence plan summary from the planner. Null until planning completes. */
     String runSummary;
 
+    /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
+    String executionMode;
+
     // ── Per-agent token breakdown (V19) ─────────────────────────────────────
     /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
     List<AgentTokenEntry> agentTokens;

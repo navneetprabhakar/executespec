@@ -43,9 +43,10 @@ export default function RunsPage() {
             <button
               onClick={() => setRunListCollapsed(!runListCollapsed)}
               className={cn(
-                'absolute top-3 left-3 z-10 p-1.5 rounded-lg transition-all',
-                'bg-white/[0.04] border border-white/[0.08] text-zinc-500',
-                'hover:bg-white/[0.08] hover:text-zinc-300 hover:border-white/[0.12]'
+                'absolute bottom-4 left-3 z-10 p-1.5 rounded-lg transition-all',
+                'bg-surface-2/80 backdrop-blur-sm border border-white/[0.08] text-zinc-500',
+                'hover:bg-white/[0.08] hover:text-zinc-300 hover:border-white/[0.12]',
+                'shadow-sm'
               )}
               title={runListCollapsed ? 'Show run list' : 'Hide run list'}
             >

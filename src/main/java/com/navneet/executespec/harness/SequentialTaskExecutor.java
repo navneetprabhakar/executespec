@@ -117,6 +117,10 @@ public class SequentialTaskExecutor {
      * branches merge to main and the next tier starts.
      */
     public SequentialExecutionResult execute(PipelineRun run, List<AgentTask> tasks) {
+        return execute(run, tasks, run.getExecutionModeEnum());
+    }
+
+    public SequentialExecutionResult execute(PipelineRun run, List<AgentTask> tasks, ExecutionMode mode) {
         List<WorkerReport> allReports = Collections.synchronizedList(new ArrayList<>());
         List<AgentTask> completed = Collections.synchronizedList(new ArrayList<>());
         List<AgentTask> failed = Collections.synchronizedList(new ArrayList<>());
@@ -124,7 +128,14 @@ public class SequentialTaskExecutor {
         Set<String> mergedTaskIds = ConcurrentHashMap.newKeySet();
         String runId = run.getRunId();
         String defaultModel = run.getWorkerModel();
-        ValidationLevel level = parseLevel(validationLevelStr);
+
+        // Execution mode controls validation level and model tier ceiling
+        ValidationLevel level = mode.isPrototype()
+                ? ValidationLevel.SYNTAX
+                : parseLevel(validationLevelStr);
+        ModelTier tierCeiling = mode.isPrototype()
+                ? ModelTier.FAST
+                : ModelTier.POWER;
 
         // Resolve available providers for this run's org (API key-aware routing)
         Set<LlmProvider> availableProviders = providerResolver.resolve(runId);
@@ -174,7 +185,7 @@ public class SequentialTaskExecutor {
 
             if (executable.size() == 1) {
                 // Single task in tier — run directly on current thread (no thread overhead)
-                executeSingleTask(executable.get(0), run, defaultModel, level,
+                executeSingleTask(executable.get(0), run, defaultModel, level, tierCeiling,
                         availableProviders, allReports, completed, failed,
                         previouslyMerged, mergedTaskIds, mergeLock);
             } else {
@@ -186,7 +197,7 @@ public class SequentialTaskExecutor {
                     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
                     Thread vt = Thread.ofVirtual()
                             .name("worker-tier" + tier + "-" + task.getTaskId())
-                            .start(snapshot.wrap(() -> executeSingleTask(task, run, defaultModel, level,
+                            .start(snapshot.wrap(() -> executeSingleTask(task, run, defaultModel, level, tierCeiling,
                                     availableProviders, allReports, completed, failed,
                                     previouslyMerged, mergedTaskIds, mergeLock)));
                     threads.add(vt);
@@ -234,7 +245,8 @@ public class SequentialTaskExecutor {
      * Thread-safe — can be called from multiple virtual threads concurrently.
      */
     private void executeSingleTask(AgentTask task, PipelineRun run, String defaultModel,
-                                    ValidationLevel level, Set<LlmProvider> availableProviders,
+                                    ValidationLevel level, ModelTier tierCeiling,
+                                    Set<LlmProvider> availableProviders,
                                     List<WorkerReport> allReports, List<AgentTask> completed,
                                     List<AgentTask> failed, List<AgentTask> previouslyMerged,
                                     Set<String> mergedTaskIds, Object mergeLock) {
@@ -271,7 +283,7 @@ public class SequentialTaskExecutor {
         // === Execute with validation + model routing ===
         WorkerReport report;
         try {
-            report = executeWithValidation(run, task, level, availableProviders);
+            report = executeWithValidation(run, task, level, tierCeiling, availableProviders);
         } catch (Exception e) {
             log.error("Task {} crashed with unhandled exception: {}", taskId, e.getMessage(), e);
             stateStore.failTask(taskId, "Unhandled exception: " + e.getMessage());
@@ -340,7 +352,7 @@ public class SequentialTaskExecutor {
      * path directly (not gitTool.getWorkspacePath which reads WorkspaceContext).
      */
     private WorkerReport executeWithValidation(PipelineRun run, AgentTask task,
-                                                ValidationLevel level,
+                                                ValidationLevel level, ModelTier tierCeiling,
                                                 Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
         String taskId = task.getTaskId();
@@ -350,12 +362,12 @@ public class SequentialTaskExecutor {
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
 
-            // === MODEL SELECTION (tier escalation on retry, filtered by available providers) ===
+            // === MODEL SELECTION (tier escalation on retry, capped by execution mode ceiling) ===
             ModelSelection model;
             if (attempt == 1) {
-                model = modelRouter.selectForTask(complexity, availableProviders);
+                model = modelRouter.selectForTask(complexity, tierCeiling, availableProviders);
             } else {
-                model = modelRouter.selectForRetry(complexity, attempt, availableProviders);
+                model = modelRouter.selectForRetry(complexity, attempt, tierCeiling, availableProviders);
             }
 
             sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,

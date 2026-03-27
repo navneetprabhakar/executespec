@@ -15,6 +15,9 @@ import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRouter;
+import com.navneet.executespec.router.ModelSelection;
+import com.navneet.executespec.router.ModelTier;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.recovery.RecoveryProperties;
@@ -128,6 +131,13 @@ public class PipelineHarness {
     private final com.navneet.executespec.deployment.preview.PreviewService previewService;
     private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepository;
 
+    // ── Model routing + LLM routing (for execution-mode support) ───────────────
+    private final ModelRouter modelRouter;
+    private final com.navneet.executespec.agent.LlmRouter llmRouter;
+
+    // ── UI style resolution ────────────────────────────────────────────────────
+    private final UiStyleResolver uiStyleResolver;
+
     // ── Language validation for existing repos ─────────────────────────────────
     private final LanguageValidator languageValidator;
 
@@ -218,6 +228,7 @@ public class PipelineHarness {
         if (run.isAutoMerge()) retryRun.setAutoMerge(true);
         if (run.getGithubPat() != null) retryRun.setGithubPat(run.getGithubPat());
         if (run.getGithubOwner() != null) retryRun.setGithubOwner(run.getGithubOwner());
+        retryRun.setExecutionMode(run.getExecutionMode());
         stateStore.save(retryRun);
 
         // Update failed run with retry link
@@ -329,7 +340,7 @@ public class PipelineHarness {
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner) {
         return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
-                         false, false, null, null, null, null);
+                         false, false, null, null, null, null, "PRODUCTION");
     }
 
     /**
@@ -343,7 +354,8 @@ public class PipelineHarness {
                                   String githubPat, String githubOwner,
                                   boolean skipApproval, boolean autoMerge,
                                   String modelName,
-                                  String createdByUserId, String orgId, String projectId) {
+                                  String createdByUserId, String orgId, String projectId,
+                                  String executionMode) {
         PipelineRun run = stateStore.createRun(userRequest, source, repoUrl, repoMode,
             props.getRoles().getPlanner(),
             props.getRoles().getWorker(),
@@ -387,6 +399,19 @@ public class PipelineHarness {
         }
         if (projectId != null && !projectId.isBlank()) {
             run.setProjectId(projectId);
+            needsSave = true;
+        }
+
+        // Apply execution mode — PROTOTYPE forces skipApproval + autoMerge + FAST-tier planner
+        if (executionMode != null && !executionMode.isBlank()) {
+            run.setExecutionMode(executionMode);
+            needsSave = true;
+        }
+        if ("PROTOTYPE".equals(executionMode)) {
+            run.setSkipApproval(true);
+            run.setAutoMerge(true);
+            ModelSelection fastPlanner = modelRouter.selectFromTier(ModelTier.FAST);
+            run.setPlannerModel(fastPlanner.getModelName());
             needsSave = true;
         }
 
@@ -635,7 +660,8 @@ public class PipelineHarness {
             pausedRun.getPlannerModel(),
             pausedRun.getCreatedByUserId(),
             pausedRun.getOrgId(),
-            pausedRun.getProjectId()
+            pausedRun.getProjectId(),
+            pausedRun.getExecutionMode()
         );
 
         // Carry forward additional context (not part of submitRun params)
@@ -1324,6 +1350,13 @@ public class PipelineHarness {
         //   3. Default                           — init a fresh empty git workspace
         PipelineRun run = stateStore.findRun(runId).orElseThrow();
 
+        // ── Resolve execution mode — controls which pipeline phases are active ──
+        ExecutionMode execMode = run.getExecutionModeEnum();
+        log.info("Run {} execution mode: {}", runId, execMode);
+
+        // Set per-run LLM iteration cap: PROTOTYPE=50, PRODUCTION=100
+        llmRouter.setRunCallLimit(runId, execMode.isPrototype() ? 50 : 100);
+
         // ── Resolve per-user/org API keys and register for this run ──────────
         // Resolution hierarchy: user key → org key → system key (application.yml).
         // Keys are stored in RunKeyStore so LlmRouter can use them without any agent
@@ -1447,6 +1480,15 @@ public class PipelineHarness {
                 plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
                 stateStore.savePlan(runId, plan);
 
+                // Resolve and persist ui_style for frontend task generation
+                try {
+                    String uiStyleJson = uiStyleResolver.resolve(effectiveRequest, null);
+                    stateStore.setUiStyle(runId, uiStyleJson);
+                    log.info("[Run {}] Resolved ui_style: {}", runId, uiStyleJson);
+                } catch (Exception ue) {
+                    log.debug("[Run {}] Could not resolve ui_style: {}", runId, ue.getMessage());
+                }
+
                 // Compute and persist cost estimate for plan approval UI
                 try {
                     var costBreakdown = costEstimator.estimate(plan);
@@ -1555,7 +1597,7 @@ public class PipelineHarness {
 
                 // === SEQUENTIAL EXECUTION WITH VALIDATION + MODEL ROUTING ===
                 SequentialTaskExecutor.SequentialExecutionResult execResult =
-                    sequentialTaskExecutor.execute(run, workerTasks);
+                    sequentialTaskExecutor.execute(run, workerTasks, execMode);
                 reports = execResult.reports();
 
                 if (execResult.hasFailures()) {
@@ -1708,54 +1750,67 @@ public class PipelineHarness {
             // ── 4c. Test generation + preview (async, parallel to review) ────
             // Testgen runs AFTER merge so it generates tests against actual code,
             // and does not contend with workers for API rate limits.
-            try {
-                String planJson = mapper.writeValueAsString(plan);
-                testCompletionFutures.put(runId, new CompletableFuture<>());
-                testGenOrchestrator.runTestGenPipeline(runId, run.getUserRequest(), planJson);
-                log.info("Run {} — test gen pipeline kicked off (post-merge, parallel to review)", runId);
-            } catch (Exception e) {
-                testCompletionFutures.remove(runId);
-                log.warn("Run {} — failed to start test gen pipeline: {}", runId, e.getMessage());
+            // Prototype mode: skip test generation, auto-start preview.
+            // Production mode: run test gen, preview is manual.
+            if (execMode.isProduction()) {
+                try {
+                    String planJson = mapper.writeValueAsString(plan);
+                    testCompletionFutures.put(runId, new CompletableFuture<>());
+                    testGenOrchestrator.runTestGenPipeline(runId, run.getUserRequest(), planJson);
+                    log.info("Run {} — test gen pipeline kicked off (post-merge, parallel to review)", runId);
+                    // Start preview so TestPreviewCoordinator can execute generated tests
+                    autoStartPreview(runId, run);
+                } catch (Exception e) {
+                    testCompletionFutures.remove(runId);
+                    log.warn("Run {} — failed to start test gen pipeline: {}", runId, e.getMessage());
+                }
             }
-            autoStartPreview(runId, run);
+            if (execMode.isPrototype()) {
+                autoStartPreview(runId, run);
+            }
 
             // ══════════════════════════════════════════════════════════════════
-            // ── 5. REVIEW MERGED CODE ────────────────────────────────────────
+            // ── 5. REVIEW MERGED CODE (Production mode only) ─────────────────
             // ══════════════════════════════════════════════════════════════════
-            // Reviewer inspects the merged result (all tasks combined on main branch).
-            // Auto-fix is built into V2: FAST tier first, escalates to CAPABLE on retry.
             ReviewReportV2 review = null;
             List<WorkerReport> currentReports = new ArrayList<>(reports);
             PipelineRun currentRun = stateStore.findRun(runId).orElse(run);
 
-            Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
-                .lowCardinalityKeyValue("run.id", runId)
-                .start();
-            try (Observation.Scope reviewScope = reviewObs.openScope()) {
-                stateStore.markReviewing(runId);
-                broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
-                var providers = availableProviderResolver.resolve(runId);
-                review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
-                        currentRun.getUserRequest(), providers);
-                stateStore.saveReviewV2(runId, review);
+            if (execMode.isProduction()) {
+                // Reviewer inspects the merged result (all tasks combined on main branch).
+                // Auto-fix is built into V2: FAST tier first, escalates to CAPABLE on retry.
+                Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
+                    .lowCardinalityKeyValue("run.id", runId)
+                    .start();
+                try (Observation.Scope reviewScope = reviewObs.openScope()) {
+                    stateStore.markReviewing(runId);
+                    broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+                    var providers = availableProviderResolver.resolve(runId);
+                    review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
+                            currentRun.getUserRequest(), providers);
+                    stateStore.saveReviewV2(runId, review);
 
-                if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
-                        || review.getVerdict() == ReviewVerdict.REJECTED) {
-                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                        "⚠️ Reviewer found issues: " + review.getSummary()));
-                } else {
-                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                        "✅ Review passed: " + review.getSummary()));
+                    if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
+                            || review.getVerdict() == ReviewVerdict.REJECTED) {
+                        broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                            "⚠️ Reviewer found issues: " + review.getSummary()));
+                    } else {
+                        broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                            "✅ Review passed: " + review.getSummary()));
+                    }
+                } catch (Exception e) {
+                    reviewObs.error(e);
+                    throw e;
+                } finally {
+                    reviewObs.stop();
                 }
-            } catch (Exception e) {
-                reviewObs.error(e);
-                throw e;
-            } finally {
-                reviewObs.stop();
+                Instant reviewEnd = Instant.now();
+                Timer.builder(HANDOVER_DURATION).tag("from_phase", "merge").tag("to_phase", "review")
+                        .register(meterRegistry).record(java.time.Duration.between(mergeEnd, reviewEnd));
+            } else {
+                log.info("Run {} — Prototype mode: reviewer skipped", runId);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Reviewer skipped (Prototype mode)"));
             }
-            Instant reviewEnd = Instant.now();
-            Timer.builder(HANDOVER_DURATION).tag("from_phase", "merge").tag("to_phase", "review")
-                    .register(meterRegistry).record(java.time.Duration.between(mergeEnd, reviewEnd));
 
             // ══════════════════════════════════════════════════════════════════
             // ── 6. VALIDATION REPORT + TEST REPORT (non-fatal) ───────────────
@@ -1765,13 +1820,16 @@ public class PipelineHarness {
             testPreviewCoordinator.cancelIfPending(runId);
 
             // Use post-merge compile result for the report (reflects final state).
-            try {
-                generateValidationReport(runId, currentRun, currentReports, review,
-                        postMergeCompile != null ? postMergeCompile : mainCompileResult);
-            } catch (Exception reportEx) {
-                log.warn("Validation report generation failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
-                broadcaster.emit(runId, RunEvent.log(runId, "report",
-                    "⚠️ Report generation failed — completing run without report"));
+            // Prototype mode: skip validation report.
+            if (execMode.isProduction()) {
+                try {
+                    generateValidationReport(runId, currentRun, currentReports, review,
+                            postMergeCompile != null ? postMergeCompile : mainCompileResult);
+                } catch (Exception reportEx) {
+                    log.warn("Validation report generation failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
+                    broadcaster.emit(runId, RunEvent.log(runId, "report",
+                        "⚠️ Report generation failed — completing run without report"));
+                }
             }
 
             // ══════════════════════════════════════════════════════════════════
@@ -1779,7 +1837,7 @@ public class PipelineHarness {
             // ══════════════════════════════════════════════════════════════════
             // ReviewerV2 auto-fix commits are already on the main branch.
             // Run a final compile-and-fix to confirm everything still builds.
-            boolean fixesApplied = review.getAutoFixSucceeded() > 0;
+            boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
             if (fixesApplied) {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness",
                     "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
@@ -1817,12 +1875,15 @@ public class PipelineHarness {
             }
 
             // Publish MergeCompleted — PostMergeOrchestrator handles post-merge agents
+            // Prototype mode: skip post-merge agents (context gen, API test gen, etc.)
             final PipelineRun completedRun = stateStore.findRun(runId).orElse(currentRun);
-            boolean hadFailures = currentReports.stream()
-                .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
-                               "partial".equalsIgnoreCase(r.getStatus()));
-            eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                runId, completedRun, currentReports, review, hadFailures));
+            if (execMode.isProduction()) {
+                boolean hadFailures = currentReports.stream()
+                    .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
+                                   "partial".equalsIgnoreCase(r.getStatus()));
+                eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                    runId, completedRun, currentReports, review, hadFailures));
+            }
             eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
 
         } catch (InterruptedException e) {
@@ -2234,7 +2295,8 @@ public class PipelineHarness {
             original.getPlannerModel(),
             original.getCreatedByUserId(),
             original.getOrgId(),
-            original.getProjectId()
+            original.getProjectId(),
+            original.getExecutionMode()
         );
         broadcaster.emit(original.getRunId(), RunEvent.log(
             original.getRunId(), null,
@@ -2268,7 +2330,8 @@ public class PipelineHarness {
             original.getPlannerModel(),
             original.getCreatedByUserId(),
             original.getOrgId(),
-            original.getProjectId()
+            original.getProjectId(),
+            original.getExecutionMode()
         );
         // Propagate the restart counter so we don't loop forever
         newRun.setAutoRestartCount(newCount);
@@ -2290,7 +2353,7 @@ public class PipelineHarness {
     public PipelineRun submitIntegrationRun(String userRequest, String source, boolean skipApproval) {
         // skipApproval passed directly into submitRun so it's set before the async thread starts
         // Integration runs also auto-merge when skipApproval is true (fully automated)
-        return submitRun(userRequest, source, null, null, null, null, skipApproval, skipApproval, null, null, null, null);
+        return submitRun(userRequest, source, null, null, null, null, skipApproval, skipApproval, null, null, null, null, "PRODUCTION");
     }
 
     // ── File-ownership validation ────────────────────────────────────────────

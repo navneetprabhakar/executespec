@@ -93,6 +93,16 @@ public class PipelineRun {
     @Column(columnDefinition = "boolean default false")
     private boolean autoMerge = false; // true = auto-approve merge gate (skip human merge review)
 
+    /** "PROTOTYPE" | "PRODUCTION". Controls speed-vs-quality tradeoffs. */
+    @Builder.Default
+    @Column(name = "execution_mode", length = 20)
+    private String executionMode = "PRODUCTION";
+
+    public com.navneet.executespec.harness.ExecutionMode getExecutionModeEnum() {
+        try { return com.navneet.executespec.harness.ExecutionMode.valueOf(executionMode); }
+        catch (Exception e) { return com.navneet.executespec.harness.ExecutionMode.PRODUCTION; }
+    }
+
     // ── Auto-restart tracking ─────────────────────────────────────────────────
     /**
      * How many times this run has been auto-restarted due to transient failures
@@ -133,6 +143,10 @@ public class PipelineRun {
      */
     @Column(name = "tech_stack")
     private String techStack;
+
+    /** JSON-encoded ui_style config (theme, design system, layout). Set during planning. */
+    @Column(name = "ui_style", columnDefinition = "TEXT")
+    private String uiStyle;
 
     @Column(name = "tenant_id", nullable = false)
     @Builder.Default

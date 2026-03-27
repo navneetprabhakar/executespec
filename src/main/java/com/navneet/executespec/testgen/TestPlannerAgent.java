@@ -96,6 +96,20 @@ public class TestPlannerAgent {
             }
         }
 
+        // Cap at 6 test classes to keep runs lean
+        if (taskPlans.size() > 6) {
+            log.info("[TestPlanner] Trimming {} test tasks to 6 for run {}", taskPlans.size(), runId);
+            taskPlans = taskPlans.subList(0, 6);
+        }
+
+        // Cap test methods per class at 8
+        for (TestTaskPlan tp : taskPlans) {
+            if (tp.getTestMethods() != null && tp.getTestMethods().size() > 8) {
+                log.info("[TestPlanner] Trimming {} methods to 8 in {} for run {}", tp.getTestMethods().size(), tp.getTaskName(), runId);
+                tp.setTestMethods(tp.getTestMethods().subList(0, 8));
+            }
+        }
+
         // Persist test tasks
         for (TestTaskPlan tp : taskPlans) {
             TestCategory category;

@@ -1,0 +1,51 @@
+{
+  "id": "neutral-warm",
+  "name": "Neutral Warm",
+  "description": "Warm tones, content-focused, editorial",
+  "tailwind": {
+    "colors": {
+      "primary": "amber-800",
+      "primary-foreground": "stone-50",
+      "background": "stone-50",
+      "foreground": "stone-900",
+      "card": "white",
+      "card-foreground": "stone-900",
+      "muted": "stone-100",
+      "muted-foreground": "stone-500",
+      "accent": "amber-50",
+      "accent-foreground": "amber-900",
+      "destructive": "red-600",
+      "border": "stone-200",
+      "input": "stone-200",
+      "ring": "amber-600"
+    },
+    "borderRadius": "rounded-md",
+    "fontFamily": "'Source Serif 4', Georgia, serif"
+  },
+  "shadcn": {
+    "cssVariables": {
+      "--background": "36 33% 97%",
+      "--foreground": "24 10% 10%",
+      "--card": "0 0% 100%",
+      "--card-foreground": "24 10% 10%",
+      "--popover": "0 0% 100%",
+      "--popover-foreground": "24 10% 10%",
+      "--primary": "32 81% 29%",
+      "--primary-foreground": "36 33% 97%",
+      "--secondary": "30 10% 94%",
+      "--secondary-foreground": "24 10% 10%",
+      "--muted": "30 10% 94%",
+      "--muted-foreground": "24 6% 45%",
+      "--accent": "36 100% 95%",
+      "--accent-foreground": "32 81% 22%",
+      "--destructive": "0 72% 51%",
+      "--destructive-foreground": "0 0% 100%",
+      "--border": "24 6% 83%",
+      "--input": "24 6% 83%",
+      "--ring": "32 81% 44%",
+      "--radius": "0.375rem"
+    }
+  },
+  "density": "comfortable",
+  "darkMode": false
+}

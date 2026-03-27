@@ -39,3 +39,67 @@ export function truncate(s: string | null | undefined, n: number): string {
   if (s == null || typeof s !== 'string') return '';
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
+
+/**
+ * Returns a human-readable status description for a pipeline run.
+ * Provides context-aware detail when tasks are available.
+ */
+export function describeRunStatus(
+  status: string,
+  tasks?: { status: string; title: string }[],
+  failureReason?: string | null,
+  executionMode?: string | null,
+): string {
+  const total = tasks?.length ?? 0;
+  const completed = tasks?.filter(t => t.status === 'COMPLETE').length ?? 0;
+  const failed = tasks?.filter(t => t.status === 'FAILED').length ?? 0;
+  const working = tasks?.find(t => t.status === 'IN_PROGRESS' || t.status === 'WORKING');
+
+  switch (status) {
+    case 'QUEUED':
+      return 'Waiting in queue';
+    case 'PLANNING':
+      return 'Generating execution plan';
+    case 'AWAITING_APPROVAL':
+      return total > 0
+        ? `Plan ready — ${total} task${total !== 1 ? 's' : ''} proposed`
+        : 'Plan ready for review';
+    case 'AWAITING_CLARIFICATION':
+      return 'Needs your input to proceed';
+    case 'WORKING':
+      if (working && total > 0) {
+        return `Task ${completed + 1} of ${total} — ${truncate(working.title, 40)}`;
+      }
+      if (total > 0) {
+        return `Building — ${completed}/${total} tasks done`;
+      }
+      return 'Executing tasks';
+    case 'REVIEWING':
+      return `Reviewing ${total} task${total !== 1 ? 's' : ''} for quality`;
+    case 'AWAITING_MERGE':
+      return 'Code ready — awaiting merge approval';
+    case 'MERGING':
+      return 'Merging changes to main';
+    case 'COMPLETE':
+      if (total > 0) {
+        const modeLabel = executionMode === 'PROTOTYPE' ? 'Prototype' : '';
+        return `${modeLabel ? modeLabel + ' — ' : ''}${total} task${total !== 1 ? 's' : ''} completed`.trim();
+      }
+      return 'Run completed successfully';
+    case 'FAILED':
+      if (failureReason) return truncate(failureReason, 50);
+      if (failed > 0 && total > 0) return `Failed — ${failed}/${total} tasks errored`;
+      return 'Run failed';
+    case 'PARTIAL':
+      return `${completed}/${total} tasks completed — ${failed} need attention`;
+    case 'PAUSED':
+      if (total > 0) return `Paused — ${completed}/${total} tasks done`;
+      return 'Run paused';
+    case 'CANCELLED':
+      return 'Run cancelled';
+    case 'STUCK':
+      return 'Pipeline stalled — may need retry';
+    default:
+      return status.replace(/_/g, ' ').toLowerCase();
+  }
+}

@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import { ChevronRight, Cpu, FolderOpen, Github, User } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import TechBadges from '@/components/runs/TechBadges';
-import { fmtTokens, relativeTime, truncate } from '@/lib/utils';
+import { fmtTokens, relativeTime, truncate, describeRunStatus } from '@/lib/utils';
 import type { RunSummary } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -41,10 +41,13 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
       <div className="flex items-start gap-3">
         <GlowDot status={run.status} className="mt-0.5 flex-shrink-0" />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-0.5">
             <span className="font-mono text-xs text-zinc-400">{run.runId.slice(0, 12)}</span>
             <span className="text-xs text-zinc-600">{relativeTime(run.startedAt)}</span>
           </div>
+          <p className="text-[11px] text-zinc-500 mb-1 line-clamp-1">
+            {describeRunStatus(run.status)}
+          </p>
           {run.runTitle ? (
             <>
               <p className="text-sm font-medium text-zinc-100 line-clamp-1">

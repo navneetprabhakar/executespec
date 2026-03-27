@@ -19,6 +19,8 @@ public record RunRequest(
     Boolean skipApproval,
     /** When true, automatically approve the merge gate without human review. */
     Boolean autoMerge,
+    /** "PROTOTYPE" | "PRODUCTION" (default). Controls speed-vs-quality tradeoffs. */
+    String executionMode,
     /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
     String modelName,
     /** Optional project ID to associate this run with (org members only). */
