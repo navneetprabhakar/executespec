@@ -11,24 +11,11 @@ executespec:
       openai: 3
 
 spring:
-  ai:
-    anthropic:
-      api-key: ${ANTHROPIC_API_KEY}
-    openai:
-      api-key: ${OPENAI_API_KEY}
-    google:
-      genai:
-        api-key: ${GOOGLE_API_KEY:}
   autoconfigure:
     exclude:
       - org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpAutoConfiguration
 
 app:
-  mail:
-    smtp:
-      password: ${SMTP_PASSWORD}
-  jwt:
-    secret: ${JWT_SECRET}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://dev.executespec.ai}
 
