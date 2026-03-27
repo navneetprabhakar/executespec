@@ -14,7 +14,7 @@ import java.util.Set;
 
 /**
  * Two-axis model routing:
- *   Axis 1 (Tier): FAST → CAPABLE → POWER based on task complexity + escalation
+ *   Axis 1 (Tier): CAPABLE → POWER based on task complexity + escalation (FAST tier disabled)
  *   Axis 2 (Provider): Fixed priority order with fallback on failure/unavailability
  *
  * Provider priority: Anthropic → OpenAI → Google
@@ -22,9 +22,8 @@ import java.util.Set;
  *
  * Provider failover: same tier, different provider (horizontal)
  * Tier escalation: higher tier on validation retry failure (vertical)
- *   - FAST → CAPABLE on attempt 3 (auto)
- *   - CAPABLE → CAPABLE (capped — POWER is manual-only)
- *   - POWER is triggered only via manual retry endpoint or admin override
+ *   - CAPABLE → POWER on attempt 3 (auto)
+ *   - POWER → POWER (already max)
  *
  * This service does NOT make LLM calls. It selects a model, and the caller
  * passes the model name to the existing LlmRouter/ChatModel for execution.
@@ -177,11 +176,12 @@ public class ModelRouter {
 
     /**
      * Map complexity hint to initial model tier.
-     * LOW → FAST (Haiku), MEDIUM → CAPABLE (Sonnet), HIGH → CAPABLE (Sonnet)
+     * FAST tier disabled — all tasks start at CAPABLE minimum for quality.
+     * LOW → CAPABLE (Sonnet), MEDIUM → CAPABLE (Sonnet), HIGH → CAPABLE (Sonnet)
      */
     private ModelTier complexityToTier(TaskComplexity complexity) {
         return switch (complexity) {
-            case LOW -> ModelTier.FAST;
+            case LOW -> ModelTier.CAPABLE;
             case MEDIUM -> ModelTier.CAPABLE;
             case HIGH -> ModelTier.CAPABLE;
         };
@@ -189,16 +189,16 @@ public class ModelRouter {
 
     /**
      * Escalate tier based on retry attempt number.
-     * Attempts 1-2: stay put. Attempt 3+: escalate one level, capped at CAPABLE.
+     * Attempts 1-2: stay put. Attempt 3+: escalate one level.
      *
-     * POWER tier is reserved for manual retry via /api/runs/{id}/tasks/{taskId}/retry
-     * or explicit admin override.
+     * CAPABLE → POWER on attempt 3 (auto-escalate to Opus/GPT-5.4)
+     * POWER → POWER (already max)
      */
     private ModelTier escalate(ModelTier current, int attempt) {
         if (attempt <= 2) return current;
         return switch (current) {
-            case FAST -> ModelTier.CAPABLE;
-            case CAPABLE -> ModelTier.CAPABLE;
+            case FAST -> ModelTier.CAPABLE;   // shouldn't happen, but safe fallback
+            case CAPABLE -> ModelTier.POWER;
             case POWER -> ModelTier.POWER;
         };
     }
