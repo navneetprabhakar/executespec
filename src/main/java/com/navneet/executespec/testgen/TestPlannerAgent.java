@@ -15,6 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
@@ -122,10 +125,17 @@ public class TestPlannerAgent {
     }
 
     private LlmRouter.LlmResponse callLlm(String runId, ModelSelection model, String prompt, int attempt) {
+        AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
+        AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .model(model.getModelName())
+                .cacheOptions(cacheOpts)
+                .build();
         Prompt chatPrompt = new Prompt(List.of(
                 new SystemMessage(prompt),
                 new UserMessage("Generate the test plan now.")
-        ));
+        ), opts);
         return llmRouter.callWithFallbackTracked(
                 model.getProvider().name().toLowerCase(), model.getModelName(),
                 chatPrompt, runId, "test-planner",

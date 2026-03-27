@@ -14,7 +14,7 @@ class PreviewSessionTest {
     @DisplayName("isExpired returns true when expiresAt is in the past")
     void expiredSession() {
         var session = new PreviewSession(
-                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.WEB, null,
+                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.REST, null,
                 PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now().minusSeconds(3600), Instant.now().minusSeconds(60)
         );
@@ -25,7 +25,7 @@ class PreviewSessionTest {
     @DisplayName("isExpired returns false when expiresAt is in the future")
     void activeSession() {
         var session = new PreviewSession(
-                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.WEB, null,
+                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.REST, null,
                 PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now(), Instant.now().plusSeconds(3600)
         );
@@ -36,7 +36,7 @@ class PreviewSessionTest {
     @DisplayName("isExpired returns false when expiresAt is null (no expiry)")
     void noExpirySession() {
         var session = new PreviewSession(
-                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.WEB, null,
+                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.REST, null,
                 PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now(), null
         );
@@ -47,7 +47,7 @@ class PreviewSessionTest {
     @DisplayName("Record fields are accessible")
     void recordFieldAccess() {
         var session = new PreviewSession(
-                "run-1", "es-preview-run1", PreviewProjectType.SPRING_BOOT, PreviewMode.WEB, DatabaseType.POSTGRESQL,
+                "run-1", "es-preview-run1", PreviewProjectType.SPRING_BOOT, PreviewMode.REST, DatabaseType.POSTGRESQL,
                 PreviewStatus.BUILDING, "https://preview-run1.executespec.ai",
                 10042, "some error",
                 Instant.now(), Instant.now().plusSeconds(900)
@@ -56,7 +56,7 @@ class PreviewSessionTest {
         assertThat(session.runId()).isEqualTo("run-1");
         assertThat(session.composeProjectName()).isEqualTo("es-preview-run1");
         assertThat(session.projectType()).isEqualTo(PreviewProjectType.SPRING_BOOT);
-        assertThat(session.previewMode()).isEqualTo(PreviewMode.WEB);
+        assertThat(session.previewMode()).isEqualTo(PreviewMode.REST);
         assertThat(session.databaseType()).isEqualTo(DatabaseType.POSTGRESQL);
         assertThat(session.status()).isEqualTo(PreviewStatus.BUILDING);
         assertThat(session.url()).isEqualTo("https://preview-run1.executespec.ai");
@@ -68,7 +68,7 @@ class PreviewSessionTest {
     @DisplayName("Session with database type reports it correctly")
     void sessionWithDatabase() {
         var session = new PreviewSession(
-                "run-db", "es-preview-rundb", PreviewProjectType.NODE_BACKEND, PreviewMode.WEB, DatabaseType.MYSQL,
+                "run-db", "es-preview-rundb", PreviewProjectType.NODE_BACKEND, PreviewMode.REST, DatabaseType.MYSQL,
                 PreviewStatus.RUNNING, "https://preview-rundb.executespec.ai", 10001, null,
                 Instant.now(), Instant.now().plusSeconds(3600)
         );
@@ -81,7 +81,7 @@ class PreviewSessionTest {
     @DisplayName("ttlRemainingSeconds returns positive value for active session")
     void ttlRemainingActive() {
         var session = new PreviewSession(
-                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.WEB, null,
+                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.REST, null,
                 PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now(), Instant.now().plusSeconds(600)
         );
@@ -92,7 +92,7 @@ class PreviewSessionTest {
     @DisplayName("ttlRemainingSeconds returns 0 for expired session")
     void ttlRemainingExpired() {
         var session = new PreviewSession(
-                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.WEB, null,
+                "run-1", "es-preview-run1", PreviewProjectType.NODE_FRONTEND, PreviewMode.REST, null,
                 PreviewStatus.RUNNING, "https://preview-run1.executespec.ai", 10000, null,
                 Instant.now().minusSeconds(700), Instant.now().minusSeconds(100)
         );

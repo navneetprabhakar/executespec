@@ -60,7 +60,8 @@ public class TestExecutionService {
             ProcessBuilder pb = new ProcessBuilder(
                     "mvn", "test",
                     "-f", pomFile.toString(),
-                    "-Dapp.base-url=" + previewBaseUrl
+                    "-Dapp.base-url=" + previewBaseUrl,
+                    "-T", "1C"
             );
             pb.environment().put("JAVA_HOME", javaHome);
             pb.redirectErrorStream(true);

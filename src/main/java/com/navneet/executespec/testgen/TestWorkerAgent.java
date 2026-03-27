@@ -15,6 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
@@ -137,10 +140,17 @@ public class TestWorkerAgent {
     }
 
     private LlmRouter.LlmResponse callLlmTracked(String runId, ModelSelection model, String systemPrompt) {
+        AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
+        AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .model(model.getModelName())
+                .cacheOptions(cacheOpts)
+                .build();
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(systemPrompt),
                 new UserMessage("Generate the test class now.")
-        ));
+        ), opts);
         return llmRouter.callWithFallbackTracked(
                 model.getProvider().name().toLowerCase(), model.getModelName(),
                 prompt, runId, "test-worker",

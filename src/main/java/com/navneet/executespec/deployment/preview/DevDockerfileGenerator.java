@@ -1022,7 +1022,11 @@ public class DevDockerfileGenerator {
     public PreviewMode detectMode(PreviewProjectType type, Path workspace) {
         if (isMcpProject(type, workspace)) return PreviewMode.MCP_INSPECTOR;
         if (isCliProject(type, workspace)) return PreviewMode.CLI_TERMINAL;
-        return PreviewMode.WEB;
+        
+        if (type == PreviewProjectType.FULL_STACK || type == PreviewProjectType.NODE_FRONTEND || type == PreviewProjectType.STATIC_HTML) {
+            return PreviewMode.FULL_STACK;
+        }
+        return PreviewMode.REST;
     }
 
     private boolean isMcpProject(PreviewProjectType type, Path workspace) {
