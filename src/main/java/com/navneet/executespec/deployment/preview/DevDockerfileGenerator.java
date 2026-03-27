@@ -214,18 +214,21 @@ public class DevDockerfileGenerator {
         dockerfile = dockerfile.replace("CMD [\"npm\", \"run\", \"dev\"]",
                 "CMD PORT=${PORT:-8080} npm run dev");
         // Node backend with explicit main file
-        dockerfile = dockerfile.replaceAll(
-                "CMD \\[\"node\", \"([^\"]+)\"\\]",
-                "CMD PORT=${PORT:-8080} node $1");
+        // Use Matcher.replaceAll with quoteReplacement to avoid ${...} being interpreted as regex group ref
+        dockerfile = java.util.regex.Pattern.compile("CMD \\[\"node\", \"([^\"]+)\"\\]")
+                .matcher(dockerfile)
+                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement("CMD PORT=${PORT:-8080} node ") + m.group(1));
         // Django: exec-form with host:port — must convert to shell form so $PORT expands
         // CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"] → shell form
         dockerfile = dockerfile.replace(
                 "CMD [\"python\", \"manage.py\", \"runserver\", \"0.0.0.0:${PORT:-8080}\"]",
                 "CMD python manage.py runserver 0.0.0.0:${PORT:-8080}");
         // FastAPI/uvicorn: exec-form with --port — convert to shell form
-        dockerfile = dockerfile.replaceAll(
-                "CMD \\[\"uvicorn\", \"([^\"]+)\", \"--host\", \"0\\.0\\.0\\.0\", \"--port\", \"8080\"\\]",
-                "CMD uvicorn $1 --host 0.0.0.0 --port ${PORT:-8080}");
+        dockerfile = java.util.regex.Pattern.compile(
+                "CMD \\[\"uvicorn\", \"([^\"]+)\", \"--host\", \"0\\.0\\.0\\.0\", \"--port\", \"8080\"\\]")
+                .matcher(dockerfile)
+                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement("CMD uvicorn ") + m.group(1)
+                        + java.util.regex.Matcher.quoteReplacement(" --host 0.0.0.0 --port ${PORT:-8080}"));
         // Flask: exec-form with --port — convert to shell form
         dockerfile = dockerfile.replace(
                 "CMD [\"flask\", \"run\", \"--host\", \"0.0.0.0\", \"--port\", \"8080\"]",
