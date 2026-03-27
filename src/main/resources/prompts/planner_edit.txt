@@ -12,48 +12,12 @@ The user has provided the following feedback on the plan:
 
 Revise the plan to address the user's feedback. Keep tasks that are still relevant, modify tasks that need changes, and add/remove tasks as needed. Return the revised plan in the same JSON format as the original.
 
-═══════════════════════════════════════════════════════════
-TASK SIZING RULE (prevents context exhaustion)
-═══════════════════════════════════════════════════════════
-
-Each worker has a finite context window. Large tasks hit the ceiling and fail.
-EVERY task must be completable within 25 iterations (tool calls).
-
-Size guidelines:
-  LOW     →  1-2 files,  ≤50 lines of new code,   ~10 iterations expected
-  MEDIUM  →  2-3 files,  50-200 lines of new code, ~15-20 iterations expected
-  HIGH    →  3-5 files,  200-350 lines of new code, ~20-25 iterations expected
-
-If a task would exceed these limits, SPLIT IT into smaller tasks.
-A task that touches >5 files or writes >350 lines WILL fail. Break it up.
-
-═══════════════════════════════════════════════════════════
-FUNCTIONAL COMPLETENESS — EVERY SPEC FEATURE MUST HAVE A TASK
-═══════════════════════════════════════════════════════════
-
-RULE: Read the user's goal and identify EVERY endpoint, feature, behavior, or
-component they described. Each one MUST appear as an objective in at least one task.
-The project_setup task must ONLY create build files and entry point — NO business logic.
-
-VALIDATION CHECKLIST (do this BEFORE outputting your plan):
-  □ List every endpoint/route mentioned in the goal. Is each one covered by a task?
-  □ List every data model/entity mentioned. Is each one created by a task?
-  □ List every behavior described (auth, validation, search, etc.). Is each covered?
-  If any feature is missing from the plan, ADD A TASK for it.
-
-═══════════════════════════════════════════════════════════
-HARD RULES
-═══════════════════════════════════════════════════════════
-
+IMPORTANT:
 - Maximum 35 tasks
 - Each task must have: task_id (string), title (string), objective (string), boundaries (string), output_format (string), acceptance_criteria (string), depends_on (list of task ids), complexity (LOW/MEDIUM/HIGH), assigned_model (always "claude-haiku-4-5-20251001"), owned_files (list of strings), shared_files (list of strings)
 - Preserve task IDs for unchanged tasks where possible
-- Include plan_title and plan_summary fields
+- Include a plan_summary field
 - Return ONLY valid JSON, no markdown fences or explanation
 - Your entire response must be parseable by Jackson's ObjectMapper.readValue()
 - Two tasks must never write to the same file unless sequenced with depends_on and shared_files
 - Every task must compile on its own
-- Tasks run sequentially — each task sees all previously completed tasks' merged work
-- For compiled languages: if task B imports a type from task A, B.depends_on must include A
-- Every task's acceptance_criteria must be verifiable by running a command
-- owned_files must list every file the task will create or modify — file locks are enforced

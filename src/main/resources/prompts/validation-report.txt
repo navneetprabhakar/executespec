@@ -18,10 +18,10 @@ Rules:
 
 Use this structure:
 ## Validation Summary
-(files, languages, pipeline result: PASSED / PASSED_WITH_FIXES / NEEDS_ATTENTION / FAILED)
+(files, languages, pipeline result)
 
 ## Issues Detected
-(for each: what was found, severity label, resolution status — auto-fixed or unresolved)
+(for each: what was found, severity label, resolution)
 (skip this section entirely if clean run)
 
 ## Checks Passed
@@ -29,7 +29,5 @@ Use this structure:
 
 ## Bottom Line
 (one sentence summarizing the quality outcome)
-(for PASSED_WITH_FIXES: "N issues were caught and resolved by automated checks before merge.")
-(for NEEDS_ATTENTION: "N issues remain unresolved — review recommended before merge.")
-(for FAILED: "Critical issues remain unresolved — merge blocked until fixed.")
-(for PASSED: "Clean run — all code passed compilation, review, and lint checks on first pass.")
+(for runs with issues: "N issues were caught and resolved by automated checks before merge.")
+(for clean runs: "Clean run — all code passed compilation, review, and lint checks on first pass.")

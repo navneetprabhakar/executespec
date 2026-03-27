@@ -30,10 +30,13 @@ import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -74,7 +77,7 @@ public class WorkerAgent {
     private Resource workerPromptFallback;
 
     /**
-     * Parsed representation of a single <tool_call> extracted from assistant text.
+     * Parsed representation of a single tool call extracted from assistant text.
      */
     private record ParsedToolCall(String name, String argsJson) {
     }
@@ -135,6 +138,8 @@ public class WorkerAgent {
         boolean justCompacted = false;
         int lastCompactedIteration = -999;
         int fileWritesSinceCheck = 0;  // tracks file writes for adaptive extension
+        int consecutiveNullResponses = 0;
+        final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
 
         // ── AGENTIC LOOP (time-based) ────────────────────────────────────────
         Instant deadline = Instant.now().plus(Duration.ofMinutes(taskDurationMinutes));
@@ -226,7 +231,7 @@ public class WorkerAgent {
                 stateStore.appendTaskLog(taskId, "LLM_REQUEST_SENT");
 
                 LlmRouter.LlmResponse lr = callModel(messages, provider, model,
-                        runId, agentId, iteration, justCompacted, complexity);
+                        runId, taskId, agentId, iteration, justCompacted, complexity);
                 provider = lr.provider(); // track the provider that actually succeeded
                 model    = lr.model();    // track the model that actually served the call
 
@@ -239,10 +244,19 @@ public class WorkerAgent {
                 // (e.g. rate-limit response, content-filter rejection) that LlmRouter
                 // passed through without throwing. Guard here so the loop can retry.
                 if (lr.response().getResult() == null) {
-                    log.warn("[Worker {}] Null ChatResponse.getResult() on iteration {} — skipping, will retry",
-                            taskId, iteration);
+                    consecutiveNullResponses++;
+                    log.warn("[Worker {}] Null ChatResponse.getResult() on iteration {} ({}/{} consecutive nulls)",
+                            taskId, iteration, consecutiveNullResponses, MAX_CONSECUTIVE_NULL_RESPONSES);
+                    if (consecutiveNullResponses >= MAX_CONSECUTIVE_NULL_RESPONSES) {
+                        log.error("[Worker {}] {} consecutive null responses — aborting task (provider may be down)",
+                                taskId, consecutiveNullResponses);
+                        stateStore.logMessage(runId, agentId, "state", "WORKER_ABORT",
+                                "Task aborted: " + consecutiveNullResponses + " consecutive null LLM responses", 0);
+                        break;
+                    }
                     continue;
                 }
+                consecutiveNullResponses = 0; // reset on successful response
                 AssistantMessage assistantMsg = (AssistantMessage) lr.response().getResult().getOutput();
                 String assistantText = assistantMsg.getText();
                 messages.add(assistantMsg);
@@ -283,25 +297,43 @@ public class WorkerAgent {
                             String.format("%.1f", cacheSavingPct));
                 }
 
-                // ── Execute native tool calls or final output ─────────────────────────
-                // Spring AI 1.1.0 with internalToolExecutionEnabled=true will actually loop
-                // internally
-                // until it returns the final text response. However, we want to maintain the
-                // outer observable loop in WorkerAgent to log iterations, budget monitors, etc.
-                // Since we are returning the raw Tool response to the LLM, we just need to
-                // detect
-                // if it's a completion report vs an intermediate thought.
+                // ── PATH A: OpenAI native tool calls ─────────────────────────────────
+                // When using OpenAI with native function calling, tool calls are returned
+                // as structured objects in the response (not in text). We dispatch them
+                // manually and send results back as ToolResponseMessage (required by OpenAI API).
+                if (assistantMsg.hasToolCalls() && !assistantMsg.getToolCalls().isEmpty()) {
+                    log.info("[Worker {}] Iteration {} — {} native tool call(s)",
+                            taskId, iteration, assistantMsg.getToolCalls().size());
+                    List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
+                    for (AssistantMessage.ToolCall tc : assistantMsg.getToolCalls()) {
+                        Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
+                                .lowCardinalityKeyValue("tool.name", tc.name())
+                                .lowCardinalityKeyValue("task.id", taskId)
+                                .lowCardinalityKeyValue("run.id", runId)
+                                .start();
+                        try {
+                            stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
+                            String result = dispatchTool(new ParsedToolCall(tc.name(), tc.arguments()), runId, taskId);
+                            if (isFileWriteTool(tc.name())) fileWritesSinceCheck++;
+                            responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
+                        } finally {
+                            toolObs.stop();
+                        }
+                    }
+                    messages.add(ToolResponseMessage.builder().responses(responses).build());
+                    continue; // next iteration
+                }
 
-                // When using Spring AI's automatic internal tool execution, the final output
-                // returned here implies the LLM has finished its chain of thought/tool-usage
-                // for this single call.
-
+                // ── PATH B: Prompt-based tool calls (Anthropic/Google) ───────────────
                 if (assistantText != null && !assistantText.isBlank()) {
                     log.info("[Worker {}] Iteration {} — output ({} chars)",
                             taskId, iteration, assistantText.length());
 
-                    // 1. Parse and dispatch XML <tool_call> blocks
-                    List<ParsedToolCall> toolCalls = parseXmlToolCalls(assistantText);
+                    // 1. Parse tool calls — JSON first (unified format), XML as legacy fallback
+                    List<ParsedToolCall> toolCalls = parseJsonToolCalls(assistantText);
+                    if (toolCalls.isEmpty()) {
+                        toolCalls = parseXmlToolCalls(assistantText);
+                    }
                     if (!toolCalls.isEmpty()) {
                         StringBuilder results = new StringBuilder();
                         for (ParsedToolCall tc : toolCalls) {
@@ -335,15 +367,16 @@ public class WorkerAgent {
                 }
 
                 // No tool calls and no completion report — prompt to continue
+                String toolHint = "{\"name\": \"...\", \"args\": {...}}";
                 String continuePrompt;
                 long minsLeft = Duration.between(Instant.now(), deadline).toMinutes();
                 if (minsLeft <= 3) {
                     continuePrompt = "You have approximately " + minsLeft + " minute(s) remaining. " +
                             "If you have finished all your work, output ONLY your completion JSON report now. " +
-                            "Otherwise, use <tool_call> to call the MOST IMPORTANT remaining tool.";
+                            "Otherwise, call the MOST IMPORTANT remaining tool: " + toolHint;
                 } else {
                     continuePrompt = "If you have finished all your work, output ONLY your completion JSON report now. " +
-                            "Otherwise, use <tool_call>{\"name\": \"...\", \"args\": {...}}</tool_call> XML to call the next tool.";
+                            "Otherwise, call the next tool: " + toolHint;
                 }
                 messages.add(new UserMessage(continuePrompt));
 
@@ -475,6 +508,107 @@ public class WorkerAgent {
     }
 
     /**
+     * Fallback parser for non-Anthropic models that emit tool calls as bare JSON
+     * (without XML wrapping). Handles single objects and arrays:
+     *   {"name": "readFile", "args": {"path": "..."}}
+     *   [{"name": "readFile", "args": {"path": "..."}}, ...]
+     *
+     * Rejects objects that look like completion reports ("task_id" + "status" present).
+     */
+    private List<ParsedToolCall> parseJsonToolCalls(String text) {
+        if (text == null || text.isBlank()) return List.of();
+
+        List<ParsedToolCall> calls = new ArrayList<>();
+
+        // Strategy: scan the text for JSON objects that look like tool calls.
+        // Models may wrap them in prose, markdown fences, or output them bare.
+
+        // 1. Try extracting from markdown code fences first (```json ... ```)
+        java.util.regex.Matcher fenceMatcher = java.util.regex.Pattern
+                .compile("```(?:json)?\\s*([\\s\\S]*?)```")
+                .matcher(text);
+        while (fenceMatcher.find()) {
+            List<ParsedToolCall> fenced = tryParseJsonBlock(fenceMatcher.group(1).trim());
+            if (!fenced.isEmpty()) {
+                calls.addAll(fenced);
+                return calls; // fenced JSON is authoritative — don't double-parse
+            }
+        }
+
+        // 2. Scan for bare JSON objects by finding { at potential tool-call boundaries.
+        //    Use brace-depth tracking to extract complete JSON objects.
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '{') {
+                String candidate = extractJsonObject(text, i);
+                if (candidate != null) {
+                    List<ParsedToolCall> parsed = tryParseJsonBlock(candidate);
+                    calls.addAll(parsed);
+                    if (!calls.isEmpty()) return calls; // first valid tool call wins
+                    // Skip past this object even if it wasn't a tool call
+                    i += candidate.length() - 1;
+                }
+            }
+        }
+
+        return calls;
+    }
+
+    /** Try to parse a JSON string as one or more tool calls. */
+    private List<ParsedToolCall> tryParseJsonBlock(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        String sanitized = escapeControlCharsInJsonStrings(json);
+        List<ParsedToolCall> calls = new ArrayList<>();
+        try {
+            JsonNode root = mapper.readTree(sanitized);
+            if (root.isArray()) {
+                for (JsonNode node : root) {
+                    ParsedToolCall tc = extractToolCallFromNode(node);
+                    if (tc != null) calls.add(tc);
+                }
+            } else if (root.isObject()) {
+                ParsedToolCall tc = extractToolCallFromNode(root);
+                if (tc != null) calls.add(tc);
+            }
+        } catch (Exception e) {
+            log.debug("[Worker] JSON tool-call parse attempt failed: {}", e.getMessage());
+        }
+        return calls;
+    }
+
+    /** Extract a balanced JSON object starting at position i, or null if not valid. */
+    private String extractJsonObject(String text, int start) {
+        if (start >= text.length() || text.charAt(start) != '{') return null;
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\' && inString) { escaped = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (c == '{') depth++;
+            else if (c == '}') {
+                depth--;
+                if (depth == 0) return text.substring(start, i + 1);
+            }
+        }
+        return null; // unbalanced
+    }
+
+    /** Extract a ParsedToolCall from a JSON node, or null if it's not a tool call. */
+    private ParsedToolCall extractToolCallFromNode(JsonNode node) {
+        if (!node.isObject()) return null;
+        // Reject completion reports — they have "task_id" + "status"
+        if (node.has("task_id") && node.has("status")) return null;
+        String name = node.has("name") ? node.get("name").asText() : null;
+        if (name == null || name.isBlank()) return null;
+        // "args" is optional — some models may omit it for no-arg tools like git_status
+        String argsJson = node.has("args") ? node.get("args").toString() : "{}";
+        return new ParsedToolCall(name, argsJson);
+    }
+
+    /**
      * LLMs frequently emit raw control characters (newlines, tabs, carriage returns)
      * inside JSON string values. Standard JSON requires these to be escaped as \\n, \\t, \\r.
      * This method walks the JSON text and escapes any raw control chars found inside
@@ -556,7 +690,12 @@ public class WorkerAgent {
                     String message = args.path("message").asText("");
                     yield gitTool.commit(runId, message);
                 }
-                default -> "Unknown tool: " + tc.name();
+                default -> {
+                    String suggestion = suggestTool(tc.name());
+                    yield "Unknown tool: '" + tc.name() + "'. "
+                        + "Available tools: readFile, writeFile, editFile, listFiles, searchFiles, run, status, diff, commit. "
+                        + (suggestion != null ? "Did you mean: '" + suggestion + "'?" : "Use ONLY these exact tool names.");
+                }
             };
             String truncated = truncateResult(tc.name(), result);
             log.debug("[Worker {}] Tool '{}' → {} chars", taskId, tc.name(),
@@ -573,6 +712,26 @@ public class WorkerAgent {
         return switch (toolName) {
             case "writeFile", "write_file", "editFile", "edit_file" -> true;
             default -> false;
+        };
+    }
+
+    /** Suggests the correct tool name for commonly hallucinated tool names. */
+    private String suggestTool(String name) {
+        if (name == null) return null;
+        return switch (name.toLowerCase()) {
+            case "gitcommit", "git_commit_all", "git_add", "gitadd", "stage" -> "commit";
+            case "runbuild", "build", "run_build", "make" -> "run";
+            case "runtests", "test", "run_tests", "runtestcases" -> "run";
+            case "runcommand", "execute", "exec", "shell", "bash", "terminal" -> "run";
+            case "createfile", "create_file", "touch", "newfile" -> "writeFile";
+            case "deletefile", "delete_file", "remove", "rm" -> "run";
+            case "updatefile", "update_file", "modifyfile", "modify_file" -> "editFile";
+            case "cat", "viewfile", "view_file", "getfile", "get_file" -> "readFile";
+            case "ls", "dir", "listdir", "list_dir", "list_directory" -> "listFiles";
+            case "grep", "find", "search", "findfiles", "find_files" -> "searchFiles";
+            case "gitstatus" -> "status";
+            case "gitdiff" -> "diff";
+            default -> null;
         };
     }
 
@@ -640,7 +799,7 @@ public class WorkerAgent {
         summaryMessages.add(new UserMessage(summaryPrompt));
 
         LlmRouter.LlmResponse summaryLr = callModel(summaryMessages, provider, model,
-                runId, agentId, 0, false, complexity);
+                runId, taskId, agentId, 0, false, complexity);
         effectiveProvider[0] = summaryLr.provider();
         effectiveModel[0]    = summaryLr.model();
         String summary = summaryLr.response().getResult().getOutput().getText();
@@ -676,7 +835,7 @@ public class WorkerAgent {
                 Current state of files you have written:
                 %s
 
-                Continue from where you left off. Use <tool_call> XML calls to complete the remaining work.
+                Continue from where you left off. Call the next tool as a JSON object: {"name": "...", "args": {...}}
                 """.formatted(safeJson(task), summary, fileContext)));
 
         log.info("Context compacted for task {}. Checkpoint: {}", taskId, checkpointPath);
@@ -794,62 +953,96 @@ public class WorkerAgent {
                 totalChars += am.getText() != null ? am.getText().length() : 0;
             } else if (m instanceof SystemMessage sm) {
                 totalChars += sm.getText() != null ? sm.getText().length() : 0;
+            } else if (m instanceof ToolResponseMessage trm) {
+                for (var resp : trm.getResponses()) {
+                    totalChars += resp.responseData() != null ? resp.responseData().length() : 0;
+                }
             }
         }
         return totalChars / 4;
     }
 
     /**
-     * Calls the LLM via LlmRouter with plain options (no tool callbacks).
-     * Tools are described in the system prompt; the model outputs XML tool calls
-     * which the agentic loop parses and executes manually.
+     * Calls the LLM via LlmRouter.
+     *
+     * <p><b>Anthropic/Google:</b> tools described in the system prompt; model outputs XML/JSON
+     * tool calls which the agentic loop parses and executes manually.
+     *
+     * <p><b>OpenAI:</b> tools provided as native function-calling schemas via
+     * {@link ToolCallback}. Model returns structured {@code tool_calls} in the response
+     * (not in text). {@code internalToolExecutionEnabled = false} keeps the outer loop
+     * in control.
      */
     private LlmRouter.LlmResponse callModel(List<Message> messages,
             String provider, String model,
-            String runId, String agentId,
+            String runId, String taskId, String agentId,
             int iteration, boolean justCompacted,
             String complexity) {
         String systemPrompt = loadPrompt(provider);
         int maxOut = budgetMonitor.maxOutputTokens(complexity);
+        boolean isOpenAi = "openai".equalsIgnoreCase(provider);
 
-        log.info("[Worker callModel] provider={} model={} complexity={} maxOut={}",
-                provider, model, complexity, maxOut);
-
-        // Enable Anthropic prompt caching on the system prompt.
-        AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
-                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
-                .build();
-
-        AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                .maxTokens(maxOut)
-                .cacheOptions(cacheOpts)
-                .build();
+        log.info("[Worker callModel] provider={} model={} complexity={} maxOut={} nativeTools={}",
+                provider, model, complexity, maxOut, isOpenAi);
 
         // Sliding window: always send the first 2 messages (task assignment + initial
-        // context)
-        // and the most-recent HISTORY_WINDOW messages. This bounds input tokens per
-        // call
-        // regardless of iteration count, while compaction handles summarising the full
-        // history.
-        // The full `messages` list is preserved in memory for the compact() summariser.
+        // context) and the most-recent HISTORY_WINDOW messages. This bounds input tokens
+        // per call regardless of iteration count, while compaction handles summarising
+        // the full history. The full `messages` list is preserved in memory for compact().
         final int HISTORY_WINDOW = 18;
         List<Message> windowed;
-        if (messages.size() <= HISTORY_WINDOW + 2) {
+        if (isOpenAi || messages.size() <= HISTORY_WINDOW + 2) {
+            // OpenAI native tool calling: skip sliding window entirely.
+            // AssistantMessage(tool_calls) and ToolResponseMessage pairs MUST stay together;
+            // the window boundary would split them causing 400 errors. Rely on compaction instead.
             windowed = messages;
         } else {
+            int windowStart = messages.size() - HISTORY_WINDOW;
+            // Ensure the window boundary does not split an AssistantMessage(tool_calls)
+            // from its ToolResponseMessage.
+            while (windowStart > 2 && windowStart < messages.size()
+                    && messages.get(windowStart) instanceof ToolResponseMessage) {
+                windowStart--;
+            }
             windowed = new ArrayList<>(messages.subList(0, 2));
-            windowed.addAll(messages.subList(messages.size() - HISTORY_WINDOW, messages.size()));
+            windowed.addAll(messages.subList(windowStart, messages.size()));
             log.debug("[Worker callModel] Sliding window: kept first 2 + last {} of {} messages",
-                    HISTORY_WINDOW, messages.size());
+                    messages.size() - windowStart, messages.size());
         }
 
         List<Message> allMessages = new ArrayList<>();
         allMessages.add(new SystemMessage(systemPrompt));
         allMessages.addAll(windowed);
 
-        Prompt prompt = new Prompt(allMessages, opts);
+        Prompt prompt;
+        if (isOpenAi) {
+            // OpenAI: native function calling — tools defined as JSON schemas
+            List<ToolCallback> callbacks = WorkerToolCallbackFactory.create(
+                    runId, taskId,
+                    (name, argsJson, rid, tid) -> dispatchTool(new ParsedToolCall(name, argsJson), rid, tid));
+            OpenAiChatOptions opts = OpenAiChatOptions.builder()
+                    .maxCompletionTokens(maxOut)
+                    .toolCallbacks(callbacks)
+                    .internalToolExecutionEnabled(false) // keep outer loop in control
+                    .build();
+            prompt = new Prompt(allMessages, opts);
+        } else {
+            // Anthropic / Google: prompt-based tool calling (XML <tool_call> format)
+            AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                    .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                    .build();
+            AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                    .maxTokens(maxOut)
+                    .cacheOptions(cacheOpts)
+                    .build();
+            prompt = new Prompt(allMessages, opts);
+        }
+
+        // OpenAI native tool calls: NO_FALLBACK — message history contains ToolResponseMessages
+        // that are incompatible with Anthropic/Google providers
+        FallbackMode fallbackMode = isOpenAi ? FallbackMode.NO_FALLBACK : FallbackMode.TASK_BOUNDARY;
         return llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,
-                FallbackMode.TASK_BOUNDARY, iteration, justCompacted);
+                fallbackMode, iteration, justCompacted);
     }
 
     private WorkerReport parseCompletionReport(String raw, String taskId,

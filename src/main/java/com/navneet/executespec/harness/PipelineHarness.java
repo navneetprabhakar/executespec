@@ -1106,7 +1106,12 @@ public class PipelineHarness {
                 stateStore.saveReviewV2(runId, review);
 
                 // ── 4. Validation Report (non-fatal) ─────────────────────
-                generateValidationReport(runId, freshRun, reports, review, postMergeCompile);
+                testPreviewCoordinator.cancelIfPending(runId);
+                try {
+                    generateValidationReport(runId, freshRun, reports, review, postMergeCompile);
+                } catch (Exception reportEx) {
+                    log.warn("Validation report generation failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
+                }
             }
 
             // ── 5. Re-validate after auto-fix ─────────────────────────────
@@ -1513,19 +1518,6 @@ public class PipelineHarness {
             stateStore.markApproved(runId);
             broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
 
-            // ── 2b. Test generation pipeline (parallel to code gen) ─────
-            try {
-                String planJson = mapper.writeValueAsString(plan);
-                // Register completion future BEFORE starting the pipeline
-                testCompletionFutures.put(runId, new CompletableFuture<>());
-                testGenOrchestrator.runTestGenPipeline(runId, run.getUserRequest(), planJson);
-                log.info("Run {} — test gen pipeline kicked off (parallel)", runId);
-            } catch (Exception e) {
-                testCompletionFutures.remove(runId);
-                log.warn("Run {} — failed to start test gen pipeline: {}", runId, e.getMessage());
-                // Non-fatal: code gen continues even if test gen fails to start
-            }
-
             // ── 3. Workers ─────────────────────────────────────────────────
             Observation workObs = Observation.createNotStarted("executespec.run.phase.working", observationRegistry)
                 .lowCardinalityKeyValue("run.id", runId)
@@ -1646,9 +1638,6 @@ public class PipelineHarness {
             // ── 3b. Cleanup stale worktrees before merge ──────────────────
             gitTool.pruneAllWorktrees(runId);
 
-            // ── 3c. Auto-start preview for test execution ───────────────────
-            autoStartPreview(runId, run);
-
             // ══════════════════════════════════════════════════════════════════
             // ── 4. MERGE ALL TASK BRANCHES (no gate — automatic) ─────────────
             // ══════════════════════════════════════════════════════════════════
@@ -1704,6 +1693,20 @@ public class PipelineHarness {
                 log.warn("Post-merge compile failed for run {}: {}", runId, compileEx.getMessage());
             }
 
+            // ── 4c. Test generation + preview (async, parallel to review) ────
+            // Testgen runs AFTER merge so it generates tests against actual code,
+            // and does not contend with workers for API rate limits.
+            try {
+                String planJson = mapper.writeValueAsString(plan);
+                testCompletionFutures.put(runId, new CompletableFuture<>());
+                testGenOrchestrator.runTestGenPipeline(runId, run.getUserRequest(), planJson);
+                log.info("Run {} — test gen pipeline kicked off (post-merge, parallel to review)", runId);
+            } catch (Exception e) {
+                testCompletionFutures.remove(runId);
+                log.warn("Run {} — failed to start test gen pipeline: {}", runId, e.getMessage());
+            }
+            autoStartPreview(runId, run);
+
             // ══════════════════════════════════════════════════════════════════
             // ── 5. REVIEW MERGED CODE ────────────────────────────────────────
             // ══════════════════════════════════════════════════════════════════
@@ -1745,9 +1748,19 @@ public class PipelineHarness {
             // ══════════════════════════════════════════════════════════════════
             // ── 6. VALIDATION REPORT + TEST REPORT (non-fatal) ───────────────
             // ══════════════════════════════════════════════════════════════════
+            // Cancel pending test execution if preview never started — releases
+            // the CompletableFuture immediately instead of blocking 10 min.
+            testPreviewCoordinator.cancelIfPending(runId);
+
             // Use post-merge compile result for the report (reflects final state).
-            generateValidationReport(runId, currentRun, currentReports, review,
-                    postMergeCompile != null ? postMergeCompile : mainCompileResult);
+            try {
+                generateValidationReport(runId, currentRun, currentReports, review,
+                        postMergeCompile != null ? postMergeCompile : mainCompileResult);
+            } catch (Exception reportEx) {
+                log.warn("Validation report generation failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
+                broadcaster.emit(runId, RunEvent.log(runId, "report",
+                    "⚠️ Report generation failed — completing run without report"));
+            }
 
             // ══════════════════════════════════════════════════════════════════
             // ── 7. RE-VALIDATE after auto-fix ────────────────────────────────
@@ -2347,6 +2360,10 @@ public class PipelineHarness {
             - Do NOT add dependencies unless the task explicitly requires it.
             - Updating README.md is mandatory before reporting DONE.
             """);
+        // Commit .agent-context/ to main so worktrees inherit it.
+        // Without this, `git worktree add -b <branch> main` checks out main
+        // which has no .agent-context/, causing workers to fail reading file-locks.json.
+        gitTool.commitIfDirty(runId, "chore: init agent context");
         log.info("Agent context initialized for run {} (.agent-context/)", runId);
     }
 
@@ -2765,6 +2782,7 @@ public class PipelineHarness {
                         : null;
                 if (user == null) {
                     log.warn("[AutoPreview] No user found for run {} — skipping auto-preview", runId);
+                    testPreviewCoordinator.cancelIfPending(runId);
                     return;
                 }
 
@@ -2776,7 +2794,10 @@ public class PipelineHarness {
             } catch (Exception e) {
                 log.warn("[AutoPreview] Failed to auto-start preview for run {}: {}", runId, e.getMessage());
                 broadcaster.emit(runId, RunEvent.log(runId, null,
-                        "⚠️ Auto-preview failed: " + e.getMessage() + " — tests may be skipped"));
+                        "⚠️ Auto-preview failed: " + e.getMessage() + " — skipping integration tests"));
+                // Immediately release the test coordinator so report generation isn't blocked
+                // by the 10-minute safety timeout waiting for a preview that will never arrive.
+                testPreviewCoordinator.cancelIfPending(runId);
             }
         });
     }
@@ -2789,6 +2810,14 @@ public class PipelineHarness {
         if (future != null) {
             future.complete(event.summary());
             log.info("Run {} — test execution completed, report generation unblocked", event.runId());
+        }
+
+        // Auto-stop the preview that was started for test execution — free Docker resources
+        try {
+            previewService.stop(event.runId());
+            log.info("Run {} — auto-stopped preview after test execution", event.runId());
+        } catch (Exception e) {
+            log.debug("Run {} — no preview to stop after test execution: {}", event.runId(), e.getMessage());
         }
     }
 }

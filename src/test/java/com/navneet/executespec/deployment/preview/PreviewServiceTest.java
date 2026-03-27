@@ -78,6 +78,9 @@ class PreviewServiceTest {
             return workspaceRoot.resolve(runId);
         });
 
+        // Default: preview mode is WEB
+        when(dockerfileGen.detectMode(any(), any())).thenReturn(PreviewMode.WEB);
+
         service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
                 composeFileGen, composeExecutor, portPool, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
     }

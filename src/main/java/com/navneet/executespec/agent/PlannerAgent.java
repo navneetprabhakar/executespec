@@ -8,6 +8,9 @@ import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.merge.MergeConflictAnalyser;
+import com.navneet.executespec.router.ModelRouter;
+import com.navneet.executespec.router.ModelSelection;
+import com.navneet.executespec.router.ModelTier;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.ToolResult;
@@ -44,6 +47,7 @@ public class PlannerAgent {
     private final LlmRouter llmRouter;
     private final LlmOutputParser outputParser;
     private final MergeConflictAnalyser conflictAnalyser;
+    private final ModelRouter modelRouter;
 
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
@@ -56,10 +60,17 @@ public class PlannerAgent {
 
         String systemPrompt = loadPrompt() + buildConflictHistoryContext();
         String contextSummary = buildWorkspaceContext(runId);
-        String model = (modelOverride != null && !modelOverride.isBlank())
-                ? modelOverride
-                : resolveModelName(props.getRoles().getPlanner());
-        String provider = resolveProviderFromModel(model);
+        String model;
+        String provider;
+        if (modelOverride != null && !modelOverride.isBlank()) {
+            model = modelOverride;
+            provider = resolveProviderFromModel(model);
+        } else {
+            // Use ModelRouter weighted selection at CAPABLE tier (Sonnet-class)
+            ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
+            model = selection.getModelName();
+            provider = selection.getProvider().name().toLowerCase();
+        }
         log.info("[Planner] Using model={} provider={} (override={})", model, provider, modelOverride);
 
         // Prepend existing-codebase context when the workspace was cloned from a real repo
@@ -228,8 +239,10 @@ public class PlannerAgent {
             .replace("{existingPlan}", existingPlanJson)
             .replace("{feedback}", feedback);
 
-        String model = resolveModelName(props.getRoles().getPlanner());
-        String provider = resolveProviderFromModel(model);
+        // Use ModelRouter weighted selection at CAPABLE tier (Sonnet-class)
+        ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
+        String model = selection.getModelName();
+        String provider = selection.getProvider().name().toLowerCase();
 
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {

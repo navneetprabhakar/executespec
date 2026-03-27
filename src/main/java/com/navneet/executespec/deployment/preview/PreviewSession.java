@@ -7,6 +7,7 @@ public record PreviewSession(
         String runId,
         String composeProjectName,   // docker compose --project-name value
         PreviewProjectType projectType,
+        PreviewMode previewMode,     // WEB, CLI_TERMINAL, or MCP_INSPECTOR
         DatabaseType databaseType,
         PreviewStatus status,
         String url,                  // https://preview-{short-id}.executespec.ai

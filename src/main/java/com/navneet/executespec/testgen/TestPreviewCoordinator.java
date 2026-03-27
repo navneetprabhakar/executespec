@@ -15,23 +15,21 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Coordinates the convergence of preview readiness and test compilation readiness.
  * Tests only execute when BOTH the preview is running AND tests are compiled.
  *
- * Uses Spring events + in-memory coordination state per run.
- * 5-minute timeout: if preview not ready after tests compiled, skip execution.
+ * <p>Uses Spring events + in-memory coordination state per run.
+ * No internal timeout — the report-generation safety cap in PipelineHarness
+ * (10 min on the CompletableFuture) is the single timeout authority.
+ * Call {@link #cancelIfPending(String)} before report generation to release
+ * runs whose preview never started.
  */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class TestPreviewCoordinator {
-
-    private static final Duration PREVIEW_TIMEOUT = Duration.ofMinutes(5);
 
     private final TestExecutionService testExecutionService;
     private final TestReportGenerator testReportGenerator;
@@ -39,8 +37,6 @@ public class TestPreviewCoordinator {
     private final SseBroadcaster broadcaster;
 
     private final ConcurrentHashMap<String, CoordinationState> stateMap = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService timeoutScheduler = Executors.newSingleThreadScheduledExecutor(
-            Thread.ofVirtual().name("test-coord-timeout-", 0).factory());
 
     /**
      * Called when the preview is ready for a run.
@@ -62,9 +58,18 @@ public class TestPreviewCoordinator {
         state.setTestsReady(true);
         state.setTestsReadyAt(Instant.now());
 
-        // Schedule timeout: if preview not ready in 5 minutes, skip execution
-        timeoutScheduler.schedule(() -> checkTimeout(event.runId()),
-                PREVIEW_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+        // If preview already failed (cancelIfPending was called before tests were ready),
+        // immediately fire the completion event with an empty summary.
+        if (state.isPreviewFailed()) {
+            log.info("[TestCoord] Tests ready but preview already failed for run {} — skipping execution",
+                    event.runId());
+            broadcaster.emit(event.runId(), RunEvent.log(event.runId(), null,
+                    "[TestExec] Test execution skipped — preview failed before tests were ready"));
+            eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                    event.runId(), state.getTestPlanId(), TestExecutionSummary.empty()));
+            stateMap.remove(event.runId());
+            return;
+        }
 
         tryExecute(event.runId(), state);
     }
@@ -97,6 +102,9 @@ public class TestPreviewCoordinator {
                     log.error("[TestCoord] Test execution failed for run {}: {}", runId, e.getMessage(), e);
                     broadcaster.emit(runId, RunEvent.log(runId, null,
                             "[TestExec] Test execution failed: " + e.getMessage()));
+                    // Publish empty summary so the validation report future isn't blocked
+                    eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                            runId, state.getTestPlanId(), TestExecutionSummary.empty()));
                 } finally {
                     stateMap.remove(runId);
                 }
@@ -104,13 +112,35 @@ public class TestPreviewCoordinator {
         }
     }
 
-    private void checkTimeout(String runId) {
+    /**
+     * Cancel pending test execution for a run if preview never started.
+     * Called by PipelineHarness before report generation so the CompletableFuture
+     * is completed immediately (with an empty summary) instead of blocking for
+     * the 10-minute safety timeout.
+     *
+     * <p>If execution already started (preview arrived + tests ready), this is a no-op
+     * — the execution will complete naturally and publish its own event.
+     */
+    public void cancelIfPending(String runId) {
         CoordinationState state = stateMap.get(runId);
-        if (state != null && state.isTestsReady() && !state.isPreviewReady() && !state.isExecutionStarted()) {
-            log.warn("[TestCoord] Preview timeout for run {} — tests were ready but preview never started", runId);
+        if (state != null && !state.isExecutionStarted()) {
+            long waitSec = state.getTestsReadyAt() != null
+                    ? Duration.between(state.getTestsReadyAt(), Instant.now()).toSeconds() : 0;
+            log.info("[TestCoord] Cancelling pending test execution for run {} " +
+                    "(tests ready {}s ago, preview never arrived)", runId, waitSec);
             broadcaster.emit(runId, RunEvent.log(runId, null,
-                    "[TestExec] Test execution skipped — preview was not ready within 5 minutes"));
+                    "[TestExec] Test execution skipped — preview was not ready in time"));
+            eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                    runId, state.getTestPlanId(), TestExecutionSummary.empty()));
             stateMap.remove(runId);
+        } else if (state == null) {
+            // Preview failed BEFORE tests were ready. Mark the state so that when
+            // onTestsReady fires later, it immediately completes instead of waiting.
+            CoordinationState earlyCancel = new CoordinationState(runId);
+            earlyCancel.setPreviewFailed(true);
+            stateMap.put(runId, earlyCancel);
+            log.info("[TestCoord] Preview failed before tests ready for run {} — " +
+                    "will auto-cancel when tests arrive", runId);
         }
     }
 
@@ -120,6 +150,7 @@ public class TestPreviewCoordinator {
         private boolean previewReady;
         private boolean testsReady;
         private boolean executionStarted;
+        private boolean previewFailed;
         private String previewUrl;
         private Long testPlanId;
         private Instant testsReadyAt;
