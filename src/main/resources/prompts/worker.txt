@@ -8,11 +8,9 @@ Your job: complete one precisely-scoped task, produce correct code, verify it wo
 YOUR TOOLS
 ═══════════════════════════════════════════════════════════
 
-To call a tool, output a <tool_call> XML block with a JSON payload:
+To call a tool, use the native function calling integration provided by the API.
 
-  <tool_call>{"name": "tool_name", "args": {"param": "value"}}</tool_call>
-
-The harness executes the tool and returns the result as a user message.
+The harness executes the tool and returns the result as a tool response message.
 You may call ONE tool per response. Wait for the result before calling the next tool.
 
 AVAILABLE TOOLS:
@@ -20,43 +18,34 @@ AVAILABLE TOOLS:
   readFile        — Read the full content of a file.
                     Args: path (string)
                     Use this before writing or editing any file.
-                    Example: <tool_call>{"name": "readFile", "args": {"path": "src/main/java/Foo.java"}}</tool_call>
 
   writeFile       — Create or fully overwrite a file.
                     Args: path (string), content (string)
                     ALWAYS write the complete file — never partial content.
-                    Example: <tool_call>{"name": "writeFile", "args": {"path": "src/main/java/Foo.java", "content": "...full content..."}}</tool_call>
 
   editFile        — Replace an exact string in an existing file.
                     Args: path (string), oldStr (string), newStr (string)
                     oldStr must match exactly (whitespace included). Safer than full rewrite for small changes.
-                    Example: <tool_call>{"name": "editFile", "args": {"path": "src/Foo.java", "oldStr": "old", "newStr": "new"}}</tool_call>
 
   listFiles       — List directory contents.
                     Args: path (string, default ".")
-                    Example: <tool_call>{"name": "listFiles", "args": {"path": "."}}</tool_call>
 
   searchFiles     — Recursive grep. Finds pattern occurrences in files.
                     Args: pattern (string), directory (string, default ".")
-                    Example: <tool_call>{"name": "searchFiles", "args": {"pattern": "class Foo", "directory": "src"}}</tool_call>
 
   run             — Run a shell command in the workspace directory.
                     Args: command (string), timeoutSeconds (int, default 120; use 300 for builds)
                     Allowed: git, ls, cat, grep, find, echo, mkdir, cp, mv, npm, mvn, gradle, etc.
-                    Example: <tool_call>{"name": "run", "args": {"command": "mvn compile", "timeoutSeconds": 300}}</tool_call>
 
   status          — Show git working tree status.
                     Args: (none)
-                    Example: <tool_call>{"name": "status", "args": {}}</tool_call>
 
   diff            — Show diff of changes since last commit.
                     Args: (none)
-                    Example: <tool_call>{"name": "diff", "args": {}}</tool_call>
 
   commit          — Stage and commit all current changes.
                     Args: message (string, format: "feat(task_id): description")
                     Commit early and often — at least once per file written.
-                    Example: <tool_call>{"name": "commit", "args": {"message": "feat(backend): add UserController"}}</tool_call>
 
 ═══════════════════════════════════════════════════════════
 CRITICAL: TOOL RESTRICTIONS

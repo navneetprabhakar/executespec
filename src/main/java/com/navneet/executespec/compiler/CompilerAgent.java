@@ -15,6 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -155,7 +158,14 @@ public class CompilerAgent {
                 + "\n\nRELEVANT SOURCE FILES:\n" + context
                 + "\n\nOutput ONLY a JSON array: [{\"path\":\"...\",\"content\":\"...\"}]";
 
-        Prompt prompt = new Prompt(List.of(new SystemMessage(system), new UserMessage(user)));
+        AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
+        AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .model(compilerProps.getModel())
+                .cacheOptions(cacheOpts)
+                .build();
+        Prompt prompt = new Prompt(List.of(new SystemMessage(system), new UserMessage(user)), opts);
 
         LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
                 compilerProps.getProvider(), compilerProps.getModel(),
@@ -243,8 +253,8 @@ public class CompilerAgent {
 
     private String buildCommand(String tool) {
         return switch (tool) {
-            case "mvn" -> "mvn compile -q 2>&1";
-            case "gradle" -> "gradle compileJava -q 2>&1";
+            case "mvn" -> "mvn compile -q -T 1C 2>&1";
+            case "gradle" -> "gradle compileJava -q --parallel 2>&1";
             case "npm" -> "npm run build 2>&1";
             default -> throw new IllegalArgumentException("Unknown build tool: " + tool);
         };

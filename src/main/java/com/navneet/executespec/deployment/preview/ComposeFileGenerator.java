@@ -36,10 +36,10 @@ public class ComposeFileGenerator {
                          DatabaseType databaseType, Map<String, String> envVars, int hostPort) {
 
         // CLI (ttyd) and MCP (Inspector) always bind to 8080; web apps use their native port
-        int containerPort = (previewMode == PreviewMode.WEB) ? projectType.getContainerPort() : 8080;
+        int containerPort = (previewMode == PreviewMode.REST || previewMode == PreviewMode.FULL_STACK) ? projectType.getContainerPort() : 8080;
 
         // Determine resource limits — CLI/MCP are lightweight
-        boolean heavyWeight = previewMode == PreviewMode.WEB
+        boolean heavyWeight = (previewMode == PreviewMode.REST || previewMode == PreviewMode.FULL_STACK)
                 && (projectType == PreviewProjectType.SPRING_BOOT
                     || projectType == PreviewProjectType.FULL_STACK);
         String cpu = heavyWeight ? "1.5" : "0.5";

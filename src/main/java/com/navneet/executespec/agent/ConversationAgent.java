@@ -120,9 +120,13 @@ public class ConversationAgent {
         messages.add(new UserMessage(newMessage));
 
         // Build prompt with selected model + max tokens
+        var cacheOpts = org.springframework.ai.anthropic.api.AnthropicCacheOptions.builder()
+            .strategy(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY)
+            .build();
         var opts = org.springframework.ai.anthropic.AnthropicChatOptions.builder()
             .model(selectedModel)
             .maxTokens(MAX_OUTPUT_TOKENS)
+            .cacheOptions(cacheOpts)
             .build();
         Prompt prompt = new Prompt(messages, opts);
 
@@ -214,9 +218,13 @@ public class ConversationAgent {
         messages.add(new SystemMessage(systemPrompt));
         messages.add(new UserMessage("Generate a task plan for the following improvement:\n\n" + suggestion));
 
+        var cacheOpts = org.springframework.ai.anthropic.api.AnthropicCacheOptions.builder()
+                .strategy(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY)
+                .build();
         var opts = org.springframework.ai.anthropic.AnthropicChatOptions.builder()
                 .model(selectedModel)
                 .maxTokens(MAX_OUTPUT_TOKENS)
+                .cacheOptions(cacheOpts)
                 .build();
 
         var response = llmRouter.callWithFallback(

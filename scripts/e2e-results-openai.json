@@ -4,87 +4,10 @@
     "language": "Python",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 51,
+    "duration": 40,
     "model": "anthropic",
     "report": "HAS_REPORT",
     "share": "SHARE_OK",
     "notes": " "
-  },
-  {
-    "index": 1,
-    "language": "JavaScript",
-    "status": "TIMEOUT",
-    "tasks": "?/?",
-    "duration": 602,
-    "model": "",
-    "report": "NO_REPORT",
-    "share": "NONE",
-    "notes": "Timed out after 602s "
-  },
-  {
-    "index": 2,
-    "language": "Go",
-    "status": "FAILED",
-    "tasks": "0/1",
-    "duration": 30,
-    "model": "anthropic",
-    "report": "NO_REPORT|404",
-    "share": "SKIPPED",
-    "notes": "All tasks failed validation "
-  },
-  {
-    "index": 3,
-    "language": "Java",
-    "status": "COMPLETE",
-    "tasks": "1/1",
-    "duration": 101,
-    "model": "anthropic",
-    "report": "HAS_REPORT",
-    "share": "SHARE_OK",
-    "notes": " "
-  },
-  {
-    "index": 4,
-    "language": "TypeScript",
-    "status": "COMPLETE",
-    "tasks": "2/2",
-    "duration": 120,
-    "model": "anthropic",
-    "report": "HAS_REPORT",
-    "share": "SHARE_OK",
-    "notes": " "
-  },
-  {
-    "index": 5,
-    "language": "Rust",
-    "status": "COMPLETE",
-    "tasks": "2/2",
-    "duration": 291,
-    "model": "anthropic",
-    "report": "HAS_REPORT",
-    "share": "SHARE_OK",
-    "notes": " "
-  },
-  {
-    "index": 6,
-    "language": "Static HTML",
-    "status": "COMPLETE",
-    "tasks": "1/1",
-    "duration": 160,
-    "model": "anthropic",
-    "report": "HAS_REPORT",
-    "share": "SHARE_OK",
-    "notes": " "
-  },
-  {
-    "index": 7,
-    "language": "Cancel",
-    "status": "PASS",
-    "tasks": "0/0",
-    "duration": 124,
-    "model": "",
-    "report": "NO_REPORT",
-    "share": "NONE",
-    "notes": "Cancel flow works "
   }
 ]
