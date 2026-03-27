@@ -10,7 +10,6 @@ import com.navneet.executespec.testgen.repository.TestTaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -42,7 +41,6 @@ public class TestGenOrchestrator {
      * Entry point — triggered when plan is approved.
      * Runs on a virtual thread, parallel to code gen.
      */
-    @Async
     public void runTestGenPipeline(String runId, String userRequest, String planJson) {
         try {
             log.info("[TestGen] Starting test generation pipeline for run {}", runId);

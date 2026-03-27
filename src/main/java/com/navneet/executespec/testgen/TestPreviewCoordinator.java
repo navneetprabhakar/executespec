@@ -5,6 +5,7 @@ import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
 import com.navneet.executespec.testgen.event.TestsReadyEvent;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import io.micrometer.context.ContextSnapshotFactory;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,7 +79,8 @@ public class TestPreviewCoordinator {
         if (state.isPreviewReady() && state.isTestsReady() && !state.isExecutionStarted()) {
             state.setExecutionStarted(true);
 
-            Thread.ofVirtual().name("test-exec-" + runId).start(() -> {
+            var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+            Thread.ofVirtual().name("test-exec-" + runId).start(snapshot.wrap(() -> {
                 try {
                     broadcaster.emit(runId, RunEvent.log(runId, null,
                             "[TestExec] Starting test execution against preview"));
@@ -108,7 +110,7 @@ public class TestPreviewCoordinator {
                 } finally {
                     stateMap.remove(runId);
                 }
-            });
+            }));
         }
     }
 
