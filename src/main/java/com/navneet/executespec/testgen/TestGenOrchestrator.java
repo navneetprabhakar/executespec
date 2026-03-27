@@ -36,6 +36,7 @@ public class TestGenOrchestrator {
     private final TestTaskRepository testTaskRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final SseBroadcaster broadcaster;
+    private final com.navneet.executespec.deployment.preview.DevDockerfileGenerator dockerfileGenerator;
 
     /**
      * Entry point — triggered when plan is approved.
@@ -50,12 +51,21 @@ public class TestGenOrchestrator {
             // 1. Scaffold test project
             testProjectScaffold.scaffold(runId);
 
+            // Detect if CLI
+            java.nio.file.Path workspace = java.nio.file.Path.of("workspace", runId);
+            com.navneet.executespec.deployment.preview.PreviewProjectType type = dockerfileGenerator.detect(workspace);
+            boolean isCli = false;
+            if (type != null) {
+                com.navneet.executespec.deployment.preview.PreviewMode mode = dockerfileGenerator.detectMode(type, workspace);
+                isCli = (mode == com.navneet.executespec.deployment.preview.PreviewMode.CLI_TERMINAL);
+            }
+
             // 2. Generate conventions doc
-            String conventionsDoc = conventionsGenerator.generate(userRequest, planJson);
+            String conventionsDoc = conventionsGenerator.generate(userRequest, planJson, isCli);
 
             // 3. Plan tests
-            emitTestEvent(runId, "TEST_PLANNING_STARTED", "Planning integration tests");
-            TestPlan testPlan = testPlannerAgent.planTests(runId, userRequest, conventionsDoc);
+            emitTestEvent(runId, "TEST_PLANNING_STARTED", "Planning integration tests (CLI: " + isCli + ")");
+            TestPlan testPlan = testPlannerAgent.planTests(runId, userRequest, conventionsDoc, isCli);
             List<TestTask> tasks = testTaskRepository.findByTestPlanId(testPlan.getId());
             emitTestEvent(runId, "TEST_PLANNING_COMPLETED",
                     "Test plan created with " + tasks.size() + " test classes");
@@ -66,7 +76,7 @@ public class TestGenOrchestrator {
 
             for (TestTask task : tasks) {
                 try {
-                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest);
+                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest, isCli);
                 } catch (Exception e) {
                     log.error("[TestGen] Test generation failed for task {}: {}",
                             task.getTaskName(), e.getMessage());
@@ -88,7 +98,7 @@ public class TestGenOrchestrator {
                 testCompilationGate.markFailedTasks(
                         testPlan.getId(), compilationResult.failedClasses(), compilationResult.output());
 
-                handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest);
+                handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest, isCli);
 
                 // Re-compile after retries
                 TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
@@ -140,7 +150,7 @@ public class TestGenOrchestrator {
     }
 
     private void handleCompilationRetries(String runId, TestPlan testPlan,
-                                            String conventionsDoc, String userRequest) {
+                                            String conventionsDoc, String userRequest, boolean isCli) {
         List<TestTask> failedTasks = testTaskRepository
                 .findByTestPlanIdAndStatus(testPlan.getId(), TestTaskStatus.FAILED);
 
@@ -148,7 +158,7 @@ public class TestGenOrchestrator {
             if (task.getCompilationError() == null) continue;
             try {
                 testWorkerAgent.retryWithError(runId, task, conventionsDoc, userRequest,
-                        task.getCompilationError());
+                        task.getCompilationError(), isCli);
                 task.setStatus(TestTaskStatus.GENERATING);
                 testTaskRepository.save(task);
             } catch (Exception e) {

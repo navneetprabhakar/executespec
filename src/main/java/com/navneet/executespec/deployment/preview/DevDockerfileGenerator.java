@@ -59,6 +59,11 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.SPRING_BOOT;
         }
 
+        // 1b. Java CLI
+        if (hasJavaFiles(workspace)) {
+            return PreviewProjectType.JAVA;
+        }
+
         // 2. Node (frontend vs backend)
         Path packageJson = workspace.resolve("package.json");
         if (Files.exists(packageJson)) {
@@ -83,10 +88,14 @@ public class DevDockerfileGenerator {
             }
             return PreviewProjectType.NODE_FRONTEND;
         }
+        if (hasJsOrTsFiles(workspace)) {
+            return PreviewProjectType.NODE_BACKEND;
+        }
 
         // 3. Python
         if (Files.exists(workspace.resolve("requirements.txt")) ||
-            Files.exists(workspace.resolve("pyproject.toml"))) {
+            Files.exists(workspace.resolve("pyproject.toml")) ||
+            !findPythonFiles(workspace).isEmpty()) {
             return PreviewProjectType.PYTHON;
         }
 
@@ -153,6 +162,7 @@ public class DevDockerfileGenerator {
             case NODE_FRONTEND -> nodeFrontendDockerfile(workspace);
             case NODE_BACKEND -> nodeBackendDockerfile(workspace);
             case SPRING_BOOT -> springBootDockerfile(workspace);
+            case JAVA -> cliJavaDockerfile(workspace);
             case PYTHON -> pythonDockerfile(workspace);
             case GO -> goDockerfile(workspace);
             case RUBY -> rubyDockerfile(workspace);
@@ -1089,8 +1099,22 @@ public class DevDockerfileGenerator {
                 }
                 yield true;
             }
-            // NODE_BACKEND already implies web framework detected
-            case NODE_BACKEND, NODE_FRONTEND, SPRING_BOOT, FULL_STACK, STATIC_HTML -> false;
+            case NODE_BACKEND -> {
+                JsonNode pkg = parsePackageJson(workspace);
+                if (pkg != null) {
+                    for (String field : List.of("dependencies", "devDependencies")) {
+                        JsonNode deps = pkg.get(field);
+                        if (deps != null) {
+                            for (String backendDep : NODE_BACKEND_DEPS) {
+                                if (deps.has(backendDep)) yield false;
+                            }
+                        }
+                    }
+                }
+                yield true; // No web framework detected -> CLI script
+            }
+            case NODE_FRONTEND, SPRING_BOOT, FULL_STACK, STATIC_HTML -> false;
+            case JAVA -> true;
         };
     }
 
@@ -1134,12 +1158,57 @@ public class DevDockerfileGenerator {
     private String cliDockerfile(PreviewProjectType type, Path workspace) {
         return switch (type) {
             case PYTHON -> cliPythonDockerfile(workspace);
+            case JAVA -> cliJavaDockerfile(workspace);
+            case NODE_BACKEND -> cliNodeDockerfile(workspace);
             case GO -> cliGoDockerfile();
             case RUST -> cliRustDockerfile();
             case RUBY -> cliRubyDockerfile(workspace);
             case PHP -> cliPhpDockerfile(workspace);
             default -> generate(type, workspace); // fallback to web
         };
+    }
+
+    private String cliNodeDockerfile(Path workspace) {
+        String entryFile = findNodeEntryPoint(workspace);
+        String installStep = Files.exists(workspace.resolve("package.json")) ? "RUN npm install" : "# No package.json";
+        return """
+                FROM node:20-alpine
+                WORKDIR /app
+                LABEL preview=true
+                RUN apk add --no-cache ttyd
+                COPY package*.json* ./
+                """ + installStep + "\n" + """
+                COPY . .
+                EXPOSE 8080
+                CMD ["ttyd", "--port", "8080", "--writable", "node", \"""" + entryFile + "\"]\n";
+    }
+
+    private String cliJavaDockerfile(Path workspace) {
+        // Find the java file containing 'public static void main'
+        String mainClass = "Main";
+        try (Stream<Path> stream = Files.walk(workspace, 3)) {
+            Path mainFile = stream
+                    .filter(p -> p.toString().endsWith(".java"))
+                    .filter(p -> fileContainsPattern(p, "public static void main"))
+                    .findFirst().orElse(null);
+            if (mainFile != null) {
+                // If it's a single file at root, mainClass is just the name without .java
+                String filename = mainFile.getFileName().toString();
+                mainClass = filename.substring(0, filename.length() - 5);
+            }
+        } catch (IOException e) { /* ignore */ }
+        
+        return """
+                FROM eclipse-temurin:21
+                WORKDIR /app
+                LABEL preview=true
+                RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* \\
+                    && wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd \\
+                    && chmod +x /usr/local/bin/ttyd
+                COPY . .
+                RUN javac *.java 2>/dev/null || true
+                EXPOSE 8080
+                CMD ["ttyd", "--port", "8080", "--writable", "java", \"""" + mainClass + "\"]\n";
     }
 
     private String cliPythonDockerfile(Path workspace) {
@@ -1156,7 +1225,9 @@ public class DevDockerfileGenerator {
                 FROM python:3.12-slim
                 WORKDIR /app
                 LABEL preview=true
-                RUN apt-get update && apt-get install -y ttyd && rm -rf /var/lib/apt/lists/*
+                RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* \\
+                    && wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd \\
+                    && chmod +x /usr/local/bin/ttyd
                 COPY requirements.txt* pyproject.toml* ./
                 """ + installStep + "\n" + """
                 COPY . .
@@ -1182,7 +1253,9 @@ public class DevDockerfileGenerator {
     private String cliRustDockerfile() {
         return """
                 FROM rust:1.77-slim
-                RUN apt-get update && apt-get install -y pkg-config libssl-dev ttyd && rm -rf /var/lib/apt/lists/*
+                RUN apt-get update && apt-get install -y pkg-config libssl-dev wget && rm -rf /var/lib/apt/lists/* \\
+                    && wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd \\
+                    && chmod +x /usr/local/bin/ttyd
                 WORKDIR /app
                 LABEL preview=true
                 COPY Cargo.toml Cargo.lock* ./
@@ -1214,9 +1287,13 @@ public class DevDockerfileGenerator {
     private String cliPhpDockerfile(Path workspace) {
         boolean hasComposer = Files.exists(workspace.resolve("composer.json"));
         String installStep = hasComposer
-                ? "RUN apt-get update && apt-get install -y ttyd && rm -rf /var/lib/apt/lists/* && " +
-                  "curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
-                : "RUN apt-get update && apt-get install -y ttyd && rm -rf /var/lib/apt/lists/*";
+                ? "RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* && \\\\\n" +
+                  "    wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd && \\\\\n" +
+                  "    chmod +x /usr/local/bin/ttyd && \\\\\n" +
+                  "    curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
+                : "RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* && \\\\\n" +
+                  "    wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd && \\\\\n" +
+                  "    chmod +x /usr/local/bin/ttyd";
         String entryFile = "index.php";
         for (String candidate : new String[]{"main.php", "app.php", "index.php", "cli.php"}) {
             if (Files.exists(workspace.resolve(candidate))) { entryFile = candidate; break; }
@@ -1319,6 +1396,25 @@ public class DevDockerfileGenerator {
             log.debug("Failed to read file {}: {}", file, e.getMessage());
         }
         return false;
+    }
+
+    private boolean hasJsOrTsFiles(Path workspace) {
+        try (Stream<Path> stream = Files.list(workspace)) {
+            return stream.anyMatch(p -> {
+                String s = p.toString();
+                return s.endsWith(".js") || s.endsWith(".ts") || s.endsWith(".mjs");
+            });
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private boolean hasJavaFiles(Path workspace) {
+        try (Stream<Path> stream = Files.list(workspace)) {
+            return stream.anyMatch(p -> p.toString().endsWith(".java"));
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**

@@ -24,8 +24,18 @@ public class ApiConventionsGenerator {
      * @param planJson    the JSON plan from PlannerAgent (contains task list with entity names, etc.)
      * @return markdown string with API conventions
      */
-    public String generate(String userRequest, String planJson) {
+    public String generate(String userRequest, String planJson, boolean isCli) {
         var sb = new StringBuilder();
+        
+        if (isCli) {
+            sb.append("## CLI Application Conventions\n\n");
+            sb.append("- The application is a Command Line Interface (CLI) tool, NOT a web server.\n");
+            sb.append("- Execute the application binary/script using `ProcessBuilder` or an equivalent technique.\n");
+            sb.append("- Assert on standard output (stdout), standard error (stderr), and exit codes (0 for success).\n");
+            sb.append("- DO NOT attempt to send HTTP requests or use RestAssured.\n\n");
+            return sb.toString();
+        }
+
         sb.append("## API Conventions\n\n");
 
         sb.append("### Base Configuration\n");
