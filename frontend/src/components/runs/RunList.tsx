@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, FolderOpen, Users, User, Globe } from 'lucide-react';
+import { Plus, FolderOpen, Users, User, Globe, ChevronLeft, ChevronRight } from 'lucide-react';
 import RunCard from './RunCard';
 import { RunCardSkeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
@@ -23,6 +23,7 @@ export default function RunList() {
     projectFilter, setProjectFilter,
     scopeFilter, setScopeFilter,
     setActiveRunId, fetchRuns,
+    page, totalElements, totalPages, hasNext, hasPrevious, setPage,
   } = useRunStore();
   const isOrgMember = useAuthStore(selectIsOrgMember);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
@@ -187,6 +188,40 @@ export default function RunList() {
           ))
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.06] flex-shrink-0 bg-zinc-900/50">
+          <span className="text-xs text-zinc-500">
+            {totalElements} runs
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(page - 1)}
+              disabled={!hasPrevious}
+              className={cn(
+                'p-1 rounded transition-colors',
+                hasPrevious ? 'text-zinc-400 hover:text-white hover:bg-white/[0.06]' : 'text-zinc-700 cursor-not-allowed'
+              )}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-xs text-zinc-400 min-w-[4rem] text-center">
+              {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(page + 1)}
+              disabled={!hasNext}
+              className={cn(
+                'p-1 rounded transition-colors',
+                hasNext ? 'text-zinc-400 hover:text-white hover:bg-white/[0.06]' : 'text-zinc-700 cursor-not-allowed'
+              )}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* FAB */}
       <motion.button

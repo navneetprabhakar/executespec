@@ -70,8 +70,8 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
   useEffect(() => {
     if (step !== 'select-run') return;
     setRunsLoading(true);
-    api.getRuns({ status: 'COMPLETE' })
-      .then(setRuns)
+    api.getRuns({ status: 'COMPLETE', size: 100 })
+      .then((res) => setRuns(res.content))
       .catch(() => setRuns([]))
       .finally(() => setRunsLoading(false));
   }, [step]);

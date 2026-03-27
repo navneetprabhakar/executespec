@@ -315,13 +315,25 @@ export interface ModelComparisonData {
 
 // ── Runs ────────────────────────────────────────────────────────────────────
 
-export const getRuns = (params?: { status?: string; projectId?: string; scope?: string }) => {
+export interface PagedResponse<T> {
+  content: T[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
+}
+
+export const getRuns = (params?: { status?: string; projectId?: string; scope?: string; page?: number; size?: number }) => {
   const qs = new URLSearchParams();
   if (params?.status)    qs.set('status',    params.status);
   if (params?.projectId) qs.set('projectId', params.projectId);
   if (params?.scope)     qs.set('scope',     params.scope);
+  if (params?.page !== undefined) qs.set('page', String(params.page));
+  if (params?.size !== undefined) qs.set('size', String(params.size));
   const q = qs.toString();
-  return req<RunSummary[]>(`/runs${q ? `?${q}` : ''}`);
+  return req<PagedResponse<RunSummary>>(`/runs${q ? `?${q}` : ''}`);
 };
 
 export const getRun = (id: string) =>

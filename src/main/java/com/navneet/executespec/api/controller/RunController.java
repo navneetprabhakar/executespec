@@ -118,7 +118,7 @@ public class RunController {
      * scope=mine restricts to the current user's runs (within org visibility).
      */
     @GetMapping
-    public ResponseEntity<List<RunSummary>> list(
+    public ResponseEntity<Map<String, Object>> list(
             @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String projectId,
@@ -143,7 +143,16 @@ public class RunController {
         }
 
         Page<PipelineRun> runs = stateStore.listRuns(status, projectId, PageRequest.of(page, size), visSpec);
-        return ResponseEntity.ok(runs.getContent().stream().map(mapper::toSummary).toList());
+        List<RunSummary> content = runs.getContent().stream().map(mapper::toSummary).toList();
+        return ResponseEntity.ok(Map.of(
+                "content", content,
+                "page", runs.getNumber(),
+                "size", runs.getSize(),
+                "totalElements", runs.getTotalElements(),
+                "totalPages", runs.getTotalPages(),
+                "hasNext", runs.hasNext(),
+                "hasPrevious", runs.hasPrevious()
+        ));
     }
 
     /** Get a single run with task details. */
