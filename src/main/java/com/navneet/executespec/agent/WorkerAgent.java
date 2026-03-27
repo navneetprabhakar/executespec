@@ -1047,7 +1047,7 @@ public class WorkerAgent {
                     .build();
             prompt = new Prompt(allMessages, opts);
             // Allow provider fallback since no ToolResponseMessages in history
-            fallbackMode = FallbackMode.FULL;
+            fallbackMode = FallbackMode.IMMEDIATE;
         }
         return llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,
                 fallbackMode, iteration, justCompacted);
