@@ -240,8 +240,13 @@ public class RunConversationController {
         stateStore.incrementPlanVersion(runId);
         stateStore.savePlanVersion(runId, source == ApplySource.COPILOT ? "COPILOT" : "REVIEW", userId);
 
-        // Append tasks to existing plan
+        // Update run goal text with apply identifier so the update is visible
         int applyIndex = run.getApplySuggestionCount() + 1;
+        String applyLabel = "\n\n--- Applied Improvement #" + applyIndex + " (" + source + ") ---\n" + suggestion;
+        run.setUserRequest(run.getUserRequest() + applyLabel);
+        stateStore.save(run);
+
+        // Append tasks to existing plan
         List<AgentTask> newTasks = stateStore.appendSuggestionTasks(runId, miniPlan, applyIndex, source);
         stateStore.incrementApplySuggestionCount(runId);
 
