@@ -352,27 +352,60 @@ if ! command -v caddy &>/dev/null; then
 fi
 log "Caddy: $(caddy version 2>/dev/null || echo 'installed')"
 
-# Write Caddy config for preview routing.
-# The "preview" server listens on :443 for *.preview.executespec.ai.
-# Routes are added/removed dynamically via the admin API (localhost:2019).
-# For now, use a simple Caddyfile with on-demand TLS.
-GCP_PROJECT=$(meta "gcp-project" || echo "executespecv1")
-cat > /etc/caddy/Caddyfile << CADDYEOF
+# Write Caddy JSON config for preview routing.
+# Single server on :443 handles both dev.executespec.ai (→ Spring Boot :8080)
+# and preview-*.executespec.ai (→ dynamic routes added by CaddyProxyManager).
+# Routes are managed via the admin API at localhost:2019.
+cat > /etc/caddy/config.json << 'CADDYEOF'
 {
-    admin localhost:2019
-}
-
-*.preview.executespec.ai {
-    tls {
-        on_demand
+  "admin": {
+    "listen": "localhost:2019"
+  },
+  "apps": {
+    "http": {
+      "servers": {
+        "srv0": {
+          "listen": [":443"],
+          "routes": [
+            {
+              "match": [{"host": ["dev.executespec.ai"]}],
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [{"dial": "localhost:8080"}],
+                  "transport": {
+                    "protocol": "http"
+                  }
+                }
+              ],
+              "terminal": true
+            }
+          ],
+          "automatic_https": {
+            "disable": true
+          }
+        }
+      }
     }
-    respond "Preview not found" 404
+  }
 }
 CADDYEOF
 
+# Stop default Caddy service (uses Caddyfile), start with JSON config
+systemctl stop caddy 2>/dev/null || true
+
+# Create systemd override for Caddy to use JSON config
+mkdir -p /etc/systemd/system/caddy.service.d
+cat > /etc/systemd/system/caddy.service.d/override.conf << 'OVERRIDEEOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/caddy run --config /etc/caddy/config.json --resume --environ
+OVERRIDEEOF
+
+systemctl daemon-reload
 systemctl enable caddy
 systemctl restart caddy
-log "Caddy configured and started"
+log "Caddy configured with JSON config and started"
 
 # ── Done ────────────────────────────────────────────────────────────────────
 
