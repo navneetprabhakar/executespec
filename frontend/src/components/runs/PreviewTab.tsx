@@ -362,7 +362,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                   {dbInfo.emoji} {dbInfo.label} database auto-configured
                 </p>
               )}
-              <p className="text-xs text-zinc-600">This preview will automatically shut down in 10 minutes</p>
+              <p className="text-xs text-zinc-600">This preview will automatically shut down in 5 minutes</p>
             </div>
           </div>
         ) : (isFailed || isTimedOut) ? (

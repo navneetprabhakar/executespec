@@ -150,10 +150,14 @@ public class CloudRunClient {
         try {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         Process process = pb.start();
-        // Read stdout and stderr separately — gcloud writes progress text to stderr
-        // even with --format=json, and --quiet doesn't fully suppress it
+        // Read stdout and stderr in parallel to avoid pipe buffer deadlock.
+        // gcloud writes progress text to stderr even with --format=json and --quiet.
+        var stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try { return new String(process.getErrorStream().readAllBytes()).trim(); }
+            catch (Exception e) { return "stderr read failed: " + e.getMessage(); }
+        });
         String stdout = new String(process.getInputStream().readAllBytes()).trim();
-        String stderr = new String(process.getErrorStream().readAllBytes()).trim();
+        String stderr = stderrFuture.join();
         int exit = process.waitFor();
 
         String combined = (stdout + "\n" + stderr).trim();
