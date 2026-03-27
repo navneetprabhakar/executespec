@@ -353,9 +353,10 @@ fi
 log "Caddy: $(caddy version 2>/dev/null || echo 'installed')"
 
 # Write Caddy JSON config for preview routing.
-# Single server on :443 handles both dev.executespec.ai (→ Spring Boot :8080)
-# and preview-*.executespec.ai (→ dynamic routes added by CaddyProxyManager).
-# Routes are managed via the admin API at localhost:2019.
+# Caddy listens on :443 with auto-HTTPS (self-signed/internal CA).
+# Cloudflare SSL mode = "Full" accepts any cert from origin.
+# Preview routes are added dynamically via admin API (localhost:2019).
+# dev.executespec.ai → Spring Boot :8080, preview-*.executespec.ai → Docker containers.
 cat > /etc/caddy/config.json << 'CADDYEOF'
 {
   "admin": {
@@ -373,9 +374,7 @@ cat > /etc/caddy/config.json << 'CADDYEOF'
                 {
                   "handler": "reverse_proxy",
                   "upstreams": [{"dial": "localhost:8080"}],
-                  "transport": {
-                    "protocol": "http"
-                  }
+                  "transport": {"protocol": "http"}
                 }
               ],
               "terminal": true
@@ -392,10 +391,7 @@ cat > /etc/caddy/config.json << 'CADDYEOF'
             "subjects": ["dev.executespec.ai", "*.executespec.ai"],
             "issuers": [
               {
-                "module": "acme",
-                "challenges": {
-                  "http": {"alternate_port": 8888}
-                }
+                "module": "internal"
               }
             ]
           }

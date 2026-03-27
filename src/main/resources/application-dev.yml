@@ -87,7 +87,7 @@ agent:
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
-  fallback-host: ${PREVIEW_FALLBACK_HOST:http://dev.executespec.ai}
+  fallback-host: ${PREVIEW_FALLBACK_HOST:https://dev.executespec.ai}
   proxy:
     enabled: ${PREVIEW_PROXY_ENABLED:true}
 
