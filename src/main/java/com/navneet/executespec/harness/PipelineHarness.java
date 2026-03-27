@@ -1199,21 +1199,33 @@ public class PipelineHarness {
 
                 // Run compiler on full workspace
                 broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+                CompileResult compileResult = null;
                 try {
-                    compilerAgent.runCompileAndFix(runId);
+                    compileResult = compilerAgent.runCompileAndFix(runId);
                 } catch (Exception e) {
                     log.warn("[ApplySuggestion] Compiler failed for run {}: {}", runId, e.getMessage());
                 }
 
                 // Run reviewer on the changes
                 broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+                ReviewReportV2 reviewResult = null;
                 try {
                     var freshRun = stateStore.findRun(runId).orElseThrow();
                     var providers = availableProviderResolver.resolve(runId);
-                    ReviewReportV2 reviewResult = reviewerAgentV2.review(freshRun, newTasks, freshRun.getUserRequest(), providers);
+                    reviewResult = reviewerAgentV2.review(freshRun, newTasks, freshRun.getUserRequest(), providers);
                     stateStore.saveReviewV2(runId, reviewResult);
                 } catch (Exception e) {
                     log.warn("[ApplySuggestion] Reviewer failed for run {}: {}", runId, e.getMessage());
+                }
+
+                // Generate validation report (same as main pipeline)
+                try {
+                    var freshRun = stateStore.findRun(runId).orElseThrow();
+                    List<WorkerReport> reports = getWorkerReports(runId);
+                    generateValidationReport(runId, freshRun, reports, reviewResult, compileResult);
+                    log.info("[ApplySuggestion] Validation report generated for run {}", runId);
+                } catch (Exception e) {
+                    log.warn("[ApplySuggestion] Validation report failed for run {}: {}", runId, e.getMessage());
                 }
 
                 // Determine final status based on task outcomes
