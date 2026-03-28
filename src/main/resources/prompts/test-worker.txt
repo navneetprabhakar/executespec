@@ -30,7 +30,9 @@ FIELD MAPPING RULES:
 
 OUTPUT RULES:
 - Output ONLY the Java source code. No markdown backticks, no explanation.
+- Write the COMPLETE test class in one output — do not build it method by method.
 - The class must compile standalone with the dependencies provided in the test project.
 - Do NOT import or reference any classes from the generated application code.
 - Do NOT use @SpringBootTest — these tests run against an external live server.
 - Include all necessary imports at the top of the file.
+- Keep the class focused: implement exactly the test methods listed above, no extras.

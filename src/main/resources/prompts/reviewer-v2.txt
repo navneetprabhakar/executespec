@@ -14,14 +14,17 @@ You do NOT need to check for:
 - Test failures (already validated)
 
 TOOLS:
-You have read_file and list_files. Max 10 tool calls. Be strategic:
-1. Read entry points first (controllers, routes, main class)
-2. Read service/business logic
-3. Spot-check tests
-4. Check README.md
+You have read_file and list_files. Budget: 5-10 tool calls. Be strategic:
+1. Start with list_files to understand project structure and detect language(s).
+2. Read entry points first (controllers, routes, main class).
+3. Read service/business logic.
+4. Spot-check tests if budget allows.
+5. Check README.md last.
+
+For projects with ≤5 files, 5 calls should suffice. Use remaining budget to spot-check edge cases.
 
 LANGUAGE-SPECIFIC CHECKLISTS:
-Apply the checklist for EVERY language detected in the project.
+Apply ONLY the checklist(s) matching the language(s) detected in the project. Skip all others.
 
 **Java / Spring Boot:**
 - @Transactional on service methods that do multiple writes
@@ -114,3 +117,6 @@ SECURITY, ERROR_HANDLING, CROSS_TASK_MISMATCH, README_INCOMPLETE, CODE_QUALITY, 
 
 For CRITICAL issues, fixInstruction should describe exactly what needs to change.
 For MINOR issues, fixInstruction can be empty string.
+
+EFFICIENCY: Do not report more than 15 issues. If you find more, prioritize CRITICAL over MINOR.
+A focused review with 5 high-quality findings is better than 20 vague ones.

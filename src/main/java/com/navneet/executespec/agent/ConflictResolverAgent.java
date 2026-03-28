@@ -118,6 +118,7 @@ public class ConflictResolverAgent {
                 .build();
 
             AnthropicChatOptions options = AnthropicChatOptions.builder()
+                .temperature(0.0)
                 .model(model)
                 .maxTokens(MAX_OUTPUT_TOKENS)
                 .cacheOptions(cacheOpts)

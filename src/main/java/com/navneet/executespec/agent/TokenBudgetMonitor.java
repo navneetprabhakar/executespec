@@ -94,16 +94,15 @@ public class TokenBudgetMonitor {
      * to avoid wasteful over-generation on simple tasks.
      */
     public int maxOutputTokens(String model, String complexity) {
-        int modelMax = maxOutputForModel(model);
-        // Fraction of model's max output based on task complexity.
-        // HIGH is capped at 50% (not 100%) to avoid multi-minute LLM responses
-        // — e.g. Sonnet at 100% = 64K tokens ≈ 3-5min response time.
-        double fraction = switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
-            case "LOW"  -> 0.25;
-            case "HIGH" -> 0.50;
-            default     -> 0.375;
+        // Fixed ceilings — decoupled from model max output to cap latency.
+        // 16K tokens ≈ 400-500 lines of code, ~2.5min at 100 tok/s.
+        // If a task genuinely needs more, WorkerAgent auto-continues on truncation.
+        return switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
+            case "LOW"    -> 8_192;
+            case "MEDIUM" -> 12_288;
+            case "HIGH"   -> 16_384;
+            default       -> 8_192;
         };
-        return Math.min(modelMax, Math.max((int) (modelMax * fraction), props.getTokenBudget().getLow()));
     }
 
     /** @deprecated Use {@link #maxOutputTokens(String, String)} with model parameter. */

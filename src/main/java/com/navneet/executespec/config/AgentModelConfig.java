@@ -113,6 +113,7 @@ public class AgentModelConfig {
                 .defaultOptions(AnthropicChatOptions.builder()
                         .model(model)
                         .maxTokens(maxTokens)
+                        .temperature(0.0)
                         .build())
                 .build();
     }
@@ -153,7 +154,7 @@ public class AgentModelConfig {
         Client client = Client.builder().apiKey(apiKey).build();
         return GoogleGenAiChatModel.builder()
                 .genAiClient(client)
-                .defaultOptions(GoogleGenAiChatOptions.builder().model(ModelConstants.GEMINI_CAPABLE).build())
+                .defaultOptions(GoogleGenAiChatOptions.builder().model(ModelConstants.GEMINI_CAPABLE).temperature(0.0).build())
                 .build();
     }
 }

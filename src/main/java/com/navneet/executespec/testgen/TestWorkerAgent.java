@@ -219,6 +219,7 @@ public class TestWorkerAgent {
                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                 .build();
         AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .temperature(0.0)
                 .model(model.getModel())
                 .cacheOptions(cacheOpts)
                 .build();

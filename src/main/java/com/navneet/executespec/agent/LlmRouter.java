@@ -403,21 +403,21 @@ public class LlmRouter {
 
         Prompt augmented = switch (provider.toLowerCase()) {
             case "anthropic" -> {
-                var builder = AnthropicChatOptions.builder().model(model).maxTokens(maxTok);
+                var builder = AnthropicChatOptions.builder().model(model).maxTokens(maxTok).temperature(0.0);
                 if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
                 if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
                 if (finalCacheOpts != null) builder.cacheOptions(finalCacheOpts);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }
             case "openai" -> {
-                var builder = OpenAiChatOptions.builder().model(model);
+                var builder = OpenAiChatOptions.builder().model(model).temperature(0.0);
                 if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
                 if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
                 if (maxTok != null) builder.maxCompletionTokens(maxTok);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }
             case "google" -> {
-                var builder = GoogleGenAiChatOptions.builder().model(model);
+                var builder = GoogleGenAiChatOptions.builder().model(model).temperature(0.0);
                 if (maxTok != null) builder.maxOutputTokens(maxTok);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }
@@ -490,7 +490,7 @@ public class LlmRouter {
         AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
         return AnthropicChatModel.builder()
                 .anthropicApi(api)
-                .defaultOptions(AnthropicChatOptions.builder().build())
+                .defaultOptions(AnthropicChatOptions.builder().temperature(0.0).build())
                 .retryTemplate(getRetryTemplate())
                 .observationRegistry(getObservationRegistry())
                 .build();
@@ -500,7 +500,7 @@ public class LlmRouter {
         OpenAiApi api = OpenAiApi.builder().apiKey(apiKey).build();
         return OpenAiChatModel.builder()
                 .openAiApi(api)
-                .defaultOptions(OpenAiChatOptions.builder().build())
+                .defaultOptions(OpenAiChatOptions.builder().temperature(0.0).build())
                 .retryTemplate(getRetryTemplate())
                 .observationRegistry(getObservationRegistry())
                 .build();
@@ -510,7 +510,7 @@ public class LlmRouter {
         Client client = Client.builder().apiKey(apiKey).build();
         return GoogleGenAiChatModel.builder()
                 .genAiClient(client)
-                .defaultOptions(GoogleGenAiChatOptions.builder().build())
+                .defaultOptions(GoogleGenAiChatOptions.builder().temperature(0.0).build())
                 .retryTemplate(getRetryTemplate())
                 .observationRegistry(getObservationRegistry())
                 .build();
