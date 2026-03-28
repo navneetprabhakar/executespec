@@ -21,6 +21,7 @@ export default function RunDetail() {
   const { activeRun, activeRunId, setActiveRunId, approveRun, clarifyRun, cancelRun, createRun, pauseRun, editAndRestartRun, resumeRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
   const { isVibe } = useViewMode();
+  const isMobile = useIsMobile();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -188,7 +189,7 @@ export default function RunDetail() {
           {/* Mobile back button */}
           <button
             onClick={() => setActiveRunId(null)}
-            className="md:hidden flex items-center gap-1.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white border-b border-white/[0.06] transition-colors"
+            className="lg:hidden flex items-center gap-1.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white border-b border-white/[0.06] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
             Back to runs
@@ -416,7 +417,7 @@ export default function RunDetail() {
           </div>
 
           {/* Action bar */}
-          <div className="flex items-center gap-1 md:gap-2 px-3 md:px-4 py-2 border-b border-white/[0.06] flex-shrink-0 overflow-x-auto">
+          <div className="flex items-center gap-1 lg:gap-2 px-3 lg:px-4 py-2 flex-shrink-0 overflow-x-auto scrollbar-hide border-b border-white/[0.06]">
             {!['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED'].includes(activeRun.status) && (
               <>
                 <button
@@ -477,7 +478,7 @@ export default function RunDetail() {
 
 function MobileCollapsibleReports({ runId, status }: { runId: string; status: string }) {
   const isMobile = useIsMobile();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   // On desktop, always show reports inline (no collapsing)
   if (!isMobile) {

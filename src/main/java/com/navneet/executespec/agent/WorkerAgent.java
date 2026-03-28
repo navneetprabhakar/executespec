@@ -95,6 +95,20 @@ public class WorkerAgent {
     private static final int HARD_ITERATION_LIMIT = 25;
     /** Max auto-continue attempts when LLM response is truncated (hit maxTokens). */
     private static final int MAX_CONTINUATIONS = 2;
+    /** Max skeleton recovery attempts before escalating model anyway. */
+    private static final int MAX_SKELETON_RECOVERIES = 2;
+    /** Recovery prompt injected when truncation persists after MAX_CONTINUATIONS exhausted. */
+    private static final String SKELETON_RECOVERY_PROMPT =
+            "STOP — your output keeps getting truncated because it exceeds the token limit. " +
+            "You MUST change strategy immediately:\n\n" +
+            "1. Write a MINIMAL SKELETON of the file first using writeFile — include the structure " +
+            "(imports, class/function signatures, key comments like `// TODO: implement`) but leave " +
+            "method bodies as stubs or single-line placeholders.\n\n" +
+            "2. Then use editFile to replace each placeholder with real content, ONE SECTION AT A TIME. " +
+            "Keep each editFile call under 150 lines.\n\n" +
+            "3. Do NOT attempt to write the entire file in one writeFile call again — that is what " +
+            "caused the truncation.\n\n" +
+            "Start now: call writeFile with the skeleton version of the file you were working on.";
 
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
@@ -127,8 +141,14 @@ public class WorkerAgent {
         String worktreePath = gitTool.createWorktree(runId, taskId, branchName, depBranches);
         WorkspaceContext.set(runId, worktreePath);
         WorkspaceContext.setTaskId(taskId);
-        log.info("Worker starting task [{}] on branch {} in worktree {} ({}:{})",
-                taskId, branchName, worktreePath, provider, model);
+
+        // Apply complexity override (last line of defense against planner over-assignment)
+        String projectType = readProjectType(worktreePath);
+        int ownedFilesCount = taskDef.getOwnedFiles() != null ? taskDef.getOwnedFiles().size() : 0;
+        complexity = budgetMonitor.resolveEffectiveComplexity(complexity, projectType, ownedFilesCount, taskId);
+
+        log.info("Worker starting task [{}] on branch {} in worktree {} ({}:{}) complexity={}",
+                taskId, branchName, worktreePath, provider, model, complexity);
 
         // Per-task conversation history (WorkerAgent is a Spring singleton — no
         // instance fields)
@@ -149,6 +169,8 @@ public class WorkerAgent {
         final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
         int toolCallCount = 0;  // total tool calls dispatched — for hard iteration limit
         int continuations = 0;  // truncation auto-continue count
+        int skeletonRecoveries = 0; // skeleton recovery injection count
+        int configuredMaxOutput = budgetMonitor.maxOutputTokens(model, complexity); // for calibration tracking
 
         // ── AGENTIC LOOP (time-based) ────────────────────────────────────────
         Instant deadline = Instant.now().plus(Duration.ofMinutes(taskDurationMinutes));
@@ -187,16 +209,29 @@ public class WorkerAgent {
                 }
 
                 // ── Stall detection: if no file writes in N minutes, escalate model ──
+                // Truncation-aware: if recent stall is caused by truncation (continuations > 0),
+                // inject recovery instruction instead of escalating — a bigger model won't fix
+                // a token-limit problem, it just costs more.
                 if (iteration > 0 && Duration.between(lastStallCheckTime, Instant.now()).toMinutes() >= STALL_CHECK_MINUTES) {
                     if (fileWritesSinceCheck == 0) {
-                        String escalatedModel = escalateModel(model, runId);
-                        if (!escalatedModel.equals(model)) {
-                            log.warn("[Worker {}] Stalled (no file writes in {}min) — escalating {} → {}",
-                                    taskId, STALL_CHECK_MINUTES, model, escalatedModel);
-                            stateStore.logMessage(runId, agentId, "state", "MODEL_ESCALATED",
-                                    "Escalating model to " + escalatedModel + " (stalled — no file writes in " + STALL_CHECK_MINUTES + " min)", 0);
-                            model = escalatedModel;
-                            provider = resolveProvider(model);
+                        if (continuations > 0 && skeletonRecoveries < MAX_SKELETON_RECOVERIES) {
+                            // Stall is likely truncation-caused — try skeleton recovery before escalating
+                            skeletonRecoveries++;
+                            log.info("[Worker {}] Stalled but {} truncation(s) detected — injecting skeleton recovery " +
+                                    "({}/{}) instead of model escalation", taskId, continuations,
+                                    skeletonRecoveries, MAX_SKELETON_RECOVERIES);
+                            stateStore.appendTaskLog(taskId, "STALL_TRUNCATION_RECOVERY:" + skeletonRecoveries);
+                            messages.add(new UserMessage(SKELETON_RECOVERY_PROMPT));
+                        } else {
+                            String escalatedModel = escalateModel(model, runId);
+                            if (!escalatedModel.equals(model)) {
+                                log.warn("[Worker {}] Stalled (no file writes in {}min) — escalating {} → {}",
+                                        taskId, STALL_CHECK_MINUTES, model, escalatedModel);
+                                stateStore.logMessage(runId, agentId, "state", "MODEL_ESCALATED",
+                                        "Escalating model to " + escalatedModel + " (stalled — no file writes in " + STALL_CHECK_MINUTES + " min)", 0);
+                                model = escalatedModel;
+                                provider = resolveProvider(model);
+                            }
                         }
                     } else {
                         log.info("[Worker {}] Progress check: {} file writes in last {}min", taskId, fileWritesSinceCheck, STALL_CHECK_MINUTES);
@@ -314,17 +349,30 @@ public class WorkerAgent {
                 try {
                     finishReason = lr.response().getResult().getMetadata().getFinishReason();
                 } catch (Exception ignored) { /* metadata may be null for some providers */ }
-                if (isTruncatedResponse(finishReason) && continuations < MAX_CONTINUATIONS) {
+                if (isTruncatedResponse(finishReason)) {
                     continuations++;
-                    log.warn("[Worker {}] Iteration {} — response truncated (finishReason={}). " +
-                            "Auto-continuing ({}/{})", taskId, iteration, finishReason,
-                            continuations, MAX_CONTINUATIONS);
-                    stateStore.appendTaskLog(taskId, "TRUNCATION_CONTINUE:" + continuations);
-                    messages.add(new UserMessage(
-                            "Your previous response was truncated (hit output token limit). " +
-                            "Continue EXACTLY where you left off. Do not repeat any code " +
-                            "already written. Complete the remaining file(s)."));
-                    continue; // next iteration — send continuation request
+                    if (continuations <= MAX_CONTINUATIONS) {
+                        log.warn("[Worker {}] Iteration {} — response truncated (finishReason={}). " +
+                                "Auto-continuing ({}/{})", taskId, iteration, finishReason,
+                                continuations, MAX_CONTINUATIONS);
+                        stateStore.appendTaskLog(taskId, "TRUNCATION_CONTINUE:" + continuations);
+                        messages.add(new UserMessage(
+                                "Your previous response was truncated (hit output token limit). " +
+                                "Continue EXACTLY where you left off. Do not repeat any code " +
+                                "already written. Complete the remaining file(s)."));
+                        continue; // next iteration — send continuation request
+                    } else {
+                        // Skeleton recovery: continuations exhausted, response still truncating.
+                        // Instead of letting broken concatenated output flow to compiler,
+                        // instruct the model to use a skeleton-then-fill strategy.
+                        skeletonRecoveries++;
+                        log.warn("[Worker {}] Iteration {} — truncation persists after {} continuations. " +
+                                "Injecting skeleton recovery ({}/{}).", taskId, iteration, MAX_CONTINUATIONS,
+                                skeletonRecoveries, MAX_SKELETON_RECOVERIES);
+                        stateStore.appendTaskLog(taskId, "SKELETON_RECOVERY_INJECTED:" + skeletonRecoveries);
+                        messages.add(new UserMessage(SKELETON_RECOVERY_PROMPT));
+                        continue; // next iteration — model should switch to skeleton strategy
+                    }
                 }
 
                 // ── PATH A: OpenAI native tool calls ─────────────────────────────────
@@ -358,7 +406,8 @@ public class WorkerAgent {
                         stateStore.appendTaskLog(taskId, "HARD_ITERATION_LIMIT:" + toolCallCount);
                         return withProviderModel(WorkerReport.partial(taskId,
                                 "Terminated: exceeded " + HARD_ITERATION_LIMIT + " tool-call iterations",
-                                totalInputTokens, totalOutputTokens), provider, model);
+                                totalInputTokens, totalOutputTokens), provider, model,
+                                continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                     }
                     continue; // next iteration
                 }
@@ -400,7 +449,8 @@ public class WorkerAgent {
                             stateStore.appendTaskLog(taskId, "HARD_ITERATION_LIMIT:" + toolCallCount);
                             return withProviderModel(WorkerReport.partial(taskId,
                                     "Terminated: exceeded " + HARD_ITERATION_LIMIT + " tool-call iterations",
-                                    totalInputTokens, totalOutputTokens), provider, model);
+                                    totalInputTokens, totalOutputTokens), provider, model,
+                                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                         }
                         continue; // next iteration — do NOT add the "continue" prompt below
                     }
@@ -428,7 +478,8 @@ public class WorkerAgent {
                                 parseCompletionReport(assistantText, taskId,
                                         totalInputTokens, totalOutputTokens,
                                         totalCacheReadTokens, totalCacheWriteTokens),
-                                provider, model);
+                                provider, model,
+                                continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                     }
                 }
 
@@ -484,7 +535,8 @@ public class WorkerAgent {
                             return withProviderModel(WorkerReport.partial(taskId,
                                     "Hard stopped at " + (int) (budget.usagePct() * 100)
                                             + "% context usage after emergency compaction failed. Resume required.",
-                                    totalInputTokens, totalOutputTokens), provider, model);
+                                    totalInputTokens, totalOutputTokens), provider, model,
+                                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                         }
                     }
                     case COMPACT -> {
@@ -514,11 +566,13 @@ public class WorkerAgent {
         } catch (MidTaskProviderFailureException e) {
             log.error("Mid-task provider failure for task {}: {}", taskId, e.getMessage());
             return withProviderModel(WorkerReport.blocked(taskId, e.getMessage(),
-                    totalInputTokens, totalOutputTokens), provider, model);
+                    totalInputTokens, totalOutputTokens), provider, model,
+                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
         } catch (LlmRouter.ProviderUnavailableException e) {
             log.error("All providers exhausted for task {}: {}", taskId, e.getMessage());
             return withProviderModel(WorkerReport.blocked(taskId, "All providers exhausted: " + e.getMessage(),
-                    totalInputTokens, totalOutputTokens), provider, model);
+                    totalInputTokens, totalOutputTokens), provider, model,
+                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
         }
         // ── END AGENTIC LOOP ──────────────────────────────────────────────────
 
@@ -528,14 +582,28 @@ public class WorkerAgent {
                 : "Hit safety iteration cap (" + safetyIterationCap + ") without producing completion report.";
         log.warn("Worker for task {} stopped: {} (complexity={})", taskId, reason, complexity);
         return withProviderModel(WorkerReport.partial(taskId, reason,
-                totalInputTokens, totalOutputTokens), provider, model);
+                totalInputTokens, totalOutputTokens), provider, model,
+                continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
         } finally {
             // Always clear the thread-local worktree context, even on exception.
             WorkspaceContext.clear();
         }
     }
 
-    /** Stamps the final provider and model onto the report so downstream code can persist it. */
+    /** Stamps the final provider, model, and calibration data onto the report. */
+    private static WorkerReport withProviderModel(WorkerReport report, String provider, String model,
+                                                    boolean wasTruncated, int maxOutputTokens,
+                                                    int totalOutputTokens, int iterationCount) {
+        report.setProvider(provider);
+        report.setModel(model);
+        report.setWasTruncated(wasTruncated);
+        report.setMaxOutputTokens(maxOutputTokens);
+        report.setActualOutputTokens(totalOutputTokens);
+        report.setIterationCount(iterationCount);
+        return report;
+    }
+
+    /** Overload for backward compat — no calibration data. */
     private static WorkerReport withProviderModel(WorkerReport report, String provider, String model) {
         report.setProvider(provider);
         report.setModel(model);
@@ -1407,6 +1475,26 @@ public class WorkerAgent {
                     .cacheReadTokens(cacheReadTokens).cacheWriteTokens(cacheWriteTokens)
                     .build();
         }
+    }
+
+    /**
+     * Reads project_type from .agent-context/project.json in the workspace.
+     * Returns null if file doesn't exist or can't be parsed.
+     */
+    private String readProjectType(String worktreePath) {
+        try {
+            java.nio.file.Path projectJson = java.nio.file.Path.of(worktreePath, ".agent-context", "project.json");
+            if (java.nio.file.Files.exists(projectJson)) {
+                String content = java.nio.file.Files.readString(projectJson);
+                var node = mapper.readTree(content);
+                if (node.has("project_type")) {
+                    return node.get("project_type").asText();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not read project type from .agent-context/project.json: {}", e.getMessage());
+        }
+        return null;
     }
 
     private TaskDefinition parseTask(String json) {

@@ -67,7 +67,7 @@ export default function VibeRunSubmit({ onClose }: Props) {
         )}
 
         <div className="flex items-center justify-between mt-4">
-          <span className="text-xs text-[var(--mc-text-muted)]">
+          <span className="hidden lg:inline text-xs text-[var(--mc-text-muted)]">
             Cmd+Enter to submit
           </span>
           <button

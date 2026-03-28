@@ -89,6 +89,41 @@ public class TokenBudgetMonitor {
     }
 
     /**
+     * Apply complexity overrides before resolving token budget.
+     * Last line of defense against planner over-assignment.
+     *
+     * @param originalComplexity the planner-assigned complexity (LOW/MEDIUM/HIGH)
+     * @param projectType        the project type from .agent-context/project.json (e.g. "STATIC_HTML")
+     * @param ownedFilesCount    number of files in the task's owned_files list
+     * @param taskId             for logging
+     * @return effective complexity after overrides
+     */
+    public String resolveEffectiveComplexity(String originalComplexity, String projectType,
+                                              int ownedFilesCount, String taskId) {
+        String c = originalComplexity != null ? originalComplexity.toUpperCase() : "MEDIUM";
+
+        // STATIC_HTML / NODE_FRONTEND: cap at MEDIUM (12288 output tokens).
+        // LOW (8192) is too small for full-page HTML+CSS+JS writes — causes truncation loops.
+        if ("STATIC_HTML".equalsIgnoreCase(projectType) || "NODE_FRONTEND".equalsIgnoreCase(projectType)) {
+            if ("HIGH".equals(c)) {
+                log.info("Complexity override: task {} downgraded HIGH → MEDIUM ({} project)",
+                        taskId, projectType);
+                return "MEDIUM";
+            }
+            return c; // keep LOW or MEDIUM as-is
+        }
+
+        // Tasks with ≤2 owned files are almost never HIGH.
+        if ("HIGH".equals(c) && ownedFilesCount <= 2) {
+            log.info("Complexity override: task {} downgraded HIGH → MEDIUM (≤{} owned files)",
+                    taskId, ownedFilesCount);
+            return "MEDIUM";
+        }
+
+        return c;
+    }
+
+    /**
      * Returns the max output tokens for a given model and complexity.
      * Uses the model's actual output limit, capped by complexity-based soft limits
      * to avoid wasteful over-generation on simple tasks.
@@ -98,7 +133,7 @@ public class TokenBudgetMonitor {
         // 16K tokens ≈ 400-500 lines of code, ~2.5min at 100 tok/s.
         // If a task genuinely needs more, WorkerAgent auto-continues on truncation.
         return switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
-            case "LOW"    -> 8_192;
+            case "LOW"    -> 4_096;
             case "MEDIUM" -> 12_288;
             case "HIGH"   -> 16_384;
             default       -> 8_192;

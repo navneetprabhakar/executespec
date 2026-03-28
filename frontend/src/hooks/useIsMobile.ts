@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 
-const MOBILE_BREAKPOINT = '(max-width: 767px)';
+const MOBILE_BREAKPOINT = '(max-width: 1023px)';
 
 /**
- * Returns true when the viewport is below the `md` Tailwind breakpoint (768px).
+ * Returns true when the viewport is below the `lg` Tailwind breakpoint (1024px).
  * Uses matchMedia for efficient listener-based updates (no resize polling).
  */
 export function useIsMobile(): boolean {

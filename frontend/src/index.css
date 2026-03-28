@@ -39,10 +39,19 @@ body {
 }
 
 /* Minimum touch target for mobile (Apple HIG: 44×44px) */
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   button, a[role="button"], [role="tab"] {
     min-height: 44px;
   }
+}
+
+/* Hide scrollbar but keep scrolling — used for horizontal tab bars / pill rows */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 :root {

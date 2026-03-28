@@ -351,7 +351,7 @@ public class SequentialTaskExecutor {
 
         String workerStatus = normalizeStatus(report.getStatus());
         stateStore.completeTask(taskId, report);
-        trackMetric(runId, task, model, 1, "COMPLETE".equals(workerStatus), durationMs);
+        trackMetric(runId, task, model, 1, "COMPLETE".equals(workerStatus), durationMs, report);
 
         return report;
     }
@@ -594,7 +594,8 @@ public class SequentialTaskExecutor {
      * Track model performance metrics for future data-driven routing.
      */
     private void trackMetric(String runId, AgentTask task, ResolvedModel model,
-                              int attempt, boolean passed, long durationMs) {
+                              int attempt, boolean passed, long durationMs,
+                              WorkerReport report) {
         try {
             metricRepository.save(ModelTaskMetric.builder()
                     .runId(runId)
@@ -607,6 +608,10 @@ public class SequentialTaskExecutor {
                     .validationPassed(passed)
                     .errorCount(0)
                     .durationMs(durationMs)
+                    .wasTruncated(report != null && report.isWasTruncated())
+                    .maxOutputTokens(report != null ? report.getMaxOutputTokens() : 0)
+                    .actualOutputTokens(report != null ? report.getActualOutputTokens() : 0)
+                    .iterationCount(report != null ? report.getIterationCount() : 0)
                     .build());
         } catch (Exception e) {
             log.warn("Failed to track model task metric", e);

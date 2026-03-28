@@ -74,7 +74,7 @@ export default function RunList() {
           <button
             onClick={() => setScopeFilter('mine')}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-sm text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 lg:py-1 rounded-sm text-xs font-medium transition-colors',
               scopeFilter === 'mine'
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -86,7 +86,7 @@ export default function RunList() {
           <button
             onClick={() => setScopeFilter(isSuperAdmin ? 'org' : null)}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-sm text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 lg:py-1 rounded-sm text-xs font-medium transition-colors',
               (isSuperAdmin ? scopeFilter === 'org' : scopeFilter === null)
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -99,7 +99,7 @@ export default function RunList() {
             <button
               onClick={() => setScopeFilter(null)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-sm text-xs font-medium transition-colors',
+                'flex items-center gap-1.5 px-3 py-2 lg:py-1 rounded-sm text-xs font-medium transition-colors',
                 scopeFilter === null
                   ? 'bg-accent-violet text-white'
                   : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -113,13 +113,13 @@ export default function RunList() {
       )}
 
       {/* Status filter bar */}
-      <div className="flex items-center gap-1.5 px-4 py-3 border-b border-white/[0.06] overflow-x-auto flex-shrink-0">
+      <div className="flex items-center gap-1 lg:gap-1.5 px-3 lg:px-4 py-2.5 lg:py-3 border-b border-white/[0.06] overflow-x-auto flex-shrink-0 scrollbar-hide">
         {FILTERS.map((f) => (
           <button
             key={f}
             onClick={() => setStatusFilter(f)}
             className={cn(
-              'px-3 py-2 md:py-1 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2 lg:px-3 py-1.5 lg:py-1 rounded-sm text-[10px] lg:text-xs font-medium whitespace-nowrap transition-colors',
               statusFilter === f
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -132,12 +132,12 @@ export default function RunList() {
 
       {/* Project filter bar — visible for org members with projects */}
       {isOrgMember && projects.length > 0 && (
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-white/[0.04] overflow-x-auto flex-shrink-0 bg-white/[0.01]">
+        <div className="flex items-center gap-1 lg:gap-1.5 px-3 lg:px-4 py-2 border-b border-white/[0.04] overflow-x-auto flex-shrink-0 scrollbar-hide bg-white/[0.01]">
           <FolderOpen className="h-3.5 w-3.5 text-zinc-600 flex-shrink-0" />
           <button
             onClick={() => setProjectFilter(null)}
             className={cn(
-              'px-2.5 py-1.5 md:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2.5 py-1.5 lg:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === null
                 ? 'bg-zinc-700 text-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
@@ -148,7 +148,7 @@ export default function RunList() {
           <button
             onClick={() => setProjectFilter('__none__')}
             className={cn(
-              'px-2.5 py-1.5 md:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2.5 py-1.5 lg:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === '__none__'
                 ? 'bg-zinc-600 text-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
@@ -163,7 +163,7 @@ export default function RunList() {
                 key={p.id}
                 onClick={() => setProjectFilter(p.id)}
                 className={cn(
-                  'px-2.5 py-1.5 md:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
+                  'px-2.5 py-1.5 lg:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
                   projectFilter === p.id
                     ? 'bg-accent-violet text-white'
                     : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
