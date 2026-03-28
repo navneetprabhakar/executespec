@@ -17,18 +17,18 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect }: PlanCardPro
   const isPopular = plan.tier === 'PRO';
 
   return (
-    <div className={`relative rounded-xl border-2 p-6 flex flex-col ${
-      isPopular ? 'border-indigo-600 shadow-lg' : 'border-gray-200'
+    <div className={`relative rounded-sm border-2 p-6 flex flex-col ${
+      isPopular ? 'border-indigo-600 ' : 'border-gray-200'
     } ${isCurrentPlan ? 'ring-2 ring-green-500' : ''}`}>
 
       {isPopular && (
-        <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-full">
+        <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-sm">
           POPULAR
         </span>
       )}
 
       {isCurrentPlan && (
-        <span className="absolute -top-3 right-4 bg-green-500 text-white text-xs font-semibold px-3 py-1 rounded-full">
+        <span className="absolute -top-3 right-4 bg-green-500 text-white text-xs font-semibold px-3 py-1 rounded-sm">
           CURRENT
         </span>
       )}
@@ -86,7 +86,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect }: PlanCardPro
       <button
         onClick={() => onSelect(plan.id)}
         disabled={isCurrentPlan}
-        className={`mt-6 w-full py-2.5 rounded-lg text-sm font-semibold transition ${
+        className={`mt-6 w-full py-2.5 rounded-sm text-sm font-semibold transition ${
           isCurrentPlan
             ? 'bg-green-100 text-green-700 cursor-default'
             : isPopular

@@ -8,9 +8,8 @@ import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.merge.MergeConflictAnalyser;
-import com.navneet.executespec.router.ModelRouter;
-import com.navneet.executespec.router.ModelSelection;
-import com.navneet.executespec.router.ModelTier;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.ToolResult;
@@ -47,7 +46,7 @@ public class PlannerAgent {
     private final LlmRouter llmRouter;
     private final LlmOutputParser outputParser;
     private final MergeConflictAnalyser conflictAnalyser;
-    private final ModelRouter modelRouter;
+    private final ModelResolver modelResolver;
 
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
@@ -66,10 +65,13 @@ public class PlannerAgent {
             model = modelOverride;
             provider = resolveProviderFromModel(model);
         } else {
-            // Use ModelRouter weighted selection at CAPABLE tier (Sonnet-class)
-            ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
-            model = selection.getModelName();
-            provider = selection.getProvider().name().toLowerCase();
+            // Use ModelResolver with the run's selected provider
+            var aiProvider = stateStore.findRun(runId)
+                    .map(r -> r.getAiProviderEnum())
+                    .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
+            ResolvedModel resolved = modelResolver.resolve("PlannerAgent", aiProvider);
+            model = resolved.getModel();
+            provider = resolved.providerName();
         }
         log.info("[Planner] Using model={} provider={} (override={})", model, provider, modelOverride);
 
@@ -239,10 +241,13 @@ public class PlannerAgent {
             .replace("{existingPlan}", existingPlanJson)
             .replace("{feedback}", feedback);
 
-        // Use ModelRouter weighted selection at CAPABLE tier (Sonnet-class)
-        ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
-        String model = selection.getModelName();
-        String provider = selection.getProvider().name().toLowerCase();
+        // Use ModelResolver with the run's selected provider
+        var aiProvider = stateStore.findRun(runId)
+                .map(r -> r.getAiProviderEnum())
+                .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
+        ResolvedModel resolved = modelResolver.resolve("PlannerAgent", aiProvider);
+        String model = resolved.getModel();
+        String provider = resolved.providerName();
 
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {

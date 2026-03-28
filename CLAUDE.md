@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-03-27
+> Last updated: 2026-03-28
 
 ## Architecture
 
@@ -10,9 +10,9 @@
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
 - **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
 - **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Sonnet) → Plan Gate → SequentialTaskExecutor (Haiku per task) → CompilerAgent → Auto-merge all tasks → ReviewerAgentV2 (inspect + auto-fix) → ValidationReport → COMPLETE
-- **LLM Router:** 3-provider fallback chains (Anthropic → Google → OpenAI) with weighted round-robin (4:3:3) and tier-based model escalation (FAST → CAPABLE → POWER)
+- **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). YAML-configured model matrix maps `AgentTier × Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING (Sonnet-class), WORKHORSE (Haiku-class), LIGHTWEIGHT (Haiku-class).
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
-- **Progressive merge:** Each task merged to main immediately after validation
+- **Progressive merge:** Each task merged to main immediately after completion (validation deferred to review phase)
 - **Auth:** JWT (access 24h, refresh 7d), RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles
 - **Tiers:** FREE (5 runs/month) → PRO (100/month) → ENTERPRISE (unlimited)
 - **Billing:** Razorpay integration for subscriptions + run top-up credits
@@ -33,7 +33,7 @@
 ## Patterns: MUST Follow
 
 - LLM calls go through `LlmRouter` — supports multi-provider fallback, per-run API key resolution, and tier-based model routing
-- Agent outputs validated by `CodeValidatorImpl` (pluggable gate chain: SYNTAX → TYPE → LINT → TEST) before merge
+- Agent outputs validated by `CodeValidatorImpl` during review phase (CompilerAgent + ReviewerAgentV2), not per-task
 - Structured logging with traceId/spanId via Micrometer context propagation (MDC auto-populated)
 - Constructor injection only via `@RequiredArgsConstructor`
 - Run ownership fields (`createdByUserId`, `orgId`, `projectId`) stamped BEFORE async pipeline thread starts (race condition fix)
@@ -146,7 +146,7 @@ Full API reference: see memory file `api-endpoints.md`
 | Sequential task executor | `harness/SequentialTaskExecutor.java` |
 | Worker agent | `agent/WorkerAgent.java` |
 | LLM router (multi-provider) | `agent/LlmRouter.java` |
-| Model router (tier escalation) | `router/ModelRouter.java` |
+| Model resolver (matrix-based) | `router/ModelResolver.java` |
 | State store | `state/StateStore.java` |
 | Code validator | `validator/CodeValidatorImpl.java` |
 | Compiler agent | `compiler/CompilerAgent.java` |
@@ -166,33 +166,33 @@ Full API reference: see memory file `api-endpoints.md`
 | Tier permissions | `auth/service/TierPermissionService.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Slack integration | `integration/slack/SlackNotificationService.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V39) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V42) |
 | LLM prompts | `resources/prompts/*.txt` |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |
 | Observability stack | `observability/docker-compose.yml` |
 | OTel config | `config/ObservabilityConfig.java`, `config/CustomMetricsConfig.java` |
-| Routing config | `config/RoutingProperties.java` (provider weights 4:3:3) |
+| Model matrix config | `router/ModelMatrixProperties.java` (agent tiers, provider models, failover order) |
+| Provider circuit breaker | `router/ProviderHealthTracker.java` (Redis-backed, 5-failure threshold, 60s TTL recovery) |
 | Test generation | `testgen/TestResultController.java` (apply-test-fixes) |
 | Infra (Terraform) | `infra/` |
 
 ## Model Matrix
 
-| Role | Agent(s) | Model |
-|------|----------|-------|
-| Planner | PlannerAgent | `claude-sonnet-4-6` |
-| Worker | WorkerAgent, CompilerAgent, ApiTestSuiteAgent | `claude-haiku-4-5-20251001` |
-| Reviewer | ReviewerAgentV2 | `claude-haiku-4-5-20251001` |
-| Report | ValidationReportGenerator | `claude-haiku-4-5-20251001` |
-| Scout | ContextAgent, PromptOptimiserAgent | `claude-haiku-4-5-20251001` |
-| Chat | ConversationAgent | `claude-haiku-4-5-20251001` |
+| Agent Tier | Agents | Anthropic | Google | OpenAI |
+|------------|--------|-----------|--------|--------|
+| PLANNING | PlannerAgent, ReviewerAgentV2, WorkerAgent (stall escalation) | `claude-sonnet-4-6` | `gemini-2.5-pro` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, ApiTestSuiteAgent, ConflictResolverAgent, TestPlannerAgent, TestWorkerAgent | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, PromptOptimiserAgent, ValidationReportGenerator, TestReportGenerator, ConversationController | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+
+Provider is user-selected per project. See `application.yml` → `model-matrix:` for full configuration.
 
 ## Current State
 
 ### Working
 - Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → review (inspect + auto-fix) → **validation report** → COMPLETE
-- Multi-provider LLM routing with automatic fallback (Anthropic → Google → OpenAI)
+- User-selected AI provider per project (Anthropic/Google/OpenAI) with YAML model matrix and health-based failover
 - 15-minute wall-clock worker time limit with stall detection and model escalation
 - Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 10-min TTL, Caddy proxy)
 - Caddy reverse proxy with Cloudflare Origin Certificate for local/VM preview routing
@@ -205,6 +205,15 @@ Full API reference: see memory file `api-endpoints.md`
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
 - Metrics wired into services: PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
+
+### Recent Changes (2026-03-28)
+- **Redis-backed circuit breaker:** `ProviderHealthTracker` rewritten from in-memory to Redis. LlmRouter now checks provider health before each call and records success/failure. 5-failure threshold, 60s TTL auto-recovery.
+- **Per-task validation removed:** `SequentialTaskExecutor` no longer runs `CodeValidator` after each task. Validation deferred to review phase (CompilerAgent + ReviewerAgentV2).
+- **LLM call limits removed:** Per-run LLM call circuit breaker removed from `LlmRouter`. Wall-clock time limit remains as safety net.
+- **Dependency merge fix:** `GitTool.createWorktree()` now throws on dep branch merge failure instead of silently continuing.
+- **Auto-restart disabled:** `autoRetryRunIfEligible()` and `autoRestartIfTransient()` calls removed from `PipelineHarness`.
+- **LiveLog fix:** Event type checks updated from camelCase to SCREAMING_SNAKE_CASE to match backend. Tool-result log noise removed.
+- **VM scaled:** n2-standard-4 → n2-standard-8, JVM heap -Xms8g -Xmx24g
 
 ### Recent Changes (2026-03-27)
 - Preview mode: dual-mode support — `cloud-run` for dev/prod (5-min TTL, Artifact Registry + Cloud Run), `docker` for local (10-min TTL, Docker Compose + Caddy)

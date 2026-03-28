@@ -66,7 +66,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
             onChange={e => setName(e.target.value)}
             required
             placeholder="Acme Corp"
-            className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+            className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
           />
         </div>
         <div>
@@ -77,7 +77,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
             onChange={e => setDomains(e.target.value)}
             required
             placeholder="acme.com, acmecorp.com"
-            className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+            className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
           />
           <p className="text-xs text-slate-500 mt-1">
             Comma-separated domains. Users with matching emails can be invited.
@@ -91,7 +91,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
             onChange={e => setAdminEmail(e.target.value)}
             required
             placeholder="admin@acme.com"
-            className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+            className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
           />
           <p className="text-xs text-slate-500 mt-1">
             Primary contact email for the organization admin.
@@ -105,7 +105,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
         <button
           type="submit"
           disabled={saving}
-          className="w-full rounded-lg bg-purple-600 px-4 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors"
+          className="w-full rounded-sm bg-purple-600 px-4 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Creating...' : 'Create Organization'}
         </button>
@@ -206,7 +206,7 @@ export default function OrgSettingsPage() {
         {/* Members */}
         <div>
           <h2 className="text-lg font-semibold text-white mb-3">Members ({members.length})</h2>
-          <div className="rounded-xl border border-slate-700 bg-[#1a1f2e] overflow-hidden">
+          <div className="rounded-sm border border-slate-700 bg-[#1a1f2e] overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-slate-800 text-slate-400">
                 <tr>
@@ -223,7 +223,7 @@ export default function OrgSettingsPage() {
                     <td className="px-4 py-3 text-white">{m.firstName} {m.lastName}</td>
                     <td className="px-4 py-3 text-slate-400">{m.email}</td>
                     <td className="px-4 py-3">
-                      <span className="rounded-full bg-purple-900/40 px-2 py-0.5 text-xs text-purple-300">
+                      <span className="rounded-sm bg-purple-900/40 px-2 py-0.5 text-xs text-purple-300">
                         {m.orgRole}
                       </span>
                     </td>
@@ -251,15 +251,15 @@ export default function OrgSettingsPage() {
           <form onSubmit={handleInvite} className="flex gap-3 flex-wrap">
             <input type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} required
               placeholder="colleague@company.com"
-              className="flex-1 min-w-[200px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+              className="flex-1 min-w-[200px] rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
             <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
-              className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none">
+              className="rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none">
               <option value="DEVELOPER">Developer</option>
               <option value="ORG_ADMIN">Org Admin</option>
               <option value="BILLING_ADMIN">Billing Admin</option>
             </select>
             <button type="submit"
-              className="rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500">
+              className="rounded-sm bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500">
               Send invite
             </button>
           </form>
@@ -272,13 +272,13 @@ export default function OrgSettingsPage() {
             <h2 className="text-lg font-semibold text-white mb-3">Pending invitations</h2>
             <div className="space-y-2">
               {invitations.map(inv => (
-                <div key={inv.id} className="flex items-center justify-between rounded-lg border border-slate-700 bg-[#1a1f2e] px-4 py-3">
+                <div key={inv.id} className="flex items-center justify-between rounded-sm border border-slate-700 bg-[#1a1f2e] px-4 py-3">
                   <div>
                     <span className="text-white text-sm">{inv.invitedEmail}</span>
                     <span className="ml-2 text-xs text-slate-500">{inv.orgRole}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    <span className={`rounded-sm px-2 py-0.5 text-xs font-semibold ${
                       inv.status === 'ESCALATED' ? 'bg-amber-900/40 text-amber-400' :
                       inv.status === 'ACCEPTED' ? 'bg-green-900/40 text-green-400' :
                       inv.status === 'EXPIRED' ? 'bg-red-900/40 text-red-400' :

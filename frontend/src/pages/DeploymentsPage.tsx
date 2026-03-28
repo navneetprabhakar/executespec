@@ -32,7 +32,7 @@ export default function DeploymentsPage() {
       <div className="h-full flex items-center justify-center p-4">
         <div className="text-center space-y-6 max-w-md">
           <div className="relative mx-auto w-fit">
-            <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-accent-violet/20 to-accent-cyan/20 border border-white/[0.08] flex items-center justify-center">
+            <div className="h-16 w-16 rounded-sm bg-gradient-to-br from-accent-violet/20 to-accent-cyan/20 border border-white/[0.08] flex items-center justify-center">
               <Rocket className="h-8 w-8 text-accent-violet" />
             </div>
             <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-accent-amber flex items-center justify-center">
@@ -47,22 +47,22 @@ export default function DeploymentsPage() {
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="p-3 rounded-lg bg-surface-1 border border-white/[0.06]">
+            <div className="p-3 rounded-sm bg-surface-1 border border-white/[0.06]">
               <Cloud className="h-4 w-4 text-accent-violet mx-auto mb-1" />
               <p className="text-[10px] text-zinc-400">Cloud Run</p>
             </div>
-            <div className="p-3 rounded-lg bg-surface-1 border border-white/[0.06]">
+            <div className="p-3 rounded-sm bg-surface-1 border border-white/[0.06]">
               <Server className="h-4 w-4 text-accent-cyan mx-auto mb-1" />
               <p className="text-[10px] text-zinc-400">Auto-scaling</p>
             </div>
-            <div className="p-3 rounded-lg bg-surface-1 border border-white/[0.06]">
+            <div className="p-3 rounded-sm bg-surface-1 border border-white/[0.06]">
               <Globe className="h-4 w-4 text-accent-emerald mx-auto mb-1" />
               <p className="text-[10px] text-zinc-400">Your GCP Project</p>
             </div>
           </div>
           <button
             onClick={() => navigate('/billing')}
-            className="px-6 py-2.5 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+            className="px-6 py-2.5 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
           >
             Upgrade to PRO
           </button>
@@ -80,7 +80,7 @@ export default function DeploymentsPage() {
         </div>
         <button
           onClick={() => setShowWizard(true)}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+          className="flex items-center gap-2 px-3 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
         >
           <Rocket className="h-4 w-4" /> Deploy Run
         </button>
@@ -96,7 +96,7 @@ export default function DeploymentsPage() {
           description="Deploy a completed run to your GCP Cloud Run project"
           action={
             <button onClick={() => setShowWizard(true)}
-              className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80">
+              className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80">
               Deploy Run
             </button>
           }

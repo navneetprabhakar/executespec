@@ -368,7 +368,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
         ) : (isFailed || isTimedOut) ? (
           <div className="p-4 space-y-3">
             <div className={cn(
-              'p-3 rounded-lg border',
+              'p-3 rounded-sm border',
               isTimedOut
                 ? 'bg-accent-amber/10 border-accent-amber/20'
                 : 'bg-accent-rose/10 border-accent-rose/20'
@@ -389,7 +389,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
             {logs.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs text-zinc-500 font-medium">Process output ({logs.length} lines):</p>
-                <pre className="p-3 rounded-lg bg-black/30 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap break-all max-h-64 overflow-y-auto leading-relaxed">
+                <pre className="p-3 rounded-sm bg-black/30 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap break-all max-h-64 overflow-y-auto leading-relaxed">
                   {logs.join('\n')}
                 </pre>
               </div>
@@ -498,7 +498,7 @@ function EnvConfigDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-white/[0.08] rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+      <div className="bg-zinc-900 border border-white/[0.08] rounded-sm  w-full max-w-lg max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
           <h3 className="text-sm font-semibold text-zinc-100">Third-Party API Keys</h3>
@@ -510,7 +510,7 @@ function EnvConfigDialog({
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Disclaimer */}
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-accent-amber/10 border border-accent-amber/20">
+          <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-amber/10 border border-accent-amber/20">
             <Shield className="h-4 w-4 text-accent-amber mt-0.5 flex-shrink-0" />
             <p className="text-xs text-accent-amber/90 leading-relaxed">
               These values are <strong>not stored, logged, or transmitted</strong> beyond this preview session.
@@ -520,7 +520,7 @@ function EnvConfigDialog({
 
           {/* Database info */}
           {dbInfo && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-accent-cyan/5 border border-accent-cyan/10">
+            <div className="flex items-center gap-2 p-3 rounded-sm bg-accent-cyan/5 border border-accent-cyan/10">
               <Database className="h-4 w-4 text-accent-cyan" />
               <p className="text-xs text-accent-cyan">
                 {dbInfo.emoji} <strong>{dbInfo.label}</strong> database will be auto-configured
@@ -550,7 +550,7 @@ function EnvConfigDialog({
                       value={values[v.name] ?? ''}
                       onChange={e => setValues(prev => ({ ...prev, [v.name]: e.target.value }))}
                       placeholder="Enter value (optional)..."
-                      className="w-full px-3 py-2 pr-9 text-xs font-mono bg-black/30 border border-white/[0.08] rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent-cyan/40"
+                      className="w-full px-3 py-2 pr-9 text-xs font-mono bg-black/30 border border-white/[0.08] rounded-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent-cyan/40"
                     />
                     <button
                       type="button"
@@ -588,7 +588,7 @@ function EnvConfigDialog({
               );
               onStart(nonEmpty);
             }}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25 transition-all"
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-sm text-xs font-medium bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25 transition-all"
           >
             <Play className="h-3 w-3" />
             Start Preview

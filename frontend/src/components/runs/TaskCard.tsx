@@ -54,7 +54,7 @@ export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
   const [open, setOpen] = useState(retryable && (hasReason || STUCK_RETRYABLE.has(task.status)));
 
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] overflow-hidden">
+    <div className="rounded-sm border border-white/[0.06] bg-white/[0.02] overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02]"

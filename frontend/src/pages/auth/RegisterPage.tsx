@@ -34,7 +34,7 @@ export default function RegisterPage() {
   if (success) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#1a1f2e] p-8 text-center shadow-2xl">
+        <div className="w-full max-w-md rounded-sm border border-slate-700 bg-[#1a1f2e] p-8 text-center ">
           <div className="mb-4 text-5xl">📧</div>
           <h2 className="mb-2 text-xl font-bold text-white">Check your inbox</h2>
           <p className="text-slate-400">
@@ -56,40 +56,40 @@ export default function RegisterPage() {
           <h1 className="text-3xl font-bold text-purple-400">executespec</h1>
           <p className="mt-2 text-slate-400">Create your free account</p>
         </div>
-        <div className="rounded-2xl border border-slate-700 bg-[#1a1f2e] p-8 shadow-2xl">
+        <div className="rounded-sm border border-slate-700 bg-[#1a1f2e] p-8 ">
           <h2 className="mb-6 text-xl font-bold text-white">Sign up</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-sm text-slate-400">First name</label>
                 <input type="text" value={form.firstName} onChange={set('firstName')} required
-                  className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+                  className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
               </div>
               <div>
                 <label className="mb-1 block text-sm text-slate-400">Last name</label>
                 <input type="text" value={form.lastName} onChange={set('lastName')} required
-                  className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+                  className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
               </div>
             </div>
             <div>
               <label className="mb-1 block text-sm text-slate-400">Email</label>
               <input type="email" value={form.email} onChange={set('email')} required
-                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+                className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
             </div>
             <div>
               <label className="mb-1 block text-sm text-slate-400">Password</label>
               <input type="password" value={form.password} onChange={set('password')} required minLength={8}
-                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+                className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
               <p className="mt-1 text-xs text-slate-500">Min 8 chars, 1 uppercase, 1 digit, no spaces</p>
             </div>
             <div>
               <label className="mb-1 block text-sm text-slate-400">Confirm password</label>
               <input type="password" value={form.confirm} onChange={set('confirm')} required
-                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+                className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
             </div>
-            {error && <p className="rounded-lg bg-red-900/30 px-3 py-2 text-sm text-red-400">{error}</p>}
+            {error && <p className="rounded-sm bg-red-900/30 px-3 py-2 text-sm text-red-400">{error}</p>}
             <button type="submit" disabled={loading}
-              className="w-full rounded-lg bg-purple-600 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors">
+              className="w-full rounded-sm bg-purple-600 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors">
               {loading ? 'Creating account…' : 'Create account'}
             </button>
           </form>

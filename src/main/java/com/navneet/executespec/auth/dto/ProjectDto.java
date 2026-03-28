@@ -10,9 +10,12 @@ public record ProjectDto(
         String name,
         String description,
         String status,
+        String aiProvider,
         Instant createdAt
 ) {
     public static ProjectDto from(Project p) {
-        return new ProjectDto(p.getId(), p.getOrgId(), p.getName(), p.getDescription(), p.getStatus(), p.getCreatedAt());
+        return new ProjectDto(p.getId(), p.getOrgId(), p.getName(), p.getDescription(),
+                p.getStatus(), p.getAiProvider() != null ? p.getAiProvider().name() : "ANTHROPIC",
+                p.getCreatedAt());
     }
 }

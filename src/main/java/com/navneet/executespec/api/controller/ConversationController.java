@@ -1,8 +1,9 @@
 package com.navneet.executespec.api.controller;
-import com.navneet.executespec.config.ModelConstants;
-
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.LlmRouter.FallbackMode;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.api.dto.ConversationMessage;
 import com.navneet.executespec.api.dto.ConversationRequest;
 import com.navneet.executespec.api.dto.ConversationResponse;
@@ -55,6 +56,7 @@ public class ConversationController {
             """;
 
     private final LlmRouter llmRouter;
+    private final ModelResolver modelResolver;
 
     @PostMapping
     public ResponseEntity<ConversationResponse> chat(
@@ -82,13 +84,15 @@ public class ConversationController {
             }
         }
 
+        // Pre-flight conversation has no project context — use default provider
+        ResolvedModel resolved = modelResolver.resolve("ConversationAgent", LlmProvider.ANTHROPIC);
         var options = AnthropicChatOptions.builder()
-                .model(ModelConstants.HAIKU)
+                .model(resolved.getModel())
                 .maxTokens(512)
                 .build();
 
         var response = llmRouter.callWithFallback(
-                "anthropic", ModelConstants.HAIKU,
+                resolved.providerName(), resolved.getModel(),
                 new Prompt(springMessages, options),
                 "conversation", "conversation-api",
                 FallbackMode.IMMEDIATE, 0, false);

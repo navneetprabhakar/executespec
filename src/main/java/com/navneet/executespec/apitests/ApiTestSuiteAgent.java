@@ -1,6 +1,8 @@
 package com.navneet.executespec.apitests;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -54,6 +56,7 @@ public class ApiTestSuiteAgent {
     private final FileSystemTool fsTool;
     private final GitTool gitTool;
     private final LlmRouter llmRouter;
+    private final ModelResolver modelResolver;
     private final SseBroadcaster broadcaster;
     private final StateStore stateStore;
     private final ApiTestSuiteProperties props;
@@ -116,11 +119,12 @@ public class ApiTestSuiteAgent {
 
         // Call LLM
         String system = promptResource.getContentAsString(StandardCharsets.UTF_8);
+        ResolvedModel resolved = modelResolver.resolve("ApiTestSuiteAgent", run.getAiProviderEnum());
         AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                 .build();
         AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                .model(props.getModel())
+                .model(resolved.getModel())
                 .cacheOptions(cacheOpts)
                 .build();
         Prompt prompt = new Prompt(List.of(
@@ -128,7 +132,7 @@ public class ApiTestSuiteAgent {
                 new UserMessage("Generate OpenAPI 3.0 YAML for these backend API source files:\n\n" + controllerContent)), opts);
 
         var llmResponse = llmRouter.callWithFallback(
-                props.getProvider(), props.getModel(),
+                resolved.providerName(), resolved.getModel(),
                 prompt, runId, "api-test-suite",
                 LlmRouter.FallbackMode.IMMEDIATE, 0, false);
 

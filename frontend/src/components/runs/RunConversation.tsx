@@ -58,7 +58,7 @@ export default function RunConversation({ runId }: Props) {
   if (permissions && !permissions.canUseChat) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center space-y-3 py-8 px-4">
-        <div className="h-12 w-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
+        <div className="h-12 w-12 rounded-sm bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
           <Lock className="h-6 w-6 text-zinc-600" />
         </div>
         <div>
@@ -344,7 +344,7 @@ export default function RunConversation({ runId }: Props) {
               </p>
               <textarea
                 className={cn(
-                  'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2',
+                  'w-full bg-white/[0.04] border border-white/[0.08] rounded-sm px-3 py-2',
                   'text-sm text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none',
                   'focus:border-emerald-500/40 focus:bg-white/[0.06] transition-colors'
                 )}
@@ -397,7 +397,7 @@ export default function RunConversation({ runId }: Props) {
               </p>
               <textarea
                 className={cn(
-                  'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2',
+                  'w-full bg-white/[0.04] border border-white/[0.08] rounded-sm px-3 py-2',
                   'text-sm text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none',
                   'focus:border-accent-violet/40 focus:bg-white/[0.06] transition-colors'
                 )}
@@ -448,7 +448,7 @@ export default function RunConversation({ runId }: Props) {
                 <span className="text-xs font-medium text-amber-400">Compiled Spec</span>
                 <button onClick={() => setShowCompiledSpec(false)} className="text-xs text-zinc-500 hover:text-zinc-300">Close</button>
               </div>
-              <div className="text-xs text-zinc-300 whitespace-pre-wrap bg-white/[0.03] rounded-lg p-3 max-h-48 overflow-y-auto">
+              <div className="text-xs text-zinc-300 whitespace-pre-wrap bg-white/[0.03] rounded-sm p-3 max-h-48 overflow-y-auto">
                 <MarkdownContent content={compiledSpec} />
               </div>
               <div className="flex justify-end gap-2">
@@ -495,7 +495,7 @@ export default function RunConversation({ runId }: Props) {
                   onClick={() => handleSend(prompt)}
                   disabled={sending}
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-all',
+                    'flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs transition-all',
                     'bg-white/[0.04] border border-white/[0.08] text-zinc-400',
                     'hover:bg-white/[0.08] hover:text-zinc-200 hover:border-accent-violet/30',
                     sending && 'opacity-50 cursor-not-allowed'
@@ -523,12 +523,12 @@ export default function RunConversation({ runId }: Props) {
           >
             {msg.role === 'user' ? (
               /* User message — plain text bubble */
-              <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed bg-accent-violet/20 text-zinc-100 rounded-br-sm">
+              <div className="max-w-[85%] rounded-sm px-4 py-3 text-sm leading-relaxed bg-accent-violet/20 text-zinc-100 rounded-br-sm">
                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
               </div>
             ) : (
               /* Assistant message — rendered markdown */
-              <div className="max-w-[90%] rounded-2xl px-4 py-3 bg-white/[0.05] border border-white/[0.06] text-zinc-300 rounded-bl-sm">
+              <div className="max-w-[90%] rounded-sm px-4 py-3 bg-white/[0.05] border border-white/[0.06] text-zinc-300 rounded-bl-sm">
                 <MarkdownContent content={msg.content} compact />
               </div>
             )}
@@ -538,7 +538,7 @@ export default function RunConversation({ runId }: Props) {
         {/* Sending indicator */}
         {sending && (
           <div className="flex justify-start">
-            <div className="bg-white/[0.05] border border-white/[0.06] rounded-2xl rounded-bl-sm px-4 py-3">
+            <div className="bg-white/[0.05] border border-white/[0.06] rounded-sm rounded-bl-sm px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5">
                   <span className="h-1.5 w-1.5 bg-accent-violet/60 rounded-full animate-bounce [animation-delay:0ms]" />
@@ -553,7 +553,7 @@ export default function RunConversation({ runId }: Props) {
 
         {/* Error */}
         {error && (
-          <div className="mx-auto max-w-md p-3 rounded-lg bg-accent-rose/10 border border-accent-rose/20 text-xs text-accent-rose text-center">
+          <div className="mx-auto max-w-md p-3 rounded-sm bg-accent-rose/10 border border-accent-rose/20 text-xs text-accent-rose text-center">
             {error}
           </div>
         )}
@@ -581,7 +581,7 @@ export default function RunConversation({ runId }: Props) {
       {!limitReached && (
         <div className="px-4 py-3 border-t border-white/[0.06] flex-shrink-0">
           <div className={cn(
-            'flex items-end gap-2 bg-white/[0.04] border rounded-xl px-3 py-2 transition-colors',
+            'flex items-end gap-2 bg-white/[0.04] border rounded-sm px-3 py-2 transition-colors',
             input ? 'border-accent-violet/40' : 'border-white/[0.08]'
           )}>
             <textarea
@@ -603,7 +603,7 @@ export default function RunConversation({ runId }: Props) {
               onClick={() => handleSend()}
               disabled={!input.trim() || sending || limitReached}
               className={cn(
-                'p-2.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg flex-shrink-0 transition-all',
+                'p-2.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-sm flex-shrink-0 transition-all',
                 input.trim() && !sending
                   ? 'bg-accent-violet text-white hover:bg-accent-violet/90'
                   : 'text-zinc-600 cursor-not-allowed'

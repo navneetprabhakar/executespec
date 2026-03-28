@@ -1,0 +1,35 @@
+/* ── Mission Control Design Tokens ─────────────────────────────────────── */
+
+:root {
+  /* Backgrounds */
+  --mc-bg-0: #0A0A0F;
+  --mc-bg-1: #111118;
+  --mc-bg-2: #1A1A24;
+  --mc-bg-3: #242432;
+  --mc-bg-4: #2E2E3E;
+
+  /* Borders */
+  --mc-border: rgba(255, 255, 255, 0.06);
+  --mc-border-active: rgba(255, 255, 255, 0.12);
+
+  /* Text */
+  --mc-text-primary: #E4E4E7;
+  --mc-text-secondary: #A1A1AA;
+  --mc-text-muted: #71717A;
+
+  /* Status */
+  --mc-status-success: #10B981;
+  --mc-status-warning: #F59E0B;
+  --mc-status-error: #F43F5E;
+  --mc-status-info: #06B6D4;
+
+  /* Accent */
+  --mc-accent: #8B5CF6;
+  --mc-accent-hover: #7C3AED;
+
+  /* Radii */
+  --mc-radius: 2px;
+
+  /* Shadows */
+  --mc-inset: inset 0 1px 0 0 rgba(255, 255, 255, 0.02);
+}

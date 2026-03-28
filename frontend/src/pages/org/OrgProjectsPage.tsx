@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronDown, ChevronUp, FolderOpen, FolderArchive,
-  Users, Plus, X, Eye, AlertCircle,
+  Users, Plus, X, Eye, AlertCircle, Cpu,
 } from 'lucide-react';
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useRunStore } from '@/stores/useRunStore';
@@ -20,7 +20,7 @@ function MemberRow({
   onRemove: (userId: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-white/[0.03] transition-colors">
+    <div className="flex items-center justify-between py-2 px-3 rounded-sm hover:bg-white/[0.03] transition-colors">
       <div className="flex items-center gap-3 min-w-0">
         <div className="h-7 w-7 rounded-full bg-accent-violet/20 flex items-center justify-center text-xs font-semibold text-accent-violet flex-shrink-0">
           {member.firstName?.[0]?.toUpperCase() ?? member.email[0].toUpperCase()}
@@ -31,7 +31,7 @@ function MemberRow({
         </div>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-        <span className="text-xs px-2 py-0.5 rounded-full bg-accent-violet/10 text-accent-violet">
+        <span className="text-xs px-2 py-0.5 rounded-sm bg-accent-violet/10 text-accent-violet">
           {member.projectRole}
         </span>
         {canManage && (
@@ -98,7 +98,7 @@ function AddMemberForm({
         <select
           value={userId}
           onChange={(e) => setUserId(e.target.value)}
-          className="w-full rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none"
+          className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none"
         >
           <option value="">— select org member —</option>
           {eligible.map((m) => (
@@ -113,7 +113,7 @@ function AddMemberForm({
         <select
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          className="rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none"
+          className="rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none"
         >
           <option value="DEVELOPER">Developer</option>
           <option value="PROJECT_LEAD">Project Lead</option>
@@ -123,7 +123,7 @@ function AddMemberForm({
       <button
         type="submit"
         disabled={!userId || adding}
-        className="px-3 py-1.5 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors flex items-center gap-1"
+        className="px-3 py-1.5 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors flex items-center gap-1"
       >
         <Plus className="h-3.5 w-3.5" />
         {adding ? 'Adding…' : 'Add'}
@@ -136,23 +136,32 @@ function AddMemberForm({
 }
 
 // ── Sub-component: project card ────────────────────────────────────────────────
+const PROVIDER_LABELS: Record<string, string> = {
+  ANTHROPIC: 'Anthropic (Claude)',
+  GOOGLE: 'Google (Gemini)',
+  OPENAI: 'OpenAI (GPT)',
+};
+
 function ProjectCard({
   project,
   orgMembers,
   isAdmin,
   onArchive,
   onViewRuns,
+  onUpdateProject,
 }: {
   project: api.ProjectDto;
   orgMembers: api.OrgMemberDto[];
   isAdmin: boolean;
   onArchive: (id: string) => void;
   onViewRuns: (id: string) => void;
+  onUpdateProject: (updated: api.ProjectDto) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState<api.ProjectMemberDto[]>([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [savingProvider, setSavingProvider] = useState(false);
 
   const loadMembers = async () => {
     if (membersLoaded) return;
@@ -190,7 +199,7 @@ function ProjectCard({
 
   return (
     <div className={cn(
-      'rounded-xl border transition-colors',
+      'rounded-sm border transition-colors',
       isArchived
         ? 'border-white/[0.04] bg-white/[0.01]'
         : 'border-white/[0.08] bg-[#0f1117]'
@@ -213,12 +222,15 @@ function ProjectCard({
                 {project.name}
               </p>
               <span className={cn(
-                'text-xs px-2 py-0.5 rounded-full flex-shrink-0',
+                'text-xs px-2 py-0.5 rounded-sm flex-shrink-0',
                 isArchived
                   ? 'bg-zinc-800 text-zinc-500'
                   : 'bg-emerald-900/40 text-emerald-400'
               )}>
                 {project.status}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded-sm flex-shrink-0 bg-blue-900/30 text-blue-400">
+                {PROVIDER_LABELS[project.aiProvider] ?? project.aiProvider}
               </span>
             </div>
             {project.description && (
@@ -230,7 +242,7 @@ function ProjectCard({
           {!isArchived && (
             <button
               onClick={(e) => { e.stopPropagation(); onViewRuns(project.id); }}
-              className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white border border-white/[0.08] hover:border-white/20 rounded-lg px-3 py-1.5 transition-colors"
+              className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white border border-white/[0.08] hover:border-white/20 rounded-sm px-3 py-1.5 transition-colors"
               title="Filter runs to this project"
             >
               <Eye className="h-3.5 w-3.5" />
@@ -287,6 +299,34 @@ function ProjectCard({
             )}
           </div>
 
+          {/* AI Provider setting — admin + active only */}
+          {isAdmin && !isArchived && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Cpu className="h-3.5 w-3.5 text-zinc-500" />
+                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">AI Provider</span>
+              </div>
+              <select
+                value={project.aiProvider}
+                disabled={savingProvider}
+                onChange={async (e) => {
+                  setSavingProvider(true);
+                  try {
+                    const updated = await api.updateProjectSettings(project.id, { aiProvider: e.target.value });
+                    onUpdateProject(updated);
+                  } catch { /* ignore */ }
+                  finally { setSavingProvider(false); }
+                }}
+                className="rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none disabled:opacity-50"
+              >
+                <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
+                <option value="GOOGLE">Google (Gemini)</option>
+                <option value="OPENAI">OpenAI (GPT)</option>
+              </select>
+              <p className="text-xs text-zinc-600 mt-1">All pipeline runs in this project will use this provider.</p>
+            </div>
+          )}
+
           {/* Archive action */}
           {isAdmin && !isArchived && (
             <div className="flex justify-end pt-2 border-t border-white/[0.04]">
@@ -319,6 +359,7 @@ export default function OrgProjectsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
+  const [provider, setProvider] = useState('ANTHROPIC');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
@@ -340,10 +381,11 @@ export default function OrgProjectsPage() {
     setCreateError('');
     setCreating(true);
     try {
-      const p = await api.createProject({ name, description: desc || undefined });
+      const p = await api.createProject({ name, description: desc || undefined, aiProvider: provider });
       setProjects((prev) => [p, ...prev]);
       setName('');
       setDesc('');
+      setProvider('ANTHROPIC');
       setShowCreate(false);
     } catch (err: any) {
       setCreateError(err.message ?? 'Failed to create project');
@@ -379,7 +421,7 @@ export default function OrgProjectsPage() {
         {isAdmin && (
           <button
             onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
           >
             <Plus className="h-4 w-4" />
             New Project
@@ -389,7 +431,7 @@ export default function OrgProjectsPage() {
 
       {/* Create form (collapsible) */}
       {isAdmin && showCreate && (
-        <div className="rounded-xl border border-white/[0.08] bg-[#0f1117] p-5">
+        <div className="rounded-sm border border-white/[0.08] bg-[#0f1117] p-5">
           <h2 className="text-base font-semibold text-white mb-4">Create project</h2>
           <form onSubmit={handleCreate} className="space-y-3">
             <input
@@ -398,28 +440,40 @@ export default function OrgProjectsPage() {
               onChange={(e) => setName(e.target.value)}
               required
               placeholder="Project name"
-              className="w-full rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+              className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
             />
             <input
               type="text"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
               placeholder="Description (optional)"
-              className="w-full rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+              className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
             />
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">AI Provider</label>
+              <select
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+                className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white focus:border-accent-violet focus:outline-none"
+              >
+                <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
+                <option value="GOOGLE">Google (Gemini)</option>
+                <option value="OPENAI">OpenAI (GPT)</option>
+              </select>
+            </div>
             {createError && <p className="text-sm text-red-400">{createError}</p>}
             <div className="flex gap-3">
               <button
                 type="submit"
                 disabled={creating || !name.trim()}
-                className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
               >
                 {creating ? 'Creating…' : 'Create'}
               </button>
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
-                className="px-4 py-2 rounded-lg text-zinc-400 hover:text-white text-sm transition-colors"
+                className="px-4 py-2 rounded-sm text-zinc-400 hover:text-white text-sm transition-colors"
               >
                 Cancel
               </button>
@@ -456,6 +510,7 @@ export default function OrgProjectsPage() {
                   isAdmin={isAdmin}
                   onArchive={handleArchive}
                   onViewRuns={handleViewRuns}
+                  onUpdateProject={(updated) => setProjects((prev) => prev.map((x) => x.id === updated.id ? updated : x))}
                 />
               ))}
             </div>
@@ -509,6 +564,7 @@ function ArchivedSection({
               isAdmin={isAdmin}
               onArchive={() => {}}
               onViewRuns={onViewRuns}
+              onUpdateProject={() => {}}
             />
           ))}
         </div>

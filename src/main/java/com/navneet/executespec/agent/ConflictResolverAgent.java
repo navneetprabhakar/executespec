@@ -1,5 +1,8 @@
 package com.navneet.executespec.agent;
 import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.state.StateStore;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,12 +35,11 @@ import java.util.List;
 public class ConflictResolverAgent {
 
     private final LlmRouter llmRouter;
+    private final ModelResolver modelResolver;
+    private final StateStore stateStore;
 
     @Value("classpath:prompts/conflict-resolver.txt")
     private Resource promptTemplate;
-
-    private static final String HAIKU_MODEL = ModelConstants.HAIKU;
-    private static final String SONNET_MODEL = ModelConstants.SONNET;
     private static final int MAX_OUTPUT_TOKENS = 8192;
 
     /**
@@ -52,12 +54,14 @@ public class ConflictResolverAgent {
                                    String baseContent,
                                    String taskADescription,
                                    String taskBDescription) {
+        ResolvedModel resolved = resolveModelForRun(runId);
         return doResolve(runId, conflictFilePath, oursContent, theirsContent,
-            baseContent, taskADescription, taskBDescription, HAIKU_MODEL);
+            baseContent, taskADescription, taskBDescription, resolved.getModel(),
+            resolved.providerName());
     }
 
     /**
-     * Escalated resolution using Sonnet when Haiku fails.
+     * Escalated resolution using PLANNING tier when WORKHORSE fails.
      *
      * @return merged file content, or null if resolution failed
      */
@@ -68,8 +72,26 @@ public class ConflictResolverAgent {
                                          String baseContent,
                                          String taskADescription,
                                          String taskBDescription) {
+        ResolvedModel resolved = resolveModelForRun(runId,
+                com.navneet.executespec.router.AgentTier.PLANNING);
         return doResolve(runId, conflictFilePath, oursContent, theirsContent,
-            baseContent, taskADescription, taskBDescription, SONNET_MODEL);
+            baseContent, taskADescription, taskBDescription, resolved.getModel(),
+            resolved.providerName());
+    }
+
+    private ResolvedModel resolveModelForRun(String runId) {
+        var provider = stateStore.findRun(runId)
+                .map(r -> r.getAiProviderEnum())
+                .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
+        return modelResolver.resolve("ConflictResolverAgent", provider);
+    }
+
+    private ResolvedModel resolveModelForRun(String runId,
+                                              com.navneet.executespec.router.AgentTier tierOverride) {
+        var provider = stateStore.findRun(runId)
+                .map(r -> r.getAiProviderEnum())
+                .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
+        return modelResolver.resolve("ConflictResolverAgent", provider, tierOverride);
     }
 
     private String doResolve(String runId,
@@ -79,7 +101,8 @@ public class ConflictResolverAgent {
                               String base,
                               String taskADesc,
                               String taskBDesc,
-                              String model) {
+                              String model,
+                              String provider) {
         try {
             String template = loadTemplate();
             String userContent = template
@@ -106,7 +129,7 @@ public class ConflictResolverAgent {
             );
 
             ChatResponse response = llmRouter.callWithFallback(
-                "anthropic", model, prompt, runId, "conflict-resolver",
+                provider, model, prompt, runId, "conflict-resolver",
                 LlmRouter.FallbackMode.IMMEDIATE, 0, false);
 
             if (response != null && response.getResult() != null

@@ -5,6 +5,7 @@ import { useSseStore } from '@/stores/useSseStore';
 import { ACTIVE_STATUSES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
+import ViewModeToggle from '@/components/shared/ViewModeToggle';
 
 export default function Header() {
   const { setCommandPaletteOpen, mobileSidebarOpen, setMobileSidebarOpen } = useUiStore();
@@ -52,13 +53,16 @@ export default function Header() {
         </span>
       </div>
 
+      {/* View mode toggle */}
+      <ViewModeToggle />
+
       {/* Spacer */}
       <div className="flex-1" />
 
       {/* Command palette trigger */}
       <button
         onClick={() => setCommandPaletteOpen(true)}
-        className="flex items-center gap-2 px-3 py-2 md:py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-sm text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+        className="flex items-center gap-2 px-3 py-2 md:py-1.5 rounded-sm bg-white/[0.04] border border-white/[0.06] text-sm text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
       >
         <Search className="h-3.5 w-3.5" />
         <span className="hidden md:block">Search...</span>
@@ -67,7 +71,7 @@ export default function Header() {
 
       {/* Active runs badge */}
       {activeCount > 0 && (
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-violet/15 border border-accent-violet/20">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-accent-violet/15 border border-accent-violet/20">
           <Zap className="h-3 w-3 text-accent-violet" />
           <span className="text-xs font-medium text-accent-violet">{activeCount} active</span>
         </div>

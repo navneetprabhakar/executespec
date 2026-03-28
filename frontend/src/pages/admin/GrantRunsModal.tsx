@@ -51,7 +51,7 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl p-6 space-y-5 overflow-y-auto"
+        className="w-full max-w-md rounded-sm bg-surface-2 border border-white/[0.08]  p-6 space-y-5 overflow-y-auto"
         style={{ maxHeight: '95dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -83,7 +83,7 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
               max={10000}
               value={quantity}
               onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
               required
             />
           </div>
@@ -98,7 +98,7 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
               value={expiryDays}
               onChange={(e) => setExpiryDays(e.target.value === '' ? '' : parseInt(e.target.value) || 0)}
               placeholder="90"
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
+              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
             />
             <p className="text-[10px] text-zinc-500 mt-1">Default: 90 days. Admin grants always expire.</p>
           </div>
@@ -111,7 +111,7 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
               onChange={(e) => setReason(e.target.value)}
               placeholder="e.g., Promotional credit, customer support"
               rows={2}
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40 resize-none"
+              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40 resize-none"
             />
           </div>
 
@@ -119,7 +119,7 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
             type="submit"
             disabled={submitting || quantity <= 0}
             className={cn(
-              'w-full py-2.5 rounded-lg font-medium text-sm text-white transition-all',
+              'w-full py-2.5 rounded-sm font-medium text-sm text-white transition-all',
               'bg-accent-emerald hover:bg-accent-emerald/80 disabled:opacity-40 disabled:cursor-not-allowed',
               'flex items-center justify-center gap-2',
             )}

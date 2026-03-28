@@ -69,6 +69,46 @@ spring:
           options:
             model: gemini-3-flash-preview    # default UTILITY; CAPABLE uses flash-lite, ARCHITECT uses customtools
 
+# ── Model Matrix (user-selected provider × agent tier → model) ────────────────
+model-matrix:
+  providers:
+    anthropic:
+      planning: claude-opus-4-6
+      workhorse: claude-sonnet-4-6
+      lightweight: claude-haiku-4-5-20251001
+    google:
+      planning: gemini-3.1-pro-preview
+      workhorse: gemini-3-flash-preview
+      lightweight: gemini-3-flash-preview
+    openai:
+      planning: gpt-5.4
+      workhorse: gpt-5.4
+      lightweight: gpt-5.4-mini
+  agent-tier-map:
+    PlannerAgent: PLANNING
+    ReviewerAgentV2: PLANNING
+    TestPlannerAgent: PLANNING
+    WorkerAgent: WORKHORSE
+    TestWorkerAgent: WORKHORSE
+    CompilerAgent: WORKHORSE
+    ApiTestSuiteAgent: WORKHORSE
+    ConflictResolverAgent: WORKHORSE
+    ContextAgent: LIGHTWEIGHT
+    ConversationAgent: LIGHTWEIGHT
+    PromptOptimiserAgent: LIGHTWEIGHT
+    TestReportGenerator: LIGHTWEIGHT
+    ValidationReportGenerator: LIGHTWEIGHT
+  failover-order:
+    anthropic:
+      - google
+      - openai
+    google:
+      - anthropic
+      - openai
+    openai:
+      - anthropic
+      - google
+
 agent:
   workspace: ./workspace
   roles:

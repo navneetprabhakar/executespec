@@ -1002,6 +1002,7 @@ export interface ProjectDto {
   name: string;
   description: string | null;
   status: string;
+  aiProvider: string;
   createdAt: string;
 }
 
@@ -1016,8 +1017,11 @@ export interface ProjectMemberDto {
 
 export const getProjects = () => req<ProjectDto[]>('/projects');
 
-export const createProject = (body: { name: string; description?: string }) =>
+export const createProject = (body: { name: string; description?: string; aiProvider?: string }) =>
   req<ProjectDto>('/projects', { method: 'POST', body: JSON.stringify(body) });
+
+export const updateProjectSettings = (id: string, body: { aiProvider: string }) =>
+  req<ProjectDto>(`/projects/${id}/settings`, { method: 'PATCH', body: JSON.stringify(body) });
 
 export const archiveProject = (id: string) =>
   req<ProjectDto>(`/projects/${id}/archive`, { method: 'PUT' });

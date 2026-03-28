@@ -57,7 +57,7 @@ export default function BillingProfileForm() {
   if (!profile) return null;
 
   const inputClasses =
-    'w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 ' +
+    'w-full rounded-sm border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 ' +
     'placeholder:text-zinc-600 focus:border-accent-violet/50 focus:outline-none focus:ring-1 focus:ring-accent-violet/20 transition-colors';
 
   const labelClasses = 'mb-1 block text-xs font-medium text-zinc-400';
@@ -75,7 +75,7 @@ export default function BillingProfileForm() {
   );
 
   return (
-    <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6 mt-6">
+    <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-6 mt-6">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h3 className="text-base font-semibold text-zinc-100">Billing Details</h3>
@@ -84,7 +84,7 @@ export default function BillingProfileForm() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-1.5 rounded-lg bg-accent-violet px-3.5 py-1.5 text-xs font-semibold
+          className="flex items-center gap-1.5 rounded-sm bg-accent-violet px-3.5 py-1.5 text-xs font-semibold
                      text-white hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
         >
           <Save className="h-3.5 w-3.5" />

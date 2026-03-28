@@ -42,7 +42,7 @@ export default function TestProgressTracker({ runId, status }: Props) {
   if (!hasStarted) return null;
 
   return (
-    <div className="mx-4 mt-3 rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+    <div className="mx-4 mt-3 rounded-sm border border-white/[0.08] bg-white/[0.02] p-3">
       <div className="flex items-center gap-2 mb-2">
         <TestTube2 className="h-4 w-4 text-violet-400" />
         <span className="text-sm font-medium text-zinc-200">Integration Tests</span>

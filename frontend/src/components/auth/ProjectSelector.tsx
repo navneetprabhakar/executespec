@@ -67,7 +67,7 @@ export default function ProjectSelector({ value, onChange, required }: Props) {
     }
   }, [newName, saving, onChange]);
 
-  if (loading) return <div className="h-9 animate-pulse rounded-lg bg-slate-700" />;
+  if (loading) return <div className="h-9 animate-pulse rounded-sm bg-slate-700" />;
 
   return (
     <div ref={containerRef} className="relative">
@@ -79,7 +79,7 @@ export default function ProjectSelector({ value, onChange, required }: Props) {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm transition-colors hover:border-slate-500 focus:border-purple-500 focus:outline-none"
+        className="w-full flex items-center justify-between rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm transition-colors hover:border-slate-500 focus:border-purple-500 focus:outline-none"
       >
         <span className={selectedProject ? 'text-white' : 'text-zinc-500'}>
           {selectedProject ? (
@@ -96,7 +96,7 @@ export default function ProjectSelector({ value, onChange, required }: Props) {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-white/[0.08] bg-[#1e1e2e] shadow-xl overflow-hidden">
+        <div className="absolute z-50 mt-1 w-full rounded-sm border border-white/[0.08] bg-[#1e1e2e]  overflow-hidden">
           <div className="max-h-52 overflow-y-auto py-1">
             {/* No project option */}
             <button

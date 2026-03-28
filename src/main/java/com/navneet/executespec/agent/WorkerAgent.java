@@ -73,6 +73,7 @@ public class WorkerAgent {
     private final ObservationRegistry observationRegistry;
     private final SseBroadcaster sseBroadcaster;
     private final com.navneet.executespec.harness.UiStyleResolver uiStyleResolver;
+    private final com.navneet.executespec.router.ModelResolver modelResolver;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -182,7 +183,7 @@ public class WorkerAgent {
                 // ── Stall detection: if no file writes in N minutes, escalate model ──
                 if (iteration > 0 && Duration.between(lastStallCheckTime, Instant.now()).toMinutes() >= STALL_CHECK_MINUTES) {
                     if (fileWritesSinceCheck == 0) {
-                        String escalatedModel = escalateModel(model);
+                        String escalatedModel = escalateModel(model, runId);
                         if (!escalatedModel.equals(model)) {
                             log.warn("[Worker {}] Stalled (no file writes in {}min) — escalating {} → {}",
                                     taskId, STALL_CHECK_MINUTES, model, escalatedModel);
@@ -499,19 +500,19 @@ public class WorkerAgent {
     // ── Model Router integration ────────────────────────────────────────────
 
     /**
-     * Execute with a specific model from ModelRouter.
+     * Execute with a specific resolved model.
      * Overrides task.assignedModel before calling execute().
      *
      * @param task   the task to execute
      * @param runId  the run ID
-     * @param model  the ModelSelection from ModelRouter (contains modelName, provider, tier)
+     * @param model  the ResolvedModel from ModelResolver
      * @return the WorkerReport from execution
      */
     public WorkerReport executeWithModel(AgentTask task, String runId,
-                                          com.navneet.executespec.router.ModelSelection model) {
+                                          com.navneet.executespec.router.ResolvedModel model) {
         log.info("Running task {} with model {} [{}]",
-                task.getTaskId(), model.getModelName(), model.getTier());
-        task.setAssignedModel(model.getModelName());
+                task.getTaskId(), model.getModel(), model.getAgentTier());
+        task.setAssignedModel(model.getModel());
         return execute(task, runId);
     }
 
@@ -943,16 +944,23 @@ public class WorkerAgent {
     }
 
     /**
-     * Escalate to the next higher model within the same provider family.
-     * Used by adaptive extension when the worker is stalled.
+     * Escalate to the next higher tier model within the run's selected provider.
+     * WORKHORSE → PLANNING (the highest tier). Used when the worker stalls.
      */
-    private String escalateModel(String currentModel) {
-        return switch (currentModel) {
-            case ModelConstants.HAIKU, ModelConstants.HAIKU_LEGACY -> ModelConstants.SONNET;
-            case ModelConstants.SONNET, ModelConstants.SONNET_LEGACY -> ModelConstants.OPUS;
-            case ModelConstants.GPT4O_MINI -> ModelConstants.GPT4O;
-            default -> currentModel; // already at max or unknown — no change
-        };
+    private String escalateModel(String currentModel, String runId) {
+        try {
+            var aiProvider = stateStore.findRun(runId)
+                    .map(r -> r.getAiProviderEnum())
+                    .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
+            var resolved = modelResolver.resolve("WorkerAgent", aiProvider,
+                    com.navneet.executespec.router.AgentTier.PLANNING);
+            if (!resolved.getModel().equals(currentModel)) {
+                return resolved.getModel();
+            }
+        } catch (Exception e) {
+            // Best-effort — fall through to current model
+        }
+        return currentModel;
     }
 
     /**

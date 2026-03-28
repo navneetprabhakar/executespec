@@ -82,7 +82,7 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
   };
 
   return (
-    <div className="mx-4 mb-3 rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+    <div className="mx-4 mb-3 rounded-sm border border-white/[0.08] bg-white/[0.02] overflow-hidden">
       {/* Collapsed header */}
       <div
         role="button"
@@ -126,22 +126,22 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
             {report.issuesCaught > 0 && (
               <div className="flex flex-wrap gap-2">
                 {report.buildBreakers > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-full border', SEVERITY_CONFIG.WOULD_BREAK_BUILD.color)}>
+                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_BREAK_BUILD.color)}>
                     {report.buildBreakers} build breaker{report.buildBreakers !== 1 ? 's' : ''}
                   </span>
                 )}
                 {report.productionBugs > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-full border', SEVERITY_CONFIG.WOULD_CAUSE_BUG.color)}>
+                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_CAUSE_BUG.color)}>
                     {report.productionBugs} bug risk{report.productionBugs !== 1 ? 's' : ''}
                   </span>
                 )}
                 {report.reviewFailures > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-full border', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.color)}>
+                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.color)}>
                     {report.reviewFailures} review issue{report.reviewFailures !== 1 ? 's' : ''}
                   </span>
                 )}
                 {report.lintFailures > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-full border', SEVERITY_CONFIG.WOULD_FAIL_LINT.color)}>
+                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_FAIL_LINT.color)}>
                     {report.lintFailures} lint issue{report.lintFailures !== 1 ? 's' : ''}
                   </span>
                 )}

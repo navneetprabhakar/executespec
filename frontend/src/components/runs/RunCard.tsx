@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ChevronRight, Cpu, FolderOpen, Github, User } from 'lucide-react';
+import { ChevronRight, FolderOpen, Github, User } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import TechBadges from '@/components/runs/TechBadges';
 import { fmtTokens, relativeTime, truncate, describeRunStatus } from '@/lib/utils';
@@ -11,6 +11,7 @@ interface RunCardProps {
   isActive: boolean;
   onClick: () => void;
   index: number;
+  compact?: boolean;
 }
 
 const cardVariants = {
@@ -21,7 +22,7 @@ const cardVariants = {
   }),
 };
 
-export default function RunCard({ run, isActive, onClick, index }: RunCardProps) {
+export default function RunCard({ run, isActive, onClick, index, compact }: RunCardProps) {
   return (
     <motion.button
       custom={index}
@@ -30,11 +31,10 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
       animate="visible"
       onClick={onClick}
       className={cn(
-        'w-full text-left p-4 rounded-xl border transition-all duration-150',
+        'w-full text-left p-4 rounded-sm border transition-all duration-150',
         'bg-white/[0.02] hover:bg-white/[0.04]',
-        'hover:-translate-y-px',
         isActive
-          ? 'border-accent-violet/40 bg-accent-violet/[0.05] shadow-glow-violet'
+          ? 'border-l-2 border-l-accent-violet border-accent-violet/40 bg-accent-violet/[0.05]'
           : 'border-white/[0.06] hover:border-white/[0.10]'
       )}
     >
@@ -62,55 +62,55 @@ export default function RunCard({ run, isActive, onClick, index }: RunCardProps)
               {truncate(run.userRequest ?? '', 120)}
             </p>
           )}
-          <TechBadges
-            userRequest={run.userRequest ?? ''}
-            runStatus={run.status}
-            techStack={run.techStack}
-            className="mt-1.5"
-          />
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
-            <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
-              <Cpu className="h-3 w-3" />
-              {run.plannerModel}
-            </span>
-            {run.createdByName && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/15 text-indigo-400">
-                <User className="h-2.5 w-2.5" />
-                {run.createdByName}
-              </span>
-            )}
-            {run.projectName && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-500/15 text-cyan-400">
-                <FolderOpen className="h-2.5 w-2.5" />
-                {run.projectName}
-              </span>
-            )}
-            {run.keySource && (
-              <span className={cn(
-                'px-1.5 py-0.5 rounded text-[10px] font-medium',
-                run.keySource === 'SYSTEM'   && 'bg-violet-500/15 text-violet-400',
-                run.keySource === 'OWN_KEYS' && 'bg-emerald-500/15 text-emerald-400',
-                run.keySource === 'HYBRID'   && 'bg-amber-500/15 text-amber-400',
-              )}>
-                {run.keySource === 'SYSTEM' ? 'Platform' : run.keySource === 'OWN_KEYS' ? 'Own Keys' : 'Hybrid'}
-              </span>
-            )}
-            {(run.totalInputTokens + run.totalOutputTokens) > 0 && (
-              <span className="text-xs text-zinc-600">{fmtTokens(run.totalInputTokens + run.totalOutputTokens)} tok</span>
-            )}
-            {run.repoUrl && (
-              <a
-                href={run.repoUrl}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
-              >
-                <Github className="h-3 w-3" />
-                GitHub
-              </a>
-            )}
-          </div>
+          {!compact && (
+            <TechBadges
+              userRequest={run.userRequest ?? ''}
+              runStatus={run.status}
+              techStack={run.techStack}
+              className="mt-1.5"
+            />
+          )}
+          {!compact && (
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              {run.createdByName && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/15 text-indigo-400">
+                  <User className="h-2.5 w-2.5" />
+                  {run.createdByName}
+                </span>
+              )}
+              {run.projectName && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-500/15 text-cyan-400">
+                  <FolderOpen className="h-2.5 w-2.5" />
+                  {run.projectName}
+                </span>
+              )}
+              {run.keySource && (
+                <span className={cn(
+                  'px-1.5 py-0.5 rounded text-[10px] font-medium',
+                  run.keySource === 'SYSTEM'   && 'bg-violet-500/15 text-violet-400',
+                  run.keySource === 'OWN_KEYS' && 'bg-emerald-500/15 text-emerald-400',
+                  run.keySource === 'HYBRID'   && 'bg-amber-500/15 text-amber-400',
+                )}>
+                  {run.keySource === 'SYSTEM' ? 'Platform' : run.keySource === 'OWN_KEYS' ? 'Own Keys' : 'Hybrid'}
+                </span>
+              )}
+              {(run.totalInputTokens + run.totalOutputTokens) > 0 && (
+                <span className="text-xs text-zinc-600">{fmtTokens(run.totalInputTokens + run.totalOutputTokens)} tok</span>
+              )}
+              {run.repoUrl && (
+                <a
+                  href={run.repoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
+                >
+                  <Github className="h-3 w-3" />
+                  GitHub
+                </a>
+              )}
+            </div>
+          )}
         </div>
         <ChevronRight className={cn('h-4 w-4 flex-shrink-0 mt-1 transition-colors',
           isActive ? 'text-accent-violet' : 'text-zinc-600')} />

@@ -56,7 +56,7 @@ export default function AdminInviteModal({ onClose, onSuccess }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl p-6 space-y-5 overflow-y-auto"
+        className="w-full max-w-md rounded-sm bg-surface-2 border border-white/[0.08]  p-6 space-y-5 overflow-y-auto"
         style={{ maxHeight: '95dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -113,7 +113,7 @@ export default function AdminInviteModal({ onClose, onSuccess }: Props) {
                     type="button"
                     onClick={() => setOrgMode(m)}
                     className={cn(
-                      'flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                      'flex-1 py-1.5 rounded-sm text-xs font-medium border transition-colors',
                       orgMode === m
                         ? 'bg-accent-violet/15 border-accent-violet/40 text-accent-violet'
                         : 'bg-white/[0.04] border-white/[0.08] text-zinc-400 hover:text-zinc-200',
@@ -153,7 +153,7 @@ export default function AdminInviteModal({ onClose, onSuccess }: Props) {
             type="submit"
             disabled={submitting}
             className={cn(
-              'w-full py-2.5 rounded-lg font-medium text-sm text-white transition-all',
+              'w-full py-2.5 rounded-sm font-medium text-sm text-white transition-all',
               'bg-accent-violet hover:bg-accent-violet/80 disabled:opacity-40 disabled:cursor-not-allowed',
               'flex items-center justify-center gap-2',
             )}
@@ -171,7 +171,7 @@ export default function AdminInviteModal({ onClose, onSuccess }: Props) {
 }
 
 // ── tiny helpers ─────────────────────────────────────────────────────────────
-const selectCls = 'w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40';
+const selectCls = 'w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40';
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
@@ -192,7 +192,7 @@ function Input({ type = 'text', value, onChange, placeholder, required }: {
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       required={required}
-      className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
+      className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
     />
   );
 }

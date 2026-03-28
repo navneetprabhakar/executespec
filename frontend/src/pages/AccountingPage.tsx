@@ -69,7 +69,7 @@ export default function AccountingPage() {
       </div>
 
       {/* GST summary */}
-      <div className="rounded-xl border border-surface-700 bg-surface-800 p-6">
+      <div className="rounded-sm border border-surface-700 bg-surface-800 p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-200">GST Summary — Q{quarter}</h3>
           {perms?.canExportGstr && (
@@ -107,7 +107,7 @@ export default function AccountingPage() {
       </div>
 
       {/* Trial balance */}
-      <div className="rounded-xl border border-surface-700 bg-surface-800 p-6">
+      <div className="rounded-sm border border-surface-700 bg-surface-800 p-6">
         <h3 className="mb-4 text-sm font-semibold text-slate-200">Trial Balance</h3>
         {trial.length === 0 ? (
           <div className="text-sm text-slate-500">No entries found for this period</div>
@@ -145,7 +145,7 @@ export default function AccountingPage() {
 
 function MetricCard({ label, value }: { label: string; value?: number }) {
   return (
-    <div className="rounded-xl border border-surface-700 bg-surface-800 p-4">
+    <div className="rounded-sm border border-surface-700 bg-surface-800 p-4">
       <div className="flex items-center gap-2 text-xs text-slate-500">
         <TrendingUp className="h-3.5 w-3.5" />
         {label}

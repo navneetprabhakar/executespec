@@ -10,10 +10,10 @@ import {
 // ── Milestone detection ───────────────────────────────────────────────────────
 
 const MILESTONE_TYPES = new Set([
-  'runStatus', 'taskStatus', 'gateOpened', 'gateResolved',
-  'complete', 'costUpdate', 'queued', 'recoveryAttempted',
-  'runRestarted', 'deployStarted', 'deployBuilding', 'deployPushing',
-  'deployLive', 'deployFailed',
+  'RUN_STATUS', 'TASK_STATUS', 'GATE_OPENED', 'GATE_RESOLVED',
+  'COMPLETE', 'COST_UPDATE', 'QUEUED', 'RECOVERY_ATTEMPTED',
+  'RUN_RESTARTED', 'DEPLOY_STARTED', 'DEPLOY_BUILDING', 'DEPLOY_PUSHING',
+  'DEPLOY_LIVE', 'DEPLOY_FAILED',
 ]);
 
 type FileOp = { kind: 'write' | 'edit' | 'commit' | 'command'; path?: string };
@@ -70,7 +70,7 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   let colorClass = 'border-zinc-600 text-zinc-300 bg-white/[0.03]';
 
   // Task status
-  if (type === 'taskStatus') {
+  if (type === 'TASK_STATUS') {
     const status = String(data.status ?? data.payload ?? '');
     const label = humanizeTaskId(String(data.taskId ?? ''));
     if (status === 'IN_PROGRESS' || status === 'RUNNING') {
@@ -97,7 +97,7 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   }
 
   // Run status
-  else if (type === 'runStatus') {
+  else if (type === 'RUN_STATUS') {
     const status = String(data.status ?? data.payload ?? '');
     icon = <Rocket className="h-3.5 w-3.5" />;
     text = `Run → ${status}`;
@@ -105,11 +105,11 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   }
 
   // Gates
-  else if (type === 'gateOpened') {
+  else if (type === 'GATE_OPENED') {
     icon = <PauseCircle className="h-3.5 w-3.5" />;
     text = `Waiting for ${String(data.gateType ?? data.payload ?? 'approval')} approval`;
     colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
-  } else if (type === 'gateResolved') {
+  } else if (type === 'GATE_RESOLVED') {
     const decision = String(data.decision ?? data.payload ?? '');
     const approved = decision === 'APPROVED';
     icon = approved ? <PlayCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />;
@@ -120,7 +120,7 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   }
 
   // Cost update
-  else if (type === 'costUpdate') {
+  else if (type === 'COST_UPDATE') {
     icon = <DollarSign className="h-3.5 w-3.5" />;
     const cost = Number(data.totalCost ?? data.payload ?? 0);
     const tokens = data.totalTokens ?? '';
@@ -129,29 +129,29 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   }
 
   // Complete
-  else if (type === 'complete') {
+  else if (type === 'COMPLETE') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     text = `Pipeline complete`;
     colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
   }
 
   // Recovery
-  else if (type === 'recoveryAttempted') {
+  else if (type === 'RECOVERY_ATTEMPTED') {
     icon = <RotateCcw className="h-3.5 w-3.5" />;
     text = `Recovery: ${String(data.strategy ?? data.payload ?? '')}`;
     colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
   }
 
   // Deploy events
-  else if (type === 'deployStarted') {
+  else if (type === 'DEPLOY_STARTED') {
     icon = <Rocket className="h-3.5 w-3.5" />;
     text = 'Deployment started';
     colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
-  } else if (type === 'deployLive') {
+  } else if (type === 'DEPLOY_LIVE') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     text = `Live at ${String(data.serviceUrl ?? data.payload ?? '')}`;
     colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
-  } else if (type === 'deployFailed') {
+  } else if (type === 'DEPLOY_FAILED') {
     icon = <XCircle className="h-3.5 w-3.5" />;
     text = `Deploy failed: ${String(data.error ?? data.payload ?? '')}`;
     colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
@@ -161,7 +161,7 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
 
   return (
     <div className={cn(
-      'flex items-center gap-2.5 px-3 py-1.5 rounded-lg border',
+      'flex items-center gap-2.5 px-3 py-1.5 rounded-sm border',
       'text-xs font-medium my-1',
       colorClass,
     )}>
@@ -193,23 +193,6 @@ function FileOpRow({ entry, op }: { entry: LogEntry; op: FileOp }) {
       {op.path && (
         <span className="text-zinc-400 font-mono truncate">{op.path}</span>
       )}
-    </div>
-  );
-}
-
-/** Dimmed compact row for regular verbose log lines. */
-function LogRow({ entry }: { entry: LogEntry }) {
-  const msg = formatLogMessage(entry.data);
-  // Skip empty or very short messages
-  if (!msg.trim()) return null;
-  // First line only for multi-line messages (collapse verbose output)
-  const firstLine = msg.split('\n')[0].slice(0, 160);
-
-  return (
-    <div className="flex gap-2 px-2 py-[1px] text-[11px] opacity-60 hover:opacity-100 transition-opacity">
-      <span className="text-zinc-700 flex-shrink-0 font-mono">{formatTimestamp(entry.timestamp)}</span>
-      <span className="text-zinc-500 flex-shrink-0">[log]</span>
-      <span className="text-zinc-400 truncate font-mono">{firstLine}</span>
     </div>
   );
 }
@@ -255,20 +238,23 @@ export default function LiveLog() {
             return <MilestoneBanner key={entry.id} entry={entry} />;
           }
 
-          // ── Log entries: check for file/command operations ──────────────
-          if (entry.type === 'log') {
+          // ── Log entries: show only file/command operations ──────────────
+          if (entry.type === 'LOG') {
             const msg = formatLogMessage(entry.data);
             const op  = detectFileOp(msg);
             if (op) return <FileOpRow key={entry.id} entry={entry} op={op} />;
-            return <LogRow key={entry.id} entry={entry} />;
+            // Skip verbose tool-result log lines — only show file ops and milestones
+            return null;
           }
 
-          // ── Fallback for unknown types ──────────────────────────────────
+          // ── Fallback for unknown types — show as readable text ─────────
+          const fallbackMsg = String(entry.data?.payload ?? entry.data?.message ?? '');
+          if (!fallbackMsg) return null;
           return (
             <div key={entry.id} className="flex gap-2 px-2 py-[1px] text-[11px] opacity-50">
               <span className="text-zinc-700 font-mono">{formatTimestamp(entry.timestamp)}</span>
               <span className="text-zinc-500">[{entry.type}]</span>
-              <span className="text-zinc-400 truncate">{JSON.stringify(entry.data).slice(0, 120)}</span>
+              <span className="text-zinc-400 truncate">{fallbackMsg.slice(0, 160)}</span>
             </div>
           );
         })}

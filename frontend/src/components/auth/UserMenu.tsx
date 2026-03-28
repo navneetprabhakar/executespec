@@ -16,7 +16,7 @@ export default function UserMenu() {
     <div className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-full bg-slate-700 px-3 py-1.5 text-sm text-white hover:bg-slate-600"
+        className="flex items-center gap-2 rounded-sm bg-slate-700 px-3 py-1.5 text-sm text-white hover:bg-slate-600"
       >
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-600 text-xs font-bold">
           {initials}
@@ -28,7 +28,7 @@ export default function UserMenu() {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-slate-700 bg-[#1a1f2e] shadow-xl">
+          <div className="absolute right-0 z-20 mt-2 w-56 rounded-sm border border-slate-700 bg-[#1a1f2e] ">
             <div className="border-b border-slate-700 p-4">
               <p className="font-semibold text-white">{user.firstName} {user.lastName}</p>
               <p className="text-xs text-slate-400">{user.email}</p>
@@ -42,7 +42,7 @@ export default function UserMenu() {
             <div className="p-2">
               <button
                 onClick={() => { setOpen(false); navigate('/settings'); }}
-                className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
+                className="w-full rounded-sm px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
               >
                 Settings
               </button>
@@ -50,7 +50,7 @@ export default function UserMenu() {
               {user.orgId && (user.orgRole === 'ORG_ADMIN' || user.globalRole === 'SUPER_ADMIN') && (
                 <button
                   onClick={() => { setOpen(false); navigate('/org/settings'); }}
-                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
+                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
                 >
                   Org Settings
                 </button>
@@ -59,7 +59,7 @@ export default function UserMenu() {
               {!user.orgId && (user.tier === 'PRO' || user.tier === 'ENTERPRISE') && (
                 <button
                   onClick={() => { setOpen(false); navigate('/org/settings'); }}
-                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-purple-400 hover:bg-slate-700"
+                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-purple-400 hover:bg-slate-700"
                 >
                   Create Organization
                 </button>
@@ -67,7 +67,7 @@ export default function UserMenu() {
               {user.globalRole === 'SUPER_ADMIN' && (
                 <button
                   onClick={() => { setOpen(false); navigate('/admin'); }}
-                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-amber-400 hover:bg-slate-700"
+                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-amber-400 hover:bg-slate-700"
                 >
                   Admin Panel
                 </button>
@@ -75,7 +75,7 @@ export default function UserMenu() {
               <hr className="my-1 border-slate-700" />
               <button
                 onClick={async () => { setOpen(false); await logout(); navigate('/login'); }}
-                className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700"
+                className="w-full rounded-sm px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700"
               >
                 Log out
               </button>

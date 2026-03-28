@@ -8,9 +8,9 @@ export default function GlassPanel({ children, className, ...props }: GlassPanel
   return (
     <div
       className={cn(
-        'backdrop-blur-xl border rounded-xl',
-        'bg-white/[0.03] border-white/[0.06]',
-        'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03)]',
+        'border rounded-sm',
+        'bg-[var(--mc-bg-1)] border-[var(--mc-border)]',
+        'shadow-mc-inset',
         className
       )}
       {...props}

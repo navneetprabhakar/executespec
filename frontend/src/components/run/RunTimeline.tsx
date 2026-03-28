@@ -88,7 +88,7 @@ export function RunTimeline({ events, status, taskCount, completedTaskCount }: R
         <div key={phase.name} className="flex items-center flex-shrink-0">
           {/* Phase node */}
           <div className="flex flex-col items-center">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold
+            <div className={`w-7 h-7 rounded-sm flex items-center justify-center text-xs font-bold
               ${phase.status === 'done' ? 'bg-green-500 text-white' :
                 phase.status === 'active' ? 'bg-indigo-500 text-white animate-pulse' :
                 'bg-zinc-700 text-zinc-400'}`}>

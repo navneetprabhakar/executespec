@@ -1,0 +1,66 @@
+import { Download, Eye, RotateCcw } from 'lucide-react';
+import type { RunDetail } from '@/lib/api';
+import { useRunStore } from '@/stores/useRunStore';
+import { useUiStore } from '@/stores/useUiStore';
+
+interface Props {
+  run: RunDetail;
+}
+
+export default function VibeRunSummary({ run }: Props) {
+  const retryRun = useRunStore((s) => s.retryRun);
+  const setActiveRunId = useRunStore((s) => s.setActiveRunId);
+  const setActiveTab = useUiStore((s) => s.setActiveTab);
+
+  const handleViewPreview = () => {
+    setActiveTab('preview');
+  };
+
+  const handleRunAgain = async () => {
+    try {
+      const newRunId = await retryRun(run.runId);
+      setActiveRunId(newRunId);
+    } catch {
+      // toast handled by store
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-4">
+      {/* Title + summary */}
+      <div>
+        {run.runTitle && (
+          <h3 className="text-lg font-medium text-[var(--mc-text-primary)] mb-1">{run.runTitle}</h3>
+        )}
+        {run.runSummary && (
+          <p className="text-sm text-[var(--mc-text-secondary)]">{run.runSummary}</p>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex flex-wrap gap-2">
+        <a
+          href={`/api/runs/${run.runId}/download`}
+          className="flex items-center gap-2 px-4 py-2 rounded-sm border border-[var(--mc-border)] bg-[var(--mc-bg-2)] text-sm text-[var(--mc-text-primary)] hover:bg-[var(--mc-bg-3)] transition-colors"
+        >
+          <Download className="h-4 w-4" />
+          Download Code
+        </a>
+        <button
+          onClick={handleViewPreview}
+          className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+        >
+          <Eye className="h-4 w-4" />
+          View Preview
+        </button>
+        <button
+          onClick={handleRunAgain}
+          className="flex items-center gap-2 px-4 py-2 rounded-sm border border-[var(--mc-border)] bg-[var(--mc-bg-2)] text-sm text-[var(--mc-text-primary)] hover:bg-[var(--mc-bg-3)] transition-colors"
+        >
+          <RotateCcw className="h-4 w-4" />
+          Run Again
+        </button>
+      </div>
+    </div>
+  );
+}

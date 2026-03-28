@@ -71,7 +71,7 @@ import java.util.stream.Collectors;
 public class ReviewerAgentV2 {
 
     private final LlmRouter llmRouter;
-    private final ModelRouter modelRouter;
+    private final ModelResolver modelResolver;
     private final FileSystemTool fileSystemTool;
     private final WorkerAgent workerAgent;
     private final CodeValidator codeValidator;
@@ -121,12 +121,12 @@ public class ReviewerAgentV2 {
         String runId = run.getRunId();
         Path workspacePath = gitTool.getWorkspacePath(runId);
 
-        // Select CAPABLE tier for review
-        ModelSelection reviewModel = modelRouter.selectFromTier(ModelTier.CAPABLE, availableProviders);
-        log.info("Review using model: {} [{}]", reviewModel.getModelName(), reviewModel.getTier());
+        // Select model via ModelResolver for review (PLANNING tier)
+        ResolvedModel reviewModel = modelResolver.resolve("ReviewerAgentV2", run.getAiProviderEnum());
+        log.info("Review using model: {} [{}]", reviewModel.getModel(), reviewModel.getAgentTier());
 
         sseBroadcaster.emit(runId, RunEvent.log(runId, null,
-                "Review started using " + reviewModel.getModelName()));
+                "Review started using " + reviewModel.getModel()));
 
         // ============================
         // PHASE 1: INSPECT
@@ -241,7 +241,7 @@ public class ReviewerAgentV2 {
                 .autoFixSucceeded(autoFixSucceeded)
                 .summary(buildSummary(verdict, criticalCount, minorCount, autoFixSucceeded))
                 .reviewDuration(reviewDuration)
-                .reviewerModel(reviewModel.getModelName())
+                .reviewerModel(reviewModel.getModel())
                 .readmeUpdated(readmeUpdated)
                 .overallConfidence(confidence)
                 .mergeBlockers(mergeBlockers)
@@ -273,11 +273,11 @@ public class ReviewerAgentV2 {
      * with max 10 tool calls. Expects JSON array output matching ReviewIssue structure.
      */
     private List<ReviewIssue> executeInspection(PipelineRun run, Path workspacePath,
-                                                  String reviewPrompt, ModelSelection model) {
+                                                  String reviewPrompt, ResolvedModel model) {
         String runId = run.getRunId();
-        log.info("Executing review inspection with model {}", model.getModelName());
+        log.info("Executing review inspection with model {}", model.getModel());
 
-        String provider = resolveProviderFromModel(model);
+        String provider = model.providerName();
         String systemPrompt = loadPrompt();
 
         List<Message> messages = new ArrayList<>();
@@ -296,7 +296,7 @@ public class ReviewerAgentV2 {
 
             LlmRouter.LlmResponse lr;
             try {
-                lr = llmRouter.callWithFallbackTracked(provider, model.getModelName(), prompt,
+                lr = llmRouter.callWithFallbackTracked(provider, model.getModel(), prompt,
                         runId, "reviewer-v2", FallbackMode.IMMEDIATE, iteration, false);
             } catch (Exception e) {
                 log.error("[ReviewerV2] LLM call failed on iteration {}", iteration, e);
@@ -399,20 +399,18 @@ public class ReviewerAgentV2 {
                                     ReviewIssue issue, Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
 
-        // Start at CAPABLE (FAST tier removed), escalate to POWER on retry
-        ModelTier[] tiers = { ModelTier.CAPABLE, ModelTier.POWER };
+        // Use PLANNING tier for fix attempts (no escalation — same tier for both)
+        ResolvedModel fixModel = modelResolver.resolve("ReviewerAgentV2", run.getAiProviderEnum());
 
         for (int attempt = 0; attempt < MAX_FIX_ATTEMPTS; attempt++) {
-            ModelTier tier = tiers[Math.min(attempt, tiers.length - 1)];
             try {
-                ModelSelection fixModel = modelRouter.selectFromTier(tier, availableProviders);
                 AgentTask fixTask = createFixTask(run, issue, fixModel);
 
                 log.info("Executing auto-fix for {} using {} (attempt {}/{})",
-                        issue.getId(), fixModel.getModelName(), attempt + 1, MAX_FIX_ATTEMPTS);
+                        issue.getId(), fixModel.getModel(), attempt + 1, MAX_FIX_ATTEMPTS);
 
                 // Execute using WorkerAgent's standard tool-use loop
-                WorkerReport fixReport = workerAgent.executeWithModel(fixTask, runId, fixModel);
+                WorkerReport fixReport = workerAgent.execute(fixTask, runId);
 
                 // Validate the fix
                 Language lang = detectLanguageForFile(issue.getFile());
@@ -454,7 +452,7 @@ public class ReviewerAgentV2 {
      * Create a transient AgentTask for the fix worker.
      * Sets up proper TaskDefinition JSON so WorkerAgent.execute() can process it.
      */
-    private AgentTask createFixTask(PipelineRun run, ReviewIssue issue, ModelSelection fixModel) {
+    private AgentTask createFixTask(PipelineRun run, ReviewIssue issue, ResolvedModel fixModel) {
         String fixPrompt = buildFixPrompt(issue);
 
         // Build a TaskDefinition JSON for the worker
@@ -469,7 +467,7 @@ public class ReviewerAgentV2 {
         task.setTaskId("fix-" + issue.getId().toLowerCase());
         task.setTitle("Fix: " + issue.getDescription());
         task.setStatus("WORKING");
-        task.setAssignedModel(fixModel.getModelName());
+        task.setAssignedModel(fixModel.getModel());
 
         try {
             task.setTaskJson(mapper.writeValueAsString(fixDef));
@@ -634,17 +632,6 @@ public class ReviewerAgentV2 {
         } catch (IOException e) {
             throw new RuntimeException("Cannot load reviewer-v2 prompt", e);
         }
-    }
-
-    /**
-     * Resolve provider string for LlmRouter from ModelSelection.
-     */
-    private String resolveProviderFromModel(ModelSelection model) {
-        return switch (model.getProvider()) {
-            case ANTHROPIC -> "anthropic";
-            case OPENAI -> "openai";
-            case GEMINI -> "google";
-        };
     }
 
     // ============================

@@ -32,7 +32,7 @@ public class ApprovalGate {
 
         // Step 9: Show cost estimate at plan approval
         try {
-            CostBreakdown cost = costEstimator.estimate(plan);
+            CostBreakdown cost = costEstimator.estimate(plan, run.getAiProviderEnum());
             log.info("  {}", cost.formatted());
         } catch (Exception e) {
             log.debug("Could not compute cost estimate: {}", e.getMessage());

@@ -98,6 +98,16 @@ public class PipelineRun {
     @Column(name = "execution_mode", length = 20)
     private String executionMode = "PRODUCTION";
 
+    /** User-selected LLM provider (copied from Project at submission time). */
+    @Builder.Default
+    @Column(name = "ai_provider", length = 20)
+    private String aiProvider = "ANTHROPIC";
+
+    public com.navneet.executespec.router.LlmProvider getAiProviderEnum() {
+        try { return com.navneet.executespec.router.LlmProvider.valueOf(aiProvider); }
+        catch (Exception e) { return com.navneet.executespec.router.LlmProvider.ANTHROPIC; }
+    }
+
     public com.navneet.executespec.harness.ExecutionMode getExecutionModeEnum() {
         try { return com.navneet.executespec.harness.ExecutionMode.valueOf(executionMode); }
         catch (Exception e) { return com.navneet.executespec.harness.ExecutionMode.PRODUCTION; }

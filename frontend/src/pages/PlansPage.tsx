@@ -94,7 +94,7 @@ export default function PlansPage() {
       {/* Toggles */}
       <div className="flex justify-center gap-6 mb-10">
         {/* Billing cycle toggle */}
-        <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+        <div className="flex items-center gap-2 bg-gray-100 rounded-sm p-1">
           <button
             onClick={() => setBillingCycle('MONTHLY')}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
@@ -114,7 +114,7 @@ export default function PlansPage() {
         </div>
 
         {/* Key mode toggle */}
-        <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+        <div className="flex items-center gap-2 bg-gray-100 rounded-sm p-1">
           <button
             onClick={() => setKeyMode('BYOK')}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
@@ -136,7 +136,7 @@ export default function PlansPage() {
 
       {/* Error message */}
       {checkoutError && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm text-center">
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-sm text-sm text-center">
           {checkoutError}
         </div>
       )}

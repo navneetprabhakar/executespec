@@ -3,6 +3,7 @@ package com.navneet.executespec.auth.controller;
 import com.navneet.executespec.auth.dto.CreateProjectRequest;
 import com.navneet.executespec.auth.dto.ProjectDto;
 import com.navneet.executespec.auth.dto.ProjectMemberDto;
+import com.navneet.executespec.auth.dto.UpdateProjectSettingsRequest;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ProjectService;
 import jakarta.validation.Valid;
@@ -52,6 +53,15 @@ public class ProjectController {
         boolean isOrgAdmin = isOrgAdminOrSuperAdmin(userDetails);
         return ResponseEntity.ok(projectService.getProject(id, userDetails.getUser().getId(),
                 isSuperAdmin, isOrgAdmin));
+    }
+
+    @PatchMapping("/{id}/settings")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ProjectDto> updateSettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable String id,
+            @RequestBody UpdateProjectSettingsRequest req) {
+        return ResponseEntity.ok(projectService.updateSettings(id, req, userDetails.getUser().getId()));
     }
 
     @PutMapping("/{id}/archive")

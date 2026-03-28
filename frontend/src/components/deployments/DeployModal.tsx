@@ -40,7 +40,7 @@ export default function DeployModal({ onClose, onRefresh }: DeployModalProps) {
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl p-6 space-y-4 overflow-y-auto"
+        className="w-full max-w-md rounded-sm bg-surface-2 border border-white/[0.08]  p-6 space-y-4 overflow-y-auto"
         style={{ maxHeight: '95dvh' }}
       >
         <div className="flex items-center justify-between">
@@ -57,7 +57,7 @@ export default function DeployModal({ onClose, onRefresh }: DeployModalProps) {
               value={runId}
               onChange={(e) => setRunId(e.target.value)}
               placeholder="e.g. abc12345-..."
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
             />
           </div>
           <div>
@@ -65,7 +65,7 @@ export default function DeployModal({ onClose, onRefresh }: DeployModalProps) {
             <select
               value={strategy}
               onChange={(e) => setStrategy(e.target.value)}
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none"
+              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none"
             >
               <option value="SPRING_BOOT">Spring Boot</option>
               <option value="STATIC">Static Site</option>
@@ -77,7 +77,7 @@ export default function DeployModal({ onClose, onRefresh }: DeployModalProps) {
           onClick={handleDeploy}
           disabled={!runId.trim() || loading}
           className={cn(
-            'w-full py-2.5 rounded-lg font-medium text-sm text-white transition-all',
+            'w-full py-2.5 rounded-sm font-medium text-sm text-white transition-all',
             'bg-accent-violet hover:bg-accent-violet/80 disabled:opacity-40 disabled:cursor-not-allowed',
             'flex items-center justify-center gap-2'
           )}

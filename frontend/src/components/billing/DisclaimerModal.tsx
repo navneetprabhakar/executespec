@@ -13,7 +13,7 @@ export function DisclaimerModal({ isOpen, onAccept, onCancel }: DisclaimerModalP
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-black/50">
-      <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
+      <div className="bg-white rounded-sm  max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
         <div className="p-6 border-b">
           <h2 className="text-lg font-semibold text-gray-900">Terms of Use & Disclaimer</h2>
         </div>
@@ -46,14 +46,14 @@ export function DisclaimerModal({ isOpen, onAccept, onCancel }: DisclaimerModalP
           <div className="flex gap-3 justify-end">
             <button
               onClick={onCancel}
-              className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-sm hover:bg-gray-200"
             >
               Cancel
             </button>
             <button
               onClick={onAccept}
               disabled={!accepted}
-              className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Continue to Payment
             </button>

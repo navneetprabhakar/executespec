@@ -36,7 +36,7 @@ export default function AcceptInvitePage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#1a1f2e] p-8 text-center shadow-2xl">
+      <div className="w-full max-w-md rounded-sm border border-slate-700 bg-[#1a1f2e] p-8 text-center ">
         {status === 'loading' && (
           <>
             <div className="mb-4 flex justify-center">
@@ -58,7 +58,7 @@ export default function AcceptInvitePage() {
             <h2 className="mb-2 text-xl font-bold text-white">Sign in to accept</h2>
             <p className="mb-6 text-slate-400">You need to be logged in to accept this invitation.</p>
             <Link to={`/login?invite=${token}`}
-              className="inline-block rounded-lg bg-purple-600 px-6 py-2.5 font-semibold text-white hover:bg-purple-500">
+              className="inline-block rounded-sm bg-purple-600 px-6 py-2.5 font-semibold text-white hover:bg-purple-500">
               Sign in
             </Link>
             <p className="mt-3 text-sm text-slate-400">

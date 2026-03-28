@@ -10,9 +10,8 @@ import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewSession;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
-import com.navneet.executespec.router.ModelRouter;
-import com.navneet.executespec.router.ModelSelection;
-import com.navneet.executespec.router.ModelTier;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
@@ -81,7 +80,7 @@ public class ConversationAgent {
     private static final int MAX_SUGGESTION_TASKS = 6;
 
     private final LlmRouter llmRouter;
-    private final ModelRouter modelRouter;
+    private final ModelResolver modelResolver;
     private final WorkspaceFileService workspaceFileService;
     private final PreviewService previewService;
     private final ObjectMapper objectMapper;
@@ -96,9 +95,9 @@ public class ConversationAgent {
      * @return the assistant's reply text
      */
     public String chat(PipelineRun run, List<ChatMessageRecord> history, String newMessage) {
-        ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
-        String selectedModel = selection.getModelName();
-        String selectedProvider = selection.getProvider().name().toLowerCase();
+        ResolvedModel resolved = modelResolver.resolve("ConversationAgent", run.getAiProviderEnum());
+        String selectedModel = resolved.getModel();
+        String selectedProvider = resolved.providerName();
         log.info("[ConversationAgent] run={} historySize={} model={} provider={}",
             run.getRunId(), history.size(), selectedModel, selectedProvider);
 
@@ -163,9 +162,9 @@ public class ConversationAgent {
      * @throws ApplySuggestionTooLargeException if the LLM generates >6 tasks
      */
     public TaskPlan generateSuggestionPlan(PipelineRun run, String suggestion) {
-        ModelSelection selection = modelRouter.selectFromTier(ModelTier.CAPABLE);
-        String selectedModel = selection.getModelName();
-        String selectedProvider = selection.getProvider().name().toLowerCase();
+        ResolvedModel resolved = modelResolver.resolve("ConversationAgent", run.getAiProviderEnum());
+        String selectedModel = resolved.getModel();
+        String selectedProvider = resolved.providerName();
         log.info("[ConversationAgent] Generating suggestion plan for run={} model={}", run.getRunId(), selectedModel);
 
         String workspaceContext = buildWorkspaceContext(run.getRunId());

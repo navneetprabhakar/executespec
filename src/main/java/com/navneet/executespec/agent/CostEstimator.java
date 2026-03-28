@@ -6,6 +6,9 @@ import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.config.AgentModelConfig;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.pricing.ModelPricingRepository;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
@@ -29,6 +32,7 @@ public class CostEstimator {
 
     private final AgentProperties props;
     private final ModelPricingRepository pricingRepo;
+    private final ModelResolver modelResolver;
     private final StateStore stateStore;
     private final TestPlanRepository testPlanRepository;
 
@@ -44,11 +48,22 @@ public class CostEstimator {
     private static final int HIGH_IN_TOKENS   = 60_000,  HIGH_OUT_TOKENS   = 8_192;
 
     public CostBreakdown estimate(TaskPlan plan) {
+        return estimate(plan, LlmProvider.ANTHROPIC);
+    }
+
+    public CostBreakdown estimate(TaskPlan plan, LlmProvider provider) {
         if (plan == null || plan.getTasks() == null) {
             return new CostBreakdown(0, 0);
         }
 
-        double[] workerRates = dbRates(props.getRoles().getWorker());
+        ResolvedModel workerModel   = modelResolver.resolve("WorkerAgent", provider);
+        ResolvedModel plannerModel  = modelResolver.resolve("PlannerAgent", provider);
+        ResolvedModel reviewerModel = modelResolver.resolve("ReviewerAgentV2", provider);
+
+        double[] workerRates   = dbRatesForModel(workerModel.providerName(), workerModel.getModel());
+        double[] plannerRates  = dbRatesForModel(plannerModel.providerName(), plannerModel.getModel());
+        double[] reviewerRates = dbRatesForModel(reviewerModel.providerName(), reviewerModel.getModel());
+
         double totalLow  = 0;
         double totalHigh = 0;
 
@@ -63,16 +78,13 @@ public class CostEstimator {
         }
 
         // Add fixed planner and reviewer costs (~1 call each, MEDIUM size)
-        double[] plannerRates  = dbRates(props.getRoles().getPlanner());
-        double[] reviewerRates = dbRates(props.getRoles().getReviewer());
-
         totalLow  += costUsd(MEDIUM_IN_TOKENS, MEDIUM_OUT_TOKENS, 1, plannerRates);
         totalHigh += costUsd(MEDIUM_IN_TOKENS, MEDIUM_OUT_TOKENS, 1, plannerRates);
         totalLow  += costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 1, reviewerRates);
         totalHigh += costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 2, reviewerRates);
 
-        log.debug("[CostEstimator] {} tasks → low=${}, high=${}", plan.getTasks().size(),
-            String.format("%.3f", totalLow), String.format("%.3f", totalHigh));
+        log.debug("[CostEstimator] {} tasks → low=${}, high=${} (provider={})", plan.getTasks().size(),
+            String.format("%.3f", totalLow), String.format("%.3f", totalHigh), provider);
 
         return new CostBreakdown(totalLow, totalHigh);
     }

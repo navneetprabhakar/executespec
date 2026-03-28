@@ -21,7 +21,7 @@ export default function VerifyEmailPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#1a1f2e] p-8 text-center shadow-2xl">
+      <div className="w-full max-w-md rounded-sm border border-slate-700 bg-[#1a1f2e] p-8 text-center ">
         {status === 'loading' && (
           <>
             <div className="mb-4 flex justify-center">
@@ -36,7 +36,7 @@ export default function VerifyEmailPage() {
             <h2 className="mb-2 text-xl font-bold text-white">Email verified!</h2>
             <p className="mb-6 text-slate-400">Your account is now active. You can log in.</p>
             <Link to="/login"
-              className="inline-block rounded-lg bg-purple-600 px-6 py-2.5 font-semibold text-white hover:bg-purple-500">
+              className="inline-block rounded-sm bg-purple-600 px-6 py-2.5 font-semibold text-white hover:bg-purple-500">
               Go to login
             </Link>
           </>

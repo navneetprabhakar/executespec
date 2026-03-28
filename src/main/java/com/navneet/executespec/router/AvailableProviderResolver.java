@@ -13,7 +13,7 @@ import java.util.Set;
 /**
  * Resolves which LLM providers are available for a given run.
  * Bridges the existing {@link ResolvedKeys} / {@link RunKeyStore} system
- * with the {@link ModelRouter}'s {@code Set<LlmProvider>} provider filter.
+ * with the {@link ModelResolver}'s provider-based model resolution.
  *
  * <p>Resolution rules:
  * <ul>
@@ -62,14 +62,14 @@ public class AvailableProviderResolver {
             // System keys available
             if (isPresent(systemAnthropicKey)) available.add(LlmProvider.ANTHROPIC);
             if (isPresent(systemOpenAiKey)) available.add(LlmProvider.OPENAI);
-            if (isPresent(systemGeminiKey)) available.add(LlmProvider.GEMINI);
+            if (isPresent(systemGeminiKey)) available.add(LlmProvider.GOOGLE);
         }
 
         if ("OWN_KEYS".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
             // User/org keys
             if (keys.anthropicKey() != null) available.add(LlmProvider.ANTHROPIC);
             if (keys.openAiKey() != null) available.add(LlmProvider.OPENAI);
-            if (keys.geminiKey() != null) available.add(LlmProvider.GEMINI);
+            if (keys.geminiKey() != null) available.add(LlmProvider.GOOGLE);
         }
 
         // Apply org-level enabled provider policy
@@ -94,7 +94,7 @@ public class AvailableProviderResolver {
         Set<LlmProvider> providers = EnumSet.noneOf(LlmProvider.class);
         if (isPresent(systemAnthropicKey)) providers.add(LlmProvider.ANTHROPIC);
         if (isPresent(systemOpenAiKey)) providers.add(LlmProvider.OPENAI);
-        if (isPresent(systemGeminiKey)) providers.add(LlmProvider.GEMINI);
+        if (isPresent(systemGeminiKey)) providers.add(LlmProvider.GOOGLE);
 
         if (providers.isEmpty()) {
             // Last resort: assume Anthropic is available (system default)
@@ -107,7 +107,7 @@ public class AvailableProviderResolver {
         return switch (provider) {
             case ANTHROPIC -> "anthropic";
             case OPENAI -> "openai";
-            case GEMINI -> "google"; // ResolvedKeys uses "google" not "gemini"
+            case GOOGLE -> "google";
         };
     }
 

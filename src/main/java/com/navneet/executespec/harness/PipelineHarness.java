@@ -15,9 +15,6 @@ import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.ModelRouter;
-import com.navneet.executespec.router.ModelSelection;
-import com.navneet.executespec.router.ModelTier;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.recovery.RecoveryProperties;
@@ -132,9 +129,11 @@ public class PipelineHarness {
     private final com.navneet.executespec.deployment.preview.PreviewService previewService;
     private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepository;
 
-    // ── Model routing + LLM routing (for execution-mode support) ───────────────
-    private final ModelRouter modelRouter;
+    // ── LLM routing ────────────────────────────────────────────────────────────
     private final com.navneet.executespec.agent.LlmRouter llmRouter;
+
+    // ── Project repository (for aiProvider copy at submission) ────────────────
+    private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
 
     // ── UI style resolution ────────────────────────────────────────────────────
     private final UiStyleResolver uiStyleResolver;
@@ -230,6 +229,7 @@ public class PipelineHarness {
         if (run.getGithubPat() != null) retryRun.setGithubPat(run.getGithubPat());
         if (run.getGithubOwner() != null) retryRun.setGithubOwner(run.getGithubOwner());
         retryRun.setExecutionMode(run.getExecutionMode());
+        retryRun.setAiProvider(run.getAiProvider());
         stateStore.save(retryRun);
 
         // Update failed run with retry link
@@ -400,6 +400,9 @@ public class PipelineHarness {
         }
         if (projectId != null && !projectId.isBlank()) {
             run.setProjectId(projectId);
+            // Copy project's AI provider to the run (frozen at submission time)
+            projectRepository.findById(projectId).ifPresent(project ->
+                run.setAiProvider(project.getAiProvider().name()));
             needsSave = true;
         }
 
@@ -411,8 +414,7 @@ public class PipelineHarness {
         if ("PROTOTYPE".equals(executionMode)) {
             run.setSkipApproval(true);
             run.setAutoMerge(true);
-            ModelSelection fastPlanner = modelRouter.selectFromTier(ModelTier.FAST);
-            run.setPlannerModel(fastPlanner.getModelName());
+            // PROTOTYPE mode: planner model resolved from matrix at runtime (no override needed)
             needsSave = true;
         }
 
@@ -1355,9 +1357,6 @@ public class PipelineHarness {
         ExecutionMode execMode = run.getExecutionModeEnum();
         log.info("Run {} execution mode: {}", runId, execMode);
 
-        // Set per-run LLM iteration cap: PROTOTYPE=100, PRODUCTION=200
-        llmRouter.setRunCallLimit(runId, execMode.isPrototype() ? 100 : 200);
-
         // ── Resolve per-user/org API keys and register for this run ──────────
         // Resolution hierarchy: user key → org key → system key (application.yml).
         // Keys are stored in RunKeyStore so LlmRouter can use them without any agent
@@ -1492,7 +1491,7 @@ public class PipelineHarness {
 
                 // Compute and persist cost estimate for plan approval UI
                 try {
-                    var costBreakdown = costEstimator.estimate(plan);
+                    var costBreakdown = costEstimator.estimate(plan, run.getAiProviderEnum());
                     stateStore.setCostEstimate(runId, costBreakdown.lowUsd(), costBreakdown.highUsd());
                     log.info("[Run {}] {}", runId, costBreakdown.formatted());
                 } catch (Exception ce) {
@@ -1607,8 +1606,6 @@ public class PipelineHarness {
                     if (execResult.completedTasks().isEmpty()) {
                         stateStore.markFailed(runId, "All tasks failed validation");
                         broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                        PipelineRun failedRunAllTasks = stateStore.findRun(runId).orElse(run);
-                        if (autoRetryRunIfEligible(failedRunAllTasks)) return;
                         return;
                     }
                 }
@@ -1660,8 +1657,6 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
                 PipelineRun failedRun = stateStore.findRun(runId).orElse(run);
-                recoveryService.autoRestartIfTransient(failedRun, reports);
-                if (autoRetryRunIfEligible(failedRun)) return;
                 return;
             }
 
@@ -1685,8 +1680,6 @@ public class PipelineHarness {
                 stateStore.markPartial(runId, partialReason);
                 broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, partialReason));
-                PipelineRun partialRun = stateStore.findRun(runId).orElse(run);
-                if (autoRetryRunIfEligible(partialRun)) return;
                 return;
             }
 
@@ -1916,7 +1909,7 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
                 PipelineRun failedRunEx = stateStore.findRun(runId).orElse(null);
-                if (failedRunEx != null) autoRetryRunIfEligible(failedRunEx);
+                // Auto-retry disabled — runs stay at their terminal status
             }
         } finally {
             Metrics.ACTIVE_RUNS.decrementAndGet();

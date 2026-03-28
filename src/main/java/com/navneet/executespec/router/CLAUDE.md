@@ -1,14 +1,28 @@
 # router/ — Model Selection & Provider Routing
 
-Tier-based model selection with fixed-priority provider fallback.
+User-selected provider architecture with YAML-configured model matrix and Redis-backed circuit breaker.
 
 ## Key Files
-- `ModelRouter.java` — Selects model+provider from tier. Fixed priority: Anthropic → OpenAI → Google. Falls back to next on failure/unavailability.
+- `ModelResolver.java` — Resolves `agentTier × provider → model` from the model matrix. Handles health-based failover via ProviderHealthTracker.
+- `ModelMatrixProperties.java` — `@ConfigurationProperties` for the YAML model matrix (providers, agent-tier-map, failover-order).
+- `AgentTier.java` — Enum: PLANNING, WORKHORSE, LIGHTWEIGHT
+- `ResolvedModel.java` — DTO: requestedProvider, actualProvider, model, agentTier, fallback
+- `ProviderHealthTracker.java` — Redis-backed circuit breaker. Marks provider unhealthy after 5 consecutive failures. Auto-recovers via 60s Redis TTL.
+- `LlmProvider.java` — Enum: ANTHROPIC, OPENAI, GOOGLE
+- `AvailableProviderResolver.java` — Resolves available providers per run based on org policy + API key availability
 
-## Tiers
-- FAST: Haiku / GPT-5.4-mini / Gemini Flash
-- CAPABLE: Sonnet / GPT-5.4 / Gemini Pro
-- POWER: Opus / GPT-5.4 / Gemini Pro
+## Agent Tiers
+- PLANNING: Sonnet / GPT-5.4 / Gemini Pro (planner, reviewer, worker stall escalation)
+- WORKHORSE: Haiku / GPT-5.4-mini / Gemini Flash (workers, compiler, most agents)
+- LIGHTWEIGHT: Haiku / GPT-5.4-mini / Gemini Flash (chat, reports, context)
 
-## Provider Order
-Fixed priority: Anthropic → OpenAI → Google. No weighted distribution — first healthy provider wins.
+## Provider Selection
+Each project selects its AI provider (ANTHROPIC/GOOGLE/OPENAI). ModelResolver maps `agentTier × provider → model` from YAML config. Failover to next healthy provider if selected provider is down.
+
+## Circuit Breaker (ProviderHealthTracker)
+- **Storage:** Redis (`StringRedisTemplate`). Keys: `provider:health:{name}`, `provider:failures:{name}`
+- **Threshold:** 5 consecutive failures → circuit OPEN
+- **Recovery:** Unhealthy key has 60s TTL → auto-expires → provider assumed healthy again
+- **Fail-open:** Redis errors degrade to "assume healthy" (never blocks LLM calls due to Redis issues)
+- **Metrics:** `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed` (tagged by provider)
+- **Integration:** LlmRouter checks health before each provider attempt; records success/failure after each call

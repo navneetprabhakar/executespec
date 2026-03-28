@@ -4,7 +4,8 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useSse } from '@/hooks/useSse';
 import { useUiStore } from '@/stores/useUiStore';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Sparkles } from 'lucide-react';
+import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
 
 export default function RunsPage() {
@@ -17,6 +18,8 @@ export default function RunsPage() {
   const setActiveTab = useUiStore((s) => s.setActiveTab);
   const runListCollapsed = useUiStore((s) => s.runListCollapsed);
   const setRunListCollapsed = useUiStore((s) => s.setRunListCollapsed);
+
+  const { isVibe } = useViewMode();
 
   // Mobile: show either the list or the detail, not both
   const mobileShowDetail = isMobile && !!activeRunId;
@@ -43,10 +46,9 @@ export default function RunsPage() {
             <button
               onClick={() => setRunListCollapsed(!runListCollapsed)}
               className={cn(
-                'absolute bottom-4 left-3 z-10 p-1.5 rounded-lg transition-all',
-                'bg-surface-2/80 backdrop-blur-sm border border-white/[0.08] text-zinc-500',
-                'hover:bg-white/[0.08] hover:text-zinc-300 hover:border-white/[0.12]',
-                'shadow-sm'
+                'absolute bottom-4 left-3 z-10 p-1.5 rounded-sm transition-all',
+                'bg-surface-2/80 border border-white/[0.08] text-zinc-500',
+                'hover:bg-white/[0.08] hover:text-zinc-300 hover:border-white/[0.12]'
               )}
               title={runListCollapsed ? 'Show run list' : 'Hide run list'}
             >
@@ -60,8 +62,16 @@ export default function RunsPage() {
           {activeRun ? (
             <RunDetail />
           ) : (
-            <div className="h-full flex items-center justify-center">
-              <p className="text-sm text-zinc-600">Select a run to view details</p>
+            <div className="h-full flex flex-col items-center justify-center gap-3">
+              {isVibe ? (
+                <>
+                  <Sparkles className="h-8 w-8 text-accent-violet/40" />
+                  <p className="text-sm text-zinc-500">What do you want to build?</p>
+                  <p className="text-xs text-zinc-600">Select a run or start a new one</p>
+                </>
+              ) : (
+                <p className="text-sm text-zinc-600">Select a run to view details</p>
+              )}
             </div>
           )}
         </div>

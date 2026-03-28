@@ -6,9 +6,11 @@ import RunCard from './RunCard';
 import { RunCardSkeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
 import NewRunModal from './NewRunModal';
+import VibeRunSubmit from './VibeRunSubmit';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsOrgMember, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import { useUiStore } from '@/stores/useUiStore';
+import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
 
@@ -31,6 +33,7 @@ export default function RunList() {
   const [showModal, setShowModal] = useState(false);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const { pendingNewRunGoal, setPendingNewRunGoal } = useUiStore();
+  const { isVibe } = useViewMode();
   const isMobile = useIsMobile();
 
   // Open modal when a pending goal is set (e.g., from RunConversation "Implement as New Run")
@@ -58,7 +61,7 @@ export default function RunList() {
       {isMobile && (
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors shadow-glow-violet"
+          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
         >
           <Sparkles className="h-4 w-4" />
           New Run
@@ -71,7 +74,7 @@ export default function RunList() {
           <button
             onClick={() => setScopeFilter('mine')}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-full text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-sm text-xs font-medium transition-colors',
               scopeFilter === 'mine'
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -83,7 +86,7 @@ export default function RunList() {
           <button
             onClick={() => setScopeFilter(isSuperAdmin ? 'org' : null)}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-full text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-sm text-xs font-medium transition-colors',
               (isSuperAdmin ? scopeFilter === 'org' : scopeFilter === null)
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -96,7 +99,7 @@ export default function RunList() {
             <button
               onClick={() => setScopeFilter(null)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-full text-xs font-medium transition-colors',
+                'flex items-center gap-1.5 px-3 py-2 md:py-1 rounded-sm text-xs font-medium transition-colors',
                 scopeFilter === null
                   ? 'bg-accent-violet text-white'
                   : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -116,7 +119,7 @@ export default function RunList() {
             key={f}
             onClick={() => setStatusFilter(f)}
             className={cn(
-              'px-3 py-2 md:py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+              'px-3 py-2 md:py-1 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
               statusFilter === f
                 ? 'bg-accent-violet text-white'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -134,7 +137,7 @@ export default function RunList() {
           <button
             onClick={() => setProjectFilter(null)}
             className={cn(
-              'px-2.5 py-1.5 md:py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2.5 py-1.5 md:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === null
                 ? 'bg-zinc-700 text-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
@@ -145,7 +148,7 @@ export default function RunList() {
           <button
             onClick={() => setProjectFilter('__none__')}
             className={cn(
-              'px-2.5 py-1.5 md:py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2.5 py-1.5 md:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === '__none__'
                 ? 'bg-zinc-600 text-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
@@ -160,7 +163,7 @@ export default function RunList() {
                 key={p.id}
                 onClick={() => setProjectFilter(p.id)}
                 className={cn(
-                  'px-2.5 py-1.5 md:py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+                  'px-2.5 py-1.5 md:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
                   projectFilter === p.id
                     ? 'bg-accent-violet text-white'
                     : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
@@ -183,7 +186,7 @@ export default function RunList() {
             action={
               <button
                 onClick={() => setShowModal(true)}
-                className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+                className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
               >
                 Launch Run
               </button>
@@ -197,6 +200,7 @@ export default function RunList() {
               index={i}
               isActive={run.runId === activeRunId}
               onClick={() => setActiveRunId(run.runId)}
+              compact={isVibe}
             />
           ))
         )}
@@ -242,17 +246,21 @@ export default function RunList() {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setShowModal(true)}
-          className="absolute bottom-6 right-4 h-12 w-12 rounded-full bg-accent-violet shadow-glow-violet flex items-center justify-center z-10"
+          className="absolute bottom-6 right-4 h-12 w-12 rounded-sm bg-accent-violet flex items-center justify-center z-10"
         >
           <Plus className="h-5 w-5 text-white" />
         </motion.button>
       )}
 
       {showModal && (
-        <NewRunModal
-          initialGoal={pendingNewRunGoal ?? undefined}
-          onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }}
-        />
+        isVibe ? (
+          <VibeRunSubmit onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }} />
+        ) : (
+          <NewRunModal
+            initialGoal={pendingNewRunGoal ?? undefined}
+            onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }}
+          />
+        )
       )}
     </div>
   );
