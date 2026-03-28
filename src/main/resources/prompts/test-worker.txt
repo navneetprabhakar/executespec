@@ -14,8 +14,19 @@ USER SPECIFICATION:
 {user_request}
 
 TECHNICAL REQUIREMENTS:
-- Package: com.executespec.tests
 {technical_requirements}
+
+LANGUAGE-SPECIFIC TEST FRAMEWORK:
+- Java/Spring Boot: RestAssured + JUnit 5 + AssertJ (package: com.executespec.tests)
+- Node.js/Express: supertest + Jest or Mocha
+- Python/FastAPI/Flask/Django: pytest + httpx or requests
+- Go: net/http/httptest + testing package
+- Ruby/Rails: RSpec + rack-test
+- Static HTML: Playwright or Puppeteer (browser-based tests for UI interactions)
+
+Use the framework that matches the project language. If testing a static HTML app,
+write browser-based tests that verify UI interactions (button clicks produce correct
+display output, navigation works, forms submit correctly).
 
 {status_code_conventions}
 

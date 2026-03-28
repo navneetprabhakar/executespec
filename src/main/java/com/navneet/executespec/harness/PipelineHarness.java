@@ -1755,9 +1755,9 @@ public class PipelineHarness {
                     Thread.ofVirtual().name("testgen-" + runId).start(snapshot.wrap(() ->
                         testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson)
                     ));
-                    log.info("Run {} — test gen pipeline kicked off (post-merge, parallel to review)", runId);
-                    // Start preview so TestPreviewCoordinator can execute generated tests
-                    autoStartPreview(runId, run);
+                    log.info("Run {} — test gen pipeline kicked off (post-merge, preview deferred until tests ready)", runId);
+                    // Preview will be started by TestPreviewCoordinator.onTestsReady()
+                    // to ensure full preview TTL is available for test execution.
                 } catch (Exception e) {
                     testCompletionFutures.remove(runId);
                     log.warn("Run {} — failed to start test gen pipeline: {}", runId, e.getMessage());

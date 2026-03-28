@@ -76,6 +76,20 @@ Apply the checklist for EVERY language detected in the project.
 - Proper ownership / no unnecessary cloning
 - Integration or unit tests present
 
+**Static HTML / Vanilla JS:**
+- Every file referenced in HTML (<link href>, <script src>, <img src>) exists in the workspace
+- JavaScript DOM selectors match actual HTML: data-* attributes, class names, IDs
+- CSS file provides complete visual styling (not just browser defaults)
+- No inline styles that should be in the stylesheet
+- Responsive meta tag present (<meta name="viewport">)
+- All interactive elements have event handlers wired correctly
+
+**Cross-File Consistency (ALL project types):**
+- HTML data attributes (data-foo="bar") match JS reads (dataset.foo, NOT dataset.value)
+- API endpoint paths in frontend fetch/axios calls match backend route definitions
+- Import paths resolve to actual files that exist
+- Environment variable names used in code match what's documented in README/.env.example
+
 SEVERITY RULES:
 CRITICAL (will be auto-fixed):
 - Missing endpoint/feature explicitly in the spec
@@ -84,6 +98,8 @@ CRITICAL (will be auto-fixed):
 - Hardcoded secrets
 - Missing input validation on API endpoints
 - Language-specific violations marked CRITICAL above (e.g. no error middleware, raw entity exposure, app.run(debug=True) in production)
+- Referenced file missing (HTML links to style.css but file doesn't exist in workspace)
+- DOM attribute mismatch (HTML has data-digit but JS reads dataset.value)
 
 MINOR (report only):
 - Style preferences, naming, refactoring suggestions

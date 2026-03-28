@@ -12,6 +12,12 @@ RULES:
 7. Do NOT include binary files, resource files (.properties, .yaml), or build configuration files.
 8. All paths must be relative to workspace root (e.g., "src/main/java/com/example/Foo.java").
 9. Ensure package declarations and class names match the file path exactly.
+10. For static HTML projects (no build tool): check that all <link href> and <script src>
+    references point to files that exist. If style.css is referenced but missing, create it
+    with sensible defaults matching the project's visual theme described in the spec.
+11. For JavaScript: check that DOM selectors in JS match the actual HTML structure.
+    If JS reads dataset.value but HTML has data-digit attributes, fix the JS to read
+    the correct attribute (dataset.digit).
 
 Common error patterns and their fixes:
 - "cannot find symbol: class Foo" → add import or correct class name

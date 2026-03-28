@@ -1,7 +1,10 @@
 package com.navneet.executespec.testgen;
 
+import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
 import com.navneet.executespec.testgen.event.TestsReadyEvent;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
@@ -9,7 +12,9 @@ import io.micrometer.context.ContextSnapshotFactory;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +41,12 @@ public class TestPreviewCoordinator {
     private final TestReportGenerator testReportGenerator;
     private final ApplicationEventPublisher eventPublisher;
     private final SseBroadcaster broadcaster;
+    private final AppUserRepository appUserRepository;
+    private final StateStore stateStore;
+
+    /** Lazy to break circular dependency: PreviewService → TestPreviewCoordinator → PreviewService */
+    @Lazy @Autowired
+    private PreviewService previewService;
 
     private final ConcurrentHashMap<String, CoordinationState> stateMap = new ConcurrentHashMap<>();
 
@@ -72,7 +83,53 @@ public class TestPreviewCoordinator {
             return;
         }
 
-        tryExecute(event.runId(), state);
+        // Start preview now that tests are ready — ensures full TTL for test execution
+        startPreviewForTests(event.runId());
+        // Don't call tryExecute() here — onPreviewReady() will trigger it when preview is live
+    }
+
+    /**
+     * Starts the preview after test generation is complete.
+     * This ensures the full preview TTL is available for test execution,
+     * avoiding the race condition where preview expires before tests finish.
+     */
+    private void startPreviewForTests(String runId) {
+        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+        Thread.ofVirtual().name("test-preview-" + runId).start(snapshot.wrap(() -> {
+            try {
+                var run = stateStore.findRun(runId).orElse(null);
+                if (run == null) {
+                    log.warn("[TestCoord] No run found for {} — skipping preview", runId);
+                    cancelIfPending(runId);
+                    return;
+                }
+                var user = run.getCreatedByUserId() != null
+                        ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
+                        : null;
+                if (user == null) {
+                    log.warn("[TestCoord] No user found for run {} — skipping preview", runId);
+                    cancelIfPending(runId);
+                    return;
+                }
+                log.info("[TestCoord] Starting preview for run {} (tests ready, starting preview for execution)", runId);
+                broadcaster.emit(runId, RunEvent.log(runId, null,
+                        "Tests generated — starting preview for test execution..."));
+                previewService.start(runId, user);
+                // PreviewService will call onPreviewReady() when ready → triggers tryExecute()
+            } catch (Exception e) {
+                log.warn("[TestCoord] Failed to start preview for run {}: {}", runId, e.getMessage());
+                broadcaster.emit(runId, RunEvent.log(runId, null,
+                        "⚠️ Preview failed: " + e.getMessage() + " — skipping integration tests"));
+                CoordinationState state = stateMap.get(runId);
+                if (state != null) {
+                    state.setPreviewFailed(true);
+                }
+                eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                        runId, stateMap.containsKey(runId) ? stateMap.get(runId).getTestPlanId() : 0L,
+                        TestExecutionSummary.empty()));
+                stateMap.remove(runId);
+            }
+        }));
     }
 
     private synchronized void tryExecute(String runId, CoordinationState state) {
