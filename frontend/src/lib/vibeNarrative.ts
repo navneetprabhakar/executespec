@@ -35,9 +35,24 @@ export function mapEventToNarrative(entry: LogEntry): NarrativeItem | null {
     return { text: 'Reviewing the code...', variant: 'progress' };
   }
 
-  // Compilation
-  if (type === 'COMPILATION_STARTED') {
-    return { text: 'Finalizing build...', variant: 'progress' };
+  // Compiling
+  if (type === 'COMPILATION_STARTED' || (type === 'RUN_STATUS' && data.status === 'COMPILING')) {
+    return { text: 'Checking the build...', variant: 'progress' };
+  }
+
+  // Merging
+  if (type === 'RUN_STATUS' && data.status === 'MERGING') {
+    return { text: 'Assembling the pieces...', variant: 'progress' };
+  }
+
+  // Preview launching (matches "Code ready — starting preview..." log message)
+  if (type === 'LOG' && typeof data.message === 'string' && data.message.includes('Code ready')) {
+    return { text: 'Launching preview...', variant: 'progress' };
+  }
+
+  // Preview live
+  if (type === 'PREVIEW_READY') {
+    return { text: 'Preview is live!', variant: 'done' };
   }
 
   // Complete

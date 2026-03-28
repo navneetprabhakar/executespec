@@ -9,11 +9,10 @@ CRITICAL — TASK SIZING RULE (prevents context exhaustion)
 ═══════════════════════════════════════════════════════════
 
 Each worker has a finite context window. Large tasks hit the ceiling and fail.
-EVERY task must be completable within 25 iterations (tool calls).
 Size guidelines:
-  LOW     →  1-2 files,  ≤80 lines of new code,   ~10 iterations expected
-  MEDIUM  →  2-3 files,  80-200 lines of new code, ~15-20 iterations expected
-  HIGH    →  3-5 files,  200-350 lines of new code, ~20-25 iterations expected
+  LOW     →  1-2 files,  ≤80 lines of new code,   ~3-5 iterations expected
+  MEDIUM  →  2-3 files,  80-200 lines of new code, ~8-12 iterations expected
+  HIGH    →  3-5 files,  200-350 lines of new code, ~12-18 iterations expected
 
 If a task would exceed these limits, SPLIT IT into smaller tasks.
 A task that touches >5 files or writes >350 lines WILL fail. Break it up.
@@ -101,11 +100,11 @@ BIAS RULES — READ BEFORE ASSIGNING COMPLEXITY:
 
 COMPLEXITY DISTRIBUTION — SELF-CHECK BEFORE FINALIZING:
   Count your complexity assignments. Expected distribution:
-    60-70% of tasks should be LOW
-    25-35% should be MEDIUM
-    0-10% should be HIGH (often zero)
-  If >15% of your tasks are HIGH, re-examine each one — split or downgrade.
-  If <50% of your tasks are LOW, you are over-assigning — downgrade aggressively.
+    70-80% of tasks should be LOW
+    20-30% should be MEDIUM
+    0-5% should be HIGH (almost never — one at most)
+  If >5% of your tasks are HIGH, re-examine each one — split or downgrade.
+  If <60% of your tasks are LOW, you are over-assigning — downgrade aggressively.
 
 ═══════════════════════════════════════════════════════════
 HARD RULES — violating these causes the run to fail
@@ -130,12 +129,16 @@ HARD RULES — violating these causes the run to fail
 1. Respond ONLY with a valid JSON object. No preamble, no explanation, no markdown fences.
    Your entire response must be parseable by Jackson's ObjectMapper.readValue().
 
-2. Produce between 1 and 35 tasks.
-   - Simple request (add one endpoint, fix a bug): 1-3 tasks
-   - Medium request (build a feature): 6-12 tasks
-   - Large request (build an app): 10-35 tasks
-   Prefer more focused tasks over fewer large tasks. 15 small tasks that all succeed
-   is far better than 5 large tasks where 2 hit context limits and fail.
+2. Produce between 1 and 25 tasks. NEVER exceed 25 tasks.
+   - Simple request (add one endpoint, fix a bug): 1-4 tasks
+   - Medium request (build a feature): 4-12 tasks
+   - Large request (build an app): 12-25 tasks
+   ANTI-OVER-DECOMPOSITION: Do not create separate tasks for trivially small units.
+   A task that only creates a single interface, a single DTO, or a single config file
+   should be merged into a related task. If you find yourself creating >20 tasks,
+   re-examine whether some can be combined.
+   Example: "Create UserRepository" (1 file, 15 lines) is too small on its own —
+   merge it into the entity+DTO task or the service task that uses it.
 
 3. Every task must have explicit, non-overlapping file boundaries.
    Two tasks must never write to the same file. If they must, sequence them with dependsOn.
@@ -284,6 +287,23 @@ RULE: When in doubt, add the dependency. Running tasks sequentially is better
 than having them block each other on file locks.
 Leave depends_on as [] ONLY when tasks are 100% independent:
   different files AND no shared types AND no shared imports.
+
+═══════════════════════════════════════════════════════════
+SHARED FILES — AUTOMATICALLY UNLOCKED
+═══════════════════════════════════════════════════════════
+
+The following files are NEVER file-locked by the harness. Any task can read or
+write them without lock conflicts:
+  pom.xml, package.json, build.gradle, settings.gradle,
+  application.yml, application.properties, .env,
+  README.md, .gitignore, Dockerfile, docker-compose.yml
+
+This means:
+  - project_setup can write pom.xml, and a later task can ALSO modify pom.xml.
+  - You do NOT need to put README.md in shared_files or add depends_on just because
+    two tasks both touch README.md.
+  - For all OTHER files, the normal file-lock rules still apply.
+
 ═══════════════════════════════════════════════════════════
 WORKSPACE CONTEXT
 ═══════════════════════════════════════════════════════════

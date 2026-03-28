@@ -54,6 +54,7 @@ public class OrphanedRunWatchdog {
     private final SseBroadcaster broadcaster;
     private final RecoveryProperties props;
     private final ActivityAuditService auditService;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     /** Prevent duplicate recovery: track run IDs currently being recovered. */
     private final Set<String> recovering = ConcurrentHashMap.newKeySet();
@@ -206,17 +207,38 @@ public class OrphanedRunWatchdog {
             }
 
         } else if (hasCompletedTasks) {
-            // All executable tasks done — pipeline died during post-processing
-            // (compiler/reviewer/merge). Can't partially resume post-processing.
-            recovery.setActionTaken("AUTO_FAIL");
-            recoveryRepo.save(recovery);
+            // All executable tasks done — pipeline died during post-processing.
+            // For PROTOTYPE mode: code is generated and preview may already be running.
+            // Auto-complete instead of failing — post-processing (review/test/report)
+            // is skipped in PROTOTYPE anyway.
+            boolean allTasksComplete = allTasks.stream()
+                .allMatch(t -> "COMPLETE".equals(t.getStatus()));
+            boolean isPrototype = "PROTOTYPE".equals(run.getExecutionMode());
 
-            stateStore.markFailed(runId,
-                "Watchdog: Pipeline thread died after tasks completed — please re-run");
-            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-            log.info("Orphaned run {} marked FAILED — tasks done but pipeline died in post-processing",
-                runId);
-            recordAudit(run, "AUTO_FAIL", idle);
+            if (isPrototype && allTasksComplete) {
+                recovery.setActionTaken("AUTO_COMPLETE");
+                recoveryRepo.save(recovery);
+
+                stateStore.markComplete(runId);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "Run recovered — all tasks completed successfully"));
+                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
+                eventPublisher.publishEvent(new com.navneet.executespec.harness.event.PipelineEvent.RunCompleted(runId));
+                log.info("Orphaned PROTOTYPE run {} auto-completed — all {} tasks done",
+                    runId, allTasks.size());
+                recordAudit(run, "AUTO_COMPLETE", idle);
+            } else {
+                // PRODUCTION mode or has incomplete tasks — can't partially resume post-processing
+                recovery.setActionTaken("AUTO_FAIL");
+                recoveryRepo.save(recovery);
+
+                stateStore.markFailed(runId,
+                    "Watchdog: Pipeline thread died after tasks completed — please re-run");
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                log.info("Orphaned run {} marked FAILED — tasks done but pipeline died in post-processing",
+                    runId);
+                recordAudit(run, "AUTO_FAIL", idle);
+            }
 
         } else {
             // No progress at all — mark failed

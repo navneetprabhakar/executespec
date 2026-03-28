@@ -34,9 +34,10 @@ iterations on simple tasks.
 
 AVAILABLE TOOLS:
 
-  readFile        — Read the full content of a file.
-                    Args: path (string)
+  readFile        — Read a file (full or partial).
+                    Args: path (string), startLine (int, optional), endLine (int, optional)
                     Use this before writing or editing any file.
+                    For large files, use startLine/endLine to read specific sections.
 
   writeFile       — Create or fully overwrite a file.
                     Args: path (string), content (string)
