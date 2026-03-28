@@ -50,8 +50,10 @@ public class TestPlannerAgent {
      *
      * @return saved TestPlan with associated TestTask records
      */
-    public TestPlan planTests(String runId, String userRequest, String conventionsDoc, boolean isCli) {
-        log.info("[TestPlanner] Starting test planning for run {}", runId);
+    public TestPlan planTests(String runId, String userRequest, String conventionsDoc,
+                              boolean isCli, boolean isStaticHtml) {
+        log.info("[TestPlanner] Starting test planning for run {} (isCli={}, isStaticHtml={})",
+                runId, isCli, isStaticHtml);
 
         // Create TestPlan record
         TestPlan testPlan = TestPlan.builder()
@@ -61,9 +63,18 @@ public class TestPlannerAgent {
                 .build();
         testPlan = testPlanRepository.save(testPlan);
 
-        String testingContext = isCli 
-            ? "You are testing a Command Line Interface (CLI) application. Tests should verify via stdout, stderr, and exit codes."
-            : "You are testing against a LIVE RUNNING APPLICATION via HTTP calls. These are NOT unit tests.";
+        String testingContext;
+        if (isStaticHtml) {
+            testingContext = "You are testing a STATIC HTML / FRONTEND web application using Playwright browser automation. "
+                    + "Tests should verify UI interactions (button clicks, form submissions, display updates), "
+                    + "page content (headings, text, elements), navigation, and visual layout. "
+                    + "Use browser automation — NOT HTTP REST assertions. "
+                    + "Use com.microsoft.playwright classes (Playwright, Browser, Page, Locator).";
+        } else if (isCli) {
+            testingContext = "You are testing a Command Line Interface (CLI) application. Tests should verify via stdout, stderr, and exit codes.";
+        } else {
+            testingContext = "You are testing against a LIVE RUNNING APPLICATION via HTTP calls. These are NOT unit tests.";
+        }
 
         // Build prompt
         String systemPrompt = loadPrompt()

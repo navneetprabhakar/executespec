@@ -46,35 +46,39 @@ public class TestGenOrchestrator {
             log.info("[TestGen] Starting test generation pipeline for run {}", runId);
             emitTestEvent(runId, "TEST_GEN_STARTED", "Test generation pipeline started");
 
-            // 1. Scaffold test project
-            testProjectScaffold.scaffold(runId);
-
-            // Detect if CLI
+            // 1. Detect project type first (needed for scaffold + conventions)
             java.nio.file.Path workspace = java.nio.file.Path.of("workspace", runId);
             com.navneet.executespec.deployment.preview.PreviewProjectType type = dockerfileGenerator.detect(workspace);
             boolean isCli = false;
+            boolean isStaticHtml = false;
             if (type != null) {
                 com.navneet.executespec.deployment.preview.PreviewMode mode = dockerfileGenerator.detectMode(type, workspace);
                 isCli = (mode == com.navneet.executespec.deployment.preview.PreviewMode.CLI_TERMINAL);
+                isStaticHtml = (type == com.navneet.executespec.deployment.preview.PreviewProjectType.STATIC_HTML
+                             || type == com.navneet.executespec.deployment.preview.PreviewProjectType.NODE_FRONTEND);
             }
 
-            // 2. Generate conventions doc
-            String conventionsDoc = conventionsGenerator.generate(userRequest, planJson, isCli);
+            // 2. Scaffold test project (Playwright POM for static HTML, RestAssured for REST APIs)
+            testProjectScaffold.scaffold(runId, isStaticHtml);
 
-            // 3. Plan tests
-            emitTestEvent(runId, "TEST_PLANNING_STARTED", "Planning integration tests (CLI: " + isCli + ")");
-            TestPlan testPlan = testPlannerAgent.planTests(runId, userRequest, conventionsDoc, isCli);
+            // 3. Generate conventions doc
+            String conventionsDoc = conventionsGenerator.generate(userRequest, planJson, isCli, isStaticHtml);
+
+            // 4. Plan tests
+            emitTestEvent(runId, "TEST_PLANNING_STARTED",
+                    "Planning integration tests (CLI: " + isCli + ", staticHtml: " + isStaticHtml + ")");
+            TestPlan testPlan = testPlannerAgent.planTests(runId, userRequest, conventionsDoc, isCli, isStaticHtml);
             List<TestTask> tasks = testTaskRepository.findByTestPlanId(testPlan.getId());
             emitTestEvent(runId, "TEST_PLANNING_COMPLETED",
                     "Test plan created with " + tasks.size() + " test classes");
 
-            // 4. Generate test classes sequentially
+            // 5. Generate test classes sequentially
             emitTestEvent(runId, "TEST_GENERATION_STARTED",
                     "Generating " + tasks.size() + " test classes");
 
             for (TestTask task : tasks) {
                 try {
-                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest, isCli);
+                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest, isCli, isStaticHtml);
                 } catch (Exception e) {
                     log.error("[TestGen] Test generation failed for task {}: {}",
                             task.getTaskName(), e.getMessage());
@@ -84,7 +88,7 @@ public class TestGenOrchestrator {
                 }
             }
 
-            // 5. Compile all generated tests together
+            // 6. Compile all generated tests together
             emitTestEvent(runId, "TEST_COMPILATION_STARTED", "Compiling generated tests");
             TestCompilationGate.CompilationResult compilationResult = testCompilationGate.compileTests(runId);
 
@@ -96,7 +100,7 @@ public class TestGenOrchestrator {
                 testCompilationGate.markFailedTasks(
                         testPlan.getId(), compilationResult.failedClasses(), compilationResult.output());
 
-                handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest, isCli);
+                handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest, isCli, isStaticHtml);
 
                 // Re-compile after retries
                 TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
@@ -133,7 +137,7 @@ public class TestGenOrchestrator {
 
             testPlanRepository.save(testPlan);
 
-            // 6. Publish event — tests are ready for execution
+            // 7. Publish event — tests are ready for execution
             eventPublisher.publishEvent(new TestsReadyEvent(runId, testPlan.getId()));
             log.info("[TestGen] Test generation complete for run {} — ready for execution", runId);
 
@@ -148,7 +152,8 @@ public class TestGenOrchestrator {
     }
 
     private void handleCompilationRetries(String runId, TestPlan testPlan,
-                                            String conventionsDoc, String userRequest, boolean isCli) {
+                                            String conventionsDoc, String userRequest,
+                                            boolean isCli, boolean isStaticHtml) {
         List<TestTask> failedTasks = testTaskRepository
                 .findByTestPlanIdAndStatus(testPlan.getId(), TestTaskStatus.FAILED);
 
@@ -156,7 +161,7 @@ public class TestGenOrchestrator {
             if (task.getCompilationError() == null) continue;
             try {
                 testWorkerAgent.retryWithError(runId, task, conventionsDoc, userRequest,
-                        task.getCompilationError(), isCli);
+                        task.getCompilationError(), isCli, isStaticHtml);
                 task.setStatus(TestTaskStatus.GENERATING);
                 testTaskRepository.save(task);
             } catch (Exception e) {

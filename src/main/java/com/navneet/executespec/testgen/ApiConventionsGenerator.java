@@ -24,9 +24,28 @@ public class ApiConventionsGenerator {
      * @param planJson    the JSON plan from PlannerAgent (contains task list with entity names, etc.)
      * @return markdown string with API conventions
      */
-    public String generate(String userRequest, String planJson, boolean isCli) {
+    public String generate(String userRequest, String planJson, boolean isCli, boolean isStaticHtml) {
         var sb = new StringBuilder();
-        
+
+        if (isStaticHtml) {
+            sb.append("## Static HTML / Frontend Test Conventions\n\n");
+            sb.append("- The application serves static HTML/CSS/JS files via a web server (nginx, http-server, etc.).\n");
+            sb.append("- There are NO REST API endpoints. Do NOT send POST/PUT/DELETE requests or expect JSON responses.\n");
+            sb.append("- Use Playwright (com.microsoft.playwright) for browser-based testing.\n");
+            sb.append("- Base URL from System.getProperty(\"app.base-url\", \"http://localhost:8080\").\n");
+            sb.append("- Test user interactions: button clicks, form inputs, display updates, navigation.\n");
+            sb.append("- Verify visible text content using page.locator() + textContent() / inputValue().\n");
+            sb.append("- Run headless Chromium via playwright.chromium().launch(headless=true).\n");
+            sb.append("- Use @BeforeAll to create Playwright/Browser/Page, @AfterAll to close them.\n\n");
+            sb.append("### What to Test\n");
+            sb.append("- Page loads correctly (navigate to URL, verify page title or heading)\n");
+            sb.append("- Interactive elements work (click buttons, verify display updates)\n");
+            sb.append("- Form inputs accept values and produce expected results\n");
+            sb.append("- Navigation links work (click links, verify page changes)\n");
+            sb.append("- CSS/JS assets load (page renders correctly with styles and scripts)\n\n");
+            return sb.toString();
+        }
+
         if (isCli) {
             sb.append("## CLI Application Conventions\n\n");
             sb.append("- The application is a Command Line Interface (CLI) tool, NOT a web server.\n");
