@@ -1254,7 +1254,7 @@ public class WorkerAgent {
             int iteration, boolean justCompacted,
             String complexity) {
         String systemPrompt = loadPrompt(provider);
-        int maxOut = budgetMonitor.maxOutputTokens(complexity);
+        int maxOut = budgetMonitor.maxOutputTokens(model, complexity);
         boolean isOpenAi = "openai".equalsIgnoreCase(provider);
 
         log.info("[Worker callModel] provider={} model={} complexity={} maxOut={} nativeTools={}",

@@ -19,7 +19,7 @@
 - `ConflictResolverAgent` — Resolves merge conflicts
 - `ApplySuggestionTooLargeException` — Exception for oversized suggestions
 - `model/TaskDefinition` — Single task in plan
-- `model/TaskPlan` — Multi-task plan container
+- `model/TaskPlan` — Multi-task plan container (includes `projectType` field declared by planner)
 - `model/WorkerReport` — Task execution report
 - `model/TaskReview` — Task review verdict
 - `model/ReviewReport` — Legacy V1 review (deprecated)
@@ -47,7 +47,7 @@
 - `CompilerAgent` — Compiles code (3 rounds), fixes errors
 - `CompileResult` — Compilation output model
 - `CompilerProperties` — Config
-- `DevDockerfileGenerator` — Generates preview Dockerfile
+- `DevDockerfileGenerator` — Generates preview Dockerfile (reads `.agent-context/project.json` for planner-declared project type)
 
 ### reviewer/ — Code review
 - `ReviewerAgentV2` — Inspects merged code, auto-fixes (FAST→CAPABLE)
@@ -117,6 +117,11 @@
 - `strategy/` — Deployment strategy selection
 
 ### testgen/ — Test generation
+- `TestGenOrchestrator` — Orchestrates full test gen pipeline (sequential after review)
+- `TestPreviewCoordinator` — Coordinates preview readiness + test compilation, starts preview after tests compile, owns preview lifecycle for test execution
+- `TestPlannerAgent` — Creates test plan from user spec
+- `TestWorkerAgent` — Generates test code per test task
+- `TestReportGenerator` — Generates fix suggestions for failed tests
 - `TestGenerationAgent` — Generates tests parallel with workers
 - `TestExecutionOrchestrator` — Runs test suites
 - `TestResultController` — REST: apply-test-fixes

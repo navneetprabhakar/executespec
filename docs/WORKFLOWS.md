@@ -51,39 +51,35 @@ flowchart TD
     K2 -->|No refs| L
     K4 --> L
 
-    L[PlannerAgent decomposes goal into tasks]
+    L[PlannerAgent decomposes goal into tasks — includes project_type]
     L --> M{skipApproval?}
     M -->|Yes| N[Auto-approve plan]
-    M -->|No| O[Plan Approval Gate — User reviews]
+    M -->|No| O[Plan Approval Gate — Redis-backed, 500ms polling, 2h TTL]
     O -->|Approve| N
     O -->|Reject| P[❌ Run cancelled]
-    N --> Q[SequentialTaskExecutor begins]
+    N --> N1[initAgentContext — writes .agent-context/ files including project.json]
+    N1 --> Q[SequentialTaskExecutor begins]
 
-    Q --> R[For each task — sequential:]
-    R --> S[Create git worktree]
+    Q --> R[Tasks run in tiered parallel groups:]
+    R --> S[Create git worktree per task]
     S --> T[WorkerAgent writes code]
-    T --> U[CodeValidator runs gate chain]
-    U -->|Pass| V[Merge task branch to main — progressive merge]
-    U -->|Fail| W[Retry with error feedback + model escalation]
-    W -->|Max retries| X[Task marked PARTIAL]
-    W -->|Pass| V
+    T --> U[Merge task branch to main — progressive merge]
+    U --> V{More task groups?}
+    V -->|Yes| R
+    V -->|No| W[CompilerAgent — fixes compilation errors]
 
-    V --> Y{More tasks?}
-    Y -->|Yes| R
-    Y -->|No| Z[CompilerAgent — full project build]
-    X --> Y
-
-    Z --> ZA[Merge all task branches — automatic]
-    ZA --> ZB[Post-merge compile validation]
-    ZB --> AA[ReviewerAgentV2 — inspect merged code]
-    AA --> AAB[Auto-fix issues: FAST tier, then CAPABLE on retry]
-    AAB --> AAC[Re-validate after auto-fix — compile + type check]
-    AAC --> AAD[Validation Report + Test Report]
-    AAD --> AG[Post-merge agents run]
-    AG --> AH([✅ Run COMPLETE — code ready])
+    W --> X[Auto-merge all task branches to main]
+    X --> Y[ReviewerAgentV2 — inspect merged code + auto-fix]
+    Y --> Z[TestGenOrchestrator — sequential after review]
+    Z --> ZA[TestPlannerAgent plans integration tests]
+    ZA --> ZB[TestWorkerAgent writes test code]
+    ZB --> ZC[TestPreviewCoordinator.onTestsReady — starts preview AFTER tests compile]
+    ZC --> ZD[Tests execute against live preview]
+    ZD --> ZE[ValidationReport generated]
+    ZE --> ZF([✅ Run COMPLETE — code ready])
 
     style A fill:#6366f1,color:#fff
-    style AH fill:#22c55e,color:#fff
+    style ZF fill:#22c55e,color:#fff
     style J fill:#ef4444,color:#fff
     style P fill:#ef4444,color:#fff
 ```
@@ -120,6 +116,12 @@ sequenceDiagram
     S->>U: 📝 Reviewing merged code
     P->>S: AUTO_FIX_APPLIED
     S->>U: 🔧 Auto-fix applied (FAST → CAPABLE escalation)
+    P->>S: TEST_GEN_STARTED
+    S->>U: 🧪 Generating integration tests
+    P->>S: PREVIEW_STARTED
+    S->>U: 🌐 Preview started for test execution
+    P->>S: TESTS_EXECUTING
+    S->>U: 🧪 Tests running against live preview
     P->>S: REPORT_GENERATED
     S->>U: 📊 Validation report ready
     P->>S: RUN_COMPLETED
@@ -369,21 +371,20 @@ flowchart TD
     C --> D[POST /api/runs/{id}/tasks/{taskId}/retry]
     D --> E[Task reset to PENDING]
     E --> F[WorkerAgent re-executes task]
-    F --> G[CodeValidator validates]
-    G -->|Pass| H[Merge task branch]
-    G -->|Fail| I[Retry with model escalation]
-    H --> J{All sibling tasks complete?}
-    I -->|Max retries| K[Task remains PARTIAL]
-    I -->|Pass| H
-    J -->|No| L[Auto-pick up remaining incomplete tasks]
-    L --> F
-    J -->|Yes| M[Auto-merge all branches]
-    M --> MA[ReviewerAgentV2 reviews merged code + auto-fix]
-    MA --> N[Validation Report generated]
-    N --> O([✅ Run COMPLETE])
+    F --> G[Merge task branch — progressive merge]
+    G --> H{All sibling tasks complete?}
+    H -->|No| I[Auto-pick up remaining incomplete tasks]
+    I --> F
+    H -->|Yes| J[CompilerAgent fixes compilation errors]
+    J --> K[Auto-merge all branches]
+    K --> L[ReviewerAgentV2 reviews merged code + auto-fix]
+    L --> M[TestGenOrchestrator generates tests]
+    M --> N[TestPreviewCoordinator starts preview → tests execute]
+    N --> O[Validation Report generated]
+    O --> P([✅ Run COMPLETE])
 
     style A fill:#f59e0b,color:#000
-    style O fill:#22c55e,color:#fff
+    style P fill:#22c55e,color:#fff
 ```
 
 ### Automatic Recovery (StuckRunMonitor)
@@ -451,12 +452,17 @@ Preview supports two modes, configured via `preview.mode` in application propert
 | `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | `https://{subdomain}.preview.local` (Caddy) or `http://localhost:{port}` |
 | `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 5 min | `https://*.run.app` (managed HTTPS) |
 
+Preview is started in two ways:
+1. **Pipeline-automated:** TestPreviewCoordinator.onTestsReady() starts preview sequentially after tests compile (NOT in parallel with test gen). Uses `@Lazy @Autowired` for PreviewService to avoid circular dependency. Preview is no longer started by `autoStartPreview()` in PRODUCTION mode.
+2. **User-initiated:** User clicks 'Start Preview' in the UI after a run completes.
+
 ```mermaid
 flowchart TD
-    A([Run completes]) --> B[User opens Preview tab]
-    B --> C[Click 'Start Preview']
-    C --> D[POST /api/runs/{id}/preview/start]
-    D --> E[PreviewService detects project type]
+    A([Run completes OR TestPreviewCoordinator.onTestsReady]) --> B{Trigger source?}
+    B -->|Pipeline automated| D[TestPreviewCoordinator calls PreviewService]
+    B -->|User manual| C[Click 'Start Preview' → POST /api/runs/{id}/preview/start]
+    C --> E[PreviewService detects project type]
+    D --> E
     E --> F{preview.mode?}
 
     %% Docker mode (local dev)
@@ -794,5 +800,5 @@ sequenceDiagram
 
 ---
 
-*Updated: 2026-03-27*
-*Covers: Pipeline execution, auth, org management, integrations, Slack notifications, JIRA/Confluence context extraction, post-run features, deployment (dual-mode preview), recovery, admin workflows.*
+*Updated: 2026-03-28*
+*Covers: Pipeline execution, auth, org management, integrations, Slack notifications, JIRA/Confluence context extraction, post-run features, deployment (dual-mode preview), test generation, recovery, admin workflows.*

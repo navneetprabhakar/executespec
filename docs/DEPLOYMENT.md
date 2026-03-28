@@ -125,7 +125,7 @@ serves both the API and the SPA. There is no separate frontend server or CDN req
                         │         │                                                │
                         │  ┌──────┴───────┐                                       │
                         │  │     MIG      │   Managed Instance Group              │
-                        │  │  2× n2-std-4 │   us-central1-a                      │
+                        │  │  2× n2-std-8 │   us-central1-a                      │
                         │  │  GCE VMs     │   AutoHealing on /actuator/health     │
                         │  └──────┬───────┘                                       │
                         │         │ private IP only (no-address)                  │
@@ -150,7 +150,7 @@ serves both the API and the SPA. There is no separate frontend server or CDN req
 
 | Component | Spec | Est. Cost/Month |
 |---|---|---|
-| GCE VMs (×2) | n2-standard-4 (4 vCPU, 16 GB), us-central1 | ~$130 |
+| GCE VMs (×2) | n2-standard-8 (8 vCPU, 32 GB), us-central1 | ~$260 |
 | Cloud SQL | db-custom-2-3840, 50 GB pd-ssd, us-central1 | ~$60 |
 | Data disk (per VM) | 100 GB pd-ssd | ~$17 |
 | Cloud Memorystore Redis | 1 GB Basic, us-central1 | ~$16 |
@@ -653,7 +653,8 @@ echo "[startup] Starting ExecuteSpec..."
 # ── Start the app (called by systemd ExecStart, so we exec directly) ─────────
 exec java \
   -Xms1g \
-  -Xmx10g \
+  -Xmx6g \
+  # NOTE: Pending upgrade to -Xms8g -Xmx16g once n2-standard-8 rollout completes
   -XX:+UseZGC \
   -XX:+ZGenerational \
   -XX:MaxGCPauseMillis=100 \
@@ -717,7 +718,7 @@ Set up the first VM manually. After validating it, you will create the MIG in St
 
 ```bash
 gcloud compute instances create executespec-prod \
-  --machine-type=n2-standard-4 \
+  --machine-type=n2-standard-8 \
   --zone=$ZONE \
   --boot-disk-size=30GB \
   --boot-disk-type=pd-ssd \
@@ -852,7 +853,7 @@ Once the first VM is confirmed healthy, convert to a Managed Instance Group for 
 ```bash
 # Create a template from the existing VM's disk configuration
 gcloud compute instance-templates create executespec-template \
-  --machine-type=n2-standard-4 \
+  --machine-type=n2-standard-8 \
   --boot-disk-size=30GB \
   --boot-disk-type=pd-ssd \
   --image-family=debian-12 \
@@ -1591,7 +1592,7 @@ sudo journalctl -u executespec -f           # app logs on VM
 
 | Resource | Dev | Prod |
 |----------|-----|------|
-| Compute | $49/mo (e2-standard-2 ×1) | $194/mo (n2-standard-4 ×2) |
+| Compute | $49/mo (e2-standard-2 ×1) | $388/mo (n2-standard-8 ×2) |
 | Cloud SQL | $25/mo (db-g1-small) | $80/mo (db-custom-2-3840 HA) |
 | Redis | $36/mo (1GB Basic) | $73/mo (1GB Standard HA) |
 | Load Balancer | $18/mo | $18/mo |

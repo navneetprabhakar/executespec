@@ -55,13 +55,13 @@ spring:
       chat:
         options:
           model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
-          max-tokens: 16000                  # safe limit — Haiku/Sonnet both support ≥16k output
+          max-tokens: 64000                  # Sonnet supports 64k; per-call limits applied by TokenBudgetMonitor
     openai:
       api-key: ""                   # set via env var in profile files
       chat:
         options:
           model: gpt-5.4-mini
-          max-tokens: 16000                  # gpt-5.4 / gpt-5.4-mini both support 16k output
+          max-tokens: 16384                  # gpt-5.4 / gpt-5.4-mini max; per-call limits applied by TokenBudgetMonitor
     google:
       genai:
         api-key: ""                 # set via env var in profile files
@@ -116,11 +116,11 @@ agent:
     worker: anthropic
     reviewer: anthropic
   token-budget:
-    max-tokens: 16000        # Must match spring.ai.*.chat.options.max-tokens
-    low: 8192                # LOW complexity output-token limit (raised: Sonnet needs room for tool calls + code)
-    medium: 8192             # MEDIUM complexity output-token limit
-    high: 16000              # HIGH complexity output-token limit
-    hard-ceiling-pct: 0.90   # 14,400 tokens — absolute max, forces FORCE_REPORT
+    max-tokens: 64000        # Fallback ceiling; actual limits are per-model in TokenBudgetMonitor
+    low: 8192                # LOW complexity fallback (used when model is unknown)
+    medium: 8192             # MEDIUM complexity fallback
+    high: 16000              # HIGH complexity fallback
+    hard-ceiling-pct: 0.90   # 90% of model max — absolute max, forces FORCE_REPORT
   compaction:
     warn-pct: 0.45     # warn at 90k tokens input (balanced: was 0.25=50k too early, 0.65=130k too late)
     compact-pct: 0.60  # compact at 120k tokens input (balanced: was 0.35=70k too frequent, 0.75=150k too late)

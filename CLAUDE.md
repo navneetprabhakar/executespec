@@ -9,8 +9,9 @@
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
 - **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Sonnet) → Plan Gate → SequentialTaskExecutor (Haiku per task) → CompilerAgent → Auto-merge all tasks → ReviewerAgentV2 (inspect + auto-fix) → ValidationReport → COMPLETE
-- **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). YAML-configured model matrix maps `AgentTier × Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING (Sonnet-class), WORKHORSE (Haiku-class), LIGHTWEIGHT (Haiku-class).
+- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Opus) → Plan Gate → SequentialTaskExecutor (Sonnet per task) → CompilerAgent → Auto-merge all tasks → ReviewerAgentV2 (inspect + auto-fix) → TestGenOrchestrator → TestPreviewCoordinator (start preview → execute tests) → ValidationReport → COMPLETE
+- **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
+- **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). YAML-configured model matrix maps `AgentTier × Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING (Opus-class), WORKHORSE (Sonnet-class), LIGHTWEIGHT (Haiku-class).
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
 - **Progressive merge:** Each task merged to main immediately after completion (validation deferred to review phase)
 - **Auth:** JWT (access 24h, refresh 7d), RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles
@@ -28,7 +29,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V39)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V42)
 
 ## Patterns: MUST Follow
 
@@ -175,16 +176,21 @@ Full API reference: see memory file `api-endpoints.md`
 | OTel config | `config/ObservabilityConfig.java`, `config/CustomMetricsConfig.java` |
 | Model matrix config | `router/ModelMatrixProperties.java` (agent tiers, provider models, failover order) |
 | Provider circuit breaker | `router/ProviderHealthTracker.java` (Redis-backed, 5-failure threshold, 60s TTL recovery) |
-| Test generation | `testgen/TestResultController.java` (apply-test-fixes) |
+| Test generation orchestrator | `testgen/TestGenOrchestrator.java` |
+| Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
+| Test execution service | `testgen/TestExecutionService.java` |
+| Test result controller | `testgen/TestResultController.java` (apply-test-fixes) |
+| Dockerfile gen (preview) | `deployment/preview/DevDockerfileGenerator.java` (reads `.agent-context/project.json`) |
+| Dockerfile gen (deploy) | `deployment/DockerfileGenerator.java` (strategy pattern, reads `project.json`) |
 | Infra (Terraform) | `infra/` |
 
 ## Model Matrix
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2, WorkerAgent (stall escalation) | `claude-sonnet-4-6` | `gemini-2.5-pro` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, ApiTestSuiteAgent, ConflictResolverAgent, TestPlannerAgent, TestWorkerAgent | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, PromptOptimiserAgent, ValidationReportGenerator, TestReportGenerator, ConversationController | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| PLANNING | PlannerAgent, ReviewerAgentV2, TestPlannerAgent, WorkerAgent (stall escalation) | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, ApiTestSuiteAgent, ConflictResolverAgent, TestWorkerAgent | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, PromptOptimiserAgent, ValidationReportGenerator, TestReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
 
 Provider is user-selected per project. See `application.yml` → `model-matrix:` for full configuration.
 
@@ -207,13 +213,17 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - Metrics wired into services: PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
 
 ### Recent Changes (2026-03-28)
+- **Planner-declared project type:** Planner outputs `project_type` field in plan JSON. Written to `.agent-context/project.json`. Preview (`DevDockerfileGenerator`) and deploy (`DockerfileGenerator`) read this before file-based heuristics. Fixes static HTML misdetected as NODE_BACKEND.
+- **Static HTML detection fix:** `DevDockerfileGenerator.detect()` now checks `hasStaticHtml()` before `hasJsOrTsFiles()` fallback — projects with `script.js` no longer misdetected as NODE.
+- **Pipeline sequencing fix:** Preview no longer starts in parallel with test gen. `TestPreviewCoordinator.onTestsReady()` starts preview AFTER tests compile, ensuring full TTL for test execution. `autoStartPreview()` removed from PRODUCTION block in PipelineHarness.
+- **Prompt overhaul (11 files):** Added frontend/static HTML quality rules to worker prompts, DOM consistency checks, cross-file self-review, static HTML checklist in reviewer, language-agnostic test generation, frontend task decomposition rules in planner.
 - **Redis-backed circuit breaker:** `ProviderHealthTracker` rewritten from in-memory to Redis. LlmRouter now checks provider health before each call and records success/failure. 5-failure threshold, 60s TTL auto-recovery.
 - **Per-task validation removed:** `SequentialTaskExecutor` no longer runs `CodeValidator` after each task. Validation deferred to review phase (CompilerAgent + ReviewerAgentV2).
 - **LLM call limits removed:** Per-run LLM call circuit breaker removed from `LlmRouter`. Wall-clock time limit remains as safety net.
 - **Dependency merge fix:** `GitTool.createWorktree()` now throws on dep branch merge failure instead of silently continuing.
 - **Auto-restart disabled:** `autoRetryRunIfEligible()` and `autoRestartIfTransient()` calls removed from `PipelineHarness`.
 - **LiveLog fix:** Event type checks updated from camelCase to SCREAMING_SNAKE_CASE to match backend. Tool-result log noise removed.
-- **VM scaled:** n2-standard-4 → n2-standard-8, JVM heap -Xms8g -Xmx24g
+- **VM scaled:** n2-standard-4 → n2-standard-8, JVM heap -Xms1g/-Xmx6g (pending upgrade to -Xms8g/-Xmx16g)
 
 ### Recent Changes (2026-03-27)
 - Preview mode: dual-mode support — `cloud-run` for dev/prod (5-min TTL, Artifact Registry + Cloud Run), `docker` for local (10-min TTL, Docker Compose + Caddy)
@@ -236,9 +246,12 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - Production deployment preparation
 
 ### Known Tech Debt
+- **Model matrix mismatch:** WORKHORSE tier for Anthropic is `claude-sonnet-4-6` (should be Haiku for cost/speed). All worker tasks run on Sonnet, making runs slow and expensive.
+- **test-worker.txt OUTPUT RULES:** Lines 41-45 still hardcode "Output ONLY the Java source code" and mention RestAssured/JUnit 5, contradicting the new language-agnostic framework section added above.
 - V3 migration type mismatch: `actual_cost_usd` must be `DOUBLE PRECISION` (not `DECIMAL(10,6)`)
 - Branch retry: `GitTool.createBranch()` catches RefAlreadyExistsException → checkout fallback
 - Gate lost on restart: approve() → if gate missing → auto-fail with message
 - StartupRunResumer disabled — users resume stuck runs manually via UI
 - ReviewerAgent V1 class still wired as @Service bean but unused in pipeline (blocks deletion of reviewer.txt prompt)
 - Apply-to-run: `plan_version` duplicate key error on retry (incrementPlanVersion may not be working correctly)
+- `@Lazy @Autowired` on `PreviewService` in `TestPreviewCoordinator` — only field injection in codebase, needed to break circular dependency
