@@ -116,11 +116,9 @@ agent:
     worker: anthropic
     reviewer: anthropic
   token-budget:
-    max-tokens: 64000        # Fallback ceiling; actual limits are per-model in TokenBudgetMonitor
-    low: 8192                # LOW complexity fallback (used when model is unknown)
-    medium: 8192             # MEDIUM complexity fallback
-    high: 16000              # HIGH complexity fallback
+    max-tokens: 64000        # Fallback ceiling for hard-ceiling-pct calculation
     hard-ceiling-pct: 0.90   # 90% of model max — absolute max, forces FORCE_REPORT
+    # Output ceilings are fixed in TokenBudgetMonitor (LOW=8K, MED=12K, HIGH=16K)
   compaction:
     warn-pct: 0.45     # warn at 90k tokens input (balanced: was 0.25=50k too early, 0.65=130k too late)
     compact-pct: 0.60  # compact at 120k tokens input (balanced: was 0.35=70k too frequent, 0.75=150k too late)

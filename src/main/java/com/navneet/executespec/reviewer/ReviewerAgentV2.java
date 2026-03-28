@@ -85,9 +85,8 @@ public class ReviewerAgentV2 {
     @Value("classpath:prompts/reviewer-v2.txt")
     private Resource reviewerV2Prompt;
 
-    private static final int MAX_AUTO_FIX = 8;  // max issues to attempt auto-fix (both CRITICAL and MINOR)
-    private static final int MAX_TOOL_CALLS = 10;
-    private static final Duration REVIEW_TIMEOUT = Duration.ofMinutes(3);
+    private static final int MAX_TOOL_CALLS = 50;  // generous limit for inspect phase — reviewer must read many files
+    private static final Duration REVIEW_TIMEOUT = Duration.ofMinutes(15); // reviewer runs once, fixes everything
 
     /**
      * Run the full review: inspect → fix loop → report.
@@ -166,12 +165,9 @@ public class ReviewerAgentV2 {
         int autoFixSucceeded = 0;
         int totalFixable = issues.size();
 
-        if (totalFixable > MAX_AUTO_FIX) {
-            log.warn("Too many issues ({}) — skipping auto-fix, flagging for human review", totalFixable);
-            sseBroadcaster.emit(runId, RunEvent.log(runId, null,
-                    "Too many issues (" + totalFixable + ") — skipping auto-fix"));
-        } else {
-            // Fix ALL issues (CRITICAL first, then MINOR) — sorted so critical are fixed first
+        {
+            // Fix ALL issues (CRITICAL first, then MINOR) — no cap, reviewer runs once and fixes everything
+            log.info("Auto-fixing {} issues for run {}", totalFixable, runId);
             List<ReviewIssue> fixableIssues = issues.stream()
                     .sorted((a, b) -> {
                         if (a.getSeverity() == IssueSeverity.CRITICAL && b.getSeverity() != IssueSeverity.CRITICAL) return -1;
@@ -181,9 +177,16 @@ public class ReviewerAgentV2 {
                     .toList();
 
             for (ReviewIssue issue : fixableIssues) {
-                if (Duration.between(start, Instant.now()).compareTo(REVIEW_TIMEOUT) > 0) {
-                    log.warn("Review timeout reached — stopping auto-fix loop");
-                    break;
+                boolean timedOut = Duration.between(start, Instant.now()).compareTo(REVIEW_TIMEOUT) > 0;
+                if (timedOut) {
+                    if (issue.getSeverity() == IssueSeverity.CRITICAL) {
+                        // Always fix CRITICAL issues even past timeout
+                        log.warn("Review timeout reached but continuing for CRITICAL issue {}", issue.getId());
+                    } else {
+                        // Skip MINOR issues when time is up
+                        log.info("Review timeout reached — skipping MINOR issue {}", issue.getId());
+                        continue;
+                    }
                 }
 
                 autoFixAttempted++;
@@ -288,6 +291,7 @@ public class ReviewerAgentV2 {
 
         for (int iteration = 0; iteration < MAX_TOOL_CALLS + 5; iteration++) {
             AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                    .temperature(0.0)
                     .cacheOptions(AnthropicCacheOptions.builder()
                             .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                             .build())
@@ -641,7 +645,6 @@ public class ReviewerAgentV2 {
     private ReviewVerdict determineVerdict(List<ReviewIssue> issues, boolean readmeUpdated,
                                             int criticalCount, int autoFixSucceeded) {
         if (!readmeUpdated) return ReviewVerdict.REJECTED;
-        if (issues.size() > MAX_AUTO_FIX) return ReviewVerdict.REJECTED;
 
         // Check for unfixed critical issues
         long unfixedCritical = issues.stream()

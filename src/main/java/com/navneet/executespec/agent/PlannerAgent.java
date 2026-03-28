@@ -98,6 +98,7 @@ public class PlannerAgent {
                 // Enable SYSTEM_ONLY caching — system prompt is identical on every retry
                 // attempt.
                 AnthropicChatOptions plannerOpts = AnthropicChatOptions.builder()
+                        .temperature(0.0)
                         .cacheOptions(AnthropicCacheOptions.builder()
                                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                                 .build())

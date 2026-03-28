@@ -91,6 +91,10 @@ public class WorkerAgent {
     private static final int URGENCY_THRESHOLD_MINUTES = 2;
     /** Check for stall (no file writes) and escalate model after this many minutes. */
     private static final int STALL_CHECK_MINUTES = 5;
+    /** Hard cap on tool-call iterations — circuit breaker when prompt-level limit (20) is ignored. */
+    private static final int HARD_ITERATION_LIMIT = 25;
+    /** Max auto-continue attempts when LLM response is truncated (hit maxTokens). */
+    private static final int MAX_CONTINUATIONS = 2;
 
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
@@ -143,6 +147,8 @@ public class WorkerAgent {
         int totalFileWrites = 0;      // total writeFile/editFile dispatches for completion validation
         int consecutiveNullResponses = 0;
         final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
+        int toolCallCount = 0;  // total tool calls dispatched — for hard iteration limit
+        int continuations = 0;  // truncation auto-continue count
 
         // ── AGENTIC LOOP (time-based) ────────────────────────────────────────
         Instant deadline = Instant.now().plus(Duration.ofMinutes(taskDurationMinutes));
@@ -300,6 +306,27 @@ public class WorkerAgent {
                             String.format("%.1f", cacheSavingPct));
                 }
 
+                // ── TRUNCATION AUTO-CONTINUE ─────────────────────────────────────────
+                // If the LLM hit maxTokens, the response is truncated mid-output.
+                // Instead of letting broken code flow to compiler, auto-continue up to
+                // MAX_CONTINUATIONS times.
+                String finishReason = null;
+                try {
+                    finishReason = lr.response().getResult().getMetadata().getFinishReason();
+                } catch (Exception ignored) { /* metadata may be null for some providers */ }
+                if (isTruncatedResponse(finishReason) && continuations < MAX_CONTINUATIONS) {
+                    continuations++;
+                    log.warn("[Worker {}] Iteration {} — response truncated (finishReason={}). " +
+                            "Auto-continuing ({}/{})", taskId, iteration, finishReason,
+                            continuations, MAX_CONTINUATIONS);
+                    stateStore.appendTaskLog(taskId, "TRUNCATION_CONTINUE:" + continuations);
+                    messages.add(new UserMessage(
+                            "Your previous response was truncated (hit output token limit). " +
+                            "Continue EXACTLY where you left off. Do not repeat any code " +
+                            "already written. Complete the remaining file(s)."));
+                    continue; // next iteration — send continuation request
+                }
+
                 // ── PATH A: OpenAI native tool calls ─────────────────────────────────
                 // When using OpenAI with native function calling, tool calls are returned
                 // as structured objects in the response (not in text). We dispatch them
@@ -323,7 +350,16 @@ public class WorkerAgent {
                             toolObs.stop();
                         }
                     }
+                    toolCallCount += assistantMsg.getToolCalls().size();
                     messages.add(ToolResponseMessage.builder().responses(responses).build());
+                    if (toolCallCount >= HARD_ITERATION_LIMIT) {
+                        log.warn("[Worker {}] Hit hard iteration limit ({} tool calls) — forcing partial completion",
+                                taskId, toolCallCount);
+                        stateStore.appendTaskLog(taskId, "HARD_ITERATION_LIMIT:" + toolCallCount);
+                        return withProviderModel(WorkerReport.partial(taskId,
+                                "Terminated: exceeded " + HARD_ITERATION_LIMIT + " tool-call iterations",
+                                totalInputTokens, totalOutputTokens), provider, model);
+                    }
                     continue; // next iteration
                 }
 
@@ -356,7 +392,16 @@ public class WorkerAgent {
                                 toolObs.stop();
                             }
                         }
+                        toolCallCount += toolCalls.size();
                         messages.add(new UserMessage(results.toString().trim()));
+                        if (toolCallCount >= HARD_ITERATION_LIMIT) {
+                            log.warn("[Worker {}] Hit hard iteration limit ({} tool calls) — forcing partial completion",
+                                    taskId, toolCallCount);
+                            stateStore.appendTaskLog(taskId, "HARD_ITERATION_LIMIT:" + toolCallCount);
+                            return withProviderModel(WorkerReport.partial(taskId,
+                                    "Terminated: exceeded " + HARD_ITERATION_LIMIT + " tool-call iterations",
+                                    totalInputTokens, totalOutputTokens), provider, model);
+                        }
                         continue; // next iteration — do NOT add the "continue" prompt below
                     }
 
@@ -1298,6 +1343,7 @@ public class WorkerAgent {
         if (isOpenAi) {
             // OpenAI: native function calling — tools defined as JSON schemas
             OpenAiChatOptions opts = OpenAiChatOptions.builder()
+                    .temperature(0.0)
                     .maxCompletionTokens(maxOut)
                     .toolCallbacks(callbacks)
                     .internalToolExecutionEnabled(false) // keep outer loop in control
@@ -1316,6 +1362,7 @@ public class WorkerAgent {
                     .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                     .build();
             AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                    .temperature(0.0)
                     .maxTokens(maxOut)
                     .cacheOptions(cacheOpts)
                     // NO toolCallbacks — tools described in prompt, parsed as XML in PATH B
@@ -1472,6 +1519,20 @@ public class WorkerAgent {
         if (m.contains("gemini"))
             return "google";
         return props.getRoles().getWorker();
+    }
+
+    /**
+     * Checks whether the LLM response was truncated because it hit the output token limit.
+     * Finish reason strings vary by provider:
+     *   Anthropic: "end_turn" (normal) vs "max_tokens" (truncated)
+     *   OpenAI:    "stop" (normal) vs "length" (truncated)
+     *   Gemini:    "STOP" (normal) vs "MAX_TOKENS" (truncated)
+     */
+    private static boolean isTruncatedResponse(String finishReason) {
+        if (finishReason == null) return false;
+        return "max_tokens".equalsIgnoreCase(finishReason)
+                || "length".equalsIgnoreCase(finishReason)
+                || "MAX_TOKENS".equals(finishReason);
     }
 
     /**

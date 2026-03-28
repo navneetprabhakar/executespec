@@ -124,6 +124,7 @@ public class ApiTestSuiteAgent {
                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                 .build();
         AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .temperature(0.0)
                 .model(resolved.getModel())
                 .cacheOptions(cacheOpts)
                 .build();

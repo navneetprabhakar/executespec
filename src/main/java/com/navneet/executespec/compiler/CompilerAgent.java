@@ -153,11 +153,17 @@ public class CompilerAgent {
         return CompileResult.failed(maxAttempts, summary);
     }
 
+    /** Max files to include in a single compiler LLM pass. Remaining files fixed in subsequent retry passes. */
+    private static final int MAX_COMPILER_FILES = 10;
+
     private void applyLlmFixes(String runId, String errors, String buildTool) throws IOException {
         String system = compilerPrompt.getContentAsString(StandardCharsets.UTF_8);
-        String context = extractRelevantFiles(runId, errors);
+        // Scope enforcement: if many files have errors, prioritize foundational files
+        // (models/entities first) and limit to MAX_COMPILER_FILES per pass.
+        String scopedErrors = scopeErrors(errors, MAX_COMPILER_FILES);
+        String context = extractRelevantFiles(runId, scopedErrors);
         String user = "Build tool: " + buildTool
-                + "\n\nCOMPILE ERRORS:\n" + truncate(errors, 2000)
+                + "\n\nCOMPILE ERRORS:\n" + truncate(scopedErrors, 2000)
                 + "\n\nRELEVANT SOURCE FILES:\n" + context
                 + "\n\nOutput ONLY a JSON array: [{\"path\":\"...\",\"content\":\"...\"}]";
 
@@ -168,6 +174,7 @@ public class CompilerAgent {
                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                 .build();
         AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                .temperature(0.0)
                 .model(resolved.getModel())
                 .cacheOptions(cacheOpts)
                 .build();
@@ -226,11 +233,57 @@ public class CompilerAgent {
         }
     }
 
+    /**
+     * Scope compile errors to at most {@code maxFiles} unique files, prioritized by
+     * dependency order (models/entities first, tests last). This prevents the LLM from
+     * trying to fix 30+ files in one pass, producing a massive truncated response.
+     * Remaining files are fixed in subsequent retry passes once foundational fixes resolve
+     * cascading errors.
+     */
+    private String scopeErrors(String errors, int maxFiles) {
+        Pattern filePattern = Pattern.compile("([\\w/.-]+\\.(?:java|ts|js|tsx|jsx|py|go|rs))");
+        Matcher m = filePattern.matcher(errors);
+        var allFiles = new LinkedHashSet<String>();
+        while (m.find()) allFiles.add(m.group(1));
+
+        if (allFiles.size() <= maxFiles) return errors;
+
+        log.info("CompilerAgent: {} files with errors — scoping to {} (priority order)", allFiles.size(), maxFiles);
+
+        // Priority: model/entity/dto > repository > service > controller > config > test > other
+        java.util.Comparator<String> priority = java.util.Comparator.comparingInt(path -> {
+            String lower = ((String) path).toLowerCase();
+            if (lower.contains("/model/") || lower.contains("/entity/") || lower.contains("/dto/")) return 0;
+            if (lower.contains("/repository/") || lower.contains("/repo/")) return 1;
+            if (lower.contains("/service/")) return 2;
+            if (lower.contains("/controller/") || lower.contains("/resource/")) return 3;
+            if (lower.contains("/config/")) return 4;
+            if (lower.contains("/test/") || lower.contains("Test.")) return 5;
+            return 6;
+        });
+
+        var prioritizedFiles = allFiles.stream()
+                .sorted(priority)
+                .limit(maxFiles)
+                .collect(java.util.stream.Collectors.toSet());
+
+        // Filter error lines to only include lines mentioning prioritized files
+        StringBuilder scoped = new StringBuilder();
+        for (String line : errors.split("\n")) {
+            boolean include = prioritizedFiles.stream().anyMatch(line::contains);
+            // Also include lines that don't mention any file (general error context)
+            if (include || allFiles.stream().noneMatch(line::contains)) {
+                scoped.append(line).append("\n");
+            }
+        }
+        return scoped.toString();
+    }
+
     private String extractRelevantFiles(String runId, String errors) {
         Pattern p = Pattern.compile("([\\w/]+\\.(?:java|ts|js|py))");
         Matcher m = p.matcher(errors);
         var seen = new LinkedHashSet<String>();
-        while (m.find() && seen.size() < 5)
+        while (m.find() && seen.size() < MAX_COMPILER_FILES)
             seen.add(m.group(1));
         var sb = new StringBuilder();
         for (String f : seen) {
