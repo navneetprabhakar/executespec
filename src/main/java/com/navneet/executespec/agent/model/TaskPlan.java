@@ -18,6 +18,7 @@ import java.util.List;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public class TaskPlan {
 
+    private String projectType;     // planner-declared: SPRING_BOOT, STATIC_HTML, NODE_FRONTEND, etc.
     private String planTitle;
     private String planSummary;
     private List<TaskDefinition> tasks;

@@ -6,15 +6,37 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.deployment.preview.PreviewProjectType;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class DockerfileGenerator {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** Maps planner-declared project_type → DeployStrategy for strategy lookup. */
+    private static final Map<String, Deployment.DeployStrategy> PROJECT_TYPE_TO_DEPLOY = Map.ofEntries(
+            Map.entry("SPRING_BOOT", Deployment.DeployStrategy.SPRING_BOOT),
+            Map.entry("JAVA", Deployment.DeployStrategy.SPRING_BOOT),
+            Map.entry("NODE_FRONTEND", Deployment.DeployStrategy.NODE),
+            Map.entry("NODE_BACKEND", Deployment.DeployStrategy.NODE),
+            Map.entry("PYTHON", Deployment.DeployStrategy.PYTHON),
+            Map.entry("GO", Deployment.DeployStrategy.GO),
+            Map.entry("RUST", Deployment.DeployStrategy.RUST),
+            Map.entry("RUBY", Deployment.DeployStrategy.RUBY),
+            Map.entry("PHP", Deployment.DeployStrategy.PHP),
+            Map.entry("FULL_STACK", Deployment.DeployStrategy.FULLSTACK),
+            Map.entry("STATIC_HTML", Deployment.DeployStrategy.STATIC)
+    );
 
     private final List<DeploymentStrategy> strategies;
     private final DeploymentProperties props;
@@ -30,7 +52,13 @@ public class DockerfileGenerator {
             return detectStrategyOnly(workspacePath);
         }
 
-        DeploymentStrategy matched = strategies.stream()
+        // Check planner-declared project type first
+        DeploymentStrategy fromPlan = resolveFromProjectJson(workspacePath);
+        if (fromPlan != null) {
+            log.info("[Deploy] Using planner-declared project type → strategy: {}", fromPlan.type());
+        }
+
+        DeploymentStrategy matched = (fromPlan != null) ? fromPlan : strategies.stream()
             .filter(s -> s.applies(workspacePath))
             .findFirst()
             .orElseThrow(() -> new IllegalStateException(
@@ -63,11 +91,39 @@ public class DockerfileGenerator {
     }
 
     private DeploymentStrategy detectStrategyOnly(Path workspacePath) {
+        DeploymentStrategy fromPlan = resolveFromProjectJson(workspacePath);
+        if (fromPlan != null) return fromPlan;
         return strategies.stream()
             .filter(s -> s.applies(workspacePath))
             .findFirst()
             .orElseThrow(() -> new IllegalStateException(
                 "Existing Dockerfile found but cannot determine project strategy for " + workspacePath));
+    }
+
+    /**
+     * Reads .agent-context/project.json and maps the planner-declared project_type
+     * to the matching DeploymentStrategy bean. Returns null if not found or invalid.
+     */
+    private DeploymentStrategy resolveFromProjectJson(Path workspacePath) {
+        Path projectJson = workspacePath.resolve(".agent-context/project.json");
+        if (!Files.exists(projectJson)) return null;
+        try {
+            JsonNode node = MAPPER.readTree(projectJson.toFile());
+            String declared = node.path("project_type").asText(null);
+            if (declared == null || declared.isBlank() || "UNKNOWN".equals(declared)) return null;
+            Deployment.DeployStrategy target = PROJECT_TYPE_TO_DEPLOY.get(declared);
+            if (target == null) {
+                log.warn("[Deploy] Unknown planner-declared project type '{}' — falling back", declared);
+                return null;
+            }
+            return strategies.stream()
+                    .filter(s -> s.type() == target)
+                    .findFirst()
+                    .orElse(null);
+        } catch (IOException e) {
+            log.debug("[Deploy] Could not read project.json: {}", e.getMessage());
+            return null;
+        }
     }
 
     private void writeDockerignore(Path workspacePath) throws IOException {

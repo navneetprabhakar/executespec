@@ -2399,6 +2399,20 @@ public class PipelineHarness {
         fsTool.writeFile(runId, ".agent-context/task-assignments.json", planJson);
         fsTool.writeFile(runId, ".agent-context/file-locks.json", "{}");
         fsTool.writeFile(runId, ".agent-context/shared-contracts.json", "{}");
+
+        // Write planner-declared project type for preview/deploy detection
+        String projectType = "UNKNOWN";
+        try {
+            var node = mapper.readTree(planJson);
+            String declared = node.path("project_type").asText(null);
+            if (declared != null && !declared.isBlank()) {
+                projectType = declared;
+            }
+        } catch (Exception e) {
+            log.debug("Could not extract project_type from plan JSON: {}", e.getMessage());
+        }
+        fsTool.writeFile(runId, ".agent-context/project.json",
+                String.format("{\"project_type\": \"%s\"}", projectType));
         fsTool.writeFile(runId, ".agent-context/CODEBASE_CONTEXT.md", """
             # Workspace Context
 
