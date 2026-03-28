@@ -95,12 +95,13 @@ public class TokenBudgetMonitor {
      */
     public int maxOutputTokens(String model, String complexity) {
         int modelMax = maxOutputForModel(model);
-        // For LOW complexity, use at most half the model's max to save cost
-        // For MEDIUM, use up to 75%. For HIGH, use the full model max.
+        // Fraction of model's max output based on task complexity.
+        // HIGH is capped at 50% (not 100%) to avoid multi-minute LLM responses
+        // — e.g. Sonnet at 100% = 64K tokens ≈ 3-5min response time.
         double fraction = switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
             case "LOW"  -> 0.25;
-            case "HIGH" -> 1.0;
-            default     -> 0.50;
+            case "HIGH" -> 0.50;
+            default     -> 0.375;
         };
         return Math.min(modelMax, Math.max((int) (modelMax * fraction), props.getTokenBudget().getLow()));
     }
