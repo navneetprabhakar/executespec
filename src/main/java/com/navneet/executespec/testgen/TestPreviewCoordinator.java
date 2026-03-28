@@ -70,20 +70,9 @@ public class TestPreviewCoordinator {
         state.setTestsReady(true);
         state.setTestsReadyAt(Instant.now());
 
-        // If preview already failed (cancelIfPending was called before tests were ready),
-        // immediately fire the completion event with an empty summary.
-        if (state.isPreviewFailed()) {
-            log.info("[TestCoord] Tests ready but preview already failed for run {} — skipping execution",
-                    event.runId());
-            broadcaster.emit(event.runId(), RunEvent.log(event.runId(), null,
-                    "[TestExec] Test execution skipped — preview failed before tests were ready"));
-            eventPublisher.publishEvent(new TestExecutionCompletedEvent(
-                    event.runId(), state.getTestPlanId(), TestExecutionSummary.empty()));
-            stateMap.remove(event.runId());
-            return;
-        }
-
-        // Start preview now that tests are ready — ensures full TTL for test execution
+        // Start preview now that tests are ready — ensures full TTL for test execution.
+        // The 10-minute CompletableFuture timeout in PipelineHarness.generateValidationReport()
+        // is the safety net if preview startup takes too long.
         startPreviewForTests(event.runId());
         // Don't call tryExecute() here — onPreviewReady() will trigger it when preview is live
     }
@@ -182,24 +171,32 @@ public class TestPreviewCoordinator {
      */
     public void cancelIfPending(String runId) {
         CoordinationState state = stateMap.get(runId);
-        if (state != null && !state.isExecutionStarted()) {
+        if (state != null && !state.isExecutionStarted() && !state.isTestsReady()) {
+            // Tests were never ready (gen pipeline failed or still running) — no preview was started.
+            // Safe to cancel: nothing is in-flight.
             long waitSec = state.getTestsReadyAt() != null
                     ? Duration.between(state.getTestsReadyAt(), Instant.now()).toSeconds() : 0;
             log.info("[TestCoord] Cancelling pending test execution for run {} " +
-                    "(tests ready {}s ago, preview never arrived)", runId, waitSec);
+                    "(tests never compiled, preview never started)", runId);
             broadcaster.emit(runId, RunEvent.log(runId, null,
-                    "[TestExec] Test execution skipped — preview was not ready in time"));
+                    "[TestExec] Test execution skipped — tests did not compile in time"));
             eventPublisher.publishEvent(new TestExecutionCompletedEvent(
                     runId, state.getTestPlanId(), TestExecutionSummary.empty()));
             stateMap.remove(runId);
+        } else if (state != null && !state.isExecutionStarted() && state.isTestsReady()) {
+            // Tests are ready and preview is starting (or about to start).
+            // Do NOT cancel — let the preview come up and execute tests.
+            // The 10-minute CompletableFuture timeout in generateValidationReport
+            // is the safety net if preview never arrives.
+            log.info("[TestCoord] Tests ready for run {} but execution not started yet — " +
+                    "allowing preview+test flow to continue (10min timeout will catch failures)", runId);
         } else if (state == null) {
-            // Preview failed BEFORE tests were ready. Mark the state so that when
-            // onTestsReady fires later, it immediately completes instead of waiting.
-            CoordinationState earlyCancel = new CoordinationState(runId);
-            earlyCancel.setPreviewFailed(true);
-            stateMap.put(runId, earlyCancel);
-            log.info("[TestCoord] Preview failed before tests ready for run {} — " +
-                    "will auto-cancel when tests arrive", runId);
+            // Test gen hasn't finished yet. Do NOT poison the state — let test gen
+            // complete naturally. Preview starts only after tests are ready (onTestsReady),
+            // so there's no resource to cancel. The CompletableFuture timeout handles
+            // the case where test gen takes too long.
+            log.debug("[TestCoord] cancelIfPending called for run {} but test gen not finished — " +
+                    "letting test pipeline proceed naturally", runId);
         }
     }
 
