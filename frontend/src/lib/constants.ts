@@ -6,6 +6,7 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string; glow: st
   WORKING:           { dot: 'bg-accent-cyan',      text: 'text-accent-cyan',   glow: 'shadow-glow-cyan',        bg: 'bg-accent-cyan/10' },
   REVIEWING:         { dot: 'bg-accent-violet',    text: 'text-accent-violet', glow: 'shadow-glow-violet',      bg: 'bg-accent-violet/10' },
   AWAITING_MERGE:    { dot: 'bg-accent-amber',     text: 'text-accent-amber',  glow: 'shadow-glow-amber',       bg: 'bg-accent-amber/10' },
+  COMPILING:         { dot: 'bg-accent-cyan',      text: 'text-accent-cyan',   glow: 'shadow-glow-cyan',        bg: 'bg-accent-cyan/10' },
   MERGING:           { dot: 'bg-accent-emerald',   text: 'text-accent-emerald',glow: 'shadow-glow-emerald',     bg: 'bg-accent-emerald/10' },
   COMPLETE:          { dot: 'bg-accent-emerald',   text: 'text-accent-emerald',glow: 'shadow-glow-emerald',     bg: 'bg-accent-emerald/10' },
   FAILED:            { dot: 'bg-accent-rose',      text: 'text-accent-rose',   glow: 'shadow-glow-rose',        bg: 'bg-accent-rose/10' },
@@ -19,12 +20,12 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string; glow: st
   LOCKED:            { dot: 'bg-zinc-400',         text: 'text-zinc-400',      glow: '',                        bg: 'bg-zinc-400/10' },
 };
 
-export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'REVIEWING', 'MERGING']);
+export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'COMPILING', 'REVIEWING', 'MERGING']);
 export const GATE_STATUSES   = new Set(['AWAITING_APPROVAL', 'AWAITING_MERGE', 'AWAITING_CLARIFICATION']);
 
 export const PIPELINE_STEPS = [
   'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'WORKING',
-  'REVIEWING', 'AWAITING_MERGE', 'MERGING', 'COMPLETE',
+  'COMPILING', 'REVIEWING', 'MERGING', 'COMPLETE',
 ];
 
 export const NAV_ITEMS: {

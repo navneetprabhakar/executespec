@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Component
@@ -31,9 +32,31 @@ public class FileLockTool {
 
     private static final String LOCK_FILE = ".agent-context/file-locks.json";
 
+    /**
+     * Files that are never exclusively locked — any task can write to them.
+     * These are common config/build files that multiple tasks may need to modify.
+     */
+    private static final Set<String> SHARED_BY_DEFAULT = Set.of(
+        "pom.xml", "package.json", "build.gradle", "build.gradle.kts", "settings.gradle",
+        "application.yml", "application.properties", "application-dev.yml", "application-test.yml",
+        ".env", ".env.example",
+        "README.md", "readme.md",
+        ".gitignore",
+        "Dockerfile", "docker-compose.yml", "docker-compose.yaml"
+    );
+
+    /** Returns true if the given path refers to a shared-by-default file (basename match). */
+    private static boolean isSharedFile(String filePath) {
+        if (filePath == null) return false;
+        String basename = filePath.contains("/") ? filePath.substring(filePath.lastIndexOf('/') + 1) : filePath;
+        return SHARED_BY_DEFAULT.contains(basename);
+    }
+
     // Claim a file for a task. Returns false if already owned by another task.
+    // Shared files (pom.xml, package.json, etc.) always succeed — no exclusive lock.
     @Transactional
     public boolean claim(String filePath, String runId, String taskId) {
+        if (isSharedFile(filePath)) return true; // shared files are never locked
         Optional<FileLock> existing = lockRepo.findById(filePath);
         if (existing.isPresent() && !existing.get().getTaskId().equals(taskId)) {
             return false; // owned by someone else
@@ -55,6 +78,7 @@ public class FileLockTool {
     }
 
     public Optional<String> getOwner(String filePath) {
+        if (isSharedFile(filePath)) return Optional.empty(); // shared files have no exclusive owner
         return lockRepo.findById(filePath).map(FileLock::getTaskId);
     }
 

@@ -25,6 +25,7 @@ public record DeploymentProperties(
     public record WorkspaceConfig(
         int    retentionDays,
         String gcsBucket,          // GCS bucket for archived workspaces
-        int    archiveAfterHours   // hours after run completion before archiving (default 24)
+        int    archiveAfterHours,  // hours after run completion before archiving (default 24)
+        boolean gcsEnabled         // false = skip all GCS uploads/archiving (local dev)
     ) {}
 }

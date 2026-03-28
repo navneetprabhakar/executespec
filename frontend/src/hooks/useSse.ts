@@ -30,8 +30,8 @@ export function useSse(runId: string | null) {
       msgs.forEach((msg, i) => {
         addEntry({
           id: `hist-${i}-${msg.sentAt}`,
-          type: 'log',
-          data: { message: `[${msg.fromAgent}] ${msg.contentSummary}` },
+          type: 'LOG',
+          data: { message: `[${msg.fromAgent}] ${msg.contentSummary}`, payload: `[${msg.fromAgent}] ${msg.contentSummary}` },
           timestamp: new Date(msg.sentAt).getTime(),
         });
       });

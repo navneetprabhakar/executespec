@@ -134,9 +134,12 @@ public class PlannerAgent {
                     continue;
                 }
 
-                if (plan.getTasks().size() > 35) {
-                    log.warn("Plan has {} tasks — truncating to 35", plan.getTasks().size());
-                    plan.setTasks(plan.getTasks().subList(0, 35));
+                if (plan.getTasks().size() > 25) {
+                    // TODO: Send alert to Slack / PagerDuty when task count breaches cap
+                    log.error("[ALERT] Plan has {} tasks for run {} — breaches 25-task cap. Truncating. Request: {}",
+                        plan.getTasks().size(), runId,
+                        plan.getPlanSummary() != null ? plan.getPlanSummary() : "unknown");
+                    plan.setTasks(plan.getTasks().subList(0, 25));
                 }
 
                 stateStore.logMessage(runId, "planner", "harness",
@@ -276,9 +279,11 @@ public class PlannerAgent {
 
                 TaskPlan plan = outputParser.parse(responseContent, TaskPlan.class);
 
-                if (plan.getTasks() != null && plan.getTasks().size() > 35) {
-                    log.warn("Edited plan has {} tasks — truncating to 35", plan.getTasks().size());
-                    plan.setTasks(plan.getTasks().subList(0, 35));
+                if (plan.getTasks() != null && plan.getTasks().size() > 25) {
+                    // TODO: Send alert to Slack / PagerDuty when task count breaches cap
+                    log.error("[ALERT] Edited plan has {} tasks for run {} — breaches 25-task cap. Truncating.",
+                        plan.getTasks().size(), runId);
+                    plan.setTasks(plan.getTasks().subList(0, 25));
                 }
 
                 log.info("Planner re-plan produced {} tasks", plan.getTasks().size());
