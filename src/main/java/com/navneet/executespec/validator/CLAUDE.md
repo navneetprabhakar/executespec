@@ -14,4 +14,5 @@ Pluggable validation gate chain: SYNTAX → TYPE → LINT → TEST
 ## Patterns
 - Gates run sequentially — fail-fast on SYNTAX before TYPE
 - Results feed into ValidationReportService for aggregation
-- Validator runs BEFORE merge (per-task) and AFTER merge (post-merge compile check)
+- Validation deferred to review phase (CompilerAgent + ReviewerAgentV2) — NOT run per-task
+- Per-task validation was removed from SequentialTaskExecutor (2026-03-28)

@@ -11,10 +11,10 @@ User-selected provider architecture with YAML-configured model matrix and Redis-
 - `LlmProvider.java` — Enum: ANTHROPIC, OPENAI, GOOGLE
 - `AvailableProviderResolver.java` — Resolves available providers per run based on org policy + API key availability
 
-## Agent Tiers
-- PLANNING: Sonnet / GPT-5.4 / Gemini Pro (planner, reviewer, worker stall escalation)
-- WORKHORSE: Haiku / GPT-5.4-mini / Gemini Flash (workers, compiler, most agents)
-- LIGHTWEIGHT: Haiku / GPT-5.4-mini / Gemini Flash (chat, reports, context)
+## Agent Tiers (from application.yml model-matrix)
+- PLANNING: Opus / GPT-5.4 / Gemini 3.1 Pro (planner, reviewer, test planner, worker stall escalation)
+- WORKHORSE: Sonnet / GPT-5.4 / Gemini 3 Flash (workers, compiler, test worker, conflict resolver)
+- LIGHTWEIGHT: Haiku / GPT-5.4-mini / Gemini 3 Flash (chat, reports, context, prompt optimiser)
 
 ## Provider Selection
 Each project selects its AI provider (ANTHROPIC/GOOGLE/OPENAI). ModelResolver maps `agentTier × provider → model` from YAML config. Failover to next healthy provider if selected provider is down.

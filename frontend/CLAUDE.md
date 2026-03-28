@@ -11,16 +11,19 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - `src/lib/store.ts` — Zustand state store
 
 ## Key Components
-- `RunDetail.tsx` — Main run view. Shows gate banners, task list, review, report, cost estimate.
-- `NewRunModal.tsx` — Run submission form with language validation hint.
+- `RunDetail.tsx` — Main run view with Vibe View toggle. Shows gate banners, task list, review, report, cost estimate.
+- `NewRunModal.tsx` — Run submission form with AI provider selection, language validation hint.
 - `ValidationReportPanel.tsx` — Collapsible validation report display.
 - `RunConversation.tsx` — Chat copilot interface.
 - `PreviewTab.tsx` — Cloud Run preview with countdown timer.
+- `VibeView.tsx` — Simplified progress view (mission control UX) for non-technical users.
 
 ## Patterns
 - SSE events flow through generic `onmessage` handler — no per-type wiring needed
+- Event type checks use SCREAMING_SNAKE_CASE (matches backend)
 - Review display uses `recommendationCompat ?? recommendation` for V2 compat
 - Toast notifications for SSE events (compaction, model escalation)
+- Pagination: run list uses `PagedResponse<RunSummary>` with page/size/totalElements
 
 ## Build
 ```bash

@@ -31,6 +31,16 @@ public class TokenBudgetMonitor {
     private static final int OPENAI_LIMIT     = 200_000;  // GPT-5.4: 1.05M, GPT-5.4-mini: 400k — floor to Anthropic limit
     private static final int GEMINI_LIMIT     = 200_000;  // Gemini: 1M+ — floor to Anthropic limit
 
+    // Max output tokens per model (from provider docs)
+    private static final int OPUS_MAX_OUTPUT    = 32_000;
+    private static final int SONNET_MAX_OUTPUT  = 64_000;
+    private static final int HAIKU_MAX_OUTPUT   = 8_192;
+    private static final int GPT54_MAX_OUTPUT   = 16_384;
+    private static final int GPT54M_MAX_OUTPUT  = 16_384;
+    private static final int GEMINI_PRO_OUTPUT  = 65_536;
+    private static final int GEMINI_FLASH_OUTPUT = 24_576;
+    private static final int DEFAULT_MAX_OUTPUT = 16_000;
+
     public BudgetStatus check(String model, String complexity, int lastCallInputTokens) {
         int limit = contextLimitFor(model);
         double usagePct = (double) lastCallInputTokens / limit;
@@ -68,18 +78,53 @@ public class TokenBudgetMonitor {
      * @return CONTINUE, COMPACT_AND_CONTINUE, or FORCE_REPORT
      */
     public TokenBudgetPolicy.BudgetAction evaluateBudget(int usedTokens, String complexity) {
-        AgentProperties.TokenBudget budget = props.getTokenBudget();
-        int softLimit   = softLimitFor(complexity, budget);
-        int hardCeiling = budget.getHardCeiling();
+        return evaluateBudget(usedTokens, null, complexity);
+    }
+
+    public TokenBudgetPolicy.BudgetAction evaluateBudget(int usedTokens, String model, String complexity) {
+        int modelMax    = maxOutputForModel(model);
+        int softLimit   = maxOutputTokens(model, complexity);
+        int hardCeiling = (int) (modelMax * props.getTokenBudget().getHardCeilingPct());
         return budgetPolicy.evaluate(usedTokens, softLimit, hardCeiling);
     }
 
-    public int maxOutputTokens(String complexity) {
-        return switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
-            case "LOW"  -> props.getTokenBudget().getLow();
-            case "HIGH" -> props.getTokenBudget().getHigh();
-            default     -> props.getTokenBudget().getMedium();
+    /**
+     * Returns the max output tokens for a given model and complexity.
+     * Uses the model's actual output limit, capped by complexity-based soft limits
+     * to avoid wasteful over-generation on simple tasks.
+     */
+    public int maxOutputTokens(String model, String complexity) {
+        int modelMax = maxOutputForModel(model);
+        // For LOW complexity, use at most half the model's max to save cost
+        // For MEDIUM, use up to 75%. For HIGH, use the full model max.
+        double fraction = switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
+            case "LOW"  -> 0.25;
+            case "HIGH" -> 1.0;
+            default     -> 0.50;
         };
+        return Math.min(modelMax, Math.max((int) (modelMax * fraction), props.getTokenBudget().getLow()));
+    }
+
+    /** @deprecated Use {@link #maxOutputTokens(String, String)} with model parameter. */
+    @Deprecated
+    public int maxOutputTokens(String complexity) {
+        return maxOutputTokens(null, complexity);
+    }
+
+    /**
+     * Returns the maximum output tokens supported by the given model.
+     */
+    public int maxOutputForModel(String model) {
+        if (model == null) return DEFAULT_MAX_OUTPUT;
+        String m = model.toLowerCase();
+        if (m.contains("opus"))          return OPUS_MAX_OUTPUT;
+        if (m.contains("sonnet"))        return SONNET_MAX_OUTPUT;
+        if (m.contains("haiku"))         return HAIKU_MAX_OUTPUT;
+        if (m.contains("gpt-5.4-mini"))  return GPT54M_MAX_OUTPUT;
+        if (m.contains("gpt-5.4"))       return GPT54_MAX_OUTPUT;
+        if (m.contains("gemini") && m.contains("pro"))   return GEMINI_PRO_OUTPUT;
+        if (m.contains("gemini") && m.contains("flash")) return GEMINI_FLASH_OUTPUT;
+        return DEFAULT_MAX_OUTPUT;
     }
 
     public int contextLimitFor(String model) {

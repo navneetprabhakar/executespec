@@ -19,6 +19,12 @@ QUEUED ─(slot available)─→ PLANNING
                               ↓           ↓
                           REVIEWING     PARTIAL ──(retry tasks)──→ WORKING
                               ↓
+                        (review done)
+                              ↓
+                        TEST_GENERATION
+                              ↓
+                        TEST_EXECUTION
+                              ↓
                            COMPLETE
 
 Side paths:
@@ -183,24 +189,51 @@ Side paths:
   - Validate fix via `CodeValidator`.
   - Mark `autoFixed = true/false`.
 
-### Concurrent: Test Generation
-- `TestGenOrchestrator.runTestGenPipeline()` runs in parallel.
-- Preview auto-started for test execution (10-min timeout).
-
 **Output** — `ReviewReportV2`: verdict (APPROVED / NEEDS_FIXES / REJECTED), issues list, auto-fix count.
 
 ---
 
-## Stage 7 — Validation Report
+## Stage 7 — Test Generation
 
 | | |
 |---|---|
-| **Trigger** | Review complete |
+| **Trigger** | Review complete (runs sequentially AFTER review, not in parallel) |
+| **Handler** | `TestGenOrchestrator.runTestGenPipeline()` |
+| **Model** | Haiku (WORKHORSE tier) for TestWorkerAgent, LIGHTWEIGHT for TestReportGenerator |
+| **State** | `REVIEWING` (continued) |
+
+1. **Test planning** — `TestPlannerAgent` creates a test plan from the user spec and generated code.
+2. **Test code generation** — `TestWorkerAgent` generates test code for each test task.
+3. **Test compilation** — compile generated tests; failures are fed back for retry.
+
+---
+
+## Stage 8 — Test Execution
+
+| | |
+|---|---|
+| **Trigger** | Tests compile successfully in Stage 7 |
+| **Handler** | `TestPreviewCoordinator` |
+| **State** | `REVIEWING` (continued) |
+
+1. **Preview startup** — `TestPreviewCoordinator` starts a preview AFTER tests compile. It owns the preview lifecycle for test execution (10-min timeout).
+2. **Test execution** — execute compiled tests against the running preview.
+3. **Report generation** — `TestReportGenerator` generates fix suggestions for any failed tests.
+
+**Non-fatal** — test execution failure doesn't block completion.
+
+---
+
+## Stage 9 — Validation Report
+
+| | |
+|---|---|
+| **Trigger** | Test execution complete (or skipped) |
 | **Handler** | `ValidationReportService.generateAndPersist()` → `ValidationReportGenerator` |
 | **Model** | Haiku (FAST tier) |
 | **State** | `REVIEWING` (continued) |
 
-1. Extract structured data: issues, languages, checks passed, files generated.
+1. Extract structured data: issues, languages, checks passed, files generated, test results.
 2. LLM generates markdown report.
 3. Persist `ValidationReport` entity (JSON + markdown).
 4. Record metrics: result (PASSED/NEEDS_REVIEW/REJECTED), issue count, generation time.
@@ -209,20 +242,7 @@ Side paths:
 
 ---
 
-## Stage 8 — Re-Validation (conditional)
-
-| | |
-|---|---|
-| **Trigger** | Auto-fixes were applied in Stage 6 |
-| **Handler** | `CompilerAgent` |
-
-- Re-run compiler on merged code after auto-fixes.
-- Pass → emit "Re-validation passed".
-- Fail → warning only (non-fatal).
-
----
-
-## Stage 9 — Completion & Cleanup
+## Stage 10 — Completion & Cleanup
 
 | | |
 |---|---|
@@ -258,7 +278,7 @@ Side paths:
 | Agent / Service | Stage | Model | Responsibility |
 |-----------------|-------|-------|----------------|
 | `RunController` | 0 | — | REST entry, tier/quota checks |
-| `PipelineHarness` | 1–9 | — | Orchestrator, async thread, gate polling |
+| `PipelineHarness` | 1–10 | — | Orchestrator, async thread, gate polling |
 | `PlannerAgent` | 2 | Sonnet | Task decomposition, cost estimation |
 | `SequentialTaskExecutor` | 4 | — | Dependency graph, tiered parallel dispatch |
 | `WorkerAgent` | 4, 6 | Haiku/Sonnet/Power | Agentic tool-use loop (15 min), code generation |
@@ -266,13 +286,17 @@ Side paths:
 | `CompilerAgent` | 5, 8 | Haiku | Build detection, LLM-guided compile fixes |
 | `GitMergeService` | 4, 6 | — | Branch merging, conflict detection |
 | `ReviewerAgentV2` | 6 | Haiku | Code inspection, auto-fix orchestration |
-| `ValidationReportService` | 7 | Haiku | Report generation & persistence |
-| `TestGenOrchestrator` | 6 (parallel) | Haiku | Test generation pipeline |
-| `LlmRouter` | 2,4,5,6,7 | — | Multi-provider fallback, per-run key resolution |
-| `ModelRouter` | 2,4,5,6,7 | — | Tier-based model selection, weighted round-robin |
+| `TestGenOrchestrator` | 7 | — | Orchestrates test gen pipeline (sequential after review) |
+| `TestPlannerAgent` | 7 | Haiku | Creates test plan from user spec |
+| `TestWorkerAgent` | 7 | Haiku | Generates test code per test task |
+| `TestPreviewCoordinator` | 8 | — | Starts preview after tests compile, owns preview lifecycle for test execution |
+| `TestReportGenerator` | 8 | Haiku | Generates fix suggestions for failed tests |
+| `ValidationReportService` | 9 | Haiku | Report generation & persistence |
+| `LlmRouter` | 2,4,5,6–9 | — | Multi-provider fallback, per-run key resolution |
+| `ModelRouter` | 2,4,5,6–9 | — | Tier-based model selection, weighted round-robin |
 | `GateStore` | 3 | — | Redis-backed gates (500ms poll, 2h TTL) |
 | `StateStore` | All | — | Central state persistence |
-| `PreviewService` | 6 (async) | — | Cloud Run preview lifecycle |
+| `PreviewService` | 8 | — | Cloud Run preview lifecycle (used by TestPreviewCoordinator) |
 
 ---
 

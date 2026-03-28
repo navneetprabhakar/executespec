@@ -1,7 +1,7 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 2.0
-> **Date**: 2026-03-27
+> **Version**: 2.1
+> **Date**: 2026-03-28
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -132,6 +132,10 @@ graph TB
         CA[CompilerAgent]
         ConvA[ConversationAgent]
         CtxA[ContextAgent]
+        TGO[TestGenOrchestrator]
+        TWA[TestWorkerAgent]
+        TPC[TestPreviewCoordinator]
+        TRG[TestReportGenerator]
     end
 
     subgraph "Infrastructure Layer"
@@ -166,14 +170,15 @@ graph TB
     BC --> BS
     SC --> SB
 
-    PH --> PA & WA & RA & CA
+    PH --> PA & WA & RA & CA & TGO
     PH --> STE & GMS & GS
     PH --> SS & SB
+    TGO --> TWA & TPC & TRG
 
     PS --> CRC & ARC
     DS --> CRC & ARC
 
-    PA & WA & RA & CA --> LR
+    PA & WA & RA & CA & TGO & TWA & TRG --> LR
     LR --> MR
 
     WA --> FST & GT & ST & FLT
@@ -184,21 +189,34 @@ graph TB
 
 ### 3.2 Agent Architecture
 
+**Pipeline flow:** plan → approve → work (sequential tasks) → compile → merge → review → test gen → preview (started by TestPreviewCoordinator AFTER tests compile) → test exec → validation report → complete
+
+**Project type detection:** PlannerAgent outputs `project_type` in the plan JSON. This is written to `.agent-context/project.json` in the workspace. `DevDockerfileGenerator` and `DockerfileGenerator` read this value before falling back to file-based heuristics, preventing misdetection (e.g., static HTML being classified as NODE).
+
+**Model Matrix:**
+
+| Agent Tier | Agents | Anthropic | Google | OpenAI |
+|------------|--------|-----------|--------|--------|
+| PLANNING | PlannerAgent, ReviewerAgentV2, TestPlannerAgent | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, ApiTestSuiteAgent, ConflictResolverAgent, TestWorkerAgent | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, PromptOptimiserAgent, TestReportGenerator, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+
 ```mermaid
 graph TB
     subgraph "Agent Execution Model"
         direction TB
 
         subgraph "PlannerAgent"
-            P_IN[User Goal + Context] --> P_LLM[Claude Sonnet<br/>CAPABLE_CHAIN]
-            P_LLM --> P_OUT[TaskPlan<br/>1-35 tasks, sequential<br/>complexity per task]
+            P_IN[User Goal + Context] --> P_LLM[LLM Call<br/>PLANNING tier]
+            P_LLM --> P_OUT[TaskPlan<br/>1-35 tasks, sequential<br/>complexity per task<br/>+ project_type detection]
+            P_OUT --> P_CTX[.agent-context/project.json<br/>project_type written here<br/>Read by DockerfileGenerator<br/>before file-based heuristics]
         end
 
         subgraph "WorkerAgent (per task, sequential)"
             W_PROMPT[Task + Context<br/>+ Workspace State] --> W_LOOP
 
             subgraph "W_LOOP [15-min Time Loop]"
-                W_LLM[LLM Call<br/>Claude Haiku] --> W_PARSE[Parse XML<br/>tool_call tags]
+                W_LLM[LLM Call<br/>WORKHORSE tier] --> W_PARSE[Parse XML<br/>tool_call tags]
                 W_PARSE --> W_DISPATCH[Dispatch Tool<br/>readFile/writeFile/<br/>editFile/run/etc.]
                 W_DISPATCH --> W_RESULT[Tool Result<br/>Truncated output]
                 W_RESULT --> W_CHECK{Completion?<br/>Starts with '{'}
@@ -217,8 +235,18 @@ graph TB
             R_FIX --> R_REPORT[ReviewReportV2<br/>APPROVED/NEEDS_FIXES/REJECTED]
         end
 
+        subgraph "Test Generation Pipeline (after review)"
+            TG_ORCH[TestGenOrchestrator<br/>Orchestrates full test pipeline]
+            TG_PLAN[TestPlannerAgent<br/>PLANNING tier] --> TG_WORKER[TestWorkerAgent<br/>WORKHORSE tier<br/>Generates test files]
+            TG_WORKER --> TG_COMPILE{Tests compile?}
+            TG_COMPILE -->|Yes| TG_PREVIEW[TestPreviewCoordinator<br/>Starts preview AFTER tests compile<br/>Ensures full TTL for execution]
+            TG_COMPILE -->|No| TG_RETRY[Retry compilation]
+            TG_PREVIEW --> TG_EXEC[Test Execution<br/>Against live preview]
+            TG_EXEC --> TG_REPORT[TestReportGenerator<br/>LIGHTWEIGHT tier]
+        end
+
         subgraph "ValidationReportAgent (non-fatal)"
-            VR_INPUT[WorkerReports + CompileResult<br/>+ ReviewReport + TestResults] --> VR_LLM[Claude Haiku<br/>via LlmCallGuard]
+            VR_INPUT[WorkerReports + CompileResult<br/>+ ReviewReport + TestResults] --> VR_LLM[LLM Call<br/>LIGHTWEIGHT tier]
             VR_LLM --> VR_OUT[Markdown Report<br/>+ Structured Issues<br/>+ PDF Download]
             VR_OUT --> VR_DB[(validation_report<br/>table)]
         end
@@ -552,6 +580,9 @@ graph TB
 | MODEL_ESCALATED | Retry with upgraded model |
 | REVIEWING | Review phase |
 | REPORT_GENERATED | Validation report ready (non-fatal) |
+| TEST_GENERATION_STARTED | Test generation pipeline begins |
+| TEST_EXECUTION_STARTED | Tests executing against live preview |
+| TEST_EXECUTION_COMPLETED | Test execution finished |
 | REVIEW_READY | Awaiting merge decision |
 | COMPLETE / FAILED / PARTIAL | Terminal states |
 | PREVIEW_ANALYZING / BUILDING / PUSHING / DEPLOYING / RUNNING | Preview phases |
@@ -660,4 +691,4 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-03-27.*
+*This architecture document is maintained alongside the codebase. Last updated: 2026-03-28.*
