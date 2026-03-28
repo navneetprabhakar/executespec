@@ -21,7 +21,7 @@ export default function Header() {
       {/* Mobile hamburger menu */}
       <button
         onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        className="md:hidden min-h-[44px] min-w-[44px] flex items-center justify-center -ml-2 text-zinc-400 hover:text-white transition-colors"
+        className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center -ml-2 text-zinc-400 hover:text-white transition-colors"
         aria-label="Toggle menu"
       >
         <Menu className="h-5 w-5" />
@@ -62,11 +62,11 @@ export default function Header() {
       {/* Command palette trigger */}
       <button
         onClick={() => setCommandPaletteOpen(true)}
-        className="flex items-center gap-2 px-3 py-2 md:py-1.5 rounded-sm bg-white/[0.04] border border-white/[0.06] text-sm text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+        className="flex items-center gap-2 px-3 py-2 lg:py-1.5 rounded-sm bg-white/[0.04] border border-white/[0.06] text-sm text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
       >
         <Search className="h-3.5 w-3.5" />
-        <span className="hidden md:block">Search...</span>
-        <kbd className="hidden md:block text-xs bg-white/[0.06] px-1.5 py-0.5 rounded border border-white/[0.08] font-mono">⌘K</kbd>
+        <span className="hidden lg:block">Search...</span>
+        <kbd className="hidden lg:block text-xs bg-white/[0.06] px-1.5 py-0.5 rounded border border-white/[0.08] font-mono">⌘K</kbd>
       </button>
 
       {/* Active runs badge */}

@@ -60,6 +60,18 @@ public class ModelTaskMetric {
     @Column(name = "duration_ms")
     private long durationMs;
 
+    @Column(name = "was_truncated")
+    private boolean wasTruncated;
+
+    @Column(name = "max_output_tokens")
+    private int maxOutputTokens;
+
+    @Column(name = "actual_output_tokens")
+    private int actualOutputTokens;
+
+    @Column(name = "iteration_count")
+    private int iterationCount;
+
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();

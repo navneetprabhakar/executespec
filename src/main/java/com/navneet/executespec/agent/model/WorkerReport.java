@@ -37,6 +37,15 @@ public class WorkerReport {
     /** Actual model ID used (e.g. "claude-haiku-4-5-20251001"). May differ from assignedModel due to escalation. */
     private String model;
 
+    /** Whether the task hit output token truncation at least once. */
+    private boolean wasTruncated;
+    /** Max output tokens configured for this task (from TokenBudgetMonitor). */
+    private int maxOutputTokens;
+    /** Total output tokens actually produced. */
+    private int actualOutputTokens;
+    /** Number of agentic loop iterations. */
+    private int iterationCount;
+
     /** Convenience factory for tasks that hit a token/iteration limit. */
     public static WorkerReport partial(String taskId, String reason,
                                        int inputTokens, int outputTokens) {

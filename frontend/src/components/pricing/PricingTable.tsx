@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { updatePricing } from '@/lib/api';
 import { useUiStore } from '@/stores/useUiStore';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import type { PricingRow } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -41,6 +42,7 @@ interface PricingTableProps {
 export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
   const [editing, setEditing] = useState<EditCell | null>(null);
   const { addToast } = useUiStore();
+  const isMobile = useIsMobile();
 
   const saveEdit = async () => {
     if (!editing) return;
@@ -81,6 +83,28 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
       </button>
     );
   };
+
+  if (isMobile) {
+    return (
+      <div className="space-y-3 px-1">
+        {rows.map((row) => (
+          <div key={`${row.provider}-${row.model}`} className="p-3 rounded-md border border-white/[0.06] bg-white/[0.02] space-y-2">
+            <div className="flex items-center justify-between">
+              <span className={cn('text-xs px-2 py-0.5 rounded-sm font-medium capitalize', ROLE_BADGES[row.provider] ?? 'text-zinc-400 bg-zinc-400/10')}>
+                {row.provider}
+              </span>
+              <span className="text-xs text-zinc-500">{MODEL_ROLES[row.model] ?? '—'}</span>
+            </div>
+            <p className="font-mono text-xs text-zinc-300 truncate">{row.model}</p>
+            <div className="flex gap-4 text-xs">
+              <div className="flex items-center gap-1"><span className="text-zinc-500">In /1M:</span> <EditableCell row={row} field="inputCostPer1m" /></div>
+              <div className="flex items-center gap-1"><span className="text-zinc-500">Out /1M:</span> <EditableCell row={row} field="outputCostPer1m" /></div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-x-auto">

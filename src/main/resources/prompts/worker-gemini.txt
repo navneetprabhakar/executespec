@@ -148,8 +148,12 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      Frontend fetch/axios calls must use relative URLs or env-configurable base URL.
      CORS must be configured on the backend.
 
-   Write the COMPLETE file in one write_file call — not pieces.
-   After writing ALL files for this task, commit once:
+   Write each file COMPLETE in one writeFile call — never partial content.
+      Write ONE file per response if any file exceeds 100 lines.
+      Do NOT batch multiple large writeFile calls in a single response — you will
+      hit the output token limit and truncate. Write one file, wait for confirmation,
+      write the next.
+      After all files are written, commit once:
      git_commit with message "feat(task_id): description"
 
 3. BUILD

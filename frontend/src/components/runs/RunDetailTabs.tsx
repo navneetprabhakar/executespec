@@ -126,13 +126,13 @@ export default function RunDetailTabs() {
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-      <Tabs.List className="flex gap-0 border-b border-white/[0.06] flex-shrink-0 px-4 overflow-x-auto">
+      <Tabs.List className="flex gap-0 border-b border-white/[0.06] flex-shrink-0 px-2 lg:px-4 overflow-x-auto scrollbar-hide">
         {TABS.map((tab) => (
           <Tabs.Trigger
             key={tab.value}
             value={tab.value}
             className={cn(
-              'px-4 py-2.5 text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
+              'px-2.5 lg:px-4 py-2 lg:py-2.5 text-[10px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
               'data-[state=active]:border-accent-violet data-[state=active]:text-white',
               'data-[state=inactive]:border-transparent data-[state=inactive]:text-zinc-500',
               'hover:text-zinc-300'

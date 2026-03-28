@@ -12,7 +12,8 @@ export default function UserRunsChart({ data }: { data: UserRunsSummaryData | nu
       .sort((a, b) => b.runCount - a.runCount)
       .slice(0, 10);
 
-    const margin = { top: 16, right: 60, bottom: 24, left: 130 };
+    const isMobile = svgRef.current.clientWidth < 500;
+    const margin = { top: 16, right: isMobile ? 30 : 60, bottom: 24, left: isMobile ? 80 : 130 };
     const width = svgRef.current.clientWidth - margin.left - margin.right;
     const rowH = 28;
     const height = users.length * rowH;
@@ -46,8 +47,8 @@ export default function UserRunsChart({ data }: { data: UserRunsSummaryData | nu
       .attr('x', -6)
       .attr('y', (d) => y(d.displayName)! + y.bandwidth() / 2)
       .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-      .attr('fill', 'rgba(255,255,255,0.5)').attr('font-size', 11)
-      .text((d) => d.displayName.length > 16 ? d.displayName.slice(0, 15) + '\u2026' : d.displayName);
+      .attr('fill', 'rgba(255,255,255,0.5)').attr('font-size', isMobile ? 9 : 11)
+      .text((d) => { const max = isMobile ? 10 : 16; return d.displayName.length > max ? d.displayName.slice(0, max - 1) + '\u2026' : d.displayName; });
 
     svg.selectAll('.value').data(users).join('text')
       .attr('x', (d) => x(d.runCount) + 4)
@@ -57,7 +58,7 @@ export default function UserRunsChart({ data }: { data: UserRunsSummaryData | nu
       .text((d) => `${d.runCount} runs`);
 
     svg.append('g').attr('transform', `translate(0,${height})`)
-      .call(d3.axisBottom(x).ticks(4).tickSize(0))
+      .call(d3.axisBottom(x).ticks(isMobile ? 3 : 4).tickSize(0))
       .call((g) => g.select('.domain').remove())
       .selectAll('text').attr('fill', 'rgba(255,255,255,0.3)').attr('font-size', 10);
   }, [data]);

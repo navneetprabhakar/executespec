@@ -384,6 +384,9 @@ spring:
     activate:
       on-profile: gcp
 
+  threads:
+    virtual:
+      enabled: true
 management:
   otlp:
     tracing:

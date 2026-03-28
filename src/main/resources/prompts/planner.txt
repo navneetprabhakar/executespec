@@ -176,6 +176,28 @@ Split tasks along these lines (finest granularity first):
     - IMPORTANT: When splitting a class across tasks, the FIRST task creates the
       class file with all its methods. Later tasks EDIT the file to add methods.
       Use shared_files + depends_on to sequence them.
+
+  COMPLEX SERVICE SPLIT (for services with >3 public methods or multiple dependencies):
+    If a service orchestrates multiple external services, has both read and write
+    workflows, or exceeds 200 lines, split it BY WORKFLOW — not by arbitrary method count.
+
+    GOOD (three MEDIUM tasks, each focused and fast):
+      order_service_lifecycle   — createOrder(), cancelOrder()
+                                  (write operations, transactions, stock validation)
+      order_service_payment     — processPayment(), refundPayment()
+                                  (Stripe/external API calls, idempotency)
+      order_service_queries     — getOrder(), listOrders(), getOrdersByUser()
+                                  (read-only, pagination, no transactions)
+      Each task: shared_files=["OrderService.java"], sequenced with depends_on.
+      First task creates the class. Subsequent tasks add methods via editFile.
+
+    BAD (one HIGH task that takes 3× longer and risks truncation):
+      order_service             — all 7 methods in one task, complexity: HIGH
+
+    RULE: If you are about to assign HIGH to a service task, stop and check whether
+    it can be split into 2-3 MEDIUM tasks grouped by workflow. Three MEDIUM tasks
+    that each take 90 seconds is always better than one HIGH task that takes 4 minutes.
+
   COMPONENT-LEVEL SPLIT (for frontend):
     - One task per React/Vue/Angular component (or small group of related components)
     - Example: "Create LoginForm component" and "Create RegisterForm component" are separate tasks

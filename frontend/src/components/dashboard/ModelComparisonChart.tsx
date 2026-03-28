@@ -10,7 +10,8 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
     if (!data || !svgRef.current || data.models.length === 0) return;
     const models = [...data.models].sort((a, b) => (b.totalInputTokens + b.totalOutputTokens) - (a.totalInputTokens + a.totalOutputTokens)).slice(0, 8);
 
-    const margin = { top: 16, right: 60, bottom: 24, left: 130 };
+    const isMobile = svgRef.current.clientWidth < 500;
+    const margin = { top: 16, right: isMobile ? 30 : 60, bottom: 24, left: isMobile ? 80 : 130 };
     const width = svgRef.current.clientWidth - margin.left - margin.right;
     const rowH = 28;
     const height = models.length * rowH;
@@ -34,8 +35,8 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
     svg.selectAll('.label').data(models).join('text')
       .attr('x', -6).attr('y', (d) => y(d.model)! + y.bandwidth() / 2)
       .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-      .attr('fill', 'rgba(255,255,255,0.5)').attr('font-size', 11)
-      .text((d) => d.model.replace('claude-', '').slice(0, 16));
+      .attr('fill', 'rgba(255,255,255,0.5)').attr('font-size', isMobile ? 9 : 11)
+      .text((d) => d.model.replace('claude-', '').slice(0, isMobile ? 10 : 16));
 
     svg.selectAll('.value').data(models).join('text')
       .attr('x', (d) => x(d.totalInputTokens + d.totalOutputTokens) + 4).attr('y', (d) => y(d.model)! + y.bandwidth() / 2)
@@ -43,7 +44,7 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
       .text((d) => { const t = d.totalInputTokens + d.totalOutputTokens; return t > 999 ? `${(t / 1000).toFixed(0)}k` : String(t); });
 
     svg.append('g').attr('transform', `translate(0,${height})`)
-      .call(d3.axisBottom(x).ticks(4).tickSize(0))
+      .call(d3.axisBottom(x).ticks(isMobile ? 3 : 4).tickSize(0))
       .call((g) => g.select('.domain').remove())
       .selectAll('text').attr('fill', 'rgba(255,255,255,0.3)').attr('font-size', 10);
   }, [data]);
