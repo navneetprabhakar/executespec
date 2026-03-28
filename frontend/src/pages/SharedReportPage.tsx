@@ -75,7 +75,7 @@ export default function SharedReportPage() {
             {report.issues.map((issue, i) => {
               const cfg = SEVERITY_CONFIG[issue.severity] ?? SEVERITY_CONFIG.WOULD_FAIL_REVIEW;
               return (
-                <span key={i} className={cn('text-xs px-2 py-0.5 rounded-full border', cfg.color)}>
+                <span key={i} className={cn('text-xs px-2 py-0.5 rounded-sm border', cfg.color)}>
                   {issue.severity.replace(/WOULD_/g, '').replace(/_/g, ' ').toLowerCase()}
                 </span>
               );
@@ -85,7 +85,7 @@ export default function SharedReportPage() {
 
         {/* Markdown report */}
         {report.reportMarkdown && (
-          <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-6">
+          <div className="rounded-sm border border-white/[0.08] bg-white/[0.02] p-6">
             <MarkdownContent content={report.reportMarkdown} />
           </div>
         )}

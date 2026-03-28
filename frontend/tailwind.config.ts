@@ -31,8 +31,8 @@ export default {
         dvh: '100dvh',
       },
       fontFamily: {
-        sans: ['Geist Sans', 'system-ui', 'sans-serif'],
-        mono: ['Geist Mono', 'JetBrains Mono', 'monospace'],
+        sans: ['DM Sans', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
       },
       animation: {
         'glow-pulse': 'glow-pulse 2s ease-in-out infinite',
@@ -59,12 +59,7 @@ export default {
         },
       },
       boxShadow: {
-        'glow-violet': '0 0 12px rgba(139, 92, 246, 0.25)',
-        'glow-emerald': '0 0 12px rgba(16, 185, 129, 0.25)',
-        'glow-amber': '0 0 12px rgba(245, 158, 11, 0.25)',
-        'glow-rose': '0 0 12px rgba(244, 63, 94, 0.25)',
-        'glow-cyan': '0 0 12px rgba(6, 182, 212, 0.25)',
-        glass: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.03)',
+        'mc-inset': 'var(--mc-inset)',
       },
     },
   },

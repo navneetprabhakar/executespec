@@ -90,7 +90,7 @@ function SecretField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none pr-10"
+          className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none pr-10"
         />
         <button
           type="button"
@@ -117,7 +117,7 @@ function TextField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+        className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
       />
       {hint && <p className="text-xs text-zinc-600 mt-1">{hint}</p>}
     </div>
@@ -192,7 +192,7 @@ function JiraCredentialForm({
         <button
           type="submit"
           disabled={saving || (!baseUrl.trim() && !email.trim() && !token.trim())}
-          className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -200,7 +200,7 @@ function JiraCredentialForm({
           type="button"
           onClick={handleTest}
           disabled={testing || !baseUrl.trim() || !email.trim() || !token.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
         >
           {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           Test Connection
@@ -210,7 +210,7 @@ function JiraCredentialForm({
             type="button"
             onClick={handleDisconnect}
             disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
           >
             <Unplug className="h-3.5 w-3.5" />
             Disconnect
@@ -289,7 +289,7 @@ function ConfluenceCredentialForm({
         <button
           type="submit"
           disabled={saving || (!baseUrl.trim() && !email.trim() && !token.trim())}
-          className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -297,7 +297,7 @@ function ConfluenceCredentialForm({
           type="button"
           onClick={handleTest}
           disabled={testing || !baseUrl.trim() || !email.trim() || !token.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
         >
           {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           Test Connection
@@ -307,7 +307,7 @@ function ConfluenceCredentialForm({
             type="button"
             onClick={handleDisconnect}
             disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
           >
             <Unplug className="h-3.5 w-3.5" />
             Disconnect
@@ -373,7 +373,7 @@ function SlackConfigForm({
         <button
           onClick={handleConnect}
           disabled={connecting}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4A154B] text-white text-sm font-medium hover:bg-[#4A154B]/80 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-sm bg-[#4A154B] text-white text-sm font-medium hover:bg-[#4A154B]/80 disabled:opacity-50 transition-colors"
         >
           {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
             <svg width="16" height="16" viewBox="0 0 32 32" fill="none"><path d="M8.8 19.2a2.4 2.4 0 01-2.4 2.4A2.4 2.4 0 014 19.2a2.4 2.4 0 012.4-2.4h2.4v2.4z" fill="#fff"/><path d="M10 19.2a2.4 2.4 0 012.4-2.4 2.4 2.4 0 012.4 2.4v6a2.4 2.4 0 01-2.4 2.4 2.4 2.4 0 01-2.4-2.4v-6z" fill="#fff"/><path d="M12.4 8.8a2.4 2.4 0 01-2.4-2.4A2.4 2.4 0 0112.4 4a2.4 2.4 0 012.4 2.4v2.4h-2.4z" fill="#fff"/><path d="M12.4 10a2.4 2.4 0 012.4 2.4 2.4 2.4 0 01-2.4 2.4h-6A2.4 2.4 0 014 12.4 2.4 2.4 0 016.4 10h6z" fill="#fff"/></svg>
@@ -414,14 +414,14 @@ function SlackConfigForm({
       <div className="flex gap-3 pt-1">
         <button
           onClick={onRefresh}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/[0.08] text-zinc-400 hover:text-white text-xs transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-white/[0.08] text-zinc-400 hover:text-white text-xs transition-colors"
         >
           <RefreshCw className="h-3 w-3" /> Refresh Status
         </button>
         <button
           onClick={handleDisconnect}
           disabled={disconnecting}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-400 hover:text-red-400 text-xs transition-colors disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-zinc-400 hover:text-red-400 text-xs transition-colors disabled:opacity-50"
         >
           <Unplug className="h-3 w-3" />
           {disconnecting ? 'Disconnecting...' : 'Disconnect'}
@@ -459,7 +459,7 @@ function SlackTestSection({
             <button
               onClick={loadChannels}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-xs hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-xs hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
             >
               {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Hash className="h-3 w-3" />}
               Load Channels
@@ -469,7 +469,7 @@ function SlackTestSection({
               <select
                 value={selectedChannel}
                 onChange={(e) => setSelectedChannel(e.target.value)}
-                className="flex-1 rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-xs text-white focus:border-accent-violet focus:outline-none"
+                className="flex-1 rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-xs text-white focus:border-accent-violet focus:outline-none"
               >
                 {channels.map((ch) => (
                   <option key={ch.channelId} value={ch.channelId}>#{ch.channelName}</option>
@@ -478,7 +478,7 @@ function SlackTestSection({
               <button
                 onClick={() => selectedChannel && onTest(selectedChannel)}
                 disabled={!selectedChannel || testingChannel != null}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-sm bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
               >
                 {testingChannel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                 Test
@@ -511,7 +511,7 @@ export default function IntegrationsPage() {
     return (
       <div className="h-full overflow-y-auto p-4 flex items-center justify-center">
         <div className="text-center space-y-3 max-w-md">
-          <div className="h-12 w-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mx-auto">
+          <div className="h-12 w-12 rounded-sm bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mx-auto">
             <Unplug className="h-6 w-6 text-zinc-600" />
           </div>
           <h2 className="text-lg font-semibold text-zinc-200">Integrations Unavailable</h2>
@@ -586,7 +586,7 @@ export default function IntegrationsPage() {
         </div>
         <button
           onClick={() => setShowGuide(!showGuide)}
-          className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-accent-violet transition-colors px-3 py-1.5 rounded-lg border border-white/[0.08] hover:border-accent-violet/30"
+          className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-accent-violet transition-colors px-3 py-1.5 rounded-sm border border-white/[0.08] hover:border-accent-violet/30"
         >
           <HelpCircle className="h-3.5 w-3.5" />
           Setup Guide
@@ -613,7 +613,7 @@ export default function IntegrationsPage() {
           return (
             <div
               key={int.key}
-              className={`rounded-xl border transition-all ${
+              className={`rounded-sm border transition-all ${
                 configured
                   ? 'border-accent-violet/30 bg-accent-violet/[0.04]'
                   : 'border-white/[0.06] bg-white/[0.02]'
@@ -630,7 +630,7 @@ export default function IntegrationsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    <span className={`text-xs px-2 py-0.5 rounded-sm font-medium ${
                       configured ? 'text-accent-emerald bg-accent-emerald/10' : 'text-zinc-600 bg-zinc-600/10'
                     }`}>
                       {configured ? 'Enabled' : 'Disabled'}
@@ -638,7 +638,7 @@ export default function IntegrationsPage() {
                     {isAdmin && int.configurable && user?.orgId && (
                       <button
                         onClick={() => setConfiguring(isExpanded ? null : int.key)}
-                        className="flex items-center gap-1 text-xs text-zinc-400 hover:text-accent-violet transition-colors px-2 py-1 rounded-lg border border-white/[0.06] hover:border-accent-violet/30"
+                        className="flex items-center gap-1 text-xs text-zinc-400 hover:text-accent-violet transition-colors px-2 py-1 rounded-sm border border-white/[0.06] hover:border-accent-violet/30"
                       >
                         <Settings2 className="h-3 w-3" />
                         {isExpanded ? 'Close' : configured ? 'Edit' : 'Configure'}
@@ -688,7 +688,7 @@ export default function IntegrationsPage() {
           </p>
           <div className="space-y-1">
             {Object.entries(SETUP_GUIDES).map(([key, guide]) => (
-              <div key={key} className="border border-white/[0.06] rounded-lg overflow-hidden">
+              <div key={key} className="border border-white/[0.06] rounded-sm overflow-hidden">
                 <button
                   onClick={() => toggleGuide(key)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-white/[0.02] transition-colors"

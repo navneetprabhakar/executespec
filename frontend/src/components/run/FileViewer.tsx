@@ -19,7 +19,7 @@ export function FileViewer({ fileName, content, language }: FileViewerProps) {
   };
 
   return (
-    <div className="border border-white/[0.06] rounded-lg overflow-hidden">
+    <div className="border border-white/[0.06] rounded-sm overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-zinc-800 border-b border-white/[0.06]">
         <span className="text-sm font-mono text-zinc-300 truncate">{fileName}</span>

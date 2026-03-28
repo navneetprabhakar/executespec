@@ -2,7 +2,9 @@ package com.navneet.executespec.context;
 
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.recovery.LlmCallGuard;
+import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +28,8 @@ import java.util.List;
 public class ContextAgent {
 
     private final ContextAgentScanner scanner;
-    private final LlmCallGuard llmCallGuard;
+    private final LlmRouter llmRouter;
+    private final ModelResolver modelResolver;
     private final ContextAgentProperties props;
     private final StateStore stateStore;
 
@@ -36,10 +39,12 @@ public class ContextAgent {
     @Value("classpath:prompts/context-agent.txt")
     private Resource promptTemplate;
 
-    public ContextAgent(ContextAgentScanner scanner, LlmCallGuard llmCallGuard,
-                        ContextAgentProperties props, StateStore stateStore) {
+    public ContextAgent(ContextAgentScanner scanner, LlmRouter llmRouter,
+                        ModelResolver modelResolver, ContextAgentProperties props,
+                        StateStore stateStore) {
         this.scanner = scanner;
-        this.llmCallGuard = llmCallGuard;
+        this.llmRouter = llmRouter;
+        this.modelResolver = modelResolver;
         this.props = props;
         this.stateStore = stateStore;
     }
@@ -87,13 +92,17 @@ public class ContextAgent {
         String systemPrompt = promptTemplate.getContentAsString(StandardCharsets.UTF_8);
         String userMessage  = buildUserMessage(input);
 
+        ResolvedModel resolved = modelResolver.resolve("ContextAgent", run.getAiProviderEnum());
+
         Prompt prompt = new Prompt(List.of(
             new SystemMessage(systemPrompt),
             new UserMessage(userMessage)
         ));
 
-        var response = llmCallGuard
-            .call(prompt, props.getModel(), "context-agent-" + run.getRunId(), run.getRunId());
+        var response = llmRouter.callWithFallback(
+            resolved.providerName(), resolved.getModel(), prompt,
+            run.getRunId(), "context-agent",
+            LlmRouter.FallbackMode.IMMEDIATE, 0, false);
 
         // Track tokens for billing accuracy
         try {

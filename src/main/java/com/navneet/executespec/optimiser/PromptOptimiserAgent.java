@@ -1,6 +1,8 @@
 package com.navneet.executespec.optimiser;
 
-import com.navneet.executespec.recovery.LlmCallGuard;
+import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.extern.slf4j.Slf4j;
@@ -45,16 +47,18 @@ public class PromptOptimiserAgent {
 
     private final PromptPatternAnalyser analyser;
     private final PromptAuditService auditService;
-    private final LlmCallGuard llmCallGuard;
+    private final LlmRouter llmRouter;
+    private final ModelResolver modelResolver;
     private final PromptOptimiserProperties props;
     private final StateStore stateStore;
 
     public PromptOptimiserAgent(PromptPatternAnalyser analyser, PromptAuditService auditService,
-                                LlmCallGuard llmCallGuard, PromptOptimiserProperties props,
-                                StateStore stateStore) {
+                                LlmRouter llmRouter, ModelResolver modelResolver,
+                                PromptOptimiserProperties props, StateStore stateStore) {
         this.analyser = analyser;
         this.auditService = auditService;
-        this.llmCallGuard = llmCallGuard;
+        this.llmRouter = llmRouter;
+        this.modelResolver = modelResolver;
         this.props = props;
         this.stateStore = stateStore;
     }
@@ -145,8 +149,11 @@ public class PromptOptimiserAgent {
             new UserMessage(userMessage)
         ));
 
-        var response = llmCallGuard
-            .call(prompt, props.getModel(), "prompt-optimiser-" + run.getRunId(), run.getRunId());
+        ResolvedModel resolved = modelResolver.resolve("PromptOptimiserAgent", run.getAiProviderEnum());
+        var response = llmRouter.callWithFallback(
+            resolved.providerName(), resolved.getModel(), prompt,
+            run.getRunId(), "prompt-optimiser",
+            LlmRouter.FallbackMode.IMMEDIATE, 0, false);
 
         // Track tokens for billing accuracy
         try {

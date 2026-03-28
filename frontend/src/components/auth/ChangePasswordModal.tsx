@@ -30,7 +30,7 @@ export default function ChangePasswordModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl bg-[#1a1f2e] border border-slate-700 p-8 shadow-2xl overflow-y-auto" style={{ maxHeight: '95dvh' }}>
+      <div className="w-full max-w-md rounded-sm bg-[#1a1f2e] border border-slate-700 p-8  overflow-y-auto" style={{ maxHeight: '95dvh' }}>
         <h2 className="mb-2 text-xl font-bold text-white">Change your password</h2>
         <p className="mb-6 text-sm text-slate-400">
           Your account requires a password change before you can continue.
@@ -43,7 +43,7 @@ export default function ChangePasswordModal() {
                 type="password"
                 value={current}
                 onChange={e => setCurrent(e.target.value)}
-                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+                className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
               />
             </div>
           )}
@@ -54,7 +54,7 @@ export default function ChangePasswordModal() {
               value={newPwd}
               onChange={e => setNewPwd(e.target.value)}
               required minLength={8}
-              className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+              className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
             />
             <p className="mt-1 text-xs text-slate-500">Min 8 chars, 1 uppercase, 1 digit, no spaces</p>
           </div>
@@ -65,14 +65,14 @@ export default function ChangePasswordModal() {
               value={confirm}
               onChange={e => setConfirm(e.target.value)}
               required
-              className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+              className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
             />
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-purple-600 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
+            className="w-full rounded-sm bg-purple-600 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
           >
             {loading ? 'Saving…' : 'Set new password'}
           </button>

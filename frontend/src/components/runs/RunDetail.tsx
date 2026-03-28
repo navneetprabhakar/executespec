@@ -12,12 +12,15 @@ import { RunTimeline } from '@/components/run/RunTimeline';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
+import { useViewMode } from '@/hooks/useViewMode';
 import { downloadWorkspace, editRunPlan, type ReviewReport } from '@/lib/api';
 import { cn, describeRunStatus } from '@/lib/utils';
+import VibeProgressNarrative from './VibeProgressNarrative';
 
 export default function RunDetail() {
   const { activeRun, activeRunId, setActiveRunId, approveRun, clarifyRun, cancelRun, createRun, pauseRun, editAndRestartRun, resumeRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
+  const { isVibe } = useViewMode();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -151,6 +154,37 @@ export default function RunDetail() {
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           className="flex flex-col h-full bg-surface-1 border-l border-white/[0.06]"
         >
+          {/* ── Vibe Mode: simplified view ──────────────────────────── */}
+          {isVibe ? (
+            <>
+              {/* Minimal header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <GlowDot status={activeRun.status} className="flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--mc-text-primary)] line-clamp-1">
+                      {activeRun.runTitle ?? activeRun.userRequest?.slice(0, 60) ?? 'Run'}
+                    </p>
+                    <StatusBadge status={activeRun.status} />
+                  </div>
+                </div>
+                <button onClick={() => setActiveRunId(null)} className="text-zinc-500 hover:text-zinc-300 flex-shrink-0 ml-2 p-1.5 -m-1">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Narrative + summary */}
+              <div className="h-48 overflow-y-auto flex-shrink-0 border-b border-white/[0.06]">
+                <VibeProgressNarrative />
+              </div>
+
+              {/* Code + Preview tabs */}
+              <div className="flex-1 overflow-hidden">
+                <RunDetailTabs />
+              </div>
+            </>
+          ) : (
+          <>
           {/* Mobile back button */}
           <button
             onClick={() => setActiveRunId(null)}
@@ -278,7 +312,7 @@ export default function RunDetail() {
           )}
           {/* Review summary shown on COMPLETE runs */}
           {activeRun.status === 'COMPLETE' && review && (
-            <div className="mx-4 mt-3 p-3 rounded-lg border border-zinc-700 bg-zinc-800/60 text-xs">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-zinc-700 bg-zinc-800/60 text-xs">
               <div className="flex items-center gap-2 mb-1">
                 <span className={cn(
                   'font-semibold',
@@ -301,7 +335,7 @@ export default function RunDetail() {
           )}
           {/* Failure reason banner */}
           {activeRun.status === 'FAILED' && activeRun.failureReason && (
-            <div className="mx-4 mt-3 p-3 rounded-lg border border-accent-rose/30 bg-accent-rose/5">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-rose/30 bg-accent-rose/5">
               <div className="flex items-center gap-2 mb-1">
                 <AlertTriangle className="h-4 w-4 text-accent-rose flex-shrink-0" />
                 <p className="text-xs font-medium text-accent-rose">Run failed</p>
@@ -311,7 +345,7 @@ export default function RunDetail() {
           )}
           {/* Paused banner — edit goal and restart */}
           {activeRun.status === 'PAUSED' && (
-            <div className="mx-4 mt-3 p-3 rounded-lg border border-orange-400/30 bg-orange-400/5 space-y-2">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-orange-400/30 bg-orange-400/5 space-y-2">
               <div className="flex items-center gap-2">
                 <Pause className="h-4 w-4 text-orange-400 flex-shrink-0" />
                 <p className="text-xs font-medium text-orange-400">Run paused</p>
@@ -431,6 +465,8 @@ export default function RunDetail() {
           <div className="flex-1 overflow-hidden">
             <RunDetailTabs />
           </div>
+          </>
+          )}
         </motion.div>
       )}
     </AnimatePresence>
@@ -498,7 +534,7 @@ interface ClarificationBannerProps {
 
 function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onSkip }: ClarificationBannerProps) {
   return (
-    <div className="mx-4 mt-3 p-3 rounded-lg border border-accent-violet/30 bg-accent-violet/5 space-y-2">
+    <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-violet/30 bg-accent-violet/5 space-y-2">
       <div className="flex items-center gap-2">
         <HelpCircle className="h-4 w-4 text-accent-violet flex-shrink-0" />
         <p className="text-xs text-accent-violet">
@@ -512,13 +548,13 @@ function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onS
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && input.trim()) onSubmit(); }}
           placeholder="e.g., PROJ-123 or https://yourorg.atlassian.net/wiki/..."
-          className="flex-1 rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+          className="flex-1 rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
           disabled={submitting}
         />
         <button
           onClick={onSubmit}
           disabled={submitting || !input.trim()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
         >
           {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
           Submit
@@ -526,7 +562,7 @@ function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onS
         <button
           onClick={onSkip}
           disabled={submitting}
-          className="px-3 py-1.5 rounded-lg border border-white/[0.06] text-zinc-400 hover:text-zinc-300 text-xs transition-colors disabled:opacity-50"
+          className="px-3 py-1.5 rounded-sm border border-white/[0.06] text-zinc-400 hover:text-zinc-300 text-xs transition-colors disabled:opacity-50"
         >
           Skip
         </button>
@@ -539,7 +575,7 @@ function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onS
 
 function GateBanner({ message, icon, onApprove, onReject, approveLabel, rejectLabel, confirming, setConfirming }: GateBannerProps) {
   return (
-    <div className="mx-4 mt-3 p-3 rounded-lg border border-accent-amber/30 bg-accent-amber/5 flex items-center justify-between gap-3">
+    <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-amber/30 bg-accent-amber/5 flex items-center justify-between gap-3">
       <div className="flex items-center gap-2 min-w-0">
         {icon}
         <p className="text-xs text-accent-amber truncate">{message}</p>

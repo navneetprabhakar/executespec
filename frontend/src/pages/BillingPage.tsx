@@ -120,7 +120,7 @@ export default function BillingPage() {
         <h1 className="text-xl font-bold text-zinc-100">Billing</h1>
 
         {/* Current Plan */}
-        <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6">
+        <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-6">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-lg font-semibold text-zinc-100">
@@ -146,7 +146,7 @@ export default function BillingPage() {
                 </p>
               )}
               {sub.founderPricing && (
-                <span className="inline-block mt-2 px-2 py-0.5 bg-accent-amber/15 text-accent-amber text-xs font-semibold rounded-full">
+                <span className="inline-block mt-2 px-2 py-0.5 bg-accent-amber/15 text-accent-amber text-xs font-semibold rounded-sm">
                   Founder Pricing — locked in forever
                 </span>
               )}
@@ -164,7 +164,7 @@ export default function BillingPage() {
           {isFree && (
             <button
               onClick={() => navigate('/plans')}
-              className="mt-4 w-full py-2.5 bg-accent-violet text-white rounded-lg text-sm font-semibold hover:bg-accent-violet/80 transition-colors"
+              className="mt-4 w-full py-2.5 bg-accent-violet text-white rounded-sm text-sm font-semibold hover:bg-accent-violet/80 transition-colors"
             >
               Upgrade Plan
             </button>
@@ -172,7 +172,7 @@ export default function BillingPage() {
         </div>
 
         {/* Usage */}
-        <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6">
+        <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-6">
           <h2 className="text-base font-semibold text-zinc-100 mb-4">Usage This Month</h2>
           <div className="space-y-4">
             {usage.map((u) => {
@@ -208,11 +208,11 @@ export default function BillingPage() {
 
         {/* Bonus Runs */}
         {bonusRuns && bonusRuns.topups.length > 0 && (
-          <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6">
+          <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-6">
             <div className="flex items-center gap-2 mb-4">
               <Gift className="h-4 w-4 text-accent-emerald" />
               <h2 className="text-base font-semibold text-zinc-100">Bonus Runs</h2>
-              <span className="ml-auto px-2.5 py-0.5 rounded-full bg-accent-emerald/15 text-accent-emerald text-sm font-semibold">
+              <span className="ml-auto px-2.5 py-0.5 rounded-sm bg-accent-emerald/15 text-accent-emerald text-sm font-semibold">
                 {bonusAvailable} available
               </span>
             </div>
@@ -221,7 +221,7 @@ export default function BillingPage() {
                 <div
                   key={t.id}
                   className={cn(
-                    'flex items-center justify-between px-4 py-2.5 rounded-lg border',
+                    'flex items-center justify-between px-4 py-2.5 rounded-sm border',
                     t.status === 'ACTIVE'
                       ? 'bg-accent-emerald/[0.04] border-accent-emerald/20'
                       : 'bg-white/[0.02] border-white/[0.04] opacity-60',
@@ -264,7 +264,7 @@ export default function BillingPage() {
 
         {/* Buy Extra Runs */}
         {packages.length > 0 && (
-          <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6">
+          <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-6">
             <div className="flex items-center gap-2 mb-1">
               <Zap className="h-4 w-4 text-accent-amber" />
               <h2 className="text-base font-semibold text-zinc-100">Buy Extra Runs</h2>
@@ -279,7 +279,7 @@ export default function BillingPage() {
                   onClick={() => handleBuyTopup(pkg)}
                   disabled={purchasing !== null}
                   className={cn(
-                    'relative group flex flex-col items-center p-5 rounded-xl border transition-all',
+                    'relative group flex flex-col items-center p-5 rounded-sm border transition-all',
                     'bg-white/[0.02] border-white/[0.08] hover:border-accent-violet/40 hover:bg-accent-violet/[0.04]',
                     'disabled:opacity-40 disabled:cursor-not-allowed',
                     purchasing === pkg.id && 'border-accent-violet/60 bg-accent-violet/[0.06]',
@@ -299,7 +299,7 @@ export default function BillingPage() {
                     )}
                   </div>
                   {purchasing === pkg.id && (
-                    <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40">
+                    <span className="absolute inset-0 flex items-center justify-center rounded-sm bg-black/40">
                       <span className="h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                     </span>
                   )}
@@ -311,7 +311,7 @@ export default function BillingPage() {
 
         {/* Cancel — admin only for org accounts */}
         {isActive && !sub.cancelAtPeriodEnd && (!isOrgUser || isAdmin) && (
-          <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-6">
+          <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-6">
             <button
               onClick={handleCancel}
               disabled={cancelling}

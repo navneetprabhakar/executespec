@@ -135,13 +135,17 @@ public class GitTool {
                     if (mexit == 0) {
                         log.info("[GitTool] Worktree {}: merged dep '{}' (shell git -X theirs)", taskId, dep);
                     } else {
-                        log.warn("[GitTool] Worktree {}: shell merge of '{}' failed (exit {}): {} — aborting",
+                        log.error("[GitTool] Worktree {}: CRITICAL — dep merge of '{}' failed (exit {}): {}",
                                 taskId, dep, mexit, mout.trim());
-                        // Attempt abort to restore clean state; non-fatal if already clean
+                        // Abort to restore clean state
                         new ProcessBuilder("git", "merge", "--abort")
                                 .directory(worktreeDir.toFile())
                                 .redirectErrorStream(true)
                                 .start().waitFor();
+                        throw new RuntimeException(
+                                "Dependency branch merge failed for task '" + taskId +
+                                "': could not merge '" + dep + "'. Output: " + mout.trim() +
+                                ". The dependency task may not have committed its files correctly.");
                     }
                 }
             }

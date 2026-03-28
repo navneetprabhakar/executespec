@@ -13,9 +13,6 @@ import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.tool.GitTool;
-import com.navneet.executespec.validator.CodeValidator;
-import com.navneet.executespec.validator.model.*;
-import com.navneet.executespec.validator.prompt.RetryPromptBuilder;
 import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -27,7 +24,6 @@ import static com.navneet.executespec.config.CustomMetricsConfig.*;
 import com.navneet.executespec.config.CustomMetricsConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
@@ -49,12 +45,12 @@ import java.util.stream.Collectors;
  * <p>Per-task execution flow:
  * <ol>
  *   <li>Branch creation + lockTask (persists branch name to DB)</li>
- *   <li>Model selection based on task complexity (via ModelRouter)</li>
+ *   <li>Model selection based on agent tier (via ModelResolver)</li>
  *   <li>Worker execution in isolated worktree (via WorkerAgent.execute())</li>
- *   <li>Post-execution code validation in worktree (via CodeValidator)</li>
  *   <li>Progressive merge to main (under lock, sequential within tier)</li>
- *   <li>Retry with error feedback + model escalation on validation failure</li>
  * </ol>
+ *
+ * <p>Code validation is deferred to the review phase (compiler agent + reviewer post-merge).
  */
 @Slf4j
 @Service
@@ -62,8 +58,7 @@ import java.util.stream.Collectors;
 public class SequentialTaskExecutor {
 
     private final WorkerAgent workerAgent;
-    private final CodeValidator codeValidator;
-    private final ModelRouter modelRouter;
+    private final ModelResolver modelResolver;
     private final ModelTaskMetricRepository metricRepository;
     private final AvailableProviderResolver providerResolver;
     private final StateStore stateStore;
@@ -75,11 +70,6 @@ public class SequentialTaskExecutor {
     private final MeterRegistry meterRegistry;
     private final AgentProperties agentProperties;
 
-    @Value("${executespec.validator.max-retries:3}")
-    private int maxRetries;
-
-    @Value("${executespec.validator.per-task-level:TYPE}")
-    private String validationLevelStr;
 
     /*
      * TODO: Per-run cost budget — check budget before each worker attempt:
@@ -129,13 +119,7 @@ public class SequentialTaskExecutor {
         String runId = run.getRunId();
         String defaultModel = run.getWorkerModel();
 
-        // Execution mode controls validation level and model tier ceiling
-        ValidationLevel level = mode.isPrototype()
-                ? ValidationLevel.SYNTAX
-                : parseLevel(validationLevelStr);
-        ModelTier tierCeiling = mode.isPrototype()
-                ? ModelTier.FAST
-                : ModelTier.POWER;
+        // Model selection now handled by ModelResolver — no tier ceiling concept
 
         // Resolve available providers for this run's org (API key-aware routing)
         Set<LlmProvider> availableProviders = providerResolver.resolve(runId);
@@ -185,7 +169,7 @@ public class SequentialTaskExecutor {
 
             if (executable.size() == 1) {
                 // Single task in tier — run directly on current thread (no thread overhead)
-                executeSingleTask(executable.get(0), run, defaultModel, level, tierCeiling,
+                executeSingleTask(executable.get(0), run, defaultModel,
                         availableProviders, allReports, completed, failed,
                         previouslyMerged, mergedTaskIds, mergeLock);
             } else {
@@ -197,7 +181,7 @@ public class SequentialTaskExecutor {
                     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
                     Thread vt = Thread.ofVirtual()
                             .name("worker-tier" + tier + "-" + task.getTaskId())
-                            .start(snapshot.wrap(() -> executeSingleTask(task, run, defaultModel, level, tierCeiling,
+                            .start(snapshot.wrap(() -> executeSingleTask(task, run, defaultModel,
                                     availableProviders, allReports, completed, failed,
                                     previouslyMerged, mergedTaskIds, mergeLock)));
                     threads.add(vt);
@@ -245,7 +229,6 @@ public class SequentialTaskExecutor {
      * Thread-safe — can be called from multiple virtual threads concurrently.
      */
     private void executeSingleTask(AgentTask task, PipelineRun run, String defaultModel,
-                                    ValidationLevel level, ModelTier tierCeiling,
                                     Set<LlmProvider> availableProviders,
                                     List<WorkerReport> allReports, List<AgentTask> completed,
                                     List<AgentTask> failed, List<AgentTask> previouslyMerged,
@@ -280,10 +263,10 @@ public class SequentialTaskExecutor {
         task.setBranchName(branchName);
         task.setAssignedModel(taskModel);
 
-        // === Execute with validation + model routing ===
+        // === Execute worker (validation deferred to review phase) ===
         WorkerReport report;
         try {
-            report = executeWithValidation(run, task, level, tierCeiling, availableProviders);
+            report = executeTask(run, task, availableProviders);
         } catch (Exception e) {
             log.error("Task {} crashed with unhandled exception: {}", taskId, e.getMessage(), e);
             stateStore.failTask(taskId, "Unhandled exception: " + e.getMessage());
@@ -344,118 +327,33 @@ public class SequentialTaskExecutor {
     }
 
     /**
-     * Execute a single task with validation loop:
-     * 1. Select model → 2. Run worker → 3. Validate in worktree → 4. Retry if failed
-     *
-     * <p>WorkerAgent.execute() creates an isolated git worktree, runs the agentic loop,
-     * and clears WorkspaceContext when done. Validation must therefore use the worktree
-     * path directly (not gitTool.getWorkspacePath which reads WorkspaceContext).
+     * Execute a single task: select model → run worker → complete.
+     * Validation is deferred to the review phase (compiler agent + reviewer post-merge).
      */
-    private WorkerReport executeWithValidation(PipelineRun run, AgentTask task,
-                                                ValidationLevel level, ModelTier tierCeiling,
-                                                Set<LlmProvider> availableProviders) {
+    private WorkerReport executeTask(PipelineRun run, AgentTask task,
+                                      Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
         String taskId = task.getTaskId();
-        ValidationResult lastValidation = null;
-        TaskComplexity complexity = parseComplexity(task.getComplexity());
-        WorkerReport lastReport = null;
 
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        // === MODEL SELECTION via ModelResolver ===
+        ResolvedModel model = modelResolver.resolve("WorkerAgent", run.getAiProviderEnum());
 
-            // === MODEL SELECTION (tier escalation on retry, capped by execution mode ceiling) ===
-            ModelSelection model;
-            if (attempt == 1) {
-                model = modelRouter.selectForTask(complexity, tierCeiling, availableProviders);
-            } else {
-                model = modelRouter.selectForRetry(complexity, attempt, tierCeiling, availableProviders);
-            }
-
-            sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
-                    String.format("Attempt %d/%d using %s [%s]",
-                            attempt, maxRetries, model.getModelName(), model.getTier())));
-            sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
-
-            // === PREPARE TASK FOR EXECUTION ===
-            task.setAssignedModel(model.getModelName());
-
-            if (attempt > 1 && lastValidation != null) {
-                // Inject validation errors as rework feedback so the worker sees them
-                String retryPrompt = RetryPromptBuilder.build(lastValidation);
-                stateStore.markRetryingWithFeedback(runId, taskId, retryPrompt);
-                // Re-fetch task after markRetryingWithFeedback (it resets status + injects feedback)
-                task = stateStore.getTask(taskId);
-                task.setAssignedModel(model.getModelName());
-
-                sseBroadcaster.emit(runId, RunEvent.modelEscalated(runId, taskId,
-                        "previous", model.getModelName()));
-            }
-
-            // === EXECUTE WORKER (creates worktree, runs agentic loop, clears WorkspaceContext) ===
-            Instant execStart = Instant.now();
-            lastReport = workerAgent.execute(task, runId);
-            long durationMs = java.time.Duration.between(execStart, Instant.now()).toMillis();
-
-            // Check if worker itself reported non-complete status (BLOCKED, etc.)
-            String workerStatus = normalizeStatus(lastReport.getStatus());
-            if (!"COMPLETE".equals(workerStatus)) {
-                stateStore.completeTask(taskId, lastReport);
-                trackMetric(runId, task, model, attempt, false, null, durationMs);
-                log.warn("Task {} worker returned {}, skipping validation", taskId, workerStatus);
-                return lastReport;
-            }
-
-            // === VALIDATE OUTPUT IN WORKTREE ===
-            // WorkspaceContext is cleared after workerAgent.execute() returns, so
-            // gitTool.getWorkspacePath(runId) returns the shared workspace root.
-            // The worktree is at workspace/{runId}/worktrees/{taskId}/.
-            Path mainWorkspace = gitTool.getWorkspacePath(runId);
-            Path worktreePath = mainWorkspace.resolve("worktrees").resolve(taskId);
-            if (!Files.isDirectory(worktreePath)) {
-                // Worktree might not exist (fallback to main workspace)
-                worktreePath = mainWorkspace;
-            }
-
-            List<Path> modifiedFiles = getModifiedFiles(worktreePath);
-
-            if (modifiedFiles.isEmpty()) {
-                // No code files modified — skip validation (config-only tasks, etc.)
-                stateStore.completeTask(taskId, lastReport);
-                trackMetric(runId, task, model, attempt, true, null, durationMs);
-                log.info("Task {} — no modified code files, skipping validation", taskId);
-                return lastReport;
-            }
-
-            lastValidation = validateModifiedFiles(runId, taskId, worktreePath, modifiedFiles, level);
-
-            sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
-                    String.format("Validation [attempt %d]: %s — %s",
-                            attempt, lastValidation.getVerdict(),
-                            RetryPromptBuilder.buildSummary(lastValidation))));
-
-            // === CHECK RESULT ===
-            if (lastValidation.getVerdict() != ValidationVerdict.FAIL) {
-                stateStore.completeTask(taskId, lastReport);
-                sseBroadcaster.emit(runId, RunEvent.validationPassed(runId, taskId));
-                trackMetric(runId, task, model, attempt, true, lastValidation, durationMs);
-                return lastReport;
-            }
-
-            // Validation failed
-            sseBroadcaster.emit(runId, RunEvent.validationFailed(runId, taskId,
-                    RetryPromptBuilder.buildSummary(lastValidation)));
-            trackMetric(runId, task, model, attempt, false, lastValidation, durationMs);
-            log.warn("Task {} attempt {}/{} failed validation: {} errors",
-                    taskId, attempt, maxRetries, lastValidation.getErrors().size());
-        }
-
-        // All retries exhausted — mark as failed
-        stateStore.failTask(taskId, String.format("Validation failed after %d attempts", maxRetries));
-        sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
         sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
-                String.format("FAILED after %d attempts", maxRetries)));
+                String.format("Using %s [%s]", model.getModel(), model.getAgentTier())));
+        sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
 
-        if (lastReport != null) return lastReport;
-        return WorkerReport.partial(taskId, "Validation failed after " + maxRetries + " attempts", 0, 0);
+        task.setAssignedModel(model.getModel());
+
+        // === EXECUTE WORKER (creates worktree, runs agentic loop, clears WorkspaceContext) ===
+        Instant execStart = Instant.now();
+        WorkerReport report = workerAgent.execute(task, runId);
+        long durationMs = java.time.Duration.between(execStart, Instant.now()).toMillis();
+
+        String workerStatus = normalizeStatus(report.getStatus());
+        stateStore.completeTask(taskId, report);
+        trackMetric(runId, task, model, 1, "COMPLETE".equals(workerStatus), durationMs);
+
+        return report;
     }
 
     // ── Worktree commit + progressive merge ─────────────────────────────────
@@ -690,94 +588,24 @@ public class SequentialTaskExecutor {
         return sorted;
     }
 
-    // ── Validation helpers ───────────────────────────────────────────────────
-
-    /**
-     * Validate all modified code files against the appropriate language toolchain.
-     * Returns FAIL on the first file that fails validation.
-     */
-    private ValidationResult validateModifiedFiles(String runId, String taskId,
-                                                    Path workspacePath, List<Path> modifiedFiles,
-                                                    ValidationLevel level) {
-        for (Path file : modifiedFiles) {
-            Language lang = Language.fromPath(file);
-            if (lang == null) continue;
-
-            sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
-                    "Validating: " + file.getFileName()));
-
-            ValidationResult result = codeValidator.validateFile(
-                    ValidateFileRequest.builder()
-                            .projectRoot(workspacePath)
-                            .filePath(workspacePath.relativize(file))
-                            .language(lang)
-                            .level(level)
-                            .build());
-
-            String validationResult = result.getVerdict() == ValidationVerdict.FAIL ? "fail" : "pass";
-            Counter.builder(VALIDATION_TOTAL).tag("result", validationResult)
-                    .tag("gate", lang.name())
-                    .register(meterRegistry).increment();
-
-            if (result.getVerdict() == ValidationVerdict.FAIL) {
-                return result;
-            }
-        }
-        return ValidationResult.pass();
-    }
-
-    /**
-     * Get list of modified/new files from git diff in the specified directory.
-     */
-    private List<Path> getModifiedFiles(Path workspacePath) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "git", "diff", "--name-only", "HEAD", "--diff-filter=ACMR")
-                    .directory(workspacePath.toFile()).redirectErrorStream(true);
-            Process process = pb.start();
-            String output = new String(process.getInputStream().readAllBytes());
-            process.waitFor();
-
-            ProcessBuilder pb2 = new ProcessBuilder(
-                    "git", "ls-files", "--others", "--exclude-standard")
-                    .directory(workspacePath.toFile()).redirectErrorStream(true);
-            Process process2 = pb2.start();
-            String untrackedOutput = new String(process2.getInputStream().readAllBytes());
-            process2.waitFor();
-
-            String combined = output + "\n" + untrackedOutput;
-            return combined.lines()
-                    .filter(line -> !line.isBlank())
-                    .map(line -> workspacePath.resolve(line.trim()))
-                    .filter(Files::exists)
-                    .toList();
-        } catch (Exception e) {
-            log.error("Failed to get modified files from git in {}", workspacePath, e);
-            return List.of();
-        }
-    }
-
     // ── Metrics ──────────────────────────────────────────────────────────────
 
     /**
      * Track model performance metrics for future data-driven routing.
      */
-    private void trackMetric(String runId, AgentTask task, ModelSelection model,
-                              int attempt, boolean passed, ValidationResult validation,
-                              long durationMs) {
+    private void trackMetric(String runId, AgentTask task, ResolvedModel model,
+                              int attempt, boolean passed, long durationMs) {
         try {
             metricRepository.save(ModelTaskMetric.builder()
                     .runId(runId)
                     .taskId(task.getTaskId())
-                    .modelName(model.getModelName())
-                    .provider(model.getProvider().name())
-                    .tier(model.getTier().name())
+                    .modelName(model.getModel())
+                    .provider(model.getActualProvider().name())
+                    .tier(model.getAgentTier().name())
                     .complexity(task.getComplexity() != null ? task.getComplexity() : "MEDIUM")
                     .attempt(attempt)
                     .validationPassed(passed)
-                    .errorCount(validation != null ? validation.getErrors().size() : 0)
-                    .firstErrorGate(validation != null && !validation.getErrors().isEmpty()
-                            ? validation.getErrors().get(0).getGate() : null)
+                    .errorCount(0)
                     .durationMs(durationMs)
                     .build());
         } catch (Exception e) {
@@ -825,13 +653,4 @@ public class SequentialTaskExecutor {
         }
     }
 
-    private ValidationLevel parseLevel(String level) {
-        try { return ValidationLevel.valueOf(level.toUpperCase()); }
-        catch (Exception e) { return ValidationLevel.TYPE; }
-    }
-
-    private TaskComplexity parseComplexity(String complexity) {
-        try { return TaskComplexity.valueOf(complexity != null ? complexity.toUpperCase() : "MEDIUM"); }
-        catch (Exception e) { return TaskComplexity.MEDIUM; }
-    }
 }

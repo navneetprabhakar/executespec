@@ -166,7 +166,7 @@ export default function AuditPage() {
         <button
           onClick={fetchLogs}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-xs font-medium hover:bg-white/[0.1] transition-colors disabled:opacity-40"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-white/[0.06] text-zinc-300 text-xs font-medium hover:bg-white/[0.1] transition-colors disabled:opacity-40"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh
@@ -174,7 +174,7 @@ export default function AuditPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg bg-surface-1 border border-white/[0.06] p-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-sm bg-surface-1 border border-white/[0.06] p-3">
         <Filter className="h-4 w-4 text-zinc-500 mt-5" />
 
         {/* Date range */}
@@ -206,7 +206,7 @@ export default function AuditPage() {
                 key={t}
                 onClick={() => { setEntityFilter(t); setPage(0); }}
                 className={cn(
-                  'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
+                  'px-2.5 py-1 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
                   entityFilter === t
                     ? 'bg-accent-violet text-white'
                     : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
@@ -236,13 +236,13 @@ export default function AuditPage() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-lg bg-accent-rose/10 border border-accent-rose/20 px-4 py-2 text-sm text-accent-rose">
+        <div className="rounded-sm bg-accent-rose/10 border border-accent-rose/20 px-4 py-2 text-sm text-accent-rose">
           {error}
         </div>
       )}
 
       {/* Results table */}
-      <div className="rounded-lg bg-surface-1 border border-white/[0.06] overflow-hidden">
+      <div className="rounded-sm bg-surface-1 border border-white/[0.06] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -270,7 +270,7 @@ export default function AuditPage() {
                     </td>
                     <td className="px-4 py-2.5">
                       <span className={cn(
-                        'inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase',
+                        'inline-block px-2 py-0.5 rounded-sm text-[10px] font-semibold uppercase',
                         entityBadgeColor(entry.entityType)
                       )}>
                         {entry.entityType}

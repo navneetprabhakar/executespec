@@ -3,6 +3,8 @@ package com.navneet.executespec.compiler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -56,6 +58,7 @@ public class CompilerAgent {
     private final ShellTool shellTool;
     private final FileSystemTool fsTool;
     private final LlmRouter llmRouter;
+    private final ModelResolver modelResolver;
     private final SseBroadcaster broadcaster;
     private final CompilerProperties compilerProps;
     private final ObjectMapper mapper;
@@ -158,17 +161,20 @@ public class CompilerAgent {
                 + "\n\nRELEVANT SOURCE FILES:\n" + context
                 + "\n\nOutput ONLY a JSON array: [{\"path\":\"...\",\"content\":\"...\"}]";
 
+        ResolvedModel resolved = modelResolver.resolve("CompilerAgent",
+                stateStore.findRun(runId).map(r -> r.getAiProviderEnum())
+                        .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC));
         AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                 .build();
         AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                .model(compilerProps.getModel())
+                .model(resolved.getModel())
                 .cacheOptions(cacheOpts)
                 .build();
         Prompt prompt = new Prompt(List.of(new SystemMessage(system), new UserMessage(user)), opts);
 
         LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
-                compilerProps.getProvider(), compilerProps.getModel(),
+                resolved.providerName(), resolved.getModel(),
                 prompt, runId, "compiler",
                 LlmRouter.FallbackMode.IMMEDIATE, 0, false);
         String resp = lr.response().getResult().getOutput().getText();

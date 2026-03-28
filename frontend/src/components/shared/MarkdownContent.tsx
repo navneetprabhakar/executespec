@@ -72,7 +72,7 @@ export function MarkdownContent({ content, className, compact = false }: Markdow
               </code>
             ),
           pre: ({ children }) => (
-            <pre className="bg-black/40 border border-white/[0.07] rounded-lg px-3 py-2.5 overflow-x-auto mb-2 last:mb-0 text-xs font-mono leading-relaxed">
+            <pre className="bg-black/40 border border-white/[0.07] rounded-sm px-3 py-2.5 overflow-x-auto mb-2 last:mb-0 text-xs font-mono leading-relaxed">
               {children}
             </pre>
           ),
@@ -127,7 +127,7 @@ export function MarkdownContent({ content, className, compact = false }: Markdow
 
           // ── Tables (GFM) ─────────────────────────────────────────────────
           table: ({ children }) => (
-            <div className="overflow-x-auto mb-2 last:mb-0 rounded-lg border border-white/[0.07]">
+            <div className="overflow-x-auto mb-2 last:mb-0 rounded-sm border border-white/[0.07]">
               <table className="w-full text-xs border-collapse">{children}</table>
             </div>
           ),

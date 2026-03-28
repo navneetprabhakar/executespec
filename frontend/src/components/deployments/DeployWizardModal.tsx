@@ -228,12 +228,12 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl max-h-[85vh] rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl flex flex-col overflow-hidden"
+        className="w-full max-w-2xl max-h-[85vh] rounded-sm bg-surface-2 border border-white/[0.08]  flex flex-col overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-accent-violet/20 flex items-center justify-center">
+            <div className="h-8 w-8 rounded-sm bg-accent-violet/20 flex items-center justify-center">
               <Rocket className="h-4 w-4 text-accent-violet" />
             </div>
             <div>
@@ -262,7 +262,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
               <div key={s} className="flex items-center gap-1">
                 {i > 0 && <div className={cn('w-6 h-px', isPast ? 'bg-accent-violet' : 'bg-white/10')} />}
                 <div className={cn(
-                  'text-[10px] px-2 py-0.5 rounded-full font-medium transition-colors',
+                  'text-[10px] px-2 py-0.5 rounded-sm font-medium transition-colors',
                   isCurrent ? 'bg-accent-violet/20 text-accent-violet' :
                   isPast ? 'bg-accent-emerald/10 text-accent-emerald' :
                   'bg-white/[0.04] text-zinc-600'
@@ -287,7 +287,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search completed runs..."
-                    className="w-full pl-9 pr-3 py-2 bg-surface-1 border border-white/[0.08] rounded-lg text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
+                    className="w-full pl-9 pr-3 py-2 bg-surface-1 border border-white/[0.08] rounded-sm text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
                   />
                 </div>
 
@@ -306,7 +306,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                         key={run.runId}
                         onClick={() => setSelectedRunId(run.runId)}
                         className={cn(
-                          'w-full text-left p-3 rounded-lg border transition-all',
+                          'w-full text-left p-3 rounded-sm border transition-all',
                           selectedRunId === run.runId
                             ? 'border-accent-violet/40 bg-accent-violet/5'
                             : 'border-white/[0.06] bg-surface-1 hover:border-white/[0.12]'
@@ -334,7 +334,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 className="space-y-4">
 
                 {/* Required Permissions (show before upload) */}
-                <div className="rounded-lg border border-white/[0.06] bg-surface-1 overflow-hidden">
+                <div className="rounded-sm border border-white/[0.06] bg-surface-1 overflow-hidden">
                   <button
                     onClick={() => setShowPerms(!showPerms)}
                     className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors"
@@ -377,7 +377,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                     <Loader2 className="h-5 w-5 text-zinc-500 animate-spin" />
                   </div>
                 ) : credential ? (
-                  <div className="rounded-lg border border-accent-emerald/20 bg-accent-emerald/5 p-4 space-y-2">
+                  <div className="rounded-sm border border-accent-emerald/20 bg-accent-emerald/5 p-4 space-y-2">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-accent-emerald" />
                       <span className="text-sm font-medium text-accent-emerald">Credentials configured</span>
@@ -411,7 +411,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-dashed border-white/[0.12] bg-surface-1 p-6 text-center space-y-3">
+                  <div className="rounded-sm border border-dashed border-white/[0.12] bg-surface-1 p-6 text-center space-y-3">
                     <Cloud className="h-8 w-8 text-zinc-600 mx-auto" />
                     <div>
                       <p className="text-sm font-medium text-zinc-300">No GCP credentials configured</p>
@@ -423,7 +423,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                       onClick={() => fileInputRef.current?.click()}
                       disabled={uploading}
                       className={cn(
-                        'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
+                        'inline-flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium',
                         'bg-accent-violet text-white hover:bg-accent-violet/80 transition-colors',
                         'disabled:opacity-40 disabled:cursor-not-allowed'
                       )}
@@ -446,7 +446,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 {/* Validation Results */}
                 {validationResult && (
                   <div className={cn(
-                    'rounded-lg border p-4 space-y-3',
+                    'rounded-sm border p-4 space-y-3',
                     validationResult.valid
                       ? 'border-accent-emerald/20 bg-accent-emerald/5'
                       : 'border-accent-amber/20 bg-accent-amber/5'
@@ -516,7 +516,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 ) : analysis ? (
                   <div className="space-y-4">
                     {/* Manifest summary */}
-                    <div className="rounded-lg border border-white/[0.06] bg-surface-1 p-4 space-y-3">
+                    <div className="rounded-sm border border-white/[0.06] bg-surface-1 p-4 space-y-3">
                       <h3 className="text-sm font-semibold text-white">Infrastructure Analysis</h3>
                       <div className="grid grid-cols-2 gap-3">
                         <InfoRow icon={<Server className="h-3.5 w-3.5" />} label="Project Type" value={analysis.manifest.projectType} />
@@ -537,7 +537,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                     </div>
 
                     {/* Recommended path */}
-                    <div className="rounded-lg border border-accent-violet/20 bg-accent-violet/5 p-4">
+                    <div className="rounded-sm border border-accent-violet/20 bg-accent-violet/5 p-4">
                       <div className="flex items-center gap-2 mb-2">
                         <Rocket className="h-4 w-4 text-accent-violet" />
                         <span className="text-sm font-medium text-accent-violet">Recommended: {analysis.decision.recommendedPath}</span>
@@ -563,7 +563,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                         onClick={() => p.available && setSelectedPath(p.path)}
                         disabled={!p.available}
                         className={cn(
-                          'w-full text-left p-3 rounded-lg border transition-all',
+                          'w-full text-left p-3 rounded-sm border transition-all',
                           !p.available && 'opacity-40 cursor-not-allowed',
                           selectedPath === p.path
                             ? 'border-accent-violet/40 bg-accent-violet/5'
@@ -573,12 +573,12 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium text-zinc-200">{p.label || p.path}</span>
                           {p.path === analysis.decision.recommendedPath && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent-violet/20 text-accent-violet font-medium">
+                            <span className="text-[10px] px-2 py-0.5 rounded-sm bg-accent-violet/20 text-accent-violet font-medium">
                               Recommended
                             </span>
                           )}
                           {!p.available && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-700/50 text-zinc-500 font-medium">
+                            <span className="text-[10px] px-2 py-0.5 rounded-sm bg-zinc-700/50 text-zinc-500 font-medium">
                               Coming Soon
                             </span>
                           )}
@@ -595,7 +595,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                   <select
                     value={region}
                     onChange={(e) => setRegion(e.target.value)}
-                    className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+                    className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
                   >
                     {GCP_REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
@@ -626,7 +626,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                               setEnvVars(copy);
                             }}
                             placeholder="KEY"
-                            className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+                            className="flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-1.5 text-xs font-mono text-zinc-300 focus:outline-none focus:border-accent-violet/40"
                           />
                           <input
                             value={env.value}
@@ -637,7 +637,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                             }}
                             placeholder="value"
                             type="password"
-                            className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+                            className="flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-1.5 text-xs font-mono text-zinc-300 focus:outline-none focus:border-accent-violet/40"
                           />
                           <button
                             onClick={() => setEnvVars(envVars.filter((_, j) => j !== i))}
@@ -714,7 +714,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                   else if (step === 'analyze' && !analyzing) setStep('credentials');
                   else if (step === 'configure') setStep('analyze');
                 }}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-sm text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
               >
                 <ArrowLeft className="h-4 w-4" /> Back
               </button>
@@ -726,7 +726,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 onClick={() => setStep('credentials')}
                 disabled={!selectedRunId}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                  'flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-violet text-white hover:bg-accent-violet/80',
                   'disabled:opacity-40 disabled:cursor-not-allowed'
                 )}
@@ -739,7 +739,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 onClick={runAnalysis}
                 disabled={!credential}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                  'flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-violet text-white hover:bg-accent-violet/80',
                   'disabled:opacity-40 disabled:cursor-not-allowed'
                 )}
@@ -750,7 +750,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
             {step === 'analyze' && !analyzing && analysis && (
               <button
                 onClick={() => setStep('configure')}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-accent-violet text-white hover:bg-accent-violet/80 transition-all"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-accent-violet text-white hover:bg-accent-violet/80 transition-all"
               >
                 Configure <ArrowRight className="h-4 w-4" />
               </button>
@@ -760,7 +760,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 onClick={startDeploy}
                 disabled={!selectedPath}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                  'flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-emerald text-white hover:bg-accent-emerald/80',
                   'disabled:opacity-40 disabled:cursor-not-allowed'
                 )}
@@ -771,7 +771,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
             {step === 'deploying' && !deploying && (
               <button
                 onClick={onClose}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-surface-1 border border-white/[0.08] text-zinc-300 hover:border-white/[0.16] transition-all"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-surface-1 border border-white/[0.08] text-zinc-300 hover:border-white/[0.16] transition-all"
               >
                 Close
               </button>

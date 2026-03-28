@@ -22,8 +22,8 @@ export default function Toast({ toast }: { toast: ToastType }) {
       exit={{ opacity: 0, x: 40 }}
       transition={{ duration: 0.2 }}
       className={cn(
-        'flex items-start gap-3 px-4 py-3 rounded-lg max-w-xs',
-        'bg-surface-2 border shadow-xl',
+        'flex items-start gap-3 px-4 py-3 rounded-sm max-w-xs',
+        'bg-surface-2 border ',
         COLORS[toast.type]
       )}
     >

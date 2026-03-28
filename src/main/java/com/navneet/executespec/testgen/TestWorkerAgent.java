@@ -2,9 +2,10 @@ package com.navneet.executespec.testgen;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
-import com.navneet.executespec.router.ModelRouter;
-import com.navneet.executespec.router.ModelSelection;
-import com.navneet.executespec.router.ModelTier;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.testgen.model.TestPlan;
 import com.navneet.executespec.testgen.model.TestTask;
 import com.navneet.executespec.testgen.model.TestTaskStatus;
@@ -40,7 +41,8 @@ import java.util.List;
 public class TestWorkerAgent {
 
     private final LlmRouter llmRouter;
-    private final ModelRouter modelRouter;
+    private final ModelResolver modelResolver;
+    private final StateStore stateStore;
     private final TestTaskRepository testTaskRepository;
     private final TestPlanRepository testPlanRepository;
     private final TestProjectScaffold scaffold;
@@ -64,8 +66,10 @@ public class TestWorkerAgent {
         // Build prompt
         String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli);
 
-        // Call LLM (CAPABLE tier)
-        ModelSelection model = modelRouter.selectFromTier(ModelTier.CAPABLE);
+        // Call LLM via ModelResolver
+        LlmProvider aiProvider = stateStore.findRun(runId)
+                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+        ResolvedModel model = modelResolver.resolve("TestWorkerAgent", aiProvider);
         LlmRouter.LlmResponse lr = callLlmTracked(runId, model, systemPrompt);
         String code = lr.response().getResult().getOutput().getText();
         accumulateWorkerTokens(task.getTestPlanId(), lr, model);
@@ -101,10 +105,12 @@ public class TestWorkerAgent {
                 + "\n\nYour previous attempt had COMPILATION ERRORS:\n" + compilationError
                 + "\n\nFix ALL compilation errors. Output ONLY valid, compilable Java source code.";
 
-        ModelSelection model = modelRouter.selectFromTier(ModelTier.CAPABLE);
-        LlmRouter.LlmResponse lr = callLlmTracked(runId, model, systemPrompt);
+        LlmProvider aiProviderRetry = stateStore.findRun(runId)
+                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+        ResolvedModel retryModel = modelResolver.resolve("TestWorkerAgent", aiProviderRetry);
+        LlmRouter.LlmResponse lr = callLlmTracked(runId, retryModel, systemPrompt);
         String code = lr.response().getResult().getOutput().getText();
-        accumulateWorkerTokens(task.getTestPlanId(), lr, model);
+        accumulateWorkerTokens(task.getTestPlanId(), lr, retryModel);
         code = stripMarkdownFences(code);
 
         try {
@@ -152,12 +158,12 @@ public class TestWorkerAgent {
                 .replace("{user_request}", userRequest != null ? userRequest : "");
     }
 
-    private LlmRouter.LlmResponse callLlmTracked(String runId, ModelSelection model, String systemPrompt) {
+    private LlmRouter.LlmResponse callLlmTracked(String runId, ResolvedModel model, String systemPrompt) {
         AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                 .build();
         AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                .model(model.getModelName())
+                .model(model.getModel())
                 .cacheOptions(cacheOpts)
                 .build();
         Prompt prompt = new Prompt(List.of(
@@ -165,12 +171,12 @@ public class TestWorkerAgent {
                 new UserMessage("Generate the test class now.")
         ), opts);
         return llmRouter.callWithFallbackTracked(
-                model.getProvider().name().toLowerCase(), model.getModelName(),
+                model.providerName(), model.getModel(),
                 prompt, runId, "test-worker",
                 LlmRouter.FallbackMode.IMMEDIATE, 0, false);
     }
 
-    private synchronized void accumulateWorkerTokens(Long testPlanId, LlmRouter.LlmResponse lr, ModelSelection model) {
+    private synchronized void accumulateWorkerTokens(Long testPlanId, LlmRouter.LlmResponse lr, ResolvedModel model) {
         try {
             var usage = lr.response().getMetadata().getUsage();
             int inTokens = usage.getPromptTokens().intValue();
@@ -179,8 +185,8 @@ public class TestWorkerAgent {
             if (testPlan != null) {
                 testPlan.setWorkerInputTokens(testPlan.getWorkerInputTokens() + inTokens);
                 testPlan.setWorkerOutputTokens(testPlan.getWorkerOutputTokens() + outTokens);
-                testPlan.setWorkerProvider(lr.provider() != null ? lr.provider() : model.getProvider().name().toLowerCase());
-                testPlan.setWorkerModel(lr.model() != null ? lr.model() : model.getModelName());
+                testPlan.setWorkerProvider(lr.provider() != null ? lr.provider() : model.providerName());
+                testPlan.setWorkerModel(lr.model() != null ? lr.model() : model.getModel());
                 testPlanRepository.save(testPlan);
             }
         } catch (Exception e) {

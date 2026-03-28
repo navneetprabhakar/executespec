@@ -204,7 +204,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
         transition={{ duration: 0.15 }}
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          'w-full rounded-2xl bg-surface-2 border border-white/[0.08] shadow-2xl overflow-hidden flex flex-col',
+          'w-full rounded-sm bg-surface-2 border border-white/[0.08]  overflow-hidden flex flex-col',
           mode === 'chat' ? 'max-w-xl' : 'max-w-xl',
         )}
         style={{ maxHeight: mode === 'chat' ? 'min(95dvh, 80vh)' : '95dvh' }}
@@ -229,7 +229,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
           <div className="flex items-center gap-3">
             {mode === 'chat' && (
               <span className={cn(
-                'text-xs font-mono tabular-nums px-2 py-0.5 rounded-full',
+                'text-xs font-mono tabular-nums px-2 py-0.5 rounded-sm',
                 atLimit
                   ? 'bg-accent-rose/15 text-accent-rose'
                   : 'bg-white/[0.06] text-zinc-400',
@@ -253,7 +253,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               placeholder="Describe what you want to build..."
               rows={5}
               className={cn(
-                'w-full font-mono text-sm bg-surface-1 border border-white/[0.08] rounded-lg',
+                'w-full font-mono text-sm bg-surface-1 border border-white/[0.08] rounded-sm',
                 'px-4 py-3 text-zinc-200 placeholder:text-zinc-600',
                 'focus:outline-none focus:border-accent-violet/40 resize-none',
               )}
@@ -275,7 +275,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               onClick={enterChat}
               disabled={!goal.trim()}
               className={cn(
-                'w-full py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2',
+                'w-full py-2 rounded-sm text-sm font-medium transition-all flex items-center justify-center gap-2',
                 'border border-accent-violet/30 text-accent-violet/80',
                 'hover:border-accent-violet/60 hover:text-accent-violet hover:bg-accent-violet/5',
                 'disabled:opacity-30 disabled:cursor-not-allowed',
@@ -324,7 +324,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                className="w-full bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+                className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
               >
                 <option value="">Default (Claude Opus)</option>
                 {MODELS.map((m) => (
@@ -355,7 +355,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                 >
                   {/* No-PAT warning */}
                   {!user?.hasGithubPat && (
-                    <div className="flex items-center gap-1.5 text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-1.5 text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-sm px-3 py-2">
                       <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
                       No GitHub PAT configured. Add yours in&nbsp;
                       <strong>Settings → GitHub Integration</strong>&nbsp;first.
@@ -374,7 +374,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                       <label
                         key={opt.value}
                         className={cn(
-                          'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors',
+                          'flex items-start gap-2.5 rounded-sm border px-3 py-2.5 cursor-pointer transition-colors',
                           repoChoice === opt.value
                             ? 'border-accent-violet/40 bg-accent-violet/[0.06]'
                             : 'border-white/[0.06] hover:border-white/[0.12]',
@@ -405,7 +405,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="flex items-center gap-2 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 focus-within:border-accent-violet/40">
+                        <div className="flex items-center gap-2 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 focus-within:border-accent-violet/40">
                           <Github className="h-3.5 w-3.5 text-zinc-500 flex-shrink-0" />
                           <input
                             type="url"
@@ -426,7 +426,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               onClick={handleSubmit}
               disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim())}
               className={cn(
-                'w-full py-2.5 rounded-lg font-medium text-sm text-white transition-all',
+                'w-full py-2.5 rounded-sm font-medium text-sm text-white transition-all',
                 'bg-accent-violet hover:bg-accent-violet/80',
                 'disabled:opacity-40 disabled:cursor-not-allowed',
                 'flex items-center justify-center gap-2',
@@ -462,7 +462,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                   <div className="h-6 w-6 rounded-full bg-accent-violet/20 flex items-center justify-center flex-shrink-0 mt-0.5">
                     <Sparkles className="h-3 w-3 text-accent-violet" />
                   </div>
-                  <div className="bg-white/[0.05] border border-white/[0.06] rounded-xl rounded-tl-sm px-3 py-2">
+                  <div className="bg-white/[0.05] border border-white/[0.06] rounded-sm rounded-tl-sm px-3 py-2">
                     <span className="flex gap-1 items-center h-4">
                       {[0, 150, 300].map((delay) => (
                         <span
@@ -481,7 +481,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
 
             {/* Limit reached banner */}
             {atLimit && (
-              <div className="mx-5 mb-2 px-3 py-2 rounded-lg bg-accent-amber/10 border border-accent-amber/20">
+              <div className="mx-5 mb-2 px-3 py-2 rounded-sm bg-accent-amber/10 border border-accent-amber/20">
                 <p className="text-xs text-accent-amber">
                   Message limit reached. Click <strong>Use as Goal</strong> on the AI's last reply, then launch your run.
                 </p>
@@ -500,7 +500,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                   disabled={atLimit || chatLoading}
                   placeholder={atLimit ? 'Max messages reached' : 'Reply…'}
                   className={cn(
-                    'flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2',
+                    'flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2',
                     'text-sm text-zinc-200 placeholder:text-zinc-600',
                     'focus:outline-none focus:border-accent-violet/40',
                     'disabled:opacity-40',
@@ -510,7 +510,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                   onClick={sendMessage}
                   disabled={!canSend}
                   className={cn(
-                    'px-3 py-2 rounded-lg transition-all flex items-center justify-center',
+                    'px-3 py-2 rounded-sm transition-all flex items-center justify-center',
                     'bg-accent-violet hover:bg-accent-violet/80',
                     'disabled:opacity-30 disabled:cursor-not-allowed',
                   )}
@@ -524,7 +524,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                 onClick={handleSubmit}
                 disabled={!goal.trim() || launching}
                 className={cn(
-                  'mt-2 w-full py-2 rounded-lg text-xs font-medium transition-all',
+                  'mt-2 w-full py-2 rounded-sm text-xs font-medium transition-all',
                   'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]',
                   'disabled:opacity-30 disabled:cursor-not-allowed',
                   'flex items-center justify-center gap-1.5',
@@ -582,7 +582,7 @@ function ChatBubble({
 
       {/* Bubble */}
       <div className={cn(
-        'max-w-[80%] rounded-xl px-3 py-2 text-sm leading-relaxed',
+        'max-w-[80%] rounded-sm px-3 py-2 text-sm leading-relaxed',
         isUser
           ? 'bg-accent-violet/15 text-zinc-200 rounded-tr-sm'
           : 'bg-white/[0.05] border border-white/[0.06] text-zinc-300 rounded-tl-sm',
@@ -601,7 +601,7 @@ function ChatBubble({
               />
             )}
             {/* Highlighted summary block */}
-            <div className="mt-1 p-2.5 rounded-lg bg-accent-emerald/10 border border-accent-emerald/20">
+            <div className="mt-1 p-2.5 rounded-sm bg-accent-emerald/10 border border-accent-emerald/20">
               <p className="text-[10px] uppercase tracking-wider text-accent-emerald/70 mb-1.5 font-semibold">
                 Requirement Summary
               </p>

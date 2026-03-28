@@ -53,13 +53,13 @@ export default function FeasibilityEstimator() {
           onChange={(e) => setGoal(e.target.value)}
           placeholder="Describe your goal..."
           rows={3}
-          className="w-full font-mono text-sm bg-surface-1 border border-white/[0.08] rounded-lg px-4 py-3 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40 resize-none"
+          className="w-full font-mono text-sm bg-surface-1 border border-white/[0.08] rounded-sm px-4 py-3 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40 resize-none"
         />
         <div className="flex gap-3">
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none"
+            className="flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none"
           >
             <option value="">Default model</option>
             <option value="claude-opus-4-6">Claude Opus 4.6</option>
@@ -73,13 +73,13 @@ export default function FeasibilityEstimator() {
             value={budget}
             onChange={(e) => setBudget(e.target.value)}
             placeholder="Budget ($)"
-            className="w-32 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none"
+            className="w-32 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none"
           />
           <button
             onClick={handleEstimate}
             disabled={!goal.trim() || loading}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all',
+              'flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium text-white transition-all',
               'bg-accent-violet hover:bg-accent-violet/80 disabled:opacity-40 disabled:cursor-not-allowed'
             )}
           >
@@ -92,7 +92,7 @@ export default function FeasibilityEstimator() {
       <AnimatePresence>
         {error && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="p-3 rounded-lg bg-accent-rose/10 border border-accent-rose/30 text-sm text-accent-rose">
+            className="p-3 rounded-sm bg-accent-rose/10 border border-accent-rose/30 text-sm text-accent-rose">
             {error}
           </motion.div>
         )}
@@ -121,7 +121,7 @@ export default function FeasibilityEstimator() {
               <div className="space-y-2">
                 <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Task Breakdown</h4>
                 {result.tasks.map((t, i) => (
-                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-sm bg-white/[0.02] border border-white/[0.06]">
                     <div className="flex items-center gap-2 min-w-0">
                       <ChevronRight className="h-3 w-3 text-zinc-600 flex-shrink-0" />
                       <span className="text-sm text-zinc-300 truncate">{t.title}</span>

@@ -96,7 +96,7 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
           {rows.map((row) => (
             <tr key={`${row.provider}-${row.model}`} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
               <td className="px-4 py-2.5">
-                <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium capitalize', ROLE_BADGES[row.provider] ?? 'text-zinc-400 bg-zinc-400/10')}>
+                <span className={cn('text-xs px-2 py-0.5 rounded-sm font-medium capitalize', ROLE_BADGES[row.provider] ?? 'text-zinc-400 bg-zinc-400/10')}>
                   {row.provider}
                 </span>
               </td>

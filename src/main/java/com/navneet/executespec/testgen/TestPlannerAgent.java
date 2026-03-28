@@ -3,9 +3,10 @@ package com.navneet.executespec.testgen;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
-import com.navneet.executespec.router.ModelRouter;
-import com.navneet.executespec.router.ModelSelection;
-import com.navneet.executespec.router.ModelTier;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.testgen.model.*;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
@@ -35,7 +36,8 @@ import java.util.List;
 public class TestPlannerAgent {
 
     private final LlmRouter llmRouter;
-    private final ModelRouter modelRouter;
+    private final ModelResolver modelResolver;
+    private final StateStore stateStore;
     private final TestPlanRepository testPlanRepository;
     private final TestTaskRepository testTaskRepository;
     private final ObjectMapper objectMapper;
@@ -69,8 +71,10 @@ public class TestPlannerAgent {
                 .replace("{user_request}", userRequest != null ? userRequest : "")
                 .replace("{conventions_doc}", conventionsDoc != null ? conventionsDoc : "");
 
-        // Call LLM (CAPABLE tier, Sonnet)
-        ModelSelection model = modelRouter.selectFromTier(ModelTier.CAPABLE);
+        // Call LLM via ModelResolver (PLANNING tier for test planning)
+        LlmProvider aiProvider = stateStore.findRun(runId)
+                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+        ResolvedModel model = modelResolver.resolve("TestPlannerAgent", aiProvider);
         LlmRouter.LlmResponse lr = callLlm(runId, model, systemPrompt, 1);
         String llmResponse = lr.response().getResult().getOutput().getText();
         accumulatePlannerTokens(testPlan, lr, model);
@@ -143,12 +147,12 @@ public class TestPlannerAgent {
         return testPlan;
     }
 
-    private LlmRouter.LlmResponse callLlm(String runId, ModelSelection model, String prompt, int attempt) {
+    private LlmRouter.LlmResponse callLlm(String runId, ResolvedModel model, String prompt, int attempt) {
         AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                 .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                 .build();
         AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                .model(model.getModelName())
+                .model(model.getModel())
                 .cacheOptions(cacheOpts)
                 .build();
         Prompt chatPrompt = new Prompt(List.of(
@@ -156,20 +160,20 @@ public class TestPlannerAgent {
                 new UserMessage("Generate the test plan now.")
         ), opts);
         return llmRouter.callWithFallbackTracked(
-                model.getProvider().name().toLowerCase(), model.getModelName(),
+                model.providerName(), model.getModel(),
                 chatPrompt, runId, "test-planner",
                 LlmRouter.FallbackMode.IMMEDIATE, attempt - 1, false);
     }
 
-    private void accumulatePlannerTokens(TestPlan testPlan, LlmRouter.LlmResponse lr, ModelSelection model) {
+    private void accumulatePlannerTokens(TestPlan testPlan, LlmRouter.LlmResponse lr, ResolvedModel model) {
         try {
             var usage = lr.response().getMetadata().getUsage();
             int inTokens = usage.getPromptTokens().intValue();
             int outTokens = usage.getCompletionTokens().intValue();
             testPlan.setPlannerInputTokens(testPlan.getPlannerInputTokens() + inTokens);
             testPlan.setPlannerOutputTokens(testPlan.getPlannerOutputTokens() + outTokens);
-            testPlan.setPlannerProvider(lr.provider() != null ? lr.provider() : model.getProvider().name().toLowerCase());
-            testPlan.setPlannerModel(lr.model() != null ? lr.model() : model.getModelName());
+            testPlan.setPlannerProvider(lr.provider() != null ? lr.provider() : model.providerName());
+            testPlan.setPlannerModel(lr.model() != null ? lr.model() : model.getModel());
         } catch (Exception e) {
             log.warn("[TestPlanner] Failed to extract token usage: {}", e.getMessage());
         }

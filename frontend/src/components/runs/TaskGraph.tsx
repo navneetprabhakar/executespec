@@ -119,7 +119,7 @@ export default function TaskGraph({ runId }: Props) {
   };
 
   return (
-    <div className="relative w-full overflow-auto rounded-xl border border-white/10 bg-[#0a0a0f] p-2">
+    <div className="relative w-full overflow-auto rounded-sm border border-white/10 bg-[#0a0a0f] p-2">
       {/* Legend */}
       <div className="flex flex-wrap gap-3 px-3 pt-2 pb-1 text-xs">
         {Object.entries(STATUS_COLOR).map(([s, c]) => (

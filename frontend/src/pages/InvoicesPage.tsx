@@ -97,7 +97,7 @@ export default function InvoicesPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-surface-700 bg-surface-800">
+      <div className="rounded-sm border border-surface-700 bg-surface-800">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -136,7 +136,7 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3 text-slate-300 max-w-[200px] truncate">{inv.description}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-200">{formatPaise(inv.totalAmount)}</td>
                     <td className="px-4 py-3">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>
+                      <span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>
                         {inv.status}
                       </span>
                     </td>

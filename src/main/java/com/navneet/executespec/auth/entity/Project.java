@@ -1,5 +1,6 @@
 package com.navneet.executespec.auth.entity;
 
+import com.navneet.executespec.router.LlmProvider;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -29,6 +30,12 @@ public class Project {
     @Column(nullable = false)
     @Builder.Default
     private String status = "ACTIVE";
+
+    /** User-selected LLM provider for this project. */
+    @Column(name = "ai_provider", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private LlmProvider aiProvider = LlmProvider.ANTHROPIC;
 
     @Column(name = "created_by", nullable = false)
     private String createdBy;

@@ -30,7 +30,7 @@ export default function CommandPalette() {
           onClick={() => setCommandPaletteOpen(false)}
         >
           <div
-            className="w-full max-w-xl mx-4 rounded-xl border border-white/[0.10] bg-surface-2 shadow-2xl overflow-hidden"
+            className="w-full max-w-xl mx-4 rounded-sm border border-white/[0.10] bg-surface-2  overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <Command className="[&_[cmdk-input]]:h-12 [&_[cmdk-input]]:px-4 [&_[cmdk-input]]:text-sm [&_[cmdk-input]]:bg-transparent [&_[cmdk-input]]:outline-none [&_[cmdk-input]]:text-zinc-100 [&_[cmdk-input]]:placeholder:text-zinc-500">

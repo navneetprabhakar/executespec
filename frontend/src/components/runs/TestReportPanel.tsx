@@ -77,7 +77,7 @@ export default function TestReportPanel({ runId, status }: Props) {
   });
 
   return (
-    <div className={cn('mx-4 mt-3 rounded-lg border bg-white/[0.02]', borderColor)}>
+    <div className={cn('mx-4 mt-3 rounded-sm border bg-white/[0.02]', borderColor)}>
       {/* Header */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -223,7 +223,7 @@ export default function TestReportPanel({ runId, status }: Props) {
 function Badge({ color, label }: { color: string; label: string }) {
   return (
     <span className={cn(
-      'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+      'inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium',
       color === 'emerald' && 'bg-emerald-500/10 text-emerald-400',
       color === 'red' && 'bg-red-500/10 text-red-400',
       color === 'orange' && 'bg-orange-500/10 text-orange-400',

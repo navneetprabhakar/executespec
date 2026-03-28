@@ -79,7 +79,7 @@ export default function DeploymentCard({ deployment, onRefresh }: DeploymentCard
                   PULSE_COLOR[deployment.status] || 'bg-accent-cyan')} />
               </span>
             )}
-            <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', s.badge)}>
+            <span className={cn('text-xs px-2 py-0.5 rounded-sm font-medium', s.badge)}>
               {deployment.status}
             </span>
             {deployment.versionTag && (

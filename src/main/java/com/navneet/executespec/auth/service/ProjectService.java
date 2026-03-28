@@ -3,6 +3,8 @@ package com.navneet.executespec.auth.service;
 import com.navneet.executespec.auth.dto.CreateProjectRequest;
 import com.navneet.executespec.auth.dto.ProjectDto;
 import com.navneet.executespec.auth.dto.ProjectMemberDto;
+import com.navneet.executespec.auth.dto.UpdateProjectSettingsRequest;
+import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
@@ -34,11 +36,18 @@ public class ProjectService {
 
     @Transactional
     public ProjectDto createProject(String orgId, String createdBy, CreateProjectRequest req) {
+        LlmProvider provider = LlmProvider.ANTHROPIC;
+        if (req.aiProvider() != null) {
+            try { provider = LlmProvider.valueOf(req.aiProvider().toUpperCase()); }
+            catch (IllegalArgumentException ignored) { /* default ANTHROPIC */ }
+        }
+
         Project project = Project.builder()
                 .id(UUID.randomUUID().toString())
                 .orgId(orgId)
                 .name(req.name())
                 .description(req.description())
+                .aiProvider(provider)
                 .status("ACTIVE")
                 .createdBy(createdBy)
                 .build();
@@ -140,6 +149,38 @@ public class ProjectService {
                 .orgId(project != null ? project.getOrgId() : null).actorId(actorId)
                 .oldValue("{\"userId\":\"" + userId + "\"}")
                 .build());
+    }
+
+    @Transactional
+    public ProjectDto updateSettings(String projectId, UpdateProjectSettingsRequest req, String actorId) {
+        Project project = projectRepo.findById(projectId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+
+        String oldProvider = project.getAiProvider() != null ? project.getAiProvider().name() : "ANTHROPIC";
+
+        if (req.aiProvider() != null) {
+            try {
+                LlmProvider provider = LlmProvider.valueOf(req.aiProvider().toUpperCase());
+                project.setAiProvider(provider);
+            } catch (IllegalArgumentException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Invalid AI provider: " + req.aiProvider() + ". Valid: ANTHROPIC, GOOGLE, OPENAI");
+            }
+        }
+
+        project.setUpdatedAt(Instant.now());
+        ProjectDto result = ProjectDto.from(projectRepo.save(project));
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("PROJECT_SETTINGS_UPDATED")
+                .entityType("PROJECT").entityId(projectId)
+                .orgId(project.getOrgId()).actorId(actorId)
+                .oldValue("{\"aiProvider\":\"" + oldProvider + "\"}")
+                .newValue("{\"aiProvider\":\"" + project.getAiProvider().name() + "\"}")
+                .build());
+
+        log.info("Project settings updated: {} — aiProvider: {} → {}", projectId, oldProvider, project.getAiProvider());
+        return result;
     }
 
     public List<ProjectMemberDto> listMembers(String projectId) {

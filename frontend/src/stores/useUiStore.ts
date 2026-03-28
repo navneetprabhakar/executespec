@@ -6,6 +6,8 @@ export interface Toast {
   message: string;
 }
 
+type ViewMode = 'vibe' | 'pro';
+
 interface UiStore {
   sidebarExpanded: boolean;
   mobileSidebarOpen: boolean;
@@ -18,6 +20,8 @@ interface UiStore {
   runListCollapsed: boolean;
   /** Whether the copilot chat panel is maximized (full-width overlay). */
   copilotMaximized: boolean;
+  /** Vibe (simplified) or Pro (full pipeline) view mode. */
+  viewMode: ViewMode;
 
   setSidebarExpanded: (v: boolean) => void;
   setMobileSidebarOpen: (v: boolean) => void;
@@ -28,6 +32,7 @@ interface UiStore {
   setPendingNewRunGoal: (goal: string | null) => void;
   setRunListCollapsed: (v: boolean) => void;
   setCopilotMaximized: (v: boolean) => void;
+  setViewMode: (mode: ViewMode) => void;
 }
 
 let toastSeq = 0;
@@ -41,6 +46,7 @@ export const useUiStore = create<UiStore>((set) => ({
   pendingNewRunGoal: null,
   runListCollapsed: false,
   copilotMaximized: false,
+  viewMode: (localStorage.getItem('es:viewMode') as ViewMode) || 'vibe',
 
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
   setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
@@ -49,6 +55,10 @@ export const useUiStore = create<UiStore>((set) => ({
   setPendingNewRunGoal: (goal) => set({ pendingNewRunGoal: goal }),
   setRunListCollapsed: (v) => set({ runListCollapsed: v }),
   setCopilotMaximized: (v) => set({ copilotMaximized: v }),
+  setViewMode: (mode) => {
+    localStorage.setItem('es:viewMode', mode);
+    set({ viewMode: mode });
+  },
 
   addToast: (t) => {
     const id = String(++toastSeq);

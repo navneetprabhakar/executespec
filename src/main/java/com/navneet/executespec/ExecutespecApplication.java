@@ -42,7 +42,8 @@ import java.util.Scanner;
 })
 @EnableScheduling
 @EnableAsync
-@EnableConfigurationProperties({DeploymentProperties.class, IntegrationProperties.class})
+@EnableConfigurationProperties({DeploymentProperties.class, IntegrationProperties.class,
+        com.navneet.executespec.router.ModelMatrixProperties.class})
 @Slf4j
 public class ExecutespecApplication {
 

@@ -11,7 +11,7 @@ interface IntegrationCardProps {
 export default function IntegrationCard({ integrationKey, name, description, enabled }: IntegrationCardProps) {
   return (
     <div className={cn(
-      'p-4 rounded-xl border transition-all',
+      'p-4 rounded-sm border transition-all',
       enabled
         ? 'border-accent-violet/30 bg-accent-violet/[0.04]'
         : 'border-white/[0.06] bg-white/[0.02] opacity-60 grayscale'
@@ -25,7 +25,7 @@ export default function IntegrationCard({ integrationKey, name, description, ena
           </div>
         </div>
         <span className={cn(
-          'text-xs px-2 py-0.5 rounded-full font-medium',
+          'text-xs px-2 py-0.5 rounded-sm font-medium',
           enabled ? 'text-accent-emerald bg-accent-emerald/10' : 'text-zinc-600 bg-zinc-600/10'
         )}>
           {enabled ? 'Enabled' : 'Disabled'}

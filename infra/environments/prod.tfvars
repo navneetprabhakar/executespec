@@ -13,7 +13,7 @@ domain           = "executespec.ai"
 subdomain_prefix = "app"   # → app.executespec.ai
 
 # ── Compute (production-grade) ──────────────────────────────────────────────
-machine_type      = "n2-standard-4"   # 4 vCPU, 16 GB RAM (~$97/mo)
+machine_type      = "n2-standard-8"   # 8 vCPU, 32 GB RAM (~$194/mo)
 boot_disk_size_gb = 50
 boot_disk_type    = "pd-ssd"
 
@@ -39,7 +39,7 @@ labels = {
 }
 
 # ── Estimated Monthly Cost ──────────────────────────────────────────────────
-# Compute (2× n2-standard-4):  ~$194
+# Compute (n2-standard-8):     ~$194
 # Cloud SQL (db-custom-2-3840): ~$80
 # Redis (1 GB Standard HA):     ~$73
 # Load Balancer + forwarding:   ~$18

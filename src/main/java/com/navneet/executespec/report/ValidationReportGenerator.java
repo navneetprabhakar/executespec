@@ -2,6 +2,8 @@ package com.navneet.executespec.report;
 
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
@@ -33,6 +35,7 @@ import java.util.stream.Collectors;
 public class ValidationReportGenerator {
 
     private final LlmRouter llmRouter;
+    private final ModelResolver modelResolver;
 
     @Value("classpath:prompts/validation-report.txt")
     private Resource promptTemplate;
@@ -54,8 +57,9 @@ public class ValidationReportGenerator {
         ));
 
         String runId = input.run().getRunId();
+        ResolvedModel resolved = modelResolver.resolve("ValidationReportGenerator", input.run().getAiProviderEnum());
         LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
-                "anthropic", ModelConstants.HAIKU, prompt, runId,
+                resolved.providerName(), resolved.getModel(), prompt, runId,
                 "validation-report", LlmRouter.FallbackMode.IMMEDIATE, 0, false);
 
         ChatResponse response = lr.response();

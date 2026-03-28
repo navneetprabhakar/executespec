@@ -4,7 +4,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 
 ## Key Files
 - `PipelineHarness.java` — Main orchestrator. Runs async pipeline: plan → work → compile → merge → review → report → complete
-- `SequentialTaskExecutor.java` — Executes tasks sequentially via WorkerAgent, with retry and model escalation
+- `SequentialTaskExecutor.java` — Executes tasks in parallel groups via WorkerAgent. Model resolved from matrix via ModelResolver (no tier ceiling). Validation deferred to review phase.
 - `ApprovalGate.java` — Plan approval gate interface
 - `GateStore.java` — Redis-backed gate storage (500ms poll, 2h TTL)
 - `GitMergeService.java` — Merges task branches into main. Progressive merge after each task.

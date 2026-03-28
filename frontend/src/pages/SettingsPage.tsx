@@ -82,7 +82,7 @@ function SecretField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none pr-10"
+          className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none pr-10"
         />
         <button
           type="button"
@@ -111,7 +111,7 @@ function TextField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+        className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
       />
       {hint && <p className="text-xs text-zinc-600 mt-1">{hint}</p>}
     </div>
@@ -137,7 +137,7 @@ function SaveBar({
       <button
         type="submit"
         disabled={saving || disabled}
-        className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+        className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>
@@ -146,7 +146,7 @@ function SaveBar({
           type="button"
           onClick={onClear}
           disabled={saving}
-          className="px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+          className="px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
         >
           {clearLabel ?? 'Clear'}
         </button>
@@ -291,14 +291,14 @@ export default function SettingsPage() {
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => navigate('/billing')}
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 border border-white/[0.08] hover:border-white/[0.15] transition-colors"
+            className="px-3 py-1.5 rounded-sm text-xs text-zinc-400 hover:text-zinc-200 border border-white/[0.08] hover:border-white/[0.15] transition-colors"
           >
             View Billing
           </button>
           {user?.tier !== 'ENTERPRISE' && (
             <button
               onClick={() => navigate('/plans')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 transition-colors"
             >
               Upgrade Plan
               <ArrowUpRight className="h-3 w-3" />
@@ -356,7 +356,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={githubSaving || (!githubPat.trim() && !githubOwner.trim())}
-              className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+              className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
             >
               {githubSaving ? 'Saving…' : 'Save'}
             </button>
@@ -364,7 +364,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleTestGitHub}
               disabled={githubTesting || !githubPat.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
             >
               {githubTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Test Connection
@@ -374,7 +374,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={handleClearGitHub}
                 disabled={githubSaving}
-                className="px-4 py-2 rounded-lg text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+                className="px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
               >
                 Clear credentials
               </button>
@@ -667,7 +667,7 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
 
       {/* Warning */}
       {missingKeys && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+        <div className="rounded-sm border border-amber-500/30 bg-amber-500/5 px-3 py-2">
           <p className="text-xs text-amber-400">
             <AlertCircle className="h-3.5 w-3.5 inline mr-1 -mt-0.5" />
             OWN_KEYS mode is selected but no org/user keys are configured for the enabled providers.
@@ -681,7 +681,7 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 rounded-lg bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : 'Save'}
         </button>

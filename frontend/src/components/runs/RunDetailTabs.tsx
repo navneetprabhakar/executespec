@@ -21,6 +21,7 @@ import RunConversation from './RunConversation';
 import TaskGraph from './TaskGraph';
 import PreviewTab from './PreviewTab';
 import { PIPELINE_STEPS } from '@/lib/constants';
+import { useViewMode } from '@/hooks/useViewMode';
 import { fmtTokens, relativeTime, cn } from '@/lib/utils';
 import {
   ChevronDown, ChevronRight,
@@ -102,12 +103,20 @@ export default function RunDetailTabs() {
     }
   }, [activeRun, refreshing, fetchRun, fetchRuns]);
 
+  const { isVibe } = useViewMode();
+
   if (!activeRun) return null;
 
   /** Chat & Preview tabs are only shown for terminal (COMPLETE / PARTIAL) runs. */
   const showTerminalTabs = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
   const topLevelPermissions = useTierPermissions();
-  const TABS = [
+
+  const VIBE_TABS = [
+    { value: 'code', label: 'Code' },
+    ...(showTerminalTabs ? [{ value: 'preview', label: 'Preview' }] : []),
+  ];
+
+  const TABS = isVibe ? VIBE_TABS : [
     ...BASE_TABS.filter(t => t.value !== 'log' || topLevelPermissions?.canViewLiveLog !== false),
     ...(showTerminalTabs ? [
       { value: 'preview', label: 'Preview' },
@@ -123,7 +132,7 @@ export default function RunDetailTabs() {
             key={tab.value}
             value={tab.value}
             className={cn(
-              'px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap',
+              'px-4 py-2.5 text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
               'data-[state=active]:border-accent-violet data-[state=active]:text-white',
               'data-[state=inactive]:border-transparent data-[state=inactive]:text-zinc-500',
               'hover:text-zinc-300'
@@ -356,7 +365,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
     <div className="space-y-6">
       {/* Stuck warning banner */}
       {run.status === 'STUCK' && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-accent-rose/10 border border-accent-rose/20">
+        <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-rose/10 border border-accent-rose/20">
           <span className="text-accent-rose text-sm flex-shrink-0">⚠</span>
           <div>
             <p className="text-sm font-medium text-accent-rose">Run is stuck</p>
@@ -468,7 +477,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
               </button>
 
               {projectDropdownOpen && (
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[200px] rounded-md border border-white/[0.08] bg-surface-2 shadow-xl py-1">
+                <div className="absolute left-0 top-full mt-1 z-50 min-w-[200px] rounded-md border border-white/[0.08] bg-surface-2  py-1">
                   {/* Un-assign option — only if currently assigned */}
                   {run.projectId && (
                     <button
@@ -670,7 +679,7 @@ function PlanTab({ run }: { run: RunDetail }) {
   return (
     <div className="space-y-4">
       {plan.plan_summary && (
-        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+        <div className="p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
           <p className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Plan Summary</p>
           <p className="text-sm text-zinc-200 leading-relaxed">{plan.plan_summary}</p>
         </div>
@@ -710,7 +719,7 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
   const displayCrit = critExpanded || !critLong ? criteria  : criteria.slice(0, TRUNCATE) + '…';
 
   return (
-    <div className="rounded-lg bg-white/[0.02] border border-white/[0.06] overflow-hidden">
+    <div className="rounded-sm bg-white/[0.02] border border-white/[0.06] overflow-hidden">
       {/* ── Header: index · title · complexity badge ── */}
       <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-white/[0.04]">
         <div className="flex items-center gap-2 min-w-0">
@@ -916,7 +925,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
   return (
     <div className="space-y-4">
       {/* Verdict + confidence */}
-      <div className="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+      <div className="flex items-center justify-between p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
         <div>
           <p className="text-xs text-zinc-500 mb-1">Verdict</p>
           <p className={cn('text-sm font-semibold', VERDICT_COLORS[verdict] ?? 'text-zinc-300')}>
@@ -937,7 +946,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
 
       {/* Summary */}
       {review.summary && (
-        <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+        <div className="p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
           <p className="text-xs text-zinc-500 mb-1">Summary</p>
           <p className="text-sm text-zinc-300">{review.summary}</p>
         </div>
@@ -948,7 +957,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
         <div className="space-y-2">
           <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Issues ({review.issues.length})</h4>
           {review.issues.map((issue: any, i: number) => (
-            <div key={i} className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+            <div key={i} className="p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
               <div className="flex items-center gap-2 mb-1">
                 <span className={cn(
                   'text-xs px-1.5 py-0.5 rounded',
@@ -998,7 +1007,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
               onClick={handleApplyReview}
               disabled={applyingReview}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all',
+                'flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-medium transition-all',
                 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border border-amber-500/20',
                 'disabled:opacity-40 disabled:cursor-not-allowed'
               )}
@@ -1609,14 +1618,14 @@ const TEST_STATUS_COLORS: Record<string, string> = {
 
 function TestTaskCard({ task }: { task: TestTaskDto }) {
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+    <div className="rounded-sm border border-white/[0.06] bg-white/[0.02] p-3">
       <div className="flex items-center gap-2">
         <TestTube2 className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
         <span className="text-sm text-zinc-200 font-medium truncate">{task.taskName}</span>
         {task.testCategory && (
           <span className="text-xs text-zinc-500 bg-zinc-800 rounded px-1.5 py-0.5">{task.testCategory}</span>
         )}
-        <span className={cn('ml-auto text-xs rounded-full px-2 py-0.5', TEST_STATUS_COLORS[task.status] || TEST_STATUS_COLORS.PENDING)}>
+        <span className={cn('ml-auto text-xs rounded-sm px-2 py-0.5', TEST_STATUS_COLORS[task.status] || TEST_STATUS_COLORS.PENDING)}>
           {task.status}
         </span>
       </div>
@@ -1689,7 +1698,7 @@ function TestGraphSection({ graph }: { graph: TestGraphData }) {
 function GraphNode({ node }: { node: { id: string; label: string; type: string; status: string; category?: string } }) {
   const colors = NODE_STATUS_COLORS[node.status] || NODE_STATUS_COLORS.PENDING;
   return (
-    <div className={cn('rounded-lg border px-3 py-2 flex items-center gap-2', colors)}>
+    <div className={cn('rounded-sm border px-3 py-2 flex items-center gap-2', colors)}>
       <TestTube2 className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
       <span className="text-xs text-zinc-200">{node.label}</span>
       {node.category && (

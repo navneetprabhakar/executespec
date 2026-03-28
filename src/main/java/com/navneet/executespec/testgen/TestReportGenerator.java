@@ -3,9 +3,10 @@ package com.navneet.executespec.testgen;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
-import com.navneet.executespec.router.ModelRouter;
-import com.navneet.executespec.router.ModelSelection;
-import com.navneet.executespec.router.ModelTier;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.model.*;
@@ -41,7 +42,8 @@ public class TestReportGenerator {
     private final TestTaskRepository testTaskRepository;
     private final TestPlanRepository testPlanRepository;
     private final LlmRouter llmRouter;
-    private final ModelRouter modelRouter;
+    private final ModelResolver modelResolver;
+    private final StateStore stateStore;
     private final ObjectMapper objectMapper;
     private final SseBroadcaster broadcaster;
 
@@ -139,14 +141,16 @@ public class TestReportGenerator {
                     .replace("{failures_json}", failuresJson)
                     .replace("{conventions_doc}", conventionsDoc);
 
-            // Call LLM (FAST/Haiku — template work, not reasoning)
-            ModelSelection model = modelRouter.selectFromTier(ModelTier.FAST);
+            // Call LLM via ModelResolver (LIGHTWEIGHT tier for template work)
+            LlmProvider aiProvider = stateStore.findRun(runId)
+                    .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+            ResolvedModel model = modelResolver.resolve("TestReportGenerator", aiProvider);
             Prompt prompt = new Prompt(List.of(
                     new SystemMessage(promptText),
                     new UserMessage("Generate fix suggestions now.")
             ));
             LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
-                    model.getProvider().name().toLowerCase(), model.getModelName(),
+                    model.providerName(), model.getModel(),
                     prompt, runId, "test-fix-suggestion",
                     LlmRouter.FallbackMode.IMMEDIATE, 0, false);
 
@@ -176,7 +180,7 @@ public class TestReportGenerator {
         }
     }
 
-    private void accumulateReportTokens(Long testPlanId, LlmRouter.LlmResponse lr, ModelSelection model) {
+    private void accumulateReportTokens(Long testPlanId, LlmRouter.LlmResponse lr, ResolvedModel model) {
         try {
             var usage = lr.response().getMetadata().getUsage();
             int inTokens = usage.getPromptTokens().intValue();

@@ -53,13 +53,15 @@ Automatic detection and recovery of stuck tasks, real-time SSE event streaming, 
 - Budget exhausted: escalate provider immediately
 - Auth failure (401): throw immediately (needs human action)
 
-### 5. Provider Health Tracking
+### 5. Provider Health Tracking (Redis-backed Circuit Breaker)
 
 **Requirements:**
-- Track consecutive failure counts per provider
-- 3 consecutive failures = mark unhealthy
-- 5-minute auto-recovery window
-- ModelRouter skips unhealthy providers during selection
+- Track consecutive failure counts per provider via Redis (shared across threads/instances)
+- 5 consecutive failures = mark provider unhealthy (circuit OPEN)
+- 60-second auto-recovery via Redis TTL expiry
+- LlmRouter skips unhealthy providers in fallback chain; ModelRouter also filters by health during model selection
+- Fail-open on Redis errors (never block LLM calls due to Redis unavailability)
+- Metrics: `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed`
 
 ### 6. Server-Sent Events (SSE)
 

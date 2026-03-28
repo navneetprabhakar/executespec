@@ -252,11 +252,11 @@ function AdminPageInner() {
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
                 placeholder="Search users…"
-                className="flex-1 bg-surface-1 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
+                className="flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
               />
               <button
                 onClick={() => setShowInviteModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-accent-violet hover:bg-accent-violet/80 text-white text-sm font-medium rounded-lg transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-accent-violet hover:bg-accent-violet/80 text-white text-sm font-medium rounded-sm transition-colors"
               >
                 + Invite User
               </button>
@@ -265,7 +265,7 @@ function AdminPageInner() {
               </button>
             </div>
 
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-surface-1 text-zinc-500 text-xs">
                   <tr>
@@ -282,7 +282,7 @@ function AdminPageInner() {
                         <p className="text-zinc-500 text-xs">{u.email}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', STATUS_COLOR[u.status] ?? 'text-zinc-400')}>
+                        <span className={cn('px-2 py-0.5 rounded-sm text-xs font-medium', STATUS_COLOR[u.status] ?? 'text-zinc-400')}>
                           {u.status}
                         </span>
                       </td>
@@ -337,7 +337,7 @@ function AdminPageInner() {
                 <RefreshCw className="h-4 w-4" />
               </button>
             </div>
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-surface-1 text-zinc-500 text-xs">
                   <tr>
@@ -367,7 +367,7 @@ function AdminPageInner() {
                           </select>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', STATUS_COLOR[o.status] ?? 'text-zinc-400')}>
+                          <span className={cn('px-2 py-0.5 rounded-sm text-xs font-medium', STATUS_COLOR[o.status] ?? 'text-zinc-400')}>
                             {o.status}
                           </span>
                         </td>
@@ -445,7 +445,7 @@ function AdminPageInner() {
             <p className="text-sm text-zinc-500">
               Set the default monthly run limits for each tier. Changes take effect immediately for new runs.
             </p>
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-surface-1 text-zinc-500 text-xs">
                   <tr>
@@ -473,7 +473,7 @@ function AdminPageInner() {
                               className="w-24 bg-surface-1 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
                             />
                             {editing !== undefined && (
-                              <button onClick={() => saveTierLimit(tc.tier)} className="p-1.5 bg-accent-emerald/15 text-accent-emerald rounded-lg hover:bg-accent-emerald/25">
+                              <button onClick={() => saveTierLimit(tc.tier)} className="p-1.5 bg-accent-emerald/15 text-accent-emerald rounded-sm hover:bg-accent-emerald/25">
                                 <Check className="h-3.5 w-3.5" />
                               </button>
                             )}
@@ -508,7 +508,7 @@ function AdminPageInner() {
             ) : (
               <div className="space-y-3">
                 {escalations.map((inv) => (
-                  <div key={inv.id} className="flex items-center justify-between p-4 rounded-xl bg-surface-1 border border-white/[0.06]">
+                  <div key={inv.id} className="flex items-center justify-between p-4 rounded-sm bg-surface-1 border border-white/[0.06]">
                     <div>
                       <p className="text-zinc-200 text-sm font-medium">{inv.invitedEmail}</p>
                       <p className="text-zinc-500 text-xs mt-0.5">Org: {inv.orgId} · Role: {inv.orgRole}</p>
@@ -516,13 +516,13 @@ function AdminPageInner() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => approveEsc(inv.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-emerald/10 text-accent-emerald text-xs font-medium hover:bg-accent-emerald/20 transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-emerald/10 text-accent-emerald text-xs font-medium hover:bg-accent-emerald/20 transition-colors"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve
                       </button>
                       <button
                         onClick={() => rejectEsc(inv.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-rose/10 text-accent-rose text-xs font-medium hover:bg-accent-rose/20 transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-rose/10 text-accent-rose text-xs font-medium hover:bg-accent-rose/20 transition-colors"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
                       </button>
@@ -544,7 +544,7 @@ function AdminPageInner() {
               <div className="flex gap-2">
                 <button
                   onClick={() => { setNewPkg(true); setEditingPkg(null); setPkgForm({ name: '', runCount: '', amountInr: '', amountUsd: '', sortOrder: '' }); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-violet hover:bg-accent-violet/80 text-white text-xs font-medium transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-violet hover:bg-accent-violet/80 text-white text-xs font-medium transition-colors"
                 >
                   <Plus className="h-3.5 w-3.5" /> New Package
                 </button>
@@ -556,7 +556,7 @@ function AdminPageInner() {
 
             {/* Create / Edit form */}
             {(newPkg || editingPkg) && (
-              <div className="rounded-xl bg-surface-1 border border-accent-violet/30 p-4 space-y-3">
+              <div className="rounded-sm bg-surface-1 border border-accent-violet/30 p-4 space-y-3">
                 <h3 className="text-sm font-medium text-zinc-200">
                   {editingPkg ? `Edit: ${editingPkg.name}` : 'Create New Package'}
                 </h3>
@@ -615,13 +615,13 @@ function AdminPageInner() {
                 <div className="flex gap-2">
                   <button
                     onClick={savePkg}
-                    className="px-4 py-1.5 rounded-lg bg-accent-emerald/15 text-accent-emerald text-xs font-medium hover:bg-accent-emerald/25 transition-colors"
+                    className="px-4 py-1.5 rounded-sm bg-accent-emerald/15 text-accent-emerald text-xs font-medium hover:bg-accent-emerald/25 transition-colors"
                   >
                     {editingPkg ? 'Save Changes' : 'Create'}
                   </button>
                   <button
                     onClick={resetPkgForm}
-                    className="px-4 py-1.5 rounded-lg bg-white/[0.06] text-zinc-400 text-xs font-medium hover:bg-white/[0.10] transition-colors"
+                    className="px-4 py-1.5 rounded-sm bg-white/[0.06] text-zinc-400 text-xs font-medium hover:bg-white/[0.10] transition-colors"
                   >
                     Cancel
                   </button>
@@ -630,7 +630,7 @@ function AdminPageInner() {
             )}
 
             {/* Packages table */}
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-surface-1 text-zinc-500 text-xs">
                   <tr>
@@ -655,7 +655,7 @@ function AdminPageInner() {
                       <td className="px-4 py-3 text-zinc-400 text-xs">{p.sortOrder}</td>
                       <td className="px-4 py-3">
                         <span className={cn(
-                          'px-2 py-0.5 rounded-full text-xs font-medium',
+                          'px-2 py-0.5 rounded-sm text-xs font-medium',
                           p.active ? 'text-accent-emerald bg-accent-emerald/10' : 'text-zinc-500 bg-zinc-500/10',
                         )}>
                           {p.active ? 'Active' : 'Inactive'}
@@ -710,7 +710,7 @@ function AdminPageInner() {
                 onClick={() => triggerReport('WEEKLY')}
                 disabled={reportSending !== null}
                 className={cn(
-                  'flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                  'flex items-center gap-2 px-5 py-2.5 rounded-sm text-sm font-semibold transition-all',
                   reportSending === 'WEEKLY'
                     ? 'bg-accent-violet/20 text-accent-violet cursor-wait'
                     : 'bg-accent-violet hover:bg-accent-violet/80 text-white',
@@ -724,7 +724,7 @@ function AdminPageInner() {
                 onClick={() => triggerReport('MONTHLY')}
                 disabled={reportSending !== null}
                 className={cn(
-                  'flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                  'flex items-center gap-2 px-5 py-2.5 rounded-sm text-sm font-semibold transition-all',
                   reportSending === 'MONTHLY'
                     ? 'bg-cyan-500/20 text-cyan-400 cursor-wait'
                     : 'bg-cyan-600 hover:bg-cyan-500 text-white',
@@ -737,7 +737,7 @@ function AdminPageInner() {
             </div>
 
             {reportResult && (
-              <div className="rounded-xl bg-accent-emerald/10 border border-accent-emerald/20 px-5 py-4 flex items-center gap-3">
+              <div className="rounded-sm bg-accent-emerald/10 border border-accent-emerald/20 px-5 py-4 flex items-center gap-3">
                 <Check className="h-5 w-5 text-accent-emerald flex-shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-accent-emerald">
@@ -750,7 +750,7 @@ function AdminPageInner() {
               </div>
             )}
 
-            <div className="rounded-xl bg-surface-1 border border-white/[0.06] p-4">
+            <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-4">
               <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">What gets sent</h3>
               <div className="space-y-2 text-sm text-zinc-400">
                 <div className="flex items-start gap-2">
