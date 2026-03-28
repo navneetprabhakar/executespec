@@ -47,6 +47,24 @@ public class DevDockerfileGenerator {
      * Returns null if unsupported.
      */
     public PreviewProjectType detect(Path workspace) {
+        // 0. Check planner-declared project type in .agent-context/project.json
+        Path projectJson = workspace.resolve(".agent-context/project.json");
+        if (Files.exists(projectJson)) {
+            try {
+                JsonNode node = mapper.readTree(projectJson.toFile());
+                String declared = node.path("project_type").asText(null);
+                if (declared != null && !declared.isBlank() && !"UNKNOWN".equals(declared)) {
+                    PreviewProjectType fromPlan = PreviewProjectType.valueOf(declared);
+                    log.info("[Detect] Using planner-declared project type: {}", fromPlan);
+                    return fromPlan;
+                }
+            } catch (IllegalArgumentException e) {
+                log.warn("[Detect] Invalid planner-declared project type in project.json — falling back to detection");
+            } catch (IOException e) {
+                log.debug("[Detect] Could not read project.json — falling back to file-based detection");
+            }
+        }
+
         // 1. Spring Boot — Maven or Gradle (check before package.json in case both exist)
         Path pomXml = workspace.resolve("pom.xml");
         if (Files.exists(pomXml) && fileContainsPattern(pomXml, "spring-boot-starter")) {
@@ -88,6 +106,14 @@ public class DevDockerfileGenerator {
             }
             return PreviewProjectType.NODE_FRONTEND;
         }
+
+        // 2b. Static HTML — check BEFORE loose JS/TS fallback.
+        // A static site with script.js must not be misdetected as NODE_BACKEND.
+        if (hasStaticHtml(workspace)) {
+            return PreviewProjectType.STATIC_HTML;
+        }
+
+        // 2c. Bare JS/TS files (no package.json, no HTML) — likely a Node script/server
         if (hasJsOrTsFiles(workspace)) {
             return PreviewProjectType.NODE_BACKEND;
         }
@@ -131,10 +157,7 @@ public class DevDockerfileGenerator {
             return layout.hasFrontend() ? layout.frontendType() : layout.backendType();
         }
 
-        // 5. Static HTML — fallback if any .html file exists in workspace root
-        if (hasStaticHtml(workspace)) {
-            return PreviewProjectType.STATIC_HTML;
-        }
+        // 5. Static HTML already handled above (before JS/TS fallback)
 
         return null;
     }

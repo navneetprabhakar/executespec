@@ -53,6 +53,22 @@ MAXIMISE PARALLELISM:
   created by another task in the same tier — they are invisible until the next
   tier starts.
 
+PROJECT TYPE DETECTION:
+Set "project_type" at the top level of your JSON output. Choose exactly one:
+  SPRING_BOOT   — Java + Spring Boot (pom.xml or build.gradle with spring-boot-starter)
+  JAVA          — Java without Spring Boot (plain Maven/Gradle)
+  NODE_FRONTEND — React, Vue, Angular, Svelte, Vite, or any npm-based frontend
+  NODE_BACKEND  — Express, Fastify, NestJS, Koa, Hono, or any Node.js server
+  PYTHON        — FastAPI, Flask, Django, or any Python project
+  GO            — Go project (go.mod)
+  RUST          — Rust project (Cargo.toml)
+  RUBY          — Ruby/Rails/Sinatra project
+  PHP           — PHP/Laravel/Symfony project
+  FULL_STACK    — Separate frontend/ + backend/ directories
+  STATIC_HTML   — Plain HTML/CSS/JS with no build tool or framework
+This is used by the preview system to generate the correct Dockerfile.
+If the spec says "no frameworks" or "vanilla HTML/CSS/JS", use STATIC_HTML — NOT NODE_FRONTEND.
+
 TASK COMPLEXITY ASSIGNMENT:
 For each task, assign a "complexity" field with one of: LOW, MEDIUM, HIGH.
 - LOW: boilerplate code, DTOs, data classes, configs, simple CRUD, pom.xml/package.json setup
@@ -250,6 +266,7 @@ OUTPUT FORMAT
 Respond with exactly this JSON structure:
 
 {
+  "project_type": "SPRING_BOOT",
   "plan_title": "Short project name, 3-8 words (e.g. Todo REST API, React Dashboard with Charts)",
   "plan_summary": "One sentence describing what this plan builds overall",
   "tasks": [
