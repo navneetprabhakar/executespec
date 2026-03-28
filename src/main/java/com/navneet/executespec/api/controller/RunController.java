@@ -68,6 +68,7 @@ public class RunController {
     private final com.navneet.executespec.agent.PlannerAgent plannerAgent;
     private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
     private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
+    private final com.navneet.executespec.agent.CostEstimator costEstimator;
 
     /** Submit a new run. Returns immediately with the run summary (status may be PLANNING or QUEUED). */
     @PostMapping
@@ -165,6 +166,38 @@ public class RunController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
         return ResponseEntity.ok(mapper.toDetail(run, stateStore.getAllTasks(runId)));
+    }
+
+    /** Live cost cache: runId → [costUsd, computedAtMillis]. Completed runs cached forever, in-progress cached 15s. */
+    private final java.util.concurrent.ConcurrentHashMap<String, double[]> costCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long COST_CACHE_TTL_MS = 30_000;
+    private static final java.util.Set<String> TERMINAL_STATUSES = java.util.Set.of("COMPLETE", "FAILED", "CANCELLED", "PARTIAL");
+
+    /** Compute the live cost for a run. Cached: terminal runs forever, in-progress runs for 15s. */
+    @GetMapping("/{runId}/cost")
+    public ResponseEntity<java.util.Map<String, Object>> getLiveCost(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        var run = guard.requireRunAccess(runId, userDetails);
+
+        // Terminal run with stored cost → return immediately
+        if (TERMINAL_STATUSES.contains(run.getStatus()) && run.getActualCostUsd() != null) {
+            return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", run.getActualCostUsd()));
+        }
+
+        // Check cache
+        double[] cached = costCache.get(runId);
+        boolean isTerminal = TERMINAL_STATUSES.contains(run.getStatus());
+        if (cached != null) {
+            // Terminal runs: cache never expires. In-progress: 15s TTL.
+            if (isTerminal || (System.currentTimeMillis() - cached[1]) < COST_CACHE_TTL_MS) {
+                return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", cached[0]));
+            }
+        }
+
+        double cost = costEstimator.computeCostForRun(runId);
+        costCache.put(runId, new double[]{cost, System.currentTimeMillis()});
+        return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", cost));
     }
 
     /** Approve or reject the plan-approval gate. */

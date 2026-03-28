@@ -11,6 +11,7 @@ import {
   getProjects, createProject, updateRunProject,
   applyToRun, editRunPlan,
   getTestPlan, getTestGraph,
+  getLiveCost,
 } from '@/lib/api';
 import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto, TestGraphData } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
@@ -283,6 +284,16 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const isOrgMember = useAuthStore(selectIsOrgMember);
   const permissions = useTierPermissions();
+
+  // ── Live cost ──────────────────────────────────────────────────────
+  const [liveCost, setLiveCost] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getLiveCost(run.runId)
+      .then((res) => { if (!cancelled) setLiveCost(res.costUsd); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [run.runId, run.status]);
 
   // ── Project tagging ──────────────────────────────────────────────────
   const [projects, setProjects] = useState<ProjectDto[]>([]);
@@ -577,10 +588,15 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="text-xs text-zinc-600">Total cost</p>
+              <p className="text-xs text-zinc-600">Live cost</p>
               <p className="text-sm text-accent-emerald mt-0.5 font-mono font-medium">
-                {run.actualCostUsd != null ? `$${run.actualCostUsd.toFixed(4)}` : '—'}
+                {liveCost != null ? `$${liveCost.toFixed(4)}` : run.actualCostUsd != null ? `$${run.actualCostUsd.toFixed(4)}` : '—'}
               </p>
+              {run.costEstimateLow != null && run.costEstimateHigh != null && (
+                <p className="text-[10px] text-zinc-600 mt-0.5 font-mono">
+                  est. ${run.costEstimateLow.toFixed(2)} – ${run.costEstimateHigh.toFixed(2)}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs text-zinc-600">Key source</p>

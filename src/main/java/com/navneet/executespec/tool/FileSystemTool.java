@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -84,6 +85,37 @@ public class FileSystemTool {
         try {
             Path resolved = safeResolve(runId, path);
             return Files.readString(resolved);
+        } catch (SecurityException e) {
+            return "ACCESS DENIED: " + e.getMessage();
+        } catch (IOException e) {
+            return "Cannot read " + path + ": " + e.getMessage();
+        }
+    }
+
+    /**
+     * Read a range of lines from a file. Returns lines with line numbers.
+     * Used by WorkerAgent when the model requests a specific section of a large file.
+     */
+    public String readFileRange(String runId, String path, int startLine, int endLine) {
+        try {
+            Path resolved = safeResolve(runId, path);
+            List<String> allLines = Files.readAllLines(resolved);
+            int totalLines = allLines.size();
+
+            // Clamp to valid range
+            int start = Math.max(1, startLine);
+            int end = Math.min(totalLines, endLine);
+            if (start > totalLines) {
+                return "File has only " + totalLines + " lines (requested start=" + startLine + ")";
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("[Lines ").append(start).append("-").append(end)
+              .append(" of ").append(totalLines).append("]\n");
+            for (int i = start - 1; i < end; i++) {
+                sb.append(String.format("%4d | %s%n", i + 1, allLines.get(i)));
+            }
+            return sb.toString();
         } catch (SecurityException e) {
             return "ACCESS DENIED: " + e.getMessage();
         } catch (IOException e) {

@@ -98,6 +98,7 @@ model-matrix:
     PromptOptimiserAgent: LIGHTWEIGHT
     TestReportGenerator: LIGHTWEIGHT
     ValidationReportGenerator: LIGHTWEIGHT
+    RequestTriageService: LIGHTWEIGHT
   failover-order:
     anthropic:
       - google
@@ -123,6 +124,8 @@ agent:
     warn-pct: 0.45     # warn at 90k tokens input (balanced: was 0.25=50k too early, 0.65=130k too late)
     compact-pct: 0.60  # compact at 120k tokens input (balanced: was 0.35=70k too frequent, 0.75=150k too late)
     hard-stop-pct: 0.80 # hard-stop at 160k (balanced: was 0.55=110k too conservative, 0.90=180k too late)
+  triage:
+    enabled: true    # Phase 1: Single-shot fast path — set false to route all requests through planner
   concurrency:
     max-runs: 50   # Temporarily increased for load testing (was 10)
     max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
@@ -195,6 +198,7 @@ agent:
       retention-days: 30
       gcs-bucket: executespec-workspaces
       archive-after-hours: 24
+      gcs-enabled: false
 
   # ── Tier 8: Compile agent, API spec generator, frontend preview ──────────────
   compiler:

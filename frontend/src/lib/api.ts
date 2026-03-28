@@ -426,6 +426,11 @@ export const getPricing = () => req<PricingRow[]>('/pricing');
 export const updatePricing = (provider: string, model: string, body: Partial<PricingRow>) =>
   req<PricingRow>(`/pricing/${provider}/${model}`, { method: 'PUT', body: JSON.stringify(body) });
 
+// ── Live cost ───────────────────────────────────────────────────────────────
+
+export const getLiveCost = (runId: string) =>
+  req<{ runId: string; costUsd: number }>(`/runs/${runId}/cost`);
+
 // ── Feasibility ──────────────────────────────────────────────────────────────
 
 export const feasibility = (body: { goal: string; provider?: string; model?: string; budgetUsd?: number }) =>

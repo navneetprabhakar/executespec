@@ -238,12 +238,39 @@ export default function LiveLog() {
             return <MilestoneBanner key={entry.id} entry={entry} />;
           }
 
-          // ── Log entries: show only file/command operations ──────────────
+          // ── Log entries: show file ops + meaningful harness messages ────
           if (entry.type === 'LOG') {
             const msg = formatLogMessage(entry.data);
             const op  = detectFileOp(msg);
             if (op) return <FileOpRow key={entry.id} entry={entry} op={op} />;
-            // Skip verbose tool-result log lines — only show file ops and milestones
+
+            // Filter out noisy internal worker logs (tool dispatch, LLM calls, iterations)
+            const isInternalWorkerNoise =
+              /TOOL_DISPATCHED/i.test(msg)
+              || /LLM_REQUEST_SENT/i.test(msg)
+              || /\bIteration\s+\d+\s*\(/i.test(msg)
+              || /STALL_TRUNCATION/i.test(msg)
+              || /COMPACTION_TRIGGERED/i.test(msg);
+            if (isInternalWorkerNoise) return null;
+
+            // Show harness-level messages (emoji-prefixed or from known agents)
+            const isHarnessMsg = /^[✅⚠️❌🔧]/.test(msg)
+              || msg.startsWith('Merging')
+              || msg.startsWith('Simple request')
+              || msg.startsWith('Reviewer')
+              || msg.startsWith('Compile')
+              || /^\[[\w-]+\]/.test(msg);
+
+            if (isHarnessMsg) {
+              return (
+                <div key={entry.id} className="flex gap-2 px-2 py-0.5 text-[11px]">
+                  <span className="text-zinc-700 flex-shrink-0 font-mono">{formatTimestamp(entry.timestamp)}</span>
+                  <span className="text-zinc-300">{msg.length > 200 ? msg.slice(0, 200) + '…' : msg}</span>
+                </div>
+              );
+            }
+
+            // Skip verbose tool-result log lines
             return null;
           }
 

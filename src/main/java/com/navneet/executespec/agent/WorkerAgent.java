@@ -49,6 +49,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -128,27 +129,34 @@ public class WorkerAgent {
         // Load task definition
         TaskDefinition taskDef = parseTask(task.getTaskJson());
 
-        // Build the list of dep branches so the worktree can merge them in
-        List<String> depBranches = new ArrayList<>();
-        if (taskDef.getDependsOn() != null) {
-            taskDef.getDependsOn().forEach(depId ->
-                depBranches.add("agent/" + runId.substring(0, 8) + "/" + depId));
+        // ── Workspace setup: worktree (normal) or main branch (single-shot) ──
+        String workDir;
+        if (SKIP_WORKTREE.get()) {
+            // Single-shot mode: operate directly on main workspace, no worktree/branch
+            workDir = props.getWorkspace() + "/" + runId;
+            WorkspaceContext.set(runId, workDir);
+            WorkspaceContext.setTaskId(taskId);
+            branchName = "main";
+            log.info("[Worker-MainBranch] Task [{}] operating on main branch in {}", taskId, workDir);
+        } else {
+            // Normal mode: create isolated git worktree with dependency branches
+            List<String> depBranches = new ArrayList<>();
+            if (taskDef.getDependsOn() != null) {
+                taskDef.getDependsOn().forEach(depId ->
+                    depBranches.add("agent/" + runId.substring(0, 8) + "/" + depId));
+            }
+            workDir = gitTool.createWorktree(runId, taskId, branchName, depBranches);
+            WorkspaceContext.set(runId, workDir);
+            WorkspaceContext.setTaskId(taskId);
         }
 
-        // Create an isolated git worktree for this task.  Each task now has its
-        // own working directory so concurrent tasks can no longer clobber each
-        // other via git checkout / working-tree state.
-        String worktreePath = gitTool.createWorktree(runId, taskId, branchName, depBranches);
-        WorkspaceContext.set(runId, worktreePath);
-        WorkspaceContext.setTaskId(taskId);
-
         // Apply complexity override (last line of defense against planner over-assignment)
-        String projectType = readProjectType(worktreePath);
+        String projectType = readProjectType(workDir);
         int ownedFilesCount = taskDef.getOwnedFiles() != null ? taskDef.getOwnedFiles().size() : 0;
         complexity = budgetMonitor.resolveEffectiveComplexity(complexity, projectType, ownedFilesCount, taskId);
 
-        log.info("Worker starting task [{}] on branch {} in worktree {} ({}:{}) complexity={}",
-                taskId, branchName, worktreePath, provider, model, complexity);
+        log.info("Worker starting task [{}] on branch {} in {} ({}:{}) complexity={}",
+                taskId, branchName, workDir, provider, model, complexity);
 
         // Per-task conversation history (WorkerAgent is a Spring singleton — no
         // instance fields)
@@ -272,7 +280,6 @@ public class WorkerAgent {
 
                 // Tier 5: record activity before LLM call (for stuck detection)
                 stateStore.updateLastActivity(taskId);
-                stateStore.appendTaskLog(taskId, "LLM_REQUEST_SENT");
 
                 LlmRouter.LlmResponse lr = callModel(messages, provider, model,
                         runId, taskId, agentId, iteration, justCompacted, complexity);
@@ -324,10 +331,8 @@ public class WorkerAgent {
                 iterObs.highCardinalityKeyValue("cache_write_tokens", String.valueOf(cacheWriteTok));
 
                 String cacheNote = buildCacheNote(lr.response());
-                stateStore.logMessage(runId, agentId, "state",
-                        "TOOL_CALL", "Iteration " + iteration +
-                                " (" + inputTok + "/" + outputTok + " tokens)" + cacheNote,
-                        inputTok + outputTok);
+                log.debug("[Worker {}] Iteration {} ({}/{} tokens){}",
+                        taskId, iteration, inputTok, outputTok, cacheNote);
 
                 // Running cache effectiveness summary every 5 iterations
                 if (iteration % 5 == 0 && totalCacheReadTokens > 0) {
@@ -390,7 +395,6 @@ public class WorkerAgent {
                                 .lowCardinalityKeyValue("run.id", runId)
                                 .start();
                         try {
-                            stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
                             String result = dispatchTool(new ParsedToolCall(tc.name(), tc.arguments()), runId, taskId);
                             if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
                             responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
@@ -432,7 +436,6 @@ public class WorkerAgent {
                                     .lowCardinalityKeyValue("run.id", runId)
                                     .start();
                             try {
-                            stateStore.appendTaskLog(taskId, "TOOL_DISPATCHED:" + tc.name());
                             String result = dispatchTool(tc, runId, taskId);
                             if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
                             results.append("[").append(tc.name()).append(" result]\n<output>\n")
@@ -587,6 +590,35 @@ public class WorkerAgent {
         } finally {
             // Always clear the thread-local worktree context, even on exception.
             WorkspaceContext.clear();
+        }
+    }
+
+    /**
+     * Thread-local flag that suppresses worktree creation in {@link #execute}.
+     * When set, the worker operates directly on the main workspace directory.
+     * Set by {@link #executeOnMainBranch} and cleared in its finally block.
+     */
+    private static final ThreadLocal<Boolean> SKIP_WORKTREE = ThreadLocal.withInitial(() -> false);
+
+    /**
+     * Executes a task directly on the main branch workspace (no git worktree).
+     *
+     * <p>Used by {@link com.navneet.executespec.harness.SingleShotExecutor} for
+     * SINGLE_SHOT requests that bypass the planner and worktree system.
+     *
+     * <p>Identical to {@link #execute(AgentTask, String)} except:
+     * <ul>
+     *   <li>No git worktree creation — operates on {@code {agent.workspace}/{runId}/}</li>
+     *   <li>No branch creation — all changes go to the main branch</li>
+     *   <li>No dependency branch merging</li>
+     * </ul>
+     */
+    public WorkerReport executeOnMainBranch(AgentTask task, String runId) {
+        SKIP_WORKTREE.set(true);
+        try {
+            return execute(task, runId);
+        } finally {
+            SKIP_WORKTREE.remove();
         }
     }
 
@@ -977,6 +1009,11 @@ public class WorkerAgent {
             String result = switch (tc.name()) {
                 case "readFile", "read_file" -> {
                     String path = args.path("path").asText("");
+                    int startLine = args.path("startLine").asInt(args.path("start_line").asInt(0));
+                    int endLine = args.path("endLine").asInt(args.path("end_line").asInt(0));
+                    if (startLine > 0 && endLine > 0) {
+                        yield fsTool.readFileRange(runId, path, startLine, endLine);
+                    }
                     yield fsTool.readFile(runId, path);
                 }
                 case "writeFile", "write_file" -> {
@@ -1557,28 +1594,48 @@ public class WorkerAgent {
      * full in the message list wastes tokens on every subsequent API call.
      * The model can always re-read the file if it needs the full content.
      */
-    private static final int MAX_RESULT_CHARS_FILE = 8_000; // read_file / list_files
-    private static final int MAX_RESULT_CHARS_SHELL = 6_000; // run_command / run_build / run_tests
-    private static final int MAX_RESULT_CHARS_DIFF = 5_000; // git_diff
+    private static final int MAX_RESULT_CHARS_FILE = 16_000;  // readFile / listFiles / searchFiles (was 8K)
+    private static final int MAX_RESULT_CHARS_SHELL = 12_000; // run / run_command / run_build / run_tests (was 6K)
+    private static final int MAX_RESULT_CHARS_DIFF = 10_000;  // git_diff (was 5K)
+
+    /** Set of tool names that are build/run commands — truncation keeps the error tail. */
+    private static final Set<String> BUILD_TOOLS = Set.of(
+            "run", "run_command", "run_build", "run_tests");
 
     private String truncateResult(String toolName, String result) {
         if (result == null)
             return result;
         int limit = switch (toolName) {
-            case "read_file", "list_files", "search_files" -> MAX_RESULT_CHARS_FILE;
-            case "run_command", "run_build", "run_tests" -> MAX_RESULT_CHARS_SHELL;
-            case "git_diff" -> MAX_RESULT_CHARS_DIFF;
-            default -> Integer.MAX_VALUE; // write_file, git_commit etc. are always short
+            // camelCase + snake_case — both forms must be handled (latent bug fix)
+            case "readFile", "read_file", "listFiles", "list_files",
+                 "searchFiles", "search_files" -> MAX_RESULT_CHARS_FILE;
+            case "run", "run_command", "run_build", "run_tests" -> MAX_RESULT_CHARS_SHELL;
+            case "diff", "git_diff" -> MAX_RESULT_CHARS_DIFF;
+            default -> Integer.MAX_VALUE; // writeFile, editFile, git_commit etc. are always short
         };
         if (result.length() <= limit)
             return result;
-        int tail = Math.min(1_500, limit / 4); // keep a tail snippet for context
+
+        // Build commands: keep last 80% + first 20% (errors are at the end)
+        if (BUILD_TOOLS.contains(toolName)) {
+            int tailSize = (int) (limit * 0.80);
+            int headSize = limit - tailSize;
+            String head = result.substring(0, headSize);
+            String end = result.substring(result.length() - tailSize);
+            log.debug("[Worker] Truncated build result {}: {} → {} chars (head={}+tail={})",
+                    toolName, result.length(), limit, headSize, tailSize);
+            return head + "\n...[" + (result.length() - limit) +
+                    " chars omitted — build error output preserved at end]...\n" + end;
+        }
+
+        // Non-build: keep first 75% + last 25% (general head+tail strategy)
+        int tail = Math.min(limit / 4, 4_000);
         String head = result.substring(0, limit - tail);
         String end = result.substring(result.length() - tail);
         log.debug("[Worker] Truncated {} result: {} → {} chars (head={}+tail={})",
                 toolName, result.length(), limit, limit - tail, tail);
         return head + "\n...[" + (result.length() - limit) +
-                " chars omitted — use read_file for full content]...\n" + end;
+                " chars omitted — use readFile with startLine/endLine for specific sections]...\n" + end;
     }
 
     /** Provider-aware prompt loading via ResourceLoader; fallback to worker.txt */

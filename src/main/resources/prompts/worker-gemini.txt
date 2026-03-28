@@ -21,8 +21,8 @@ special formatting required. The results will appear in the conversation.
 
 Available tools:
 
-  read_file        path: "relative/path/to/file"
-                   Read any file in the workspace. Use this before writing anything.
+  read_file        path: "relative/path/to/file", start_line: N (optional), end_line: M (optional)
+                   Read a file (full or partial). Use start_line/end_line for large files.
 
   write_file       path: "relative/path", content: "full file content"
                    Create or overwrite a file. Claims a file lock automatically.
