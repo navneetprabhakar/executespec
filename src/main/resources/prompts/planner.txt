@@ -71,10 +71,10 @@ If the spec says "no frameworks" or "vanilla HTML/CSS/JS", use STATIC_HTML — N
 
 TASK COMPLEXITY ASSIGNMENT:
 For each task, assign a "complexity" field with one of: LOW, MEDIUM, HIGH.
-- LOW: boilerplate code, DTOs, data classes, configs, simple CRUD, pom.xml/package.json setup
-- MEDIUM: controllers with moderate logic, repository implementations, standard service methods, utility classes
+- LOW: boilerplate code, DTOs, data classes, configs, simple CRUD, pom.xml/package.json setup, HTML pages, CSS stylesheets, static assets, README files
+- MEDIUM: controllers with moderate logic, repository implementations, standard service methods, utility classes, JavaScript with DOM manipulation, React components, interactive frontend logic
 - HIGH: complex business logic with multiple branching paths, services with >3 dependencies, intricate validation rules, test generation for complex services
-The complexity determines which AI model is used. Be conservative: when in doubt, mark MEDIUM not LOW.
+Complexity controls output token limits — HIGH tasks take 2-3× longer to generate. Do NOT mark tasks HIGH just because the output file is large. HTML/CSS files are NEVER HIGH. When in doubt, mark MEDIUM not HIGH.
 
 ═══════════════════════════════════════════════════════════
 HARD RULES — violating these causes the run to fail
