@@ -60,6 +60,7 @@ public class WorkspaceGcsUploadListener {
     @Scheduled(fixedRate = 300_000)
     @SchedulerLock(name = "GcsUploadFallback", lockAtMostFor = "4m", lockAtLeastFor = "1m")
     public void uploadMissingWorkspaces() {
+        if (!deploymentProps.workspace().gcsEnabled()) return;
         String bucket = deploymentProps.workspace().gcsBucket();
         if (bucket == null || bucket.isBlank()) return;
 
@@ -74,6 +75,7 @@ public class WorkspaceGcsUploadListener {
     // ── Core upload logic ────────────────────────────────────────────────────
 
     private void uploadWorkspaceToGcs(String runId) {
+        if (!deploymentProps.workspace().gcsEnabled()) return;
         String bucket = deploymentProps.workspace().gcsBucket();
         if (bucket == null || bucket.isBlank()) return;
 

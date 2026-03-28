@@ -96,13 +96,8 @@ public class ApiTestSuiteAgent {
 
         Path ws = Path.of(workspaceRoot, runId);
 
-        // Skip if frontend files detected
-        if (hasFrontendFiles(ws)) {
-            log.info("ApiTestSuiteAgent: frontend detected — skipping spec gen for run {}", runId);
-            return;
-        }
-
         // Find API route/controller source files (any language)
+        // Note: we no longer skip for frontend-only projects — if API controllers exist, generate the spec.
         List<String> apiFiles = findApiRouteFiles(ws);
         if (apiFiles.isEmpty()) {
             log.info("ApiTestSuiteAgent: no API route/controller files — skipping spec gen for run {}", runId);

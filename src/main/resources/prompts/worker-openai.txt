@@ -21,7 +21,7 @@ automatically via function calling — just call them by name when needed.
 
 Quick reference:
 
-  readFile     — Read the full content of a file. Use before writing or editing.
+  readFile     — Read a file (full or partial). Args: path, startLine (optional), endLine (optional).
   writeFile    — Create or fully overwrite a file. ALWAYS write the complete file.
   editFile     — Replace an exact string in an existing file (safer for small changes).
   listFiles    — List directory contents.

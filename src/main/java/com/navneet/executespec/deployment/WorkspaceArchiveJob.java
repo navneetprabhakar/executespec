@@ -50,6 +50,10 @@ public class WorkspaceArchiveJob {
     @Scheduled(cron = "0 0 * * * *")
     @SchedulerLock(name = "WorkspaceArchiveJob", lockAtMostFor = "50m", lockAtLeastFor = "5m")
     public void archiveOldWorkspaces() {
+        if (!props.workspace().gcsEnabled()) {
+            log.debug("[WorkspaceArchiveJob] GCS disabled — skipping archival");
+            return;
+        }
         String bucket = props.workspace().gcsBucket();
         if (bucket == null || bucket.isBlank()) {
             log.debug("[WorkspaceArchiveJob] GCS bucket not configured — skipping archival");

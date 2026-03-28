@@ -141,6 +141,10 @@ public class PipelineHarness {
     // ── Language validation for existing repos ─────────────────────────────────
     private final LanguageValidator languageValidator;
 
+    // ── Single-shot fast path (Phase 1 simplification) ──────────────────────
+    private final com.navneet.executespec.agent.RequestTriageService requestTriageService;
+    private final SingleShotExecutor singleShotExecutor;
+
     // ── Test generation pipeline ─────────────────────────────────────────────
     private final com.navneet.executespec.testgen.TestGenOrchestrator testGenOrchestrator;
     private final com.navneet.executespec.testgen.TestPreviewCoordinator testPreviewCoordinator;
@@ -1468,6 +1472,105 @@ public class PipelineHarness {
             log.warn("[RefExtractor] Failed to extract references for run {}: {}", runId, e.getMessage());
         }
 
+        // ── 0. Triage: classify request as SINGLE_SHOT or MULTI_TASK ─────
+        var triageResult = requestTriageService.classify(effectiveRequest, runId, run.getAiProviderEnum());
+        if (triageResult == com.navneet.executespec.agent.RequestTriageService.TriageResult.SINGLE_SHOT) {
+            log.info("[PipelineHarness] Run {} classified as SINGLE_SHOT — bypassing planner + approval gate", runId);
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Simple request detected — running single-shot fast path"));
+
+            try {
+                // Execute single-shot: synthetic plan → auto-approve → worker on main branch
+                var singleShotResult = singleShotExecutor.execute(run, effectiveRequest);
+
+                if (!singleShotResult.success()) {
+                    stateStore.markFailed(runId, "Single-shot worker failed");
+                    broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "Single-shot worker failed"));
+                    return;
+                }
+
+                // ── Post-worker phases: compile → review → test → report → complete ──
+                // These are the same as the normal pipeline — just no merge needed.
+                // Note: initAgentContext() is called inside SingleShotExecutor before the worker.
+
+                // Compile & fix (non-fatal)
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "COMPILING"));
+                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Compiling and validating..."));
+                CompileResult compileResult = null;
+                try {
+                    compileResult = compilerAgent.runCompileAndFix(runId);
+                } catch (Exception compileEx) {
+                    log.warn("[SingleShot] Compile failed for run {}: {}", runId, compileEx.getMessage());
+                }
+
+                // Test generation (production mode only)
+                if (execMode.isProduction()) {
+                    try {
+                        final String planJson = mapper.writeValueAsString(singleShotResult.syntheticPlan());
+                        final String userReq = effectiveRequest;
+                        testCompletionFutures.put(runId, new CompletableFuture<>());
+                        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+                        Thread.ofVirtual().name("testgen-" + runId).start(snapshot.wrap(() ->
+                            testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson)
+                        ));
+                    } catch (Exception e) {
+                        testCompletionFutures.remove(runId);
+                        log.warn("[SingleShot] Test gen failed for run {}: {}", runId, e.getMessage());
+                    }
+                }
+                if (execMode.isPrototype()) {
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
+                    autoStartPreview(runId, run);
+                }
+
+                // Review (production mode only)
+                ReviewReportV2 review = null;
+                PipelineRun currentRun = stateStore.findRun(runId).orElse(run);
+                if (execMode.isProduction()) {
+                    try {
+                        stateStore.markReviewing(runId);
+                        broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+                        var providers = availableProviderResolver.resolve(runId);
+                        review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
+                                currentRun.getUserRequest(), providers);
+                        stateStore.saveReviewV2(runId, review);
+                    } catch (Exception e) {
+                        log.warn("[SingleShot] Review failed for run {}: {}", runId, e.getMessage());
+                    }
+                }
+
+                // Cancel pending test execution if preview never started
+                testPreviewCoordinator.cancelIfPending(runId);
+
+                // Validation report (production mode only)
+                if (execMode.isProduction()) {
+                    try {
+                        generateValidationReport(runId, currentRun, singleShotResult.reports(),
+                                review, compileResult);
+                    } catch (Exception reportEx) {
+                        log.warn("[SingleShot] Report generation failed for run {}: {}", runId, reportEx.getMessage());
+                    }
+                }
+
+                // Mark complete
+                stateStore.markComplete(runId);
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "COMPLETED"));
+                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETED"));
+                eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+                log.info("[SingleShot] Run {} completed successfully", runId);
+
+            } catch (Exception e) {
+                log.error("[SingleShot] Run {} failed: {}", runId, e.getMessage(), e);
+                stateStore.markFailed(runId, "Single-shot execution error: " + e.getMessage());
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
+            } finally {
+                broadcaster.complete(runId);
+                runSlots.release();
+            }
+            return; // single-shot path complete — skip normal pipeline
+        }
+
         try {
             // ── 1. Plan ────────────────────────────────────────────────────
             Observation planObs = Observation.createNotStarted("executespec.run.phase.planning", observationRegistry)
@@ -1624,6 +1727,8 @@ public class PipelineHarness {
                     .register(meterRegistry).record(java.time.Duration.between(approvalEnd, workEnd));
 
             // ── Tier 8: Compile & Fix (non-fatal, sync before reviewer) ───
+            broadcaster.emit(runId, RunEvent.runStatus(runId, "COMPILING"));
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Compile & fix pass..."));
             CompileResult mainCompileResult = null;
             Observation compileObs = Observation.createNotStarted("executespec.run.phase.compile", observationRegistry)
                 .lowCardinalityKeyValue("run.id", runId)
@@ -1689,6 +1794,7 @@ public class PipelineHarness {
             // ══════════════════════════════════════════════════════════════════
             // ── 4. MERGE ALL TASK BRANCHES (no gate — automatic) ─────────────
             // ══════════════════════════════════════════════════════════════════
+            broadcaster.emit(runId, RunEvent.runStatus(runId, "MERGING"));
             Observation mergeObs = Observation.createNotStarted("executespec.run.phase.merge", observationRegistry)
                 .lowCardinalityKeyValue("run.id", runId)
                 .start();
@@ -1764,6 +1870,7 @@ public class PipelineHarness {
                 }
             }
             if (execMode.isPrototype()) {
+                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
                 autoStartPreview(runId, run);
             }
 
@@ -1807,7 +1914,6 @@ public class PipelineHarness {
                         .register(meterRegistry).record(java.time.Duration.between(mergeEnd, reviewEnd));
             } else {
                 log.info("Run {} — Prototype mode: reviewer skipped", runId);
-                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Reviewer skipped (Prototype mode)"));
             }
 
             // ══════════════════════════════════════════════════════════════════
