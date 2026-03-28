@@ -57,14 +57,16 @@ public class TestWorkerAgent {
      * @return the generated Java source code
      */
     public String generateTestClass(String runId, TestTask task,
-                                     String conventionsDoc, String userRequest, boolean isCli) {
-        log.info("[TestWorker] Generating test class {} for run {}", task.getTaskName(), runId);
+                                     String conventionsDoc, String userRequest,
+                                     boolean isCli, boolean isStaticHtml) {
+        log.info("[TestWorker] Generating test class {} for run {} (isCli={}, isStaticHtml={})",
+                task.getTaskName(), runId, isCli, isStaticHtml);
 
         task.setStatus(TestTaskStatus.GENERATING);
         testTaskRepository.save(task);
 
         // Build prompt
-        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli);
+        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml);
 
         // Call LLM via ModelResolver
         LlmProvider aiProvider = stateStore.findRun(runId)
@@ -98,10 +100,10 @@ public class TestWorkerAgent {
      */
     public String retryWithError(String runId, TestTask task,
                                   String conventionsDoc, String userRequest,
-                                  String compilationError, boolean isCli) {
+                                  String compilationError, boolean isCli, boolean isStaticHtml) {
         log.info("[TestWorker] Retrying {} with compilation error context", task.getTaskName());
 
-        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli)
+        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml)
                 + "\n\nYour previous attempt had COMPILATION ERRORS:\n" + compilationError
                 + "\n\nFix ALL compilation errors. Output ONLY valid, compilable Java source code.";
 
@@ -126,7 +128,8 @@ public class TestWorkerAgent {
         return code;
     }
 
-    private String buildPrompt(TestTask task, String conventionsDoc, String userRequest, boolean isCli) {
+    private String buildPrompt(TestTask task, String conventionsDoc, String userRequest,
+                               boolean isCli, boolean isStaticHtml) {
         String testMethodsJson;
         try {
             // plan_json may contain test methods info; use task description as fallback
@@ -135,20 +138,73 @@ public class TestWorkerAgent {
             testMethodsJson = task.getTaskDescription();
         }
 
-        String testingContext = isCli 
-            ? "You are testing a Command Line Interface (CLI) application."
-            : "You are testing against a live running application via HTTP.";
-        String technicalReqs = isCli 
-            ? "- Execute the application binary/script directly within the JVM (e.g. ProcessBuilder)\n- Assume the binary or script is executable from the current working directory\n- Assert on stdout output, stderr, and exit codes\n- Use JUnit 5 and AssertJ"
-            : "- Use RestAssured for all HTTP calls\n- Base URL is configurable via system property \"app.base-url\" (default: http://localhost:8080)\n- If auth is required, implement a helper method that calls the login endpoint and caches the JWT token. Use this token in all authenticated requests.\n- Use JUnit 5 (@Test, @BeforeAll, @AfterAll, @Order, @TestMethodOrder)\n- Order test methods logically: create → read → update → delete\n- Use AssertJ for assertions (assertThat(...).isEqualTo(...))\n- Each test method must be independent OR explicitly ordered with @Order annotation\n- For CRUD tests: create a test entity in @BeforeAll, clean up in @AfterAll\n- For lifecycle tests: use @TestMethodOrder(MethodOrderer.OrderAnnotation.class)";
-        String statusCodeConventions = isCli
-            ? "CLI PROCESS CONVENTIONS:\n- Success means exit code 0\n- Error means non-zero exit code\n- Use standard string assertions on stdout to verify behavior"
-            : "HTTP STATUS CODE CONVENTIONS:\n- POST that creates a resource: expect 201 Created (NOT 200)\n- POST that performs an action (login, approve, etc.): expect 200 OK\n- GET: expect 200 OK\n- PUT/PATCH: expect 200 OK\n- DELETE: expect 200 OK or 204 No Content\n- 404 for resource not found\n- 400 or 422 for validation errors\n- 401 for unauthenticated, 403 for unauthorized\n- Always check the ACTUAL conventions doc above — if it specifies different status codes, use those instead";
+        String testingContext;
+        String technicalReqs;
+        String statusCodeConventions;
+        String frameworkInstructions;
+
+        if (isStaticHtml) {
+            testingContext = "You are testing a STATIC HTML / FRONTEND web application using Playwright browser automation.";
+            technicalReqs = "- Use Playwright (com.microsoft.playwright) for browser-based testing\n"
+                    + "- Launch headless Chromium: playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true))\n"
+                    + "- Base URL from System.getProperty(\"app.base-url\", \"http://localhost:8080\")\n"
+                    + "- Use @BeforeAll to create Playwright, Browser, BrowserContext, and Page instances\n"
+                    + "- Use @AfterAll to close Page, BrowserContext, Browser, and Playwright (in reverse order)\n"
+                    + "- Use page.navigate(BASE_URL) to load the page\n"
+                    + "- Use page.locator(\"css-selector\") to find elements\n"
+                    + "- Use locator.click(), locator.fill(), locator.textContent(), locator.inputValue() for interactions\n"
+                    + "- Use assertThat() with textContent()/inputValue() results for verification\n"
+                    + "- Use @TestMethodOrder(MethodOrderer.OrderAnnotation.class) and @Order for sequenced tests\n"
+                    + "- Package: com.executespec.tests";
+            statusCodeConventions = "BROWSER TEST CONVENTIONS:\n"
+                    + "- Verify page loads by checking for expected elements or text content\n"
+                    + "- Verify interactions by checking display/output elements after clicks\n"
+                    + "- Use try/catch for resilient element selection (multiple possible selectors)";
+            frameworkInstructions = "Java + Playwright (com.microsoft.playwright) + JUnit 5 + AssertJ. "
+                    + "Package: com.executespec.tests. Use browser automation for UI interaction testing. "
+                    + "Do NOT use RestAssured or make raw HTTP requests.";
+        } else if (isCli) {
+            testingContext = "You are testing a Command Line Interface (CLI) application.";
+            technicalReqs = "- Execute the application binary/script directly within the JVM (e.g. ProcessBuilder)\n"
+                    + "- Assume the binary or script is executable from the current working directory\n"
+                    + "- Assert on stdout output, stderr, and exit codes\n"
+                    + "- Use JUnit 5 and AssertJ";
+            statusCodeConventions = "CLI PROCESS CONVENTIONS:\n"
+                    + "- Success means exit code 0\n"
+                    + "- Error means non-zero exit code\n"
+                    + "- Use standard string assertions on stdout to verify behavior";
+            frameworkInstructions = "Java + ProcessBuilder + JUnit 5 + AssertJ. Package: com.executespec.tests. "
+                    + "Do NOT use RestAssured or Playwright.";
+        } else {
+            testingContext = "You are testing against a live running application via HTTP.";
+            technicalReqs = "- Use RestAssured for all HTTP calls\n"
+                    + "- Base URL is configurable via system property \"app.base-url\" (default: http://localhost:8080)\n"
+                    + "- If auth is required, implement a helper method that calls the login endpoint and caches the JWT token. Use this token in all authenticated requests.\n"
+                    + "- Use JUnit 5 (@Test, @BeforeAll, @AfterAll, @Order, @TestMethodOrder)\n"
+                    + "- Order test methods logically: create -> read -> update -> delete\n"
+                    + "- Use AssertJ for assertions (assertThat(...).isEqualTo(...))\n"
+                    + "- Each test method must be independent OR explicitly ordered with @Order annotation\n"
+                    + "- For CRUD tests: create a test entity in @BeforeAll, clean up in @AfterAll\n"
+                    + "- For lifecycle tests: use @TestMethodOrder(MethodOrderer.OrderAnnotation.class)";
+            statusCodeConventions = "HTTP STATUS CODE CONVENTIONS:\n"
+                    + "- POST that creates a resource: expect 201 Created (NOT 200)\n"
+                    + "- POST that performs an action (login, approve, etc.): expect 200 OK\n"
+                    + "- GET: expect 200 OK\n"
+                    + "- PUT/PATCH: expect 200 OK\n"
+                    + "- DELETE: expect 200 OK or 204 No Content\n"
+                    + "- 404 for resource not found\n"
+                    + "- 400 or 422 for validation errors\n"
+                    + "- 401 for unauthenticated, 403 for unauthorized\n"
+                    + "- Always check the ACTUAL conventions doc above — if it specifies different status codes, use those instead";
+            frameworkInstructions = "Java + RestAssured + JUnit 5 + AssertJ. Package: com.executespec.tests. "
+                    + "Do NOT use Playwright or ProcessBuilder.";
+        }
 
         return loadPrompt()
                 .replace("{testing_context}", testingContext)
                 .replace("{technical_requirements}", technicalReqs)
                 .replace("{status_code_conventions}", statusCodeConventions)
+                .replace("{framework_instructions}", frameworkInstructions)
                 .replace("{task_name}", task.getTaskName())
                 .replace("{task_description}", task.getTaskDescription())
                 .replace("{target_entity}", task.getTargetEntity() != null ? task.getTargetEntity() : "")
