@@ -46,6 +46,15 @@ RULES FOR TEST PLAN GENERATION:
 4. If pagination is mentioned, generate a PaginationTest verifying page/size params and response shape.
 5. Generate a LifecycleTest that creates related entities in order (respecting FK relationships) and verifies the full flow.
 6. Generate an ErrorHandlingTest that sends malformed requests and verifies proper error responses.
+7. For static HTML / frontend-only projects, generate UI interaction tests:
+   - Category: UI_INTERACTION — verify button clicks, form submissions, display updates
+   - Category: NAVIGATION — verify page transitions and routing
+   - Category: RESPONSIVE — verify layout at different viewport sizes
+   - Test methods should describe user actions and expected outcomes
+   Example: {"name": "shouldDisplayResultAfterAddition", "description": "Click 5, +, 3, = and verify display shows 8"}
+8. For CLI projects, generate command-line tests:
+   - Category: CLI_OUTPUT — verify command output for various inputs
+   - Category: CLI_ERROR — verify error messages for invalid inputs
 
 LIMITS — keep the test plan lean and focused:
 - Maximum 6 test classes total. Merge related concerns (e.g., combine validation + error handling for the same entity).

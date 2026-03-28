@@ -99,6 +99,9 @@ HARD RULES — violating these causes the run to fail
     - Common files like README.md should be owned by the last task in the dependency chain.
     - Use relative paths from the workspace root (e.g., "src/main/java/com/example/UserService.java").
     - Include ALL files the task will touch, including configuration files and test files.
+    - For static HTML projects: if a task creates index.html that references style.css
+      and script.js, ALL THREE files must be in that task's owned_files.
+      Do NOT split HTML, CSS, and JS for the same page across different tasks.
 
 3c. If two tasks MUST modify the same file, declare the file in "shared_files" for BOTH tasks
     and make one depend on the other (add to "depends_on") so they run sequentially.
@@ -154,6 +157,22 @@ This prevents workers from guessing wrong method names.
 Do NOT split:
   - Infrastructure config from the code that requires it (they go together)
   - A single simple CRUD controller that has <4 endpoints (too small to split)
+
+FRONTEND / STATIC PROJECT TASK RULES:
+  For static HTML/CSS/JS projects (no build tool, no framework):
+  - ALWAYS bundle HTML + CSS + JS for the same page into ONE task if total is <350 lines.
+    Splitting index.html, style.css, and script.js into separate tasks creates cross-file
+    consistency bugs (the #1 failure mode for frontend projects).
+  - If the project is larger, split by PAGE or FEATURE, not by file type.
+    GOOD: "Create calculator UI (index.html + style.css + script.js)"
+    BAD:  "Create HTML structure" + "Create CSS styles" + "Create JS logic"
+  - The task that creates HTML MUST also create any CSS/JS files it references.
+    Never assume a parallel task will create the stylesheet — it won't be visible.
+
+  For React/Vue/Angular/Svelte projects:
+  - Split by component, not by concern (don't separate component JSX from its styles).
+  - One task per component or small group of related components.
+  - The project_setup task must include routing setup and global styles.
 
 ═══════════════════════════════════════════════════════════
 COMPILED LANGUAGE DEPENDENCY RULE (Java / Kotlin / Go / C# / Rust)

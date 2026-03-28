@@ -107,6 +107,31 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
          use typed exceptions — not raw Exception.
    Python: use type hints. follow PEP 8.
    JS/TS: use TypeScript if the project already uses it.
+          Node.js backends MUST use PORT and CORS_ORIGIN env vars (see step 7).
+
+   HTML/CSS/JS (static projects — no framework):
+     Every HTML file that references a CSS or JS file via <link> or <script> tags MUST
+     have that referenced file written BEFORE you report done. If index.html links to
+     style.css, YOU must create style.css — do not assume another task will.
+
+     DOM CONSISTENCY — MANDATORY CHECK:
+     When writing JavaScript that reads from HTML elements (dataset.*, getAttribute,
+     querySelector selectors), ALWAYS re-read the HTML file first to verify:
+       - data-* attribute names in HTML match dataset.* property names in JS
+         (e.g., data-digit="7" → btn.dataset.digit, NOT btn.dataset.value)
+       - CSS class names referenced in JS (querySelector, classList.contains) match
+         the actual class names in the HTML
+       - Element IDs referenced in JS match the actual IDs in HTML
+     This is the #1 source of bugs in generated frontend code.
+
+     CSS: write a complete stylesheet that implements the visual design described in
+     the spec. Include layout (flexbox/grid), colors, typography, spacing, and
+     responsive breakpoints. Do not leave styling to the browser defaults.
+
+   Full-stack (backend/ + frontend/):
+     Write the backend API before the frontend that consumes it.
+     Frontend fetch/axios calls must use relative URLs or env-configurable base URL.
+     CORS must be configured on the backend.
 
    Write the COMPLETE file in one write_file call — not pieces.
    After writing: call git_commit immediately.
@@ -128,12 +153,18 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      - If you fail the same test 3 times with different fixes: stop, note it as a blocker.
 
 6. SELF-REVIEW
-   Before reporting done, ask yourself:
+   Before reporting done, verify ALL of these:
      - Does my output exactly match the task objective?
      - Does it meet every acceptance criterion?
      - Did I write to any file outside my task boundaries?
      - Is there any code I wrote but didn't test?
      - Is there any TODO, placeholder, or stub left in my code?
+     - CROSS-FILE CONSISTENCY: Re-read any HTML/template files and verify that
+       every file referenced (CSS, JS, images) actually exists. Re-read JS files
+       and verify that every DOM selector, data attribute, and class name matches
+       what's in the HTML. Mismatched data attributes are the #1 bug.
+     - COMPLETENESS: List every file your task was supposed to create (per the
+       objective and owned_files). Verify each one exists and is committed.
 
    Fix anything that fails this check. If you cannot fix it: note it in your report.
 
@@ -142,6 +173,36 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    If README.md does not exist, create one at the workspace root.
    At minimum, add or update a section describing the feature you implemented and any new APIs,
    endpoints, or configuration that was added.
+
+   If your task is "project_setup", your README MUST include a "## Running with Docker" section:
+
+     ## Running with Docker
+
+     Build and run with Docker:
+
+     ```bash
+     # Build the image
+     docker build -t app .
+
+     # Run the container
+     docker run -p 8080:8080 app
+     ```
+
+     Or with Docker Compose:
+
+     ```bash
+     docker compose up
+     ```
+
+     The application will be available at http://localhost:8080
+
+   NODE.JS BACKEND DOCKER-FRIENDLINESS:
+   If you are writing a Node.js backend (Express/Fastify/Koa/NestJS), ensure it is
+   Docker-compatible from the start:
+   • Use process.env.PORT with a sensible fallback:  const PORT = process.env.PORT || 3001;
+   • Allow configurable CORS in production:
+       const corsOrigin = process.env.CORS_ORIGIN || '*';
+       app.use(cors({ origin: corsOrigin }));
 
    This is a HARD REQUIREMENT — the reviewer and the merge gate both check that README.md
    was modified. The merge will be blocked if README.md was not touched.

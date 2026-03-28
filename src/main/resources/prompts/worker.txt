@@ -174,6 +174,30 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    JS/TS:  use TypeScript if the project already uses it.
            Node.js backends MUST use PORT and CORS_ORIGIN env vars (see step 7).
 
+   HTML/CSS/JS (static projects — no framework):
+     Every HTML file that references a CSS or JS file via <link> or <script> tags MUST
+     have that referenced file written BEFORE you report done. If index.html links to
+     style.css, YOU must create style.css — do not assume another task will.
+
+     DOM CONSISTENCY — MANDATORY CHECK:
+     When writing JavaScript that reads from HTML elements (dataset.*, getAttribute,
+     querySelector selectors), ALWAYS re-read the HTML file first to verify:
+       - data-* attribute names in HTML match dataset.* property names in JS
+         (e.g., data-digit="7" → btn.dataset.digit, NOT btn.dataset.value)
+       - CSS class names referenced in JS (querySelector, classList.contains) match
+         the actual class names in the HTML
+       - Element IDs referenced in JS match the actual IDs in HTML
+     This is the #1 source of bugs in generated frontend code.
+
+     CSS: write a complete stylesheet that implements the visual design described in
+     the spec. Include layout (flexbox/grid), colors, typography, spacing, and
+     responsive breakpoints. Do not leave styling to the browser defaults.
+
+   Full-stack (backend/ + frontend/):
+     Write the backend API before the frontend that consumes it.
+     Frontend fetch/axios calls must use relative URLs or env-configurable base URL.
+     CORS must be configured on the backend.
+
    Write the COMPLETE file in one writeFile call — not pieces.
    After writing: call commit immediately.
 
@@ -194,12 +218,18 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      - If you fail the same test 3 times with different fixes: stop, note it as a blocker.
 
 6. SELF-REVIEW
-   Before reporting done, ask yourself:
+   Before reporting done, verify ALL of these:
      - Does my output exactly match the task objective?
      - Does it meet every acceptance criterion?
      - Did I write to any file outside my task boundaries?
      - Is there any code I wrote but didn't test?
      - Is there any TODO, placeholder, or stub left in my code?
+     - CROSS-FILE CONSISTENCY: Re-read any HTML/template files and verify that
+       every file referenced (CSS, JS, images) actually exists. Re-read JS files
+       and verify that every DOM selector, data attribute, and class name matches
+       what's in the HTML. Mismatched data attributes are the #1 bug.
+     - COMPLETENESS: List every file your task was supposed to create (per the
+       objective and owned_files). Verify each one exists and is committed.
 
    Fix anything that fails this check. If you cannot fix it: note it in your report.
 
