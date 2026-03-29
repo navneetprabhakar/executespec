@@ -24,6 +24,11 @@ public class DevDockerfileGenerator {
             "express", "fastify", "koa", "hono", "@nestjs/core"
     );
 
+    private static final Set<String> FRONTEND_FRAMEWORK_DEPS = Set.of(
+            "react", "vue", "svelte", "@sveltejs/kit", "next", "nuxt",
+            "solid-js", "preact", "lit", "angular", "@angular/core"
+    );
+
     private static final Set<String> FRONTEND_DIR_NAMES = Set.of(
             "frontend", "client", "web", "app", "ui"
     );
@@ -92,16 +97,31 @@ public class DevDockerfileGenerator {
                     return detectMonorepoType(pkg, workspace);
                 }
 
-                // Check both dependencies and devDependencies for backend frameworks
+                // Check both dependencies and devDependencies for backend + frontend frameworks
+                boolean hasBackendDep = false;
+                boolean hasFrontendDep = false;
                 for (String field : List.of("dependencies", "devDependencies")) {
                     JsonNode deps = pkg.get(field);
                     if (deps != null) {
                         for (String backendDep : NODE_BACKEND_DEPS) {
-                            if (deps.has(backendDep)) {
-                                return PreviewProjectType.NODE_BACKEND;
-                            }
+                            if (deps.has(backendDep)) hasBackendDep = true;
                         }
+                        for (String frontendDep : FRONTEND_FRAMEWORK_DEPS) {
+                            if (deps.has(frontendDep)) hasFrontendDep = true;
+                        }
+                        // Also check for vite/webpack as frontend indicators
+                        if (deps.has("vite") || deps.has("webpack")) hasFrontendDep = true;
                     }
+                }
+
+                // Single-package full-stack: both backend framework + frontend framework
+                // e.g. express + react in one package.json with concurrently
+                if (hasBackendDep && hasFrontendDep) {
+                    log.info("[Detect] Single-package full-stack: backend + frontend deps in same package.json");
+                    return PreviewProjectType.FULL_STACK;
+                }
+                if (hasBackendDep) {
+                    return PreviewProjectType.NODE_BACKEND;
                 }
             }
             return PreviewProjectType.NODE_FRONTEND;
@@ -191,7 +211,7 @@ public class DevDockerfileGenerator {
             case RUBY -> rubyDockerfile(workspace);
             case PHP -> phpDockerfile(workspace);
             case RUST -> rustDockerfile(workspace);
-            case FULL_STACK -> nodeFrontendDockerfile(workspace); // fallback
+            case FULL_STACK -> singlePackageFullStackDockerfile(workspace);
             case STATIC_HTML -> staticHtmlDockerfile();
         };
     }
@@ -363,6 +383,53 @@ public class DevDockerfileGenerator {
                 COPY . .
                 EXPOSE 3000
                 """ + cmd.stripLeading() + "\n";
+    }
+
+    /**
+     * Single-package full-stack: both frontend (React/Vue/etc) and backend (Express/etc)
+     * in the same package.json, typically run via "concurrently" or similar.
+     * Uses "npm run dev" if available, otherwise starts backend + vite in parallel.
+     */
+    private String singlePackageFullStackDockerfile(Path workspace) {
+        JsonNode pkg = parsePackageJson(workspace);
+        boolean hasDevScript = pkg != null && pkg.has("scripts")
+                && pkg.get("scripts").has("dev");
+        boolean hasViteConfig = Files.exists(workspace.resolve("vite.config.js"))
+                || Files.exists(workspace.resolve("vite.config.ts"));
+
+        String cmd;
+        if (hasDevScript) {
+            // "dev" script usually runs concurrently (backend + vite frontend)
+            cmd = "CMD [\"npm\", \"run\", \"dev\"]";
+        } else if (hasViteConfig) {
+            // No dev script but has vite — run backend + vite manually
+            String startCmd = (pkg != null && pkg.has("scripts") && pkg.get("scripts").has("start"))
+                    ? "npm start" : "node " + findNodeEntryPoint(workspace);
+            cmd = "CMD [\"sh\", \"-c\", \"" + startCmd
+                    + " & npx vite --host 0.0.0.0 --port 5173\"]";
+        } else {
+            // Fallback: just npm start
+            cmd = "CMD [\"npm\", \"start\"]";
+        }
+
+        // Ensure vite is available
+        String viteInstall = "";
+        if ((hasDevScript || hasViteConfig)
+                && !fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) {
+            viteInstall = " && npm install vite";
+        }
+
+        return """
+                FROM node:20-alpine
+                WORKDIR /app
+                LABEL preview=true
+                ENV HOST=0.0.0.0
+                ENV PORT=3000
+                COPY package*.json ./
+                RUN npm install""" + viteInstall + "\n" +
+                "COPY . .\n" +
+                "EXPOSE 5173 3000\n" +
+                cmd.stripLeading() + "\n";
     }
 
     private String springBootDockerfile(Path workspace) {
