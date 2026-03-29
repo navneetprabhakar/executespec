@@ -138,10 +138,10 @@ public class TokenBudgetMonitor {
         // Fixed ceilings — decoupled from model max output to cap latency.
         // Lower ceilings force the model to iterate (one file per response) rather than
         // producing one massive response that gets truncated and loses writeFile calls.
-        // 8K tokens ≈ 200-250 lines of code, ~80s at 100 tok/s.
+        // LOW bumped from 4K→6K to reduce truncation loops on CSS/HTML files.
         // If a task genuinely needs more, WorkerAgent auto-continues on truncation (max 2).
         return switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
-            case "LOW"    -> 4_096;
+            case "LOW"    -> 6_144;
             case "MEDIUM" -> 8_192;
             case "HIGH"   -> 12_288;
             default       -> 8_192;

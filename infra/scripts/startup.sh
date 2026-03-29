@@ -29,11 +29,17 @@ log "Phase 1: System packages"
 export DEBIAN_FRONTEND=noninteractive
 
 if ! command -v java &>/dev/null || ! java -version 2>&1 | grep -q "21"; then
-  log "Installing Java 21..."
+  log "Installing Java 21 (JDK for compilation support)..."
   apt-get update -qq
-  apt-get install -y -qq openjdk-21-jre-headless
+  apt-get install -y -qq openjdk-21-jdk-headless
 fi
 log "Java: $(java -version 2>&1 | head -1)"
+
+if ! command -v mvn &>/dev/null; then
+  log "Installing Maven..."
+  apt-get install -y -qq maven
+fi
+log "Maven: $(mvn --version 2>&1 | head -1)"
 
 # ── 2. Docker ────────────────────────────────────────────────────────────────
 
@@ -233,6 +239,7 @@ DASHBOARD_URL=${APP_PUBLIC_URL}
 APP_BASE_URL=${APP_PUBLIC_URL}
 AGENT_DEPLOYMENT_GCP_PROJECT=${GCP_PROJECT}
 OTEL_SAMPLING_PROBABILITY=${OTEL_SAMPLING:-1.0}
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 JAVA_OPTS="-Xms8g -Xmx24g -XX:+UseG1GC"
 ENVEOF
 

@@ -241,7 +241,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
 
         {/* ── Compose mode ─────────────────────────────────────────────────── */}
         {mode === 'compose' && (
-          <div className="p-6 space-y-4">
+          <div className="p-6 space-y-4 overflow-y-auto min-h-0">
             <textarea
               autoFocus
               value={goal}

@@ -27,6 +27,7 @@ public class TaskDefinition {
     private List<String> dependsOn;
     private String complexity;          // LOW | MEDIUM | HIGH
     private String assignedModel;       // LLM to use; set by planner based on complexity — null = system default
+    private String taskLayer;           // BACKEND | FRONTEND | DATABASE | INFRA
 
     // ── Tier 3 nullable fields (only set in FEASIBILITY mode) ────────────────
     private IterationEstimate estimatedIterations;       // null unless feasibility mode
