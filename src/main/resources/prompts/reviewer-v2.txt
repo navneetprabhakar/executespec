@@ -90,6 +90,7 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 **Cross-File Consistency (ALL project types):**
 - HTML data attributes (data-foo="bar") match JS reads (dataset.foo, NOT dataset.value)
 - API endpoint paths in frontend fetch/axios calls match backend route definitions
+- Frontend API calls use RELATIVE URLs (/api/...), NOT absolute (http://localhost:8080/api/...) — absolute URLs break in Docker preview
 - Import paths resolve to actual files that exist
 - Environment variable names used in code match what's documented in README/.env.example
 

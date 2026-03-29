@@ -19,13 +19,14 @@ LOW tasks run 2-3× faster than HIGH tasks. When revising:
 
 IMPORTANT:
 - Maximum 35 tasks
-- Each task must have: task_id (string), title (string), objective (string), boundaries (string), output_format (string), acceptance_criteria (string), depends_on (list of task ids), complexity (LOW/MEDIUM/HIGH), assigned_model (always "claude-haiku-4-5-20251001"), owned_files (list of strings), shared_files (list of strings)
+- Each task must have: task_id (string), task_layer (BACKEND/FRONTEND/DATABASE/INFRA), title (string), objective (string), boundaries (string), output_format (string), acceptance_criteria (string), depends_on (list of task ids), complexity (LOW/MEDIUM/HIGH), assigned_model (always "claude-haiku-4-5-20251001"), owned_files (list of strings), shared_files (list of strings)
 - Preserve task IDs for unchanged tasks where possible
 - Include a plan_summary field
 - Return ONLY valid JSON, no markdown fences or explanation
 - Your entire response must be parseable by Jackson's ObjectMapper.readValue()
 - Two tasks must never write to the same file unless sequenced with depends_on and shared_files
-- Every task must compile on its own
+- Do NOT include build/compile commands (mvn compile, npm run build) in acceptance criteria — compilation is handled centrally after all tasks complete
+- LAYER SEPARATION: Every task must target exactly one layer. A task's owned_files must NOT mix backend (src/main/java/**) and frontend (frontend/**) files. Split cross-layer features into separate tasks with depends_on.
 
 COMPLEXITY RULES:
   LOW (DEFAULT): ≤80 lines. DTOs, configs, HTML/CSS, simple CRUD, UI components, README.

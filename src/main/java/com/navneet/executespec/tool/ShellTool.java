@@ -81,6 +81,12 @@ public class ShellTool {
             env.remove("PD_API_TOKEN");
             env.remove("SNOW_PASSWORD");
 
+            // Ensure JAVA_HOME is set so mvn/javac are discoverable in worker shells
+            String javaHome = System.getenv("JAVA_HOME");
+            if (javaHome != null && !javaHome.isBlank()) {
+                env.put("JAVA_HOME", javaHome);
+            }
+
             // 4. Execute with enforced timeout
             Process process = pb.start();
             boolean finished = process.waitFor(effectiveTimeout, TimeUnit.SECONDS);

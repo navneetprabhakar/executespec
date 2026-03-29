@@ -44,11 +44,9 @@ MAXIMISE PARALLELISM:
   same depends_on set so they land in the SAME tier and run concurrently.
 Example: user_entity_dto and product_entity_dto both depend only on
   project_setup → they are both tier 1 and run in parallel.
-- EACH TASK MUST COMPILE ON ITS OWN. A task's worktree contains all merged work
-  from prior tiers but NOT same-tier tasks.
-Do not reference classes or functions
-  created by another task in the same tier — they are invisible until the next
-  tier starts.
+- A task's worktree contains all merged work from prior tiers but NOT same-tier tasks.
+Do not reference classes or functions created by another task in the same tier —
+  they are invisible until the next tier starts.
 
 PROJECT TYPE DETECTION:
 Set "project_type" at the top level of your JSON output. Choose exactly one:
@@ -115,10 +113,10 @@ HARD RULES — violating these causes the run to fail
    {
      "task_id": "project_setup",
      "title": "Create project scaffold: pom.xml / package.json + entry point",
-     "objective": "Write the project build file(s) and minimal entry point FIRST so that every other task has a compilable base to build on. Spring Boot: write pom.xml (with ALL required dependencies the other tasks will need), src/main/resources/application.yml, the @SpringBootApplication main class, AND a CORS configuration class that allows all origins (allowedOriginPatterns(\"*\")) — the app runs in Docker with dynamic ports so localhost URLs must NOT be hardcoded. Node/React: write package.json and any required config files (vite.config.ts, tsconfig.json, etc.). Full-stack: write both, ensuring the backend includes CORS middleware/config allowing all origins. Then run the build (mvn compile -q or npm install) to confirm the scaffold is clean before reporting done.",
+     "objective": "Write the project build file(s) and minimal entry point FIRST so that every other task has a compilable base to build on. Spring Boot: write pom.xml (with ALL required dependencies the other tasks will need), src/main/resources/application.yml, the @SpringBootApplication main class, AND a CORS configuration class that allows all origins (allowedOriginPatterns(\"*\")) — the app runs in Docker with dynamic ports so localhost URLs must NOT be hardcoded. Node/React: write package.json and any required config files (vite.config.ts, tsconfig.json, etc.). Full-stack: write both, ensuring the backend includes CORS middleware/config allowing all origins. CRITICAL: The frontend API client/service must use RELATIVE base URLs (e.g., baseURL: '/api' or fetch('/api/...')) — NEVER absolute URLs like 'http://localhost:8080/api'. The app runs behind a dev-server proxy that forwards /api requests to the backend; absolute URLs bypass the proxy and break in preview.",
      "boundaries": "Only create the build file(s), main Application class, and base config. Do not implement any controllers, services, models, or UI components — those belong to the other tasks.",
-     "output_format": "pom.xml at workspace root (Spring Boot), package.json at workspace root (Node), or both. Build command exits 0.",
-     "acceptance_criteria": "mvn compile -q exits 0 (Spring Boot) OR npm install exits 0 (Node). File pom.xml or package.json exists at workspace root.",
+     "output_format": "pom.xml at workspace root (Spring Boot), package.json at workspace root (Node), or both.",
+     "acceptance_criteria": "File pom.xml or package.json exists at workspace root with all required dependencies listed. Main entry point file exists.",
      "depends_on": [],
      "complexity": "LOW",
      "assigned_model": "claude-haiku-4-5-20251001"
@@ -159,10 +157,43 @@ Common shared files in code projects:
       - application.yml / .env → create a "config_setup" task if multiple tasks need config changes
       - Router/route files → if multiple tasks add routes, create a single "routing_setup" task
     CRITICAL: If a file appears in shared_files for two tasks, one MUST depend on the other.
-4. Every task's acceptance_criteria must be verifiable by running a command.
-   "Code is well-written" is not verifiable. "mvn test passes" is verifiable.
+4. Every task's acceptance_criteria must be verifiable by checking file existence and content.
+   DO NOT include build/compile commands (mvn compile, npm run build, go build, etc.) in
+   acceptance criteria — compilation is handled centrally AFTER all tasks complete.
+   GOOD: "File src/main/java/com/x/UserService.java exists with findById() and save() methods."
+   BAD: "mvn compile -q exits 0."
 
 5. complexity must be exactly "LOW", "MEDIUM", or "HIGH".
+
+═══════════════════════════════════════════════════════════
+LAYER SEPARATION — MANDATORY FOR FULL-STACK PROJECTS
+═══════════════════════════════════════════════════════════
+
+Every task must target exactly ONE layer. A task's owned_files must NOT mix layers.
+
+  BACKEND   — Java/Spring files: src/main/java/**, src/main/resources/** (except db/migration/),
+              pom.xml, build.gradle. Also: Go, Python, Ruby, PHP server-side files.
+  FRONTEND  — React/TS/JS/CSS files: frontend/**, src/main/resources/static/** (for static HTML).
+              Also: Vue, Angular, Svelte files.
+  DATABASE  — SQL migrations, schema files: src/main/resources/db/**, *.sql
+  INFRA     — Dockerfile, docker-compose.yml, CI/CD configs (.github/**), .env, nginx.conf
+
+If a feature spans multiple layers, split into separate tasks with depends_on:
+  GOOD: "Create product REST endpoints" (BACKEND) → "Create product list UI" (FRONTEND, depends on backend task)
+  BAD:  "Implement product feature" (mixes ProductController.java + ProductList.tsx in one task)
+
+Set "task_layer" on every task: "BACKEND", "FRONTEND", "DATABASE", or "INFRA".
+
+Exception: project_setup tasks for FULL_STACK projects may create both pom.xml and package.json
+(these are auto-unlocked scaffold files) — use task_layer "INFRA" for such tasks.
+
+FULL-STACK ORDERING:
+  When the spec requires both backend and frontend:
+    1. Backend entity/model tasks first (BACKEND)
+    2. Backend service tasks (BACKEND, depends on models)
+    3. Backend controller/API tasks (BACKEND, depends on services)
+    4. Frontend component tasks (FRONTEND, depends on the API tasks they call)
+  This ensures the API contract exists before frontend tasks attempt to consume it.
 
 ═══════════════════════════════════════════════════════════
 TASK DECOMPOSITION STRATEGY — GRANULAR
@@ -238,18 +269,40 @@ For React/Vue/Angular/Svelte projects:
   - Split by component, not by concern (don't separate component JSX from its styles).
 - One task per component or small group of related components.
 - The project_setup task must include routing setup and global styles.
+LAYER REMINDER: Frontend tasks must ONLY own frontend/** files (task_layer: FRONTEND).
+  Backend tasks must ONLY own src/main/java/** files (task_layer: BACKEND).
+  Never mix Java and React/TS files in the same task.
+
+TOKEN-DENSE FILE RULE (prevents truncation loops):
+  CSS, HTML, and config files are TOKEN-DENSE — they consume far more output tokens
+  per line than code files due to verbose property declarations.
+  RULE: A task that creates a CSS/style file (index.css, global styles, theme) must
+  NOT also create routing, API clients, or component logic in the same task.
+  GOOD: Task A creates "App shell + routing (App.jsx)", Task B creates "Global CSS theme (index.css)",
+        Task C creates "API client (api/client.js)"
+  BAD:  One task creates App.jsx + index.css + api/client.js (will hit output token limit)
+  Split by concern: styles alone, routing alone, API client alone. Each is a LOW task.
+
+API URL RULE (prevents preview ERR_CONNECTION_REFUSED):
+  Frontend code that calls the backend API must ALWAYS use RELATIVE URLs.
+  GOOD: fetch('/api/products')  |  axios.create({ baseURL: '/api' })
+  BAD:  fetch('http://localhost:8080/api/products')
+  The app runs behind a dev-server proxy (Vite/webpack) that forwards /api → backend.
+  Absolute localhost URLs bypass the proxy and fail when the app runs in Docker preview.
+  This applies to every task that creates or modifies API client code, service files,
+  or any frontend file that makes HTTP requests to the backend.
 ═══════════════════════════════════════════════════════════
 COMPILED LANGUAGE DEPENDENCY RULE (Java / Kotlin / Go / C# / Rust)
 ═══════════════════════════════════════════════════════════
 
 In compiled languages, EVERY import creates a hard compilation dependency.
-Worker tasks run `mvn compile` or `go build` inside their own isolated git worktree.
-If the types they import are not yet committed to git, the build FAILS.
+Worker tasks operate in isolated git worktrees — if the types they import are not yet
+committed to git (from a prior tier), the code will have unresolved references.
 RULE: For each import chain A → B → C, set:
   B.depends_on = [..., A]
   C.depends_on = [..., A, B]
 
-JAVA EXAMPLE — CORRECT (the only way mvn compile succeeds):
+JAVA EXAMPLE — CORRECT (ensures all imports resolve when code is compiled post-merge):
   project_setup          depends_on: []                                                  → Tier 0
   user_entity_dto        depends_on: ["project_setup"]                                   → Tier 1
   user_repository        depends_on: ["project_setup", "user_entity_dto"]                → Tier 2
@@ -258,7 +311,7 @@ JAVA EXAMPLE — CORRECT (the only way mvn compile succeeds):
   user_controller        depends_on: ["project_setup", "user_service_auth", "user_service_profile"]  → Tier 4
   user_tests             depends_on: ["project_setup", "user_controller", "user_service_auth"]       → Tier 5
 
-JAVA EXAMPLE — WRONG (service_layer missing model dep → mvn compile fails):
+JAVA EXAMPLE — WRONG (service_layer missing model dep → unresolved imports):
   service_layer        depends_on: ["project_setup"]          ← WRONG
   controller_layer     depends_on: ["project_setup"]          ← WRONG
 
@@ -332,6 +385,7 @@ Respond with exactly this JSON structure:
   "tasks": [
     {
       "task_id": "snake_case_identifier_max_30_chars",
+      "task_layer": "BACKEND",
       "title": "One line, imperative: Create X / Add Y / Implement Z",
       "objective": "Precise description of what to produce. Include exact file paths, class names, method signatures where known. Be specific enough that a worker can start without asking any questions. When this task depends on another, state the exact interfaces/signatures it should expect.",
       "boundaries": "Explicit list of what NOT to touch. Include specific file paths and class names. Example: Do not modify UserService.java or any existing test files.",
@@ -375,10 +429,12 @@ GOOD objective:
 
 BAD acceptance_criteria:
   "Code compiles and looks correct"
+  "mvn compile -q exits 0" (build verification is done centrally, not per task)
 
 GOOD acceptance_criteria:
-  "mvn compile -pl . exits with code 0. No new compilation errors. ItemController class
-   is importable. Both endpoint methods have correct @GetMapping and @PostMapping annotations."
+  "File ItemController.java exists at src/main/java/com/example/controller/.
+   Contains @RestController annotation, @GetMapping for /items, @PostMapping for /items.
+   Delegates to ItemService.findAll() and ItemService.create()."
 
 BAD boundaries:
   "Don't break other things"

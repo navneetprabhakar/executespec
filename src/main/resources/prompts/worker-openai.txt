@@ -144,7 +144,8 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
 
    Full-stack (backend/ + frontend/):
      Write the backend API before the frontend that consumes it.
-     Frontend fetch/axios calls must use relative URLs or env-configurable base URL.
+     Frontend fetch/axios calls MUST use RELATIVE URLs (e.g., fetch('/api/products'), axios.create({ baseURL: '/api' })).
+     NEVER use absolute URLs like 'http://localhost:8080/api/...' — the app runs behind a dev-server proxy and absolute URLs break in preview.
      CORS — MANDATORY for all backends (the app runs in Docker with dynamic ports):
        Spring Boot: configure WebMvcConfigurer with allowedOriginPatterns("*"),
          allowedMethods("GET","POST","PUT","PATCH","DELETE","OPTIONS"),

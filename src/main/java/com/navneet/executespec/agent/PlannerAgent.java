@@ -61,7 +61,8 @@ public class PlannerAgent {
         String contextSummary = buildWorkspaceContext(runId);
         String model;
         String provider;
-        if (modelOverride != null && !modelOverride.isBlank()) {
+        if (modelOverride != null && !modelOverride.isBlank() && isConcreteModelName(modelOverride)) {
+            // Explicit model override from UI (e.g. "gpt-5.4", "claude-sonnet-4-6")
             model = modelOverride;
             provider = resolveProviderFromModel(model);
         } else {
@@ -141,6 +142,8 @@ public class PlannerAgent {
                         plan.getPlanSummary() != null ? plan.getPlanSummary() : "unknown");
                     plan.setTasks(plan.getTasks().subList(0, 25));
                 }
+
+                validateLayerSeparation(plan, runId);
 
                 stateStore.logMessage(runId, "planner", "harness",
                         "COMPLETION_REPORT",
@@ -373,6 +376,70 @@ public class PlannerAgent {
 
                         """.formatted(r.getRepoUrl()))
                 .orElse("");
+    }
+
+    /**
+     * Soft validation: checks that each task's owned_files are consistent with its declared task_layer.
+     * Logs warnings for mismatches but does not fail the plan — the planner prompt enforces the rule,
+     * and this catches regressions.
+     */
+    private void validateLayerSeparation(TaskPlan plan, String runId) {
+        for (TaskDefinition task : plan.getTasks()) {
+            String layer = task.getTaskLayer();
+            List<String> owned = task.getOwnedFiles();
+            if (layer == null || layer.isBlank() || owned == null || owned.isEmpty()) {
+                continue; // skip tasks with no layer or no files
+            }
+            for (String file : owned) {
+                String detectedLayer = detectLayer(file);
+                if (detectedLayer != null && !detectedLayer.equals(layer)) {
+                    log.warn("[LayerCheck] run={} task={} declared layer={} but file '{}' looks like {} — possible cross-layer task",
+                            runId, task.getTaskId(), layer, file, detectedLayer);
+                }
+            }
+        }
+    }
+
+    /**
+     * Heuristic: infers the expected layer from a file path.
+     * Returns null if the file is ambiguous (e.g. README.md, .gitignore).
+     */
+    private String detectLayer(String filePath) {
+        String lower = filePath.toLowerCase();
+        // Database
+        if (lower.contains("/db/migration/") || lower.endsWith(".sql")) {
+            return "DATABASE";
+        }
+        // Infra
+        if (lower.startsWith("dockerfile") || lower.startsWith("docker-compose")
+                || lower.startsWith(".github/") || lower.equals(".env")
+                || lower.equals("nginx.conf")) {
+            return "INFRA";
+        }
+        // Frontend
+        if (lower.startsWith("frontend/") || lower.endsWith(".tsx") || lower.endsWith(".jsx")
+                || lower.startsWith("src/main/resources/static/")) {
+            return "FRONTEND";
+        }
+        // Backend
+        if (lower.startsWith("src/main/java/") || lower.startsWith("src/test/java/")
+                || lower.equals("pom.xml") || lower.equals("build.gradle")
+                || (lower.startsWith("src/main/resources/") && !lower.startsWith("src/main/resources/static/"))) {
+            return "BACKEND";
+        }
+        return null; // ambiguous
+    }
+
+    /**
+     * Returns true if the string looks like a concrete model name (e.g. "claude-sonnet-4-6",
+     * "gpt-5.4", "gemini-3-flash-preview") rather than a bare provider name (e.g. "anthropic",
+     * "openai", "google"). The plannerModel field on PipelineRun is initialised with the
+     * provider name from config, so we must distinguish the two to avoid treating "anthropic"
+     * as a model override.
+     */
+    private boolean isConcreteModelName(String name) {
+        if (name == null) return false;
+        return name.startsWith("claude-") || name.startsWith("gpt-") || name.startsWith("gemini-");
     }
 
     /**
