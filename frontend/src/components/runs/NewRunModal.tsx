@@ -10,19 +10,12 @@ import { cn } from '@/lib/utils';
 import ProjectSelector from '@/components/auth/ProjectSelector';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
+import ProviderModelSelector, { getPersistedSelection } from '@/components/runs/ProviderModelSelector';
 
 interface NewRunModalProps {
   onClose: () => void;
   initialGoal?: string;
 }
-
-const MODELS = [
-  { value: 'claude-opus-4-6',           label: 'Claude Opus 4.6 (Architect)' },
-  { value: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6 (Capable)' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (Utility)' },
-  { value: 'gpt-5.4',                    label: 'GPT-5.4' },
-  { value: 'gemini-2.5-pro',            label: 'Gemini 2.5 Pro' },
-];
 
 const MAX_MESSAGES = 50;
 
@@ -33,7 +26,9 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
   const [goal, setGoal] = useState(initialGoal ?? '');
   const [executionMode, setExecutionMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PROTOTYPE');
   const [showGitHub, setShowGitHub] = useState(false);
-  const [model, setModel] = useState('');
+  const persisted = getPersistedSelection();
+  const [provider, setProvider] = useState(persisted.provider);
+  const [model, setModel] = useState(persisted.model);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [launching, setLaunching] = useState(false);
   const [showUpgradeNudge, setShowUpgradeNudge] = useState(false);
@@ -159,6 +154,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
         skipApproval: isPrototype,
         autoMerge: isPrototype,
         ...(model ? { modelName: model } : {}),
+        ...(provider ? { aiProvider: provider } : {}),
         ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
         ...(repoMode ? { repoMode } : {}),
         ...(repoChoice === 'EXISTING' && repoUrl.trim() ? { repoUrl: repoUrl.trim() } : {}),
@@ -318,20 +314,13 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               </span>
             </div>
 
-            {/* Model override */}
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1.5">Model override</label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
-              >
-                <option value="">Default (Claude Opus)</option>
-                {MODELS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </div>
+            {/* Provider & model selection */}
+            <ProviderModelSelector
+              provider={provider}
+              model={model}
+              onProviderChange={setProvider}
+              onModelChange={setModel}
+            />
 
             {/* GitHub toggle */}
             <button
