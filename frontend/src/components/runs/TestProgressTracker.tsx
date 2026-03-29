@@ -46,6 +46,7 @@ export default function TestProgressTracker({ runId, status }: Props) {
       <div className="flex items-center gap-2 mb-2">
         <TestTube2 className="h-4 w-4 text-violet-400" />
         <span className="text-sm font-medium text-zinc-200">Integration Tests</span>
+        <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-accent-violet/15 text-accent-violet border border-accent-violet/25">Beta</span>
         {hasFailed && (
           <span className="ml-auto text-xs text-red-400">Pipeline failed</span>
         )}

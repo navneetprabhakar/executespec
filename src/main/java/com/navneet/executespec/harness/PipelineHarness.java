@@ -346,7 +346,7 @@ public class PipelineHarness {
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner) {
         return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
-                         false, false, null, null, null, null, "PRODUCTION");
+                         false, false, null, null, null, null, null, "PRODUCTION");
     }
 
     /**
@@ -359,7 +359,7 @@ public class PipelineHarness {
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner,
                                   boolean skipApproval, boolean autoMerge,
-                                  String modelName,
+                                  String modelName, String aiProvider,
                                   String createdByUserId, String orgId, String projectId,
                                   String executionMode) {
         PipelineRun run = stateStore.createRun(userRequest, source, repoUrl, repoMode,
@@ -408,6 +408,12 @@ public class PipelineHarness {
             // Copy project's AI provider to the run (frozen at submission time)
             projectRepository.findById(projectId).ifPresent(project ->
                 run.setAiProvider(project.getAiProvider().name()));
+            needsSave = true;
+        }
+
+        // Explicit per-run AI provider override (takes precedence over project default)
+        if (aiProvider != null && !aiProvider.isBlank()) {
+            run.setAiProvider(aiProvider.toUpperCase());
             needsSave = true;
         }
 
@@ -666,6 +672,7 @@ public class PipelineHarness {
             pausedRun.isSkipApproval(),
             false,
             pausedRun.getPlannerModel(),
+            pausedRun.getAiProvider(),
             pausedRun.getCreatedByUserId(),
             pausedRun.getOrgId(),
             pausedRun.getProjectId(),
@@ -2443,6 +2450,7 @@ public class PipelineHarness {
             original.getGithubPat(), original.getGithubOwner(),
             original.isSkipApproval(), original.isAutoMerge(),
             original.getPlannerModel(),
+            original.getAiProvider(),
             original.getCreatedByUserId(),
             original.getOrgId(),
             original.getProjectId(),
@@ -2478,6 +2486,7 @@ public class PipelineHarness {
             original.getGithubPat(), original.getGithubOwner(),
             original.isSkipApproval(), original.isAutoMerge(),
             original.getPlannerModel(),
+            original.getAiProvider(),
             original.getCreatedByUserId(),
             original.getOrgId(),
             original.getProjectId(),
@@ -2503,7 +2512,7 @@ public class PipelineHarness {
     public PipelineRun submitIntegrationRun(String userRequest, String source, boolean skipApproval) {
         // skipApproval passed directly into submitRun so it's set before the async thread starts
         // Integration runs also auto-merge when skipApproval is true (fully automated)
-        return submitRun(userRequest, source, null, null, null, null, skipApproval, skipApproval, null, null, null, null, "PRODUCTION");
+        return submitRun(userRequest, source, null, null, null, null, skipApproval, skipApproval, null, null, null, null, null, "PRODUCTION");
     }
 
     // ── File-ownership validation ────────────────────────────────────────────
@@ -2952,39 +2961,13 @@ public class PipelineHarness {
             .lowCardinalityKeyValue("run.id", runId)
             .start();
         try (Observation.Scope reportScope = reportObs.openScope()) {
-            // Wait for test execution to complete (if a test pipeline was started)
-            TestExecutionSummary testSummary = null;
-            List<TestResult> testResults = List.of();
-
-            CompletableFuture<TestExecutionSummary> testFuture = testCompletionFutures.get(runId);
-            if (testFuture != null) {
-                broadcaster.emit(runId, RunEvent.log(runId, "report",
-                        "Waiting for integration tests to finish before generating report..."));
-                try {
-                    // Block until tests finish — merge gate must NOT open before tests complete.
-                    // 10-minute safety cap: compile + execute against preview should complete well within this.
-                    testSummary = testFuture.get(10, TimeUnit.MINUTES);
-                    // Fetch full test results from DB
-                    var testPlan = testPlanRepository.findByRunId(runId).orElse(null);
-                    if (testPlan != null) {
-                        testResults = testResultRepository.findByTestPlanId(testPlan.getId());
-                    }
-                    log.info("Run {} — test results included in report: {}/{} passed",
-                            runId, testSummary.getPassed(), testSummary.getTotalTests());
-                } catch (TimeoutException e) {
-                    log.warn("Run {} — timed out waiting for test results (10min) — generating report without them", runId);
-                    broadcaster.emit(runId, RunEvent.log(runId, "report",
-                            "⚠️ Test execution timed out (10min) — generating report without test results"));
-                } catch (Exception e) {
-                    log.warn("Run {} — error waiting for test results: {} — generating report without them",
-                            runId, e.getMessage());
-                } finally {
-                    testCompletionFutures.remove(runId);
-                }
-            }
+            // Test results are decoupled from validation report — tests run in
+            // background and their report is generated independently when complete.
+            // Clean up the future reference so it doesn't leak.
+            testCompletionFutures.remove(runId);
 
             ReportInput input = new ReportInput(run, reports, review, compileResult,
-                    stateStore.getAllTasks(runId), testSummary, testResults, afterImprovements);
+                    stateStore.getAllTasks(runId), null, List.of(), afterImprovements);
 
             // Attempt report generation with one retry — report is required before merge gate
             Optional<com.navneet.executespec.report.entity.ValidationReport> reportResult = Optional.empty();

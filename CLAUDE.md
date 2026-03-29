@@ -223,7 +223,7 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - **Dependency merge fix:** `GitTool.createWorktree()` now throws on dep branch merge failure instead of silently continuing.
 - **Auto-restart disabled:** `autoRetryRunIfEligible()` and `autoRestartIfTransient()` calls removed from `PipelineHarness`.
 - **LiveLog fix:** Event type checks updated from camelCase to SCREAMING_SNAKE_CASE to match backend. Tool-result log noise removed.
-- **VM scaled:** n2-standard-4 → n2-standard-8, JVM heap -Xms1g/-Xmx6g (pending upgrade to -Xms8g/-Xmx16g)
+- **VM scaled:** n2-standard-8, JVM heap -Xms8g/-Xmx16g -XX:+UseG1GC
 
 ### Recent Changes (2026-03-27)
 - Preview mode: dual-mode support — `cloud-run` for dev/prod (5-min TTL, Artifact Registry + Cloud Run), `docker` for local (10-min TTL, Docker Compose + Caddy)
