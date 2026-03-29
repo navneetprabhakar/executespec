@@ -1263,44 +1263,55 @@ public class StateStore {
 
         // Same keyword→ID mapping as frontend's TECH_DEFS (techDetect.ts)
         // Order: priority ascending (frontend frameworks → languages → backends → databases → infra)
-        record TechEntry(String id, int priority, String[] keywords) {}
+        record TechEntry(String id, int priority, String[] keywords, boolean wordBoundary) {}
         TechEntry[] defs = {
-            new TechEntry("react",      10, new String[]{"react", "reactjs", "react.js", "create-react-app"}),
-            new TechEntry("nextjs",     11, new String[]{"next.js", "nextjs", "next js"}),
-            new TechEntry("vue",        12, new String[]{"vue", "vuejs", "vue.js", "nuxt"}),
-            new TechEntry("angular",    13, new String[]{"angular"}),
-            new TechEntry("svelte",     14, new String[]{"svelte", "sveltekit"}),
-            new TechEntry("typescript", 20, new String[]{"typescript", ".ts", "tsx", "tsconfig"}),
-            new TechEntry("nodejs",     30, new String[]{"node", "nodejs", "node.js", "express", "fastify", "koa", "hapi", "nestjs"}),
-            new TechEntry("java",       31, new String[]{"java", "jvm", "maven", "gradle", "pom.xml"}),
-            new TechEntry("spring",     32, new String[]{"spring boot", "springboot", "spring-boot", "spring framework"}),
-            new TechEntry("python",     33, new String[]{"python", "django", "fastapi", "flask", "pip", "pandas", "numpy"}),
-            new TechEntry("go",         34, new String[]{"golang", "go lang", "gin framework", "fiber"}),
-            new TechEntry("rust",       35, new String[]{"rust", "cargo", "tokio", "actix", "axum"}),
-            new TechEntry("php",        36, new String[]{"php", "laravel", "symfony", "wordpress"}),
-            new TechEntry("ruby",       37, new String[]{"ruby", "rails", "ruby on rails", "sinatra"}),
-            new TechEntry("dotnet",     38, new String[]{".net", "dotnet", "csharp", "c#", "asp.net", "blazor"}),
-            new TechEntry("postgres",   50, new String[]{"postgresql", "postgres", "psql"}),
-            new TechEntry("mongodb",    51, new String[]{"mongodb", "mongoose"}),
-            new TechEntry("mysql",      52, new String[]{"mysql", "mariadb"}),
-            new TechEntry("redis",      53, new String[]{"redis"}),
-            new TechEntry("sqlite",     54, new String[]{"sqlite"}),
-            new TechEntry("docker",     60, new String[]{"docker", "dockerfile", "container", "docker-compose"}),
+            new TechEntry("html",       15, new String[]{"html", "css", "vanilla js", "vanilla javascript", "plain html", "static html", "index.html"}, false),
+            new TechEntry("react",      10, new String[]{"react", "reactjs", "react.js", "create-react-app"}, false),
+            new TechEntry("nextjs",     11, new String[]{"next.js", "nextjs", "next js"}, false),
+            new TechEntry("vue",        12, new String[]{"vuejs", "vue.js", "nuxt"}, false),
+            new TechEntry("angular",    13, new String[]{"angular"}, false),
+            new TechEntry("svelte",     14, new String[]{"svelte", "sveltekit"}, false),
+            new TechEntry("typescript", 20, new String[]{"typescript", "tsx", "tsconfig"}, false),
+            new TechEntry("nodejs",     30, new String[]{"nodejs", "node.js", "express", "fastify", "koa", "hapi", "nestjs"}, false),
+            new TechEntry("java",       31, new String[]{"\\bjava\\b", "\\bjvm\\b", "maven", "gradle", "pom.xml"}, true),
+            new TechEntry("spring",     32, new String[]{"spring boot", "springboot", "spring-boot", "spring framework"}, false),
+            new TechEntry("python",     33, new String[]{"python", "django", "fastapi", "flask", "pandas", "numpy"}, false),
+            new TechEntry("go",         34, new String[]{"golang", "go lang", "gin framework", "fiber"}, false),
+            new TechEntry("rust",       35, new String[]{"\\brust\\b", "cargo", "tokio", "actix", "axum"}, true),
+            new TechEntry("php",        36, new String[]{"php", "laravel", "symfony", "wordpress"}, false),
+            new TechEntry("ruby",       37, new String[]{"\\bruby\\b", "rails", "ruby on rails", "sinatra"}, true),
+            new TechEntry("dotnet",     38, new String[]{".net", "dotnet", "csharp", "c#", "asp.net", "blazor"}, false),
+            new TechEntry("postgres",   50, new String[]{"postgresql", "postgres", "psql"}, false),
+            new TechEntry("mongodb",    51, new String[]{"mongodb", "mongoose"}, false),
+            new TechEntry("mysql",      52, new String[]{"mysql", "mariadb"}, false),
+            new TechEntry("redis",      53, new String[]{"redis"}, false),
+            new TechEntry("sqlite",     54, new String[]{"sqlite"}, false),
+            new TechEntry("docker",     60, new String[]{"docker", "dockerfile", "container", "docker-compose"}, false),
         };
 
         List<String> found = new ArrayList<>();
         for (TechEntry def : defs) {
             for (String kw : def.keywords) {
-                if (text.contains(kw)) {
+                boolean matched;
+                if (def.wordBoundary || kw.contains("\\b")) {
+                    matched = java.util.regex.Pattern.compile(kw).matcher(text).find();
+                } else {
+                    matched = text.contains(kw);
+                }
+                if (matched) {
                     found.add(def.id);
                     break;
                 }
             }
         }
 
-        // Dedup: Spring Boot ⊃ Java, Next.js ⊃ React
+        // Dedup: Spring Boot ⊃ Java, Next.js ⊃ React, HTML ⊃ suppress frameworks
         if (found.contains("spring")) found.remove("java");
         if (found.contains("nextjs")) found.remove("react");
+        if (found.contains("html") && !found.contains("react") && !found.contains("vue") && !found.contains("angular")) {
+            // Pure HTML/CSS/JS project — suppress Node.js if only detected from generic "node" keyword
+            found.remove("nodejs");
+        }
 
         // Cap at 5 badges (matches frontend MAX_BADGES)
         if (found.size() > 5) found = new ArrayList<>(found.subList(0, 5));

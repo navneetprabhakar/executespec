@@ -69,6 +69,7 @@ public class SequentialTaskExecutor {
     private final ObservationRegistry observationRegistry;
     private final MeterRegistry meterRegistry;
     private final AgentProperties agentProperties;
+    private final RunBudgetTracker runBudgetTracker;
 
 
     /*
@@ -262,6 +263,18 @@ public class SequentialTaskExecutor {
         // AgentTask — set it here so downstream code can read it.
         task.setBranchName(branchName);
         task.setAssignedModel(taskModel);
+
+        // === Budget check before executing worker ===
+        if (runBudgetTracker.isOverBudget(runId)) {
+            log.warn("[Budget] Run {} over budget ({}/{} calls) — skipping task {}",
+                runId, runBudgetTracker.getCurrentCalls(runId),
+                runBudgetTracker.getCeiling(runId), taskId);
+            stateStore.failTask(taskId, "Run budget exceeded — task skipped");
+            sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
+            failed.add(task);
+            try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
+            return;
+        }
 
         // === Execute worker (validation deferred to review phase) ===
         WorkerReport report;

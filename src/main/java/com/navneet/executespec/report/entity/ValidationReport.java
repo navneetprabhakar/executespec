@@ -58,6 +58,10 @@ public class ValidationReport {
     @Column(name = "generation_time_ms")
     private Long generationTimeMs;
 
+    @Column(name = "generated_after_improvements", nullable = false)
+    @Builder.Default
+    private boolean generatedAfterImprovements = false;
+
     @Column(name = "share_token", length = 64, unique = true)
     private String shareToken;
 

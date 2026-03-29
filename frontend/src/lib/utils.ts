@@ -53,6 +53,9 @@ export function describeRunStatus(
   const total = tasks?.length ?? 0;
   const completed = tasks?.filter(t => t.status === 'COMPLETE').length ?? 0;
   const failed = tasks?.filter(t => t.status === 'FAILED').length ?? 0;
+  const retryable = tasks?.filter(t =>
+    ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status)
+  ).length ?? 0;
   const working = tasks?.find(t => t.status === 'IN_PROGRESS' || t.status === 'WORKING');
 
   switch (status) {
@@ -88,10 +91,12 @@ export function describeRunStatus(
       return 'Run completed successfully';
     case 'FAILED':
       if (failureReason) return truncate(failureReason, 50);
+      if (retryable > 0 && total > 0) return `Failed — ${retryable} task${retryable !== 1 ? 's' : ''} can be retried`;
       if (failed > 0 && total > 0) return `Failed — ${failed}/${total} tasks errored`;
       return 'Run failed';
     case 'PARTIAL':
-      return `${completed}/${total} tasks completed — ${failed} need attention`;
+      if (retryable > 0) return `${completed}/${total} tasks done — ${retryable} need manual retry`;
+      return `${completed}/${total} tasks completed`;
     case 'PAUSED':
       if (total > 0) return `Paused — ${completed}/${total} tasks done`;
       return 'Run paused';

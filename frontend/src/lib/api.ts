@@ -1231,6 +1231,7 @@ export interface ValidationReportData {
   lintFailures: number;
   isShared: boolean;
   shareUrl: string | null;
+  generatedAfterImprovements: boolean;
 }
 
 export interface SharedReportData {

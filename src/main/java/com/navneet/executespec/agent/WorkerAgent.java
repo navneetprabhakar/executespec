@@ -49,7 +49,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -75,6 +74,7 @@ public class WorkerAgent {
     private final SseBroadcaster sseBroadcaster;
     private final com.navneet.executespec.harness.UiStyleResolver uiStyleResolver;
     private final com.navneet.executespec.router.ModelResolver modelResolver;
+    private final com.navneet.executespec.harness.RunBudgetTracker runBudgetTracker;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -92,8 +92,10 @@ public class WorkerAgent {
     private static final int URGENCY_THRESHOLD_MINUTES = 2;
     /** Check for stall (no file writes) and escalate model after this many minutes. */
     private static final int STALL_CHECK_MINUTES = 5;
-    /** Hard cap on tool-call iterations — circuit breaker when prompt-level limit (20) is ignored. */
-    private static final int HARD_ITERATION_LIMIT = 25;
+    /** Hard cap on tool-call iterations — circuit breaker when prompt-level limit (20) is ignored.
+     *  Set high enough that truncation recovery (2 continues + 2 skeleton recoveries) doesn't
+     *  exhaust the budget. Each recovery burns ~2-3 tool calls, so 35 gives ~10 recovery slots. */
+    private static final int HARD_ITERATION_LIMIT = 35;
     /** Max auto-continue attempts when LLM response is truncated (hit maxTokens). */
     private static final int MAX_CONTINUATIONS = 2;
     /** Max skeleton recovery attempts before escalating model anyway. */
@@ -308,6 +310,7 @@ public class WorkerAgent {
                     continue;
                 }
                 consecutiveNullResponses = 0; // reset on successful response
+                runBudgetTracker.recordCall(runId);
                 AssistantMessage assistantMsg = (AssistantMessage) lr.response().getResult().getOutput();
                 String assistantText = assistantMsg.getText();
                 messages.add(assistantMsg);
@@ -355,16 +358,44 @@ public class WorkerAgent {
                     finishReason = lr.response().getResult().getMetadata().getFinishReason();
                 } catch (Exception ignored) { /* metadata may be null for some providers */ }
                 if (isTruncatedResponse(finishReason)) {
+                    // Salvage: dispatch any COMPLETE tool calls before the truncation point.
+                    // Without this, the model thinks it wrote files but the harness never dispatched them.
+                    int salvaged = 0;
+                    if (assistantText != null && !assistantText.isBlank()) {
+                        List<ParsedToolCall> salvageCalls = parseJsonToolCalls(assistantText);
+                        if (salvageCalls.isEmpty()) salvageCalls = parseXmlToolCalls(assistantText);
+                        for (ParsedToolCall tc : salvageCalls) {
+                            try {
+                                dispatchTool(tc, runId, taskId);
+                                if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
+                                toolCallCount++;
+                                salvaged++;
+                            } catch (Exception salvageEx) {
+                                log.debug("[Worker {}] Salvage dispatch failed for {}: {}", taskId, tc.name(), salvageEx.getMessage());
+                            }
+                        }
+                        if (salvaged > 0) {
+                            log.info("[Worker {}] Salvaged {} complete tool call(s) from truncated response " +
+                                    "(totalFileWrites={})", taskId, salvaged, totalFileWrites);
+                        }
+                    }
+
                     continuations++;
                     if (continuations <= MAX_CONTINUATIONS) {
                         log.warn("[Worker {}] Iteration {} — response truncated (finishReason={}). " +
                                 "Auto-continuing ({}/{})", taskId, iteration, finishReason,
                                 continuations, MAX_CONTINUATIONS);
                         stateStore.appendTaskLog(taskId, "TRUNCATION_CONTINUE:" + continuations);
+                        // Critical: tell the model which tool calls executed and which didn't.
+                        String salvageNote = salvaged > 0
+                                ? salvaged + " tool call(s) from your response WERE executed. "
+                                : "NONE of your tool calls were executed — they were all cut off by truncation. ";
                         messages.add(new UserMessage(
-                                "Your previous response was truncated (hit output token limit). " +
-                                "Continue EXACTLY where you left off. Do not repeat any code " +
-                                "already written. Complete the remaining file(s)."));
+                                "Your previous response was TRUNCATED (hit output token limit). " +
+                                salvageNote +
+                                "Any writeFile/editFile that was cut off mid-content was NOT executed.\n\n" +
+                                "IMPORTANT: Write ONE file per response to avoid truncation. " +
+                                "Call writeFile for the next file now."));
                         continue; // next iteration — send continuation request
                     } else {
                         // Skeleton recovery: continuations exhausted, response still truncating.
@@ -418,9 +449,8 @@ public class WorkerAgent {
 
                 // ── PATH B: Prompt-based tool calls (Anthropic/Google) ───────────────
                 if (assistantText != null && !assistantText.isBlank()) {
-                    log.info("[Worker {}] Iteration {} — output ({} chars): {}",
-                            taskId, iteration, assistantText.length(),
-                            assistantText.length() <= 200 ? assistantText : assistantText.substring(0, 200) + "...");
+                    log.debug("[Worker {}] Iteration {} — output ({} chars)",
+                            taskId, iteration, assistantText.length());
 
                     // 1. Parse tool calls — JSON first (unified format), XML as legacy fallback
                     List<ParsedToolCall> toolCalls = parseJsonToolCalls(assistantText);
@@ -1009,11 +1039,6 @@ public class WorkerAgent {
             String result = switch (tc.name()) {
                 case "readFile", "read_file" -> {
                     String path = args.path("path").asText("");
-                    int startLine = args.path("startLine").asInt(args.path("start_line").asInt(0));
-                    int endLine = args.path("endLine").asInt(args.path("end_line").asInt(0));
-                    if (startLine > 0 && endLine > 0) {
-                        yield fsTool.readFileRange(runId, path, startLine, endLine);
-                    }
                     yield fsTool.readFile(runId, path);
                 }
                 case "writeFile", "write_file" -> {
@@ -1594,48 +1619,29 @@ public class WorkerAgent {
      * full in the message list wastes tokens on every subsequent API call.
      * The model can always re-read the file if it needs the full content.
      */
-    private static final int MAX_RESULT_CHARS_FILE = 16_000;  // readFile / listFiles / searchFiles (was 8K)
-    private static final int MAX_RESULT_CHARS_SHELL = 12_000; // run / run_command / run_build / run_tests (was 6K)
-    private static final int MAX_RESULT_CHARS_DIFF = 10_000;  // git_diff (was 5K)
-
-    /** Set of tool names that are build/run commands — truncation keeps the error tail. */
-    private static final Set<String> BUILD_TOOLS = Set.of(
-            "run", "run_command", "run_build", "run_tests");
+    private static final int MAX_RESULT_CHARS_FILE = 8_000; // read_file / list_files
+    private static final int MAX_RESULT_CHARS_SHELL = 6_000; // run_command / run_build / run_tests
+    private static final int MAX_RESULT_CHARS_DIFF = 5_000; // git_diff
 
     private String truncateResult(String toolName, String result) {
         if (result == null)
             return result;
         int limit = switch (toolName) {
-            // camelCase + snake_case — both forms must be handled (latent bug fix)
-            case "readFile", "read_file", "listFiles", "list_files",
-                 "searchFiles", "search_files" -> MAX_RESULT_CHARS_FILE;
-            case "run", "run_command", "run_build", "run_tests" -> MAX_RESULT_CHARS_SHELL;
-            case "diff", "git_diff" -> MAX_RESULT_CHARS_DIFF;
-            default -> Integer.MAX_VALUE; // writeFile, editFile, git_commit etc. are always short
+            case "read_file", "readFile", "list_files", "listFiles",
+                 "search_files", "searchFiles" -> MAX_RESULT_CHARS_FILE;
+            case "run_command", "run_build", "run_tests", "run" -> MAX_RESULT_CHARS_SHELL;
+            case "git_diff", "diff" -> MAX_RESULT_CHARS_DIFF;
+            default -> Integer.MAX_VALUE; // write_file, git_commit etc. are always short
         };
         if (result.length() <= limit)
             return result;
-
-        // Build commands: keep last 80% + first 20% (errors are at the end)
-        if (BUILD_TOOLS.contains(toolName)) {
-            int tailSize = (int) (limit * 0.80);
-            int headSize = limit - tailSize;
-            String head = result.substring(0, headSize);
-            String end = result.substring(result.length() - tailSize);
-            log.debug("[Worker] Truncated build result {}: {} → {} chars (head={}+tail={})",
-                    toolName, result.length(), limit, headSize, tailSize);
-            return head + "\n...[" + (result.length() - limit) +
-                    " chars omitted — build error output preserved at end]...\n" + end;
-        }
-
-        // Non-build: keep first 75% + last 25% (general head+tail strategy)
-        int tail = Math.min(limit / 4, 4_000);
+        int tail = Math.min(1_500, limit / 4); // keep a tail snippet for context
         String head = result.substring(0, limit - tail);
         String end = result.substring(result.length() - tail);
         log.debug("[Worker] Truncated {} result: {} → {} chars (head={}+tail={})",
                 toolName, result.length(), limit, limit - tail, tail);
         return head + "\n...[" + (result.length() - limit) +
-                " chars omitted — use readFile with startLine/endLine for specific sections]...\n" + end;
+                " chars omitted — use read_file for full content]...\n" + end;
     }
 
     /** Provider-aware prompt loading via ResourceLoader; fallback to worker.txt */

@@ -10,6 +10,7 @@ ITERATION BUDGET — HARD LIMIT
 
 You have a maximum of 20 tool calls for this task. Every call counts.
 - If you reach iteration 15 and the build still fails, report PARTIAL — do not keep looping.
+- Batch readFile calls freely, but write ONE file per response (see below).
 - Aim for 8-15 total iterations on a typical task.
 
 ═══════════════════════════════════════════════════════════
@@ -21,7 +22,7 @@ automatically via function calling — just call them by name when needed.
 
 Quick reference:
 
-  readFile     — Read a file (full or partial). Args: path, startLine (optional), endLine (optional).
+  readFile     — Read the full content of a file. Use before writing or editing.
   writeFile    — Create or fully overwrite a file. ALWAYS write the complete file.
   editFile     — Replace an exact string in an existing file (safer for small changes).
   listFiles    — List directory contents.
@@ -33,6 +34,24 @@ Quick reference:
   commit       — Stage and commit all current changes (format: "feat(task_id): description").
 
 These are the ONLY 9 tools. Do not attempt to call any other tool name.
+
+Common mistakes — DO NOT DO THESE:
+
+  ✗ "gitCommit"  → Use "commit"
+  ✗ "runBuild"   → Use "run" with args: {"command": "mvn compile"} or {"command": "npm run build"}
+  ✗ "runTests"   → Use "run" with args: {"command": "npm test"} or {"command": "mvn test"}
+  ✗ "runCommand" → Use "run" with args: {"command": "your command here"}
+  ✗ "git_add"    → Use "commit" (it stages all changes automatically)
+  ✗ "createFile" → Use "writeFile"
+  ✗ "shell"      → Use "run"
+  ✗ "execute"    → Use "run"
+
+WRITE BATCHING — CRITICAL:
+- Batch readFile calls: multiple reads in one response is ideal.
+- WRITE operations: write ONE file per response. Large writeFile calls fill the output
+  token limit. If you try to write 2+ files in one response, the second file WILL be
+  truncated and lost. Write one file → wait for confirmation → write the next.
+- Small files (<30 lines each): you may batch 2-3 small writes in one response.
 
 ═══════════════════════════════════════════════════════════
 FILE OWNERSHIP AND LOCKING
@@ -118,24 +137,41 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
        - Element IDs referenced in JS match the actual IDs in HTML
      This is the #1 source of bugs in generated frontend code.
 
-     CSS: write a complete stylesheet that implements the visual design described in
-     the spec. Include layout (flexbox/grid), colors, typography, spacing, and
-     responsive breakpoints. Do not leave styling to the browser defaults.
+     CSS: write a polished, modern stylesheet. NEVER leave browser defaults.
+     - Define ALL colors as CSS custom properties in :root (see FRONTEND STYLING RULES if injected).
+     - Default to DARK THEME unless user says otherwise: near-black backgrounds (#0a0a0f),
+       light text (#f0f0f5), violet accent (#7c5cfc), subtle borders (rgba(255,255,255,0.08)).
+     - Use Inter / system-ui font stack. Base 15px, line-height 1.6.
+     - Cards: rounded corners (8px), subtle shadow, surface background (#12121a).
+     - Buttons: solid accent bg, white text, 6px radius, hover brightens.
+     - Inputs: dark surface bg, 1px border, matching text color, 10px 14px padding.
+     - Layout: Flexbox or CSS Grid. Max-width 1200px centered. Responsive with @media.
+     - Reset: box-sizing border-box, margin/padding 0 on *.
+     - Smooth transitions (0.2s ease) on interactive elements.
+     The result must look like a shipped product, not a tutorial demo.
 
    Full-stack (backend/ + frontend/):
      Write the backend API before the frontend that consumes it.
      Frontend fetch/axios calls must use relative URLs or env-configurable base URL.
-     CORS must be configured on the backend.
+     CORS — MANDATORY for all backends (the app runs in Docker with dynamic ports):
+       Spring Boot: configure WebMvcConfigurer with allowedOriginPatterns("*"),
+         allowedMethods("GET","POST","PUT","PATCH","DELETE","OPTIONS"),
+         allowedHeaders("*"). Do NOT use allowedOrigins with specific URLs.
+       Node.js/Express: use cors({ origin: '*' }) middleware (npm install cors).
+       Python Flask: use flask-cors with CORS(app, resources={r"/*": {"origins": "*"}}).
+       Python FastAPI: add CORSMiddleware with allow_origins=["*"], allow_methods=["*"], allow_headers=["*"].
+       Go: set Access-Control-Allow-Origin: * header on all API responses.
+       Ruby/Rails: use rack-cors gem with origins '*'.
+       Any other framework: allow ALL origins — never hardcode localhost URLs.
 
    Write each file COMPLETE in one writeFile call — never partial content.
-      Write ONE file per response if any file exceeds 100 lines.
-      Do NOT batch multiple large writeFile calls in a single response — you will
-      hit the output token limit and truncate. Write one file, wait for confirmation,
-      write the next.
       After all files are written, commit once:
        commit with message "feat(task_id): description"
 
 3. BUILD
+   Before building, ensure dependencies are installed:
+     - If package.json exists and node_modules/ does not: run `npm install` first.
+     - If frontend/package.json exists and frontend/node_modules/ does not: run `cd frontend && npm install` first.
    After committing, run the build (e.g. `mvn compile -q` or `npm run build`).
    If it fails: read the error, fix the code, commit the fix, build again.
    Do NOT proceed to tests until the build is clean.

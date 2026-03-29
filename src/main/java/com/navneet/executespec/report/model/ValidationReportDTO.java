@@ -22,5 +22,6 @@ public record ValidationReportDTO(
     int productionBugs,
     int lintFailures,
     boolean isShared,
-    String shareUrl
+    String shareUrl,
+    boolean generatedAfterImprovements
 ) {}

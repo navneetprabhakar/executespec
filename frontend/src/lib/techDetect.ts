@@ -44,7 +44,7 @@ export const TECH_DEFS: TechDef[] = [
     textCls: 'text-[#4FC08D]',
     bgCls: 'bg-[#4FC08D]/10',
     hex: '#4FC08D',
-    keywords: ['vue', 'vuejs', 'vue.js', 'nuxt'],
+    keywords: ['vuejs', 'vue.js', 'nuxt', 'vue 3', 'vue 2'],
     priority: 12,
   },
   {
@@ -65,6 +65,16 @@ export const TECH_DEFS: TechDef[] = [
     keywords: ['svelte', 'sveltekit', 'svelte kit'],
     priority: 14,
   },
+  // ── Vanilla web ────────────────────────────────────────────────────────
+  {
+    id: 'html',
+    label: 'HTML/CSS/JS',
+    textCls: 'text-[#E34F26]',
+    bgCls: 'bg-[#E34F26]/10',
+    hex: '#E34F26',
+    keywords: ['html', 'css', 'vanilla js', 'vanilla javascript', 'plain html', 'static html', 'index.html'],
+    priority: 15,
+  },
   // ── Type systems ─────────────────────────────────────────────────────────
   {
     id: 'typescript',
@@ -82,7 +92,7 @@ export const TECH_DEFS: TechDef[] = [
     textCls: 'text-[#68A063]',
     bgCls: 'bg-[#68A063]/10',
     hex: '#68A063',
-    keywords: ['node', 'nodejs', 'node.js', 'express', 'fastify', 'koa', 'hapi', 'nestjs', 'nest.js'],
+    keywords: ['nodejs', 'node.js', 'express', 'fastify', 'koa', 'hapi', 'nestjs', 'nest.js'],
     priority: 30,
   },
   {
@@ -241,13 +251,25 @@ export function resolveTechStack(techStack: string | null | undefined, userReque
  * Returns the top-N detected tech stacks from `text`, ordered by priority.
  * Deduplication ensures each tech appears at most once.
  */
+/** Keywords that must match as whole words (not substrings) to avoid false positives. */
+const WORD_BOUNDARY_IDS = new Set(['java', 'go', 'rust', 'ruby', 'nodejs']);
+
 export function detectTechStack(text: string): TechDef[] {
   if (!text) return [];
   const lower = text.toLowerCase();
   const found: TechDef[] = [];
 
   for (const tech of TECH_DEFS) {
-    if (tech.keywords.some((kw) => lower.includes(kw))) {
+    const useWordBoundary = WORD_BOUNDARY_IDS.has(tech.id);
+    const matched = tech.keywords.some((kw) => {
+      if (useWordBoundary) {
+        // Word-boundary match: prevent "java" matching inside "javascript"
+        const re = new RegExp(`\\b${kw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        return re.test(lower);
+      }
+      return lower.includes(kw);
+    });
+    if (matched) {
       found.push(tech);
     }
   }

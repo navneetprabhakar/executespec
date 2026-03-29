@@ -7,6 +7,31 @@ import { useViewMode } from '@/hooks/useViewMode';
 import { ACTIVE_STATUSES } from '@/lib/constants';
 import VibeRunSummary from './VibeRunSummary';
 
+/** Derive a narrative item from the run's persisted status (no SSE needed). */
+function statusToNarrative(status: string): NarrativeItem | null {
+  switch (status) {
+    case 'PLANNING':
+    case 'AWAITING_APPROVAL':
+      return { text: 'Analyzing requirements...', variant: 'progress' };
+    case 'WORKING':
+      return { text: 'Building...', variant: 'progress' };
+    case 'COMPILING':
+      return { text: 'Checking the build...', variant: 'progress' };
+    case 'MERGING':
+      return { text: 'Assembling the pieces...', variant: 'progress' };
+    case 'REVIEWING':
+      return { text: 'Reviewing the code...', variant: 'progress' };
+    case 'COMPLETE':
+      return { text: 'Ready.', variant: 'done' };
+    case 'PARTIAL':
+      return { text: 'Ready.', variant: 'done' };
+    case 'FAILED':
+      return { text: 'Execution halted.', variant: 'warning' };
+    default:
+      return null;
+  }
+}
+
 const ICON: Record<NarrativeItem['variant'], React.ReactNode> = {
   progress: <Loader2 className="h-4 w-4 text-accent-violet animate-spin shrink-0" />,
   done: <CheckCircle2 className="h-4 w-4 text-[var(--mc-status-success)] shrink-0" />,
@@ -26,8 +51,24 @@ export default function VibeProgressNarrative() {
         items.push({ id: entry.id, text: mapped.text, variant: mapped.variant, ts: entry.timestamp });
       }
     }
+
+    // If no SSE-derived narrative yet but we have a run status, synthesize
+    // an initial narrative from the run's current state so toggling between
+    // runs doesn't flash "Starting up..." while history loads.
+    if (items.length === 0 && activeRun) {
+      const synth = statusToNarrative(activeRun.status);
+      if (synth) {
+        items.push({
+          id: 'synth-status',
+          text: synth.text,
+          variant: synth.variant,
+          ts: activeRun.startedAt ? new Date(activeRun.startedAt).getTime() : Date.now(),
+        });
+      }
+    }
+
     return items;
-  }, [entries]);
+  }, [entries, activeRun?.status]);
 
   // Task progress counter
   const tasksDone = activeRun?.tasks?.filter((t) => t.status === 'COMPLETED').length ?? 0;

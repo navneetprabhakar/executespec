@@ -95,6 +95,7 @@ public class PipelineHarness {
 
     // ── Sequential execution with validation + model routing ──────────────────
     private final SequentialTaskExecutor sequentialTaskExecutor;
+    private final RunBudgetTracker runBudgetTracker;
 
     // ── Reviewer V2: agentic two-phase (inspect → fix) reviewer ──────────────
     private final com.navneet.executespec.reviewer.ReviewerAgentV2 reviewerAgentV2;
@@ -1251,11 +1252,28 @@ public class PipelineHarness {
                     log.warn("[ApplySuggestion] Reviewer failed for run {}: {}", runId, e.getMessage());
                 }
 
-                // Generate validation report (same as main pipeline)
+                // ── Test generation + execution (mirrors main pipeline Phase 4c) ──
+                if ("PRODUCTION".equals(run.getExecutionMode())) {
+                    try {
+                        String planJson = stateStore.findRun(runId).map(PipelineRun::getPlanJson).orElse("{}");
+                        String userReq = run.getUserRequest();
+                        testCompletionFutures.put(runId, new CompletableFuture<>());
+                        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+                        Thread.ofVirtual().name("testgen-apply-" + runId).start(snapshot.wrap(() ->
+                            testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson)
+                        ));
+                        log.info("[ApplySuggestion] Test gen pipeline started for run {}", runId);
+                    } catch (Exception e) {
+                        testCompletionFutures.remove(runId);
+                        log.warn("[ApplySuggestion] Failed to start test gen for run {}: {}", runId, e.getMessage());
+                    }
+                }
+
+                // Generate validation report (afterImprovements=true for post-edit indicator)
                 try {
                     var freshRun = stateStore.findRun(runId).orElseThrow();
                     List<WorkerReport> reports = getWorkerReports(runId);
-                    generateValidationReport(runId, freshRun, reports, reviewResult, compileResult);
+                    generateValidationReport(runId, freshRun, reports, reviewResult, compileResult, true);
                     log.info("[ApplySuggestion] Validation report generated for run {}", runId);
                 } catch (Exception e) {
                     log.warn("[ApplySuggestion] Validation report failed for run {}: {}", runId, e.getMessage());
@@ -1521,6 +1539,14 @@ public class PipelineHarness {
                 if (execMode.isPrototype()) {
                     broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
                     autoStartPreview(runId, run);
+
+                    // PROTOTYPE: mark complete immediately — skip review/test/report
+                    stateStore.markComplete(runId);
+                    broadcaster.emit(runId, RunEvent.runStatus(runId, "COMPLETED"));
+                    broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETED"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+                    log.info("[SingleShot] PROTOTYPE run {} completed — preview started", runId);
+                    return;
                 }
 
                 // Review (production mode only)
@@ -1698,6 +1724,9 @@ public class PipelineHarness {
                 // Validate file ownership — detect overlap before workers start
                 validateFileOwnership(workerTasks, runId);
 
+                // Initialize run-level budget tracker from task plan
+                runBudgetTracker.initBudget(runId, plan);
+
                 // === SEQUENTIAL EXECUTION WITH VALIDATION + MODEL ROUTING ===
                 SequentialTaskExecutor.SequentialExecutionResult execResult =
                     sequentialTaskExecutor.execute(run, workerTasks, execMode);
@@ -1872,6 +1901,22 @@ public class PipelineHarness {
             if (execMode.isPrototype()) {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
                 autoStartPreview(runId, run);
+
+                // PROTOTYPE: mark complete immediately — skip review/test/report
+                stateStore.markComplete(runId);
+                saveActualCost(runId);
+                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
+                log.info("PROTOTYPE run {} complete — compiled, merged, preview started", runId);
+                eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+
+                // GitHub push (non-blocking)
+                try {
+                    PipelineRun completedRun = stateStore.findRun(runId).orElse(run);
+                    pushToGitHubIfConfigured(completedRun);
+                } catch (Exception pushEx) {
+                    log.warn("GitHub push failed for PROTOTYPE run {} (non-fatal): {}", runId, pushEx.getMessage());
+                }
+                return;
             }
 
             // ══════════════════════════════════════════════════════════════════
@@ -2034,6 +2079,7 @@ public class PipelineHarness {
             runObs.stop();
             broadcaster.complete(runId);
             runKeyStore.remove(runId);  // clean up per-run API keys
+            runBudgetTracker.remove(runId);  // clean up per-run budget tracking
         }
     }
 
@@ -2894,6 +2940,14 @@ public class PipelineHarness {
                                            List<WorkerReport> reports,
                                            ReviewReportV2 review,
                                            CompileResult compileResult) {
+        generateValidationReport(runId, run, reports, review, compileResult, false);
+    }
+
+    private void generateValidationReport(String runId, PipelineRun run,
+                                           List<WorkerReport> reports,
+                                           ReviewReportV2 review,
+                                           CompileResult compileResult,
+                                           boolean afterImprovements) {
         Observation reportObs = Observation.createNotStarted("executespec.run.phase.report", observationRegistry)
             .lowCardinalityKeyValue("run.id", runId)
             .start();
@@ -2930,7 +2984,7 @@ public class PipelineHarness {
             }
 
             ReportInput input = new ReportInput(run, reports, review, compileResult,
-                    stateStore.getAllTasks(runId), testSummary, testResults);
+                    stateStore.getAllTasks(runId), testSummary, testResults, afterImprovements);
 
             // Attempt report generation with one retry — report is required before merge gate
             Optional<com.navneet.executespec.report.entity.ValidationReport> reportResult = Optional.empty();
@@ -2966,7 +3020,8 @@ public class PipelineHarness {
 
     // ── Auto-start preview for test execution ──────────────────────────────
 
-    private void autoStartPreview(String runId, PipelineRun run) {
+    /** Starts preview in a virtual thread. Public for watchdog recovery. */
+    public void autoStartPreview(String runId, PipelineRun run) {
         Thread.ofVirtual().name("auto-preview-" + runId).start(() -> {
             try {
                 // Look up the run creator to pass to PreviewService

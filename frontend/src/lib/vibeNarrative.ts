@@ -16,12 +16,12 @@ export function mapEventToNarrative(entry: LogEntry): NarrativeItem | null {
   if (type === 'PLANNING_STARTED') {
     return { text: 'Analyzing requirements...', variant: 'progress' };
   }
-  if (type === 'RUN_STATUS' && data.status === 'PLANNING') {
+  if (type === 'RUN_STATUS' && data.payload === 'PLANNING') {
     return { text: 'Analyzing requirements...', variant: 'progress' };
   }
 
   // Working
-  if (type === 'RUN_STATUS' && data.status === 'WORKING') {
+  if (type === 'RUN_STATUS' && data.payload === 'WORKING') {
     return { text: 'Building...', variant: 'progress' };
   }
 
@@ -31,22 +31,24 @@ export function mapEventToNarrative(entry: LogEntry): NarrativeItem | null {
   }
 
   // Review
-  if (type === 'RUN_STATUS' && data.status === 'REVIEWING') {
+  if (type === 'RUN_STATUS' && data.payload === 'REVIEWING') {
     return { text: 'Reviewing the code...', variant: 'progress' };
   }
 
   // Compiling
-  if (type === 'COMPILATION_STARTED' || (type === 'RUN_STATUS' && data.status === 'COMPILING')) {
+  if (type === 'COMPILATION_STARTED' || (type === 'RUN_STATUS' && data.payload === 'COMPILING')) {
     return { text: 'Checking the build...', variant: 'progress' };
   }
 
   // Merging
-  if (type === 'RUN_STATUS' && data.status === 'MERGING') {
+  if (type === 'RUN_STATUS' && data.payload === 'MERGING') {
     return { text: 'Assembling the pieces...', variant: 'progress' };
   }
 
   // Preview launching (matches "Code ready — starting preview..." log message)
-  if (type === 'LOG' && typeof data.message === 'string' && data.message.includes('Code ready')) {
+  // LOG events: backend puts the message in `payload`, historical messages use `message`
+  const logMsg = (data.payload ?? data.message) as string | undefined;
+  if (type === 'LOG' && typeof logMsg === 'string' && logMsg.includes('Code ready')) {
     return { text: 'Launching preview...', variant: 'progress' };
   }
 
@@ -56,12 +58,12 @@ export function mapEventToNarrative(entry: LogEntry): NarrativeItem | null {
   }
 
   // Complete
-  if (type === 'RUN_STATUS' && data.status === 'COMPLETE') {
+  if (type === 'RUN_STATUS' && (data.payload === 'COMPLETE' || data.payload === 'COMPLETED')) {
     return { text: 'Ready.', variant: 'done' };
   }
 
   // Failed
-  if (type === 'RUN_STATUS' && data.status === 'FAILED') {
+  if (type === 'RUN_STATUS' && data.payload === 'FAILED') {
     return { text: 'Execution halted.', variant: 'warning' };
   }
 

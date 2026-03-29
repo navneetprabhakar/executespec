@@ -224,6 +224,20 @@ public class OrphanedRunWatchdog {
                     "Run recovered — all tasks completed successfully"));
                 broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
                 eventPublisher.publishEvent(new com.navneet.executespec.harness.event.PipelineEvent.RunCompleted(runId));
+
+                // Auto-start preview if it hasn't been started yet
+                if (run.getPreviewStatus() == null || "NONE".equals(run.getPreviewStatus())) {
+                    try {
+                        broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                            "Code ready — starting preview..."));
+                        harness.autoStartPreview(runId, run);
+                        log.info("Orphaned PROTOTYPE run {} — preview auto-started by watchdog", runId);
+                    } catch (Exception previewEx) {
+                        log.warn("Orphaned PROTOTYPE run {} — preview auto-start failed: {}",
+                            runId, previewEx.getMessage());
+                    }
+                }
+
                 log.info("Orphaned PROTOTYPE run {} auto-completed — all {} tasks done",
                     runId, allTasks.size());
                 recordAudit(run, "AUTO_COMPLETE", idle);

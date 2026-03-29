@@ -17,12 +17,21 @@ public record ReportInput(
     CompileResult compileResult,
     List<AgentTask> tasks,
     TestExecutionSummary testSummary,
-    List<TestResult> testResults
+    List<TestResult> testResults,
+    boolean generatedAfterImprovements
 ) {
     /** Backward-compatible constructor for call sites that don't have test data. */
     public ReportInput(PipelineRun run, List<WorkerReport> workerReports,
                        ReviewReportV2 review, CompileResult compileResult,
                        List<AgentTask> tasks) {
-        this(run, workerReports, review, compileResult, tasks, null, List.of());
+        this(run, workerReports, review, compileResult, tasks, null, List.of(), false);
+    }
+
+    /** Constructor with test data but no afterImprovements flag. */
+    public ReportInput(PipelineRun run, List<WorkerReport> workerReports,
+                       ReviewReportV2 review, CompileResult compileResult,
+                       List<AgentTask> tasks, TestExecutionSummary testSummary,
+                       List<TestResult> testResults) {
+        this(run, workerReports, review, compileResult, tasks, testSummary, testResults, false);
     }
 }

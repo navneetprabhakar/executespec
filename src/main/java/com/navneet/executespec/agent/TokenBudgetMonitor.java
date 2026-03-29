@@ -102,15 +102,21 @@ public class TokenBudgetMonitor {
                                               int ownedFilesCount, String taskId) {
         String c = originalComplexity != null ? originalComplexity.toUpperCase() : "MEDIUM";
 
-        // STATIC_HTML / NODE_FRONTEND: cap at MEDIUM (12288 output tokens).
-        // LOW (8192) is too small for full-page HTML+CSS+JS writes — causes truncation loops.
+        // STATIC_HTML / NODE_FRONTEND: clamp to MEDIUM (8192 output tokens).
+        // LOW (4096) is too small for full-page HTML/CSS/JS writes — causes truncation loops.
+        // HIGH (12288) is unnecessary since tasks are single-file.
         if ("STATIC_HTML".equalsIgnoreCase(projectType) || "NODE_FRONTEND".equalsIgnoreCase(projectType)) {
+            if ("LOW".equals(c)) {
+                log.info("Complexity override: task {} upgraded LOW → MEDIUM ({} project)",
+                        taskId, projectType);
+                return "MEDIUM";
+            }
             if ("HIGH".equals(c)) {
                 log.info("Complexity override: task {} downgraded HIGH → MEDIUM ({} project)",
                         taskId, projectType);
                 return "MEDIUM";
             }
-            return c; // keep LOW or MEDIUM as-is
+            return c; // already MEDIUM
         }
 
         // Tasks with ≤2 owned files are almost never HIGH.
@@ -130,12 +136,14 @@ public class TokenBudgetMonitor {
      */
     public int maxOutputTokens(String model, String complexity) {
         // Fixed ceilings — decoupled from model max output to cap latency.
-        // 16K tokens ≈ 400-500 lines of code, ~2.5min at 100 tok/s.
-        // If a task genuinely needs more, WorkerAgent auto-continues on truncation.
+        // Lower ceilings force the model to iterate (one file per response) rather than
+        // producing one massive response that gets truncated and loses writeFile calls.
+        // 8K tokens ≈ 200-250 lines of code, ~80s at 100 tok/s.
+        // If a task genuinely needs more, WorkerAgent auto-continues on truncation (max 2).
         return switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
             case "LOW"    -> 4_096;
-            case "MEDIUM" -> 12_288;
-            case "HIGH"   -> 16_384;
+            case "MEDIUM" -> 8_192;
+            case "HIGH"   -> 12_288;
             default       -> 8_192;
         };
     }

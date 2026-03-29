@@ -70,6 +70,7 @@ public class ValidationReportService {
                 .inputTokens(llmResult.inputTokens())
                 .outputTokens(llmResult.outputTokens())
                 .generationTimeMs(System.currentTimeMillis() - startTime)
+                .generatedAfterImprovements(input.generatedAfterImprovements())
                 .build();
 
             // Accumulate report tokens into run total for billing accuracy
@@ -341,7 +342,8 @@ public class ValidationReportService {
             entity.getShareToken() != null,
             entity.getShareToken() != null
                 ? "/reports/shared/" + entity.getShareToken()
-                : null
+                : null,
+            entity.isGeneratedAfterImprovements()
         );
     }
 
