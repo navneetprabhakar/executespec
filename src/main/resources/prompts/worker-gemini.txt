@@ -166,17 +166,9 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
        - Element IDs referenced in JS match the actual IDs in HTML
      This is the #1 source of bugs in generated frontend code.
 
-     CSS: write a polished, modern stylesheet. NEVER leave browser defaults.
-     - Define ALL colors as CSS custom properties in :root (see FRONTEND STYLING RULES if injected).
-     - Default to DARK THEME unless user says otherwise: near-black backgrounds (#0a0a0f),
-       light text (#f0f0f5), violet accent (#7c5cfc), subtle borders (rgba(255,255,255,0.08)).
-     - Use Inter / system-ui font stack. Base 15px, line-height 1.6.
-     - Cards: rounded corners (8px), subtle shadow, surface background (#12121a).
-     - Buttons: solid accent bg, white text, 6px radius, hover brightens.
-     - Inputs: dark surface bg, 1px border, matching text color, 10px 14px padding.
-     - Layout: Flexbox or CSS Grid. Max-width 1200px centered. Responsive with @media.
-     - Reset: box-sizing border-box, margin/padding 0 on *.
-     - Smooth transitions (0.2s ease) on interactive elements.
+     CSS: If FRONTEND STYLING RULES are injected below your task assignment,
+     follow them EXACTLY — they contain detailed visual design specifications.
+     Otherwise: write a polished, modern dark-mode stylesheet. NEVER leave browser defaults.
      The result must look like a shipped product, not a tutorial demo.
 
    Full-stack (backend/ + frontend/):
