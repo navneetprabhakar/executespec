@@ -20,7 +20,7 @@ public class PlanVersion {
     @Column(name = "plan_json", columnDefinition = "TEXT", nullable = false)
     private String planJson;
 
-    @Column(nullable = false, length = 30)
+    @Column(nullable = false, length = 64)
     private String source;
 
     @Column(name = "created_by")
