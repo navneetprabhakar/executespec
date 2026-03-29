@@ -79,6 +79,9 @@ public class WorkerAgent {
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
 
+    @Value("classpath:prompts/css-styling.txt")
+    private Resource cssStylingPrompt;
+
     /**
      * Parsed representation of a single tool call extracted from assistant text.
      */
@@ -1318,14 +1321,21 @@ public class WorkerAgent {
     }
 
     /**
-     * Detects if a task is frontend-related and returns the design system constraint
-     * block from the run's ui_style config. Returns null for non-frontend tasks.
+     * Detects if a task is frontend-related and returns styling guidance.
+     * Combines the CSS styling prompt (visual craftsmanship rules) with the
+     * run-specific design system constraint block from ui_style config.
+     * Returns null for non-frontend tasks.
      */
     private String buildFrontendBlock(TaskDefinition task, String runId) {
+        // Check owned files for frontend extensions
+        boolean hasUiFiles = task.getOwnedFiles() != null && task.getOwnedFiles().stream()
+                .anyMatch(f -> f.endsWith(".html") || f.endsWith(".css") || f.endsWith(".jsx")
+                        || f.endsWith(".tsx") || f.endsWith(".vue") || f.endsWith(".svelte"));
+
         // Heuristic: check title and objective for frontend keywords
         String probe = ((task.getTitle() != null ? task.getTitle() : "")
                 + " " + (task.getObjective() != null ? task.getObjective() : "")).toLowerCase();
-        boolean isFrontend = probe.contains("frontend") || probe.contains("ui component")
+        boolean isFrontendKeyword = probe.contains("frontend") || probe.contains("ui component")
                 || probe.contains("react") || probe.contains("vue") || probe.contains("angular")
                 || probe.contains("page") || probe.contains("form") || probe.contains("layout")
                 || probe.contains("dashboard") || probe.contains("login") || probe.contains("register")
@@ -1334,17 +1344,34 @@ public class WorkerAgent {
                 || probe.contains("tailwind") || probe.contains("shadcn") || probe.contains("html")
                 || probe.contains("landing") || probe.contains("modal") || probe.contains("table view")
                 || probe.contains("next.js") || probe.contains("nextjs");
-        if (!isFrontend) return null;
 
+        if (!hasUiFiles && !isFrontendKeyword) return null;
+
+        var sb = new StringBuilder();
+
+        // Load CSS styling prompt (visual craftsmanship rules)
+        try {
+            String cssRules = cssStylingPrompt.getContentAsString(StandardCharsets.UTF_8);
+            sb.append("\n").append(cssRules);
+        } catch (Exception e) {
+            log.debug("Could not load css-styling.txt: {}", e.getMessage());
+        }
+
+        // Append run-specific design system constraints (theme, shadcn/daisy, etc.)
         try {
             var run = stateStore.findRun(runId).orElse(null);
-            if (run == null) return null;
-            String uiStyleJson = run.getUiStyle();
-            return uiStyleResolver.buildFrontendConstraintBlock(uiStyleJson);
+            if (run != null) {
+                String uiStyleJson = run.getUiStyle();
+                String constraintBlock = uiStyleResolver.buildFrontendConstraintBlock(uiStyleJson);
+                if (constraintBlock != null) {
+                    sb.append("\n").append(constraintBlock);
+                }
+            }
         } catch (Exception e) {
             log.debug("Could not load ui_style for run {}: {}", runId, e.getMessage());
-            return null;
         }
+
+        return sb.isEmpty() ? null : sb.toString();
     }
 
     private String buildProgressCheckpoint(TaskDefinition task, long elapsedMinutes, int totalMinutes) {
