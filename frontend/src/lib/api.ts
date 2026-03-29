@@ -347,11 +347,21 @@ export const createRun = (body: {
   skipApproval?: boolean;
   autoMerge?: boolean;
   modelName?: string;
+  aiProvider?: string;
   projectId?: string;
   repoMode?: string | null;
   repoUrl?: string | null;
 }) =>
   req<{ runId: string }>('/runs', { method: 'POST', body: JSON.stringify(body) });
+
+// ── Model matrix ────────────────────────────────────────────────────────────
+
+export interface ModelEntry { id: string; tier: string; label: string; }
+export interface ProviderEntry { id: string; label: string; models: ModelEntry[]; }
+export interface AvailableModelsResponse { providers: ProviderEntry[]; }
+
+export const getAvailableModels = () =>
+  req<AvailableModelsResponse>('/models/available');
 
 export const approveRun = (id: string, approved: boolean) =>
   req<void>(`/runs/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved }) });

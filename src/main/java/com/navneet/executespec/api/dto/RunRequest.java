@@ -23,6 +23,8 @@ public record RunRequest(
     String executionMode,
     /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
     String modelName,
+    /** Optional AI provider override for this run (ANTHROPIC, GOOGLE, OPENAI). Overrides project default. */
+    String aiProvider,
     /** Optional project ID to associate this run with (org members only). */
     String projectId
 ) {}

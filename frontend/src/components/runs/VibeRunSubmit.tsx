@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
+import ProviderModelSelector, { getPersistedSelection } from '@/components/runs/ProviderModelSelector';
 
 interface Props {
   onClose: () => void;
@@ -17,6 +18,9 @@ export default function VibeRunSubmit({ onClose }: Props) {
   const [goal, setGoal] = useState(pendingGoal ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const persisted = getPersistedSelection();
+  const [provider, setProvider] = useState(persisted.provider);
+  const [model, setModel] = useState(persisted.model);
 
   const handleSubmit = async () => {
     const trimmed = goal.trim();
@@ -29,6 +33,8 @@ export default function VibeRunSubmit({ onClose }: Props) {
         executionMode: 'PRODUCTION',
         skipApproval: true,
         autoMerge: true,
+        ...(provider ? { aiProvider: provider } : {}),
+        ...(model ? { modelName: model } : {}),
         ...(projectFilter ? { projectId: projectFilter } : {}),
       });
       setPendingGoal(null);
@@ -60,6 +66,13 @@ export default function VibeRunSubmit({ onClose }: Props) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit();
           }}
+        />
+
+        <ProviderModelSelector
+          provider={provider}
+          model={model}
+          onProviderChange={setProvider}
+          onModelChange={setModel}
         />
 
         {error && (
