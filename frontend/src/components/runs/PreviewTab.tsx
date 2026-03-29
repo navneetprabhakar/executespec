@@ -362,7 +362,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                   {dbInfo.emoji} {dbInfo.label} database auto-configured
                 </p>
               )}
-              <p className="text-xs text-zinc-600">This preview will automatically shut down in 5 minutes</p>
+              <p className="text-xs text-zinc-600">This preview will automatically shut down in 10 minutes</p>
             </div>
           </div>
         ) : (isFailed || isTimedOut) ? (
@@ -377,7 +377,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                 'text-sm font-medium',
                 isTimedOut ? 'text-accent-amber' : 'text-accent-rose'
               )}>
-                {isTimedOut ? 'Preview startup timed out (5 minutes)' : 'Preview failed to start'}
+                {isTimedOut ? 'Preview startup timed out (10 minutes)' : 'Preview failed to start'}
               </p>
               <p className={cn(
                 'text-xs mt-1 break-all whitespace-pre-wrap',

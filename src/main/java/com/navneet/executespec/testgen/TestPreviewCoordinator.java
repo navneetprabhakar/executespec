@@ -2,6 +2,7 @@ package com.navneet.executespec.testgen;
 
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.deployment.preview.PreviewService;
+import com.navneet.executespec.deployment.preview.PreviewStatus;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -83,9 +84,26 @@ public class TestPreviewCoordinator {
      * avoiding the race condition where preview expires before tests finish.
      */
     private void startPreviewForTests(String runId) {
+        // Check if a preview is already running (auto-started by PipelineHarness after COMPLETE).
+        // If so, reuse it instead of starting a duplicate.
+        var existingSession = previewService.getStatus(runId);
+        if (existingSession != null && existingSession.status() == PreviewStatus.RUNNING) {
+            log.info("[TestCoord] Reusing existing preview for run {} at {}", runId, existingSession.url());
+            onPreviewReady(runId, existingSession.url());
+            return;
+        }
+
         var snapshot = ContextSnapshotFactory.builder().build().captureAll();
         Thread.ofVirtual().name("test-preview-" + runId).start(snapshot.wrap(() -> {
             try {
+                // Re-check after thread start (preview may have become ready in the meantime)
+                var session = previewService.getStatus(runId);
+                if (session != null && session.status() == PreviewStatus.RUNNING) {
+                    log.info("[TestCoord] Preview became ready for run {} at {} (reusing)", runId, session.url());
+                    onPreviewReady(runId, session.url());
+                    return;
+                }
+
                 var run = stateStore.findRun(runId).orElse(null);
                 if (run == null) {
                     log.warn("[TestCoord] No run found for {} — skipping preview", runId);
