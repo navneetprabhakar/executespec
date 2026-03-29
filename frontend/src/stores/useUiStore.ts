@@ -57,7 +57,9 @@ export const useUiStore = create<UiStore>((set) => ({
   setCopilotMaximized: (v) => set({ copilotMaximized: v }),
   setViewMode: (mode) => {
     localStorage.setItem('es:viewMode', mode);
-    set({ viewMode: mode });
+    // Reset activeTab to the default for the new view mode
+    // VIBE view starts on 'code', PRO view starts on 'overview'
+    set({ viewMode: mode, activeTab: mode === 'vibe' ? 'code' : 'overview' });
   },
 
   addToast: (t) => {

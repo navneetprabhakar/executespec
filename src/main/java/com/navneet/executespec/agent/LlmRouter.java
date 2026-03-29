@@ -424,7 +424,15 @@ public class LlmRouter {
             default -> prompt;
         };
 
-        return resolveModel(provider, keys).call(augmented);
+        ChatResponse response = resolveModel(provider, keys).call(augmented);
+
+        // Guard against null result — Gemini can return a ChatResponse with getResult() == null
+        // (e.g., safety filter, empty response). Treat as a provider error to trigger fallback.
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
+            throw new ProviderUnavailableException(
+                provider + " returned an empty/null response (model=" + model + ") — possible safety filter or empty generation");
+        }
+        return response;
     }
 
     /**

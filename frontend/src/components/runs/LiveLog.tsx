@@ -5,6 +5,8 @@ import {
   CheckCircle2, XCircle, Clock, Zap, GitCommit,
   FilePlus2, FileEdit, Terminal, PauseCircle, PlayCircle,
   DollarSign, RotateCcw, Rocket, AlertTriangle,
+  Search, Bug, Wrench, FlaskConical, Eye, MessageSquare,
+  ArrowUpCircle, Globe, FileCode, Shield,
 } from 'lucide-react';
 
 // ── Milestone detection ───────────────────────────────────────────────────────
@@ -12,8 +14,24 @@ import {
 const MILESTONE_TYPES = new Set([
   'RUN_STATUS', 'TASK_STATUS', 'GATE_OPENED', 'GATE_RESOLVED',
   'COMPLETE', 'COST_UPDATE', 'QUEUED', 'RECOVERY_ATTEMPTED',
-  'RUN_RESTARTED', 'DEPLOY_STARTED', 'DEPLOY_BUILDING', 'DEPLOY_PUSHING',
-  'DEPLOY_LIVE', 'DEPLOY_FAILED',
+  'RUN_RESTARTED',
+  // Deploy events
+  'DEPLOY_STARTED', 'DEPLOY_BUILDING', 'DEPLOY_PUSHING', 'DEPLOY_LIVE', 'DEPLOY_FAILED',
+  // Deploy Engine events (user's GCP)
+  'ENGINE_DEPLOY_STARTED', 'ENGINE_PHASE', 'ENGINE_BUILDING', 'ENGINE_DEPLOYING',
+  'ENGINE_DEPLOY_LIVE', 'ENGINE_DEPLOY_FAILED',
+  // Review V2 events
+  'REVIEW_STARTED', 'REVIEW_ISSUE_FOUND', 'REVIEW_AUTO_FIX_STARTED',
+  'REVIEW_AUTO_FIX_RESULT', 'REVIEW_COMPLETE',
+  // Test gen pipeline events
+  'TEST_GEN_STARTED', 'TEST_PLANNING_STARTED', 'TEST_PLANNING_COMPLETED',
+  'TEST_GENERATION_STARTED', 'TEST_COMPILATION_STARTED', 'TEST_COMPILATION_PASSED',
+  'TEST_COMPILATION_FAILED', 'TEST_EXECUTION_STARTED', 'TEST_EXECUTION_SKIPPED',
+  'TEST_REPORT_READY', 'TEST_PIPELINE_FAILED',
+  // Context & validation events
+  'CONTEXT_EXTRACTED', 'CLARIFICATION_NEEDED', 'CLARIFICATION_RESOLVED',
+  'MODEL_ESCALATED', 'API_SPEC_READY', 'PREVIEW_READY',
+  'VALIDATION_STARTED', 'VALIDATION_PASSED', 'VALIDATION_FAILED',
 ]);
 
 type FileOp = { kind: 'write' | 'edit' | 'commit' | 'command'; path?: string };
@@ -99,9 +117,23 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   // Run status
   else if (type === 'RUN_STATUS') {
     const status = String(data.status ?? data.payload ?? '');
-    icon = <Rocket className="h-3.5 w-3.5" />;
-    text = `Run → ${status}`;
-    colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+    if (status === 'PARTIAL') {
+      icon = <AlertTriangle className="h-3.5 w-3.5" />;
+      text = 'Run partial — some tasks need manual retry';
+      colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
+    } else if (status === 'FAILED') {
+      icon = <XCircle className="h-3.5 w-3.5" />;
+      text = 'Run failed — check tasks for retry';
+      colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+    } else if (status === 'COMPLETE') {
+      icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+      text = 'Run completed successfully';
+      colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+    } else {
+      icon = <Rocket className="h-3.5 w-3.5" />;
+      text = `Run → ${status}`;
+      colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+    }
   }
 
   // Gates
@@ -143,18 +175,158 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   }
 
   // Deploy events
-  else if (type === 'DEPLOY_STARTED') {
+  else if (type === 'DEPLOY_STARTED' || type === 'ENGINE_DEPLOY_STARTED') {
     icon = <Rocket className="h-3.5 w-3.5" />;
     text = 'Deployment started';
     colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
-  } else if (type === 'DEPLOY_LIVE') {
+  } else if (type === 'DEPLOY_BUILDING' || type === 'ENGINE_BUILDING') {
+    icon = <Rocket className="h-3.5 w-3.5" />;
+    text = 'Building container image…';
+    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+  } else if (type === 'DEPLOY_PUSHING' || type === 'ENGINE_DEPLOYING') {
+    icon = <Rocket className="h-3.5 w-3.5" />;
+    text = type.includes('PUSHING') ? 'Pushing image…' : 'Deploying service…';
+    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+  } else if (type === 'DEPLOY_LIVE' || type === 'ENGINE_DEPLOY_LIVE') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
-    text = `Live at ${String(data.serviceUrl ?? data.payload ?? '')}`;
+    const url = String(data.payload ?? '').split('|').pop();
+    text = `Live at ${url}`;
     colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
-  } else if (type === 'DEPLOY_FAILED') {
+  } else if (type === 'DEPLOY_FAILED' || type === 'ENGINE_DEPLOY_FAILED') {
     icon = <XCircle className="h-3.5 w-3.5" />;
-    text = `Deploy failed: ${String(data.error ?? data.payload ?? '')}`;
+    const err = String(data.payload ?? '').split('|').pop();
+    text = `Deploy failed: ${err}`;
     colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+  } else if (type === 'ENGINE_PHASE') {
+    icon = <Rocket className="h-3.5 w-3.5" />;
+    const parts = String(data.payload ?? '').split('|');
+    text = `Deploy: ${parts[1] ?? parts[0] ?? ''}`;
+    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+  }
+
+  // ── Review V2 events ────────────────────────────────────────────────────
+  else if (type === 'REVIEW_STARTED') {
+    icon = <Eye className="h-3.5 w-3.5" />;
+    text = `Code review started (${String(data.payload ?? '')})`;
+    colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+  } else if (type === 'REVIEW_ISSUE_FOUND') {
+    const parts = String(data.payload ?? '').split('|');
+    const severity = parts[1] ?? 'UNKNOWN';
+    const desc = parts[2] ?? parts[0] ?? '';
+    const isCritical = severity === 'CRITICAL';
+    icon = isCritical ? <Bug className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />;
+    text = `Issue: ${desc}`;
+    colorClass = isCritical
+      ? 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]'
+      : 'border-accent-amber/40 text-accent-amber/80 bg-accent-amber/[0.04]';
+  } else if (type === 'REVIEW_AUTO_FIX_STARTED') {
+    icon = <Wrench className="h-3.5 w-3.5" />;
+    text = `Auto-fixing ${String(data.payload ?? '')}`;
+    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+  } else if (type === 'REVIEW_AUTO_FIX_RESULT') {
+    const parts = String(data.payload ?? '').split('|');
+    const success = parts[1] === 'PASS';
+    icon = success ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />;
+    text = `Auto-fix ${parts[0]}: ${success ? 'succeeded' : 'failed'}`;
+    colorClass = success
+      ? 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]'
+      : 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]';
+  } else if (type === 'REVIEW_COMPLETE') {
+    const parts = String(data.payload ?? '').split('|');
+    const verdict = parts[0] ?? '';
+    const isGood = verdict === 'APPROVED' || verdict === 'APPROVED_WITH_NOTES';
+    icon = isGood ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />;
+    text = `Review: ${verdict.replace(/_/g, ' ').toLowerCase()}`;
+    colorClass = isGood
+      ? 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.06]'
+      : 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+  }
+
+  // ── Test generation pipeline events ─────────────────────────────────────
+  else if (type === 'TEST_GEN_STARTED') {
+    icon = <FlaskConical className="h-3.5 w-3.5" />;
+    text = 'Test generation started';
+    colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+  } else if (type === 'TEST_PLANNING_STARTED') {
+    icon = <FlaskConical className="h-3.5 w-3.5" />;
+    text = 'Planning test strategy…';
+    colorClass = 'border-accent-violet/40 text-accent-violet/80 bg-accent-violet/[0.04]';
+  } else if (type === 'TEST_PLANNING_COMPLETED') {
+    icon = <FlaskConical className="h-3.5 w-3.5" />;
+    text = `Test plan ready: ${String(data.payload ?? '?')} test tasks`;
+    colorClass = 'border-accent-violet/40 text-accent-violet/80 bg-accent-violet/[0.04]';
+  } else if (type === 'TEST_GENERATION_STARTED') {
+    icon = <FileCode className="h-3.5 w-3.5" />;
+    text = `Generating ${String(data.payload ?? '?')} test suites…`;
+    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+  } else if (type === 'TEST_COMPILATION_STARTED') {
+    icon = <FlaskConical className="h-3.5 w-3.5" />;
+    text = 'Compiling tests…';
+    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+  } else if (type === 'TEST_COMPILATION_PASSED') {
+    icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+    text = 'Tests compiled successfully';
+    colorClass = 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]';
+  } else if (type === 'TEST_COMPILATION_FAILED') {
+    icon = <XCircle className="h-3.5 w-3.5" />;
+    text = `Test compilation failed: ${String(data.payload ?? '').slice(0, 100)}`;
+    colorClass = 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]';
+  } else if (type === 'TEST_EXECUTION_STARTED') {
+    icon = <FlaskConical className="h-3.5 w-3.5" />;
+    text = 'Running tests against preview…';
+    colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
+  } else if (type === 'TEST_EXECUTION_SKIPPED') {
+    icon = <AlertTriangle className="h-3.5 w-3.5" />;
+    text = `Test execution skipped: ${String(data.payload ?? '')}`;
+    colorClass = 'border-accent-amber/40 text-accent-amber/80 bg-accent-amber/[0.04]';
+  } else if (type === 'TEST_REPORT_READY') {
+    icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+    text = 'Test report ready';
+    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+  } else if (type === 'TEST_PIPELINE_FAILED') {
+    icon = <XCircle className="h-3.5 w-3.5" />;
+    text = `Test pipeline failed: ${String(data.payload ?? '').slice(0, 100)}`;
+    colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+  }
+
+  // ── Context & validation events ─────────────────────────────────────────
+  else if (type === 'CONTEXT_EXTRACTED') {
+    icon = <Search className="h-3.5 w-3.5" />;
+    text = `Context: ${String(data.payload ?? '').slice(0, 120)}`;
+    colorClass = 'border-zinc-600 text-zinc-300 bg-white/[0.03]';
+  } else if (type === 'CLARIFICATION_NEEDED') {
+    icon = <MessageSquare className="h-3.5 w-3.5" />;
+    text = 'Clarification needed from user';
+    colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
+  } else if (type === 'CLARIFICATION_RESOLVED') {
+    icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+    text = 'Clarification resolved';
+    colorClass = 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]';
+  } else if (type === 'MODEL_ESCALATED') {
+    const parts = String(data.payload ?? '').split('|');
+    icon = <ArrowUpCircle className="h-3.5 w-3.5" />;
+    text = `Model escalated: ${parts[0]} → ${parts[1] ?? ''}`;
+    colorClass = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
+  } else if (type === 'API_SPEC_READY') {
+    icon = <FileCode className="h-3.5 w-3.5" />;
+    text = 'API spec generated';
+    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+  } else if (type === 'PREVIEW_READY') {
+    icon = <Globe className="h-3.5 w-3.5" />;
+    text = 'Preview ready';
+    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+  } else if (type === 'VALIDATION_STARTED') {
+    icon = <Shield className="h-3.5 w-3.5" />;
+    text = `Validating ${String(data.payload ?? '')}`;
+    colorClass = 'border-zinc-600 text-zinc-400 bg-white/[0.03]';
+  } else if (type === 'VALIDATION_PASSED') {
+    icon = <CheckCircle2 className="h-3.5 w-3.5" />;
+    text = 'Validation passed';
+    colorClass = 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]';
+  } else if (type === 'VALIDATION_FAILED') {
+    icon = <XCircle className="h-3.5 w-3.5" />;
+    text = `Validation failed: ${String(data.payload ?? '').slice(0, 100)}`;
+    colorClass = 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]';
   }
 
   if (!text) return null;

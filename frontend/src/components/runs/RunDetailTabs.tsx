@@ -108,21 +108,24 @@ export default function RunDetailTabs() {
 
   if (!activeRun) return null;
 
-  /** Chat & Preview tabs are only shown for terminal (COMPLETE / PARTIAL) runs. */
-  const showTerminalTabs = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL';
+  const isTerminal = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL' || activeRun.status === 'FAILED';
+  const isActive = activeRun.status === 'WORKING' || activeRun.status === 'REVIEWING' || activeRun.status === 'COMPILING' || activeRun.status === 'MERGING';
+  /** Preview content is ready when the pipeline is active or finished. */
+  const previewReady = isTerminal || isActive;
+  /** Chat is only functional after the run finishes (success or failed). */
+  const chatReady = isTerminal;
   const topLevelPermissions = useTierPermissions();
 
   const VIBE_TABS = [
     { value: 'code', label: 'Code' },
-    ...(showTerminalTabs ? [{ value: 'preview', label: 'Preview' }] : []),
+    { value: 'preview', label: 'Preview' },
+    { value: 'chat', label: 'Chat' },
   ];
 
   const TABS = isVibe ? VIBE_TABS : [
     ...BASE_TABS.filter(t => t.value !== 'log' || topLevelPermissions?.canViewLiveLog !== false),
-    ...(showTerminalTabs ? [
-      { value: 'preview', label: 'Preview' },
-      { value: 'chat', label: 'Chat' },
-    ] : []),
+    { value: 'preview', label: 'Preview' },
+    { value: 'chat', label: 'Chat' },
   ];
 
   return (
@@ -207,17 +210,27 @@ export default function RunDetailTabs() {
           )}
         </Tabs.Content>
 
-        {showTerminalTabs && (
-          <Tabs.Content value="preview" className="h-full overflow-hidden">
+        <Tabs.Content value="preview" className="h-full overflow-hidden">
+          {previewReady ? (
             <PreviewTab runId={activeRun.runId} />
-          </Tabs.Content>
-        )}
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-zinc-500 gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-zinc-600" />
+              <p className="text-sm">Preview will be available once the run starts generating code.</p>
+            </div>
+          )}
+        </Tabs.Content>
 
-        {showTerminalTabs && (
-          <Tabs.Content value="chat" className="h-full overflow-hidden">
+        <Tabs.Content value="chat" className="h-full overflow-hidden">
+          {chatReady ? (
             <RunConversation runId={activeRun.runId} />
-          </Tabs.Content>
-        )}
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-zinc-500 gap-2">
+              <MessageSquare className="h-5 w-5 text-zinc-600" />
+              <p className="text-sm">Chat will be available once the run finishes.</p>
+            </div>
+          )}
+        </Tabs.Content>
       </div>
     </Tabs.Root>
   );

@@ -403,8 +403,9 @@ public class ReviewerAgentV2 {
                                     ReviewIssue issue, Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
 
-        // Use PLANNING tier for fix attempts (no escalation — same tier for both)
-        ResolvedModel fixModel = modelResolver.resolve("ReviewerAgentV2", run.getAiProviderEnum());
+        // Use WORKHORSE tier (Sonnet) for fix workers — single-file fixes don't need Opus.
+        // Review/inspection stays on PLANNING tier; only the fix execution is downgraded.
+        ResolvedModel fixModel = modelResolver.resolve("WorkerAgent", run.getAiProviderEnum());
 
         for (int attempt = 0; attempt < MAX_FIX_ATTEMPTS; attempt++) {
             try {
@@ -416,7 +417,18 @@ public class ReviewerAgentV2 {
                 // Execute using WorkerAgent's standard tool-use loop
                 WorkerReport fixReport = workerAgent.execute(fixTask, runId);
 
-                // Validate the fix
+                // The fix worker runs in a worktree on branch agent/<prefix>/<fixTaskId>.
+                // Merge the fix branch back to main so the fix is visible in the workspace.
+                String fixBranchName = "agent/" + runId.substring(0, 8) + "/" + fixTask.getTaskId();
+                String mergeResult = gitTool.mergeBranchToMain(runId, fixBranchName);
+                if (mergeResult != null && mergeResult.startsWith("ERROR")) {
+                    log.warn("Fix branch merge failed for {}: {}", issue.getId(), mergeResult);
+                    if (attempt < MAX_FIX_ATTEMPTS - 1) continue;
+                    return false;
+                }
+                log.info("Merged fix branch {} to main for issue {}", fixBranchName, issue.getId());
+
+                // Validate the fix (now on main after merge)
                 Language lang = detectLanguageForFile(issue.getFile());
                 if (lang != null) {
                     ValidationResult validationResult = codeValidator.validateFile(
@@ -438,7 +450,7 @@ public class ReviewerAgentV2 {
                     }
                 }
 
-                // Commit the fix
+                // Commit any remaining dirty state (e.g. merge artifacts)
                 gitTool.commitIfDirty(runId, "Auto-fix: " + issue.getId() + " — " + issue.getDescription());
                 return true;
 
@@ -644,7 +656,9 @@ public class ReviewerAgentV2 {
 
     private ReviewVerdict determineVerdict(List<ReviewIssue> issues, boolean readmeUpdated,
                                             int criticalCount, int autoFixSucceeded) {
-        if (!readmeUpdated) return ReviewVerdict.REJECTED;
+        // README missing is tracked as a CRITICAL issue (REV-README) and goes through
+        // auto-fix like any other issue. No longer a hard rejection gate — working code
+        // with a missing README should not be REJECTED.
 
         // Check for unfixed critical issues
         long unfixedCritical = issues.stream()
@@ -674,7 +688,7 @@ public class ReviewerAgentV2 {
             case NEEDS_FIXES ->
                     String.format("Code review found %d critical issue(s). %d auto-fixed. Remaining need manual attention.", critical, autoFixed);
             case REJECTED ->
-                    String.format("Code review rejected. %d critical issues found — exceeds auto-fix threshold or README missing.", critical);
+                    String.format("Code review rejected. %d critical issue(s) could not be resolved.", critical);
         };
     }
 }

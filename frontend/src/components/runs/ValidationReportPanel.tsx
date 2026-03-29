@@ -97,6 +97,11 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
         }
         <Shield className="h-4 w-4 text-emerald-400 flex-shrink-0" />
         <span className="text-sm font-medium text-zinc-200">Validation Report</span>
+        {report.generatedAfterImprovements && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border bg-accent-violet/20 text-accent-violet border-accent-violet/30">
+            Re-validated after edits
+          </span>
+        )}
         <span className="text-xs text-zinc-500 ml-1">{summaryParts.join(' · ')}</span>
         <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
           <button

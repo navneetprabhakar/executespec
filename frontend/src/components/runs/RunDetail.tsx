@@ -459,12 +459,14 @@ export default function RunDetail() {
             </div>
           </div>
 
-          {/* Reports section — scrollable on mobile to preserve tab space */}
-          <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} />
-
-          {/* Tabs */}
-          <div className="flex-1 overflow-hidden">
-            <RunDetailTabs />
+          {/* Reports + Tabs — single scrollable region */}
+          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+            <div className="flex-shrink-0">
+              <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} />
+            </div>
+            <div className="flex-1 min-h-0">
+              <RunDetailTabs />
+            </div>
           </div>
           </>
           )}

@@ -58,11 +58,13 @@ public class RecoveryProperties {
     // ── Escalation ladder ─────────────────────────────────────────────────────
     private Map<String, String> capableModels = new HashMap<>(Map.of(
         "anthropic", ModelConstants.HAIKU,
+        "google",    ModelConstants.GEMINI_FLASH,
         "openai",    ModelConstants.GPT4O
     ));
 
     private Map<String, String> alternateProvider = new HashMap<>(Map.of(
         "anthropic", "openai",
+        "google",    "anthropic",
         "openai",    "anthropic"
     ));
 

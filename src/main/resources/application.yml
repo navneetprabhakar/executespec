@@ -164,7 +164,6 @@ agent:
   context:
     enabled: true
     # model: uses ModelConstants.HAIKU (Scout: text summarization)
-    provider: anthropic
     run-interval: 1
   optimiser:
     enabled: true
@@ -173,7 +172,6 @@ agent:
     failure-rate-threshold: 0.20
     pattern-min-occurrences: 2
     # model: uses ModelConstants.HAIKU (Scout: pattern analysis)
-    provider: anthropic
   deployment:
     enabled: true
     gcp-project: executespecv1
@@ -206,11 +204,9 @@ agent:
     max-attempts: 3
     timeout-seconds: 300
     # model: uses ModelConstants.HAIKU (compiler error analysis)
-    provider: anthropic
   api-test-suite:
     enabled: true
     # model: uses ModelConstants.HAIKU (OpenAPI spec generation)
-    provider: anthropic
 
   preview:
     enabled: true

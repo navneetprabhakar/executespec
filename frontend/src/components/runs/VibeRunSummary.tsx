@@ -1,5 +1,6 @@
 import { Download, Eye, RotateCcw } from 'lucide-react';
 import type { RunDetail } from '@/lib/api';
+import { downloadWorkspace } from '@/lib/api';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 
@@ -11,9 +12,18 @@ export default function VibeRunSummary({ run }: Props) {
   const retryRun = useRunStore((s) => s.retryRun);
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
   const setActiveTab = useUiStore((s) => s.setActiveTab);
+  const addToast = useUiStore((s) => s.addToast);
 
   const handleViewPreview = () => {
     setActiveTab('preview');
+  };
+
+  const handleDownload = async () => {
+    try {
+      await downloadWorkspace(run.runId);
+    } catch {
+      addToast({ type: 'error', message: 'Download failed' });
+    }
   };
 
   const handleRunAgain = async () => {
@@ -39,13 +49,13 @@ export default function VibeRunSummary({ run }: Props) {
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-2">
-        <a
-          href={`/api/runs/${run.runId}/download`}
+        <button
+          onClick={handleDownload}
           className="flex items-center gap-2 px-4 py-2 rounded-sm border border-[var(--mc-border)] bg-[var(--mc-bg-2)] text-sm text-[var(--mc-text-primary)] hover:bg-[var(--mc-bg-3)] transition-colors"
         >
           <Download className="h-4 w-4" />
           Download Code
-        </a>
+        </button>
         <button
           onClick={handleViewPreview}
           className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"

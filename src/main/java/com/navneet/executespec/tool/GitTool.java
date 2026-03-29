@@ -149,10 +149,41 @@ public class GitTool {
                     }
                 }
             }
+
+            // Symlink node_modules from main workspace to worktree (gitignored, not in git history).
+            // Without this, frontend workers can't run `npm run build` because deps aren't installed.
+            symlinkNodeModules(repoRoot, worktreeDir, taskId);
+
             return worktreeDir.toString();
         } catch (Exception e) {
             log.error("[GitTool] createWorktree failed for '{}': {}", taskId, e.getMessage(), e);
             return repoRoot.toString();
+        }
+    }
+
+    /**
+     * Symlinks node_modules directories from the main workspace into the worktree.
+     * Handles both root-level (Node/React) and frontend/ subdirectory (full-stack) layouts.
+     */
+    private void symlinkNodeModules(Path mainWorkspace, Path worktreeDir, String taskId) {
+        // Root-level node_modules (pure Node/React projects)
+        symlinkIfPresent(mainWorkspace.resolve("node_modules"),
+                worktreeDir.resolve("node_modules"), taskId);
+        // frontend/ subdirectory (full-stack projects)
+        if (java.nio.file.Files.isDirectory(worktreeDir.resolve("frontend"))) {
+            symlinkIfPresent(mainWorkspace.resolve("frontend").resolve("node_modules"),
+                    worktreeDir.resolve("frontend").resolve("node_modules"), taskId);
+        }
+    }
+
+    private void symlinkIfPresent(Path source, Path target, String taskId) {
+        try {
+            if (java.nio.file.Files.isDirectory(source) && !java.nio.file.Files.exists(target)) {
+                java.nio.file.Files.createSymbolicLink(target, source);
+                log.info("[GitTool] Symlinked {} → {} for task {}", target, source, taskId);
+            }
+        } catch (Exception e) {
+            log.warn("[GitTool] Failed to symlink node_modules for task {}: {}", taskId, e.getMessage());
         }
     }
 
