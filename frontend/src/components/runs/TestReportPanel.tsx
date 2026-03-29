@@ -86,6 +86,7 @@ export default function TestReportPanel({ runId, status }: Props) {
         {expanded ? <ChevronDown className="h-4 w-4 text-zinc-500" /> : <ChevronRight className="h-4 w-4 text-zinc-500" />}
         <TestTube2 className="h-4 w-4 text-violet-400" />
         <span className="text-sm font-medium text-zinc-200">Integration Tests</span>
+        <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-accent-violet/15 text-accent-violet border border-accent-violet/25">Beta</span>
         <span className={cn('ml-2 text-sm font-medium', resultColor)}>
           {report.passed}/{report.totalTests} passed
         </span>

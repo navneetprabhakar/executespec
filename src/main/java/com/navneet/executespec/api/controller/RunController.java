@@ -104,6 +104,7 @@ public class RunController {
             Boolean.TRUE.equals(req.skipApproval()),
             Boolean.TRUE.equals(req.autoMerge()),
             req.modelName(),
+            req.aiProvider(),
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
             req.projectId(),
