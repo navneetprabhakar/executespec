@@ -17,8 +17,8 @@ spring:
       timeout: 2000ms
       lettuce:
         pool:
-          max-active: 10
-          min-idle: 2
+          max-active: 50
+          min-idle: 5
 
   datasource:
     url: jdbc:postgresql://localhost:5432/executespec

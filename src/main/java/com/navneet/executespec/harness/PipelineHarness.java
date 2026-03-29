@@ -159,6 +159,13 @@ public class PipelineHarness {
     private final ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<com.navneet.executespec.testgen.model.TestExecutionSummary>>
             testCompletionFutures = new ConcurrentHashMap<>();
 
+    /**
+     * Tracks runs with active background validation (review + test gen + report).
+     * When a run is in this set, the executeRunAsync finally block defers
+     * broadcaster.complete() and runKeyStore.remove() to the background thread.
+     */
+    private final Set<String> backgroundValidationRuns = ConcurrentHashMap.newKeySet();
+
     // ── Async infrastructure ──────────────────────────────────────────────────
 
     /**
@@ -1883,164 +1890,136 @@ public class PipelineHarness {
                 log.warn("Post-merge compile failed for run {}: {}", runId, compileEx.getMessage());
             }
 
-            // ── 4c. Test generation + preview (async, parallel to review) ────
-            // Testgen runs AFTER merge so it generates tests against actual code,
-            // and does not contend with workers for API rate limits.
-            // Prototype mode: skip test generation, auto-start preview.
-            // Production mode: run test gen, preview is manual.
-            if (execMode.isProduction()) {
-                try {
-                    final String planJson = mapper.writeValueAsString(plan);
-                    final String userReq = run.getUserRequest();
-                    testCompletionFutures.put(runId, new CompletableFuture<>());
-                    var snapshot = ContextSnapshotFactory.builder().build().captureAll();
-                    Thread.ofVirtual().name("testgen-" + runId).start(snapshot.wrap(() ->
-                        testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson)
-                    ));
-                    log.info("Run {} — test gen pipeline kicked off (post-merge, preview deferred until tests ready)", runId);
-                    // Preview will be started by TestPreviewCoordinator.onTestsReady()
-                    // to ensure full preview TTL is available for test execution.
-                } catch (Exception e) {
-                    testCompletionFutures.remove(runId);
-                    log.warn("Run {} — failed to start test gen pipeline: {}", runId, e.getMessage());
-                }
-            }
-            if (execMode.isPrototype()) {
-                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
-                autoStartPreview(runId, run);
-
-                // PROTOTYPE: mark complete immediately — skip review/test/report
-                stateStore.markComplete(runId);
-                saveActualCost(runId);
-                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
-                log.info("PROTOTYPE run {} complete — compiled, merged, preview started", runId);
-                eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
-
-                // GitHub push (non-blocking)
-                try {
-                    PipelineRun completedRun = stateStore.findRun(runId).orElse(run);
-                    pushToGitHubIfConfigured(completedRun);
-                } catch (Exception pushEx) {
-                    log.warn("GitHub push failed for PROTOTYPE run {} (non-fatal): {}", runId, pushEx.getMessage());
-                }
-                return;
-            }
-
             // ══════════════════════════════════════════════════════════════════
-            // ── 5. REVIEW MERGED CODE (Production mode only) ─────────────────
+            // ── 5. MARK COMPLETE + AUTO-START PREVIEW ────────────────────────
             // ══════════════════════════════════════════════════════════════════
-            ReviewReportV2 review = null;
+            // Both PROTOTYPE and PRODUCTION: mark complete immediately after
+            // compile+merge. User gets preview fast; review/tests run in background.
             List<WorkerReport> currentReports = new ArrayList<>(reports);
             PipelineRun currentRun = stateStore.findRun(runId).orElse(run);
 
-            if (execMode.isProduction()) {
-                // Reviewer inspects the merged result (all tasks combined on main branch).
-                // Auto-fix is built into V2: FAST tier first, escalates to CAPABLE on retry.
-                Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
-                    .lowCardinalityKeyValue("run.id", runId)
-                    .start();
-                try (Observation.Scope reviewScope = reviewObs.openScope()) {
-                    stateStore.markReviewing(runId);
-                    broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
-                    var providers = availableProviderResolver.resolve(runId);
-                    review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
-                            currentRun.getUserRequest(), providers);
-                    stateStore.saveReviewV2(runId, review);
-
-                    if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
-                            || review.getVerdict() == ReviewVerdict.REJECTED) {
-                        broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                            "⚠️ Reviewer found issues: " + review.getSummary()));
-                    } else {
-                        broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                            "✅ Review passed: " + review.getSummary()));
-                    }
-                } catch (Exception e) {
-                    reviewObs.error(e);
-                    throw e;
-                } finally {
-                    reviewObs.stop();
-                }
-                Instant reviewEnd = Instant.now();
-                Timer.builder(HANDOVER_DURATION).tag("from_phase", "merge").tag("to_phase", "review")
-                        .register(meterRegistry).record(java.time.Duration.between(mergeEnd, reviewEnd));
-            } else {
-                log.info("Run {} — Prototype mode: reviewer skipped", runId);
-            }
-
-            // ══════════════════════════════════════════════════════════════════
-            // ── 6. VALIDATION REPORT + TEST REPORT (non-fatal) ───────────────
-            // ══════════════════════════════════════════════════════════════════
-            // Cancel pending test execution if preview never started — releases
-            // the CompletableFuture immediately instead of blocking 10 min.
-            testPreviewCoordinator.cancelIfPending(runId);
-
-            // Use post-merge compile result for the report (reflects final state).
-            // Prototype mode: skip validation report.
-            if (execMode.isProduction()) {
-                try {
-                    generateValidationReport(runId, currentRun, currentReports, review,
-                            postMergeCompile != null ? postMergeCompile : mainCompileResult);
-                } catch (Exception reportEx) {
-                    log.warn("Validation report generation failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
-                    broadcaster.emit(runId, RunEvent.log(runId, "report",
-                        "⚠️ Report generation failed — completing run without report"));
-                }
-            }
-
-            // ══════════════════════════════════════════════════════════════════
-            // ── 7. RE-VALIDATE after auto-fix ────────────────────────────────
-            // ══════════════════════════════════════════════════════════════════
-            // ReviewerV2 auto-fix commits are already on the main branch.
-            // Run a final compile-and-fix to confirm everything still builds.
-            boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
-            if (fixesApplied) {
-                broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                    "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
-                try {
-                    CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
-                    if (revalidation.passed() || revalidation.skipped()) {
-                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
-                            "✅ Re-validation passed — all fixes confirmed"));
-                    } else {
-                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
-                            "⚠️ Re-validation found issues: " + revalidation.errorSummary()
-                            + " — completing anyway (non-blocking)"));
-                    }
-                } catch (Exception revalEx) {
-                    log.warn("Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
-                }
-            }
-
-            // ══════════════════════════════════════════════════════════════════
-            // ── 8. COMPLETE ──────────────────────────────────────────────────
-            // ══════════════════════════════════════════════════════════════════
             stateStore.markComplete(runId);
             saveActualCost(runId);
             broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
-            log.info("Async run {} complete — merged, reviewed, and validated", runId);
+            log.info("Run {} complete — compiled and merged (preview + validation in background)", runId);
+            eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
 
-            // GitHub push is non-blocking — failure does not revert COMPLETE status
+            // Auto-start preview for both modes
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
+            autoStartPreview(runId, currentRun);
+
+            // GitHub push (non-blocking)
             try {
                 pushToGitHubIfConfigured(currentRun);
             } catch (Exception pushEx) {
-                log.warn("GitHub push failed for run {} (run is COMPLETE): {}", runId, pushEx.getMessage());
+                log.warn("GitHub push failed for run {} (non-fatal): {}", runId, pushEx.getMessage());
                 broadcaster.emit(runId, RunEvent.log(runId, "harness",
                     "⚠️ GitHub push failed (run is COMPLETE, code was merged locally): "
                     + pushEx.getMessage()));
             }
 
-            // Publish MergeCompleted — PostMergeOrchestrator handles post-merge agents
-            // Prototype mode: skip post-merge agents (context gen, API test gen, etc.)
-            final PipelineRun completedRun = stateStore.findRun(runId).orElse(currentRun);
+            // ══════════════════════════════════════════════════════════════════
+            // ── 6. BACKGROUND VALIDATION (Production mode only) ──────────────
+            // ══════════════════════════════════════════════════════════════════
+            // Review, test gen, and validation report run in background so they
+            // don't block the user from seeing the preview.
             if (execMode.isProduction()) {
-                boolean hadFailures = currentReports.stream()
-                    .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
-                                   "partial".equalsIgnoreCase(r.getStatus()));
-                eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                    runId, completedRun, currentReports, review, hadFailures));
+                final CompileResult finalPostMergeCompile = postMergeCompile != null ? postMergeCompile : mainCompileResult;
+                backgroundValidationRuns.add(runId);
+                var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
+                Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
+                    try {
+                        // 6a. Test generation (async — fires TestsReadyEvent when done)
+                        try {
+                            final String planJson = mapper.writeValueAsString(plan);
+                            final String userReq = currentRun.getUserRequest();
+                            testCompletionFutures.put(runId, new CompletableFuture<>());
+                            testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson);
+                            log.info("Run {} — test gen pipeline completed in background", runId);
+                        } catch (Exception e) {
+                            testCompletionFutures.remove(runId);
+                            log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
+                        }
+
+                        // 6b. Review merged code (sync within background thread)
+                        ReviewReportV2 review = null;
+                        Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
+                            .lowCardinalityKeyValue("run.id", runId)
+                            .start();
+                        try (Observation.Scope reviewScope = reviewObs.openScope()) {
+                            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background review starting..."));
+                            var providers = availableProviderResolver.resolve(runId);
+                            review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
+                                    currentRun.getUserRequest(), providers);
+                            stateStore.saveReviewV2(runId, review);
+
+                            if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
+                                    || review.getVerdict() == ReviewVerdict.REJECTED) {
+                                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                                    "⚠️ Reviewer found issues: " + review.getSummary()));
+                            } else {
+                                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                                    "✅ Review passed: " + review.getSummary()));
+                            }
+                        } catch (Exception e) {
+                            reviewObs.error(e);
+                            log.warn("Run {} — background review failed: {}", runId, e.getMessage());
+                            broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                                "⚠️ Background review failed: " + e.getMessage()));
+                        } finally {
+                            reviewObs.stop();
+                        }
+
+                        // 6c. Re-validate after auto-fix
+                        boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
+                        if (fixesApplied) {
+                            broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                                "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
+                            try {
+                                CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
+                                if (revalidation.passed() || revalidation.skipped()) {
+                                    broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                                        "✅ Re-validation passed — all fixes confirmed"));
+                                } else {
+                                    broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                                        "⚠️ Re-validation found issues: " + revalidation.errorSummary()));
+                                }
+                            } catch (Exception revalEx) {
+                                log.warn("Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
+                            }
+                        }
+
+                        // 6d. Cancel pending test execution if preview never started
+                        testPreviewCoordinator.cancelIfPending(runId);
+
+                        // 6e. Validation report
+                        try {
+                            generateValidationReport(runId, currentRun, currentReports, review, finalPostMergeCompile);
+                        } catch (Exception reportEx) {
+                            log.warn("Background validation report failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
+                            broadcaster.emit(runId, RunEvent.log(runId, "report",
+                                "⚠️ Report generation failed"));
+                        }
+
+                        // 6f. Publish MergeCompleted for post-merge agents
+                        boolean hadFailures = currentReports.stream()
+                            .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
+                                           "partial".equalsIgnoreCase(r.getStatus()));
+                        eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                            runId, currentRun, currentReports, review, hadFailures));
+
+                        // Update actual cost after background work
+                        saveActualCost(runId);
+
+                        log.info("Run {} — background validation complete (review + report)", runId);
+                    } finally {
+                        backgroundValidationRuns.remove(runId);
+                        runKeyStore.remove(runId);
+                        runBudgetTracker.remove(runId);
+                        broadcaster.complete(runId);
+                    }
+                }));
             }
-            eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -2084,9 +2063,12 @@ public class PipelineHarness {
                     .register(meterRegistry).increment();
 
             runObs.stop();
-            broadcaster.complete(runId);
-            runKeyStore.remove(runId);  // clean up per-run API keys
-            runBudgetTracker.remove(runId);  // clean up per-run budget tracking
+            // If background validation is running, defer cleanup to that thread
+            if (!backgroundValidationRuns.contains(runId)) {
+                broadcaster.complete(runId);
+                runKeyStore.remove(runId);  // clean up per-run API keys
+                runBudgetTracker.remove(runId);  // clean up per-run budget tracking
+            }
         }
     }
 
@@ -3042,13 +3024,6 @@ public class PipelineHarness {
             future.complete(event.summary());
             log.info("Run {} — test execution completed, report generation unblocked", event.runId());
         }
-
-        // Auto-stop the preview that was started for test execution — free Docker resources
-        try {
-            previewService.stop(event.runId());
-            log.info("Run {} — auto-stopped preview after test execution", event.runId());
-        } catch (Exception e) {
-            log.debug("Run {} — no preview to stop after test execution: {}", event.runId(), e.getMessage());
-        }
+        // Preview stays running for the user — TTL-based cleanup handles shutdown
     }
 }

@@ -357,6 +357,7 @@ public class DevDockerfileGenerator {
                 WORKDIR /app
                 LABEL preview=true
                 ENV HOST=0.0.0.0
+                ENV PORT=3000
                 COPY package*.json ./
                 RUN npm install
                 COPY . .
