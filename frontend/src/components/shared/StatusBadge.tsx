@@ -6,6 +6,10 @@ interface StatusBadgeProps {
   className?: string;
 }
 
+const DISPLAY_NAMES: Record<string, string> = {
+  COMPLETE: 'CODE GENERATED',
+};
+
 export default function StatusBadge({ status, className }: StatusBadgeProps) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS['QUEUED'];
   return (
@@ -17,7 +21,7 @@ export default function StatusBadge({ status, className }: StatusBadgeProps) {
         className
       )}
     >
-      {status.replace(/_/g, ' ')}
+      {DISPLAY_NAMES[status] ?? status.replace(/_/g, ' ')}
     </span>
   );
 }

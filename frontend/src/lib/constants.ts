@@ -20,12 +20,12 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string; glow: st
   LOCKED:            { dot: 'bg-zinc-400',         text: 'text-zinc-400',      glow: '',                        bg: 'bg-zinc-400/10' },
 };
 
-export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'COMPILING', 'REVIEWING', 'MERGING']);
+export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'COMPILING']);
 export const GATE_STATUSES   = new Set(['AWAITING_APPROVAL', 'AWAITING_MERGE', 'AWAITING_CLARIFICATION']);
 
 export const PIPELINE_STEPS = [
   'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'WORKING',
-  'COMPILING', 'REVIEWING', 'MERGING', 'COMPLETE',
+  'COMPILING', 'COMPLETE',
 ];
 
 export const NAV_ITEMS: {

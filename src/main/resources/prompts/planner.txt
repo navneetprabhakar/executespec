@@ -257,7 +257,9 @@ Do NOT split:
 
 FRONTEND / STATIC PROJECT TASK RULES:
   For static HTML/CSS/JS projects (no build tool, no framework):
-  - ALWAYS bundle HTML + CSS + JS for the same page into ONE task if total is <350 lines.
+  - ALWAYS bundle HTML + CSS + JS for the same page into ONE task if total is <200 lines
+    AND the page has ≤3 content sections. For pages with 4+ sections (landing pages,
+    portfolios), use the MULTI-SECTION SINGLE-PAGE RULE below instead.
 Splitting index.html, style.css, and script.js into separate tasks creates cross-file
     consistency bugs (the #1 failure mode for frontend projects).
 - If the project is larger, split by PAGE or FEATURE, not by file type.
@@ -272,6 +274,51 @@ For React/Vue/Angular/Svelte projects:
 LAYER REMINDER: Frontend tasks must ONLY own frontend/** files (task_layer: FRONTEND).
   Backend tasks must ONLY own src/main/java/** files (task_layer: BACKEND).
   Never mix Java and React/TS files in the same task.
+
+MULTI-SECTION SINGLE-PAGE RULE (prevents truncation on landing pages):
+  When the spec describes a single HTML page with MULTIPLE content sections
+  (e.g., hero, about, features, pricing, testimonials, contact, footer),
+  or a single page with multiple routes/paths worth of content:
+
+  DO NOT create one task for the entire page. A landing page with 5+ sections
+  easily exceeds 350 lines of HTML+CSS and WILL truncate or fail.
+
+  SPLIT BY SECTION using shared_files + sequential depends_on:
+    Task 1: "Create page scaffold + hero section"
+            → Creates index.html (head, nav, hero section, empty placeholders for other sections),
+              style.css (resets, variables, nav styles, hero styles), script.js (nav logic).
+            owned_files: [index.html, style.css, script.js]
+
+    Task 2: "Add About and Features sections"
+            → Edits index.html to fill in about + features sections.
+              Edits style.css to add section styles.
+            shared_files: [index.html, style.css]
+            depends_on: [task_1]
+
+    Task 3: "Add Pricing and Testimonials sections"
+            → Edits index.html + style.css for these sections.
+            shared_files: [index.html, style.css]
+            depends_on: [task_2]
+
+    Task 4: "Add Contact form and Footer"
+            → Edits index.html + style.css + script.js for form logic.
+            shared_files: [index.html, style.css, script.js]
+            depends_on: [task_3]
+
+  RULES:
+    - Task 1 MUST create the full page scaffold (head, nav, section placeholders, footer structure)
+      so later tasks can fill in content without rewriting the page structure.
+    - Group 2-3 related sections per task. Each task should be LOW complexity.
+    - All tasks after Task 1 use shared_files (not owned_files) for the HTML/CSS/JS files.
+    - Each task depends_on the previous one (sequential, same file).
+    - The SAME rule applies to React/Vue single-page apps with multiple route pages
+      that share a layout — split by route/page, not by file type.
+
+  DETECTION: If the user spec mentions ANY of these, apply this rule:
+    - "landing page", "portfolio", "company website", "personal site"
+    - Multiple named sections (about, services, pricing, team, contact, etc.)
+    - "single page" or "one page" with multiple content areas
+    - "multi-page content" in a single HTML file (anchor navigation)
 
 TOKEN-DENSE FILE RULE (prevents truncation loops):
   CSS, HTML, and config files are TOKEN-DENSE — they consume far more output tokens
