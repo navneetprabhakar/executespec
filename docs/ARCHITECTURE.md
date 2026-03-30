@@ -1,7 +1,7 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 2.1
-> **Date**: 2026-03-28
+> **Version**: 2.2
+> **Date**: 2026-03-30
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -189,7 +189,7 @@ graph TB
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** plan → approve → work (sequential tasks) → compile → merge → review → test gen → preview (started by TestPreviewCoordinator AFTER tests compile) → test exec → validation report → complete
+**Pipeline flow:** plan → approve → work (sequential tasks) → compile → merge → **COMPLETE** → auto-preview (10-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report
 
 **Project type detection:** PlannerAgent outputs `project_type` in the plan JSON. This is written to `.agent-context/project.json` in the workspace. `DevDockerfileGenerator` and `DockerfileGenerator` read this value before falling back to file-based heuristics, preventing misdetection (e.g., static HTML being classified as NODE).
 
@@ -346,7 +346,7 @@ graph TB
     BS --> BP
 ```
 
-### 4.2 Migration History (V1 — V37)
+### 4.2 Migration History (V1 — V45)
 
 | Version | Description | Tables Affected |
 |---------|-------------|----------------|
@@ -366,6 +366,8 @@ graph TB
 | V32 | Plan versions | plan_version |
 | V34 | Validation report | validation_report |
 | V37 | Test generation pipeline | test_plan, test_task, test_result |
+| V38-V44 | Various (calibration, report, project provider, UI style) | pipeline_run, validation_report, project |
+| V45 | Widen plan_version columns | plan_version (VARCHAR(36) → VARCHAR(255)) |
 
 ---
 
@@ -433,7 +435,7 @@ The preview system operates in two modes, selected by the `executespec.preview.m
 | Mode | Environment | TTL | Networking | Use Case |
 |------|-------------|-----|------------|----------|
 | `docker` | Local dev | 10 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
-| `cloud-run` | Dev / Prod | 5 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
+| `cloud-run` | Dev / Prod | 10 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
 
 **Key implementation details:**
 - All subprocess commands enforce timeouts: `gcloud run deploy` 10 min, `gcloud run services delete` 5 min, `gcloud logging read` 2 min
@@ -472,7 +474,7 @@ sequenceDiagram
     PS->>PS: Health check (probeApiDocs)
     PS->>PS: Update session → RUNNING
     PS->>PS: Increment ACTIVE_PREVIEWS gauge
-    PS->>PS: Schedule TTL cleanup (5 min)
+    PS->>PS: Schedule TTL cleanup (10 min)
 
     Note over PS: After TTL expires:
     PS->>CR: deleteService(serviceName)
@@ -605,7 +607,7 @@ graph TB
 | Frontend | React + Vite + Tailwind | 18 / 5 / 3 |
 | Container | Docker | 24+ |
 | Cloud | GCP | — |
-| Compute | GCE (MIG) | n2-standard-4 |
+| Compute | GCE (MIG) | n2-standard-8 |
 | Serverless | Cloud Run | Gen2 |
 | Registry | Artifact Registry | — |
 | Storage | Cloud Storage (GCS) | — |
@@ -691,4 +693,4 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-03-28.*
+*This architecture document is maintained alongside the codebase. Last updated: 2026-03-30.*

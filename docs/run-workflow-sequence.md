@@ -17,15 +17,13 @@ QUEUED ─(slot available)─→ PLANNING
                               ┌─────┴──────┐
                           (all ok)    (partial)
                               ↓           ↓
-                          REVIEWING     PARTIAL ──(retry tasks)──→ WORKING
+                          COMPLETE      PARTIAL ──(retry tasks)──→ WORKING
                               ↓
-                        (review done)
-                              ↓
-                        TEST_GENERATION
-                              ↓
-                        TEST_EXECUTION
-                              ↓
-                           COMPLETE
+                     ┌────────┴────────┐
+                     ↓                 ↓
+              Auto-preview      Background validation
+             (10-min TTL)        (review → test gen →
+                                  test exec → report)
 
 Side paths:
   AWAITING_APPROVAL ──(paused)──→ PAUSED ──(resume)──→ PLANNING / WORKING
@@ -169,14 +167,14 @@ Side paths:
 
 ---
 
-## Stage 6 — Review
+## Stage 6 — Review (Background)
 
 | | |
 |---|---|
-| **Trigger** | Compilation pass (or non-fatal failure) |
+| **Trigger** | Runs in background validation thread after COMPLETE |
 | **Handler** | `ReviewerAgentV2.review()` |
 | **Model** | Haiku (CAPABLE tier) |
-| **State** | → `REVIEWING` |
+| **State** | `COMPLETE` (run already marked complete) |
 
 ### Phase 1 — Inspection (max 10 tool calls)
 - Read file tree, selected files, task summaries.
@@ -193,11 +191,11 @@ Side paths:
 
 ---
 
-## Stage 7 — Test Generation
+## Stage 7 — Test Generation (Background)
 
 | | |
 |---|---|
-| **Trigger** | Review complete (runs sequentially AFTER review, not in parallel) |
+| **Trigger** | Review complete (runs in background validation thread) |
 | **Handler** | `TestGenOrchestrator.runTestGenPipeline()` |
 | **Model** | Haiku (WORKHORSE tier) for TestWorkerAgent, LIGHTWEIGHT for TestReportGenerator |
 | **State** | `REVIEWING` (continued) |
@@ -208,19 +206,20 @@ Side paths:
 
 ---
 
-## Stage 8 — Test Execution
+## Stage 8 — Test Execution (Background)
 
 | | |
 |---|---|
 | **Trigger** | Tests compile successfully in Stage 7 |
 | **Handler** | `TestPreviewCoordinator` |
-| **State** | `REVIEWING` (continued) |
+| **State** | `COMPLETE` (run already marked complete) |
 
-1. **Preview startup** — `TestPreviewCoordinator` starts a preview AFTER tests compile. It owns the preview lifecycle for test execution (10-min timeout).
+1. **Preview reuse** — `TestPreviewCoordinator` checks for existing running preview via `previewService.getStatus(runId)`. Reuses the auto-started preview (started at COMPLETE). Only starts a new preview if none is running.
 2. **Test execution** — execute compiled tests against the running preview.
 3. **Report generation** — `TestReportGenerator` generates fix suggestions for any failed tests.
+4. **Preview stays running** — preview is NOT stopped after test execution (stays up for user's full 10-min TTL).
 
-**Non-fatal** — test execution failure doesn't block completion.
+**Non-fatal** — test execution failure doesn't block completion (run is already COMPLETE).
 
 ---
 
@@ -242,19 +241,30 @@ Side paths:
 
 ---
 
-## Stage 10 — Completion & Cleanup
+## Stage 10 — Completion & Background Validation
 
 | | |
 |---|---|
-| **Trigger** | All stages complete |
+| **Trigger** | Compilation pass + auto-merge complete |
 | **Handler** | `PipelineHarness` → `StateStore.markComplete()` |
 | **State** | → `COMPLETE` |
 
-1. **Mark complete** — set status, record `completedAt`.
-2. **Cost calculation** — `CostEstimator.computeCostForRun()` (per-task: provider × model × tokens × rate).
+1. **Mark complete** — set status, record `completedAt` — **before review/tests**.
+2. **Auto-start preview** — `autoStartPreview()` for both PROTOTYPE and PRODUCTION modes (10-min TTL).
 3. **GitHub push** (if configured) — push main branch; failure is non-fatal.
-4. **Events** — `RunCompleted`, SSE broadcast, close SSE connection.
-5. **Cleanup** — release compute slot, remove API keys from `RunKeyStore`, record duration metrics.
+4. **Background validation thread** (`bg-validation-{runId}` virtual thread for PRODUCTION mode):
+   - ReviewerAgentV2 review + auto-fix
+   - Re-validation after auto-fix
+   - Test gen pipeline (async)
+   - TestPreviewCoordinator (reuses existing preview)
+   - Validation report generation
+   - MergeCompleted event published
+   - Cost calculation: `CostEstimator.computeCostForRun()`
+5. **Deferred cleanup** (in background thread's `finally`):
+   - `backgroundValidationRuns.remove(runId)`
+   - `runKeyStore.remove(runId)`
+   - `runBudgetTracker.remove(runId)`
+   - `broadcaster.complete(runId)` — SSE stream closed only after background validation finishes
 
 ---
 

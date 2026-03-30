@@ -9,7 +9,7 @@ Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), per
 | Mode | Environment | Infrastructure | TTL | HTTPS |
 |------|-------------|---------------|-----|-------|
 | `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | Caddy + Cloudflare Origin Cert |
-| `cloud-run` | Dev/Prod (GCE) | Artifact Registry + Cloud Run | 5 min | Managed by Cloud Run |
+| `cloud-run` | Dev/Prod (GCE) | Artifact Registry + Cloud Run | 10 min | Managed by Cloud Run |
 
 All subprocess commands (`gcloud`, `docker compose`) are executed with enforced process timeouts to prevent hung builds. Virtual threads used for async preview operations are wrapped with `ContextSnapshotFactory.captureAll()` to ensure traceId/spanId propagation across thread boundaries.
 

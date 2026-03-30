@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-03-28
+> Last updated: 2026-03-30
 
 ## Architecture
 
@@ -9,7 +9,7 @@
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
 - **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Opus) → Plan Gate → SequentialTaskExecutor (Sonnet per task) → CompilerAgent → Auto-merge all tasks → ReviewerAgentV2 (inspect + auto-fix) → TestGenOrchestrator → TestPreviewCoordinator (start preview → execute tests) → ValidationReport → COMPLETE
+- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Opus) → Plan Gate → SequentialTaskExecutor (Sonnet per task) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (10-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
 - **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). YAML-configured model matrix maps `AgentTier × Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING (Opus-class), WORKHORSE (Sonnet-class), LIGHTWEIGHT (Haiku-class).
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
@@ -29,7 +29,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V42)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V45)
 
 ## Patterns: MUST Follow
 
@@ -167,7 +167,7 @@ Full API reference: see memory file `api-endpoints.md`
 | Tier permissions | `auth/service/TierPermissionService.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Slack integration | `integration/slack/SlackNotificationService.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V42) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V45) |
 | LLM prompts | `resources/prompts/*.txt` |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
@@ -197,10 +197,10 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 ## Current State
 
 ### Working
-- Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → review (inspect + auto-fix) → **validation report** → COMPLETE
+- Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → **COMPLETE** → auto-preview (10-min TTL) → background validation (review + test gen + test exec + report)
 - User-selected AI provider per project (Anthropic/Google/OpenAI) with YAML model matrix and health-based failover
 - 15-minute wall-clock worker time limit with stall detection and model escalation
-- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 10-min TTL, Caddy proxy)
+- Dual-mode previews: Cloud Run (dev/prod, 10-min TTL, managed HTTPS) or Docker Compose (local, 10-min TTL, Caddy proxy)
 - Caddy reverse proxy with Cloudflare Origin Certificate for local/VM preview routing
 - JWT auth with RBAC, org management, project scoping
 - Razorpay billing (subscriptions + run top-up credits)
@@ -211,6 +211,16 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
 - Metrics wired into services: PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
+
+### Recent Changes (2026-03-30)
+- **Pipeline restructuring — fast preview:** Run marked COMPLETE immediately after compile+merge. Auto-preview starts (10-min TTL) for both PROTOTYPE and PRODUCTION modes. Review, test gen, test execution, and validation report run in a background virtual thread (`bg-validation-{runId}`). User can chat, submit changes, and use preview while validation runs.
+- **Background validation lifecycle:** `backgroundValidationRuns` ConcurrentHashSet tracks runs with deferred cleanup. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` deferred to background thread's `finally` block.
+- **Single-package full-stack detection:** `DevDockerfileGenerator.detect()` now checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in the same `package.json`. If both present → `FULL_STACK` (not `NODE_BACKEND`). Generates Dockerfile with `npm run dev` (runs concurrently), exposes both 5173 and 3000.
+- **NODE_BACKEND port fix:** Added `ENV PORT=3000` to `nodeBackendDockerfile()`. Generated apps use `process.env.PORT || 3001` — without the env var, apps fell back to 3001 while Docker exposed 3000, causing health check failures.
+- **TestPreviewCoordinator preview reuse:** Checks for existing running preview via `previewService.getStatus(runId)` before starting a new one. Preview not stopped after test execution (stays up for user).
+- **Preview TTL unified at 10 min:** Both docker and cloud-run modes now use 10-min TTL (was 5-min for cloud-run).
+- **Redis pool sized for concurrency:** `max-active: 50` (was 10), `min-idle: 5` (was 2).
+- **V45 migration:** Widened `plan_version` VARCHAR(36) columns to VARCHAR(255) for IDs and VARCHAR(64) for source. Prevents truncation errors on insert.
 
 ### Recent Changes (2026-03-28)
 - **Planner-declared project type:** Planner outputs `project_type` field in plan JSON. Written to `.agent-context/project.json`. Preview (`DevDockerfileGenerator`) and deploy (`DockerfileGenerator`) read this before file-based heuristics. Fixes static HTML misdetected as NODE_BACKEND.
@@ -255,3 +265,5 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - ReviewerAgent V1 class still wired as @Service bean but unused in pipeline (blocks deletion of reviewer.txt prompt)
 - Apply-to-run: `plan_version` duplicate key error on retry (incrementPlanVersion may not be working correctly)
 - `@Lazy @Autowired` on `PreviewService` in `TestPreviewCoordinator` — only field injection in codebase, needed to break circular dependency
+- `doReviewAndMerge()` (resume/retry paths, lines ~1085-1154) NOT updated for background validation pattern — still runs synchronous review+test flow
+- Background validation: no retry/recovery if background thread fails silently (fire-and-forget)
