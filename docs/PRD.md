@@ -1,7 +1,7 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 3.1
-> **Last Updated:** 2026-03-26
+> **Version:** 3.2
+> **Last Updated:** 2026-03-30
 > **Status:** Production (v1)
 > **Author:** Navneet Prabhakar
 
@@ -30,12 +30,12 @@ The platform serves individual developers, teams, and enterprises through a tier
 ```
 User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
                                        |                    |
-                                       +-- PostgreSQL       +-- PlannerAgent (Sonnet)
-                                       +-- Redis            +-- WorkerAgent (Haiku)
-                                       +-- GitHub           +-- CompilerAgent (Haiku)
-                                       +-- Razorpay         +-- ReviewerAgentV2 (Haiku)
-                                                            +-- ConversationAgent (Haiku)
-                                                            +-- Post-merge Agents
+                                       +-- PostgreSQL       +-- PlannerAgent (PLANNING tier / Opus)
+                                       +-- Redis            +-- WorkerAgent (WORKHORSE tier / Sonnet)
+                                       +-- GitHub           +-- CompilerAgent (WORKHORSE tier / Sonnet)
+                                       +-- Razorpay         +-- ReviewerAgentV2 (PLANNING tier / Opus)
+                                                            +-- ConversationAgent (LIGHTWEIGHT tier / Haiku)
+                                                            +-- TestGenOrchestrator (WORKHORSE/PLANNING)
 ```
 
 ### 2.2 Technology Stack
@@ -88,25 +88,26 @@ CompilerAgent -- compile & fix build errors (up to 3 iterations)
 Auto-Merge -- all task branches merged to main (no manual gate)
   |
   v
-ReviewerAgentV2 -- inspect merged code, auto-fix issues (2 attempts, FAST->CAPABLE escalation, max 8 issues)
-  +-- Severity levels: CRITICAL / MINOR
+★ COMPLETE ★ (user sees run as done here -- before review/tests)
   |
   v
-ValidationReportAgent -- LLM-generated quality summary (non-fatal)
-  +-- Aggregates: WorkerReports, CompileResult, ReviewReport, tasks
-  +-- Framed as CI/CD quality gate (never mentions AI/models)
-  +-- Persisted to validation_report table
-  +-- Shareable via public URL, downloadable as PDF
+Auto-Preview (10-min TTL, both modes) -- user can interact immediately
   |
   v
-Re-validate (compile + type check after auto-fix)
+GitHub Push (non-blocking)
   |
   v
-COMPLETE -> GitHub Push -> Post-Merge Agents (async, non-blocking)
-  +-- ContextAgent -- extract context for follow-up runs
-  +-- PromptOptimiserAgent -- improve system prompts
-  +-- ApiTestSuiteAgent -- generate OpenAPI spec + integration tests
-  +-- SlackNotificationService -- Block Kit messages to configured channels
+Background Validation Thread (PRODUCTION mode, non-blocking):
+  +-- ReviewerAgentV2 -- inspect merged code, auto-fix issues (2 attempts, max 8 issues)
+  +-- TestGenOrchestrator -- generate integration tests
+  +-- TestPreviewCoordinator -- reuse existing preview, execute tests
+  +-- ValidationReportAgent -- LLM-generated quality summary (non-fatal)
+  |     +-- Aggregates: WorkerReports, CompileResult, ReviewReport, TestResults
+  |     +-- Framed as CI/CD quality gate (never mentions AI/models)
+  |     +-- Shareable via public URL, downloadable as PDF
+  +-- Post-Merge Agents (async):
+        +-- ContextAgent, PromptOptimiserAgent, ApiTestSuiteAgent
+        +-- SlackNotificationService -- Block Kit messages to configured channels
 ```
 
 ### 2.4 LLM Router & Model Matrix
@@ -658,7 +659,7 @@ SUPER_ADMIN (global -- full system access)
 
 ## 7. Database Schema
 
-### 7.1 Migrations Summary (V1-V37)
+### 7.1 Migrations Summary (V1-V45)
 
 | Range | Scope |
 |-------|-------|
@@ -675,7 +676,9 @@ SUPER_ADMIN (global -- full system access)
 | V29 | Preview limits |
 | V30-V31 | Deploy engine, project-scoped credentials |
 | V34 | Validation report |
-| V35-V37 | Recent schema updates |
+| V35-V37 | Schema updates |
+| V38-V44 | Report improvements, shared reports, validation enhancements |
+| V45 | Widen plan_version VARCHAR(36) columns to VARCHAR(255)/VARCHAR(64) |
 
 ---
 
@@ -685,7 +688,7 @@ SUPER_ADMIN (global -- full system access)
 
 | Service | Usage |
 |---------|-------|
-| GCE | App server (systemd, asia-south1) |
+| GCE | App server (n2-standard-8, systemd, asia-south1) |
 | Cloud SQL | PostgreSQL 15 (private IP, auto-backup) |
 | Memorystore | Redis 7 (gate coordination + caching) |
 | Cloud Run | Ephemeral previews (10-min TTL) |
@@ -802,7 +805,12 @@ executespec.run (root)
 - V3 migration type mismatch (`actual_cost_usd` DOUBLE PRECISION)
 - Branch retry RefAlreadyExistsException fallback
 - Startup auto-resume disabled (users resume stuck runs manually via UI)
+- `doReviewAndMerge()` not updated for background validation pattern (runs synchronous in resume/retry paths)
+- Background validation thread has no retry on failure (single attempt)
+- `@Lazy @Autowired` field injection on PreviewService in TestPreviewCoordinator (circular dependency workaround)
+- Model matrix mismatch: WORKHORSE tier uses Sonnet for all worker tasks (expensive for simple tasks)
+- test-worker.txt prompt still hardcodes Java/RestAssured references despite language-agnostic test gen
 
 ---
 
-*Document generated 2026-03-26. For implementation details, see CLAUDE.md and memory files.*
+*Document generated 2026-03-30. For implementation details, see CLAUDE.md and memory files.*
