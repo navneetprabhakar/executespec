@@ -332,7 +332,7 @@ public class DevDockerfileGenerator {
 
         if (hasViteConfig || hasDevScript) {
             // Always use vite with explicit --host and --port to ensure container accessibility
-            cmd = "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\"]";
+            cmd = "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\", \"--allowedHosts\", \"all\"]";
         } else {
             cmd = """
                     RUN npm install -g serve
@@ -406,7 +406,7 @@ public class DevDockerfileGenerator {
             String startCmd = (pkg != null && pkg.has("scripts") && pkg.get("scripts").has("start"))
                     ? "npm start" : "node " + findNodeEntryPoint(workspace);
             cmd = "CMD [\"sh\", \"-c\", \"" + startCmd
-                    + " & npx vite --host 0.0.0.0 --port 5173\"]";
+                    + " & npx vite --host 0.0.0.0 --port 5173 --allowedHosts all\"]";
         } else {
             // Fallback: just npm start
             cmd = "CMD [\"npm\", \"start\"]";
@@ -675,10 +675,10 @@ public class DevDockerfileGenerator {
             sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
               .append(" && npm start 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
               .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+              .append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (fe != null) {
             sb.append("EXPOSE 5173\n");
-            sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(fe).append(" && npx vite --host 0.0.0.0 --port 5173\"]\n");
+            sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(fe).append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all\"]\n");
         } else {
             sb.append("EXPOSE ").append(backendPort).append("\n");
             sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be).append(" && npm start\"]\n");
@@ -715,7 +715,7 @@ public class DevDockerfileGenerator {
             sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
               .append(" && mvn spring-boot:run -DskipTests -q 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
               .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+              .append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (be != null) {
             sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be)
               .append(" && mvn spring-boot:run -DskipTests -q\"]\n");
@@ -779,7 +779,7 @@ public class DevDockerfileGenerator {
             sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be).append(" && ").append(pythonCmd)
               .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
               .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+              .append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (be != null) {
             sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be).append(" && ").append(pythonCmd).append("\"]\n");
         }
@@ -935,12 +935,12 @@ public class DevDockerfileGenerator {
               .append(backendWs).append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
               .append("(npx --prefix ").append(frontendWs)
               .append(" vite --host 0.0.0.0 --port ").append(frontendPort)
-              .append(" 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+              .append(" --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (frontendWs != null) {
             sb.append("EXPOSE ").append(frontendPort).append("\n");
             sb.append("CMD [\"npx\", \"--prefix\", \"").append(frontendWs)
               .append("\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"")
-              .append(frontendPort).append("\"]\n");
+              .append(frontendPort).append("\", \"--allowedHosts\", \"all\"]\n");
         } else if (backendWs != null) {
             sb.append("EXPOSE ").append(backendPort).append("\n");
             sb.append("CMD [\"npm\", \"run\", \"dev\", \"--prefix\", \"").append(backendWs).append("\"]\n");
