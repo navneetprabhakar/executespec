@@ -22,7 +22,7 @@ function statusToNarrative(status: string): NarrativeItem | null {
     case 'REVIEWING':
       return { text: 'Reviewing the code...', variant: 'progress' };
     case 'COMPLETE':
-      return { text: 'Ready.', variant: 'done' };
+      return { text: 'Code generated.', variant: 'done' };
     case 'PARTIAL':
       return { text: 'Ready.', variant: 'done' };
     case 'FAILED':

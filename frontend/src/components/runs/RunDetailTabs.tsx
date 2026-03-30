@@ -22,6 +22,7 @@ import RunConversation from './RunConversation';
 import TaskGraph from './TaskGraph';
 import PreviewTab from './PreviewTab';
 import { PIPELINE_STEPS } from '@/lib/constants';
+import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
 import { fmtTokens, relativeTime, cn } from '@/lib/utils';
 import {
@@ -109,7 +110,7 @@ export default function RunDetailTabs() {
   if (!activeRun) return null;
 
   const isTerminal = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL' || activeRun.status === 'FAILED';
-  const isActive = activeRun.status === 'WORKING' || activeRun.status === 'REVIEWING' || activeRun.status === 'COMPILING' || activeRun.status === 'MERGING';
+  const isActive = activeRun.status === 'WORKING' || activeRun.status === 'COMPILING';
   /** Preview content is ready when the pipeline is active or finished. */
   const previewReady = isTerminal || isActive;
   /** Chat is only functional after the run finishes (success or failed). */
@@ -233,6 +234,26 @@ export default function RunDetailTabs() {
         </Tabs.Content>
       </div>
     </Tabs.Root>
+  );
+}
+
+/** Shows a subtle indicator while review & tests run in the background. */
+function BackgroundValidationIndicator() {
+  const entries = useSseStore((s) => s.entries);
+  const hasValidationStarted = entries.some(e =>
+    e.type === 'REVIEW_STARTED' || e.type === 'TEST_GEN_STARTED'
+  );
+  const hasValidationFinished = entries.some(e =>
+    e.type === 'VALIDATION_REPORT_READY'
+  );
+
+  if (!hasValidationStarted || hasValidationFinished) return null;
+
+  return (
+    <div className="flex items-center gap-2 px-1 py-1.5">
+      <span className="h-1.5 w-1.5 rounded-full bg-accent-violet/60 animate-pulse" />
+      <span className="text-[11px] text-zinc-500">Review & tests running in background...</span>
+    </div>
   );
 }
 
@@ -434,13 +455,16 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                   isDone ? 'text-accent-emerald' :
                   isActive ? 'text-white' : 'text-zinc-600'
                 )}>
-                  {step.replace(/_/g, ' ')}
+                  {step === 'COMPLETE' ? 'CODE GENERATED' : step.replace(/_/g, ' ')}
                 </p>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Background validation indicator */}
+      {run.status === 'COMPLETE' && <BackgroundValidationIndicator />}
 
       {/* Run stats: time taken */}
       <div className="pt-2 border-t border-white/[0.06]">

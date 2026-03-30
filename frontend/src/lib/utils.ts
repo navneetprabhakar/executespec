@@ -86,9 +86,9 @@ export function describeRunStatus(
     case 'COMPLETE':
       if (total > 0) {
         const modeLabel = executionMode === 'PROTOTYPE' ? 'Prototype' : '';
-        return `${modeLabel ? modeLabel + ' — ' : ''}${total} task${total !== 1 ? 's' : ''} completed`.trim();
+        return `${modeLabel ? modeLabel + ' — ' : ''}Code generated — ${total} task${total !== 1 ? 's' : ''} complete`.trim();
       }
-      return 'Run completed successfully';
+      return 'Code generated';
     case 'FAILED':
       if (failureReason) return truncate(failureReason, 50);
       if (retryable > 0 && total > 0) return `Failed — ${retryable} task${retryable !== 1 ? 's' : ''} can be retried`;
