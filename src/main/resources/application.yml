@@ -73,7 +73,7 @@ spring:
 model-matrix:
   providers:
     anthropic:
-      planning: claude-opus-4-6
+      planning: claude-sonnet-4-6
       workhorse: claude-sonnet-4-6
       lightweight: claude-haiku-4-5-20251001
     google:
@@ -82,7 +82,7 @@ model-matrix:
       lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4
+      workhorse: gpt-5.4-mini
       lightweight: gpt-5.4-mini
   agent-tier-map:
     PlannerAgent: PLANNING
@@ -175,10 +175,10 @@ agent:
   deployment:
     enabled: true
     gcp-project: executespecv1
-    gcp-region: asia-south1
+    gcp-region: us-east4
     artifact-registry:
       repository: executespec-dev-docker
-      host: asia-south1-docker.pkg.dev
+      host: us-east4-docker.pkg.dev
     cloud-run:
       cpu: "1"
       memory: 512Mi

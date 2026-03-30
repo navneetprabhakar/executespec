@@ -37,37 +37,33 @@ public class ModelPricingInitializer {
             // ── Anthropic — primary provider (Anthropic public pricing Mar 2026) ─────────
             new Object[]{
                 "anthropic", ModelConstants.OPUS, 15.00, 75.00,
-                "PRIMARY — Planner (ARCHITECT chain). With prompt caching: writes 1.25x, reads 0.10x."
+                "PRIMARY — Reserved for escalation. With prompt caching: writes 1.25x, reads 0.10x."
             },
             new Object[]{
                 "anthropic", ModelConstants.SONNET, 3.00, 15.00,
-                "PRIMARY — Workers (CAPABLE chain). With prompt caching: writes 1.25x, reads 0.10x."
+                "PRIMARY — PLANNING + WORKHORSE chains. With prompt caching: writes 1.25x, reads 0.10x."
             },
             new Object[]{
                 "anthropic", ModelConstants.HAIKU, 0.80, 4.00,
-                "PRIMARY — Reviewer + context agent + optimiser (UTILITY chain)."
+                "PRIMARY — LIGHTWEIGHT chain (context agent, conversation, reports)."
             },
             // ── Google Gemini — 2nd fallback (Google AI pricing Mar 2026) ────────────────
             new Object[]{
-                "google", ModelConstants.GEMINI_ARCHITECT, 2.00, 12.00,
-                "2nd fallback — ARCHITECT chain. 1M ctx, 66K output."
+                "google", ModelConstants.GEMINI_PRO, 2.00, 12.00,
+                "2nd fallback — PLANNING chain. 1M ctx, 66K output."
             },
             new Object[]{
-                "google", ModelConstants.GEMINI_CAPABLE, 0.25, 1.50,
-                "2nd fallback — CAPABLE chain."
-            },
-            new Object[]{
-                "google", ModelConstants.GEMINI_UTILITY, 0.15, 0.60,
-                "2nd fallback — UTILITY chain. Gemini 3.0 flash."
+                "google", ModelConstants.GEMINI_FLASH, 0.15, 0.60,
+                "2nd fallback — WORKHORSE + LIGHTWEIGHT chains (Gemini Flash)."
             },
             // ── OpenAI — 3rd fallback (OpenAI public pricing Mar 2026) ───────────────────
             new Object[]{
-                "openai", ModelConstants.GPT5_4, 2.00, 8.00,
-                "3rd fallback — CAPABLE + ARCHITECT chains (GPT-5.4, 1.05M ctx)"
+                "openai", ModelConstants.GPT5_4, 2.50, 15.00,
+                "3rd fallback — PLANNING chain (GPT-5.4, 1.05M ctx)"
             },
             new Object[]{
-                "openai", ModelConstants.GPT5_4_MINI, 0.15, 0.60,
-                "3rd fallback — UTILITY chain (GPT-5.4-mini, 400k ctx)"
+                "openai", ModelConstants.GPT5_4_MINI, 1.10, 4.40,
+                "3rd fallback — WORKHORSE + LIGHTWEIGHT chains (GPT-5.4-mini, 400k ctx)"
             }
         );
 

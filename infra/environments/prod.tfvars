@@ -5,8 +5,8 @@ environment = "prod"
 
 # ── Project ─────────────────────────────────────────────────────────────────
 # project_id = "your-gcp-project-id"   # Set via TF_VAR_project_id or -var
-region = "asia-south1"
-zone   = "asia-south1-a"
+region = "us-east4"
+zone   = "us-east4-a"
 
 # ── Domain ──────────────────────────────────────────────────────────────────
 domain           = "executespec.ai"

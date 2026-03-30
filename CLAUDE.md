@@ -8,7 +8,7 @@
 - **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.0
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
-- **Infra:** GCP Mumbai (asia-south1), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
+- **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
 - **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Opus) → Plan Gate → SequentialTaskExecutor (Sonnet per task) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (10-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
 - **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). YAML-configured model matrix maps `AgentTier × Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING (Opus-class), WORKHORSE (Sonnet-class), LIGHTWEIGHT (Haiku-class).

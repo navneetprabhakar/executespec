@@ -83,6 +83,10 @@ public class CostEstimator {
         totalLow  += costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 1, reviewerRates);
         totalHigh += costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 2, reviewerRates);
 
+        // Apply 50% buffer to high estimate to account for retries, failover,
+        // and cache-write overhead that the simple model doesn't capture.
+        totalHigh *= 1.50;
+
         log.debug("[CostEstimator] {} tasks → low=${}, high=${} (provider={})", plan.getTasks().size(),
             String.format("%.3f", totalLow), String.format("%.3f", totalHigh), provider);
 
@@ -250,8 +254,9 @@ public class CostEstimator {
 
     private double[] hardcodedFallback(String provider) {
         return switch (provider.toLowerCase()) {
-            case "openai"  -> new double[]{0.15, 0.60};
-            default        -> new double[]{0.80, 4.00};  // anthropic haiku
+            case "openai"  -> new double[]{1.10, 4.40};   // gpt-5.4-mini
+            case "google"  -> new double[]{0.15, 0.60};   // gemini flash
+            default        -> new double[]{3.00, 15.00};  // anthropic sonnet (workhorse default)
         };
     }
 
