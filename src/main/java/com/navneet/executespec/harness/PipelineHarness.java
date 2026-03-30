@@ -1535,69 +1535,108 @@ public class PipelineHarness {
                     log.warn("[SingleShot] Compile failed for run {}: {}", runId, compileEx.getMessage());
                 }
 
-                // Test generation (production mode only)
-                if (execMode.isProduction()) {
-                    try {
-                        final String planJson = mapper.writeValueAsString(singleShotResult.syntheticPlan());
-                        final String userReq = effectiveRequest;
-                        testCompletionFutures.put(runId, new CompletableFuture<>());
-                        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
-                        Thread.ofVirtual().name("testgen-" + runId).start(snapshot.wrap(() ->
-                            testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson)
-                        ));
-                    } catch (Exception e) {
-                        testCompletionFutures.remove(runId);
-                        log.warn("[SingleShot] Test gen failed for run {}: {}", runId, e.getMessage());
-                    }
-                }
-                if (execMode.isPrototype()) {
-                    broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
-                    autoStartPreview(runId, run);
-
-                    // PROTOTYPE: mark complete immediately — skip review/test/report
-                    stateStore.markComplete(runId);
-                    broadcaster.emit(runId, RunEvent.runStatus(runId, "COMPLETED"));
-                    broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETED"));
-                    eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
-                    log.info("[SingleShot] PROTOTYPE run {} completed — preview started", runId);
-                    return;
-                }
-
-                // Review (production mode only)
-                ReviewReportV2 review = null;
+                // ── Mark COMPLETE + auto-start preview (both modes) ─────────
+                // Same pattern as multi-task: user sees COMPLETE immediately
+                // after compile. Review/test/report run in background.
+                List<WorkerReport> currentReports = singleShotResult.reports();
                 PipelineRun currentRun = stateStore.findRun(runId).orElse(run);
-                if (execMode.isProduction()) {
-                    try {
-                        stateStore.markReviewing(runId);
-                        broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
-                        var providers = availableProviderResolver.resolve(runId);
-                        review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
-                                currentRun.getUserRequest(), providers);
-                        stateStore.saveReviewV2(runId, review);
-                    } catch (Exception e) {
-                        log.warn("[SingleShot] Review failed for run {}: {}", runId, e.getMessage());
-                    }
-                }
+                final CompileResult finalCompileResult = compileResult;
 
-                // Cancel pending test execution if preview never started
-                testPreviewCoordinator.cancelIfPending(runId);
-
-                // Validation report (production mode only)
-                if (execMode.isProduction()) {
-                    try {
-                        generateValidationReport(runId, currentRun, singleShotResult.reports(),
-                                review, compileResult);
-                    } catch (Exception reportEx) {
-                        log.warn("[SingleShot] Report generation failed for run {}: {}", runId, reportEx.getMessage());
-                    }
-                }
-
-                // Mark complete
                 stateStore.markComplete(runId);
-                broadcaster.emit(runId, RunEvent.runStatus(runId, "COMPLETED"));
-                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETED"));
+                saveActualCost(runId);
+                broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
+                log.info("[SingleShot] Run {} complete — compiled (preview + validation in background)", runId);
                 eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
-                log.info("[SingleShot] Run {} completed successfully", runId);
+
+                // Auto-start preview for both modes
+                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
+                autoStartPreview(runId, currentRun);
+
+                // ── Background validation (production mode only) ─────────────
+                if (execMode.isProduction()) {
+                    final String bgUserReq = effectiveRequest;
+                    backgroundValidationRuns.add(runId);
+                    var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
+                    Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
+                        try {
+                            // Test generation (async)
+                            try {
+                                final String planJson = mapper.writeValueAsString(singleShotResult.syntheticPlan());
+                                testCompletionFutures.put(runId, new CompletableFuture<>());
+                                testGenOrchestrator.runTestGenPipeline(runId, bgUserReq, planJson);
+                                log.info("[SingleShot] Run {} — test gen pipeline completed in background", runId);
+                            } catch (Exception e) {
+                                testCompletionFutures.remove(runId);
+                                log.warn("[SingleShot] Test gen failed for run {}: {}", runId, e.getMessage());
+                            }
+
+                            // Review merged code
+                            ReviewReportV2 review = null;
+                            try {
+                                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background review starting..."));
+                                var providers = availableProviderResolver.resolve(runId);
+                                review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
+                                        currentRun.getUserRequest(), providers);
+                                stateStore.saveReviewV2(runId, review);
+
+                                if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
+                                        || review.getVerdict() == ReviewVerdict.REJECTED) {
+                                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                                        "⚠️ Reviewer found issues: " + review.getSummary()));
+                                } else {
+                                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                                        "✅ Review passed: " + review.getSummary()));
+                                }
+                            } catch (Exception e) {
+                                log.warn("[SingleShot] Review failed for run {}: {}", runId, e.getMessage());
+                                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                                    "⚠️ Background review failed: " + e.getMessage()));
+                            }
+
+                            // Re-validate after auto-fix
+                            boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
+                            if (fixesApplied) {
+                                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                                    "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
+                                try {
+                                    CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
+                                    if (revalidation.passed() || revalidation.skipped()) {
+                                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                                            "✅ Re-validation passed — all fixes confirmed"));
+                                    } else {
+                                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                                            "⚠️ Re-validation found issues: " + revalidation.errorSummary()));
+                                    }
+                                } catch (Exception revalEx) {
+                                    log.warn("[SingleShot] Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
+                                }
+                            }
+
+                            // Cancel pending test execution if preview never started
+                            testPreviewCoordinator.cancelIfPending(runId);
+
+                            // Validation report
+                            try {
+                                generateValidationReport(runId, currentRun, currentReports,
+                                        review, finalCompileResult);
+                            } catch (Exception reportEx) {
+                                log.warn("[SingleShot] Report generation failed for run {}: {}", runId, reportEx.getMessage());
+                                broadcaster.emit(runId, RunEvent.log(runId, "report",
+                                    "⚠️ Report generation failed"));
+                            }
+
+                            // Update actual cost after background work
+                            saveActualCost(runId);
+
+                            log.info("[SingleShot] Run {} — background validation complete", runId);
+                        } finally {
+                            backgroundValidationRuns.remove(runId);
+                            runKeyStore.remove(runId);
+                            runBudgetTracker.remove(runId);
+                            broadcaster.complete(runId);
+                        }
+                    }));
+                }
 
             } catch (Exception e) {
                 log.error("[SingleShot] Run {} failed: {}", runId, e.getMessage(), e);
@@ -1605,8 +1644,13 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
             } finally {
-                broadcaster.complete(runId);
                 runSlots.release();
+                // If background validation is running, defer cleanup to that thread
+                if (!backgroundValidationRuns.contains(runId)) {
+                    broadcaster.complete(runId);
+                    runKeyStore.remove(runId);
+                    runBudgetTracker.remove(runId);
+                }
             }
             return; // single-shot path complete — skip normal pipeline
         }

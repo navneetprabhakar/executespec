@@ -46,7 +46,7 @@ User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
 | **Backend** | Java 21, Spring Boot 3.3, Spring AI 1.1.0 |
 | **Database** | PostgreSQL (Cloud SQL), Redis (Memorystore) |
 | **AI Providers** | Anthropic (Claude), Google (Gemini), OpenAI (GPT) -- 3-provider fallback |
-| **Infrastructure** | GCP Mumbai (asia-south1) -- Cloud Run, GCE, Artifact Registry, GCS |
+| **Infrastructure** | GCP N. Virginia (us-east4) -- Cloud Run, GCE, Artifact Registry, GCS |
 | **Payments** | Razorpay (subscriptions + one-time orders) |
 | **Observability** | Micrometer + OpenTelemetry, Grafana/Tempo (local), Cloud Trace/Monitoring (prod) |
 
@@ -688,7 +688,7 @@ SUPER_ADMIN (global -- full system access)
 
 | Service | Usage |
 |---------|-------|
-| GCE | App server (n2-standard-8, systemd, asia-south1) |
+| GCE | App server (n2-standard-8, systemd, us-east4) |
 | Cloud SQL | PostgreSQL 15 (private IP, auto-backup) |
 | Memorystore | Redis 7 (gate coordination + caching) |
 | Cloud Run | Ephemeral previews (10-min TTL) |

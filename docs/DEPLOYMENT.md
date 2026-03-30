@@ -1382,7 +1382,7 @@ gcloud auth application-default login
 gcloud config set project executespecv1
 
 # Create Terraform state bucket
-gsutil mb -l asia-south1 gs://executespec-tfstate
+gsutil mb -l us-east4 gs://executespec-tfstate
 gsutil versioning set on gs://executespec-tfstate
 
 # Initialize & create workspaces
@@ -1394,7 +1394,7 @@ terraform workspace new prod
 
 ### Deploy Dev Environment
 
-**Subdomain:** `dev.executespec.ai` | **Region:** `asia-south1`
+**Subdomain:** `dev.executespec.ai` | **Region:** `us-east4`
 
 ```bash
 terraform workspace select dev
@@ -1420,9 +1420,9 @@ gsutil cp /tmp/api-keys gs://executespec-dev-deploy/config/api-keys && rm /tmp/a
 | Secret | Value |
 |--------|-------|
 | `GCP_PROJECT` | `executespecv1` |
-| `GCP_REGION` | `asia-south1` |
+| `GCP_REGION` | `us-east4` |
 | `GCE_INSTANCE` | `<from gcloud compute instances list>` |
-| `GCE_ZONE` | `asia-south1-a` |
+| `GCE_ZONE` | `us-east4-a` |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
 | `GCP_SERVICE_ACCOUNT` | `executespec-dev-gce@executespecv1.iam.gserviceaccount.com` |
 
@@ -1431,7 +1431,7 @@ Verify: `https://dev.executespec.ai/api/health`
 
 ### Deploy Prod Environment
 
-**Subdomain:** `app.executespec.ai` | **Region:** `asia-south1`
+**Subdomain:** `app.executespec.ai` | **Region:** `us-east4`
 
 #### Step 1: Provision Infrastructure
 
@@ -1497,9 +1497,9 @@ done
 | Secret | Value |
 |--------|-------|
 | `GCP_PROJECT` | `executespecv1` |
-| `GCP_REGION` | `asia-south1` |
+| `GCP_REGION` | `us-east4` |
 | `GCE_INSTANCE` | `executespec-prod-vm` |
-| `GCE_ZONE` | `asia-south1-a` |
+| `GCE_ZONE` | `us-east4-a` |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
 | `GCP_SERVICE_ACCOUNT` | `executespec-prod-gce@executespecv1.iam.gserviceaccount.com` |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook for deploy notifications |
@@ -1540,7 +1540,7 @@ curl -s -X POST https://app.executespec.ai/api/auth/login \
   -d '{"email":"admin@executespec.ai","password":"Admin@123"}' | jq .token
 
 # Flyway migrations
-gcloud compute ssh executespec-prod-vm --zone=asia-south1-a --tunnel-through-iap \
+gcloud compute ssh executespec-prod-vm --zone=us-east4-a --tunnel-through-iap \
   -- 'sudo journalctl -u executespec | grep -i "flyway\|migration" | tail -20'
 
 # Preview test (start a run, wait for COMPLETE, then start preview)
@@ -1584,7 +1584,7 @@ terraform output -raw db_private_ip         # DB IP
 terraform output -raw lb_ip                 # LB IP
 terraform output -raw db_password           # DB password (sensitive)
 gcloud compute instances list --project=executespecv1 --filter="name~executespec-dev"
-gcloud compute ssh <INSTANCE> --zone=asia-south1-a --tunnel-through-iap
+gcloud compute ssh <INSTANCE> --zone=us-east4-a --tunnel-through-iap
 sudo journalctl -u executespec -f           # app logs on VM
 ```
 
