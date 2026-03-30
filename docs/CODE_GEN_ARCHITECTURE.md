@@ -1,7 +1,7 @@
 # ExecuteSpec — Complete Code Generation Architecture
 
 > Comprehensive technical reference for the multi-agent code generation pipeline.
-> Last updated: 2026-03-28
+> Last updated: 2026-03-30
 
 ---
 
@@ -69,34 +69,32 @@ User Request
 └────────────────────┬─────────────────────────────────┘
                      │
                      ▼
-┌──────────────────┐     ┌──────────────────┐
-│  CompilerAgent   │     │ TestGenOrchestrator│  (parallel)
-│  Pre/post-merge  │     │ Plan → Generate   │
-│  compile + fix   │     │ → Compile tests   │
-└────────┬─────────┘     └────────┬─────────┘
-         │                        │
-         ▼                        ▼
-┌──────────────────┐     ┌──────────────────┐
-│  Auto-Merge All  │     │ TestPreview       │
-│  Task Branches   │     │ Coordinator       │
-└────────┬─────────┘     │ (waits for both)  │
-         │               └────────┬─────────┘
-         ▼                        │
-┌──────────────────┐              │
-│  ReviewerAgentV2 │◄─────────────┘
-│  Inspect + Fix   │     ┌──────────────────┐
-│  (PRODUCTION)    │     │ Test Execution    │
-└────────┬─────────┘     │ Against Preview   │
-         │               └────────┬─────────┘
-         ▼                        │
-┌──────────────────────────────────┐
-│  Validation Report               │
-│  Aggregates: compiler + review   │
-│  + tests → markdown + PDF        │
-└──────────────────────────────────┘
+┌──────────────────┐
+│  CompilerAgent   │
+│  compile + fix   │
+└────────┬─────────┘
          │
          ▼
-     COMPLETE
+┌──────────────────┐
+│  Auto-Merge All  │
+│  Task Branches   │
+└────────┬─────────┘
+         │
+         ▼
+     ★ COMPLETE ★  (user sees this immediately)
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌────────┐  ┌──────────────────────────────────┐
+│ Auto   │  │  Background Validation Thread     │
+│ Preview│  │                                    │
+│ (10min)│  │  ReviewerAgentV2 → Auto-Fix       │
+└────────┘  │  TestGenOrchestrator → Compile     │
+            │  TestPreviewCoordinator (reuses    │
+            │    existing preview)                │
+            │  Test Execution Against Preview     │
+            │  Validation Report (markdown + PDF) │
+            └──────────────────────────────────┘
 ```
 
 ### Key Architectural Decisions

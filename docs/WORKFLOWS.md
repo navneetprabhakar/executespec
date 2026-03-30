@@ -69,14 +69,17 @@ flowchart TD
     V -->|No| W[CompilerAgent — fixes compilation errors]
 
     W --> X[Auto-merge all task branches to main]
-    X --> Y[ReviewerAgentV2 — inspect merged code + auto-fix]
+    X --> ZF([✅ Run COMPLETE — code ready])
+    ZF --> ZG[Auto-start preview — 10-min TTL]
+    ZG --> ZH[Background validation thread starts]
+    ZH --> Y[ReviewerAgentV2 — inspect merged code + auto-fix]
     Y --> Z[TestGenOrchestrator — sequential after review]
     Z --> ZA[TestPlannerAgent plans integration tests]
     ZA --> ZB[TestWorkerAgent writes test code]
-    ZB --> ZC[TestPreviewCoordinator.onTestsReady — starts preview AFTER tests compile]
+    ZB --> ZC[TestPreviewCoordinator reuses existing preview]
     ZC --> ZD[Tests execute against live preview]
     ZD --> ZE[ValidationReport generated]
-    ZE --> ZF([✅ Run COMPLETE — code ready])
+    ZE --> ZI([📊 Background validation complete])
 
     style A fill:#6366f1,color:#fff
     style ZF fill:#22c55e,color:#fff
@@ -112,20 +115,21 @@ sequenceDiagram
     S->>U: 🔧 Compiling
     P->>S: MERGE_COMPLETED
     S->>U: 🔀 All branches merged (automatic)
+    P->>S: RUN_COMPLETED
+    S->>U: ✅ Run complete — preview starting
+    P->>S: PREVIEW_STARTED
+    S->>U: 🌐 Preview running (10-min TTL)
+    Note over P,S: Background validation thread
     P->>S: REVIEW_STARTED
-    S->>U: 📝 Reviewing merged code
+    S->>U: 📝 Reviewing merged code (background)
     P->>S: AUTO_FIX_APPLIED
-    S->>U: 🔧 Auto-fix applied (FAST → CAPABLE escalation)
+    S->>U: 🔧 Auto-fix applied
     P->>S: TEST_GEN_STARTED
     S->>U: 🧪 Generating integration tests
-    P->>S: PREVIEW_STARTED
-    S->>U: 🌐 Preview started for test execution
     P->>S: TESTS_EXECUTING
     S->>U: 🧪 Tests running against live preview
     P->>S: REPORT_GENERATED
     S->>U: 📊 Validation report ready
-    P->>S: RUN_COMPLETED
-    S->>U: ✅ All done
 ```
 
 ---
@@ -450,11 +454,11 @@ Preview supports two modes, configured via `preview.mode` in application propert
 | Mode | Environment | Stack | TTL | URL format |
 |------|-------------|-------|-----|------------|
 | `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | `https://{subdomain}.preview.local` (Caddy) or `http://localhost:{port}` |
-| `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 5 min | `https://*.run.app` (managed HTTPS) |
+| `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 10 min | `https://*.run.app` (managed HTTPS) |
 
 Preview is started in two ways:
-1. **Pipeline-automated:** TestPreviewCoordinator.onTestsReady() starts preview sequentially after tests compile (NOT in parallel with test gen). Uses `@Lazy @Autowired` for PreviewService to avoid circular dependency. Preview is no longer started by `autoStartPreview()` in PRODUCTION mode.
-2. **User-initiated:** User clicks 'Start Preview' in the UI after a run completes.
+1. **Pipeline-automated:** PipelineHarness auto-starts preview immediately after marking run COMPLETE (for both PROTOTYPE and PRODUCTION modes). TestPreviewCoordinator reuses the existing preview for test execution.
+2. **User-initiated:** User clicks 'Start Preview' in the UI (idempotent — returns existing session if running).
 
 ```mermaid
 flowchart TD
@@ -494,7 +498,7 @@ flowchart TD
     Y --> Z{Mode?}
     Z -->|docker| AA[docker compose down, Caddy route removed]
     Z -->|cloud-run| AB[Cloud Run service deleted]
-    W -->|No action| AC[Auto-deleted after TTL — 10 min docker / 5 min cloud-run]
+    W -->|No action| AC[Auto-deleted after 10-min TTL]
 
     style A fill:#6366f1,color:#fff
     style V fill:#22c55e,color:#fff
@@ -525,7 +529,7 @@ sequenceDiagram
     BE-->>FE: Preview RUNNING — HTTPS URL
     FE-->>U: Preview link available
 
-    Note over BE,CR: Auto-delete after 5-min TTL
+    Note over BE,CR: Auto-delete after 10-min TTL
     BE->>CR: Delete Cloud Run service
     CR-->>BE: Service deleted
 ```
@@ -800,5 +804,5 @@ sequenceDiagram
 
 ---
 
-*Updated: 2026-03-28*
+*Updated: 2026-03-30*
 *Covers: Pipeline execution, auth, org management, integrations, Slack notifications, JIRA/Confluence context extraction, post-run features, deployment (dual-mode preview), test generation, recovery, admin workflows.*

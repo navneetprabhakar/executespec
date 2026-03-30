@@ -14,7 +14,7 @@ The core pipeline orchestrates multi-agent AI execution from natural language in
 
 **Requirements:**
 - Accept natural language user requests via REST API (`POST /api/runs`)
-- Orchestrate sequential phases: Plan → Approve → Work → Compile → Auto-merge → Review (+ auto-fix) → Report → COMPLETE
+- Orchestrate sequential phases: Plan → Approve → Work → Compile → Auto-merge → **COMPLETE** → Auto-preview → Background validation (Review + auto-fix + Test gen + Test exec + Report)
 - Limit concurrent active runs via semaphore (`max-runs: 10`)
 - Release compute slot while waiting at approval gates (gates don't consume compute)
 - Support both REST and CLI execution paths
@@ -23,10 +23,10 @@ The core pipeline orchestrates multi-agent AI execution from natural language in
 
 **Run States:**
 ```
-PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → COMPLETE
-    ↓              ↓                ↓            ↓
-  FAILED        FAILED          PARTIAL      FAILED
-  QUEUED        (rejected)
+PLANNING → AWAITING_APPROVAL → WORKING → COMPLETE
+    ↓              ↓                ↓         ↓
+  FAILED        FAILED          PARTIAL   Background validation
+  QUEUED        (rejected)                (review + tests + report)
   PAUSED
 ```
 
