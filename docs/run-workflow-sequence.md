@@ -74,7 +74,7 @@ Side paths:
 |---|---|
 | **Trigger** | Workspace ready |
 | **Handler** | `PlannerAgent.plan()` |
-| **Model** | Sonnet (CAPABLE tier) via `ModelRouter` |
+| **Model** | Opus (PLANNING tier) via `ModelRouter` |
 | **State** | `PLANNING` → `AWAITING_APPROVAL` |
 
 1. **Prompt assembly** — load `prompts/planner.txt` + workspace listing + CODEBASE_CONTEXT.md.
@@ -108,7 +108,7 @@ Side paths:
 |---|---|
 | **Trigger** | Plan approved |
 | **Handler** | `SequentialTaskExecutor.execute()` → `WorkerAgent.execute()` per task |
-| **Model** | Haiku (FAST) / Sonnet (CAPABLE) / Claude 3.5 (POWER) based on task complexity |
+| **Model** | Haiku (LIGHTWEIGHT) / Sonnet (WORKHORSE) / Opus (PLANNING) based on task complexity |
 | **State** | `WORKING` |
 
 ### Dependency Resolution
@@ -173,7 +173,7 @@ Side paths:
 |---|---|
 | **Trigger** | Runs in background validation thread after COMPLETE |
 | **Handler** | `ReviewerAgentV2.review()` |
-| **Model** | Haiku (CAPABLE tier) |
+| **Model** | Opus (PLANNING tier) |
 | **State** | `COMPLETE` (run already marked complete) |
 
 ### Phase 1 — Inspection (max 10 tool calls)
@@ -197,7 +197,7 @@ Side paths:
 |---|---|
 | **Trigger** | Review complete (runs in background validation thread) |
 | **Handler** | `TestGenOrchestrator.runTestGenPipeline()` |
-| **Model** | Haiku (WORKHORSE tier) for TestWorkerAgent, LIGHTWEIGHT for TestReportGenerator |
+| **Model** | Sonnet (WORKHORSE tier) for TestWorkerAgent, Haiku (LIGHTWEIGHT) for TestReportGenerator |
 | **State** | `REVIEWING` (continued) |
 
 1. **Test planning** — `TestPlannerAgent` creates a test plan from the user spec and generated code.
@@ -329,42 +329,36 @@ Side paths:
 
 | Tier | Anthropic | OpenAI | Google |
 |------|-----------|--------|--------|
-| **FAST** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
-| **CAPABLE** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
-| **POWER** | `claude-opus-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
+| **LIGHTWEIGHT** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
+| **WORKHORSE** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-flash-preview` |
+| **PLANNING** | `claude-opus-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
 
-### Provider Weight Distribution
+### Provider Selection
 
-| Provider | Weight | Share |
-|----------|--------|-------|
-| Anthropic | 4 | 40% |
-| Google | 3 | 30% |
-| OpenAI | 3 | 30% |
-
-Selection is **weighted random** (not round-robin). Health-aware — unhealthy providers (3 consecutive failures) are skipped for 60s.
+Provider is **user-selected per project** (not weighted random). The user chooses Anthropic, Google, or OpenAI when creating a run. Health-aware — unhealthy providers (5 consecutive failures, Redis-backed circuit breaker) trigger failover to the next healthy provider for 60s.
 
 ### Per-Agent Model Assignments
 
 | Agent | Default Tier | Model Selection |
 |-------|-------------|-----------------|
-| `PlannerAgent` | CAPABLE | `modelRouter.selectFromTier(CAPABLE)` |
+| `PlannerAgent` | PLANNING | `modelRouter.selectFromTier(PLANNING)` |
 | `WorkerAgent` | Task-based | Complexity → tier (see below) |
-| `CompilerAgent` | FAST | Direct Haiku assignment |
-| `ReviewerAgentV2` | CAPABLE | `modelRouter.selectFromTier(CAPABLE)` |
-| `ConversationAgent` | CAPABLE | `modelRouter.selectFromTier(CAPABLE)` |
-| `TestWorkerAgent` | CAPABLE | `modelRouter.selectFromTier(CAPABLE)` |
-| `TestReportGenerator` | FAST | `modelRouter.selectFromTier(FAST)` |
-| `ContextAgent` (Scout) | FAST | Direct Haiku assignment |
-| `PromptOptimiserAgent` | FAST | Direct Haiku assignment |
-| `ValidationReportGenerator` | FAST | Direct Haiku assignment |
+| `CompilerAgent` | WORKHORSE | `modelRouter.selectFromTier(WORKHORSE)` |
+| `ReviewerAgentV2` | PLANNING | `modelRouter.selectFromTier(PLANNING)` |
+| `ConversationAgent` | LIGHTWEIGHT | `modelRouter.selectFromTier(LIGHTWEIGHT)` |
+| `TestWorkerAgent` | WORKHORSE | `modelRouter.selectFromTier(WORKHORSE)` |
+| `TestReportGenerator` | LIGHTWEIGHT | `modelRouter.selectFromTier(LIGHTWEIGHT)` |
+| `ContextAgent` (Scout) | LIGHTWEIGHT | Direct Haiku assignment |
+| `PromptOptimiserAgent` | LIGHTWEIGHT | Direct Haiku assignment |
+| `ValidationReportGenerator` | LIGHTWEIGHT | Direct Haiku assignment |
 
 ### Task Complexity → Initial Tier
 
 | Planner Complexity | Initial Tier | Typical Model |
 |--------------------|-------------|---------------|
-| LOW | FAST | Haiku |
-| MEDIUM | CAPABLE | Sonnet |
-| HIGH | CAPABLE | Sonnet |
+| LOW | LIGHTWEIGHT | Haiku |
+| MEDIUM | WORKHORSE | Sonnet |
+| HIGH | WORKHORSE | Sonnet |
 
 ### Escalation Triggers
 

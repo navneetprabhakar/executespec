@@ -57,19 +57,19 @@ graph TB
         end
 
         subgraph "Compute — MIG (Managed Instance Group)"
-            subgraph "VM 1 — n2-standard-4"
-                JVM1[JVM<br/>Java 21 / ZGC<br/>-Xms1g -Xmx10g<br/>Spring Boot 3.3]
+            subgraph "VM 1 — n2-standard-8"
+                JVM1[JVM<br/>Java 21 / G1GC<br/>-Xms8g -Xmx16g<br/>Spring Boot 3.3]
                 WS1[Workspace<br/>/workspace/*]
             end
-            subgraph "VM 2 — n2-standard-4"
-                JVM2[JVM<br/>Java 21 / ZGC<br/>-Xms1g -Xmx10g<br/>Spring Boot 3.3]
+            subgraph "VM 2 — n2-standard-8"
+                JVM2[JVM<br/>Java 21 / G1GC<br/>-Xms8g -Xmx16g<br/>Spring Boot 3.3]
                 WS2[Workspace<br/>/workspace/*]
             end
         end
 
         subgraph "Data Layer"
             SQL[(Cloud SQL<br/>PostgreSQL 15<br/>Private IP<br/>Automated backups)]
-            REDIS[(Memorystore<br/>Redis 1GB Basic<br/>Gates, sessions)]
+            REDIS[(Memorystore<br/>Redis<br/>Pool: max-active 50<br/>Gates, sessions)]
         end
 
         subgraph "Storage"
@@ -615,7 +615,7 @@ graph TB
 | LB | HTTPS External LB | — |
 | CI/CD | GitHub Actions | — |
 | Payment | Razorpay | API v1 |
-| JVM | ZGC (Generational) | — |
+| JVM | G1GC | — |
 
 ---
 
