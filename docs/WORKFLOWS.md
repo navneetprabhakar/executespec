@@ -73,13 +73,11 @@ flowchart TD
     ZF --> ZG[Auto-start preview — 10-min TTL]
     ZG --> ZH[Background validation thread starts]
     ZH --> Y[ReviewerAgentV2 — inspect merged code + auto-fix]
-    Y --> Z[TestGenOrchestrator — sequential after review]
-    Z --> ZA[TestPlannerAgent plans integration tests]
-    ZA --> ZB[TestWorkerAgent writes test code]
-    ZB --> ZC[TestPreviewCoordinator reuses existing preview]
+    Y --> Z[TestGenOrchestrator — generates + compiles tests]
+    Z --> ZC[TestPreviewCoordinator reuses existing preview]
     ZC --> ZD[Tests execute against live preview]
     ZD --> ZE[ValidationReport generated]
-    ZE --> ZI([📊 Background validation complete])
+    ZE --> ZI([📊 Background validation complete — preview stays running])
 
     style A fill:#6366f1,color:#fff
     style ZF fill:#22c55e,color:#fff
@@ -457,7 +455,7 @@ Preview supports two modes, configured via `preview.mode` in application propert
 | `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 10 min | `https://*.run.app` (managed HTTPS) |
 
 Preview is started in two ways:
-1. **Pipeline-automated:** PipelineHarness auto-starts preview immediately after marking run COMPLETE (for both PROTOTYPE and PRODUCTION modes). TestPreviewCoordinator reuses the existing preview for test execution.
+1. **Pipeline-automated:** PipelineHarness auto-starts preview immediately after marking run COMPLETE (for both PROTOTYPE and PRODUCTION modes). Preview stays running for full 10-min TTL. TestPreviewCoordinator reuses the existing preview for test execution without stopping it.
 2. **User-initiated:** User clicks 'Start Preview' in the UI (idempotent — returns existing session if running).
 
 ```mermaid
