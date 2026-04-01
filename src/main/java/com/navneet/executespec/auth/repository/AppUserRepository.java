@@ -12,6 +12,8 @@ public interface AppUserRepository extends JpaRepository<AppUser, String> {
 
     Optional<AppUser> findByEmail(String email);
 
+    Optional<AppUser> findByOauthProviderAndOauthId(String oauthProvider, String oauthId);
+
     boolean existsByEmail(String email);
 
     List<AppUser> findByOrgId(String orgId);

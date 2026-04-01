@@ -1,0 +1,120 @@
+You are a compliance engineering specialist. A financial trading platform's saga orchestrator needs MiFID II Article 25 compliance. Below is the current audit implementation. Review it, identify all compliance failures, and design the correct audit trail.
+
+CONTEXT:
+The saga orchestrator executes multi-leg trade orders across NYSE, NASDAQ, and LSE. Each trade decision involves:
+- Market data lookup (current price, bid/ask spread, volume)
+- Pre-trade risk check (client's remaining daily risk limit)
+- Order routing decision (which exchange, what order type)
+- Execution confirmation from exchange
+- Post-trade state update
+
+MiFID II Article 25 requires firms to keep records of all services, activities, and transactions sufficient to enable the competent authority to monitor compliance. This includes: order timestamps, execution timestamps, decision rationale, best execution evidence, and complete reconstructability of the trade lifecycle from records alone.
+
+CURRENT AUDIT IMPLEMENTATION:
+
+```java
+@Service
+public class AuditService {
+
+    private final AuditRepository auditRepo;  // Separate audit database (audit-db)
+    private final ObjectMapper mapper;
+
+    /**
+     * Called after the saga state transition commits to the primary database.
+     * Writes audit record to the separate audit database for compliance.
+     */
+    public void recordTradeAudit(String orderId, String sagaState,
+                                  List<LegResult> legs, String decisionRationale) {
+        AuditRecord record = new AuditRecord();
+        record.setOrderId(orderId);
+        record.setSagaState(sagaState);
+        record.setLegs(mapper.writeValueAsString(legs));
+        record.setDecisionRationale(decisionRationale);
+        record.setTimestamp(Instant.now());  // System.currentTimeMillis() precision
+        record.setTraderUserId(SecurityContext.getCurrentUser().getId());
+        auditRepo.save(record);
+    }
+}
+
+// Called from TradeOrchestrator after state commit:
+@Transactional
+public OrderResult executeMultiLeg(MultiLegOrder order) {
+    // ... leg execution logic ...
+
+    order.setStatus(OrderStatus.FILLED);
+    orderRepo.save(order);  // Commits to primary-db
+
+    // Audit written AFTER primary transaction commits
+    auditService.recordTradeAudit(
+        order.getId(),
+        "FILLED",
+        results,
+        "All legs filled successfully"
+    );
+
+    return new OrderResult(order.getId(), results, OrderStatus.FILLED);
+}
+```
+
+AUDIT DATABASE SCHEMA:
+```sql
+CREATE TABLE audit_record (
+    id BIGSERIAL PRIMARY KEY,
+    order_id VARCHAR(100) NOT NULL,
+    saga_state VARCHAR(50) NOT NULL,
+    legs JSONB NOT NULL,
+    decision_rationale TEXT,
+    timestamp TIMESTAMP NOT NULL,
+    trader_user_id VARCHAR(100)
+);
+```
+
+WHAT'S MISSING FROM THE AUDIT (you need to identify these — the current implementation is incomplete):
+- The market data that was used to make the trading decision is not captured anywhere
+- The timestamp precision may not meet regulatory requirements
+- The best execution analysis (why this exchange over alternatives) is not recorded
+- Price staleness at the time of execution is not checked or recorded
+- The audit record can be lost entirely (think about what happens between the two database writes)
+- Compensation events (cancellations, offsetting trades) have no audit trail at all
+
+YOUR TASK:
+1. Review the current audit implementation and identify ALL compliance failures
+2. Design a correct audit trail that satisfies MiFID II Article 25
+3. Specify the exact technical mechanism for audit atomicity with saga state transitions
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "compliance_failures": [
+    {
+      "issue": "short description",
+      "severity": "CRITICAL|HIGH|MEDIUM",
+      "regulatory_risk": "what happens if this is found in an audit",
+      "code_reference": "which part of the code causes this"
+    }
+  ],
+  "audit_atomicity_fix": {
+    "problem": "why the current write-after-commit approach fails",
+    "solution": "how to make audit atomic with state transition",
+    "implementation": "specific technical mechanism"
+  },
+  "timestamp_requirements": {
+    "precision": "what precision is required and why",
+    "clock_source": "what clock source to use",
+    "synchronization": "how to ensure clock accuracy across services"
+  },
+  "best_execution_evidence": {
+    "data_to_capture": ["list of data points to record at decision time"],
+    "market_data_snapshot": "what market data to freeze at decision time",
+    "staleness_threshold": "max acceptable staleness with reasoning",
+    "alternative_venues": "how to document why this exchange was chosen over others"
+  },
+  "compensation_audit": {
+    "events_to_record": ["what compensation events need audit trails"],
+    "linkage": "how compensation audit links back to original trade audit"
+  },
+  "corrected_schema": {
+    "table_definition": "SQL DDL for the corrected audit table",
+    "key_columns": ["list of new columns with types and purposes"]
+  },
+  "anti_patterns": ["audit approaches this design explicitly rejects and why"]
+}

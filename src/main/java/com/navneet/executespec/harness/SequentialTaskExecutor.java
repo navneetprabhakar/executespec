@@ -72,16 +72,7 @@ public class SequentialTaskExecutor {
     private final RunBudgetTracker runBudgetTracker;
 
 
-    /*
-     * TODO: Per-run cost budget — check budget before each worker attempt:
-     *   - FREE: $0.50 (fixed), PRO: $2.00 (max $10), TEAM: $5.00 (max $25), ENTERPRISE: $10.00 (max $100)
-     *   - Check: RunCostBudgetService.canAfford(runId, estimatedCost) before each attempt
-     *   - Before tier escalation: verify remaining budget covers higher-tier cost
-     *   - On budget exceeded: mark task PARTIAL, emit BUDGET_EXCEEDED SSE event
-     *   - RunCostBudgetService: initBudget(runId, tier), canAfford(runId, cost), getRemainingBudget(runId)
-     *   - Store budget in Redis (ephemeral, per-run lifetime)
-     *   - Uses CostEstimator.computeCostForRun() for running total
-     */
+    private final RunCostBudgetService runCostBudgetService;
 
     /**
      * Result of sequential execution across all tasks.
@@ -139,6 +130,18 @@ public class SequentialTaskExecutor {
         Object mergeLock = new Object();
 
         for (int tierIdx = 0; tierIdx < tiers.size(); tierIdx++) {
+            // Check for cancellation before starting each tier
+            if (Thread.currentThread().isInterrupted()) {
+                log.info("Pipeline thread interrupted before tier {} — aborting execution for run {}", tierIdx, runId);
+                break;
+            }
+            // Also check DB status in case cancellation happened between tiers
+            PipelineRun freshRun = stateStore.findRun(runId).orElse(null);
+            if (freshRun != null && "CANCELLED".equals(freshRun.getStatus())) {
+                log.info("Run {} is CANCELLED — aborting execution at tier {}", runId, tierIdx);
+                break;
+            }
+
             List<AgentTask> tierTasks = tiers.get(tierIdx);
 
             Observation tierObs = Observation.createNotStarted("executespec.tier", observationRegistry)
@@ -264,13 +267,27 @@ public class SequentialTaskExecutor {
         task.setBranchName(branchName);
         task.setAssignedModel(taskModel);
 
-        // === Budget check before executing worker ===
+        // === LLM call budget check before executing worker ===
         if (runBudgetTracker.isOverBudget(runId)) {
             log.warn("[Budget] Run {} over budget ({}/{} calls) — skipping task {}",
                 runId, runBudgetTracker.getCurrentCalls(runId),
                 runBudgetTracker.getCeiling(runId), taskId);
             stateStore.failTask(taskId, "Run budget exceeded — task skipped");
             sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
+            failed.add(task);
+            try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
+            return;
+        }
+
+        // === Cost budget check (USD) before executing worker ===
+        if (runCostBudgetService.isOverBudget(runId)) {
+            String tier = runCostBudgetService.getRunTier(runId);
+            Double budget = runCostBudgetService.getBudget(runId);
+            log.warn("[CostBudget] Run {} over ${} budget — cancelling run", runId,
+                    budget != null ? String.format("%.2f", budget) : "?");
+            stateStore.failTask(taskId, "Run cost budget exceeded — upgrade for higher limits");
+            sseBroadcaster.emit(runId, RunEvent.budgetExceeded(runId, tier, budget != null ? budget : 3.0));
+            sseBroadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
             failed.add(task);
             try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
             return;

@@ -16,9 +16,9 @@ export default function UserMenu() {
     <div className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-sm bg-slate-700 px-3 py-1.5 text-sm text-white hover:bg-slate-600"
+        className="flex items-center gap-2 rounded-sm bg-[var(--gray-400)] px-3 py-1.5 text-sm text-primary hover:bg-slate-600"
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-600 text-xs font-bold">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-blue text-xs font-bold">
           {initials}
         </span>
         <span className="hidden sm:inline">{user.firstName}</span>
@@ -28,12 +28,12 @@ export default function UserMenu() {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-2 w-56 rounded-sm border border-slate-700 bg-[#1a1f2e] ">
-            <div className="border-b border-slate-700 p-4">
-              <p className="font-semibold text-white">{user.firstName} {user.lastName}</p>
-              <p className="text-xs text-slate-400">{user.email}</p>
+          <div className="absolute right-0 z-20 mt-2 w-56 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] ">
+            <div className="border-b border-[var(--border-default)] p-4">
+              <p className="font-semibold text-primary">{user.firstName} {user.lastName}</p>
+              <p className="text-xs text-muted">{user.email}</p>
               {user.orgId && (
-                <p className="mt-1 text-xs text-purple-400">
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
                   {user.orgRole === 'ORG_ADMIN' ? '👑 Org Admin' :
                    user.orgRole === 'BILLING_ADMIN' ? '💳 Billing Admin' : '💻 Developer'}
                 </p>
@@ -42,7 +42,7 @@ export default function UserMenu() {
             <div className="p-2">
               <button
                 onClick={() => { setOpen(false); navigate('/settings'); }}
-                className="w-full rounded-sm px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
+                className="w-full rounded-sm px-3 py-2 text-left text-sm text-secondary hover:bg-[var(--gray-400)]"
               >
                 Settings
               </button>
@@ -50,7 +50,7 @@ export default function UserMenu() {
               {user.orgId && (user.orgRole === 'ORG_ADMIN' || user.globalRole === 'SUPER_ADMIN') && (
                 <button
                   onClick={() => { setOpen(false); navigate('/org/settings'); }}
-                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
+                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-secondary hover:bg-[var(--gray-400)]"
                 >
                   Org Settings
                 </button>
@@ -59,7 +59,7 @@ export default function UserMenu() {
               {!user.orgId && (user.tier === 'PRO' || user.tier === 'ENTERPRISE') && (
                 <button
                   onClick={() => { setOpen(false); navigate('/org/settings'); }}
-                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-purple-400 hover:bg-slate-700"
+                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--gray-400)]"
                 >
                   Create Organization
                 </button>
@@ -67,15 +67,15 @@ export default function UserMenu() {
               {user.globalRole === 'SUPER_ADMIN' && (
                 <button
                   onClick={() => { setOpen(false); navigate('/admin'); }}
-                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-amber-400 hover:bg-slate-700"
+                  className="w-full rounded-sm px-3 py-2 text-left text-sm text-accent-amber hover:bg-[var(--gray-400)]"
                 >
                   Admin Panel
                 </button>
               )}
-              <hr className="my-1 border-slate-700" />
+              <hr className="my-1 border-[var(--border-default)]" />
               <button
                 onClick={async () => { setOpen(false); await logout(); navigate('/login'); }}
-                className="w-full rounded-sm px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700"
+                className="w-full rounded-sm px-3 py-2 text-left text-sm text-accent-red hover:bg-[var(--gray-400)]"
               >
                 Log out
               </button>

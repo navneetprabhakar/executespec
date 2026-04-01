@@ -6,16 +6,16 @@ import { fmtCost, cn } from '@/lib/utils';
 import type { FeasibilityReport } from '@/lib/api';
 
 const VERDICT_COLORS: Record<string, string> = {
-  FEASIBLE:   'text-accent-emerald',
+  FEASIBLE:   'text-accent-green',
   MARGINAL:   'text-accent-amber',
-  INFEASIBLE: 'text-accent-rose',
-  ESTIMATED:  'text-accent-cyan',
+  INFEASIBLE: 'text-accent-red',
+  ESTIMATED:  'text-secondary',
 };
 
 const COMPLEXITY_COLORS: Record<string, string> = {
-  LOW:    'text-accent-emerald bg-accent-emerald/10',
+  LOW:    'text-accent-green bg-accent-green/10',
   MEDIUM: 'text-accent-amber bg-accent-amber/10',
-  HIGH:   'text-accent-rose bg-accent-rose/10',
+  HIGH:   'text-accent-red bg-accent-red/10',
 };
 
 export default function FeasibilityEstimator() {
@@ -46,20 +46,20 @@ export default function FeasibilityEstimator() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold text-zinc-200">Feasibility Estimator</h2>
+      <h2 className="text-base font-semibold text-primary">Feasibility Estimator</h2>
       <div className="space-y-3">
         <textarea
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           placeholder="Describe your goal..."
           rows={3}
-          className="w-full font-mono text-sm bg-surface-1 border border-white/[0.08] rounded-sm px-4 py-3 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40 resize-none"
+          className="w-full font-mono text-sm bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-4 py-3 text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue/40 resize-none"
         />
         <div className="flex gap-3">
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            className="flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none"
+            className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none"
           >
             <option value="">Default model</option>
             <option value="claude-opus-4-6">Claude Opus 4.6</option>
@@ -73,14 +73,14 @@ export default function FeasibilityEstimator() {
             value={budget}
             onChange={(e) => setBudget(e.target.value)}
             placeholder="Budget ($)"
-            className="w-32 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none"
+            className="w-32 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none"
           />
           <button
             onClick={handleEstimate}
             disabled={!goal.trim() || loading}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium text-white transition-all',
-              'bg-accent-violet hover:bg-accent-violet/80 disabled:opacity-40 disabled:cursor-not-allowed'
+              'flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium text-primary transition-all',
+              'bg-accent-blue hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed'
             )}
           >
             {loading ? <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <Wand2 className="h-4 w-4" />}
@@ -92,26 +92,26 @@ export default function FeasibilityEstimator() {
       <AnimatePresence>
         {error && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="p-3 rounded-sm bg-accent-rose/10 border border-accent-rose/30 text-sm text-accent-rose">
+            className="p-3 rounded-sm bg-accent-red/10 border border-accent-red/30 text-sm text-accent-red">
             {error}
           </motion.div>
         )}
         {result && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="space-y-4 border-t border-white/[0.06] pt-4">
+            className="space-y-4 border-t border-[var(--border-default)] pt-4">
             {/* Summary */}
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
-                <span className={cn('text-sm font-medium', VERDICT_COLORS[result.verdict] ?? 'text-zinc-300')}>
+                <span className={cn('text-sm font-medium', VERDICT_COLORS[result.verdict] ?? 'text-secondary')}>
                   {result.verdict === 'FEASIBLE' ? '✓ Feasible' :
                    result.verdict === 'MARGINAL' ? '⚠ Marginal' :
                    result.verdict === 'INFEASIBLE' ? '✗ Not feasible' : '~ Estimated'}
                 </span>
               </div>
-              <div className="flex items-center gap-4 text-sm text-zinc-300">
+              <div className="flex items-center gap-4 text-sm text-secondary">
                 <span>{fmtCost(result.estimatedLowUsd)} – {fmtCost(result.estimatedHighUsd)}</span>
                 {result.budgetUsd && (
-                  <span className="text-zinc-500">Budget: {fmtCost(result.budgetUsd)}</span>
+                  <span className="text-muted">Budget: {fmtCost(result.budgetUsd)}</span>
                 )}
               </div>
             </div>
@@ -119,17 +119,17 @@ export default function FeasibilityEstimator() {
             {/* Task breakdown */}
             {result.tasks?.length > 0 && (
               <div className="space-y-2">
-                <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Task Breakdown</h4>
+                <h4 className="text-xs font-medium text-muted uppercase tracking-wider">Task Breakdown</h4>
                 {result.tasks.map((t, i) => (
-                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-sm bg-white/[0.02] border border-white/[0.06]">
+                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
                     <div className="flex items-center gap-2 min-w-0">
-                      <ChevronRight className="h-3 w-3 text-zinc-600 flex-shrink-0" />
-                      <span className="text-sm text-zinc-300 truncate">{t.title}</span>
-                      <span className={cn('text-xs px-1.5 py-0.5 rounded flex-shrink-0', COMPLEXITY_COLORS[t.complexity] ?? 'text-zinc-500 bg-zinc-500/10')}>
+                      <ChevronRight className="h-3 w-3 text-muted flex-shrink-0" />
+                      <span className="text-sm text-secondary truncate">{t.title}</span>
+                      <span className={cn('text-xs px-1.5 py-0.5 rounded flex-shrink-0', COMPLEXITY_COLORS[t.complexity] ?? 'text-muted bg-[var(--gray-200)]')}>
                         {t.complexity}
                       </span>
                     </div>
-                    <span className="text-xs text-zinc-500 flex-shrink-0 ml-2">
+                    <span className="text-xs text-muted flex-shrink-0 ml-2">
                       {fmtCost(t.estimatedLowUsd)}–{fmtCost(t.estimatedHighUsd)}
                     </span>
                   </div>

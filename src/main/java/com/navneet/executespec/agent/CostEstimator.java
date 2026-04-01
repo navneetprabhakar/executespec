@@ -35,6 +35,7 @@ public class CostEstimator {
     private final ModelResolver modelResolver;
     private final StateStore stateStore;
     private final TestPlanRepository testPlanRepository;
+    private final TokenBudgetMonitor tokenBudgetMonitor;
 
     public record CostBreakdown(double lowUsd, double highUsd) {
         public String formatted() {
@@ -42,10 +43,16 @@ public class CostEstimator {
         }
     }
 
-    // Typical tokens per iteration by complexity (conservative estimates)
-    private static final int LOW_IN_TOKENS    = 10_000,  LOW_OUT_TOKENS    = 2_048;
-    private static final int MEDIUM_IN_TOKENS = 25_000,  MEDIUM_OUT_TOKENS = 4_096;
-    private static final int HIGH_IN_TOKENS   = 60_000,  HIGH_OUT_TOKENS   = 8_192;
+    // Input token estimates per iteration by complexity.
+    // Based on typical context window usage at compaction thresholds (45%/60%/80% of 200K limit).
+    private static final int LOW_IN_TOKENS    = 15_000;
+    private static final int MEDIUM_IN_TOKENS = 40_000;
+    private static final int HIGH_IN_TOKENS   = 80_000;
+
+    // Output token estimates per iteration by complexity.
+    private static final int LOW_OUT_TOKENS    = 4_000;
+    private static final int MEDIUM_OUT_TOKENS = 8_000;
+    private static final int HIGH_OUT_TOKENS   = 16_000;
 
     public CostBreakdown estimate(TaskPlan plan) {
         return estimate(plan, LlmProvider.ANTHROPIC);
@@ -70,18 +77,20 @@ public class CostEstimator {
         for (TaskDefinition task : plan.getTasks()) {
             String complexity = task.getComplexity() != null ? task.getComplexity().toUpperCase() : "MEDIUM";
             int inTok  = complexityInputTokens(complexity);
-            int outTok = complexityOutputTokens(complexity);
+            int outTok = tokenBudgetMonitor.maxOutputTokens(null, complexity);
 
             // Low = 1 iteration, High = 3 iterations
             totalLow  += costUsd(inTok, outTok, 1, workerRates);
             totalHigh += costUsd(inTok, outTok, 3, workerRates);
         }
 
-        // Add fixed planner and reviewer costs (~1 call each, MEDIUM size)
-        totalLow  += costUsd(MEDIUM_IN_TOKENS, MEDIUM_OUT_TOKENS, 1, plannerRates);
-        totalHigh += costUsd(MEDIUM_IN_TOKENS, MEDIUM_OUT_TOKENS, 1, plannerRates);
-        totalLow  += costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 1, reviewerRates);
-        totalHigh += costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 2, reviewerRates);
+        // Add fixed planner and reviewer costs
+        int plannerOut  = tokenBudgetMonitor.maxOutputTokens(null, "HIGH");
+        int reviewerOut = tokenBudgetMonitor.maxOutputTokens(null, "MEDIUM");
+        totalLow  += costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
+        totalHigh += costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
+        totalLow  += costUsd(MEDIUM_IN_TOKENS + 20_000, reviewerOut, 1, reviewerRates);
+        totalHigh += costUsd(MEDIUM_IN_TOKENS + 20_000, reviewerOut, 2, reviewerRates);
 
         // Apply 50% buffer to high estimate to account for retries, failover,
         // and cache-write overhead that the simple model doesn't capture.

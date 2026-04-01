@@ -166,6 +166,19 @@ public class Invoice {
     @Column(name = "pdf_generated_at")
     private Instant pdfGeneratedAt;
 
+    /** Payment gateway used: "razorpay" or "stripe". */
+    @Column(name = "gateway", length = 20)
+    @Builder.Default
+    private String gateway = "razorpay";
+
+    /** Gateway-specific invoice ID (e.g., Stripe invoice ID). */
+    @Column(name = "gateway_invoice_id")
+    private String gatewayInvoiceId;
+
+    /** Gateway-hosted PDF URL (Stripe provides this natively). */
+    @Column(name = "gateway_pdf_url", columnDefinition = "TEXT")
+    private String gatewayPdfUrl;
+
     // ── Credit note reference ──────────────────────────────────────
 
     @Column(name = "original_invoice_id")

@@ -43,6 +43,10 @@ spring:
     baseline-version: 0         # Baseline before V1
     locations: classpath:db/migration
 
+  # ── OAuth2 Login (Google + GitHub) ──────────────────────────────────────────
+  # Set GOOGLE_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_ID env vars to enable.
+  # When unset, OAuth2 auto-config is excluded (see SecurityConfig).
+
   ai:
     retry:
       max-attempts: 3               # down from default 10 — LlmRouter handles its own fallback chain
@@ -74,10 +78,10 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-sonnet-4-6
+      workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning: gemini-3.1-pro-preview
+      planning: gemini-3-flash-preview #gemini-3.1-pro-preview removed for now due to rate limiting
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
@@ -87,7 +91,7 @@ model-matrix:
   agent-tier-map:
     PlannerAgent: PLANNING
     ReviewerAgentV2: PLANNING
-    TestPlannerAgent: PLANNING
+    TestPlannerAgent: WORKHORSE
     WorkerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
     CompilerAgent: WORKHORSE
@@ -95,20 +99,20 @@ model-matrix:
     ConflictResolverAgent: WORKHORSE
     ContextAgent: LIGHTWEIGHT
     ConversationAgent: LIGHTWEIGHT
-    PromptOptimiserAgent: LIGHTWEIGHT
+    PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT
-    ValidationReportGenerator: LIGHTWEIGHT
+    ValidationReportGenerator: WORKHORSE
     RequestTriageService: LIGHTWEIGHT
   failover-order:
     anthropic:
-      - google
       - openai
+      - google
     google:
-      - anthropic
       - openai
-    openai:
       - anthropic
+    openai:
       - google
+      - anthropic
 
 agent:
   workspace: ./workspace
@@ -184,7 +188,7 @@ agent:
       memory: 512Mi
       max-instances: 1
       allow-unauthenticated: true
-    ttl-days: 7
+    ttl-days: 3
     cleanup-cron: "0 3 * * * *"
     docker:
       build-timeout-seconds: 300
@@ -265,7 +269,7 @@ preview:
   enabled: true
   mode: docker                         # "docker" (Docker Compose, local) or "cloud-run" (GCP Cloud Run)
   total-startup-timeout-seconds: 480   # 8-minute total deadline (Spring Boot cold builds need extra time)
-  preview-ttl-minutes: 10              # auto-shutdown after 10 minutes
+  preview-ttl-minutes: 5              # auto-shutdown after 10 minutes
   port-range-start: 10000              # Docker Compose host port range
   port-range-end: 10100
   preview-domain: executespec.ai       # single-level: preview-{id}.executespec.ai
@@ -313,6 +317,14 @@ app:
       concurrent-run-limit: 10
 
 executespec:
+  rate-limit:
+    enabled: true
+
+  crypto:
+    enabled: true
+    gcp-secret-name: projects/${GCP_PROJECT:executespecv1}/secrets/executespec-crypto-key/versions/latest
+    local-key: ${CRYPTO_LOCAL_KEY:}  # Only for local dev — leave empty in prod
+
   validator:
     enabled: true
     per-task-validation: true
@@ -329,9 +341,19 @@ razorpay:
 
 billing:
   terms-version: "2026-03-v1"
+  default-gateway: razorpay
   founder-pricing:
     max-slots: 100
     discount-pct: 30
+  stripe:
+    enabled: false
+    secret-key: ${STRIPE_SECRET_KEY:}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    pro-price-id: ${STRIPE_PRO_PRICE_ID:}
+    enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
+  razorpay:
+    enabled: true
 
 logging:
   level:

@@ -22,14 +22,14 @@ export function UsageBadge() {
   if (runsUsage.max === -1) return null;
 
   const pct = runsUsage.pctUsed;
-  const color = pct > 90 ? 'text-red-400' : pct > 70 ? 'text-amber-400' : 'text-zinc-500';
+  const color = pct > 90 ? 'text-accent-red' : pct > 70 ? 'text-accent-amber' : 'text-muted';
 
   return (
     <div className={`flex items-center gap-1.5 text-xs ${color}`}>
-      <div className="w-16 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+      <div className="w-16 h-1.5 bg-[var(--gray-400)] rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full ${
-            pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-amber-500' : 'bg-indigo-500'
+            pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-amber-500' : 'bg-accent-blue'
           }`}
           style={{ width: `${Math.min(pct, 100)}%` }}
         />

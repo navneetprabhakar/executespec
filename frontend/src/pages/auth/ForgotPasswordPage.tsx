@@ -19,37 +19,37 @@ export default function ForgotPasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-purple-400">executespec</h1>
+          <h1 className="text-3xl font-bold text-[var(--text-secondary)]">executespec</h1>
         </div>
-        <div className="rounded-sm border border-slate-700 bg-[#1a1f2e] p-8 ">
+        <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] p-8 ">
           {sent ? (
             <div className="text-center">
               <div className="mb-4 text-4xl">🔑</div>
-              <h2 className="mb-2 text-xl font-bold text-white">Check your email</h2>
-              <p className="text-slate-400 text-sm">
-                If an account exists for <strong className="text-white">{email}</strong>,
+              <h2 className="mb-2 text-xl font-bold text-primary">Check your email</h2>
+              <p className="text-muted text-sm">
+                If an account exists for <strong className="text-primary">{email}</strong>,
                 we sent a temporary password. Use it to log in and you'll be prompted to set a new password.
               </p>
-              <Link to="/login" className="mt-6 inline-block text-purple-400 hover:text-purple-300 text-sm">
+              <Link to="/login" className="mt-6 inline-block text-[var(--text-secondary)] hover:text-accent-blue text-sm">
                 Back to login
               </Link>
             </div>
           ) : (
             <>
-              <h2 className="mb-2 text-xl font-bold text-white">Reset password</h2>
-              <p className="mb-6 text-sm text-slate-400">Enter your email and we'll send a temporary password.</p>
+              <h2 className="mb-2 text-xl font-bold text-primary">Reset password</h2>
+              <p className="mb-6 text-sm text-muted">Enter your email and we'll send a temporary password.</p>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="mb-1 block text-sm text-slate-400">Email</label>
+                  <label className="mb-1 block text-sm text-muted">Email</label>
                   <input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus
-                    className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+                    className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none" />
                 </div>
                 <button type="submit" disabled={loading}
-                  className="w-full rounded-sm bg-purple-600 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors">
+                  className="w-full rounded-sm bg-accent-blue py-2.5 font-semibold text-primary hover:bg-accent-blue disabled:opacity-50 transition-colors">
                   {loading ? 'Sending…' : 'Send temporary password'}
                 </button>
               </form>
-              <Link to="/login" className="mt-4 block text-center text-sm text-slate-400 hover:text-white">
+              <Link to="/login" className="mt-4 block text-center text-sm text-muted hover:text-primary">
                 Back to login
               </Link>
             </>

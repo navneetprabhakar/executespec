@@ -11,6 +11,7 @@ import com.navneet.executespec.billing.dto.*;
 import com.navneet.executespec.billing.entity.*;
 import com.navneet.executespec.billing.exception.BillingException;
 import com.navneet.executespec.billing.gateway.BillingGateway;
+import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
 import com.navneet.executespec.billing.repository.*;
 import com.navneet.executespec.billing.security.WebhookSignatureVerifier;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,9 @@ public class BillingService {
 
     // Email service for welcome/upgrade emails
     private final MailService mailService;
+
+    // Multi-gateway router (Stripe + Razorpay)
+    private final PaymentGatewayRouter gatewayRouter;
 
     @Value("${billing.terms-version:2026-03-v1}")
     private String currentTermsVersion;
@@ -536,6 +540,179 @@ public class BillingService {
                 notificationService.sendTopupCredited(user.getEmail(), topup.getQuantity());
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // STRIPE WEBHOOK PROCESSING
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Process a validated Stripe webhook event.
+     * Called by BillingWebhookController after signature verification by StripePaymentGateway.
+     */
+    public void processStripeWebhook(String rawPayload, String signature, String eventType) {
+        try {
+            JsonNode payload = objectMapper.readTree(rawPayload);
+            String eventId = payload.has("id") ? payload.get("id").asText() : "stripe_" + System.currentTimeMillis();
+
+            // Idempotency check
+            if (webhookRepo.existsByGatewayAndEventId("STRIPE", eventId)) {
+                log.debug("Duplicate Stripe webhook skipped: {}", eventId);
+                return;
+            }
+
+            // Store raw event
+            BillingWebhookEvent event = BillingWebhookEvent.builder()
+                    .gateway("STRIPE")
+                    .eventId(eventId)
+                    .eventType(eventType)
+                    .rawPayload(rawPayload)
+                    .processed(false)
+                    .build();
+            webhookRepo.save(event);
+
+            // Process based on event type
+            JsonNode dataObject = payload.path("data").path("object");
+
+            switch (eventType) {
+                case "checkout.session.completed" -> handleStripeCheckoutCompleted(dataObject);
+                case "invoice.paid" -> handleStripeInvoicePaid(dataObject);
+                case "invoice.payment_failed" -> handleStripeInvoicePaymentFailed(dataObject);
+                case "customer.subscription.deleted" -> handleStripeSubscriptionDeleted(dataObject);
+                default -> log.debug("Stripe webhook: unhandled event type: {}", eventType);
+            }
+
+            event.setProcessed(true);
+            event.setProcessedAt(Instant.now());
+            webhookRepo.save(event);
+
+        } catch (Exception e) {
+            log.error("Stripe webhook processing error: {}", e.getMessage(), e);
+        }
+    }
+
+    private void handleStripeCheckoutCompleted(JsonNode session) {
+        String stripeSubscriptionId = session.path("subscription").asText("");
+        String stripeCustomerId = session.path("customer").asText("");
+        String billingEntityId = session.path("metadata").path("billing_entity_id").asText("");
+        String billingEntityType = session.path("metadata").path("billing_entity_type").asText("");
+        String planId = session.path("metadata").path("plan_id").asText("");
+
+        if (stripeSubscriptionId.isBlank()) {
+            log.warn("Stripe checkout.session.completed without subscription ID");
+            return;
+        }
+
+        // Update the Stripe customer ID on the billing entity
+        if ("ORG".equals(billingEntityType) && !billingEntityId.isBlank()) {
+            orgRepo.findById(billingEntityId).ifPresent(org -> {
+                org.setStripeCustomerId(stripeCustomerId);
+                org.setPaymentGateway("stripe");
+                orgRepo.save(org);
+            });
+        } else if (!billingEntityId.isBlank()) {
+            userRepo.findById(billingEntityId).ifPresent(user -> {
+                user.setStripeCustomerId(stripeCustomerId);
+                user.setPaymentGateway("stripe");
+                userRepo.save(user);
+            });
+        }
+
+        // Find subscription by gateway subscription ID
+        BillingSubscription sub = subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
+        if (sub == null) {
+            // Create subscription record if checkout was initiated outside our flow
+            log.info("Stripe checkout completed for new subscription: subId={}, entityId={}",
+                    stripeSubscriptionId, billingEntityId);
+            // Subscription will be fully set up by invoice.paid event
+            return;
+        }
+
+        sub.setStatus("ACTIVE");
+        sub.setGatewayCustomerId(stripeCustomerId);
+        sub.setCurrentPeriodStart(Instant.now());
+        subRepo.save(sub);
+
+        log.info("Stripe checkout completed: subId={}, entityId={}", stripeSubscriptionId, billingEntityId);
+    }
+
+    private void handleStripeInvoicePaid(JsonNode invoice) {
+        String stripeSubscriptionId = invoice.path("subscription").asText("");
+        String stripeInvoiceId = invoice.path("id").asText("");
+        String invoicePdfUrl = invoice.path("invoice_pdf").asText("");
+
+        if (stripeSubscriptionId.isBlank()) {
+            log.debug("Stripe invoice.paid for non-subscription invoice: {}", stripeInvoiceId);
+            return;
+        }
+
+        BillingSubscription sub = subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
+        if (sub == null) {
+            log.warn("Stripe invoice.paid for unknown subscription: {}", stripeSubscriptionId);
+            return;
+        }
+
+        BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
+        if (plan == null) {
+            log.warn("Plan not found for subscription: {}", sub.getBillingPlanId());
+            return;
+        }
+
+        // Extend subscription period
+        sub.setStatus("ACTIVE");
+        sub.setCurrentPeriodStart(Instant.now());
+        sub.setCurrentPeriodEnd(computePeriodEnd(plan.getPeriod()));
+        subRepo.save(sub);
+
+        // Ensure tier is correct
+        upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
+
+        // Generate invoice with Stripe references
+        try {
+            invoiceService.generateStripeSubscriptionInvoice(sub, plan, stripeInvoiceId, invoicePdfUrl);
+        } catch (Exception e) {
+            log.warn("Invoice generation failed for Stripe payment (non-blocking): {}", e.getMessage());
+        }
+
+        log.info("Stripe invoice.paid: subId={}, invoiceId={}", stripeSubscriptionId, stripeInvoiceId);
+    }
+
+    private void handleStripeInvoicePaymentFailed(JsonNode invoice) {
+        String stripeSubscriptionId = invoice.path("subscription").asText("");
+
+        if (stripeSubscriptionId.isBlank()) return;
+
+        BillingSubscription sub = subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
+        if (sub == null) return;
+
+        sub.setStatus("PAST_DUE");
+        subRepo.save(sub);
+
+        log.warn("Stripe invoice payment failed: subId={}, user={}", stripeSubscriptionId, sub.getUserId());
+
+        // Notify user
+        AppUser user = userRepo.findById(sub.getUserId()).orElse(null);
+        if (user != null) {
+            BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
+            notificationService.sendPaymentFailed(user.getEmail(),
+                    plan != null ? plan.getName() : "");
+        }
+    }
+
+    private void handleStripeSubscriptionDeleted(JsonNode subscription) {
+        String stripeSubscriptionId = subscription.path("id").asText("");
+
+        if (stripeSubscriptionId.isBlank()) return;
+
+        BillingSubscription sub = subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
+        if (sub == null) {
+            log.warn("Stripe subscription.deleted for unknown subscription: {}", stripeSubscriptionId);
+            return;
+        }
+
+        downgradeToFree(sub);
+        log.info("Stripe subscription deleted → downgraded to free: subId={}, user={}",
+                stripeSubscriptionId, sub.getUserId());
     }
 
     // ─────────────────────────────────────────────────────────────

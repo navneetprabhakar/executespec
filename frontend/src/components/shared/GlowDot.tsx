@@ -9,21 +9,21 @@ interface GlowDotProps {
 
 export default function GlowDot({ status, size = 'md', className }: GlowDotProps) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS['QUEUED'];
-  const isActive = ACTIVE_STATUSES.has(status);
-  const dim = size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5';
+  const isWorking = status === 'WORKING';
+  const dim = size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2';
 
   return (
     <span className={cn('relative flex items-center justify-center', className)}>
-      {isActive && (
+      {isWorking && (
         <span
           className={cn(
-            'absolute inline-flex rounded-full opacity-75 animate-ping',
+            'absolute inline-flex rounded-full opacity-60 animate-status-pulse',
             dim,
             colors.dot
           )}
         />
       )}
-      <span className={cn('relative inline-flex rounded-full', dim, colors.dot, colors.glow)} />
+      <span className={cn('relative inline-flex rounded-full', dim, colors.dot)} />
     </span>
   );
 }

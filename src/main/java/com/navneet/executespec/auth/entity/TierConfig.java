@@ -68,4 +68,8 @@ public class TierConfig {
     /** Max active deployments. 0=disabled, -1=unlimited. FREE=0, PRO=5, ENT=-1. */
     @Column(name = "max_deployments", nullable = false)
     private int maxDeployments = 0;
+
+    /** Max USD cost per run. null = unlimited. FREE=$3, PRO=$5 (no BYOK). */
+    @Column(name = "max_run_cost_usd")
+    private Double maxRunCostUsd;
 }

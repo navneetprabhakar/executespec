@@ -5,7 +5,7 @@ interface SkeletonProps {
 }
 
 export function Skeleton({ className }: SkeletonProps) {
-  return <div className={cn('shimmer rounded-md bg-white/[0.04]', className)} />;
+  return <div className={cn('shimmer rounded-md bg-[var(--gray-200)]', className)} />;
 }
 
 export function RunCardSkeleton() {

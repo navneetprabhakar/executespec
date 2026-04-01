@@ -48,6 +48,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -96,6 +97,7 @@ public class PipelineHarness {
     // ── Sequential execution with validation + model routing ──────────────────
     private final SequentialTaskExecutor sequentialTaskExecutor;
     private final RunBudgetTracker runBudgetTracker;
+    private final RunCostBudgetService runCostBudgetService;
 
     // ── Reviewer V2: agentic two-phase (inspect → fix) reviewer ──────────────
     private final com.navneet.executespec.reviewer.ReviewerAgentV2 reviewerAgentV2;
@@ -113,6 +115,9 @@ public class PipelineHarness {
     // ── Auto-retry infrastructure ──────────────────────────────────────────
     private final com.navneet.executespec.auth.repository.TierConfigRepository tierConfigRepo;
     private final com.navneet.executespec.auth.repository.OrgRepository orgRepo;
+
+    // ── Tier enforcement (complexity gate) ────────────────────────────────────
+    private final com.navneet.executespec.auth.service.TierEnforcementService tierEnforcementService;
 
     // ── JIRA/Confluence context extraction ─────────────────────────────────
     private final com.navneet.executespec.integration.context.ReferenceExtractorService referenceExtractorService;
@@ -184,6 +189,12 @@ public class PipelineHarness {
      * Key = runId; presence means a thread is already processing the resume.
      */
     private final ConcurrentHashMap<String, Boolean> activeResumeGuard = new ConcurrentHashMap<>();
+
+    /**
+     * Tracks running pipeline threads so we can interrupt them on cancel.
+     * Key = runId, value = the thread executing the pipeline.
+     */
+    private final ConcurrentHashMap<String, Thread> pipelineThreads = new ConcurrentHashMap<>();
 
     /** Single scanner for CLI stdin path — avoids buffering issues. */
     private final Scanner stdin = new Scanner(System.in);
@@ -453,6 +464,7 @@ public class PipelineHarness {
 
             final PipelineRun queuedRun = run;
             executor.submit(() -> {
+                pipelineThreads.put(runId, Thread.currentThread());
                 boolean acquired = false;
                 try {
                     runSlots.acquire();
@@ -467,6 +479,7 @@ public class PipelineHarness {
                     Thread.currentThread().interrupt();
                     stateStore.markFailed(runId, "Interrupted while waiting for run slot");
                 } finally {
+                    pipelineThreads.remove(runId);
                     if (acquired) runSlots.release();
                 }
             });
@@ -474,9 +487,11 @@ public class PipelineHarness {
         } else {
             // Slot available — start immediately
             executor.submit(() -> {
+                pipelineThreads.put(runId, Thread.currentThread());
                 try {
                     executeRunAsync(runId, userRequest);
                 } finally {
+                    pipelineThreads.remove(runId);
                     runSlots.release();
                 }
             });
@@ -635,8 +650,18 @@ public class PipelineHarness {
         gateStore.setPlanGate(runId, false);
         gateStore.setMergeGate(runId, MergeDecision.DECLINE);
 
+        // Cancel in-flight workers (same as pauseRun)
+        workerPool.cancelAllTasksForRun(runId);
+
         boolean cancelled = stateStore.cancelRun(runId);
         if (cancelled) {
+            // Interrupt the pipeline thread so it stops between phases
+            Thread pipelineThread = pipelineThreads.get(runId);
+            if (pipelineThread != null && pipelineThread.isAlive()) {
+                log.info("[Cancel] Interrupting pipeline thread for run {}", runId);
+                pipelineThread.interrupt();
+            }
+
             broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
             broadcaster.complete(runId);
         }
@@ -985,6 +1010,7 @@ public class PipelineHarness {
             resumeObs.stop();
             broadcaster.complete(runId);
             runKeyStore.remove(runId);
+            runCostBudgetService.remove(runId);
         }
     }
 
@@ -1369,6 +1395,13 @@ public class PipelineHarness {
 
     // ── Internal async pipeline execution ────────────────────────────────────
 
+    /** Returns true if the run has been cancelled (interrupted or DB-cancelled). */
+    private boolean isCancelled(String runId) {
+        if (Thread.currentThread().isInterrupted()) return true;
+        PipelineRun r = stateStore.findRun(runId).orElse(null);
+        return r != null && "CANCELLED".equals(r.getStatus());
+    }
+
     private void executeRunAsync(String runId, String userRequest) {
         log.info("Executing async run {}", runId);
         Metrics.ACTIVE_RUNS.incrementAndGet();
@@ -1402,6 +1435,12 @@ public class PipelineHarness {
 
         // Stamp billing flag so downstream accounting knows which key source was used
         run.setKeySource(resolvedKeys.keySourceMode());
+
+        // Stamp user tier for async enforcement (model lock, cost budget)
+        String userTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
+        run.setUserTier(userTier);
+        llmRouter.setRunUserTier(runId, userTier);
+
         stateStore.saveRun(run);
 
         if (run.getSourceRunId() != null && !run.getSourceRunId().isBlank()) {
@@ -1502,6 +1541,12 @@ public class PipelineHarness {
         } catch (Exception e) {
             // Non-fatal — log and continue with original request
             log.warn("[RefExtractor] Failed to extract references for run {}: {}", runId, e.getMessage());
+        }
+
+        // ── Check for cancellation before proceeding ────────────────────
+        if (isCancelled(runId)) {
+            log.info("Run {} cancelled before triage — aborting", runId);
+            return;
         }
 
         // ── 0. Triage: classify request as SINGLE_SHOT or MULTI_TASK ─────
@@ -1633,6 +1678,7 @@ public class PipelineHarness {
                             backgroundValidationRuns.remove(runId);
                             runKeyStore.remove(runId);
                             runBudgetTracker.remove(runId);
+                    runCostBudgetService.remove(runId);
                             broadcaster.complete(runId);
                         }
                     }));
@@ -1650,6 +1696,7 @@ public class PipelineHarness {
                     broadcaster.complete(runId);
                     runKeyStore.remove(runId);
                     runBudgetTracker.remove(runId);
+                    runCostBudgetService.remove(runId);
                 }
             }
             return; // single-shot path complete — skip normal pipeline
@@ -1683,6 +1730,23 @@ public class PipelineHarness {
                     log.info("[Run {}] {}", runId, costBreakdown.formatted());
                 } catch (Exception ce) {
                     log.debug("[Run {}] Could not compute cost estimate: {}", runId, ce.getMessage());
+                }
+
+                // ── Complexity gate: block FREE / non-BYOK users from high-complexity plans ──
+                if (run.getCreatedByUserId() != null) {
+                    try {
+                        tierEnforcementService.assertComplexityAllowed(run.getCreatedByUserId(), plan);
+                    } catch (ResponseStatusException cex) {
+                        log.warn("[PipelineHarness] Complexity gate blocked run {} for user {}: {}",
+                                runId, run.getCreatedByUserId(), cex.getReason());
+                        stateStore.markFailed(runId, cex.getReason());
+                        broadcaster.emit(runId, RunEvent.log(runId, "harness", cex.getReason()));
+                        broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                        eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, cex.getReason()));
+                        // Refund the run count since the plan was blocked before execution
+                        tierEnforcementService.decrementRunCount(run.getCreatedByUserId());
+                        return;
+                    }
                 }
 
                 broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_APPROVAL"));
@@ -1779,11 +1843,23 @@ public class PipelineHarness {
                     .filter(t -> !isSystemTask(t))
                     .toList();
 
+                // Check for cancellation before starting workers
+                if (isCancelled(runId)) {
+                    log.info("Run {} cancelled before worker execution — aborting", runId);
+                    return;
+                }
+
                 // Validate file ownership — detect overlap before workers start
                 validateFileOwnership(workerTasks, runId);
 
                 // Initialize run-level budget tracker from task plan
                 runBudgetTracker.initBudget(runId, plan);
+
+                // Initialize per-run cost budget (USD ceiling based on tier)
+                boolean hasByok = "OWN_KEYS".equals(run.getKeySource()) || "HYBRID".equals(run.getKeySource());
+                double costBudget = tierEnforcementService.resolveRunCostBudget(
+                        run.getUserTier() != null ? run.getUserTier() : "FREE", hasByok);
+                runCostBudgetService.initBudget(runId, costBudget, run.getUserTier());
 
                 // === SEQUENTIAL EXECUTION WITH VALIDATION + MODEL ROUTING ===
                 SequentialTaskExecutor.SequentialExecutionResult execResult =
@@ -2060,6 +2136,7 @@ public class PipelineHarness {
                         backgroundValidationRuns.remove(runId);
                         runKeyStore.remove(runId);
                         runBudgetTracker.remove(runId);
+                    runCostBudgetService.remove(runId);
                         broadcaster.complete(runId);
                     }
                 }));
@@ -2430,6 +2507,7 @@ public class PipelineHarness {
         } finally {
             broadcaster.complete(runId);
             runKeyStore.remove(runId);  // clean up per-run API keys
+            runCostBudgetService.remove(runId);
         }
     }
 

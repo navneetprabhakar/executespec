@@ -39,13 +39,13 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
   if (!canCreate) {
     return (
       <div className="p-8 text-center">
-        <h2 className="text-xl font-bold text-white mb-2">Upgrade Required</h2>
-        <p className="text-slate-400 mb-4">
-          Only <span className="text-purple-400 font-semibold">PRO</span> and{' '}
-          <span className="text-purple-400 font-semibold">ENTERPRISE</span> users can create an organization.
+        <h2 className="text-xl font-bold text-primary mb-2">Upgrade Required</h2>
+        <p className="text-muted mb-4">
+          Only <span className="text-[var(--text-secondary)] font-semibold">PRO</span> and{' '}
+          <span className="text-[var(--text-secondary)] font-semibold">ENTERPRISE</span> users can create an organization.
         </p>
-        <p className="text-slate-500 text-sm">
-          Your current plan: <span className="text-white font-semibold">{user?.tier ?? 'FREE'}</span>
+        <p className="text-muted text-sm">
+          Your current plan: <span className="text-primary font-semibold">{user?.tier ?? 'FREE'}</span>
         </p>
       </div>
     );
@@ -53,59 +53,59 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
 
   return (
     <div className="p-8 max-w-lg mx-auto">
-      <h2 className="text-xl font-bold text-white mb-2">Create Organization</h2>
-      <p className="text-slate-400 text-sm mb-6">
+      <h2 className="text-xl font-bold text-primary mb-2">Create Organization</h2>
+      <p className="text-muted text-sm mb-6">
         Set up your organization to manage team members, integrations, and AI provider keys.
       </p>
       <form onSubmit={handleCreate} className="space-y-4">
         <div>
-          <label className="text-sm text-slate-300 mb-1 block">Organization Name</label>
+          <label className="text-sm text-secondary mb-1 block">Organization Name</label>
           <input
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
             required
             placeholder="Acme Corp"
-            className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none"
           />
         </div>
         <div>
-          <label className="text-sm text-slate-300 mb-1 block">Email Domains</label>
+          <label className="text-sm text-secondary mb-1 block">Email Domains</label>
           <input
             type="text"
             value={domains}
             onChange={e => setDomains(e.target.value)}
             required
             placeholder="acme.com, acmecorp.com"
-            className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none"
           />
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-muted mt-1">
             Comma-separated domains. Users with matching emails can be invited.
           </p>
         </div>
         <div>
-          <label className="text-sm text-slate-300 mb-1 block">Admin Email</label>
+          <label className="text-sm text-secondary mb-1 block">Admin Email</label>
           <input
             type="email"
             value={adminEmail}
             onChange={e => setAdminEmail(e.target.value)}
             required
             placeholder="admin@acme.com"
-            className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none"
           />
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-muted mt-1">
             Primary contact email for the organization admin.
           </p>
         </div>
 
         {error && (
-          <p className="text-sm text-red-400">{error}</p>
+          <p className="text-sm text-accent-red">{error}</p>
         )}
 
         <button
           type="submit"
           disabled={saving}
-          className="w-full rounded-sm bg-purple-600 px-4 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors"
+          className="w-full rounded-sm bg-accent-blue px-4 py-2.5 font-semibold text-primary hover:bg-accent-blue disabled:opacity-50 transition-colors"
         >
           {saving ? 'Creating...' : 'Create Organization'}
         </button>
@@ -184,7 +184,7 @@ export default function OrgSettingsPage() {
     }
   };
 
-  if (loading) return <div className="p-8 text-slate-400">Loading…</div>;
+  if (loading) return <div className="p-8 text-muted">Loading…</div>;
 
   // Show Create Org form if user has no org
   if (!org) return <CreateOrgForm onCreated={loadOrgData} />;
@@ -194,21 +194,21 @@ export default function OrgSettingsPage() {
       <div className="h-full overflow-y-auto p-6 space-y-8">
         {/* Org overview */}
         <div>
-          <h1 className="text-2xl font-bold text-white">{org.name}</h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Tier: <span className="text-purple-400 font-semibold">{org.tier}</span> ·
-            Runs this month: <span className="text-white">{org.monthlyRunCount}</span> ·
-            Domains: <span className="text-slate-300">{org.domainPatterns}</span>
-            {org.adminEmail && <> · Admin: <span className="text-slate-300">{org.adminEmail}</span></>}
+          <h1 className="text-2xl font-bold text-primary">{org.name}</h1>
+          <p className="text-muted text-sm mt-1">
+            Tier: <span className="text-[var(--text-secondary)] font-semibold">{org.tier}</span> ·
+            Runs this month: <span className="text-primary">{org.monthlyRunCount}</span> ·
+            Domains: <span className="text-secondary">{org.domainPatterns}</span>
+            {org.adminEmail && <> · Admin: <span className="text-secondary">{org.adminEmail}</span></>}
           </p>
         </div>
 
         {/* Members */}
         <div>
-          <h2 className="text-lg font-semibold text-white mb-3">Members ({members.length})</h2>
-          <div className="rounded-sm border border-slate-700 bg-[#1a1f2e] overflow-hidden">
+          <h2 className="text-lg font-semibold text-primary mb-3">Members ({members.length})</h2>
+          <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-slate-800 text-slate-400">
+              <thead className="bg-[var(--gray-300)] text-muted">
                 <tr>
                   <th className="px-4 py-3 text-left">Name</th>
                   <th className="px-4 py-3 text-left">Email</th>
@@ -217,24 +217,24 @@ export default function OrgSettingsPage() {
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700">
+              <tbody className="divide-y divide-[var(--border-default)]">
                 {members.map(m => (
-                  <tr key={m.userId} className="hover:bg-slate-800/40">
-                    <td className="px-4 py-3 text-white">{m.firstName} {m.lastName}</td>
-                    <td className="px-4 py-3 text-slate-400">{m.email}</td>
+                  <tr key={m.userId} className="hover:bg-[var(--gray-300)]/40">
+                    <td className="px-4 py-3 text-primary">{m.firstName} {m.lastName}</td>
+                    <td className="px-4 py-3 text-muted">{m.email}</td>
                     <td className="px-4 py-3">
-                      <span className="rounded-sm bg-purple-900/40 px-2 py-0.5 text-xs text-purple-300">
+                      <span className="rounded-sm bg-accent-blue/20 px-2 py-0.5 text-xs text-accent-blue">
                         {m.orgRole}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-500">{new Date(m.joinedAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-muted">{new Date(m.joinedAt).toLocaleDateString()}</td>
                     <td className="px-4 py-3 flex gap-2">
                       {m.userId !== user?.id && (
                         <>
                           <button onClick={() => handleRemoveMember(m.userId)}
-                            className="text-xs text-red-400 hover:text-red-300">Remove</button>
+                            className="text-xs text-accent-red hover:text-accent-red">Remove</button>
                           <button onClick={() => handleSuspendMember(m.userId, false)}
-                            className="text-xs text-amber-400 hover:text-amber-300">Suspend</button>
+                            className="text-xs text-accent-amber hover:text-accent-amber">Suspend</button>
                         </>
                       )}
                     </td>
@@ -247,48 +247,48 @@ export default function OrgSettingsPage() {
 
         {/* Invite */}
         <div>
-          <h2 className="text-lg font-semibold text-white mb-3">Invite a member</h2>
+          <h2 className="text-lg font-semibold text-primary mb-3">Invite a member</h2>
           <form onSubmit={handleInvite} className="flex gap-3 flex-wrap">
             <input type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} required
               placeholder="colleague@company.com"
-              className="flex-1 min-w-[200px] rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none" />
+              className="flex-1 min-w-[200px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none" />
             <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
-              className="rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none">
+              className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none">
               <option value="DEVELOPER">Developer</option>
               <option value="ORG_ADMIN">Org Admin</option>
               <option value="BILLING_ADMIN">Billing Admin</option>
             </select>
             <button type="submit"
-              className="rounded-sm bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500">
+              className="rounded-sm bg-accent-blue px-4 py-2 font-semibold text-primary hover:bg-accent-blue">
               Send invite
             </button>
           </form>
-          {inviteMsg && <p className="mt-2 text-sm text-slate-400">{inviteMsg}</p>}
+          {inviteMsg && <p className="mt-2 text-sm text-muted">{inviteMsg}</p>}
         </div>
 
         {/* Pending invitations */}
         {invitations.length > 0 && (
           <div>
-            <h2 className="text-lg font-semibold text-white mb-3">Pending invitations</h2>
+            <h2 className="text-lg font-semibold text-primary mb-3">Pending invitations</h2>
             <div className="space-y-2">
               {invitations.map(inv => (
-                <div key={inv.id} className="flex items-center justify-between rounded-sm border border-slate-700 bg-[#1a1f2e] px-4 py-3">
+                <div key={inv.id} className="flex items-center justify-between rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-4 py-3">
                   <div>
-                    <span className="text-white text-sm">{inv.invitedEmail}</span>
-                    <span className="ml-2 text-xs text-slate-500">{inv.orgRole}</span>
+                    <span className="text-primary text-sm">{inv.invitedEmail}</span>
+                    <span className="ml-2 text-xs text-muted">{inv.orgRole}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`rounded-sm px-2 py-0.5 text-xs font-semibold ${
-                      inv.status === 'ESCALATED' ? 'bg-amber-900/40 text-amber-400' :
-                      inv.status === 'ACCEPTED' ? 'bg-green-900/40 text-green-400' :
-                      inv.status === 'EXPIRED' ? 'bg-red-900/40 text-red-400' :
-                      'bg-slate-700 text-slate-400'}`}>
+                      inv.status === 'ESCALATED' ? 'bg-accent-amber/20 text-accent-amber' :
+                      inv.status === 'ACCEPTED' ? 'bg-accent-blue/20 text-[var(--status-success)]' :
+                      inv.status === 'EXPIRED' ? 'bg-accent-red/20 text-accent-red' :
+                      'bg-[var(--gray-400)] text-muted'}`}>
                       {inv.status}
                     </span>
                     {(inv.status === 'PENDING' || inv.status === 'EXPIRED') && (
                       <button
                         onClick={() => handleResendInvitation(inv.id)}
-                        className="text-xs text-purple-400 hover:text-purple-300 font-medium"
+                        className="text-xs text-[var(--text-secondary)] hover:text-accent-blue font-medium"
                       >
                         Resend
                       </button>

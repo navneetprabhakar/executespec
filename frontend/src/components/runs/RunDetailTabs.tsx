@@ -36,8 +36,14 @@ import {
   Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
-import Editor from '@monaco-editor/react';
+import Editor, { loader } from '@monaco-editor/react';
 import type { editor as monacoEditor } from 'monaco-editor';
+import { GEIST_THEME_NAME, geistDarkTheme } from '@/lib/monacoGeistTheme';
+
+// Register Geist theme once Monaco loads
+loader.init().then((monaco) => {
+  monaco.editor.defineTheme(GEIST_THEME_NAME, geistDarkTheme);
+});
 
 const BASE_TABS = [
   { value: 'overview',  label: 'Overview' },
@@ -131,16 +137,16 @@ export default function RunDetailTabs() {
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-      <Tabs.List className="flex gap-0 border-b border-white/[0.06] flex-shrink-0 px-2 lg:px-4 overflow-x-auto scrollbar-hide">
+      <Tabs.List className="flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 lg:px-4 overflow-x-auto scrollbar-hide">
         {TABS.map((tab) => (
           <Tabs.Trigger
             key={tab.value}
             value={tab.value}
             className={cn(
               'px-2.5 lg:px-4 py-2 lg:py-2.5 text-[10px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
-              'data-[state=active]:border-accent-violet data-[state=active]:text-white',
-              'data-[state=inactive]:border-transparent data-[state=inactive]:text-zinc-500',
-              'hover:text-zinc-300'
+              'data-[state=active]:border-[var(--text-primary)] data-[state=active]:text-primary',
+              'data-[state=inactive]:border-transparent data-[state=inactive]:text-muted',
+              'hover:text-secondary'
             )}
           >
             {tab.value === 'chat' ? (
@@ -154,7 +160,7 @@ export default function RunDetailTabs() {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="ml-auto flex-shrink-0 p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-50"
+          className="ml-auto flex-shrink-0 p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-muted hover:text-secondary transition-colors disabled:opacity-50"
           title="Refresh run data"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
@@ -168,7 +174,7 @@ export default function RunDetailTabs() {
 
         <Tabs.Content value="tasks" className="h-full overflow-y-auto p-4 space-y-2">
           {activeRun.tasks.length === 0 && testTasks.length === 0
-            ? <p className="text-sm text-zinc-500">No tasks yet.</p>
+            ? <p className="text-sm text-muted">No tasks yet.</p>
             : (
               <>
                 {activeRun.tasks.map((t) => (
@@ -177,10 +183,10 @@ export default function RunDetailTabs() {
 
                 {testTasks.length > 0 && (
                   <>
-                    <div className="flex items-center gap-2 pt-4 pb-1 border-t border-white/[0.06]">
-                      <TestTube2 className="h-4 w-4 text-violet-400" />
-                      <span className="text-sm font-medium text-zinc-300">Test Generation Tasks</span>
-                      <span className="text-xs text-zinc-500">({testTasks.length})</span>
+                    <div className="flex items-center gap-2 pt-4 pb-1 border-t border-[var(--border-default)]">
+                      <TestTube2 className="h-4 w-4 text-accent-blue" />
+                      <span className="text-sm font-medium text-secondary">Test Generation Tasks</span>
+                      <span className="text-xs text-muted">({testTasks.length})</span>
                     </div>
                     {testTasks.map((tt) => (
                       <TestTaskCard key={tt.id} task={tt} />
@@ -205,9 +211,17 @@ export default function RunDetailTabs() {
         </Tabs.Content>
 
         <Tabs.Content value="graph" className="h-full overflow-auto p-4">
-          <TaskGraph runId={activeRun.runId} />
+          <CollapsibleGraphSection title="Task Graph" defaultOpen>
+            <div className="overflow-auto max-h-[60vh] border border-[var(--border-default)] rounded-sm">
+              <TaskGraph runId={activeRun.runId} />
+            </div>
+          </CollapsibleGraphSection>
           {testGraph && testGraph.nodes.length > 0 && (
-            <TestGraphSection graph={testGraph} />
+            <CollapsibleGraphSection title="Test Pipeline" defaultOpen>
+              <div className="overflow-auto max-h-[50vh] border border-[var(--border-default)] rounded-sm">
+                <TestGraphSection graph={testGraph} />
+              </div>
+            </CollapsibleGraphSection>
           )}
         </Tabs.Content>
 
@@ -215,8 +229,8 @@ export default function RunDetailTabs() {
           {previewReady ? (
             <PreviewTab runId={activeRun.runId} />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500 gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-zinc-600" />
+            <div className="flex flex-col items-center justify-center h-full text-muted gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-muted" />
               <p className="text-sm">Preview will be available once the run starts generating code.</p>
             </div>
           )}
@@ -226,8 +240,8 @@ export default function RunDetailTabs() {
           {chatReady ? (
             <RunConversation runId={activeRun.runId} />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500 gap-2">
-              <MessageSquare className="h-5 w-5 text-zinc-600" />
+            <div className="flex flex-col items-center justify-center h-full text-muted gap-2">
+              <MessageSquare className="h-5 w-5 text-muted" />
               <p className="text-sm">Chat will be available once the run finishes.</p>
             </div>
           )}
@@ -251,8 +265,8 @@ function BackgroundValidationIndicator() {
 
   return (
     <div className="flex items-center gap-2 px-1 py-1.5">
-      <span className="h-1.5 w-1.5 rounded-full bg-accent-violet/60 animate-pulse" />
-      <span className="text-[11px] text-zinc-500">Review & tests running in background...</span>
+      <span className="h-1.5 w-1.5 rounded-full bg-accent-blue/60 animate-pulse" />
+      <span className="text-[11px] text-muted">Review & tests running in background...</span>
     </div>
   );
 }
@@ -410,11 +424,11 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
     <div className="space-y-6">
       {/* Stuck warning banner */}
       {run.status === 'STUCK' && (
-        <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-rose/10 border border-accent-rose/20">
-          <span className="text-accent-rose text-sm flex-shrink-0">⚠</span>
+        <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-red/10 border border-accent-red/20">
+          <span className="text-accent-red text-sm flex-shrink-0">⚠</span>
           <div>
-            <p className="text-sm font-medium text-accent-rose">Run is stuck</p>
-            <p className="text-xs text-accent-rose/70 mt-0.5">
+            <p className="text-sm font-medium text-accent-red">Run is stuck</p>
+            <p className="text-xs text-accent-red/70 mt-0.5">
               No activity detected for 30+ minutes. Recovery has been triggered automatically.
             </p>
           </div>
@@ -432,28 +446,28 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
               {i < PIPELINE_STEPS.length - 1 && (
                 <div className={cn(
                   'absolute left-[11px] top-6 w-0.5 h-5 -bottom-1',
-                  isDone ? 'bg-accent-emerald/40' : 'bg-white/[0.06]'
+                  isDone ? 'bg-accent-green/40' : 'bg-[var(--gray-200)]'
                 )} />
               )}
               <div className={cn(
                 'relative z-10 h-6 w-6 rounded-full border flex items-center justify-center flex-shrink-0 mt-0.5',
-                isDone ? 'border-accent-emerald bg-accent-emerald/20' :
-                isActive ? 'border-accent-violet bg-accent-violet/20' :
-                'border-white/[0.10] bg-transparent'
+                isDone ? 'border-accent-green bg-accent-green/20' :
+                isActive ? 'border-accent-blue bg-accent-blue/20' :
+                'border-[var(--border-hover)] bg-transparent'
               )}>
                 {isDone ? (
-                  <span className="text-accent-emerald text-xs">✓</span>
+                  <span className="text-accent-green text-xs">✓</span>
                 ) : isActive ? (
-                  <span className="h-2 w-2 rounded-full bg-accent-violet animate-pulse" />
+                  <span className="h-2 w-2 rounded-full bg-accent-blue animate-pulse" />
                 ) : (
-                  <span className="h-1.5 w-1.5 rounded-full bg-white/[0.15]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--border-default)]" />
                 )}
               </div>
               <div className="pb-5">
                 <p className={cn(
                   'text-sm font-medium',
-                  isDone ? 'text-accent-emerald' :
-                  isActive ? 'text-white' : 'text-zinc-600'
+                  isDone ? 'text-accent-green' :
+                  isActive ? 'text-primary' : 'text-muted'
                 )}>
                   {step === 'COMPLETE' ? 'CODE GENERATED' : step.replace(/_/g, ' ')}
                 </p>
@@ -467,39 +481,39 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
       {run.status === 'COMPLETE' && <BackgroundValidationIndicator />}
 
       {/* Run stats: time taken */}
-      <div className="pt-2 border-t border-white/[0.06]">
+      <div className="pt-2 border-t border-[var(--border-default)]">
         <div className="flex items-center gap-2 mb-3">
-          <Clock className="h-3.5 w-3.5 text-zinc-500" />
-          <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Run Stats</span>
+          <Clock className="h-3.5 w-3.5 text-muted" />
+          <span className="text-xs font-medium text-secondary uppercase tracking-wider">Run Stats</span>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-xs text-zinc-600">Time taken</p>
-            <p className="text-sm text-zinc-200 mt-0.5 font-mono">
+            <p className="text-xs text-muted">Time taken</p>
+            <p className="text-sm text-primary mt-0.5 font-mono">
               {durationMs > 0
                 ? `${fmtDuration(durationMs)}${!isTerminal ? ' (running)' : ''}`
                 : '—'}
             </p>
           </div>
           <div>
-            <p className="text-xs text-zinc-600">Started</p>
-            <p className="text-sm text-zinc-200 mt-0.5 font-mono">{relativeTime(run.startedAt)}</p>
+            <p className="text-xs text-muted">Started</p>
+            <p className="text-sm text-primary mt-0.5 font-mono">{relativeTime(run.startedAt)}</p>
           </div>
           <div>
-            <p className="text-xs text-zinc-600">Tasks</p>
-            <p className="text-sm text-zinc-200 mt-0.5 font-mono">{String(run.tasks.length)}</p>
+            <p className="text-xs text-muted">Tasks</p>
+            <p className="text-sm text-primary mt-0.5 font-mono">{String(run.tasks.length)}</p>
           </div>
           <div>
-            <p className="text-xs text-zinc-600">Total tokens</p>
-            <p className="text-sm text-zinc-200 mt-0.5 font-mono">
+            <p className="text-xs text-muted">Total tokens</p>
+            <p className="text-sm text-primary mt-0.5 font-mono">
               {totalTokens > 0 ? fmtTokens(totalTokens) : '—'}
             </p>
           </div>
           {run.createdByName && (
             <div>
-              <p className="text-xs text-zinc-600">Created by</p>
-              <p className="text-sm text-zinc-200 mt-0.5 flex items-center gap-1.5">
-                <User className="h-3 w-3 text-indigo-400" />
+              <p className="text-xs text-muted">Created by</p>
+              <p className="text-sm text-primary mt-0.5 flex items-center gap-1.5">
+                <User className="h-3 w-3 text-accent-blue" />
                 {run.createdByName}
               </p>
             </div>
@@ -507,30 +521,30 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
           {/* Project selector — org members can assign/change/remove/create project */}
           {isOrgMember ? (
             <div className="relative" ref={projectDropdownRef}>
-              <p className="text-xs text-zinc-600">Project</p>
+              <p className="text-xs text-muted">Project</p>
               <button
                 onClick={() => { setProjectDropdownOpen((v) => !v); setCreatingProject(false); }}
                 disabled={projectSaving}
                 className={cn(
                   'mt-0.5 flex items-center gap-1.5 text-sm rounded px-1.5 py-0.5 -mx-1.5 transition-colors',
-                  'hover:bg-white/[0.06] cursor-pointer',
+                  'hover:bg-[var(--gray-200)] cursor-pointer',
                   projectSaving && 'opacity-50 pointer-events-none',
                 )}
               >
                 <FolderKanban className="h-3 w-3 text-cyan-400 flex-shrink-0" />
-                <span className={run.projectName ? 'text-zinc-200' : 'text-zinc-500 italic'}>
+                <span className={run.projectName ? 'text-primary' : 'text-muted italic'}>
                   {run.projectName ?? 'Assign project…'}
                 </span>
-                <ChevronDown className="h-3 w-3 text-zinc-500" />
+                <ChevronDown className="h-3 w-3 text-muted" />
               </button>
 
               {projectDropdownOpen && (
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[200px] rounded-md border border-white/[0.08] bg-surface-2  py-1">
+                <div className="absolute left-0 top-full mt-1 z-50 min-w-[200px] rounded-md border border-[var(--border-default)] bg-[var(--gray-200)]  py-1">
                   {/* Un-assign option — only if currently assigned */}
                   {run.projectId && (
                     <button
                       onClick={() => handleProjectChange(null)}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-secondary hover:bg-[var(--gray-200)] hover:text-primary transition-colors"
                     >
                       <X className="h-3 w-3" />
                       Remove from project
@@ -543,8 +557,8 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                       className={cn(
                         'flex items-center gap-2 w-full px-3 py-1.5 text-sm transition-colors',
                         run.projectId === proj.id
-                          ? 'text-cyan-400 bg-white/[0.04]'
-                          : 'text-zinc-300 hover:bg-white/[0.06]',
+                          ? 'text-cyan-400 bg-[var(--gray-200)]'
+                          : 'text-secondary hover:bg-[var(--gray-200)]',
                       )}
                     >
                       <FolderKanban className="h-3 w-3 flex-shrink-0" />
@@ -554,7 +568,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
                   {/* Divider */}
                   {(projects.length > 0 || run.projectId) && (
-                    <div className="border-t border-white/[0.06] my-1" />
+                    <div className="border-t border-[var(--border-default)] my-1" />
                   )}
 
                   {/* Create new project */}
@@ -570,21 +584,21 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                         onChange={(e) => setNewProjectName(e.target.value)}
                         placeholder="Project name…"
                         autoFocus
-                        className="w-full bg-white/[0.04] border border-white/[0.10] rounded px-2 py-1 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-accent-violet/50"
+                        className="w-full bg-[var(--gray-200)] border border-[var(--border-hover)] rounded px-2 py-1 text-sm text-primary placeholder-[var(--text-muted)] outline-none focus:border-accent-blue/50"
                         onKeyDown={(e) => { if (e.key === 'Escape') { setCreatingProject(false); setNewProjectName(''); } }}
                       />
                       <div className="flex items-center gap-1.5 mt-1.5">
                         <button
                           type="submit"
                           disabled={!newProjectName.trim() || projectSaving}
-                          className="flex-1 text-xs text-center py-1 rounded bg-accent-violet/20 text-accent-violet hover:bg-accent-violet/30 transition-colors disabled:opacity-40"
+                          className="flex-1 text-xs text-center py-1 rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors disabled:opacity-40"
                         >
                           Create & assign
                         </button>
                         <button
                           type="button"
                           onClick={() => { setCreatingProject(false); setNewProjectName(''); }}
-                          className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 transition-colors"
+                          className="text-xs text-muted hover:text-secondary px-2 py-1 transition-colors"
                         >
                           Cancel
                         </button>
@@ -593,7 +607,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                   ) : (
                     <button
                       onClick={() => { setCreatingProject(true); setTimeout(() => newProjectInputRef.current?.focus(), 0); }}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-accent-violet hover:bg-white/[0.06] transition-colors"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-accent-blue hover:bg-[var(--gray-200)] transition-colors"
                     >
                       <Plus className="h-3 w-3" />
                       New project…
@@ -604,8 +618,8 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
             </div>
           ) : run.projectName ? (
             <div>
-              <p className="text-xs text-zinc-600">Project</p>
-              <p className="text-sm text-zinc-200 mt-0.5 flex items-center gap-1.5">
+              <p className="text-xs text-muted">Project</p>
+              <p className="text-sm text-primary mt-0.5 flex items-center gap-1.5">
                 <FolderOpen className="h-3 w-3 text-cyan-400" />
                 {run.projectName}
               </p>
@@ -616,28 +630,28 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
       {/* Super admin: cost breakdown */}
       {isSuperAdmin && (
-        <div className="pt-3 border-t border-white/[0.06]">
+        <div className="pt-3 border-t border-[var(--border-default)]">
           <div className="flex items-center gap-2 mb-3">
             <Coins className="h-3.5 w-3.5 text-accent-amber/70" />
-            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Cost Breakdown</span>
-            <span className="text-[9px] text-zinc-600 bg-white/[0.04] px-1.5 py-0.5 rounded-full">Admin</span>
+            <span className="text-xs font-medium text-secondary uppercase tracking-wider">Cost Breakdown</span>
+            <span className="text-[9px] text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded-full">Admin</span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="text-xs text-zinc-600">Live cost</p>
-              <p className="text-sm text-accent-emerald mt-0.5 font-mono font-medium">
+              <p className="text-xs text-muted">Live cost</p>
+              <p className="text-sm text-accent-green mt-0.5 font-mono font-medium">
                 {liveCost != null ? `$${liveCost.toFixed(4)}` : run.actualCostUsd != null ? `$${run.actualCostUsd.toFixed(4)}` : '—'}
               </p>
               {run.costEstimateLow != null && run.costEstimateHigh != null && (
-                <p className="text-[10px] text-zinc-600 mt-0.5 font-mono">
+                <p className="text-[10px] text-muted mt-0.5 font-mono">
                   est. ${run.costEstimateLow.toFixed(2)} – ${run.costEstimateHigh.toFixed(2)}
                 </p>
               )}
             </div>
             <div>
-              <p className="text-xs text-zinc-600">Key source</p>
-              <p className="text-sm text-zinc-200 mt-0.5 font-mono">
+              <p className="text-xs text-muted">Key source</p>
+              <p className="text-sm text-primary mt-0.5 font-mono">
                 {run.keySource ?? '—'}
               </p>
             </div>
@@ -647,32 +661,32 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
       {/* Token usage by model — visible to users with canViewTokenUsage */}
       {permissions?.canViewTokenUsage && tokensByModel(run.tasks, run.agentTokens).length > 0 && (
-        <div className="pt-3 border-t border-white/[0.06]">
+        <div className="pt-3 border-t border-[var(--border-default)]">
           <div className="flex items-center gap-2 mb-3">
-            <Cpu className="h-3.5 w-3.5 text-zinc-500" />
-            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Token Usage by Model</span>
+            <Cpu className="h-3.5 w-3.5 text-muted" />
+            <span className="text-xs font-medium text-secondary uppercase tracking-wider">Token Usage by Model</span>
           </div>
           <div className="space-y-1.5">
             {tokensByModel(run.tasks, run.agentTokens).map(({ model, provider, input, output, role }) => (
-              <div key={role ? `${role}:${model}` : model} className="flex items-center gap-3 p-2 rounded bg-white/[0.02] border border-white/[0.04]">
+              <div key={role ? `${role}:${model}` : model} className="flex items-center gap-3 p-2 rounded bg-[var(--gray-100)] border border-[var(--border-default)]">
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
                   {role && (
-                    <span className="text-[10px] font-medium text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded flex-shrink-0 capitalize">
+                    <span className="text-[10px] font-medium text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded flex-shrink-0 capitalize">
                       {role}
                     </span>
                   )}
                   {provider && (
-                    <span className="text-[10px] font-mono text-zinc-600 bg-white/[0.03] px-1 py-0.5 rounded flex-shrink-0">
+                    <span className="text-[10px] font-mono text-muted bg-[var(--gray-200)] px-1 py-0.5 rounded flex-shrink-0">
                       {provider}
                     </span>
                   )}
-                  <span className="text-xs font-mono text-zinc-300 truncate">{model}</span>
+                  <span className="text-xs font-mono text-secondary truncate">{model}</span>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0 text-[11px] font-mono">
-                  <span className="text-accent-cyan/70">
+                  <span className="text-secondary/70">
                     {fmtTokens(input)} in
                   </span>
-                  <span className="text-accent-violet/70">
+                  <span className="text-accent-blue/70">
                     {fmtTokens(output)} out
                   </span>
                 </div>
@@ -682,29 +696,52 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         </div>
       )}
 
-      {/* Model assignment */}
-      <div className="grid grid-cols-3 gap-3 pt-2 border-t border-white/[0.06]">
-        {[
-          { label: 'Planner', value: run.plannerModel },
-          { label: 'Worker', value: run.workerModel },
-          { label: 'Reviewer', value: run.reviewerModel },
-        ].map(({ label, value }) => (
-          <div key={label}>
-            <p className="text-xs text-zinc-600">{label}</p>
-            <p className="text-sm text-zinc-200 mt-0.5 font-mono truncate" title={value}>{value}</p>
-          </div>
-        ))}
+      {/* AI Provider */}
+      <div className="pt-2 border-t border-[var(--border-default)]">
+        <p className="text-xs text-muted">Provider</p>
+        <p className="text-sm text-primary mt-0.5 font-mono capitalize">
+          {run.tasks?.[0]?.provider
+            ?? (run.plannerModel?.startsWith('claude') ? 'anthropic'
+              : run.plannerModel?.startsWith('gpt') ? 'openai'
+              : run.plannerModel?.startsWith('gemini') ? 'google'
+              : '—')}
+        </p>
       </div>
 
       {/* Goal — the user's original request (markdown rendered) */}
       {run.userRequest && (
-        <div className="pt-3 border-t border-white/[0.06]">
-          <p className="text-xs text-zinc-600 mb-1.5">Goal</p>
-          <div className="line-clamp-8">
-            <MarkdownContent content={run.userRequest} />
-          </div>
-        </div>
+        <GoalSection content={run.userRequest} />
       )}
+    </div>
+  );
+}
+
+// ── Goal section with copy button ─────────────────────────────────────────────
+
+function GoalSection({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <div className="pt-3 border-t border-[var(--border-default)]">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-xs text-muted">Goal</p>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted hover:text-secondary transition-colors rounded hover:bg-[var(--gray-200)]"
+          title="Copy goal to clipboard"
+        >
+          {copied ? <Check className="h-3 w-3 text-accent-green" /> : <Copy className="h-3 w-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <div className="line-clamp-8">
+        <MarkdownContent content={content} />
+      </div>
     </div>
   );
 }
@@ -713,7 +750,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
 function PlanTab({ run }: { run: RunDetail }) {
   if (!run.planJson) {
-    return <p className="text-sm text-zinc-500">Plan not available yet.</p>;
+    return <p className="text-sm text-muted">Plan not available yet.</p>;
   }
 
   let plan: any = null;
@@ -721,7 +758,7 @@ function PlanTab({ run }: { run: RunDetail }) {
     plan = JSON.parse(run.planJson);
   } catch {
     return (
-      <pre className="text-xs font-mono text-zinc-400 whitespace-pre-wrap break-all">
+      <pre className="text-xs font-mono text-secondary whitespace-pre-wrap break-all">
         {run.planJson}
       </pre>
     );
@@ -732,15 +769,15 @@ function PlanTab({ run }: { run: RunDetail }) {
   return (
     <div className="space-y-4">
       {plan.plan_summary && (
-        <div className="p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Plan Summary</p>
-          <p className="text-sm text-zinc-200 leading-relaxed">{plan.plan_summary}</p>
+        <div className="p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
+          <p className="text-[10px] uppercase tracking-wider text-muted mb-1">Plan Summary</p>
+          <p className="text-sm text-primary leading-relaxed">{plan.plan_summary}</p>
         </div>
       )}
 
       {Array.isArray(plan.tasks) && plan.tasks.length > 0 && (
         <div className="space-y-3">
-          <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+          <h4 className="text-xs font-medium text-muted uppercase tracking-wider">
             Tasks ({plan.tasks.length})
           </h4>
           {plan.tasks.map((t: any, i: number) => (
@@ -772,29 +809,29 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
   const displayCrit = critExpanded || !critLong ? criteria  : criteria.slice(0, TRUNCATE) + '…';
 
   return (
-    <div className="rounded-sm bg-white/[0.02] border border-white/[0.06] overflow-hidden">
+    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden">
       {/* ── Header: index · title · complexity badge ── */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-white/[0.04]">
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[var(--border-default)]">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[10px] text-zinc-600 flex-shrink-0 font-mono tabular-nums">
+          <span className="text-[10px] text-muted flex-shrink-0 font-mono tabular-nums">
             #{String(i + 1).padStart(2, '0')}
           </span>
-          <p className="text-sm font-medium text-zinc-200 leading-snug">{t.title}</p>
+          <p className="text-sm font-medium text-primary leading-snug">{t.title}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {canEdit && !editing && (
             <button
               onClick={() => setEditing(true)}
-              className="text-[10px] text-zinc-500 hover:text-accent-blue transition-colors"
+              className="text-[10px] text-muted hover:text-accent-blue transition-colors"
             >
               Edit
             </button>
           )}
           <span className={cn(
             'text-[10px] font-medium px-1.5 py-0.5 rounded',
-            t.complexity === 'HIGH'   ? 'text-accent-rose bg-accent-rose/10' :
+            t.complexity === 'HIGH'   ? 'text-accent-red bg-accent-red/10' :
             t.complexity === 'MEDIUM' ? 'text-accent-amber bg-accent-amber/10' :
-                                        'text-accent-emerald bg-accent-emerald/10'
+                                        'text-accent-green bg-accent-green/10'
           )}>
             {t.complexity ?? 'MEDIUM'}
           </span>
@@ -807,12 +844,12 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
         {/* Objective */}
         {objective && (
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Objective</p>
-            <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">{displayObj}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted mb-1">Objective</p>
+            <p className="text-xs text-secondary leading-relaxed whitespace-pre-wrap">{displayObj}</p>
             {objLong && (
               <button
                 onClick={() => setObjExpanded(!objExpanded)}
-                className="text-[10px] text-accent-violet hover:text-accent-violet/70 mt-1 transition-colors"
+                className="text-[10px] text-accent-blue hover:text-accent-blue/70 mt-1 transition-colors"
               >
                 {objExpanded ? '▲ Show less' : '▼ Show more'}
               </button>
@@ -823,14 +860,14 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
         {/* Acceptance criteria */}
         {criteria && (
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Acceptance Criteria</p>
-            <div className="bg-white/[0.02] border border-white/[0.04] rounded px-2 py-1.5">
-              <p className="text-xs font-mono text-zinc-500 leading-relaxed whitespace-pre-wrap">{displayCrit}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted mb-1">Acceptance Criteria</p>
+            <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1.5">
+              <p className="text-xs font-mono text-muted leading-relaxed whitespace-pre-wrap">{displayCrit}</p>
             </div>
             {critLong && (
               <button
                 onClick={() => setCritExpanded(!critExpanded)}
-                className="text-[10px] text-accent-violet hover:text-accent-violet/70 mt-1 transition-colors"
+                className="text-[10px] text-accent-blue hover:text-accent-blue/70 mt-1 transition-colors"
               >
                 {critExpanded ? '▲ Show less' : '▼ Show more'}
               </button>
@@ -841,17 +878,17 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
         {/* Footer: model chip + depends_on chips */}
         <div className="flex items-center flex-wrap gap-2 pt-0.5">
           {t.assigned_model && (
-            <span className="text-[10px] font-mono text-zinc-600 bg-white/[0.02] px-1.5 py-0.5 rounded border border-white/[0.04]">
+            <span className="text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]">
               {t.assigned_model}
             </span>
           )}
           {Array.isArray(t.depends_on) && t.depends_on.length > 0 && (
             <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] text-zinc-600">needs:</span>
+              <span className="text-[10px] text-muted">needs:</span>
               {t.depends_on.map((dep: string) => (
                 <span
                   key={dep}
-                  className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-violet/10 text-accent-violet/70 border border-accent-violet/10"
+                  className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue/70 border border-accent-blue/10"
                 >
                   {dep}
                 </span>
@@ -862,13 +899,13 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
 
         {/* Inline task edit */}
         {editing && (
-          <div className="px-3 py-2.5 border-t border-white/[0.04] space-y-2">
+          <div className="px-3 py-2.5 border-t border-[var(--border-default)] space-y-2">
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
               placeholder={`How should "${t.title}" be changed?`}
               rows={2}
-              className="w-full rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none"
+              className="w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2 text-xs text-primary placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none"
               autoFocus
             />
             <div className="flex gap-2">
@@ -895,7 +932,7 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
               </button>
               <button
                 onClick={() => { setEditing(false); setFeedback(''); }}
-                className="px-2.5 py-1 text-[10px] font-medium rounded text-zinc-400 hover:text-zinc-200"
+                className="px-2.5 py-1 text-[10px] font-medium rounded text-secondary hover:text-primary"
               >
                 Cancel
               </button>
@@ -910,8 +947,8 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
 // ── Review tab ────────────────────────────────────────────────────────────────
 
 const VERDICT_COLORS: Record<string, string> = {
-  APPROVE:  'text-accent-emerald',
-  REJECT:   'text-accent-rose',
+  APPROVE:  'text-accent-green',
+  REJECT:   'text-accent-red',
   PARTIAL:  'text-accent-amber',
 };
 
@@ -934,7 +971,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
   const [applyError, setApplyError] = useState<string | null>(null);
 
   if (!run.reviewJson) {
-    return <p className="text-sm text-zinc-500">Review not available yet.</p>;
+    return <p className="text-sm text-muted">Review not available yet.</p>;
   }
 
   let review: any = null;
@@ -942,7 +979,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
     review = JSON.parse(run.reviewJson);
   } catch {
     return (
-      <pre className="text-xs font-mono text-zinc-400 whitespace-pre-wrap break-all">
+      <pre className="text-xs font-mono text-secondary whitespace-pre-wrap break-all">
         {run.reviewJson}
       </pre>
     );
@@ -978,17 +1015,17 @@ function ReviewTab({ run }: { run: RunDetail }) {
   return (
     <div className="space-y-4">
       {/* Verdict + confidence */}
-      <div className="flex items-center justify-between p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
+      <div className="flex items-center justify-between p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
         <div>
-          <p className="text-xs text-zinc-500 mb-1">Verdict</p>
-          <p className={cn('text-sm font-semibold', VERDICT_COLORS[verdict] ?? 'text-zinc-300')}>
+          <p className="text-xs text-muted mb-1">Verdict</p>
+          <p className={cn('text-sm font-semibold', VERDICT_COLORS[verdict] ?? 'text-secondary')}>
             {verdict ?? '—'}
           </p>
         </div>
         {review.overall_confidence != null && (
           <div className="text-right">
-            <p className="text-xs text-zinc-500 mb-1">Confidence</p>
-            <p className="text-sm text-zinc-300">
+            <p className="text-xs text-muted mb-1">Confidence</p>
+            <p className="text-sm text-secondary">
               {typeof review.overall_confidence === 'number'
                 ? `${Math.round(review.overall_confidence * 100)}%`
                 : review.overall_confidence}
@@ -999,40 +1036,40 @@ function ReviewTab({ run }: { run: RunDetail }) {
 
       {/* Summary */}
       {review.summary && (
-        <div className="p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
-          <p className="text-xs text-zinc-500 mb-1">Summary</p>
-          <p className="text-sm text-zinc-300">{review.summary}</p>
+        <div className="p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
+          <p className="text-xs text-muted mb-1">Summary</p>
+          <p className="text-sm text-secondary">{review.summary}</p>
         </div>
       )}
 
       {/* Issues */}
       {hasIssues && (
         <div className="space-y-2">
-          <h4 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Issues ({review.issues.length})</h4>
+          <h4 className="text-xs font-medium text-muted uppercase tracking-wider">Issues ({review.issues.length})</h4>
           {review.issues.map((issue: any, i: number) => (
-            <div key={i} className="p-3 rounded-sm bg-white/[0.02] border border-white/[0.06]">
+            <div key={i} className="p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
               <div className="flex items-center gap-2 mb-1">
                 <span className={cn(
                   'text-xs px-1.5 py-0.5 rounded',
-                  issue.severity === 'CRITICAL' ? 'text-accent-rose bg-accent-rose/10' :
+                  issue.severity === 'CRITICAL' ? 'text-accent-red bg-accent-red/10' :
                   issue.severity === 'MINOR'    ? 'text-accent-amber bg-accent-amber/10' :
-                  'text-zinc-400 bg-zinc-400/10'
+                  'text-secondary bg-[var(--gray-200)]'
                 )}>
                   {issue.severity ?? 'MINOR'}
                 </span>
-                <span className="text-xs text-zinc-500">{CATEGORY_LABELS[issue.category] ?? issue.category}</span>
+                <span className="text-xs text-muted">{CATEGORY_LABELS[issue.category] ?? issue.category}</span>
               </div>
               {issue.file && (
-                <p className="text-xs text-zinc-500 font-mono mt-0.5">{issue.file}</p>
+                <p className="text-xs text-muted font-mono mt-0.5">{issue.file}</p>
               )}
-              <p className="text-sm text-zinc-300">{issue.description}</p>
+              <p className="text-sm text-secondary">{issue.description}</p>
               {issue.fixInstruction && (
-                <p className="text-xs text-zinc-500 mt-1 italic">{issue.fixInstruction}</p>
+                <p className="text-xs text-muted mt-1 italic">{issue.fixInstruction}</p>
               )}
               {issue.autoFixed && (
                 <span className={cn(
                   'inline-block text-xs mt-1',
-                  issue.fixSucceeded ? 'text-emerald-400' : 'text-accent-rose'
+                  issue.fixSucceeded ? 'text-emerald-400' : 'text-accent-red'
                 )}>
                   {issue.fixSucceeded ? 'Auto-fixed \u2713' : 'Auto-fix failed'}
                 </span>
@@ -1046,12 +1083,12 @@ function ReviewTab({ run }: { run: RunDetail }) {
 
       {/* Apply Review button */}
       {isApplyable && permissions?.canUseChat && (
-        <div className="pt-3 border-t border-white/[0.06]">
+        <div className="pt-3 border-t border-[var(--border-default)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-zinc-500">Apply review fixes to this run</p>
+              <p className="text-xs text-muted">Apply review fixes to this run</p>
               {permissions.maxApplySuggestions > 0 && (
-                <p className="text-[10px] text-zinc-600 font-mono mt-0.5">
+                <p className="text-[10px] text-muted font-mono mt-0.5">
                   {run.applySuggestionCount ?? 0}/{permissions.maxApplySuggestions} applied
                 </p>
               )}
@@ -1061,7 +1098,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
               disabled={applyingReview}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-medium transition-all',
-                'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border border-amber-500/20',
+                'bg-amber-500/15 text-accent-amber hover:bg-amber-500/25 border border-amber-500/20',
                 'disabled:opacity-40 disabled:cursor-not-allowed'
               )}
             >
@@ -1072,7 +1109,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
             </button>
           </div>
           {applyError && (
-            <p className="text-xs text-accent-rose mt-2">{applyError}</p>
+            <p className="text-xs text-accent-red mt-2">{applyError}</p>
           )}
         </div>
       )}
@@ -1139,20 +1176,20 @@ function FileTypeIcon({ name }: { name: string }) {
   const textExts = new Set(['md', 'txt', 'yaml', 'yml', 'json', 'xml', 'html', 'css', 'scss', 'sql', 'sh', 'bash', 'properties', 'env', 'conf', 'toml', 'gradle', 'gitignore', 'dockerignore']);
 
   const colorMap: Record<string, string> = {
-    java: 'text-orange-400', kt: 'text-purple-400',
-    ts: 'text-blue-400', tsx: 'text-blue-400',
+    java: 'text-accent-amber', kt: 'text-[var(--text-secondary)]',
+    ts: 'text-accent-blue', tsx: 'text-accent-blue',
     js: 'text-yellow-400', jsx: 'text-yellow-400',
-    py: 'text-green-400', go: 'text-sky-400',
-    rs: 'text-orange-500', sql: 'text-blue-500',
-    json: 'text-yellow-500', xml: 'text-red-400',
-    yml: 'text-purple-400', yaml: 'text-purple-400',
-    html: 'text-orange-400', css: 'text-blue-400',
-    scss: 'text-pink-400', md: 'text-zinc-400',
-    sh: 'text-green-400', bash: 'text-green-400',
-    gradle: 'text-green-500', properties: 'text-zinc-400',
+    py: 'text-[var(--status-success)]', go: 'text-sky-400',
+    rs: 'text-orange-500', sql: 'text-accent-blue',
+    json: 'text-yellow-500', xml: 'text-accent-red',
+    yml: 'text-[var(--text-secondary)]', yaml: 'text-[var(--text-secondary)]',
+    html: 'text-accent-amber', css: 'text-accent-blue',
+    scss: 'text-accent-red', md: 'text-secondary',
+    sh: 'text-[var(--status-success)]', bash: 'text-[var(--status-success)]',
+    gradle: 'text-accent-green', properties: 'text-secondary',
   };
 
-  const color = colorMap[ext] ?? 'text-zinc-500';
+  const color = colorMap[ext] ?? 'text-muted';
 
   if (lower === 'dockerfile' || lower === '.dockerfile') {
     return <span className="text-sky-400 font-mono text-[9px] font-bold leading-none">🐳</span>;
@@ -1163,7 +1200,7 @@ function FileTypeIcon({ name }: { name: string }) {
   if (textExts.has(ext)) {
     return <FileText className={cn('h-3 w-3 flex-shrink-0', color)} />;
   }
-  return <File className="h-3 w-3 flex-shrink-0 text-zinc-500" />;
+  return <File className="h-3 w-3 flex-shrink-0 text-muted" />;
 }
 
 interface TreeNodeViewProps {
@@ -1196,8 +1233,8 @@ function TreeNodeView({
         className={cn(
           'w-full text-left flex items-center gap-1.5 py-[3px] pr-2 rounded text-xs font-mono truncate transition-colors',
           selected === node.path
-            ? 'bg-accent-violet/15 text-accent-violet'
-            : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
+            ? 'bg-accent-blue/15 text-accent-blue'
+            : 'text-secondary hover:text-primary hover:bg-[var(--gray-200)]'
         )}
         style={{ paddingLeft: `${indent}px` }}
         title={node.path}
@@ -1212,7 +1249,7 @@ function TreeNodeView({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="w-full text-left flex items-center gap-1.5 py-[3px] pr-2 rounded text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors"
+        className="w-full text-left flex items-center gap-1.5 py-[3px] pr-2 rounded text-xs text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
         style={{ paddingLeft: `${indent}px` }}
       >
         <ChevronRight className={cn('h-3 w-3 flex-shrink-0 transition-transform', open && 'rotate-90')} />
@@ -1365,7 +1402,7 @@ function IDEFileViewer({
 
   if (!filePath) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted">
         <FileCode2 className="h-10 w-10 opacity-30" />
         <span className="text-sm">Select a file to view its contents</span>
       </div>
@@ -1379,56 +1416,56 @@ function IDEFileViewer({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* ── Tab bar (VS Code style) ── */}
-      <div className="flex items-center border-b border-white/[0.06] bg-[#0d0d14] flex-shrink-0 overflow-x-auto">
-        <div className="flex items-center gap-1.5 px-3 py-2 bg-[#13131f] border-r border-white/[0.06] border-t border-t-accent-violet/60 min-w-0">
+      <div className="flex items-center border-b border-[var(--border-default)] bg-[var(--geist-bg)] flex-shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1.5 px-3 py-2 bg-[var(--gray-100)] border-r border-[var(--border-default)] border-t border-t-[var(--text-primary)] min-w-0">
           <FileTypeIcon name={fileName} />
-          <span className="text-xs font-mono text-zinc-300 whitespace-nowrap">{fileName}</span>
+          <span className="text-xs font-mono text-secondary whitespace-nowrap">{fileName}</span>
         </div>
         {/* breadcrumb path */}
-        <span className="text-[10px] font-mono text-zinc-600 px-3 truncate flex-1">
+        <span className="text-[10px] font-mono text-muted px-3 truncate flex-1">
           {filePath.split('/').slice(0, -1).join(' / ')}
         </span>
         {/* copy button */}
         <button
           onClick={handleCopy}
           title="Copy file contents"
-          className="flex items-center gap-1 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex-shrink-0"
+          className="flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0"
         >
           {copied
-            ? <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">Copied</span></>
+            ? <><Check className="h-3 w-3 text-[var(--status-success)]" /><span className="text-[var(--status-success)]">Copied</span></>
             : <><Copy className="h-3 w-3" /><span>Copy</span></>}
         </button>
         {/* Fold controls */}
         <button
           onClick={() => editorRef.current?.trigger('fold', 'editor.foldAll', {})}
           title="Collapse All"
-          className="flex items-center gap-1 px-2 py-2 text-xs text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0"
+          className="flex items-center gap-1 px-2 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0"
         >
           <ChevronsDownUp className="h-3 w-3" />
         </button>
         <button
           onClick={() => editorRef.current?.trigger('fold', 'editor.unfoldAll', {})}
           title="Expand All"
-          className="flex items-center gap-1 px-2 py-2 text-xs text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0"
+          className="flex items-center gap-1 px-2 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0"
         >
           <ChevronsUpDown className="h-3 w-3" />
         </button>
         {/* language badge */}
-        <span className="px-3 py-2 text-[10px] font-mono text-zinc-600 flex-shrink-0">
+        <span className="px-3 py-2 text-[10px] font-mono text-muted flex-shrink-0">
           {hljsLang}
         </span>
       </div>
 
       {/* ── Code area (Monaco editor — read-only with native folding) ── */}
-      <div className="flex-1 overflow-hidden bg-[#0d0d14]">
+      <div className="flex-1 overflow-hidden bg-[var(--geist-bg)]">
         {loading ? (
-          <div className="p-4 text-sm text-zinc-500 animate-pulse">Loading…</div>
+          <div className="p-4 text-sm text-muted animate-pulse">Loading…</div>
         ) : (
           <Editor
             key={filePath}
             language={monacoLang}
             value={content}
-            theme="vs-dark"
+            theme={GEIST_THEME_NAME}
             onMount={handleEditorMount}
             options={{
               readOnly: true,
@@ -1516,14 +1553,14 @@ function CodeTab({
   useEffect(() => { setShowTree(!isMobile); }, [isMobile]);
 
   if (filesLoading) {
-    return <div className="p-4 text-sm text-zinc-500">Loading files…</div>;
+    return <div className="p-4 text-sm text-muted">Loading files…</div>;
   }
 
   if (files.length === 0) {
     const isTerminal = ['COMPLETE', 'PARTIAL', 'FAILED'].includes(status || '');
     return (
       <div className="p-4 space-y-3">
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-muted">
           {isTerminal
             ? 'Local workspace has been cleaned up.'
             : 'No files generated yet. Files appear after the run completes.'}
@@ -1533,14 +1570,14 @@ function CodeTab({
             href={githubWebUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-accent-violet hover:text-accent-violet/80 transition-colors"
+            className="inline-flex items-center gap-1.5 text-sm text-accent-blue hover:text-accent-blue/80 transition-colors"
           >
             <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor"><path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
             View on GitHub
           </a>
         )}
         {isTerminal && !githubWebUrl && (
-          <p className="text-xs text-zinc-600">
+          <p className="text-xs text-muted">
             Tip: Push to GitHub to preserve code access after workspace cleanup.
           </p>
         )}
@@ -1553,24 +1590,24 @@ function CodeTab({
   const codeContent = (
     <div className={cn(
       'flex h-full overflow-hidden',
-      maximized && 'fixed inset-0 z-50 bg-surface-1'
+      maximized && 'fixed inset-0 z-50 bg-[var(--gray-100)]'
     )}>
       {/* ── File tree sidebar ── */}
       {showTree && (
         <div className={cn(
-          'flex-shrink-0 border-r border-white/[0.06] flex flex-col overflow-hidden',
-          isMobile ? 'w-full absolute inset-0 z-10 bg-surface-1' : 'w-56'
+          'flex-shrink-0 border-r border-[var(--border-default)] flex flex-col overflow-hidden',
+          isMobile ? 'w-full absolute inset-0 z-10 bg-[var(--gray-100)]' : 'w-56'
         )}>
           {/* Toolbar: Expand All / Collapse All / GitHub link */}
-          <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.06] flex-shrink-0">
-            <span className="text-[10px] text-zinc-600 uppercase tracking-widest flex-1 pl-1">Explorer</span>
+          <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-default)] flex-shrink-0">
+            <span className="text-[10px] text-muted uppercase tracking-widest flex-1 pl-1">Explorer</span>
             {githubWebUrl && (
               <a
                 href={githubWebUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 title="View on GitHub"
-                className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+                className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
               >
                 <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
               </a>
@@ -1578,14 +1615,14 @@ function CodeTab({
             <button
               title="Expand all folders"
               onClick={() => setExpandSignal(s => s + 1)}
-              className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+              className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
             >
               <ChevronsUpDown className="h-3 w-3" />
             </button>
             <button
               title="Collapse all folders"
               onClick={() => setCollapseSignal(s => s + 1)}
-              className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+              className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
             >
               <ChevronsDownUp className="h-3 w-3" />
             </button>
@@ -1593,7 +1630,7 @@ function CodeTab({
               <button
                 title="Close file tree"
                 onClick={() => setShowTree(false)}
-                className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+                className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -1623,11 +1660,11 @@ function CodeTab({
       <div className="flex-1 overflow-hidden flex flex-col">
         {/* Mobile/maximize toolbar */}
         {(isMobile || maximized) && (
-          <div className="flex items-center gap-1 px-2 py-1 border-b border-white/[0.06] flex-shrink-0 bg-[#0d0d14]">
+          <div className="flex items-center gap-1 px-2 py-1 border-b border-[var(--border-default)] flex-shrink-0 bg-[var(--geist-bg)]">
             {isMobile && !showTree && (
               <button
                 onClick={() => setShowTree(true)}
-                className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted hover:text-secondary transition-colors"
                 title="Show file tree"
               >
                 <PanelLeftOpen className="h-3.5 w-3.5" />
@@ -1637,7 +1674,7 @@ function CodeTab({
             <div className="flex-1" />
             <button
               onClick={() => setMaximized(!maximized)}
-              className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted hover:text-secondary transition-colors"
               title={maximized ? 'Exit fullscreen' : 'Fullscreen'}
             >
               {maximized
@@ -1663,34 +1700,53 @@ function CodeTab({
 // ── Test Task Card (for Tasks tab) ──────────────────────────────────────────
 
 const TEST_STATUS_COLORS: Record<string, string> = {
-  PENDING: 'bg-zinc-500/20 text-zinc-400',
-  GENERATING: 'bg-amber-500/20 text-amber-400',
+  PENDING: 'bg-[var(--gray-200)] text-secondary',
+  GENERATING: 'bg-amber-500/20 text-accent-amber',
   COMPILED: 'bg-emerald-500/20 text-emerald-400',
-  FAILED: 'bg-red-500/20 text-red-400',
+  FAILED: 'bg-red-500/20 text-accent-red',
 };
 
 function TestTaskCard({ task }: { task: TestTaskDto }) {
   return (
-    <div className="rounded-sm border border-white/[0.06] bg-white/[0.02] p-3">
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
       <div className="flex items-center gap-2">
-        <TestTube2 className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
-        <span className="text-sm text-zinc-200 font-medium truncate">{task.taskName}</span>
+        <TestTube2 className="h-3.5 w-3.5 text-accent-blue flex-shrink-0" />
+        <span className="text-sm text-primary font-medium truncate">{task.taskName}</span>
         {task.testCategory && (
-          <span className="text-xs text-zinc-500 bg-zinc-800 rounded px-1.5 py-0.5">{task.testCategory}</span>
+          <span className="text-xs text-muted bg-[var(--gray-200)] rounded px-1.5 py-0.5">{task.testCategory}</span>
         )}
         <span className={cn('ml-auto text-xs rounded-sm px-2 py-0.5', TEST_STATUS_COLORS[task.status] || TEST_STATUS_COLORS.PENDING)}>
           {task.status}
         </span>
       </div>
       {task.taskDescription && (
-        <p className="mt-1 ml-5.5 text-xs text-zinc-500 line-clamp-2">{task.taskDescription}</p>
+        <p className="mt-1 ml-5.5 text-xs text-muted line-clamp-2">{task.taskDescription}</p>
       )}
       {task.targetEntity && (
-        <p className="mt-0.5 ml-5.5 text-xs text-zinc-600">Target: {task.targetEntity}</p>
+        <p className="mt-0.5 ml-5.5 text-xs text-muted">Target: {task.targetEntity}</p>
       )}
       {task.status === 'FAILED' && task.compilationError && (
-        <p className="mt-1 ml-5.5 text-xs text-red-400/80 font-mono line-clamp-3">{task.compilationError}</p>
+        <p className="mt-1 ml-5.5 text-xs text-accent-red/80 font-mono line-clamp-3">{task.compilationError}</p>
       )}
+    </div>
+  );
+}
+
+// ── Collapsible Graph Section ────────────────────────────────────────────────
+
+function CollapsibleGraphSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="mb-4">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 w-full py-2 text-sm font-medium text-secondary hover:text-primary transition-colors"
+      >
+        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        {title}
+        {!open && <span className="text-[var(--text-muted)] text-xs ml-1">(collapsed)</span>}
+      </button>
+      {open && children}
     </div>
   );
 }
@@ -1698,12 +1754,12 @@ function TestTaskCard({ task }: { task: TestTaskDto }) {
 // ── Test Graph Section (for Graph tab) ──────────────────────────────────────
 
 const NODE_STATUS_COLORS: Record<string, string> = {
-  COMPLETED: 'border-emerald-500/50 bg-emerald-500/10',
-  COMPILED: 'border-emerald-500/50 bg-emerald-500/10',
-  PENDING: 'border-zinc-600 bg-zinc-800/50',
-  GENERATING: 'border-amber-500/50 bg-amber-500/10',
-  EXECUTING: 'border-violet-500/50 bg-violet-500/10',
-  FAILED: 'border-red-500/50 bg-red-500/10',
+  COMPLETED: 'border-accent-blue/50 bg-accent-blue/10',
+  COMPILED: 'border-accent-blue/50 bg-accent-blue/10',
+  PENDING: 'border-[var(--gray-400)] bg-[var(--gray-200)]/50',
+  GENERATING: 'border-accent-amber/50 bg-accent-amber/10',
+  EXECUTING: 'border-accent-blue/50 bg-accent-blue/10',
+  FAILED: 'border-accent-red/50 bg-accent-red/10',
 };
 
 function TestGraphSection({ graph }: { graph: TestGraphData }) {
@@ -1712,12 +1768,12 @@ function TestGraphSection({ graph }: { graph: TestGraphData }) {
   const gates = graph.nodes.filter(n => n.type === 'gate' || n.type === 'execution' || n.type === 'report');
 
   return (
-    <div className="mt-6 border-t border-white/[0.06] pt-4">
+    <div className="mt-6 border-t border-[var(--border-default)] pt-4">
       <div className="flex items-center gap-2 mb-4">
-        <TestTube2 className="h-4 w-4 text-violet-400" />
-        <span className="text-sm font-medium text-zinc-300">Test Generation Pipeline</span>
+        <TestTube2 className="h-4 w-4 text-accent-blue" />
+        <span className="text-sm font-medium text-secondary">Test Generation Pipeline</span>
         {graph.testResults.total > 0 && (
-          <span className="text-xs text-zinc-500 ml-2">
+          <span className="text-xs text-muted ml-2">
             {graph.testResults.passed}/{graph.testResults.total} passed
           </span>
         )}
@@ -1752,12 +1808,12 @@ function GraphNode({ node }: { node: { id: string; label: string; type: string; 
   const colors = NODE_STATUS_COLORS[node.status] || NODE_STATUS_COLORS.PENDING;
   return (
     <div className={cn('rounded-sm border px-3 py-2 flex items-center gap-2', colors)}>
-      <TestTube2 className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
-      <span className="text-xs text-zinc-200">{node.label}</span>
+      <TestTube2 className="h-3.5 w-3.5 text-accent-blue flex-shrink-0" />
+      <span className="text-xs text-primary">{node.label}</span>
       {node.category && (
-        <span className="text-xs text-zinc-500 bg-zinc-800/50 rounded px-1 py-0.5">{node.category}</span>
+        <span className="text-xs text-muted bg-[var(--gray-200)]/50 rounded px-1 py-0.5">{node.category}</span>
       )}
-      <span className="ml-auto text-xs text-zinc-500">{node.status}</span>
+      <span className="ml-auto text-xs text-muted">{node.status}</span>
     </div>
   );
 }

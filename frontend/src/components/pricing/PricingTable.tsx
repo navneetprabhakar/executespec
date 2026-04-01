@@ -6,9 +6,9 @@ import type { PricingRow } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const ROLE_BADGES: Record<string, string> = {
-  anthropic: 'text-accent-violet bg-accent-violet/10',
-  openai:    'text-accent-cyan bg-accent-cyan/10',
-  google:    'text-accent-emerald bg-accent-emerald/10',
+  anthropic: 'text-accent-blue bg-accent-blue/10',
+  openai:    'text-secondary bg-[var(--gray-500)]/10',
+  google:    'text-accent-green bg-accent-green/10',
 };
 
 const MODEL_ROLES: Record<string, string> = {
@@ -70,14 +70,14 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
           onChange={(e) => setEditing({ ...editing, value: e.target.value })}
           onBlur={saveEdit}
           onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null); }}
-          className="w-20 bg-surface-1 border border-accent-violet/40 rounded px-2 py-0.5 text-xs text-zinc-200 focus:outline-none font-mono"
+          className="w-20 bg-[var(--gray-100)] border border-accent-blue/40 rounded px-2 py-0.5 text-xs text-primary focus:outline-none font-mono"
         />
       );
     }
     return (
       <button
         onClick={() => setEditing({ provider: row.provider, model: row.model, field, value: String(val) })}
-        className="font-mono text-xs text-zinc-300 hover:text-white hover:underline"
+        className="font-mono text-xs text-secondary hover:text-primary hover:underline"
       >
         ${val.toFixed(4)}
       </button>
@@ -88,17 +88,17 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
     return (
       <div className="space-y-3 px-1">
         {rows.map((row) => (
-          <div key={`${row.provider}-${row.model}`} className="p-3 rounded-md border border-white/[0.06] bg-white/[0.02] space-y-2">
+          <div key={`${row.provider}-${row.model}`} className="p-3 rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] space-y-2">
             <div className="flex items-center justify-between">
-              <span className={cn('text-xs px-2 py-0.5 rounded-sm font-medium capitalize', ROLE_BADGES[row.provider] ?? 'text-zinc-400 bg-zinc-400/10')}>
+              <span className={cn('text-xs px-2 py-0.5 rounded-sm font-medium capitalize', ROLE_BADGES[row.provider] ?? 'text-secondary bg-[var(--gray-200)]')}>
                 {row.provider}
               </span>
-              <span className="text-xs text-zinc-500">{MODEL_ROLES[row.model] ?? '—'}</span>
+              <span className="text-xs text-muted">{MODEL_ROLES[row.model] ?? '—'}</span>
             </div>
-            <p className="font-mono text-xs text-zinc-300 truncate">{row.model}</p>
+            <p className="font-mono text-xs text-secondary truncate">{row.model}</p>
             <div className="flex gap-4 text-xs">
-              <div className="flex items-center gap-1"><span className="text-zinc-500">In /1M:</span> <EditableCell row={row} field="inputCostPer1m" /></div>
-              <div className="flex items-center gap-1"><span className="text-zinc-500">Out /1M:</span> <EditableCell row={row} field="outputCostPer1m" /></div>
+              <div className="flex items-center gap-1"><span className="text-muted">In /1M:</span> <EditableCell row={row} field="inputCostPer1m" /></div>
+              <div className="flex items-center gap-1"><span className="text-muted">Out /1M:</span> <EditableCell row={row} field="outputCostPer1m" /></div>
             </div>
           </div>
         ))}
@@ -110,23 +110,23 @@ export default function PricingTable({ rows, onRefresh }: PricingTableProps) {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-white/[0.06]">
+          <tr className="border-b border-[var(--border-default)]">
             {['Provider', 'Model', 'Role', 'Input /1M', 'Output /1M'].map((h) => (
-              <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">{h}</th>
+              <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-muted uppercase tracking-wider">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={`${row.provider}-${row.model}`} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+            <tr key={`${row.provider}-${row.model}`} className="border-b border-[var(--border-default)] hover:bg-[var(--gray-100)] transition-colors">
               <td className="px-4 py-2.5">
-                <span className={cn('text-xs px-2 py-0.5 rounded-sm font-medium capitalize', ROLE_BADGES[row.provider] ?? 'text-zinc-400 bg-zinc-400/10')}>
+                <span className={cn('text-xs px-2 py-0.5 rounded-sm font-medium capitalize', ROLE_BADGES[row.provider] ?? 'text-secondary bg-[var(--gray-200)]')}>
                   {row.provider}
                 </span>
               </td>
-              <td className="px-4 py-2.5 font-mono text-xs text-zinc-300">{row.model}</td>
+              <td className="px-4 py-2.5 font-mono text-xs text-secondary">{row.model}</td>
               <td className="px-4 py-2.5">
-                <span className="text-xs text-zinc-500">{MODEL_ROLES[row.model] ?? '—'}</span>
+                <span className="text-xs text-muted">{MODEL_ROLES[row.model] ?? '—'}</span>
               </td>
               <td className="px-4 py-2.5"><EditableCell row={row} field="inputCostPer1m" /></td>
               <td className="px-4 py-2.5"><EditableCell row={row} field="outputCostPer1m" /></td>

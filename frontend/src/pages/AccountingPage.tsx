@@ -45,7 +45,7 @@ export default function AccountingPage() {
 
   if (!perms?.canViewAccounting) {
     return (
-      <div className="flex h-full items-center justify-center text-slate-500">
+      <div className="flex h-full items-center justify-center text-muted">
         <p>403 — Accounting access required</p>
       </div>
     );
@@ -55,9 +55,9 @@ export default function AccountingPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Calculator className="h-6 w-6 text-violet-400" />
+        <Calculator className="h-6 w-6 text-accent-blue" />
         <h1 className="text-xl font-semibold text-slate-100">Accounting</h1>
-        <span className="ml-auto text-xs text-slate-500">FY {fy} &middot; Q{quarter}</span>
+        <span className="ml-auto text-xs text-muted">FY {fy} &middot; Q{quarter}</span>
       </div>
 
       {/* Revenue metric cards */}
@@ -75,7 +75,7 @@ export default function AccountingPage() {
           {perms?.canExportGstr && (
             <a
               href={getGstr1ExportUrl(fy, quarter)}
-              className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500"
+              className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-primary hover:bg-accent-blue"
             >
               <Download className="h-3.5 w-3.5" />
               Export GSTR-1
@@ -85,24 +85,24 @@ export default function AccountingPage() {
         {gst ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
-              <div className="text-xs text-slate-500">CGST</div>
+              <div className="text-xs text-muted">CGST</div>
               <div className="mt-1 text-lg font-semibold text-slate-200">{formatPaise(gst.cgstCollected)}</div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">SGST</div>
+              <div className="text-xs text-muted">SGST</div>
               <div className="mt-1 text-lg font-semibold text-slate-200">{formatPaise(gst.sgstCollected)}</div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">IGST</div>
+              <div className="text-xs text-muted">IGST</div>
               <div className="mt-1 text-lg font-semibold text-slate-200">{formatPaise(gst.igstCollected)}</div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">Total GST</div>
+              <div className="text-xs text-muted">Total GST</div>
               <div className="mt-1 text-lg font-semibold text-violet-300">{formatPaise(gst.totalGst)}</div>
             </div>
           </div>
         ) : (
-          <div className="text-sm text-slate-500">Loading...</div>
+          <div className="text-sm text-muted">Loading...</div>
         )}
       </div>
 
@@ -110,11 +110,11 @@ export default function AccountingPage() {
       <div className="rounded-sm border border-surface-700 bg-surface-800 p-6">
         <h3 className="mb-4 text-sm font-semibold text-slate-200">Trial Balance</h3>
         {trial.length === 0 ? (
-          <div className="text-sm text-slate-500">No entries found for this period</div>
+          <div className="text-sm text-muted">No entries found for this period</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-surface-700 text-left text-xs text-slate-500">
+              <tr className="border-b border-surface-700 text-left text-xs text-muted">
                 <th className="px-4 py-2">Account</th>
                 <th className="px-4 py-2 text-right">Debit</th>
                 <th className="px-4 py-2 text-right">Credit</th>
@@ -124,12 +124,12 @@ export default function AccountingPage() {
             <tbody>
               {trial.map((entry) => (
                 <tr key={entry.account} className="border-b border-surface-700/50">
-                  <td className="px-4 py-2 text-slate-300">{entry.account}</td>
-                  <td className="px-4 py-2 text-right font-mono text-slate-400">{formatPaise(entry.debitTotal)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-slate-400">{formatPaise(entry.creditTotal)}</td>
+                  <td className="px-4 py-2 text-secondary">{entry.account}</td>
+                  <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.debitTotal)}</td>
+                  <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.creditTotal)}</td>
                   <td className="px-4 py-2 text-right font-mono text-slate-200">
                     {formatPaise(Math.abs(entry.debitTotal - entry.creditTotal))}
-                    <span className="ml-1 text-xs text-slate-500">
+                    <span className="ml-1 text-xs text-muted">
                       {entry.debitTotal > entry.creditTotal ? 'DR' : 'CR'}
                     </span>
                   </td>
@@ -146,7 +146,7 @@ export default function AccountingPage() {
 function MetricCard({ label, value }: { label: string; value?: number }) {
   return (
     <div className="rounded-sm border border-surface-700 bg-surface-800 p-4">
-      <div className="flex items-center gap-2 text-xs text-slate-500">
+      <div className="flex items-center gap-2 text-xs text-muted">
         <TrendingUp className="h-3.5 w-3.5" />
         {label}
       </div>

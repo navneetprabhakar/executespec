@@ -121,6 +121,68 @@ public class InvoiceService {
         return invoice;
     }
 
+    /**
+     * Generate an invoice for a Stripe subscription payment.
+     * Stores the Stripe invoice ID and PDF URL so the PDF endpoint can redirect.
+     */
+    @Transactional
+    public Invoice generateStripeSubscriptionInvoice(BillingSubscription sub, BillingPlan plan,
+                                                       String stripeInvoiceId, String stripePdfUrl) {
+        SellerConfig seller = sellerRepo.getDefault();
+        BillingProfile buyer = resolveBuyerProfile(sub.getUserId(), sub.getOrgId());
+
+        long subtotal = plan.getBaseAmountInr();
+        if (sub.getExtraSeats() > 0) {
+            subtotal += (long) sub.getExtraSeats() * plan.getPerSeatInr();
+        }
+
+        String description = plan.getName() + " subscription (Stripe)" +
+                (sub.getExtraSeats() > 0 ? " (" + sub.getExtraSeats() + " extra seats)" : "");
+
+        Invoice invoice = buildInvoice(sub.getUserId(), sub.getOrgId(), buyer, seller,
+                subtotal, "SUBSCRIPTION", description, null);
+        invoice.setSubscriptionId(sub.getId());
+        invoice.setGateway("stripe");
+        invoice.setGatewayInvoiceId(stripeInvoiceId);
+        invoice.setGatewayPdfUrl(stripePdfUrl);
+        invoice = invoiceRepo.save(invoice);
+
+        // Line items
+        InvoiceLineItem baseLine = InvoiceLineItem.builder()
+                .invoiceId(invoice.getId())
+                .description(plan.getName() + " - " + plan.getPeriod().toLowerCase() + " subscription")
+                .unitPrice(plan.getBaseAmountInr())
+                .amount(plan.getBaseAmountInr())
+                .sortOrder(0)
+                .build();
+        lineItemRepo.save(baseLine);
+
+        if (sub.getExtraSeats() > 0) {
+            InvoiceLineItem seatLine = InvoiceLineItem.builder()
+                    .invoiceId(invoice.getId())
+                    .description("Additional seats (" + sub.getExtraSeats() + " x " +
+                            formatPaise(plan.getPerSeatInr()) + "/seat)")
+                    .quantity(sub.getExtraSeats())
+                    .unitPrice(plan.getPerSeatInr())
+                    .amount((long) sub.getExtraSeats() * plan.getPerSeatInr())
+                    .sortOrder(1)
+                    .build();
+            lineItemRepo.save(seatLine);
+        }
+
+        // Mark as paid
+        invoice.setStatus("PAID");
+        invoice.setPaidAt(Instant.now());
+        invoice = invoiceRepo.save(invoice);
+
+        // Record double-entry accounting
+        accountingService.recordRevenueEntry(invoice);
+
+        log.info("Stripe subscription invoice generated: {} for user={}, gateway_invoice_id={}, amount={}",
+                invoice.getInvoiceNumber(), sub.getUserId(), stripeInvoiceId, formatPaise(invoice.getTotalAmount()));
+        return invoice;
+    }
+
     @Transactional
     public Invoice generateCreditNote(UUID originalInvoiceId, long refundAmountPaise, String reason) {
         Invoice original = invoiceRepo.findById(originalInvoiceId)

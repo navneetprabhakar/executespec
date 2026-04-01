@@ -230,4 +230,21 @@ public record RunEvent(
     public static RunEvent testPipelineFailed(String runId, String error) {
         return new RunEvent("TEST_PIPELINE_FAILED", runId, null, error, Instant.now());
     }
+
+    // ── Budget events ─────────────────────────────────────────────────────────
+
+    /**
+     * Emitted when a run's accumulated cost exceeds its per-run budget.
+     * Payload format: tier|budget|message
+     */
+    public static RunEvent budgetExceeded(String runId, String tier, double budgetUsd) {
+        String message = switch (tier != null ? tier.toUpperCase() : "FREE") {
+            case "PRO" -> "Run stopped — $" + String.format("%.0f", budgetUsd) +
+                    " cost limit reached. Add your own API keys (BYOK) for unlimited runs.";
+            default -> "Run stopped — $" + String.format("%.0f", budgetUsd) +
+                    " cost limit reached. Upgrade to Pro for higher limits and 100 monthly runs.";
+        };
+        return new RunEvent("BUDGET_EXCEEDED", runId, null,
+                tier + "|" + String.format("%.2f", budgetUsd) + "|" + message, Instant.now());
+    }
 }

@@ -55,10 +55,10 @@ export default function InvoicesPage() {
   const statusColor = (status: string) => {
     switch (status) {
       case 'PAID': return 'text-emerald-400 bg-emerald-500/10';
-      case 'DRAFT': return 'text-zinc-400 bg-zinc-500/10';
-      case 'ISSUED': return 'text-blue-400 bg-blue-500/10';
-      case 'VOID': return 'text-red-400 bg-red-500/10';
-      default: return 'text-zinc-400 bg-zinc-500/10';
+      case 'DRAFT': return 'text-secondary bg-[var(--gray-200)]';
+      case 'ISSUED': return 'text-accent-blue bg-blue-500/10';
+      case 'VOID': return 'text-accent-red bg-red-500/10';
+      default: return 'text-secondary bg-[var(--gray-200)]';
     }
   };
 
@@ -76,7 +76,7 @@ export default function InvoicesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Receipt className="h-6 w-6 text-violet-400" />
+          <Receipt className="h-6 w-6 text-accent-blue" />
           <h1 className="text-xl font-semibold text-slate-100">Invoices</h1>
         </div>
         <div className="flex items-center gap-2">
@@ -86,8 +86,8 @@ export default function InvoicesPage() {
               onClick={() => setFilter(f)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
                 filter === f
-                  ? 'bg-violet-500/20 text-violet-300'
-                  : 'text-slate-400 hover:bg-surface-700 hover:text-slate-300'
+                  ? 'bg-accent-blue/20 text-violet-300'
+                  : 'text-muted hover:bg-surface-700 hover:text-secondary'
               }`}
             >
               {f === 'all' ? 'All' : typeLabel(f)}
@@ -101,7 +101,7 @@ export default function InvoicesPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-surface-700 text-left text-xs text-slate-500">
+              <tr className="border-b border-surface-700 text-left text-xs text-muted">
                 <th className="px-4 py-3">Invoice #</th>
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Type</th>
@@ -114,26 +114,26 @@ export default function InvoicesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">Loading...</td>
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted">Loading...</td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">No invoices found</td>
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted">No invoices found</td>
                 </tr>
               ) : (
                 filtered.map((inv) => (
                   <tr key={inv.id} className="border-b border-surface-700/50 hover:bg-surface-700/30">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-300">{inv.invoiceNumber}</td>
-                    <td className="px-4 py-3 text-slate-400">{inv.invoiceDate}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-secondary">{inv.invoiceNumber}</td>
+                    <td className="px-4 py-3 text-muted">{inv.invoiceDate}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 text-xs ${
-                        inv.invoiceType === 'CREDIT_NOTE' ? 'text-amber-400' : 'text-slate-400'
+                        inv.invoiceType === 'CREDIT_NOTE' ? 'text-accent-amber' : 'text-muted'
                       }`}>
                         {inv.invoiceType === 'CREDIT_NOTE' && <CreditCard className="h-3 w-3" />}
                         {typeLabel(inv.invoiceType)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-300 max-w-[200px] truncate">{inv.description}</td>
+                    <td className="px-4 py-3 text-secondary max-w-[200px] truncate">{inv.description}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-200">{formatPaise(inv.totalAmount)}</td>
                     <td className="px-4 py-3">
                       <span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>
@@ -144,7 +144,7 @@ export default function InvoicesPage() {
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => handleDownload(inv)}
-                          className="rounded p-1 text-slate-400 hover:bg-surface-600 hover:text-slate-200"
+                          className="rounded p-1 text-muted hover:bg-surface-600 hover:text-slate-200"
                           title="Download PDF"
                         >
                           <Download className="h-4 w-4" />
@@ -152,7 +152,7 @@ export default function InvoicesPage() {
                         {isAdmin && (
                           <button
                             onClick={() => handleResend(inv)}
-                            className="rounded p-1 text-slate-400 hover:bg-surface-600 hover:text-slate-200"
+                            className="rounded p-1 text-muted hover:bg-surface-600 hover:text-slate-200"
                             title="Resend email"
                           >
                             <Send className="h-4 w-4" />
@@ -173,15 +173,15 @@ export default function InvoicesPage() {
             <button
               disabled={page === 0}
               onClick={() => setPage(p => p - 1)}
-              className="rounded-md px-3 py-1 text-xs text-slate-400 hover:bg-surface-700 disabled:opacity-50"
+              className="rounded-md px-3 py-1 text-xs text-muted hover:bg-surface-700 disabled:opacity-50"
             >
               Previous
             </button>
-            <span className="text-xs text-slate-500">Page {page + 1} of {totalPages}</span>
+            <span className="text-xs text-muted">Page {page + 1} of {totalPages}</span>
             <button
               disabled={page >= totalPages - 1}
               onClick={() => setPage(p => p + 1)}
-              className="rounded-md px-3 py-1 text-xs text-slate-400 hover:bg-surface-700 disabled:opacity-50"
+              className="rounded-md px-3 py-1 text-xs text-muted hover:bg-surface-700 disabled:opacity-50"
             >
               Next
             </button>

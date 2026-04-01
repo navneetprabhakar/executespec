@@ -35,6 +35,8 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import jakarta.validation.Valid;
+
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
@@ -69,14 +71,25 @@ public class RunController {
     private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
     private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
     private final com.navneet.executespec.agent.CostEstimator costEstimator;
+    private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+    private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
 
     /** Submit a new run. Returns immediately with the run summary (status may be PLANNING or QUEUED). */
     @PostMapping
     public ResponseEntity<RunSummary> submit(
             @AuthenticationPrincipal AppUserDetails userDetails,
-            @RequestBody RunRequest req) {
+            @Valid @RequestBody RunRequest req) {
         guard.requireAuthenticated(userDetails);
         log.info("POST /api/runs — goal: {}", req.userRequest());
+
+        // Content-level security scan (prompt injection, shell embedding, abuse patterns)
+        inputSanitizer.scan(req.userRequest());
+
+        // Check if submissions are paused (maintenance mode)
+        if (featureFlagService.isEnabled("submissions.paused")) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Run submissions are temporarily paused for maintenance. Please try again later.");
+        }
 
         // Enforce tier quota (throws 429 if over limit)
         tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());

@@ -61,7 +61,7 @@ export default function RunList() {
       {isMobile && (
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
         >
           <Sparkles className="h-4 w-4" />
           New Run
@@ -70,14 +70,14 @@ export default function RunList() {
 
       {/* Scope toggle — SUPER_ADMIN: 3 views; org members: 2 views */}
       {(isSuperAdmin || isOrgMember) && (
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-white/[0.06] flex-shrink-0">
+        <div className="flex items-center gap-0 px-4 border-b border-[var(--border-default)] flex-shrink-0">
           <button
             onClick={() => setScopeFilter('mine')}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 lg:py-1 rounded-sm text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 lg:py-2.5 text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors',
               scopeFilter === 'mine'
-                ? 'bg-accent-violet text-white'
-                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+                ? 'border-[var(--text-primary)] text-primary'
+                : 'border-transparent text-muted hover:text-secondary'
             )}
           >
             <User className="h-3 w-3" />
@@ -86,10 +86,10 @@ export default function RunList() {
           <button
             onClick={() => setScopeFilter(isSuperAdmin ? 'org' : null)}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 lg:py-1 rounded-sm text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 lg:py-2.5 text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors',
               (isSuperAdmin ? scopeFilter === 'org' : scopeFilter === null)
-                ? 'bg-accent-violet text-white'
-                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+                ? 'border-[var(--text-primary)] text-primary'
+                : 'border-transparent text-muted hover:text-secondary'
             )}
           >
             <Users className="h-3 w-3" />
@@ -99,10 +99,10 @@ export default function RunList() {
             <button
               onClick={() => setScopeFilter(null)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-2 lg:py-1 rounded-sm text-xs font-medium transition-colors',
+                'flex items-center gap-1.5 px-3 py-2 lg:py-2.5 text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors',
                 scopeFilter === null
-                  ? 'bg-accent-violet text-white'
-                  : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+                  ? 'border-[var(--text-primary)] text-primary'
+                  : 'border-transparent text-muted hover:text-secondary'
               )}
             >
               <Globe className="h-3 w-3" />
@@ -113,16 +113,16 @@ export default function RunList() {
       )}
 
       {/* Status filter bar */}
-      <div className="flex items-center gap-1 lg:gap-1.5 px-3 lg:px-4 py-2.5 lg:py-3 border-b border-white/[0.06] overflow-x-auto flex-shrink-0 scrollbar-hide">
+      <div className="flex items-center gap-0 px-3 lg:px-4 border-b border-[var(--border-default)] overflow-x-auto flex-shrink-0 scrollbar-hide">
         {FILTERS.map((f) => (
           <button
             key={f}
             onClick={() => setStatusFilter(f)}
             className={cn(
-              'px-2 lg:px-3 py-1.5 lg:py-1 rounded-sm text-[10px] lg:text-xs font-medium whitespace-nowrap transition-colors',
+              'px-2.5 lg:px-3 py-2 lg:py-2.5 text-[10px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
               statusFilter === f
-                ? 'bg-accent-violet text-white'
-                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+                ? 'border-[var(--text-primary)] text-primary'
+                : 'border-transparent text-muted hover:text-secondary'
             )}
           >
             {f === 'ALL' ? 'All' : toTitleCase(f)}
@@ -132,15 +132,15 @@ export default function RunList() {
 
       {/* Project filter bar — visible for org members with projects */}
       {isOrgMember && projects.length > 0 && (
-        <div className="flex items-center gap-1 lg:gap-1.5 px-3 lg:px-4 py-2 border-b border-white/[0.04] overflow-x-auto flex-shrink-0 scrollbar-hide bg-white/[0.01]">
-          <FolderOpen className="h-3.5 w-3.5 text-zinc-600 flex-shrink-0" />
+        <div className="flex items-center gap-1 lg:gap-1.5 px-3 lg:px-4 py-2 border-b border-[var(--border-default)] overflow-x-auto flex-shrink-0 scrollbar-hide">
+          <FolderOpen className="h-3.5 w-3.5 text-muted flex-shrink-0" />
           <button
             onClick={() => setProjectFilter(null)}
             className={cn(
               'px-2.5 py-1.5 lg:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === null
-                ? 'bg-zinc-700 text-zinc-100'
-                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
+                ? 'bg-[var(--gray-300)] text-primary'
+                : 'text-muted hover:text-secondary bg-[var(--gray-200)] hover:bg-[var(--gray-300)]'
             )}
           >
             All Runs
@@ -150,8 +150,8 @@ export default function RunList() {
             className={cn(
               'px-2.5 py-1.5 lg:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
               projectFilter === '__none__'
-                ? 'bg-zinc-600 text-zinc-100'
-                : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
+                ? 'bg-[var(--gray-300)] text-primary'
+                : 'text-muted hover:text-secondary bg-[var(--gray-200)] hover:bg-[var(--gray-300)]'
             )}
           >
             Unassigned
@@ -165,8 +165,8 @@ export default function RunList() {
                 className={cn(
                   'px-2.5 py-1.5 lg:py-0.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
                   projectFilter === p.id
-                    ? 'bg-accent-violet text-white'
-                    : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.05]'
+                    ? 'bg-[var(--gray-300)] text-primary'
+                    : 'text-muted hover:text-secondary bg-[var(--gray-200)] hover:bg-[var(--gray-300)]'
                 )}
               >
                 {p.name}
@@ -186,7 +186,7 @@ export default function RunList() {
             action={
               <button
                 onClick={() => setShowModal(true)}
-                className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+                className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
               >
                 Launch Run
               </button>
@@ -208,8 +208,8 @@ export default function RunList() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.06] flex-shrink-0 bg-zinc-900/50">
-          <span className="text-xs text-zinc-500">
+        <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--border-default)] flex-shrink-0 bg-[var(--gray-100)]">
+          <span className="text-xs text-muted">
             {totalElements} runs
           </span>
           <div className="flex items-center gap-1">
@@ -218,12 +218,12 @@ export default function RunList() {
               disabled={!hasPrevious}
               className={cn(
                 'p-1 rounded transition-colors',
-                hasPrevious ? 'text-zinc-400 hover:text-white hover:bg-white/[0.06]' : 'text-zinc-700 cursor-not-allowed'
+                hasPrevious ? 'text-secondary hover:text-primary hover:bg-[var(--gray-200)]' : 'text-[var(--gray-500)] cursor-not-allowed'
               )}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <span className="text-xs text-zinc-400 min-w-[4rem] text-center">
+            <span className="text-xs text-secondary min-w-[4rem] text-center">
               {page + 1} / {totalPages}
             </span>
             <button
@@ -231,7 +231,7 @@ export default function RunList() {
               disabled={!hasNext}
               className={cn(
                 'p-1 rounded transition-colors',
-                hasNext ? 'text-zinc-400 hover:text-white hover:bg-white/[0.06]' : 'text-zinc-700 cursor-not-allowed'
+                hasNext ? 'text-secondary hover:text-primary hover:bg-[var(--gray-200)]' : 'text-[var(--gray-500)] cursor-not-allowed'
               )}
             >
               <ChevronRight className="h-4 w-4" />
@@ -240,16 +240,17 @@ export default function RunList() {
         </div>
       )}
 
-      {/* FAB — desktop only (mobile has top button) */}
+      {/* New Run button — desktop only (mobile has top button) */}
       {!isMobile && (
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setShowModal(true)}
-          className="absolute bottom-6 right-4 h-12 w-12 rounded-sm bg-accent-violet flex items-center justify-center z-10"
-        >
-          <Plus className="h-5 w-5 text-white" />
-        </motion.button>
+        <div className="px-3 py-2 border-t border-[var(--border-default)] flex-shrink-0">
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-sm bg-[var(--text-primary)] text-[var(--geist-bg)] text-sm font-medium hover:bg-[var(--gray-900)] transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            New Run
+          </button>
+        </div>
       )}
 
       {showModal && (

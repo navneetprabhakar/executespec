@@ -1,0 +1,127 @@
+You are a principal distributed systems engineer. A financial trading platform is experiencing catastrophic data consistency failures in production. Below is the actual orchestrator code and 6 production incident reports. Diagnose every failure mode and design a correct compensation protocol.
+
+PRODUCTION CODE (currently deployed):
+
+```java
+@Service
+public class TradeOrchestrator {
+    private final NyseClient nyse;
+    private final NasdaqClient nasdaq;
+    private final LseClient lse;
+    private final OrderRepository orderRepo;
+    private final AuditLogRepository auditRepo;
+    private final RedisTemplate<String, String> redis;
+
+    @Transactional
+    public OrderResult executeMultiLeg(MultiLegOrder order) {
+        // Dedup check
+        String dedupKey = "order:" + order.getClientOrderId();
+        Boolean isNew = redis.opsForValue().setIfAbsent(dedupKey, "processing", Duration.ofSeconds(30));
+        if (Boolean.FALSE.equals(isNew)) {
+            throw new DuplicateOrderException("Order already processing: " + order.getClientOrderId());
+        }
+
+        List<LegResult> results = new ArrayList<>();
+
+        for (OrderLeg leg : order.getLegs()) {
+            ExchangeClient client = resolveExchange(leg.getExchange());
+            try {
+                LegResult result = client.submitOrder(leg);  // HTTP call — 10s timeout
+                results.add(result);
+
+                if (result.getStatus() == LegStatus.REJECTED) {
+                    compensatePreviousLegs(results);
+                    order.setStatus(OrderStatus.REJECTED);
+                    orderRepo.save(order);
+                    return new OrderResult(order.getId(), results, OrderStatus.REJECTED);
+                }
+            } catch (SocketTimeoutException e) {
+                // Timeout — assume failure and compensate
+                compensatePreviousLegs(results);
+                order.setStatus(OrderStatus.FAILED);
+                orderRepo.save(order);
+                redis.delete(dedupKey);
+                return new OrderResult(order.getId(), results, OrderStatus.FAILED);
+            }
+        }
+
+        order.setStatus(OrderStatus.FILLED);
+        orderRepo.save(order);
+
+        // Write audit trail
+        AuditRecord audit = new AuditRecord();
+        audit.setOrderId(order.getId());
+        audit.setLegs(results);
+        audit.setTimestamp(Instant.now());
+        audit.setDecisionRationale("All legs filled successfully");
+        auditRepo.save(audit);
+
+        return new OrderResult(order.getId(), results, OrderStatus.FILLED);
+    }
+
+    private void compensatePreviousLegs(List<LegResult> completedLegs) {
+        for (LegResult leg : completedLegs) {
+            if (leg.getStatus() == LegStatus.FILLED || leg.getStatus() == LegStatus.PARTIAL_FILL) {
+                try {
+                    ExchangeClient client = resolveExchange(leg.getExchange());
+                    CancelResponse resp = client.cancelOrder(leg.getExchangeOrderId());
+                    leg.setCompensationStatus("CANCELLED");
+                } catch (Exception e) {
+                    log.error("Compensation failed for leg {}: {}", leg.getId(), e.getMessage());
+                    leg.setCompensationStatus("COMPENSATION_FAILED");
+                }
+            }
+        }
+    }
+}
+```
+
+PRODUCTION INCIDENTS:
+
+Incident 1 — $2.3M double-charge:
+A network partition between the orchestrator and NYSE caused the submitOrder HTTP call to timeout after 10s. NYSE actually executed the order (sell 15,000 shares of AAPL at $153.20). The orchestrator treated the timeout as failure, deleted the Redis dedup key, and the client's retry middleware resubmitted the same order. Second submission passed dedup (key was deleted) and executed again on NYSE. Client was charged twice.
+
+Incident 2 — Ghost position:
+During compensation of a 3-leg order, the NASDAQ cancel request for Leg 2 returned HTTP 200 with body {"status": "acknowledged", "note": "order already fully settled at T+0"}. The orchestrator logged the leg as "CANCELLED" based on the 200 status code. The client's position showed the NASDAQ shares as cancelled, but settlement had already transferred ownership. 340 phantom shares appeared in the client's portfolio during end-of-day reconciliation.
+
+Incident 3 — $180K slippage:
+LSE experienced a 3.2-second market data propagation delay during high volatility. The orchestrator used the quoted price ($42.15) for the LSE leg, but the actual execution price was $42.87 on 250,000 shares. No pre-trade staleness check existed. The $0.72/share slippage on 250K shares exceeded the client's risk tolerance band by 4x.
+
+Incident 4 — Orphaned exchange orders:
+A PostgreSQL connection pool exhaustion caused the orderRepo.save(order) call to fail with a connection timeout AFTER all 3 exchange legs had been successfully submitted and confirmed. The @Transactional annotation rolled back the local DB state to show no order, but 3 live orders existed on NYSE, NASDAQ, and LSE with no local record. Discovered 6 hours later during manual reconciliation.
+
+Incident 5 — Duplicate legs from split-brain:
+Two orchestrator instances processed the same order within a 50ms window. Instance A acquired the Redis dedup key, but Instance B's setIfAbsent check occurred during a 47ms GC pause on the Redis primary. Both instances saw the key as absent. Instance A submitted legs to NYSE and NASDAQ. Instance B submitted legs to NYSE, NASDAQ, and LSE. Result: 5 legs executed instead of 3, with duplicate NYSE and NASDAQ positions.
+
+Incident 6 — Regulatory violation:
+The JVM crashed (OOM) after orderRepo.save(order) committed successfully but before auditRepo.save(audit) executed. The trade was executed and recorded in the order table, but no audit trail existed. This was discovered 3 weeks later during a MiFID II Article 25 compliance audit. The missing audit record for a $4.7M trade triggered a regulatory investigation.
+
+YOUR TASK:
+Diagnose ALL 6 incidents to their root causes. Then design a production-grade distributed saga with a correct compensation protocol that prevents all 6 failure classes.
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "diagnosis": [
+    {
+      "incident": 1,
+      "root_cause": "detailed technical root cause",
+      "category": "...",
+      "current_code_flaw": "specific line/pattern in the code that causes this"
+    }
+  ],
+  "compensation_protocol": {
+    "ordering_strategy": "explain why this ordering and not alternatives",
+    "partial_fill_handling": "how to determine compensation quantity",
+    "settlement_awareness": "how to handle settled vs unsettled legs",
+    "poison_pill_escalation": "what happens when compensation itself fails",
+    "timeout_disambiguation": "what to do when an exchange call times out"
+  },
+  "saga_state_machine": {
+    "states": ["list all states"],
+    "transitions": [
+      {"from": "...", "to": "...", "trigger": "...", "guard": "optional condition", "action": "what happens"}
+    ]
+  },
+  "deduplication_design": "how to prevent split-brain and duplicate execution",
+  "anti_patterns_to_avoid": ["list of patterns this design explicitly rejects and why"]
+}

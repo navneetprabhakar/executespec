@@ -51,9 +51,9 @@ export default function ModelComparisonChart({ data }: { data: ModelComparisonDa
 
   return (
     <GlassPanel className="p-4">
-      <h3 className="text-sm font-semibold text-zinc-200 mb-3">Model Comparison (Tokens)</h3>
+      <h3 className="text-sm font-semibold text-primary mb-3">Model Comparison (Tokens)</h3>
       {!data || data.models.length === 0
-        ? <p className="text-sm text-zinc-600 py-8 text-center">No data yet</p>
+        ? <p className="text-sm text-muted py-8 text-center">No data yet</p>
         : <svg ref={svgRef} className="w-full" />
       }
     </GlassPanel>

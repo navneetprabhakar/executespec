@@ -52,8 +52,8 @@ function TreeNodeView({
   return (
     <div>
       <div
-        className={`flex items-center gap-1.5 py-0.5 px-2 cursor-pointer rounded hover:bg-white/[0.06]
-          ${selectedFile === node.path ? 'bg-accent-violet/10 text-accent-violet' : 'text-zinc-400'}`}
+        className={`flex items-center gap-1.5 py-0.5 px-2 cursor-pointer rounded hover:bg-[var(--gray-200)]
+          ${selectedFile === node.path ? 'bg-accent-blue/10 text-accent-blue' : 'text-secondary'}`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={() => {
           if (node.isDirectory) {

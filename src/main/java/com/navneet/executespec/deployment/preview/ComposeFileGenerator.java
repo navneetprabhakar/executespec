@@ -89,6 +89,11 @@ public class ComposeFileGenerator {
         sb.append("    networks:\n");
         sb.append("      - preview-net\n");
         sb.append("    restart: \"no\"\n");
+        // Security hardening — drop all capabilities, prevent privilege escalation
+        sb.append("    security_opt:\n");
+        sb.append("      - no-new-privileges:true\n");
+        sb.append("    cap_drop:\n");
+        sb.append("      - ALL\n");
         sb.append("\n");
 
         // ── Database service (optional) ──────────────────────────────────────
@@ -121,10 +126,16 @@ public class ComposeFileGenerator {
             sb.append("    networks:\n");
             sb.append("      - preview-net\n");
             sb.append("    restart: \"no\"\n");
+            // NOTE: Do NOT add security_opt/cap_drop to DB containers — official DB images
+            // (postgres, mysql, mongo) need privileges to chown/chmod their data directories
+            // on startup. Security hardening is only applied to the app container (user code).
             sb.append("\n");
         }
 
-        // ── Network (sandbox isolation) ──────────────────────────────────────
+        // ── Network ──
+        // NOTE: Do NOT use "internal: true" here — it blocks host-to-container port forwarding
+        // via published ports on many Docker Engine versions (iptables DNAT rules not created).
+        // Sandbox isolation is provided by Docker's default network namespace + container security_opt.
         sb.append("networks:\n");
         sb.append("  preview-net:\n");
         sb.append("    driver: bridge\n");

@@ -20,8 +20,8 @@ export default function DateRangeFilter() {
           className={cn(
             'px-3 py-1 text-xs font-medium rounded-sm transition-colors',
             days === p.value
-              ? 'bg-white/10 text-white border border-white/20'
-              : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] border border-transparent'
+              ? 'bg-[var(--border-default)] text-primary border border-white/20'
+              : 'text-muted hover:text-secondary hover:bg-[var(--gray-200)] border border-transparent'
           )}
         >
           {p.label}

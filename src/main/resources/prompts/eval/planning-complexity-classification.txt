@@ -1,0 +1,66 @@
+You are a principal engineer making an architecture decision. A fintech startup (12 engineers, Series A, 18 months runway) needs to rebuild their payment processing system. Current state: a monolithic Django app processing $2M/month in transactions, experiencing ~3 outages/month due to tightly coupled payment flows.
+
+Evaluate these three architectural approaches and recommend ONE with detailed justification:
+
+OPTION A — Microservices (event-sourced)
+- Separate services: PaymentGateway, LedgerService, FraudDetection, NotificationService, ReconciliationEngine
+- Event sourcing with Apache Kafka for the ledger (complete audit trail, point-in-time replay)
+- CQRS: separate read models for dashboards (Elasticsearch) vs write models (PostgreSQL)
+- Saga pattern for distributed transactions (payment → fraud check → ledger entry → notification)
+- Kubernetes deployment with service mesh (Istio)
+- Estimated build time: 9-12 months
+
+OPTION B — Modular monolith (domain-driven)
+- Single deployable with strict module boundaries (Java modules or Gradle subprojects)
+- Modules: payments, ledger, fraud, notifications, reconciliation
+- Inter-module communication via in-process event bus (no network hops)
+- Shared PostgreSQL with schema-per-module isolation
+- Transaction boundaries at the module level (no distributed transactions)
+- Can be decomposed into microservices later if needed
+- Estimated build time: 4-6 months
+
+OPTION C — Serverless (AWS-native)
+- AWS Lambda functions per payment flow step
+- Step Functions for orchestrating payment processing pipeline
+- DynamoDB for transaction state, SQS for async processing
+- API Gateway with WAF for external-facing endpoints
+- EventBridge for cross-service events
+- Vendor lock-in but minimal ops overhead
+- Estimated build time: 3-5 months
+
+CONSTRAINTS:
+- Team has strong Python/Django experience, limited Java/K8s experience
+- Must maintain PCI DSS Level 2 compliance
+- Current p99 latency is 800ms, target is <200ms
+- Must support multi-currency (USD, EUR, GBP initially, expansion to APAC in 12 months)
+- Audit trail must be immutable and queryable for 7 years (regulatory requirement)
+- The system processes idempotent payment intents — duplicate requests must return the same result
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "recommendation": "A|B|C",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "reasoning": {
+    "primary_factors": ["..."],
+    "rejected_options": {
+      "A_or_B_or_C": "why rejected with specific technical reasoning"
+    },
+    "risks": ["risks of the chosen approach"],
+    "mitigations": ["how to address each risk"]
+  },
+  "implementation_phases": [
+    {
+      "phase": 1,
+      "duration_weeks": 8,
+      "deliverables": ["..."],
+      "success_criteria": ["..."]
+    }
+  ],
+  "decision_reversibility": "explanation of what happens if this choice turns out wrong"
+}
+
+Rules:
+- Your recommendation must account for team skills, timeline, and compliance requirements
+- You must explicitly address PCI DSS implications for each rejected option
+- Each rejected option must have at least 2 specific technical reasons (not just "too complex")
+- Implementation phases must be realistic given the team size and experience

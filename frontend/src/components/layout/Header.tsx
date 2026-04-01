@@ -1,4 +1,4 @@
-import { Menu, Search, Zap } from 'lucide-react';
+import { Menu, Search } from 'lucide-react';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { useSseStore } from '@/stores/useSseStore';
@@ -13,39 +13,35 @@ export default function Header() {
   const activeRunId = useRunStore((s) => s.activeRunId);
   const sseStatus = useSseStore((s) => s.status);
   const activeCount = runs.filter((r) => ACTIVE_STATUSES.has(r.status)).length;
-  // SSE connects per-run; show "Standby" when no run is selected rather than "Offline"
   const displayStatus = sseStatus === 'DISCONNECTED' && !activeRunId ? 'STANDBY' : sseStatus;
 
   return (
-    <header className="flex items-center h-12 px-4 gap-3 bg-surface-1 border-b border-white/[0.06] flex-shrink-0 z-10">
-      {/* Mobile hamburger menu */}
+    <header className="flex items-center h-14 px-4 gap-3 bg-[var(--geist-bg)] border-b border-[var(--border-default)] flex-shrink-0 z-10">
+      {/* Mobile hamburger */}
       <button
         onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center -ml-2 text-zinc-400 hover:text-white transition-colors"
+        className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center -ml-2 text-muted hover:text-primary transition-colors"
         aria-label="Toggle menu"
       >
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* SSE status */}
-      <div className="flex items-center gap-1.5 text-xs">
+      {/* Breadcrumb */}
+      <div className="hidden lg:flex items-center gap-1.5 text-sm">
+        <span className="text-primary font-medium">ExecuteSpec</span>
+        <span className="text-muted">/</span>
+        <span className="text-secondary">Runs</span>
+      </div>
+
+      {/* SSE status dot */}
+      <div className="flex items-center gap-1.5">
         <span className={cn(
-          'relative flex h-1.5 w-1.5',
-          displayStatus === 'CONNECTED' ? '' : 'opacity-60'
-        )}>
-          {displayStatus === 'CONNECTED' && (
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75" />
-          )}
-          <span className={cn(
-            'relative inline-flex rounded-full h-1.5 w-1.5',
-            displayStatus === 'CONNECTED' ? 'bg-accent-emerald' :
-            displayStatus === 'RECONNECTING' ? 'bg-accent-amber' : 'bg-zinc-600'
-          )} />
-        </span>
+          'h-1.5 w-1.5 rounded-full',
+          displayStatus === 'CONNECTED' ? 'bg-accent-green' :
+          displayStatus === 'RECONNECTING' ? 'bg-status-building' : 'bg-[var(--gray-500)]'
+        )} />
         <span className={cn(
-          'text-xs hidden sm:block',
-          displayStatus === 'CONNECTED' ? 'text-accent-emerald' :
-          displayStatus === 'RECONNECTING' ? 'text-accent-amber' : 'text-zinc-600'
+          'text-xs hidden sm:block text-muted',
         )}>
           {displayStatus === 'CONNECTED' ? 'Live' :
            displayStatus === 'RECONNECTING' ? 'Reconnecting' :
@@ -62,19 +58,18 @@ export default function Header() {
       {/* Command palette trigger */}
       <button
         onClick={() => setCommandPaletteOpen(true)}
-        className="flex items-center gap-2 px-3 py-2 lg:py-1.5 rounded-sm bg-white/[0.04] border border-white/[0.06] text-sm text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--gray-200)] text-sm text-muted hover:text-secondary transition-colors"
       >
         <Search className="h-3.5 w-3.5" />
         <span className="hidden lg:block">Search...</span>
-        <kbd className="hidden lg:block text-xs bg-white/[0.06] px-1.5 py-0.5 rounded border border-white/[0.08] font-mono">⌘K</kbd>
+        <kbd className="hidden lg:block text-xs bg-[var(--gray-300)] px-1.5 py-0.5 rounded-sm font-mono text-muted">⌘K</kbd>
       </button>
 
-      {/* Active runs badge */}
+      {/* Active runs count */}
       {activeCount > 0 && (
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-accent-violet/15 border border-accent-violet/20">
-          <Zap className="h-3 w-3 text-accent-violet" />
-          <span className="text-xs font-medium text-accent-violet">{activeCount} active</span>
-        </div>
+        <span className="text-xs text-secondary">
+          {activeCount} active
+        </span>
       )}
 
       {/* User menu */}

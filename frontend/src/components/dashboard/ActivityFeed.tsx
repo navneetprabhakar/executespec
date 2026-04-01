@@ -13,11 +13,11 @@ const STATUS_ICONS: Record<string, React.ElementType> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  COMPLETE: 'text-accent-emerald',
-  FAILED:   'text-accent-rose',
-  WORKING:  'text-accent-violet',
-  MERGING:  'text-accent-cyan',
-  default:  'text-zinc-500',
+  COMPLETE: 'text-accent-green',
+  FAILED:   'text-accent-red',
+  WORKING:  'text-accent-blue',
+  MERGING:  'text-secondary',
+  default:  'text-muted',
 };
 
 interface ActivityFeedProps {
@@ -31,10 +31,10 @@ export default function ActivityFeed({ runs }: ActivityFeedProps) {
 
   return (
     <GlassPanel className="p-4">
-      <h3 className="text-sm font-semibold text-zinc-200 mb-3">Recent Activity</h3>
+      <h3 className="text-sm font-semibold text-primary mb-3">Recent Activity</h3>
       <div className="space-y-2 max-h-64 overflow-y-auto">
         {events.length === 0 ? (
-          <p className="text-sm text-zinc-600 py-4 text-center">No activity yet</p>
+          <p className="text-sm text-muted py-4 text-center">No activity yet</p>
         ) : events.map((run, i) => {
           const Icon = STATUS_ICONS[run.status] ?? STATUS_ICONS.default;
           const color = STATUS_COLORS[run.status] ?? STATUS_COLORS.default;
@@ -48,10 +48,10 @@ export default function ActivityFeed({ runs }: ActivityFeedProps) {
             >
               <Icon className={`h-4 w-4 mt-0.5 flex-shrink-0 ${color}`} />
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-zinc-300 truncate">
+                <p className="text-xs text-secondary truncate">
                   {(run.userRequest ?? '').slice(0, 60)}
                 </p>
-                <p className="text-xs text-zinc-600">{run.status} · {relativeTime(run.completedAt ?? run.startedAt)}</p>
+                <p className="text-xs text-muted">{run.status} · {relativeTime(run.completedAt ?? run.startedAt)}</p>
               </div>
             </motion.div>
           );

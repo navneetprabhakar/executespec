@@ -79,6 +79,23 @@ POST /api/runs  →  ReferenceExtractor (JIRA/Confluence context)
 
 ---
 
+## Security
+
+8-layer defense-in-depth model for running untrusted user input through LLM agents:
+
+1. **Request validation** — Jakarta Bean Validation (`@Size`, `@Pattern`, `@NotBlank`) rejects malformed input
+2. **Content scanning** — `InputSanitizer` detects prompt injection, shell embedding, abuse patterns (26 regexes + Unicode NFKC normalization + obfuscation detection)
+3. **LLM prompt defense** — user input tagged as untrusted in planner/worker prompts; tool results wrapped with `untrusted="true"` to prevent second-order injection from repo files
+4. **Code abuse scanning** — `CodeAbuseScanner` **blocks** writes of files matching malware patterns (crypto miners, reverse shells, data exfiltration, obfuscated payloads)
+5. **Shell sandbox** — 3-layer validation: subshell blocking + blocklist (23) + pattern blocklist (43) + chained-command splitting + allowlist (32 prefixes)
+6. **File sandbox** — path normalization + workspace boundary enforcement (`safeResolve()`)
+7. **Process isolation** — secret env var stripping + 5-minute hard timeout
+8. **Container hardening** — `.dockerignore` excludes `.env*`, `credentials.json`, `secrets.*` from preview/deploy images
+
+Full details: [docs/requirements/security-guardrails.md](docs/requirements/security-guardrails.md)
+
+---
+
 ## Documentation
 
 | Document | Audience | Description |
@@ -89,7 +106,9 @@ POST /api/runs  →  ReferenceExtractor (JIRA/Confluence context)
 | [docs/PRD.md](docs/PRD.md) | Product/Business | Product requirements, tiers, user journeys |
 | [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | Engineers/Product | Mermaid workflow diagrams for every feature |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | DevOps/Engineers | Local setup + GCP deployment + Terraform operations |
+| [docs/CODE_GEN_ARCHITECTURE.md](docs/CODE_GEN_ARCHITECTURE.md) | Engineers | Multi-agent pipeline deep dive (17 sections) |
 | [docs/requirements/](docs/requirements/) | Engineers | Feature requirement specs (one per domain) |
+| [docs/requirements/security-guardrails.md](docs/requirements/security-guardrails.md) | Engineers/Security | All 8 security layers, threat model, key file reference |
 
 ---
 

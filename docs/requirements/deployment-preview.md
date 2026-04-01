@@ -135,6 +135,21 @@ Configured via `preview.mode` in `application.yml` (default: `docker`).
 - API docs probing must work for both Docker mode (localhost:port) and Cloud Run mode (service URL), using the same detection logic
 - HTTP health check client must enforce a connect timeout of 10 seconds and a request timeout of 15 seconds to avoid blocking on unresponsive previews
 
+### Container Image Security
+
+Both preview (`DevDockerfileGenerator`) and deploy (`DockerfileGenerator`) images include `.dockerignore` files that exclude sensitive files:
+
+```
+.env, .env.*, .env.local, .env.production
+credentials.json, service-account.json
+key.json, keyfile.json
+secrets.yml, secrets.yaml
+```
+
+This prevents secrets written by agents (for generated app configuration) from being baked into container images. Preview Dockerfiles also inject a non-root `USER` directive before the final `CMD`/`ENTRYPOINT`.
+
+See also: [Security Guardrails](security-guardrails.md) for the full container hardening requirements.
+
 ---
 
 ## Key Files

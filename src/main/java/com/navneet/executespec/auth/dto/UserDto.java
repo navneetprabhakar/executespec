@@ -33,7 +33,10 @@ public record UserDto(
         // Confluence (non-sensitive fields exposed; token flag only)
         String confluenceBaseUrl,
         String confluenceEmail,
-        boolean hasConfluenceToken
+        boolean hasConfluenceToken,
+
+        // UI preference
+        String viewMode
 ) {
     private static boolean present(String s) {
         return s != null && !s.isBlank();
@@ -70,7 +73,10 @@ public record UserDto(
                 // Confluence
                 user.getConfluenceBaseUrl(),
                 user.getConfluenceEmail(),
-                present(user.getConfluenceApiToken())
+                present(user.getConfluenceApiToken()),
+
+                // UI preference
+                user.getViewMode() != null ? user.getViewMode() : "vibe"
         );
     }
 }

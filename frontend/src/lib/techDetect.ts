@@ -32,8 +32,8 @@ export const TECH_DEFS: TechDef[] = [
   {
     id: 'nextjs',
     label: 'Next.js',
-    textCls: 'text-white',
-    bgCls: 'bg-white/10',
+    textCls: 'text-primary',
+    bgCls: 'bg-[var(--border-default)]',
     hex: '#ffffff',
     keywords: ['next.js', 'nextjs', 'next js', '"next"'],
     priority: 11,

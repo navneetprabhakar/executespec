@@ -1,0 +1,1 @@
+ALTER TABLE app_user ADD COLUMN IF NOT EXISTS view_mode VARCHAR(10) DEFAULT 'vibe';

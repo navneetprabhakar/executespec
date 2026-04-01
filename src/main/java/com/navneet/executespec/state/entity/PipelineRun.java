@@ -145,6 +145,10 @@ public class PipelineRun {
     @Column(name = "key_source")
     private String keySource;
 
+    /** User's subscription tier at run creation time — FREE | PRO | ENTERPRISE. Used for async budget/model enforcement. */
+    @Column(name = "user_tier", length = 20)
+    private String userTier;
+
     /**
      * Comma-separated tech stack IDs detected from the plan JSON, e.g. "react,typescript,nodejs".
      * Computed after planning from task titles, objectives, and boundaries.

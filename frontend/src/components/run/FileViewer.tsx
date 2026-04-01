@@ -1,5 +1,11 @@
-import Editor from '@monaco-editor/react';
+import Editor, { loader } from '@monaco-editor/react';
 import { useState } from 'react';
+import { GEIST_THEME_NAME, geistDarkTheme } from '@/lib/monacoGeistTheme';
+
+// Register Geist theme once Monaco loads
+loader.init().then((monaco) => {
+  monaco.editor.defineTheme(GEIST_THEME_NAME, geistDarkTheme);
+});
 
 interface FileViewerProps {
   fileName: string;
@@ -19,13 +25,13 @@ export function FileViewer({ fileName, content, language }: FileViewerProps) {
   };
 
   return (
-    <div className="border border-white/[0.06] rounded-sm overflow-hidden">
+    <div className="border border-[var(--border-default)] rounded-sm overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-zinc-800 border-b border-white/[0.06]">
-        <span className="text-sm font-mono text-zinc-300 truncate">{fileName}</span>
+      <div className="flex items-center justify-between px-4 py-2 bg-[var(--gray-200)] border-b border-[var(--border-default)]">
+        <span className="text-sm font-mono text-secondary truncate">{fileName}</span>
         <button
           onClick={handleCopy}
-          className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 rounded hover:bg-white/[0.06]"
+          className="text-xs text-muted hover:text-secondary px-2 py-1 rounded hover:bg-[var(--gray-200)]"
         >
           {copied ? 'Copied!' : 'Copy'}
         </button>
@@ -36,7 +42,7 @@ export function FileViewer({ fileName, content, language }: FileViewerProps) {
         height={Math.min(Math.max(content.split('\n').length * 19, 100), 600)}
         language={detectedLanguage}
         value={content}
-        theme="vs-dark"
+        theme={GEIST_THEME_NAME}
         options={{
           readOnly: true,
           minimap: { enabled: false },

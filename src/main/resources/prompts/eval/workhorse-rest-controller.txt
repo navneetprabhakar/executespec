@@ -1,0 +1,28 @@
+Generate a complete, production-grade Spring Boot WebSocket notification system.
+
+The system must support:
+
+1. **WebSocket endpoint** (`/ws/notifications`) with STOMP protocol over SockJS fallback
+2. **Per-user notification channels** — user subscribes to `/user/{userId}/queue/notifications`
+3. **NotificationService** with these methods:
+   - `sendToUser(String userId, Notification notification)` — sends to a specific user's channel
+   - `broadcastToOrg(String orgId, Notification notification)` — sends to all users in an org (look up via injected `OrgMemberRepository`)
+   - `sendWithRetry(String userId, Notification notification, int maxRetries)` — retries with exponential backoff if the user is not connected, stores undelivered notifications in a `pending_notifications` table for delivery on reconnect
+4. **Connection tracking** — track connected sessions via `SessionConnectEvent` / `SessionDisconnectEvent`. When a user reconnects, drain their pending notifications.
+5. **Rate limiting** — max 30 notifications per user per minute. Excess notifications are batched and delivered as a digest after 60 seconds.
+6. **Notification entity** — id (UUID), userId, orgId, type (enum: INFO, WARNING, ERROR, ACTION_REQUIRED), title, body, metadata (JSONB), read (boolean), createdAt, deliveredAt
+
+Output ALL Java source files needed:
+- `WebSocketConfig.java` (STOMP configuration)
+- `NotificationController.java` (REST: mark-read, list unread, dismiss)
+- `NotificationService.java` (core logic above)
+- `Notification.java` (JPA entity)
+- `NotificationType.java` (enum)
+
+Requirements:
+- Constructor injection only (no @Autowired)
+- @Transactional where appropriate
+- Handle edge cases: user disconnects mid-delivery, concurrent reconnect from multiple tabs, notification ordering guarantees
+- Thread-safe session tracking (ConcurrentHashMap)
+
+Output ONLY the Java source code for all files, separated by `// === filename.java ===` markers. No explanations.

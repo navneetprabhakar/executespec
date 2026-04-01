@@ -26,21 +26,21 @@ export default function CommandPalette() {
       {commandPaletteOpen && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
-          style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.5)' }}
+          style={{ background: 'rgba(0,0,0,0.7)' }}
           onClick={() => setCommandPaletteOpen(false)}
         >
           <div
-            className="w-full max-w-xl mx-4 rounded-sm border border-white/[0.10] bg-surface-2  overflow-hidden"
+            className="w-full max-w-xl mx-4 rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <Command className="[&_[cmdk-input]]:h-12 [&_[cmdk-input]]:px-4 [&_[cmdk-input]]:text-sm [&_[cmdk-input]]:bg-transparent [&_[cmdk-input]]:outline-none [&_[cmdk-input]]:text-zinc-100 [&_[cmdk-input]]:placeholder:text-zinc-500">
+            <Command className="[&_[cmdk-input]]:h-12 [&_[cmdk-input]]:px-4 [&_[cmdk-input]]:text-sm [&_[cmdk-input]]:bg-transparent [&_[cmdk-input]]:outline-none [&_[cmdk-input]]:text-[var(--text-primary)] [&_[cmdk-input]]:placeholder:text-[var(--text-muted)]">
               <Command.Input placeholder="Search commands, navigate, find runs..." />
-              <Command.List className="max-h-80 overflow-y-auto border-t border-white/[0.06] py-2">
-                <Command.Empty className="py-6 text-center text-sm text-zinc-500">
+              <Command.List className="max-h-80 overflow-y-auto border-t border-[var(--border-default)] py-2">
+                <Command.Empty className="py-6 text-center text-sm text-muted">
                   No results found.
                 </Command.Empty>
 
-                <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-zinc-500 [&_[cmdk-group-heading]]:font-medium">
+                <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-[var(--text-muted)] [&_[cmdk-group-heading]]:font-medium">
                   <CmdItem
                     icon={<Plus className="h-4 w-4" />}
                     label="New Run"
@@ -53,7 +53,7 @@ export default function CommandPalette() {
                   />
                 </Command.Group>
 
-                <Command.Group heading="Navigation" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-zinc-500 [&_[cmdk-group-heading]]:font-medium">
+                <Command.Group heading="Navigation" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-[var(--text-muted)] [&_[cmdk-group-heading]]:font-medium">
                   {NAV_COMMANDS.map((cmd) => (
                     <CmdItem
                       key={cmd.path}
@@ -65,7 +65,7 @@ export default function CommandPalette() {
                 </Command.Group>
 
                 {runs.length > 0 && (
-                  <Command.Group heading="Recent Runs" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-zinc-500 [&_[cmdk-group-heading]]:font-medium">
+                  <Command.Group heading="Recent Runs" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-[var(--text-muted)] [&_[cmdk-group-heading]]:font-medium">
                     {runs.slice(0, 5).map((r) => (
                       <CmdItem
                         key={r.runId}
@@ -94,9 +94,9 @@ function CmdItem({ icon, label, onSelect }: { icon: React.ReactNode; label: stri
   return (
     <Command.Item
       onSelect={onSelect}
-      className="flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-300 cursor-pointer data-[selected=true]:bg-white/[0.06] data-[selected=true]:text-white"
+      className="flex items-center gap-3 px-4 py-2.5 text-sm text-secondary cursor-pointer data-[selected=true]:bg-[var(--gray-200)] data-[selected=true]:text-primary"
     >
-      <span className="text-zinc-500">{icon}</span>
+      <span className="text-muted">{icon}</span>
       {label}
     </Command.Item>
   );

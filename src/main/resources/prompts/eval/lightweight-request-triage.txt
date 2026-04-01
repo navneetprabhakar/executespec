@@ -1,0 +1,40 @@
+You are a request triage agent. Analyze the following user request and determine how to handle it. The request is intentionally ambiguous — you must identify ALL possible interpretations and explain why clarification is needed.
+
+USER REQUEST:
+"The dashboard is slow. Fix the performance and add caching. Also the data on the analytics page doesn't match what's in the database — users are complaining. And while you're at it, the CEO wants a new report page that shows MRR, churn rate, and LTV by cohort."
+
+CONTEXT:
+- The application is a B2B SaaS with a React frontend and Spring Boot backend
+- The "dashboard" could refer to: the admin dashboard, the customer-facing dashboard, or the internal monitoring dashboard
+- The "analytics page" was recently migrated from a legacy system
+- The application serves 500 enterprise customers with avg 200 users each
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "classification": "MULTI_TASK",
+  "ambiguities": [
+    {
+      "area": "which specific part of the request",
+      "possible_interpretations": ["interpretation 1", "interpretation 2"],
+      "clarifying_question": "the question to ask the user",
+      "default_assumption": "what you'd assume if forced to proceed without clarification"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "task-1",
+      "title": "...",
+      "priority": "P0|P1|P2",
+      "estimated_complexity": "LOW|MEDIUM|HIGH",
+      "rationale": "why this priority — consider user impact, data integrity, revenue impact"
+    }
+  ],
+  "recommended_order": "which tasks should be done first and why",
+  "risks_if_no_clarification": ["what could go wrong if you just proceed with assumptions"]
+}
+
+Requirements:
+- Identify at least 3 distinct ambiguities
+- The data mismatch issue must be classified as highest priority (data integrity > performance > new features)
+- The tasks must be ordered by business impact, not technical ease
+- Each ambiguity must have a specific clarifying question (not generic "can you clarify?")

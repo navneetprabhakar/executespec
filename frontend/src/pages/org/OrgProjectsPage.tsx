@@ -20,24 +20,24 @@ function MemberRow({
   onRemove: (userId: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-2 px-3 rounded-sm hover:bg-white/[0.03] transition-colors">
+    <div className="flex items-center justify-between py-2 px-3 rounded-sm hover:bg-[var(--gray-200)] transition-colors">
       <div className="flex items-center gap-3 min-w-0">
-        <div className="h-7 w-7 rounded-full bg-accent-violet/20 flex items-center justify-center text-xs font-semibold text-accent-violet flex-shrink-0">
+        <div className="h-7 w-7 rounded-full bg-accent-blue/20 flex items-center justify-center text-xs font-semibold text-accent-blue flex-shrink-0">
           {member.firstName?.[0]?.toUpperCase() ?? member.email[0].toUpperCase()}
         </div>
         <div className="min-w-0">
-          <p className="text-sm text-white truncate">{member.firstName} {member.lastName}</p>
-          <p className="text-xs text-zinc-500 truncate">{member.email}</p>
+          <p className="text-sm text-primary truncate">{member.firstName} {member.lastName}</p>
+          <p className="text-xs text-muted truncate">{member.email}</p>
         </div>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-        <span className="text-xs px-2 py-0.5 rounded-sm bg-accent-violet/10 text-accent-violet">
+        <span className="text-xs px-2 py-0.5 rounded-sm bg-accent-blue/10 text-accent-blue">
           {member.projectRole}
         </span>
         {canManage && (
           <button
             onClick={() => onRemove(member.userId)}
-            className="text-zinc-600 hover:text-red-400 transition-colors p-1 rounded"
+            className="text-muted hover:text-accent-red transition-colors p-1 rounded"
             title="Remove from project"
           >
             <X className="h-3.5 w-3.5" />
@@ -85,7 +85,7 @@ function AddMemberForm({
 
   if (eligible.length === 0) {
     return (
-      <p className="text-xs text-zinc-500 mt-2 italic">
+      <p className="text-xs text-muted mt-2 italic">
         All org members are already in this project.
       </p>
     );
@@ -94,11 +94,11 @@ function AddMemberForm({
   return (
     <form onSubmit={handleSubmit} className="flex items-end gap-2 mt-3">
       <div className="flex-1 min-w-0">
-        <label className="text-xs text-zinc-500 mb-1 block">Add member</label>
+        <label className="text-xs text-muted mb-1 block">Add member</label>
         <select
           value={userId}
           onChange={(e) => setUserId(e.target.value)}
-          className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none"
+          className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-1.5 text-sm text-primary focus:border-accent-blue focus:outline-none"
         >
           <option value="">— select org member —</option>
           {eligible.map((m) => (
@@ -109,11 +109,11 @@ function AddMemberForm({
         </select>
       </div>
       <div>
-        <label className="text-xs text-zinc-500 mb-1 block">Role</label>
+        <label className="text-xs text-muted mb-1 block">Role</label>
         <select
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          className="rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none"
+          className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-1.5 text-sm text-primary focus:border-accent-blue focus:outline-none"
         >
           <option value="DEVELOPER">Developer</option>
           <option value="PROJECT_LEAD">Project Lead</option>
@@ -123,13 +123,13 @@ function AddMemberForm({
       <button
         type="submit"
         disabled={!userId || adding}
-        className="px-3 py-1.5 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors flex items-center gap-1"
+        className="px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors flex items-center gap-1"
       >
         <Plus className="h-3.5 w-3.5" />
         {adding ? 'Adding…' : 'Add'}
       </button>
       {err && (
-        <p className="text-xs text-red-400 absolute mt-8">{err}</p>
+        <p className="text-xs text-accent-red absolute mt-8">{err}</p>
       )}
     </form>
   );
@@ -201,8 +201,8 @@ function ProjectCard({
     <div className={cn(
       'rounded-sm border transition-colors',
       isArchived
-        ? 'border-white/[0.04] bg-white/[0.01]'
-        : 'border-white/[0.08] bg-[#0f1117]'
+        ? 'border-[var(--border-default)] bg-[var(--gray-100)]'
+        : 'border-[var(--border-default)] bg-[#0f1117]'
     )}>
       {/* Card header */}
       <div
@@ -213,28 +213,28 @@ function ProjectCard({
       >
         <div className="flex items-center gap-3 min-w-0">
           {isArchived
-            ? <FolderArchive className="h-4 w-4 text-zinc-600 flex-shrink-0" />
-            : <FolderOpen className="h-4 w-4 text-accent-violet flex-shrink-0" />
+            ? <FolderArchive className="h-4 w-4 text-muted flex-shrink-0" />
+            : <FolderOpen className="h-4 w-4 text-accent-blue flex-shrink-0" />
           }
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className={cn('font-semibold truncate', isArchived ? 'text-zinc-500' : 'text-white')}>
+              <p className={cn('font-semibold truncate', isArchived ? 'text-muted' : 'text-primary')}>
                 {project.name}
               </p>
               <span className={cn(
                 'text-xs px-2 py-0.5 rounded-sm flex-shrink-0',
                 isArchived
-                  ? 'bg-zinc-800 text-zinc-500'
+                  ? 'bg-[var(--gray-200)] text-muted'
                   : 'bg-emerald-900/40 text-emerald-400'
               )}>
                 {project.status}
               </span>
-              <span className="text-xs px-2 py-0.5 rounded-sm flex-shrink-0 bg-blue-900/30 text-blue-400">
+              <span className="text-xs px-2 py-0.5 rounded-sm flex-shrink-0 bg-blue-900/30 text-accent-blue">
                 {PROVIDER_LABELS[project.aiProvider] ?? project.aiProvider}
               </span>
             </div>
             {project.description && (
-              <p className="text-xs text-zinc-500 truncate">{project.description}</p>
+              <p className="text-xs text-muted truncate">{project.description}</p>
             )}
           </div>
         </div>
@@ -242,7 +242,7 @@ function ProjectCard({
           {!isArchived && (
             <button
               onClick={(e) => { e.stopPropagation(); onViewRuns(project.id); }}
-              className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white border border-white/[0.08] hover:border-white/20 rounded-sm px-3 py-1.5 transition-colors"
+              className="flex items-center gap-1 text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-white/20 rounded-sm px-3 py-1.5 transition-colors"
               title="Filter runs to this project"
             >
               <Eye className="h-3.5 w-3.5" />
@@ -250,28 +250,28 @@ function ProjectCard({
             </button>
           )}
           {expanded
-            ? <ChevronUp className="h-4 w-4 text-zinc-500" />
-            : <ChevronDown className="h-4 w-4 text-zinc-500" />
+            ? <ChevronUp className="h-4 w-4 text-muted" />
+            : <ChevronDown className="h-4 w-4 text-muted" />
           }
         </div>
       </div>
 
       {/* Expanded body */}
       {expanded && (
-        <div className="px-5 pb-4 border-t border-white/[0.05] pt-4 space-y-4">
+        <div className="px-5 pb-4 border-t border-[var(--gray-300)] pt-4 space-y-4">
           {/* Members section */}
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <Users className="h-3.5 w-3.5 text-zinc-500" />
-              <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Members</span>
+              <Users className="h-3.5 w-3.5 text-muted" />
+              <span className="text-xs font-medium text-secondary uppercase tracking-wider">Members</span>
               {membersLoaded && (
-                <span className="text-xs text-zinc-600">({members.length})</span>
+                <span className="text-xs text-muted">({members.length})</span>
               )}
             </div>
             {membersLoading ? (
-              <div className="text-xs text-zinc-600 py-2">Loading members…</div>
+              <div className="text-xs text-muted py-2">Loading members…</div>
             ) : membersLoaded && members.length === 0 ? (
-              <div className="flex items-center gap-2 py-2 text-xs text-zinc-500">
+              <div className="flex items-center gap-2 py-2 text-xs text-muted">
                 <AlertCircle className="h-3.5 w-3.5" />
                 No members assigned yet.
               </div>
@@ -303,8 +303,8 @@ function ProjectCard({
           {isAdmin && !isArchived && (
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <Cpu className="h-3.5 w-3.5 text-zinc-500" />
-                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">AI Provider</span>
+                <Cpu className="h-3.5 w-3.5 text-muted" />
+                <span className="text-xs font-medium text-secondary uppercase tracking-wider">AI Provider</span>
               </div>
               <select
                 value={project.aiProvider}
@@ -317,22 +317,22 @@ function ProjectCard({
                   } catch { /* ignore */ }
                   finally { setSavingProvider(false); }
                 }}
-                className="rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-sm text-white focus:border-accent-violet focus:outline-none disabled:opacity-50"
+                className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-1.5 text-sm text-primary focus:border-accent-blue focus:outline-none disabled:opacity-50"
               >
                 <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
                 <option value="GOOGLE">Google (Gemini)</option>
                 <option value="OPENAI">OpenAI (GPT)</option>
               </select>
-              <p className="text-xs text-zinc-600 mt-1">All pipeline runs in this project will use this provider.</p>
+              <p className="text-xs text-muted mt-1">All pipeline runs in this project will use this provider.</p>
             </div>
           )}
 
           {/* Archive action */}
           {isAdmin && !isArchived && (
-            <div className="flex justify-end pt-2 border-t border-white/[0.04]">
+            <div className="flex justify-end pt-2 border-t border-[var(--border-default)]">
               <button
                 onClick={() => onArchive(project.id)}
-                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-red-400 transition-colors"
+                className="flex items-center gap-1.5 text-xs text-muted hover:text-accent-red transition-colors"
               >
                 <FolderArchive className="h-3.5 w-3.5" />
                 Archive project
@@ -413,15 +413,15 @@ export default function OrgProjectsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Projects</h1>
-          <p className="text-sm text-zinc-500 mt-1">
+          <h1 className="text-2xl font-bold text-primary">Projects</h1>
+          <p className="text-sm text-muted mt-1">
             Group runs into projects and control team access.
           </p>
         </div>
         {isAdmin && (
           <button
             onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
           >
             <Plus className="h-4 w-4" />
             New Project
@@ -431,8 +431,8 @@ export default function OrgProjectsPage() {
 
       {/* Create form (collapsible) */}
       {isAdmin && showCreate && (
-        <div className="rounded-sm border border-white/[0.08] bg-[#0f1117] p-5">
-          <h2 className="text-base font-semibold text-white mb-4">Create project</h2>
+        <div className="rounded-sm border border-[var(--border-default)] bg-[#0f1117] p-5">
+          <h2 className="text-base font-semibold text-primary mb-4">Create project</h2>
           <form onSubmit={handleCreate} className="space-y-3">
             <input
               type="text"
@@ -440,40 +440,40 @@ export default function OrgProjectsPage() {
               onChange={(e) => setName(e.target.value)}
               required
               placeholder="Project name"
-              className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+              className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none"
             />
             <input
               type="text"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
               placeholder="Description (optional)"
-              className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+              className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none"
             />
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">AI Provider</label>
+              <label className="text-xs text-muted mb-1 block">AI Provider</label>
               <select
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white focus:border-accent-violet focus:outline-none"
+                className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary focus:border-accent-blue focus:outline-none"
               >
                 <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
                 <option value="GOOGLE">Google (Gemini)</option>
                 <option value="OPENAI">OpenAI (GPT)</option>
               </select>
             </div>
-            {createError && <p className="text-sm text-red-400">{createError}</p>}
+            {createError && <p className="text-sm text-accent-red">{createError}</p>}
             <div className="flex gap-3">
               <button
                 type="submit"
                 disabled={creating || !name.trim()}
-                className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
               >
                 {creating ? 'Creating…' : 'Create'}
               </button>
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
-                className="px-4 py-2 rounded-sm text-zinc-400 hover:text-white text-sm transition-colors"
+                className="px-4 py-2 rounded-sm text-secondary hover:text-primary text-sm transition-colors"
               >
                 Cancel
               </button>
@@ -484,7 +484,7 @@ export default function OrgProjectsPage() {
 
       {/* Loading */}
       {loading && (
-        <div className="text-zinc-500 text-sm">Loading projects…</div>
+        <div className="text-muted text-sm">Loading projects…</div>
       )}
 
       {/* Active projects */}
@@ -492,9 +492,9 @@ export default function OrgProjectsPage() {
         <>
           {active.length === 0 && archived.length === 0 && (
             <div className="text-center py-12">
-              <FolderOpen className="h-10 w-10 text-zinc-700 mx-auto mb-3" />
-              <p className="text-zinc-400 font-medium">No projects yet</p>
-              <p className="text-zinc-600 text-sm mt-1">
+              <FolderOpen className="h-10 w-10 text-[var(--text-muted)] mx-auto mb-3" />
+              <p className="text-secondary font-medium">No projects yet</p>
+              <p className="text-muted text-sm mt-1">
                 {isAdmin ? 'Create your first project above.' : 'Your org admin hasn\'t created any projects yet.'}
               </p>
             </div>
@@ -549,7 +549,7 @@ function ArchivedSection({
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors mb-3"
+        className="flex items-center gap-2 text-sm text-muted hover:text-secondary transition-colors mb-3"
       >
         {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         Archived projects ({projects.length})

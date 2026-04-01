@@ -52,7 +52,7 @@ export default function AgentCommGraph() {
 
   return (
     <GlassPanel className="p-4">
-      <h3 className="text-sm font-semibold text-zinc-200 mb-3">Agent Communication</h3>
+      <h3 className="text-sm font-semibold text-primary mb-3">Agent Communication</h3>
       <svg ref={svgRef} className="w-full" />
     </GlassPanel>
   );

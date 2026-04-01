@@ -26,9 +26,9 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class UiStyleResolver {
 
-    private static final String DEFAULT_THEME = "minimal-light";
+    private static final String DEFAULT_THEME = "vercel-geist";
     private static final Set<String> VALID_THEMES = Set.of(
-            "minimal-dark", "minimal-light", "corporate-clean", "startup-bold", "neutral-warm");
+            "vercel-geist", "minimal-dark", "minimal-light", "corporate-clean", "startup-bold", "neutral-warm");
     private static final Set<String> VALID_DESIGN_SYSTEMS = Set.of("shadcn", "daisy", "tailwind-only");
     private static final Set<String> VALID_LAYOUTS = Set.of("sidebar", "top-nav", "minimal", "dashboard");
 
@@ -79,7 +79,7 @@ public class UiStyleResolver {
         String theme = DEFAULT_THEME;
         String density = "comfortable";
         String layout = "top-nav";
-        String darkMode = "auto";
+        String darkMode = "true";
 
         // Parse explicit ui_style block if provided (YAML-like key: value lines)
         if (explicitUiStyle != null && !explicitUiStyle.isBlank()) {
@@ -168,6 +168,70 @@ public class UiStyleResolver {
                 default -> dsLabel = "Tailwind CSS utility classes only (no component library)";
             }
 
+            // Build Geist-specific CSS guidelines if applicable
+            String geistBlock = "";
+            if ("vercel-geist".equals(themeId)) {
+                geistBlock = """
+
+                    VERCEL/GEIST DESIGN SYSTEM — MANDATORY:
+                    These rules override any conflicting defaults. Follow them exactly.
+
+                    BACKGROUNDS: Pure black (#000) for page body. #111 for cards/panels. #1a1a1a for
+                    elevated surfaces (dropdowns, popovers). #252525 for hover states. NEVER use dark
+                    gray (#1a1a1a or similar) as the page background — it MUST be pure #000000.
+
+                    TEXT: #ededed for primary text. #a1a1a1 for secondary/descriptions. #666 for muted
+                    (placeholders, timestamps, help text). #333 for disabled text.
+
+                    BORDERS: 1px solid #252525 everywhere. #333 on hover. NEVER use colored borders
+                    except as 3px left-edge status indicators on cards. No border-radius > 6px on containers.
+
+                    COLOR USAGE: Color is for MEANING only. Blue (#0070F3) = success, active, primary CTA,
+                    links. Amber (#f5a623) = warning, in-progress. Red (#e5484d) = error, destructive.
+                    Gray (#666) = inactive, queued. NEVER use color for decoration — no gradient backgrounds,
+                    no colored card borders, no tinted surfaces.
+
+                    BUTTONS: Ghost/outline by default — transparent bg, #252525 border, #ededed text.
+                    Primary CTA only: #ededed bg, #000 text (white-on-black). Hover: bg #333 (ghost) or
+                    bg #ccc (primary). Blue buttons ONLY for external links. NEVER use colored button
+                    backgrounds (no green "success" buttons, no red "delete" buttons — use ghost + red text).
+
+                    INPUTS: bg #111, border #252525, text #ededed, placeholder #666. Focus: border #333,
+                    no box-shadow, no ring, no glow. Select/dropdown: bg #111, border #252525.
+
+                    CARDS: bg #111, border #252525, no box-shadow. Hover: bg #1a1a1a OR border #333.
+                    Active/selected: bg #1a1a1a + left border 2px solid #ededed.
+
+                    SPACING: 4px grid — use multiples of 4px (4, 8, 12, 16, 24, 32, 48, 64).
+                    Generous whitespace between sections. padding: 16-24px for cards, 8-12px for list items.
+
+                    RADIUS: 2px for badges/chips, 4px for cards/inputs/buttons, 6px for modals/dialogs.
+                    NEVER use rounded-full on containers. NEVER use rounded-xl or rounded-2xl.
+
+                    TYPOGRAPHY: System sans-serif stack (Inter, system-ui, -apple-system, sans-serif) for UI.
+                    Monospace for code, IDs, timestamps. 13-14px body, 12px secondary, 11px muted caption,
+                    16-20px headings (semibold, not bold). Letter-spacing: -0.01em on headings.
+
+                    STATUS INDICATORS: 6px solid circles (not rings, not pulsing dots). Blue = success/active,
+                    amber = in-progress, red = error, gray = queued/inactive. Placed inline before status text.
+
+                    ANIMATIONS: Minimal. 150ms ease-out for hover bg/border transitions. Opacity 0→1 for
+                    new content (150ms). No bounce, no slide, no scale, no glow, no pulse (except loading spinners).
+
+                    TABLES: No zebra striping. Row border-bottom: 1px solid #252525. Header: text #666,
+                    uppercase, 11px, letter-spacing 0.05em. Cell padding: 12px 16px.
+
+                    NAVIGATION: Top nav or sidebar with bg #000, right/bottom border #252525. Active item:
+                    bg #1a1a1a, text #ededed. Inactive: text #666. No colored active indicators.
+
+                    SCROLLBARS: Thin (6px), track transparent, thumb #333, thumb hover #555.
+
+                    OVERALL AESTHETIC: The UI should feel like Vercel's dashboard — pure black, extremely
+                    clean, almost monochrome, with color used ONLY to communicate status or call attention
+                    to a primary action. When in doubt, use gray instead of color.
+                    """;
+            }
+
             return """
                     ═══ FRONTEND GENERATION RULES (NON-NEGOTIABLE) ═══
 
@@ -182,12 +246,12 @@ public class UiStyleResolver {
                     - Density: %s
                     - Layout: %s
                     - Dark mode: %s
-
+                    %s
                     THEME CONFIGURATION:
                     %s
 
                     ═══ END FRONTEND RULES ═══
-                    """.formatted(dsLabel, themeId, density, layout, darkMode, themeJson);
+                    """.formatted(dsLabel, themeId, density, layout, darkMode, geistBlock, themeJson);
         } catch (Exception e) {
             log.warn("Failed to build frontend constraint block: {}", e.getMessage());
             return null;

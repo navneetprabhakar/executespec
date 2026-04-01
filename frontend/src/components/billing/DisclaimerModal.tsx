@@ -12,13 +12,13 @@ export function DisclaimerModal({ isOpen, onAccept, onCancel }: DisclaimerModalP
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-black/50">
-      <div className="bg-white rounded-sm  max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-[var(--gray-200)]">
+      <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
         <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Terms of Use & Disclaimer</h2>
+          <h2 className="text-lg font-semibold text-primary">Terms of Use & Disclaimer</h2>
         </div>
 
-        <div className="p-6 overflow-y-auto text-sm text-gray-700 space-y-3 flex-1">
+        <div className="p-6 overflow-y-auto text-sm text-secondary space-y-3 flex-1">
           <p><strong>1. "As-Is" Provision:</strong> ExecuteSpec products are provided "as-is" and "as-available" with no warranties of any kind.</p>
           <p><strong>2. No Obligation:</strong> ExecuteSpec shall not be obligated to provide uninterrupted service, guaranteed uptime, or any SLA unless explicitly agreed in a separate Enterprise contract.</p>
           <p><strong>3. AI-Generated Output:</strong> All outputs are AI-generated and must be reviewed, validated, and tested before production use. ExecuteSpec assumes no liability for damages arising from generated outputs.</p>
@@ -36,9 +36,9 @@ export function DisclaimerModal({ isOpen, onAccept, onCancel }: DisclaimerModalP
               type="checkbox"
               checked={accepted}
               onChange={(e) => setAccepted(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              className="mt-0.5 h-4 w-4 rounded border-[var(--border-default)] text-accent-blue focus:ring-accent-blue"
             />
-            <span className="text-sm text-gray-700">
+            <span className="text-sm text-secondary">
               I have read and agree to the Terms of Use & Disclaimer
             </span>
           </label>
@@ -46,14 +46,14 @@ export function DisclaimerModal({ isOpen, onAccept, onCancel }: DisclaimerModalP
           <div className="flex gap-3 justify-end">
             <button
               onClick={onCancel}
-              className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-sm hover:bg-gray-200"
+              className="px-4 py-2 text-sm text-secondary bg-[var(--gray-200)] rounded-sm hover:bg-[var(--gray-300)]"
             >
               Cancel
             </button>
             <button
               onClick={onAccept}
               disabled={!accepted}
-              className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 text-sm text-primary bg-accent-blue rounded-sm hover:bg-accent-blue-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Continue to Payment
             </button>

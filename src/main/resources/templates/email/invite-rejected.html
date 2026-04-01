@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head><meta charset="UTF-8"><title>Invite rejected</title></head>
-<body style="font-family:sans-serif;background:#0f1117;color:#e2e8f0;padding:40px">
-  <div style="max-width:480px;margin:0 auto;background:#1a1f2e;border-radius:12px;padding:32px">
-    <h1 style="color:#8b5cf6;margin:0 0 8px">executespec</h1>
+<body style="font-family:'SFMono-Regular',ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;background:#000000;color:#ededed;padding:40px">
+  <div style="max-width:480px;margin:0 auto;background:#111111;border:1px solid #252525;border-radius:6px;padding:32px">
+    <h1 style="color:#ededed;margin:0 0 8px">executespec</h1>
     <h2 style="margin:0 0 24px;font-size:20px">Invitation not approved</h2>
     <p>The invitation you sent to <strong th:text="${invitedEmail}">email@example.com</strong> was reviewed and rejected by the executespec admin team because the email domain is not approved for your org.</p>
-    <p>If you believe this is a mistake, please contact <a href="mailto:admin@executespec.ai" style="color:#8b5cf6">admin@executespec.ai</a>.</p>
-    <hr style="border:1px solid #2d3748;margin:24px 0"/>
-    <p style="color:#64748b;font-size:12px">© 2026 executespec</p>
+    <p>If you believe this is a mistake, please contact <a href="mailto:admin@executespec.ai" style="color:#ededed;text-decoration:underline">admin@executespec.ai</a>.</p>
+    <hr style="border:1px solid #252525;margin:24px 0"/>
+    <p style="color:#a1a1a1;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:underline" href="#">executespec.ai</a></p>
   </div>
 </body>
 </html>

@@ -48,11 +48,11 @@ export default function VibeRunSubmit({ onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-xl mx-4 rounded-sm border border-[var(--mc-border)] bg-[var(--mc-bg-1)] p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--gray-200)]">
+      <div className="w-full max-w-xl mx-4 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-6">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-medium text-[var(--mc-text-primary)]">What do you want to build?</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+          <h2 className="text-lg font-medium text-[var(--text-primary)]">What do you want to build?</h2>
+          <button onClick={onClose} className="text-muted hover:text-secondary transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -61,7 +61,7 @@ export default function VibeRunSubmit({ onClose }: Props) {
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           placeholder="Describe what you want to build..."
-          className="w-full h-36 rounded-sm border border-[var(--mc-border)] bg-[var(--mc-bg-0)] text-[var(--mc-text-primary)] placeholder:text-[var(--mc-text-muted)] p-4 text-sm resize-none focus:outline-none focus:border-accent-violet"
+          className="w-full h-36 rounded-sm border border-[var(--border-default)] bg-[var(--geist-bg)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] p-4 text-sm resize-none focus:outline-none focus:border-accent-blue"
           autoFocus
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit();
@@ -80,13 +80,13 @@ export default function VibeRunSubmit({ onClose }: Props) {
         )}
 
         <div className="flex items-center justify-between mt-4">
-          <span className="hidden lg:inline text-xs text-[var(--mc-text-muted)]">
+          <span className="hidden lg:inline text-xs text-[var(--text-muted)]">
             Cmd+Enter to submit
           </span>
           <button
             onClick={handleSubmit}
             disabled={!goal.trim() || submitting}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Sparkles className="h-4 w-4" />
             {submitting ? 'Starting...' : 'Build It'}

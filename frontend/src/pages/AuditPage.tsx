@@ -60,13 +60,13 @@ function humanLabel(eventType: string): string {
 
 function entityBadgeColor(entityType: string): string {
   switch (entityType) {
-    case 'USER': return 'bg-accent-violet/20 text-accent-violet';
-    case 'ORG': return 'bg-accent-cyan/20 text-accent-cyan';
+    case 'USER': return 'bg-accent-blue/20 text-accent-blue';
+    case 'ORG': return 'bg-[var(--gray-500)]/20 text-secondary';
     case 'ORG_MEMBER': return 'bg-accent-amber/20 text-accent-amber';
-    case 'INVITATION': return 'bg-blue-500/20 text-blue-400';
-    case 'PROJECT': return 'bg-accent-emerald/20 text-accent-emerald';
-    case 'BILLING': return 'bg-green-500/20 text-green-400';
-    default: return 'bg-zinc-500/20 text-zinc-400';
+    case 'INVITATION': return 'bg-blue-500/20 text-accent-blue';
+    case 'PROJECT': return 'bg-accent-green/20 text-accent-green';
+    case 'BILLING': return 'bg-[var(--status-success)]/20 text-[var(--status-success)]';
+    default: return 'bg-[var(--gray-200)] text-secondary';
   }
 }
 
@@ -162,11 +162,11 @@ export default function AuditPage() {
     <div className="h-full overflow-y-auto p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-zinc-100">Audit Trail</h2>
+        <h2 className="text-lg font-semibold text-primary">Audit Trail</h2>
         <button
           onClick={fetchLogs}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-white/[0.06] text-zinc-300 text-xs font-medium hover:bg-white/[0.1] transition-colors disabled:opacity-40"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors disabled:opacity-40"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh
@@ -174,32 +174,32 @@ export default function AuditPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-sm bg-surface-1 border border-white/[0.06] p-3">
-        <Filter className="h-4 w-4 text-zinc-500 mt-5" />
+      <div className="flex flex-wrap items-end gap-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-3">
+        <Filter className="h-4 w-4 text-muted mt-5" />
 
         {/* Date range */}
         <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">From</label>
+          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">From</label>
           <input
             type="datetime-local"
             value={toDatetimeLocal(fromDate)}
             onChange={(e) => { setFromDate(fromDatetimeLocal(e.target.value)); setPage(0); }}
-            className="block w-48 px-2 py-1.5 rounded-md bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-accent-violet"
+            className="block w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
           />
         </div>
         <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">To</label>
+          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">To</label>
           <input
             type="datetime-local"
             value={toDatetimeLocal(toDate)}
             onChange={(e) => { setToDate(fromDatetimeLocal(e.target.value)); setPage(0); }}
-            className="block w-48 px-2 py-1.5 rounded-md bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-accent-violet"
+            className="block w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
           />
         </div>
 
         {/* Entity type chips */}
         <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Entity</label>
+          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Entity</label>
           <div className="flex gap-1">
             {ENTITY_TYPES.map((t) => (
               <button
@@ -208,8 +208,8 @@ export default function AuditPage() {
                 className={cn(
                   'px-2.5 py-1 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
                   entityFilter === t
-                    ? 'bg-accent-violet text-white'
-                    : 'text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.06]'
+                    ? 'bg-accent-blue text-primary'
+                    : 'text-muted hover:text-secondary bg-[var(--gray-200)] hover:bg-[var(--gray-200)]'
                 )}
               >
                 {t === 'ALL' ? 'All' : t.replace(/_/g, ' ')}
@@ -220,11 +220,11 @@ export default function AuditPage() {
 
         {/* Event type search */}
         <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Event Type</label>
+          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Event Type</label>
           <select
             value={eventFilter}
             onChange={(e) => { setEventFilter(e.target.value); setPage(0); }}
-            className="block w-56 px-2 py-1.5 rounded-md bg-white/[0.04] border border-white/[0.08] text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-accent-violet"
+            className="block w-56 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
           >
             <option value="">All Events</option>
             {Object.entries(EVENT_TYPE_LABELS).map(([key, label]) => (
@@ -236,37 +236,37 @@ export default function AuditPage() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-sm bg-accent-rose/10 border border-accent-rose/20 px-4 py-2 text-sm text-accent-rose">
+        <div className="rounded-sm bg-accent-red/10 border border-accent-red/20 px-4 py-2 text-sm text-accent-red">
           {error}
         </div>
       )}
 
       {/* Results table */}
-      <div className="rounded-sm bg-surface-1 border border-white/[0.06] overflow-hidden">
+      <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-white/[0.06] text-left">
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">Time</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">Event</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">Entity</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">Actor</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">Changes</th>
+              <tr className="border-b border-[var(--border-default)] text-left">
+                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Time</th>
+                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Event</th>
+                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Entity</th>
+                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Actor</th>
+                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Changes</th>
               </tr>
             </thead>
             <tbody>
               {loading && entries.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-zinc-500">Loading...</td></tr>
+                <tr><td colSpan={5} className="px-4 py-12 text-center text-muted">Loading...</td></tr>
               ) : entries.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-zinc-500">No audit events found</td></tr>
+                <tr><td colSpan={5} className="px-4 py-12 text-center text-muted">No audit events found</td></tr>
               ) : (
                 entries.map((entry) => (
-                  <tr key={entry.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
-                    <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap text-xs">
+                  <tr key={entry.id} className="border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors">
+                    <td className="px-4 py-2.5 text-secondary whitespace-nowrap text-xs">
                       {formatTime(entry.createdAt)}
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className="text-zinc-200 text-xs font-medium">{humanLabel(entry.eventType)}</span>
+                      <span className="text-primary text-xs font-medium">{humanLabel(entry.eventType)}</span>
                     </td>
                     <td className="px-4 py-2.5">
                       <span className={cn(
@@ -275,25 +275,25 @@ export default function AuditPage() {
                       )}>
                         {entry.entityType}
                       </span>
-                      <span className="ml-1.5 text-xs text-zinc-500 font-mono" title={entry.entityId}>
+                      <span className="ml-1.5 text-xs text-muted font-mono" title={entry.entityId}>
                         {entry.entityId.length > 12 ? entry.entityId.slice(0, 8) + '...' : entry.entityId}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-zinc-300 whitespace-nowrap">
+                    <td className="px-4 py-2.5 text-xs text-secondary whitespace-nowrap">
                       {entry.actorEmail ?? (entry.actorId ? entry.actorId.slice(0, 8) + '...' : 'SYSTEM')}
                     </td>
                     <td className="px-4 py-2.5 text-xs max-w-xs">
                       {entry.oldValue && entry.newValue ? (
                         <div className="space-y-0.5">
-                          <div className="text-zinc-500 line-through">{renderJsonValue(entry.oldValue)}</div>
-                          <div className="text-accent-emerald">{renderJsonValue(entry.newValue)}</div>
+                          <div className="text-muted line-through">{renderJsonValue(entry.oldValue)}</div>
+                          <div className="text-accent-green">{renderJsonValue(entry.newValue)}</div>
                         </div>
                       ) : entry.newValue ? (
-                        <span className="text-accent-emerald">{renderJsonValue(entry.newValue)}</span>
+                        <span className="text-accent-green">{renderJsonValue(entry.newValue)}</span>
                       ) : entry.oldValue ? (
-                        <span className="text-accent-rose line-through">{renderJsonValue(entry.oldValue)}</span>
+                        <span className="text-accent-red line-through">{renderJsonValue(entry.oldValue)}</span>
                       ) : (
-                        <span className="text-zinc-600">-</span>
+                        <span className="text-muted">-</span>
                       )}
                     </td>
                   </tr>
@@ -305,24 +305,24 @@ export default function AuditPage() {
 
         {/* Pagination */}
         {data && data.totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/[0.06]">
-            <span className="text-xs text-zinc-500">
+          <div className="flex items-center justify-between px-4 py-2.5 border-t border-[var(--border-default)]">
+            <span className="text-xs text-muted">
               Page {data.number + 1} of {data.totalPages} ({data.totalElements} total)
             </span>
             <div className="flex gap-1">
               <button
                 onClick={() => setPage(Math.max(0, page - 1))}
                 disabled={page === 0}
-                className="p-1.5 rounded bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-1.5 rounded bg-[var(--gray-200)] hover:bg-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <ChevronLeft className="h-4 w-4 text-zinc-400" />
+                <ChevronLeft className="h-4 w-4 text-secondary" />
               </button>
               <button
                 onClick={() => setPage(Math.min(data.totalPages - 1, page + 1))}
                 disabled={page >= data.totalPages - 1}
-                className="p-1.5 rounded bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-1.5 rounded bg-[var(--gray-200)] hover:bg-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <ChevronRight className="h-4 w-4 text-zinc-400" />
+                <ChevronRight className="h-4 w-4 text-secondary" />
               </button>
             </div>
           </div>

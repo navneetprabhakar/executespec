@@ -8,9 +8,8 @@ export default function GlassPanel({ children, className, ...props }: GlassPanel
   return (
     <div
       className={cn(
-        'border rounded-sm',
-        'bg-[var(--mc-bg-1)] border-[var(--mc-border)]',
-        'shadow-mc-inset',
+        'border rounded-md',
+        'bg-[var(--gray-100)] border-[var(--border-default)]',
         className
       )}
       {...props}

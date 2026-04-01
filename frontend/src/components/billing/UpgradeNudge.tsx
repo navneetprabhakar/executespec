@@ -20,21 +20,21 @@ export function UpgradeNudge({ isOpen, onClose, currentTier, metric, current, ma
   const nextLimit = currentTier === 'FREE' ? 50 : 500;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-black/50">
-      <div className="bg-white rounded-sm  max-w-md w-full mx-4 p-8 text-center overflow-y-auto" style={{ maxHeight: '95dvh' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-[var(--gray-200)]">
+      <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md max-w-md w-full mx-4 p-8 text-center overflow-y-auto" style={{ maxHeight: '95dvh' }}>
         <div className="text-4xl mb-4">{'\u{1F680}'}</div>
-        <h2 className="text-xl font-bold text-gray-900">
+        <h2 className="text-xl font-bold text-primary">
           You've used all your {metricLabel}
         </h2>
-        <p className="mt-2 text-gray-600">
+        <p className="mt-2 text-secondary">
           {current}/{max} {metricLabel} used this month.
         </p>
 
-        <div className="mt-6 p-4 bg-indigo-50 rounded-sm">
-          <p className="text-sm font-semibold text-indigo-900">
+        <div className="mt-6 p-4 bg-[var(--gray-100)] rounded-sm">
+          <p className="text-sm font-semibold text-primary">
             Upgrade to {nextTier} for {nextLimit} {metricLabel}/month
           </p>
-          <p className="text-2xl font-bold text-indigo-700 mt-1">
+          <p className="text-2xl font-bold text-accent-blue mt-1">
             {nextPrice}<span className="text-sm font-normal">/mo</span>
           </p>
         </div>
@@ -42,13 +42,13 @@ export function UpgradeNudge({ isOpen, onClose, currentTier, metric, current, ma
         <div className="mt-6 flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2.5 text-sm text-gray-700 bg-gray-100 rounded-sm hover:bg-gray-200"
+            className="flex-1 px-4 py-2.5 text-sm text-secondary bg-[var(--gray-200)] rounded-sm hover:bg-[var(--gray-300)]"
           >
             Not now
           </button>
           <button
             onClick={() => navigate('/plans')}
-            className="flex-1 px-4 py-2.5 text-sm text-white bg-indigo-600 rounded-sm hover:bg-indigo-700 font-semibold"
+            className="flex-1 px-4 py-2.5 text-sm text-primary bg-accent-blue rounded-sm hover:bg-accent-blue-hover font-semibold"
           >
             Upgrade Now
           </button>

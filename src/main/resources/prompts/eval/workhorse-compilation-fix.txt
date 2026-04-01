@@ -1,0 +1,153 @@
+Fix ALL compilation and runtime bugs in the following Spring Boot service. The code has 7 bugs — some are compilation errors, some are subtle runtime bugs that will cause data corruption or exceptions under concurrent load.
+
+```java
+package com.example.billing;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+@Entity
+@Data
+class Invoice {
+    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+    private String customerId;
+    private BigDecimal totalAmount;
+    private BigDecimal paidAmount = BigDecimal.ZERO;
+    @Enumerated(EnumType.STRING)
+    private InvoiceStatus status = InvoiceStatus.PENDING;
+    private LocalDateTime createdAt;
+    private LocalDateTime paidAt;
+
+    enum InvoiceStatus { PENDING, PARTIALLY_PAID, PAID, OVERDUE, CANCELLED }
+}
+
+interface InvoiceRepository extends JpaRepository<Invoice, String> {
+    List<Invoice> findByCustomerId(String customerId);
+
+    @Query("SELECT i FROM Invoice i WHERE i.status = :status AND i.createdAt < :before")
+    List<Invoice> findOverdueInvoices(Invoice.InvoiceStatus status, LocalDateTime before);
+}
+
+@Service
+class BillingService {
+
+    private final InvoiceRepository invoiceRepository;
+    private final Map<String, BigDecimal> customerBalanceCache = new HashMap<>();
+
+    public BillingService(InvoiceRepository invoiceRepository) {
+        this.invoiceRepository = invoiceRepository;
+    }
+
+    @Transactional
+    public Invoice createInvoice(String customerId, List<LineItem> lineItems) {
+        Invoice invoice = new Invoice();
+        invoice.setCustomerId(customerId);
+        invoice.setCreatedAt(LocalDateTime.now());
+
+        BigDecimal total = lineItems.stream()
+                .map(li -> li.unitPrice.multiply(BigDecimal.valueOf(li.quantity)))
+                .reduce(BigDecimal::add)
+                .get();
+
+        invoice.setTotalAmount(total);
+        return invoiceRepository.save(invoice);
+    }
+
+    @Transactional
+    public Invoice applyPayment(String invoiceId, BigDecimal amount) {
+        Invoice invoice = invoiceRepository.findById(invoiceId).orElseThrow();
+
+        if (invoice.getStatus() == Invoice.InvoiceStatus.CANCELLED) {
+            throw new IllegalStateException("Cannot pay cancelled invoice");
+        }
+
+        BigDecimal newPaid = invoice.getPaidAmount().add(amount);
+        invoice.setPaidAmount(newPaid);
+
+        if (newPaid.compareTo(invoice.getTotalAmount()) >= 0) {
+            invoice.setStatus(Invoice.InvoiceStatus.PAID);
+            invoice.setPaidAt(LocalDateTime.now());
+        } else if (newPaid.compareTo(BigDecimal.ZERO) > 0) {
+            invoice.setStatus(Invoice.InvoiceStatus.PARTIALLY_PAID);
+        }
+
+        // Update balance cache
+        BigDecimal remaining = invoice.getTotalAmount().subtract(newPaid);
+        customerBalanceCache.put(invoice.getCustomerId(), remaining);
+
+        return invoiceRepository.save(invoice);
+    }
+
+    public BigDecimal getCustomerBalance(String customerId) {
+        if (customerBalanceCache.containsKey(customerId)) {
+            return customerBalanceCache.get(customerId);
+        }
+
+        List<Invoice> invoices = invoiceRepository.findByCustomerId(customerId);
+        BigDecimal balance = invoices.stream()
+                .filter(i -> i.getStatus() != Invoice.InvoiceStatus.CANCELLED)
+                .map(i -> i.getTotalAmount().subtract(i.getPaidAmount()))
+                .reduce(BigDecimal::add)
+                .get();
+
+        customerBalanceCache.put(customerId, balance);
+        return balance;
+    }
+
+    @Transactional
+    public void markOverdueInvoices() {
+        LocalDateTime thirtyDaysAgo = LocalDateTime.now().minusDays(30);
+        List<Invoice> overdue = invoiceRepository.findOverdueInvoices(
+                Invoice.InvoiceStatus.PENDING, thirtyDaysAgo);
+
+        overdue.forEach(invoice -> {
+            invoice.setStatus(Invoice.InvoiceStatus.OVERDUE);
+        });
+        invoiceRepository.saveAll(overdue);
+    }
+
+    public Map<String, Object> generateReport(String customerId) {
+        List<Invoice> invoices = invoiceRepository.findByCustomerId(customerId);
+
+        Map<Invoice.InvoiceStatus, Long> statusCounts = invoices.stream()
+                .collect(Collectors.groupingBy(Invoice::getStatus, Collectors.counting()));
+
+        double avgPaymentTime = invoices.stream()
+                .filter(i -> i.getPaidAt() != null)
+                .mapToLong(i -> java.time.Duration.between(i.getCreatedAt(), i.getPaidAt()).toDays())
+                .average()
+                .getAsDouble();
+
+        Map<String, Object> report = new HashMap<>();
+        report.put("total_invoices", invoices.size());
+        report.put("status_breakdown", statusCounts);
+        report.put("avg_payment_days", avgPaymentTime);
+        report.put("outstanding_balance", getCustomerBalance(customerId));
+        return report;
+    }
+
+    record LineItem(String description, BigDecimal unitPrice, int quantity) {}
+}
+```
+
+Find and fix ALL 7 bugs:
+1. A NoSuchElementException waiting to happen (2 places)
+2. A thread-safety bug that causes incorrect balances under concurrent access
+3. An overpayment bug (what if payment exceeds invoice total?)
+4. A balance cache that serves stale data after multi-invoice payments
+5. A crash when no invoices have been paid yet (in generateReport)
+6. A missing @Param annotation on the JPQL query
+7. An incorrect balance cache update (caches per-invoice remaining, not total customer balance)
+
+Output ONLY the complete corrected Java source code. No explanations.

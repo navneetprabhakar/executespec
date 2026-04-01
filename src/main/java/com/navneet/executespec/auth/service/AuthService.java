@@ -2,6 +2,7 @@ package com.navneet.executespec.auth.service;
 
 import com.navneet.executespec.auth.dto.*;
 import com.navneet.executespec.auth.entity.*;
+import com.navneet.executespec.auth.oauth.OAuthEmailConflictException;
 import com.navneet.executespec.auth.repository.*;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
@@ -312,6 +313,88 @@ public class AuthService {
             // Non-fatal: tier enforcement still works via TierEnforcementService
             log.warn("Failed to create FREE billing subscription for user {}: {}", userId, e.getMessage());
         }
+    }
+
+    // ── OAuth ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Find or create a user from an OAuth2 login.
+     * <ul>
+     *   <li>If a user with matching provider+oauthId exists → return it (update last login).</li>
+     *   <li>If a user with the same email exists but different provider → throw conflict.</li>
+     *   <li>If a user with the same email exists with no provider → link the OAuth identity.</li>
+     *   <li>Otherwise → create a new user (no password, ACTIVE, email verified).</li>
+     * </ul>
+     */
+    @Transactional
+    public AppUser findOrCreateFromOAuth(String provider, String oauthId, String email,
+                                         String name, String avatarUrl) {
+        // 1. Exact OAuth match
+        var existing = userRepo.findByOauthProviderAndOauthId(provider, oauthId);
+        if (existing.isPresent()) {
+            AppUser user = existing.get();
+            user.setLastLoginAt(Instant.now());
+            user.setUpdatedAt(Instant.now());
+            if (avatarUrl != null) user.setAvatarUrl(avatarUrl);
+            return userRepo.save(user);
+        }
+
+        // 2. Check by email
+        var byEmail = userRepo.findByEmail(email.toLowerCase());
+        if (byEmail.isPresent()) {
+            AppUser user = byEmail.get();
+            if (user.getOauthProvider() != null && !user.getOauthProvider().equals(provider)) {
+                // Different OAuth provider already linked
+                throw new OAuthEmailConflictException(
+                        "Email " + email + " is already linked to " + user.getOauthProvider() + " login");
+            }
+            // No OAuth provider yet (email/password user) → link this OAuth identity
+            user.setOauthProvider(provider);
+            user.setOauthId(oauthId);
+            if (avatarUrl != null) user.setAvatarUrl(avatarUrl);
+            user.setEmailVerified(true);
+            user.setStatus("ACTIVE");
+            user.setLastLoginAt(Instant.now());
+            user.setUpdatedAt(Instant.now());
+            userRepo.save(user);
+
+            log.info("Linked OAuth {} to existing user {}", provider, user.getEmail());
+            return user;
+        }
+
+        // 3. New user
+        String firstName = name != null ? name.split(" ")[0] : email.split("@")[0];
+        String lastName = (name != null && name.contains(" "))
+                ? name.substring(name.indexOf(' ') + 1) : null;
+
+        AppUser user = AppUser.builder()
+                .id(UUID.randomUUID().toString())
+                .email(email.toLowerCase())
+                .firstName(firstName)
+                .lastName(lastName)
+                .passwordHash(null)
+                .oauthProvider(provider)
+                .oauthId(oauthId)
+                .avatarUrl(avatarUrl)
+                .globalRole("USER")
+                .tier("FREE")
+                .status("ACTIVE")
+                .emailVerified(true)
+                .lastLoginAt(Instant.now())
+                .build();
+        userRepo.save(user);
+
+        // Auto-create FREE billing subscription
+        createFreeSubscription(user.getId());
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_REGISTERED_OAUTH")
+                .entityType("USER").entityId(user.getId())
+                .newValue("{\"email\":\"" + user.getEmail() + "\",\"provider\":\"" + provider + "\",\"tier\":\"FREE\"}")
+                .build());
+
+        log.info("Created new OAuth user: email={}, provider={}", email, provider);
+        return user;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

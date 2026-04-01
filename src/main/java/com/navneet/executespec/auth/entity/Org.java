@@ -1,5 +1,6 @@
 package com.navneet.executespec.auth.entity;
 
+import com.navneet.executespec.crypto.EncryptedValueConverter;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -64,12 +65,15 @@ public class Org {
     // Resolution order: user key → org key → system key (application.yml).
     // Raw values are NEVER returned to the client — only boolean flags.
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "anthropic_api_key")
     private String anthropicApiKey;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "openai_api_key")
     private String openAiApiKey;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "gemini_api_key")
     private String geminiApiKey;
 
@@ -109,6 +113,16 @@ public class Org {
     @Column(name = "admin_email")
     private String adminEmail;
 
+    // ── Payment gateway ──────────────────────────────────────────────────────
+
+    @Column(name = "stripe_customer_id")
+    private String stripeCustomerId;
+
+    /** Preferred payment gateway: "razorpay" or "stripe". */
+    @Column(name = "payment_gateway", length = 20)
+    @Builder.Default
+    private String paymentGateway = "razorpay";
+
     // ── Org-level JIRA credentials ───────────────────────────────────────────
     // Managed by ORG_ADMIN via the Integrations page.
     // Raw tokens are NEVER returned to the client — only boolean flags.
@@ -119,6 +133,7 @@ public class Org {
     @Column(name = "jira_email")
     private String jiraEmail;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "jira_api_token")
     private String jiraApiToken;
 
@@ -130,6 +145,7 @@ public class Org {
     @Column(name = "confluence_email")
     private String confluenceEmail;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "confluence_api_token")
     private String confluenceApiToken;
 

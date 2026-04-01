@@ -230,23 +230,23 @@ export default function PreviewTab({ runId }: { runId: string }) {
   return (
     <div className="flex flex-col h-full">
       {/* ── Control bar ── */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs px-2 py-0.5 rounded bg-white/[0.06] text-zinc-400 font-mono">
+            <span className="text-xs px-2 py-0.5 rounded bg-[var(--gray-200)] text-secondary font-mono">
               {TYPE_LABELS[projectType] ?? projectType}
             </span>
             {dbInfo && (
-              <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan">
+              <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-[var(--gray-500)]/10 text-secondary">
                 <Database className="h-3 w-3" />
                 {dbInfo.label}
               </span>
             )}
             {isRunning && (
-              <span className="flex items-center gap-1.5 text-xs text-accent-emerald">
+              <span className="flex items-center gap-1.5 text-xs text-accent-green">
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-emerald" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-green" />
                 </span>
                 Running
               </span>
@@ -254,7 +254,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
             {isRunning && countdown > 0 && (
               <span className={cn(
                 'flex items-center gap-1 text-xs font-mono',
-                countdownWarning ? 'text-accent-amber' : 'text-zinc-500'
+                countdownWarning ? 'text-accent-amber' : 'text-muted'
               )}>
                 <Clock className="h-3 w-3" />
                 {formatCountdown(countdown)}
@@ -267,16 +267,16 @@ export default function PreviewTab({ runId }: { runId: string }) {
               </span>
             )}
             {isFailed && (
-              <span className="text-xs text-accent-rose">Failed</span>
+              <span className="text-xs text-accent-red">Failed</span>
             )}
             {isTimedOut && (
-              <span className="flex items-center gap-1 text-xs text-accent-rose">
+              <span className="flex items-center gap-1 text-xs text-accent-red">
                 <AlertTriangle className="h-3 w-3" />
                 Timed Out
               </span>
             )}
             {previewCountInfo && (
-              <span className="text-[10px] text-zinc-600">{previewCountInfo}</span>
+              <span className="text-[10px] text-muted">{previewCountInfo}</span>
             )}
           </div>
           {isRunning && status?.url && (
@@ -284,16 +284,16 @@ export default function PreviewTab({ runId }: { runId: string }) {
               href={status.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-accent-emerald hover:underline mt-0.5"
+              className="flex items-center gap-1 text-xs text-accent-green hover:underline mt-0.5"
             >
               <ExternalLink className="h-3 w-3" />
               {status.url}
             </a>
           )}
           {isRunning && status?.backendUrl && status?.frontendUrl && (
-            <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-500">
-              <span>Backend: <span className="text-zinc-300">{status.backendUrl}</span></span>
-              <span>Frontend: <span className="text-zinc-300">{status.frontendUrl}</span></span>
+            <div className="flex items-center gap-3 mt-0.5 text-xs text-muted">
+              <span>Backend: <span className="text-secondary">{status.backendUrl}</span></span>
+              <span>Frontend: <span className="text-secondary">{status.frontendUrl}</span></span>
             </div>
           )}
         </div>
@@ -302,7 +302,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
           {!isStartingPhase && (
             <button
               onClick={handleRefresh}
-              className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04] transition-colors"
+              className="p-1.5 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
               title="Refresh status"
             >
               <RefreshCw className="h-3.5 w-3.5" />
@@ -314,11 +314,11 @@ export default function PreviewTab({ runId }: { runId: string }) {
               disabled={loading || analyzing}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
-                'bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25 disabled:opacity-40'
+                'bg-accent-green/15 text-accent-green hover:bg-accent-green/25 disabled:opacity-40'
               )}
             >
               {(loading || analyzing)
-                ? <span className="h-3 w-3 rounded-full border-2 border-accent-emerald/30 border-t-accent-emerald animate-spin" />
+                ? <span className="h-3 w-3 rounded-full border-2 border-accent-green/30 border-t-accent-green animate-spin" />
                 : <Play className="h-3 w-3" />}
               {analyzing ? 'Analyzing...' : isFailed || isTimedOut ? 'Retry' : 'Start Preview'}
             </button>
@@ -329,7 +329,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
               disabled={loading}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
-                'bg-accent-rose/15 text-accent-rose hover:bg-accent-rose/25 disabled:opacity-40'
+                'bg-accent-red/15 text-accent-red hover:bg-accent-red/25 disabled:opacity-40'
               )}
             >
               <Square className="h-3 w-3" />
@@ -356,13 +356,13 @@ export default function PreviewTab({ runId }: { runId: string }) {
           <div className="flex-1 flex items-center justify-center h-full">
             <div className="text-center space-y-2">
               <span className="inline-block h-6 w-6 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin" />
-              <p className="text-sm text-zinc-400">{STATUS_MESSAGES[status!.status] ?? 'Starting...'}</p>
+              <p className="text-sm text-secondary">{STATUS_MESSAGES[status!.status] ?? 'Starting...'}</p>
               {dbInfo && (
-                <p className="text-xs text-accent-cyan">
+                <p className="text-xs text-secondary">
                   {dbInfo.emoji} {dbInfo.label} database auto-configured
                 </p>
               )}
-              <p className="text-xs text-zinc-600">This preview will automatically shut down in 10 minutes</p>
+              <p className="text-xs text-muted">This preview will automatically shut down in 10 minutes</p>
             </div>
           </div>
         ) : (isFailed || isTimedOut) ? (
@@ -371,25 +371,25 @@ export default function PreviewTab({ runId }: { runId: string }) {
               'p-3 rounded-sm border',
               isTimedOut
                 ? 'bg-accent-amber/10 border-accent-amber/20'
-                : 'bg-accent-rose/10 border-accent-rose/20'
+                : 'bg-accent-red/10 border-accent-red/20'
             )}>
               <p className={cn(
                 'text-sm font-medium',
-                isTimedOut ? 'text-accent-amber' : 'text-accent-rose'
+                isTimedOut ? 'text-accent-amber' : 'text-accent-red'
               )}>
                 {isTimedOut ? 'Preview startup timed out (10 minutes)' : 'Preview failed to start'}
               </p>
               <p className={cn(
                 'text-xs mt-1 break-all whitespace-pre-wrap',
-                isTimedOut ? 'text-accent-amber/80' : 'text-accent-rose/80'
+                isTimedOut ? 'text-accent-amber/80' : 'text-accent-red/80'
               )}>
                 {status?.errorMessage ?? 'Unknown error'}
               </p>
             </div>
             {logs.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs text-zinc-500 font-medium">Process output ({logs.length} lines):</p>
-                <pre className="p-3 rounded-sm bg-black/30 text-[11px] font-mono text-zinc-400 whitespace-pre-wrap break-all max-h-64 overflow-y-auto leading-relaxed">
+                <p className="text-xs text-muted font-medium">Process output ({logs.length} lines):</p>
+                <pre className="p-3 rounded-sm bg-[var(--gray-200)] text-[11px] font-mono text-secondary whitespace-pre-wrap break-all max-h-64 overflow-y-auto leading-relaxed">
                   {logs.join('\n')}
                 </pre>
               </div>
@@ -398,14 +398,14 @@ export default function PreviewTab({ runId }: { runId: string }) {
         ) : (
           <div className="flex-1 flex items-center justify-center h-full">
             <div className="text-center space-y-2 px-8">
-              <p className="text-sm text-zinc-400">Preview not started</p>
-              <p className="text-xs text-zinc-600 max-w-sm">
-                Click <strong className="text-zinc-400">Start Preview</strong> to launch
+              <p className="text-sm text-secondary">Preview not started</p>
+              <p className="text-xs text-muted max-w-sm">
+                Click <strong className="text-secondary">Start Preview</strong> to launch
                 the {TYPE_LABELS[projectType]?.toLowerCase() ?? 'application'} dev server.
                 {' '}Database and dependencies will be auto-detected.
               </p>
               {projectType === 'UNKNOWN' && (
-                <p className="text-xs text-zinc-700">
+                <p className="text-xs text-[var(--text-muted)]">
                   No recognised project files found. Preview may not be available for this run.
                 </p>
               )}
@@ -416,10 +416,10 @@ export default function PreviewTab({ runId }: { runId: string }) {
 
       {/* ── Log panel (collapsible) ── */}
       {hasLogs && (
-        <div className="border-t border-white/[0.06] flex-shrink-0">
+        <div className="border-t border-[var(--border-default)] flex-shrink-0">
           <button
             onClick={() => setLogsExpanded(!logsExpanded)}
-            className="w-full flex items-center justify-between px-4 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.02] transition-colors"
+            className="w-full flex items-center justify-between px-4 py-2 text-xs text-muted hover:text-secondary hover:bg-[var(--gray-100)] transition-colors"
           >
             <span className="flex items-center gap-1.5">
               <Terminal className="h-3 w-3" />
@@ -432,7 +432,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
               {/* Filter bar */}
               {showLogFilter && (
                 <div className="flex items-center gap-1.5 px-4 pb-2">
-                  <Filter className="h-3 w-3 text-zinc-600" />
+                  <Filter className="h-3 w-3 text-muted" />
                   {(['all', ...(isFullStack ? ['backend', 'frontend'] as const : []), ...(hasDatabase ? ['db'] as const : [])] as const).map(f => (
                     <button
                       key={f}
@@ -440,8 +440,8 @@ export default function PreviewTab({ runId }: { runId: string }) {
                       className={cn(
                         'px-2 py-0.5 rounded text-[10px] font-medium transition-colors',
                         logFilter === f
-                          ? 'bg-accent-cyan/15 text-accent-cyan'
-                          : 'bg-white/[0.04] text-zinc-500 hover:text-zinc-300'
+                          ? 'bg-[var(--gray-500)]/15 text-secondary'
+                          : 'bg-[var(--gray-200)] text-muted hover:text-secondary'
                       )}
                     >
                       {f === 'all' ? 'All' : f === 'backend' ? 'Backend' : f === 'frontend' ? 'Frontend' : 'Database'}
@@ -450,7 +450,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                 </div>
               )}
               <div className="max-h-48 overflow-y-auto px-4 pb-3">
-                <pre className="text-[11px] font-mono text-zinc-500 whitespace-pre-wrap break-all leading-relaxed">
+                <pre className="text-[11px] font-mono text-muted whitespace-pre-wrap break-all leading-relaxed">
                   {logs.length > 0 ? logs.join('\n') : 'No output yet...'}
                 </pre>
                 <div ref={logEndRef} />
@@ -497,12 +497,12 @@ function EnvConfigDialog({
   const secretVars = analysis.requiredEnvVars.filter(v => v.category === 'SECRET');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-white/[0.08] rounded-sm  w-full max-w-lg max-h-[80vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--gray-200)] backdrop-blur-sm">
+      <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm  w-full max-w-lg max-h-[80vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-          <h3 className="text-sm font-semibold text-zinc-100">Third-Party API Keys</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-white/[0.06] text-zinc-500 hover:text-zinc-300">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-default)]">
+          <h3 className="text-sm font-semibold text-primary">Third-Party API Keys</h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-[var(--gray-200)] text-muted hover:text-secondary">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -520,9 +520,9 @@ function EnvConfigDialog({
 
           {/* Database info */}
           {dbInfo && (
-            <div className="flex items-center gap-2 p-3 rounded-sm bg-accent-cyan/5 border border-accent-cyan/10">
-              <Database className="h-4 w-4 text-accent-cyan" />
-              <p className="text-xs text-accent-cyan">
+            <div className="flex items-center gap-2 p-3 rounded-sm bg-[var(--gray-500)]/5 border border-accent-blue/10">
+              <Database className="h-4 w-4 text-secondary" />
+              <p className="text-xs text-secondary">
                 {dbInfo.emoji} <strong>{dbInfo.label}</strong> database will be auto-configured
                 (fresh instance, no data persistence)
               </p>
@@ -533,16 +533,16 @@ function EnvConfigDialog({
           {secretVars.length > 0 && (
             <div className="space-y-2">
               <div>
-                <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">External API Keys</p>
-                <p className="text-[10px] text-zinc-600 mt-0.5">
+                <p className="text-xs font-medium text-secondary uppercase tracking-wide">External API Keys</p>
+                <p className="text-[10px] text-muted mt-0.5">
                   Internal config (URLs, CORS, ports) is auto-configured. Only third-party keys are needed.
                 </p>
               </div>
               {secretVars.map(v => (
                 <div key={v.name} className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-mono text-zinc-300">{v.name}</label>
-                    <span className="text-[10px] text-zinc-600">from {v.source}</span>
+                    <label className="text-xs font-mono text-secondary">{v.name}</label>
+                    <span className="text-[10px] text-muted">from {v.source}</span>
                   </div>
                   <div className="relative">
                     <input
@@ -550,12 +550,12 @@ function EnvConfigDialog({
                       value={values[v.name] ?? ''}
                       onChange={e => setValues(prev => ({ ...prev, [v.name]: e.target.value }))}
                       placeholder="Enter value (optional)..."
-                      className="w-full px-3 py-2 pr-9 text-xs font-mono bg-black/30 border border-white/[0.08] rounded-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-accent-cyan/40"
+                      className="w-full px-3 py-2 pr-9 text-xs font-mono bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm text-primary placeholder-[var(--text-muted)] focus:outline-none focus:border-accent-blue/40"
                     />
                     <button
                       type="button"
                       onClick={() => setShowSecrets(prev => ({ ...prev, [v.name]: !prev[v.name] }))}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-zinc-600 hover:text-zinc-400"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted hover:text-secondary"
                     >
                       {showSecrets[v.name] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </button>
@@ -566,17 +566,17 @@ function EnvConfigDialog({
           )}
 
           {secretVars.length === 0 && dbInfo && (
-            <p className="text-xs text-zinc-500 text-center py-4">
+            <p className="text-xs text-muted text-center py-4">
               No additional configuration needed. Click Start Preview below.
             </p>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/[0.06]">
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border-default)]">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+            className="px-3 py-1.5 text-xs text-secondary hover:text-primary transition-colors"
           >
             Cancel
           </button>
@@ -588,7 +588,7 @@ function EnvConfigDialog({
               );
               onStart(nonEmpty);
             }}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-sm text-xs font-medium bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25 transition-all"
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-sm text-xs font-medium bg-accent-green/15 text-accent-green hover:bg-accent-green/25 transition-all"
           >
             <Play className="h-3 w-3" />
             Start Preview
@@ -725,18 +725,18 @@ function BackendPreview({
       <div className="text-center space-y-3 px-8">
         <div className="flex items-center justify-center gap-2">
           <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent-emerald" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent-green" />
           </span>
-          <span className="text-sm font-medium text-accent-emerald">Service running</span>
+          <span className="text-sm font-medium text-accent-green">Service running</span>
         </div>
-        <p className="text-xs text-zinc-500">
-          Backend API is live at <code className="font-mono text-zinc-300">{url}</code>
+        <p className="text-xs text-muted">
+          Backend API is live at <code className="font-mono text-secondary">{url}</code>
         </p>
         {probing ? (
-          <p className="text-xs text-zinc-600 animate-pulse">Probing for API documentation...</p>
+          <p className="text-xs text-muted animate-pulse">Probing for API documentation...</p>
         ) : (
-          <p className="text-xs text-zinc-600">
+          <p className="text-xs text-muted">
             No API documentation endpoint found. Try adding Swagger/OpenAPI to your project.
           </p>
         )}
@@ -744,7 +744,7 @@ function BackendPreview({
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-accent-cyan hover:underline"
+          className="inline-flex items-center gap-1 text-xs text-secondary hover:underline"
         >
           <ExternalLink className="h-3 w-3" />
           Open in new tab

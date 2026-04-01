@@ -791,6 +791,8 @@ export interface AuthUser {
   confluenceBaseUrl?: string | null;
   confluenceEmail?: string | null;
   hasConfluenceToken?: boolean;
+  // UI preference
+  viewMode?: 'vibe' | 'pro';
 }
 
 export interface LoginResponse {
@@ -863,6 +865,13 @@ export const updateConfluenceSettings = (confluenceBaseUrl: string, confluenceEm
   req<AuthUser>('/auth/settings/confluence', {
     method: 'PUT',
     body: JSON.stringify({ confluenceBaseUrl, confluenceEmail, confluenceApiToken }),
+  });
+
+/** Updates the user's UI view mode preference ('vibe' or 'pro'). */
+export const updateViewMode = (viewMode: 'vibe' | 'pro') =>
+  req<AuthUser>('/auth/settings/view-mode', {
+    method: 'PUT',
+    body: JSON.stringify({ viewMode }),
   });
 
 // ── Credential Validation ──────────────────────────────────────────────────────
@@ -1136,6 +1145,26 @@ export const adminTriggerUsageReport = (period: 'WEEKLY' | 'MONTHLY') =>
     method: 'POST', body: JSON.stringify({ period }),
   });
 
+// ── Feature Flags (Admin) ────────────────────────────────────────────────────
+
+export interface FeatureFlagDto {
+  id: number;
+  flagKey: string;
+  flagValue: string;
+  valueType: 'BOOLEAN' | 'STRING' | 'INTEGER' | 'PERCENTAGE';
+  scope: 'PLATFORM' | 'ORG';
+  description: string | null;
+  updatedBy: number | null;
+  updatedAt: string | null;
+}
+
+export const adminListFeatureFlags = () => req<FeatureFlagDto[]>('/admin/feature-flags');
+export const adminUpdateFeatureFlag = (key: string, value: string) =>
+  req<FeatureFlagDto>(`/admin/feature-flags/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  });
+
 // ── Plan Editing & Versioning ──────────────────────────────────────────────
 
 export const editRunPlan = (runId: string, feedback: string) =>
@@ -1376,6 +1405,58 @@ export const markTestInvalid = (testResultId: number) =>
 
 export const applyTestFixes = (runId: string, signature?: string) =>
   req<void>(`/runs/${runId}/apply-test-fixes${signature ? `?signature=${encodeURIComponent(signature)}` : ''}`, { method: 'POST' });
+
+// ── Admin Analytics ──────────────────────────────────────────────────────────
+
+export interface UsageMetrics {
+  totalRuns: number;
+  successfulRuns: number;
+  failedRuns: number;
+  partialRuns: number;
+  runsByDay: { date: string; count: number; successRate: number }[];
+  runsByProject: Record<string, number>;
+  avgTimeToCompleteSeconds: number;
+  totalCost: number;
+  costByModel: Record<string, number>;
+}
+
+export interface MemberUsage {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  runCount: number;
+  successRate: number;
+  lastRunDate: string | null;
+}
+
+export interface BillingOverviewData {
+  billingEntityType: string;
+  billingEntityName: string;
+  currentPlan: string;
+  subscriptionStatus: string;
+  nextBillingDate: string | null;
+  periodUsage: number;
+  remainingRuns: number;
+  runLimit: number;
+  gateway: string | null;
+  topupCredits: number;
+  recentInvoices: { invoiceNumber: string; amount: number; currency: string; status: string; issuedAt: string }[];
+}
+
+export const getAnalyticsUsage = (entityType: string, entityId: string, period = 30) =>
+  req<UsageMetrics>(`/admin/analytics/usage?entityType=${entityType}&entityId=${entityId}&period=${period}`);
+
+export const getAnalyticsMembers = (orgId: string, period = 30) =>
+  req<MemberUsage[]>(`/admin/analytics/members?orgId=${orgId}&period=${period}`);
+
+export const getAnalyticsBilling = (entityType: string, entityId: string) =>
+  req<BillingOverviewData>(`/admin/analytics/billing?entityType=${entityType}&entityId=${entityId}`);
+
+export const updateModelPricing = (provider: string, model: string, data: { inputCostPer1m: number; outputCostPer1m: number; notes?: string }) =>
+  req<PricingRow>(`/pricing/${provider}/${model}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const getAllPricing = () => req<PricingRow[]>('/pricing');
 
 export const downloadValidationReportPdf = async (runId: string): Promise<void> => {
   const res = await fetch(`${BASE}/runs/${runId}/report/pdf`, {

@@ -247,6 +247,25 @@ public class AuthController {
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
 
+    // ── View mode settings ─────────────────────────────────────────────────────
+
+    record ViewModeRequest(String viewMode) {}
+
+    @PutMapping("/settings/view-mode")
+    public ResponseEntity<UserDto> updateViewMode(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody ViewModeRequest req) {
+        String mode = req.viewMode() != null ? req.viewMode().strip().toLowerCase() : "vibe";
+        if (!"vibe".equals(mode) && !"pro".equals(mode)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "viewMode must be 'vibe' or 'pro'");
+        }
+        AppUser user = userDetails.getUser();
+        user.setViewMode(mode);
+        userRepo.save(user);
+        log.info("User {} updated view mode to {}", user.getId(), mode);
+        return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    }
+
     // ── Validation endpoints ──────────────────────────────────────────────────
 
     record ValidateGitHubRequest(String pat, String owner) {}

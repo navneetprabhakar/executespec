@@ -1,0 +1,854 @@
+{
+  "evaluationId" : "c4699dcf-2772-4e5c-865f-ad3d5c1a0b0a",
+  "timestamp" : "2026-04-01T14:56:02.559830Z",
+  "durationMs" : 2823801,
+  "modelResults" : [ {
+    "provider" : "anthropic",
+    "model" : "claude-sonnet-4-6",
+    "tierScores" : {
+      "PLANNING" : {
+        "accuracy" : 9.4444268143851,
+        "speed" : 1.2233777777777777,
+        "cost" : 3.6192944526944886,
+        "overall" : 5.932881464810617,
+        "reasoning" : "Avg accuracy=9.4, speed=1.2, cost=3.6 across 6 tests. 4/6 passed.",
+        "testResults" : [ {
+          "testCaseId" : "planning-plan-generation",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 2.880505416233098,
+          "overall" : 5.970126354058275,
+          "latencyMs" : 178375,
+          "costUsd" : 0.13671,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-code-review",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 1.0,
+          "overall" : 5.5,
+          "latencyMs" : 110550,
+          "costUsd" : 0.093684,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-architecture-decision",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 3.6151318770423373,
+          "overall" : 6.153782969260584,
+          "latencyMs" : 118327,
+          "costUsd" : 0.068217,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-saga-diagnosis",
+          "accuracy" : 8.565767278817546,
+          "speed" : 1.0,
+          "cost" : 4.805017185477973,
+          "overall" : 5.734137935778266,
+          "latencyMs" : 169974,
+          "costUsd" : 0.13148100000000001,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-consistency",
+          "accuracy" : 10.0,
+          "speed" : 2.3402666666666665,
+          "cost" : 5.101107879380923,
+          "overall" : 6.860343636511897,
+          "latencyMs" : 79948,
+          "costUsd" : 0.050934,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-saga-compliance",
+          "accuracy" : 8.100793607493054,
+          "speed" : 1.0,
+          "cost" : 4.314004358032601,
+          "overall" : 5.378897893254678,
+          "latencyMs" : 157917,
+          "costUsd" : 0.12307200000000001,
+          "passed" : false
+        } ]
+      },
+      "WORKHORSE" : {
+        "accuracy" : 10.0,
+        "speed" : 5.0408,
+        "cost" : 2.943609848472374,
+        "overall" : 6.996102462118093,
+        "reasoning" : "Avg accuracy=10.0, speed=5.0, cost=2.9 across 3 tests. 3/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "workhorse-websocket-notification",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 2.536301842942489,
+          "overall" : 5.884075460735622,
+          "latencyMs" : 141123,
+          "costUsd" : 0.198414,
+          "passed" : true
+        }, {
+          "testCaseId" : "workhorse-virtualized-search-list",
+          "accuracy" : 10.0,
+          "speed" : 4.1224,
+          "cost" : 2.4202395628603286,
+          "overall" : 6.635659890715082,
+          "latencyMs" : 66582,
+          "costUsd" : 0.103224,
+          "passed" : true
+        }, {
+          "testCaseId" : "workhorse-multi-bug-fix",
+          "accuracy" : 10.0,
+          "speed" : 10.0,
+          "cost" : 3.874288139614305,
+          "overall" : 8.468572034903577,
+          "latencyMs" : 17090,
+          "costUsd" : 0.03039,
+          "passed" : true
+        } ]
+      },
+      "LIGHTWEIGHT" : {
+        "accuracy" : 10.0,
+        "speed" : 1.1344,
+        "cost" : 2.714001856742826,
+        "overall" : 5.962100464185706,
+        "reasoning" : "Avg accuracy=10.0, speed=1.1, cost=2.7 across 3 tests. 3/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "lightweight-request-triage",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 1.5368367216123549,
+          "overall" : 5.634209180403088,
+          "latencyMs" : 77536,
+          "costUsd" : 0.053244,
+          "passed" : true
+        }, {
+          "testCaseId" : "lightweight-dual-summary",
+          "accuracy" : 10.0,
+          "speed" : 1.4032,
+          "cost" : 3.8270663403975274,
+          "overall" : 6.307566585099382,
+          "latencyMs" : 9664,
+          "costUsd" : 0.008466,
+          "passed" : true
+        }, {
+          "testCaseId" : "lightweight-config-diff-analysis",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 2.7781025082185966,
+          "overall" : 5.944525627054649,
+          "latencyMs" : 27865,
+          "costUsd" : 0.025845,
+          "passed" : true
+        } ]
+      }
+    },
+    "bestFitTier" : "WORKHORSE"
+  }, {
+    "provider" : "anthropic",
+    "model" : "claude-haiku-4-5-20251001",
+    "tierScores" : {
+      "PLANNING" : {
+        "accuracy" : 9.314207843227978,
+        "speed" : 4.9126722222222226,
+        "cost" : 10.0,
+        "overall" : 8.385271977169545,
+        "reasoning" : "Avg accuracy=9.3, speed=4.9, cost=10.0 across 6 tests. 5/6 passed.",
+        "testResults" : [ {
+          "testCaseId" : "planning-plan-generation",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 7.75,
+          "latencyMs" : 61256,
+          "costUsd" : 0.026387999999999998,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-code-review",
+          "accuracy" : 10.0,
+          "speed" : 7.7341999999999995,
+          "cost" : 10.0,
+          "overall" : 9.43355,
+          "latencyMs" : 26329,
+          "costUsd" : 0.010890400000000001,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-architecture-decision",
+          "accuracy" : 10.0,
+          "speed" : 4.409800000000001,
+          "cost" : 10.0,
+          "overall" : 8.602450000000001,
+          "latencyMs" : 42951,
+          "costUsd" : 0.015603200000000001,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-saga-diagnosis",
+          "accuracy" : 5.885247059367869,
+          "speed" : 4.511100000000001,
+          "cost" : 10.0,
+          "overall" : 6.570398529683935,
+          "latencyMs" : 84889,
+          "costUsd" : 0.039589599999999996,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-consistency",
+          "accuracy" : 10.0,
+          "speed" : 8.139066666666666,
+          "cost" : 10.0,
+          "overall" : 9.534766666666666,
+          "latencyMs" : 36457,
+          "costUsd" : 0.0164224,
+          "passed" : true
+        }, {
+          "testCaseId" : "planning-saga-compliance",
+          "accuracy" : 10.0,
+          "speed" : 3.681866666666666,
+          "cost" : 10.0,
+          "overall" : 8.420466666666666,
+          "latencyMs" : 69886,
+          "costUsd" : 0.0330832,
+          "passed" : true
+        } ]
+      },
+      "WORKHORSE" : {
+        "accuracy" : 10.0,
+        "speed" : 9.227066666666666,
+        "cost" : 10.0,
+        "overall" : 9.806766666666666,
+        "reasoning" : "Avg accuracy=10.0, speed=9.2, cost=10.0 across 3 tests. 3/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "workhorse-websocket-notification",
+          "accuracy" : 10.0,
+          "speed" : 7.828533333333334,
+          "cost" : 10.0,
+          "overall" : 9.457133333333333,
+          "latencyMs" : 38786,
+          "costUsd" : 0.0353704,
+          "passed" : true
+        }, {
+          "testCaseId" : "workhorse-virtualized-search-list",
+          "accuracy" : 10.0,
+          "speed" : 9.852666666666666,
+          "cost" : 10.0,
+          "overall" : 9.963166666666666,
+          "latencyMs" : 23605,
+          "costUsd" : 0.0179144,
+          "passed" : true
+        }, {
+          "testCaseId" : "workhorse-multi-bug-fix",
+          "accuracy" : 10.0,
+          "speed" : 10.0,
+          "cost" : 10.0,
+          "overall" : 10.0,
+          "latencyMs" : 7461,
+          "costUsd" : 0.00738,
+          "passed" : true
+        } ]
+      },
+      "LIGHTWEIGHT" : {
+        "accuracy" : 10.0,
+        "speed" : 1.0,
+        "cost" : 10.0,
+        "overall" : 7.75,
+        "reasoning" : "Avg accuracy=10.0, speed=1.0, cost=10.0 across 3 tests. 3/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "lightweight-request-triage",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 7.75,
+          "latencyMs" : 20360,
+          "costUsd" : 0.007534399999999999,
+          "passed" : true
+        }, {
+          "testCaseId" : "lightweight-dual-summary",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 7.75,
+          "latencyMs" : 10005,
+          "costUsd" : 0.0020336,
+          "passed" : true
+        }, {
+          "testCaseId" : "lightweight-config-diff-analysis",
+          "accuracy" : 10.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 7.75,
+          "latencyMs" : 10871,
+          "costUsd" : 0.004872,
+          "passed" : true
+        } ]
+      }
+    },
+    "bestFitTier" : "WORKHORSE"
+  }, {
+    "provider" : "google",
+    "model" : "gemini-3.1-pro-preview",
+    "tierScores" : {
+      "PLANNING" : {
+        "accuracy" : 0.8333333333333334,
+        "speed" : 0.8333333333333334,
+        "cost" : 10.0,
+        "overall" : 3.125,
+        "reasoning" : "Avg accuracy=0.8, speed=0.8, cost=10.0 across 6 tests. 0/6 passed.",
+        "testResults" : [ {
+          "testCaseId" : "planning-plan-generation",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 180005,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-code-review",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 180007,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-architecture-decision",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 180008,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-diagnosis",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 91037,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-consistency",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 180007,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-compliance",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "WORKHORSE" : {
+        "accuracy" : 1.0,
+        "speed" : 1.0,
+        "cost" : 10.0,
+        "overall" : 3.25,
+        "reasoning" : "Avg accuracy=1.0, speed=1.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "workhorse-websocket-notification",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 127660,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-virtualized-search-list",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 15073,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-multi-bug-fix",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 20044,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "LIGHTWEIGHT" : {
+        "accuracy" : 1.0,
+        "speed" : 1.0,
+        "cost" : 10.0,
+        "overall" : 3.25,
+        "reasoning" : "Avg accuracy=1.0, speed=1.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "lightweight-request-triage",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 4568,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-dual-summary",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 77289,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-config-diff-analysis",
+          "accuracy" : 1.0,
+          "speed" : 1.0,
+          "cost" : 10.0,
+          "overall" : 3.25,
+          "latencyMs" : 180006,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      }
+    },
+    "bestFitTier" : "WORKHORSE"
+  }, {
+    "provider" : "google",
+    "model" : "gemini-3-flash-preview",
+    "tierScores" : {
+      "PLANNING" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 6 tests. 0/6 passed.",
+        "testResults" : [ {
+          "testCaseId" : "planning-plan-generation",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-code-review",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-architecture-decision",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-diagnosis",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-consistency",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-compliance",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "WORKHORSE" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "workhorse-websocket-notification",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-virtualized-search-list",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-multi-bug-fix",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "LIGHTWEIGHT" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "lightweight-request-triage",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-dual-summary",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-config-diff-analysis",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      }
+    },
+    "bestFitTier" : "PLANNING"
+  }, {
+    "provider" : "openai",
+    "model" : "gpt-5.4",
+    "tierScores" : {
+      "PLANNING" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 6 tests. 0/6 passed.",
+        "testResults" : [ {
+          "testCaseId" : "planning-plan-generation",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-code-review",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-architecture-decision",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-diagnosis",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-consistency",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-compliance",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "WORKHORSE" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "workhorse-websocket-notification",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-virtualized-search-list",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-multi-bug-fix",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "LIGHTWEIGHT" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "lightweight-request-triage",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-dual-summary",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-config-diff-analysis",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      }
+    },
+    "bestFitTier" : "PLANNING"
+  }, {
+    "provider" : "openai",
+    "model" : "gpt-5.4-mini",
+    "tierScores" : {
+      "PLANNING" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 6 tests. 0/6 passed.",
+        "testResults" : [ {
+          "testCaseId" : "planning-plan-generation",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-code-review",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-architecture-decision",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-diagnosis",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-consistency",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "planning-saga-compliance",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "WORKHORSE" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "workhorse-websocket-notification",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-virtualized-search-list",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "workhorse-multi-bug-fix",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      },
+      "LIGHTWEIGHT" : {
+        "accuracy" : 0.0,
+        "speed" : 0.0,
+        "cost" : 10.0,
+        "overall" : 2.5,
+        "reasoning" : "Avg accuracy=0.0, speed=0.0, cost=10.0 across 3 tests. 0/3 passed.",
+        "testResults" : [ {
+          "testCaseId" : "lightweight-request-triage",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-dual-summary",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        }, {
+          "testCaseId" : "lightweight-config-diff-analysis",
+          "accuracy" : 0.0,
+          "speed" : 0.0,
+          "cost" : 10.0,
+          "overall" : 2.5,
+          "latencyMs" : 0,
+          "costUsd" : 0.0,
+          "passed" : false
+        } ]
+      }
+    },
+    "bestFitTier" : "PLANNING"
+  } ],
+  "recommendations" : {
+    "PLANNING" : {
+      "provider" : "anthropic",
+      "model" : "claude-haiku-4-5-20251001",
+      "score" : 8.385271977169545,
+      "reasoning" : "Best PLANNING model: anthropic:claude-haiku-4-5-20251001 (overall=8.4, accuracy=9.3, speed=4.9, cost=10.0)"
+    },
+    "WORKHORSE" : {
+      "provider" : "anthropic",
+      "model" : "claude-haiku-4-5-20251001",
+      "score" : 9.806766666666666,
+      "reasoning" : "Best WORKHORSE model: anthropic:claude-haiku-4-5-20251001 (overall=9.8, accuracy=10.0, speed=9.2, cost=10.0)"
+    },
+    "LIGHTWEIGHT" : {
+      "provider" : "anthropic",
+      "model" : "claude-haiku-4-5-20251001",
+      "score" : 7.75,
+      "reasoning" : "Best LIGHTWEIGHT model: anthropic:claude-haiku-4-5-20251001 (overall=7.8, accuracy=10.0, speed=1.0, cost=10.0)"
+    }
+  }
+}

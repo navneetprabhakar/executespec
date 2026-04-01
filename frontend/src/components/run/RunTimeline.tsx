@@ -89,18 +89,18 @@ export function RunTimeline({ events, status, taskCount, completedTaskCount }: R
           {/* Phase node */}
           <div className="flex flex-col items-center">
             <div className={`w-7 h-7 rounded-sm flex items-center justify-center text-xs font-bold
-              ${phase.status === 'done' ? 'bg-green-500 text-white' :
-                phase.status === 'active' ? 'bg-indigo-500 text-white animate-pulse' :
-                'bg-zinc-700 text-zinc-400'}`}>
+              ${phase.status === 'done' ? 'bg-[var(--text-primary)] text-[var(--geist-bg)]' :
+                phase.status === 'active' ? 'bg-accent-blue text-primary animate-pulse' :
+                'bg-[var(--gray-400)] text-secondary'}`}>
               {phase.status === 'done' ? '✓' : i + 1}
             </div>
             <span className={`mt-1 text-xs whitespace-nowrap
-              ${phase.status === 'active' ? 'text-indigo-400 font-semibold' :
-                phase.status === 'done' ? 'text-zinc-300' : 'text-zinc-500'}`}>
+              ${phase.status === 'active' ? 'text-accent-blue font-semibold' :
+                phase.status === 'done' ? 'text-secondary' : 'text-muted'}`}>
               {phase.name}
             </span>
             {phase.startedAt && phase.completedAt && (
-              <span className="text-[10px] text-zinc-500">
+              <span className="text-[10px] text-muted">
                 {formatDuration(phase.completedAt.getTime() - phase.startedAt.getTime())}
               </span>
             )}
@@ -109,7 +109,7 @@ export function RunTimeline({ events, status, taskCount, completedTaskCount }: R
           {/* Connector line */}
           {i < phases.length - 1 && (
             <div className={`w-8 h-0.5 mx-1 ${
-              phase.status === 'done' ? 'bg-green-400' : 'bg-zinc-700'
+              phase.status === 'done' ? 'bg-[var(--text-primary)]' : 'bg-[var(--gray-400)]'
             }`} />
           )}
         </div>

@@ -1301,37 +1301,49 @@ SSE (Server-Sent Events) via `SseBroadcaster`:
 
 ## 17. Security & Sandboxing
 
+> Full security requirements: [docs/requirements/security-guardrails.md](requirements/security-guardrails.md)
+
+ExecuteSpec uses 8 independent security layers. No single layer failing results in full compromise.
+
+### Input Scanning (InputSanitizer)
+
+Called in `RunController.submit()` before pipeline submission:
+- **26 regex patterns** across 3 categories: prompt injection (11), shell embedding (6), abuse (9)
+- **Unicode NFKC normalization** before pattern matching — collapses homoglyphs (Cyrillic `a` → Latin `a`)
+- **Obfuscation detection:** >60% non-printable chars → reject; 50-char substring repeated >20 times → reject
+- Returns HTTP 400 on violation
+
+### LLM Prompt Defense
+
+- **Planner:** User spec wrapped in `<user_request>` tags + explicit "untrusted input" warning
+- **Worker (all 3 prompts):** Mandatory SECURITY section listing blocked categories; report `BLOCKED` on violation
+- **Tool result tagging:** All results wrapped in `<tool_result tool="..." untrusted="true">` — workers instructed to never follow instructions inside tool results (second-order injection defense)
+
+### Code Abuse Scanning (BLOCKING)
+
+`CodeAbuseScanner` runs on every `writeFile()` — **rejects** files matching malware patterns:
+- Crypto mining: `stratum+tcp://`, `xmrig`, `coinhive`, `cryptonight`, `minergate`, `ethminer`
+- Reverse shells: `bash -i >& /dev/tcp/`, `nc -e /bin/`, `socat exec`, python socket+dup2, `mkfifo+nc`
+- Data exfiltration: `curl -d @`, `curl --data-binary @`, `wget --post-file`, `fetch(document.cookie)`
+- Obfuscated payloads: `eval(atob(...))`, `eval(Buffer.from(...))`, base64 strings >500 chars
+
 ### Shell Command Sandbox
 
-**Blocklist (never allowed):**
-- `rm -rf /`, `mkfs`, `dd if=`, fork bombs
-- `chmod`/`chown`/`mount` operations
-- `reboot`/`shutdown`/`halt`
-- `kill -9`, `pkill -9`
-- `iptables`, `ufw`, `firewall-cmd`
-- User management (`useradd`, `userdel`, `passwd`)
-- Network listeners (`ncat`, `nc -l`, `socat`)
+Three-layer validation + chained-command splitting:
 
-**Blocked patterns (regex):**
-- `curl | bash`, `wget | bash` (remote code execution)
-- Redirects to `/etc`, `/usr`, `/var` (system directories)
-- `ssh`, `scp`, `rsync` (network access)
-- Python socket code
-- `base64 decode | bash`
-
-**Allowed command prefixes (whitelist):**
-- Build: `mvn`, `gradle`, `npm`, `npx`, `node`, `java`, `javac`
-- File ops: `cat`, `ls`, `find`, `grep`, `head`, `tail`, `mkdir`, `cp`, `mv`
-- VCS: `git`, `diff`, `patch`
-- Text: `sort`, `uniq`, `sed`, `awk`, `tr`, `cut`
-- Languages: `python`, `pip`, `pytest`, `docker`
+1. **Subshell blocking:** `$(...)` and backtick expansion rejected outright
+2. **Explicit blocklist (23 commands):** `rm -rf /`, `mkfs`, `reboot`, `chmod -R 777`, `useradd`, `nc -l`, fork bombs, etc.
+3. **Pattern blocklist (43 regexes):** `curl | bash`, Docker escape (`docker run/exec`, `--privileged`), mining pools, reverse shells, data exfil uploads
+4. **Chained-command splitting:** Commands split on `&&`, `||`, `;`, `|` (respecting quotes). Each segment validated against the allowlist independently.
+5. **Allowlist (32 prefixes):** `mvn`, `npm`, `node`, `git`, `cat`, `ls`, `python`, `docker` (6 safe subcommands only), etc.
+6. **Absolute path block:** `cd /` blocked; `cd ..` allowed for worktree navigation
 
 ### Path Sandboxing
 
 - All file paths sandboxed to run's workspace directory
 - `safeResolve()` normalizes and validates paths don't escape workspace
 - Hidden directories: `worktrees/`, `target/`, `build/`, `node_modules/`, `.git/`
-- Sensitive files (`.env`, `credentials.json`, `key.json`) → log warning but not blocked
+- Sensitive files (`.env`, `credentials.json`, `key.json`) → log warning (not blocked — agents legitimately create these)
 
 ### Environment Variable Stripping
 
@@ -1339,7 +1351,18 @@ Child processes have secrets removed:
 - `GITHUB_PAT`, `POSTGRES_PASSWORD`
 - `SPRING_AI_ANTHROPIC_API_KEY`, `ANTHROPIC_API_KEY`
 - `SPRING_AI_OPENAI_API_KEY`, `OPENAI_API_KEY`
+- `GOOGLE_API_KEY`
 - `JIRA_API_TOKEN`, `CONFLUENCE_API_TOKEN`
+- `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`
+
+### Container Image Hardening
+
+`.dockerignore` excludes secrets from both preview and deploy images:
+`.env`, `.env.*`, `credentials.json`, `service-account.json`, `key.json`, `keyfile.json`, `secrets.yml`, `secrets.yaml`
+
+### Provider Policy Enforcement
+
+`LlmRouter` respects org provider restrictions on ALL paths — including the forced-primary fallback when all providers are circuit-open. Throws `ProviderUnavailableException` if the primary is policy-blocked.
 
 ---
 
