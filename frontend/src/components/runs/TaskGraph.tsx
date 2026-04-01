@@ -9,8 +9,8 @@ const STATUS_COLOR: Record<string, { bg: string; border: string; text: string; d
   WORKING:   { bg: '#1a1a1a', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
   PENDING:   { bg: '#111111', border: '#333333', text: '#666666', dot: '#666666' },
   LOCKED:    { bg: '#111111', border: '#252525', text: '#666666', dot: '#555555' },
-  PARTIAL:   { bg: '#1a1500', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
-  BLOCKED:   { bg: '#1a1500', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
+  PARTIAL:   { bg: '#1a1508', border: '#e08b1a', text: '#a1a1a1', dot: '#e08b1a' },
+  BLOCKED:   { bg: '#1a0a10', border: '#d44690', text: '#a1a1a1', dot: '#d44690' },
   FAILED:    { bg: '#1a0a0a', border: '#e5484d', text: '#a1a1a1', dot: '#e5484d' },
 };
 const DEFAULT_COLOR = { bg: '#111111', border: '#333333', text: '#666666', dot: '#555555' };
@@ -112,7 +112,7 @@ export default function TaskGraph({ runId }: Props) {
   // Source badge — detect from task ID prefix
   const sourceBadge = (taskId: string): { label: string; bg: string; text: string; border: string } | null => {
     if (taskId.includes('_cop')) return { label: 'COPILOT', bg: 'rgba(139,92,246,0.20)', text: '#c4b5fd', border: '#8B5CF6' };
-    if (taskId.includes('_rev')) return { label: 'REVIEW',  bg: 'rgba(245,158,11,0.20)', text: '#fcd34d', border: '#F59E0B' };
+    if (taskId.includes('_rev')) return { label: 'REVIEW',  bg: 'rgba(6,182,212,0.20)', text: '#67e8f9', border: '#06B6D4' };
     return null;
   };
 
@@ -131,8 +131,8 @@ export default function TaskGraph({ runId }: Props) {
           <span style={{ color: '#c4b5fd' }}>COPILOT</span>
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-sm" style={{ background: '#F59E0B' }} />
-          <span style={{ color: '#fcd34d' }}>REVIEW</span>
+          <span className="w-2 h-2 rounded-sm" style={{ background: '#06B6D4' }} />
+          <span style={{ color: '#67e8f9' }}>REVIEW</span>
         </span>
       </div>
 

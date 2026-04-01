@@ -339,16 +339,10 @@ public class AuthService {
             return userRepo.save(user);
         }
 
-        // 2. Check by email
+        // 2. Check by email — link/update OAuth identity regardless of current provider
         var byEmail = userRepo.findByEmail(email.toLowerCase());
         if (byEmail.isPresent()) {
             AppUser user = byEmail.get();
-            if (user.getOauthProvider() != null && !user.getOauthProvider().equals(provider)) {
-                // Different OAuth provider already linked
-                throw new OAuthEmailConflictException(
-                        "Email " + email + " is already linked to " + user.getOauthProvider() + " login");
-            }
-            // No OAuth provider yet (email/password user) → link this OAuth identity
             user.setOauthProvider(provider);
             user.setOauthId(oauthId);
             if (avatarUrl != null) user.setAvatarUrl(avatarUrl);
