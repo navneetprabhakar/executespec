@@ -75,14 +75,14 @@ public class UsageTrackingService {
         if (maxValue <= 0) return; // unlimited
 
         Instant now = Instant.now();
-        BillingUsage usage = getOrCreateUsage(userId, sub.getOrgId(), metric, now);
+        String orgId = sub != null ? sub.getOrgId() : null;
+        BillingUsage usage = getOrCreateUsage(userId, orgId, metric, now);
 
         if (usage.getCurrentValue() >= maxValue) {
             // For RUNS metric, check bonus top-up credits before rejecting
             if ("RUNS".equals(metric)) {
                 Instant checkNow = Instant.now();
                 long userBonus = runTopupRepo.sumRemainingByUserId(userId, checkNow);
-                String orgId = sub != null ? sub.getOrgId() : null;
                 long orgBonus = orgId != null ? runTopupRepo.sumRemainingByOrgId(orgId, checkNow) : 0;
                 if (userBonus + orgBonus > 0) {
                     log.debug("RUNS limit reached but user {} has {} bonus runs (user={}, org={})",
