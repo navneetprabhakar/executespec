@@ -70,6 +70,16 @@ jobs:
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      # ── Debug: print resolved values ───────────────────────────────────
+      - name: Debug — print resolved config
+        run: |
+          echo "GCP_PROJECT=${{ env.GCP_PROJECT }}"
+          echo "GCE_ZONE=${{ env.GCE_ZONE }}"
+          echo "GCP_REGION=${{ env.GCP_REGION }}"
+          echo "DEPLOY_ENV=${{ env.DEPLOY_ENV }}"
+          gcloud config get-value project
+          gcloud compute instances list --project=${{ env.GCP_PROJECT }} --filter="name~executespec" --format="table(name,zone,status)" || echo 'instances list failed'
+
       # ── Determine deploy bucket ───────────────────────────────────────────
       - name: Set deploy bucket
         run: |
@@ -99,6 +109,7 @@ jobs:
       - name: Ensure validator toolchains on GCE
         run: |
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
@@ -200,11 +211,13 @@ jobs:
         run: |
           # Upload env-patch script to the VM
           gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/env-patch.sh \
+            --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no
 
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
@@ -230,6 +243,7 @@ jobs:
           for i in 1 2 3 4 5 6 7 8; do
             echo "Health check attempt $i..."
             RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+              --project ${{ env.GCP_PROJECT }} \
               --zone ${{ env.GCE_ZONE }} \
               --tunnel-through-iap \
               --command="curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/api/health 2>/dev/null; echo \"HTTP_CODE=\$?:\$(cat /tmp/health.json 2>/dev/null)\"" \
@@ -250,6 +264,7 @@ jobs:
         run: |
           echo "── systemctl status ──"
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
@@ -258,6 +273,7 @@ jobs:
           echo ""
           echo "── Last 150 lines of app log ──"
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
@@ -266,6 +282,7 @@ jobs:
           echo ""
           echo "── Environment file (redacted) ──"
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
