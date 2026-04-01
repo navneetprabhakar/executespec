@@ -471,8 +471,8 @@ public class WorkerAgent {
                             try {
                             String result = dispatchTool(tc, runId, taskId);
                             if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
-                            results.append("[").append(tc.name()).append(" result]\n<output>\n")
-                                   .append(result).append("\n</output>\n\n");
+                            results.append("<tool_result tool=\"").append(tc.name()).append("\" untrusted=\"true\">\n")
+                                   .append(result).append("\n</tool_result>\n\n");
                             } finally {
                                 toolObs.stop();
                             }

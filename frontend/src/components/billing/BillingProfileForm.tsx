@@ -57,10 +57,10 @@ export default function BillingProfileForm() {
   if (!profile) return null;
 
   const inputClasses =
-    'w-full rounded-sm border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 ' +
-    'placeholder:text-zinc-600 focus:border-accent-violet/50 focus:outline-none focus:ring-1 focus:ring-accent-violet/20 transition-colors';
+    'w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2 text-sm text-primary ' +
+    'placeholder:text-muted focus:border-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-accent-blue/20 transition-colors';
 
-  const labelClasses = 'mb-1 block text-xs font-medium text-zinc-400';
+  const labelClasses = 'mb-1 block text-xs font-medium text-secondary';
 
   const field = (label: string, key: keyof BillingProfile, placeholder?: string) => (
     <div>
@@ -75,17 +75,17 @@ export default function BillingProfileForm() {
   );
 
   return (
-    <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-6 mt-6">
+    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6 mt-6">
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h3 className="text-base font-semibold text-zinc-100">Billing Details</h3>
-          <p className="text-xs text-zinc-500 mt-0.5">GST and invoicing information</p>
+          <h3 className="text-base font-semibold text-primary">Billing Details</h3>
+          <p className="text-xs text-muted mt-0.5">GST and invoicing information</p>
         </div>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-1.5 rounded-sm bg-accent-violet px-3.5 py-1.5 text-xs font-semibold
-                     text-white hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-1.5 rounded-sm bg-accent-blue px-3.5 py-1.5 text-xs font-semibold
+                     text-primary hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
         >
           <Save className="h-3.5 w-3.5" />
           {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}

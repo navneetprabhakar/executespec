@@ -36,34 +36,34 @@ export default function AcceptInvitePage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
-      <div className="w-full max-w-md rounded-sm border border-slate-700 bg-[#1a1f2e] p-8 text-center ">
+      <div className="w-full max-w-md rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] p-8 text-center ">
         {status === 'loading' && (
           <>
             <div className="mb-4 flex justify-center">
               <div className="h-10 w-10 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
             </div>
-            <p className="text-slate-400">Accepting invitation…</p>
+            <p className="text-muted">Accepting invitation…</p>
           </>
         )}
         {status === 'success' && (
           <>
             <div className="mb-4 text-5xl">🎉</div>
-            <h2 className="mb-2 text-xl font-bold text-white">Welcome to the team!</h2>
-            <p className="text-slate-400">You've joined the org. Redirecting…</p>
+            <h2 className="mb-2 text-xl font-bold text-primary">Welcome to the team!</h2>
+            <p className="text-muted">You've joined the org. Redirecting…</p>
           </>
         )}
         {status === 'needsAuth' && (
           <>
             <div className="mb-4 text-4xl">🔐</div>
-            <h2 className="mb-2 text-xl font-bold text-white">Sign in to accept</h2>
-            <p className="mb-6 text-slate-400">You need to be logged in to accept this invitation.</p>
+            <h2 className="mb-2 text-xl font-bold text-primary">Sign in to accept</h2>
+            <p className="mb-6 text-muted">You need to be logged in to accept this invitation.</p>
             <Link to={`/login?invite=${token}`}
-              className="inline-block rounded-sm bg-purple-600 px-6 py-2.5 font-semibold text-white hover:bg-purple-500">
+              className="inline-block rounded-sm bg-accent-blue px-6 py-2.5 font-semibold text-primary hover:bg-accent-blue">
               Sign in
             </Link>
-            <p className="mt-3 text-sm text-slate-400">
+            <p className="mt-3 text-sm text-muted">
               No account?{' '}
-              <Link to={`/register?invite=${token}`} className="text-purple-400 hover:text-purple-300">
+              <Link to={`/register?invite=${token}`} className="text-[var(--text-secondary)] hover:text-accent-blue">
                 Register
               </Link>
             </p>
@@ -72,9 +72,9 @@ export default function AcceptInvitePage() {
         {status === 'error' && (
           <>
             <div className="mb-4 text-5xl">❌</div>
-            <h2 className="mb-2 text-xl font-bold text-white">Invitation error</h2>
-            <p className="mb-4 text-slate-400">{error}</p>
-            <Link to="/" className="text-purple-400 hover:text-purple-300 text-sm">Go home</Link>
+            <h2 className="mb-2 text-xl font-bold text-primary">Invitation error</h2>
+            <p className="mb-4 text-muted">{error}</p>
+            <Link to="/" className="text-[var(--text-secondary)] hover:text-accent-blue text-sm">Go home</Link>
           </>
         )}
       </div>

@@ -26,6 +26,9 @@ public class FileSystemTool {
     @Autowired(required = false)
     private FileLockTool lockTool;
 
+    @Autowired(required = false)
+    private com.navneet.executespec.security.CodeAbuseScanner codeAbuseScanner;
+
     // File names that trigger a WARN log when written (potential secret leakage).
     // NOT blocked — agents legitimately write these for generated projects.
     // Security boundary is safeResolve() which sandboxes all paths to the workspace.
@@ -136,6 +139,17 @@ public class FileSystemTool {
                     ? target.getFileName().toString().toLowerCase() : "";
             if (SENSITIVE_FILE_NAMES.contains(fileName)) {
                 log.warn("[Security] Agent writing sensitive file: {} (runId={})", path, runId);
+            }
+            // Scan for malicious code patterns (crypto mining, reverse shells, etc.)
+            // BLOCKING: flagged content is rejected — not written to disk.
+            if (codeAbuseScanner != null) {
+                var scanResult = codeAbuseScanner.scan(path, content);
+                if (scanResult.flagged()) {
+                    log.warn("[Security] WRITE BLOCKED — code abuse detected in {} (runId={}, category={}, detail={})",
+                            path, runId, scanResult.category(), scanResult.detail());
+                    return "WRITE BLOCKED: File '" + path + "' contains " + scanResult.category()
+                            + " patterns and cannot be written. Remove the malicious content and retry.";
+                }
             }
             Files.createDirectories(target.getParent());
             Files.writeString(target, content);

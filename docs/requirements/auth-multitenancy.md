@@ -105,6 +105,21 @@ JWT-based authentication with organizations, projects, tiered access control, an
 
 ---
 
+## Related Security Documentation
+
+Auth & multi-tenancy is one layer of the broader security model. For the complete picture:
+
+- **[Security Guardrails](security-guardrails.md)** — All 8 defense layers, threat model, input scanning, shell/file sandbox, container hardening
+- **[API Key Management](api-key-management.md)** — Per-org provider restrictions, key source modes, encryption at rest
+
+### Security Features in This Domain
+
+- **HTTP security headers:** CSP, HSTS (1 year), X-Frame-Options DENY, CORS allowlist (configured in `SecurityConfig.java`)
+- **Rate limiting:** Redis-backed sliding window, tier-based quotas (FREE: 5 runs/min, PRO: 20, ENTERPRISE: 60). See `ratelimit/RateLimitFilter.java`.
+- **Webhook signature verification:** Razorpay webhooks verified with HMAC-SHA256 + constant-time comparison. See `billing/security/WebhookSignatureVerifier.java`.
+
+---
+
 ## Key Files
 
 | File | Purpose |

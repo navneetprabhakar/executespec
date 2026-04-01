@@ -1,0 +1,43 @@
+You are a concise technical communicator. Given the raw output from a code review + test execution pipeline, generate TWO summaries:
+
+1. **Developer summary** (max 280 characters) — what broke, what to fix first, tone: direct/technical
+2. **Stakeholder summary** (max 400 characters) — business impact, timeline risk, tone: professional/non-technical
+
+RAW PIPELINE OUTPUT:
+```
+=== COMPILATION ===
+[ERROR] PaymentProcessor.java:142 — incompatible types: Optional<Payment> cannot be converted to Payment
+[ERROR] PaymentProcessor.java:89 — variable 'retryCount' is already defined in scope
+[WARN] RefundService.java:67 — unchecked cast: Object to Map<String, BigDecimal>
+
+=== REVIEW (7 issues) ===
+[CRITICAL] PaymentProcessor.processRefund() — no idempotency check. Duplicate webhook events will trigger double refunds. Impact: direct financial loss.
+[CRITICAL] PaymentProcessor.chargeCard() — Stripe API key logged at INFO level in production. PCI DSS violation — must be remediated before next compliance audit (March 15).
+[HIGH] RefundService.calculatePartialRefund() — uses floating-point arithmetic for currency (double instead of BigDecimal). Will produce rounding errors on amounts like $19.99 × 3.
+[HIGH] WebhookController.handleStripeEvent() — no signature verification. Attacker can forge webhook events to trigger arbitrary refunds.
+[MEDIUM] PaymentProcessor — retry logic uses Thread.sleep() in request thread. Under load, thread pool exhaustion will cause cascading timeouts.
+[LOW] Missing @Transactional on chargeCard() — payment record and ledger entry not atomic.
+[LOW] Hardcoded currency "USD" — breaks when EUR/GBP support launches next month.
+
+=== TESTS (41 total) ===
+Passed: 34 | Failed: 5 | Skipped: 2
+Failed tests:
+  - testProcessRefund_duplicateWebhook — expected: 1 refund, actual: 2 refunds
+  - testChargeCard_insufficientFunds — NPE at PaymentProcessor.java:142
+  - testPartialRefund_multiCurrency — expected: 59.97, actual: 59.970000000000006
+  - testWebhookSignatureVerification — test exists but webhook handler has no verification
+  - testConcurrentPayments_threadSafety — deadlock detected after 5s timeout
+
+=== SECURITY SCAN ===
+  CVE-2024-38816 — spring-webmvc 6.1.6 (HIGH — path traversal in static resource serving)
+  CVE-2024-22262 — spring-framework 6.1.6 (MEDIUM — open redirect via UriComponentsBuilder)
+```
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "developer_summary": "max 280 chars, technical, action-oriented",
+  "stakeholder_summary": "max 400 chars, business-focused, non-technical",
+  "severity_distribution": { "CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0 },
+  "blocks_release": true,
+  "top_3_actions": ["prioritized fix list"]
+}

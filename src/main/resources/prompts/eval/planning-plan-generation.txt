@@ -1,0 +1,46 @@
+You are a senior software architect. Generate a detailed execution plan for the following project.
+
+PROJECT SPECIFICATION:
+Build a real-time collaborative document editor (like Google Docs) with the following requirements:
+
+Core Features:
+- Operational Transformation (OT) engine for concurrent edits — must handle split-brain scenarios where two users edit the same paragraph simultaneously. The OT engine must support insert, delete, retain, and format operations, with server-side transformation to resolve conflicts deterministically.
+- WebSocket server (Node.js + ws) managing per-document editing sessions. Each session tracks connected cursors, presence indicators, and an operation log. Must support graceful degradation to HTTP long-polling when WebSockets are unavailable (corporate proxies).
+- PostgreSQL for document persistence with JSONB content storage. Documents have version vectors (not simple integer versions) to support offline editing and branch-merge reconciliation.
+- Redis pub/sub for horizontal scaling — multiple WebSocket server instances must relay operations to all subscribers of a document channel. Handle Redis connection drops with local operation buffering and replay.
+- React frontend with a custom rich-text editor built on Slate.js. Must render remote cursors with user colors, handle undo/redo that respects OT history (not naive state reversal), and support offline mode with operation queuing.
+
+Hard Constraints:
+- The system must handle 50 concurrent editors on a single document without visible lag (<100ms operation round-trip).
+- Undo must be correct under OT — undoing operation O when operations P,Q,R have been applied after O requires computing O' = transform(inverse(O), P∘Q∘R).
+- Offline edits must merge correctly when reconnecting, even if the server document has diverged by 100+ operations.
+- Document history must support point-in-time recovery and branching (like git).
+
+Architecture Constraint:
+- The plan must identify which tasks can run in parallel vs which have hard data/API dependencies.
+- At least one task must be flagged HIGH complexity.
+- The plan must address the split-brain OT edge case explicitly in at least one task description.
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "project_type": "FULL_STACK",
+  "plan_title": "...",
+  "plan_summary": "...",
+  "tasks": [
+    {
+      "task_id": "task-1",
+      "title": "...",
+      "description": "detailed description including edge cases and acceptance criteria",
+      "complexity": "LOW|MEDIUM|HIGH",
+      "depends_on": [],
+      "owned_files": ["..."],
+      "parallelizable_with": []
+    }
+  ]
+}
+
+Requirements:
+- At least 6 tasks
+- Dependency graph must be a valid DAG (no cycles)
+- At least 2 tasks must be parallelizable
+- Task descriptions must mention specific edge cases, not just feature names

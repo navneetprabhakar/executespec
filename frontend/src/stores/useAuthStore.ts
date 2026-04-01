@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as api from '@/lib/api';
 import type { TierPermissions } from '@/hooks/useTierPermissions';
+import { useUiStore } from './useUiStore';
 
 interface AuthStore {
   user: api.AuthUser | null;
@@ -67,6 +68,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       const user = await api.authMe();
       set({ user, isAuthenticated: true });
+      // Sync view mode from server preference
+      if (user.viewMode) {
+        useUiStore.getState().setViewMode(user.viewMode);
+      }
       // Load tier permissions
       api.getMyPermissions().then((p) => set({ permissions: p })).catch(() => {});
     } catch {

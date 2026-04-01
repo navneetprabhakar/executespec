@@ -1,0 +1,174 @@
+Analyze the following two Kubernetes deployment configs. One is the CURRENT production config, the other is a PROPOSED change in a pull request. Identify ONLY the differences that could cause a production incident. Ignore cosmetic changes (label additions, annotation updates, comment changes, resource request increases within 2x).
+
+CURRENT (production):
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: production
+  labels:
+    app: payment-api
+    version: v2.3.1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: payment-api
+  template:
+    metadata:
+      labels:
+        app: payment-api
+        version: v2.3.1
+    spec:
+      serviceAccountName: payment-api-sa
+      containers:
+      - name: payment-api
+        image: gcr.io/prod-project/payment-api:v2.3.1
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretRef:
+              name: payment-db-credentials
+              key: url
+        - name: STRIPE_API_KEY
+          valueFrom:
+            secretRef:
+              name: stripe-credentials
+              key: api-key
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: MAX_CONNECTIONS
+          value: "50"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: payment-api
+```
+
+PROPOSED (PR #847):
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: production
+  labels:
+    app: payment-api
+    version: v2.4.0
+    team: payments
+  annotations:
+    deployment.kubernetes.io/change-cause: "Add connection pooling and env cleanup"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: payment-api
+  template:
+    metadata:
+      labels:
+        app: payment-api
+        version: v2.4.0
+        team: payments
+    spec:
+      serviceAccountName: payment-api-sa
+      containers:
+      - name: payment-api
+        image: gcr.io/prod-project/payment-api:v2.4.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretRef:
+              name: payment-db-credentials
+              key: connection-string
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: MAX_CONNECTIONS
+          value: "200"
+        - name: POOL_SIZE
+          value: "50"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 768Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: payment-api
+```
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "breaking_changes": [
+    {
+      "field": "exact YAML path",
+      "current_value": "...",
+      "proposed_value": "...",
+      "risk": "what production incident this could cause",
+      "severity": "CRITICAL|HIGH|MEDIUM"
+    }
+  ],
+  "safe_changes": ["list of changes that are cosmetic or non-breaking"],
+  "verdict": "APPROVE|REQUEST_CHANGES|BLOCK",
+  "review_comment": "concise comment for the PR"
+}
+
+There are exactly 6 breaking changes. Find all of them. Do NOT flag safe changes as breaking.

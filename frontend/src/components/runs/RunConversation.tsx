@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Loader2, Rocket, MessageSquare, Lock, Bug, Lightbulb, Code2, Wrench, FileText, Maximize2, Minimize2 } from 'lucide-react';
+import { Send, Loader2, Rocket, MessageSquare, Bug, Lightbulb, Code2, Wrench, FileText, Maximize2, Minimize2 } from 'lucide-react';
 import { getRunChat, sendRunChatMessage, applyToRun } from '@/lib/api';
 import type { RunChatMessage, ChatResponse } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -53,27 +53,6 @@ export default function RunConversation({ runId }: Props) {
   const { addToast, setPendingNewRunGoal } = useUiStore();
   const copilotMaximized = useUiStore((s) => s.copilotMaximized);
   const setCopilotMaximized = useUiStore((s) => s.setCopilotMaximized);
-
-  // Tier gate — show upgrade prompt if chat is not available on the user's plan
-  if (permissions && !permissions.canUseChat) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center space-y-3 py-8 px-4">
-        <div className="h-12 w-12 rounded-sm bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
-          <Lock className="h-6 w-6 text-zinc-600" />
-        </div>
-        <div>
-          <p className="text-sm font-medium text-zinc-400">
-            Post-run Chat Unavailable
-          </p>
-          <p className="text-xs text-zinc-600 mt-1 max-w-xs leading-relaxed">
-            Post-run conversations require a <span className="text-accent-violet font-medium">PRO</span> or{' '}
-            <span className="text-accent-violet font-medium">ENTERPRISE</span> plan.
-            Upgrade to ask questions about generated code.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   // Load chat history on mount / when runId changes
   useEffect(() => {
@@ -236,7 +215,7 @@ export default function RunConversation({ runId }: Props) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
+        <Loader2 className="h-4 w-4 animate-spin text-muted" />
       </div>
     );
   }
@@ -244,19 +223,19 @@ export default function RunConversation({ runId }: Props) {
   return (
     <div className={cn(
       'flex flex-col h-full',
-      copilotMaximized && 'fixed inset-0 z-50 bg-zinc-950'
+      copilotMaximized && 'fixed inset-0 z-50 bg-[var(--geist-bg)]'
     )}>
 
       {/* Header */}
-      <div className="flex flex-col gap-2 px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+      <div className="flex flex-col gap-2 px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-accent-violet" />
-            <span className="text-sm font-medium text-zinc-200">Run Copilot</span>
-            <span className="text-[10px] text-zinc-600 font-mono">sonnet</span>
+            <MessageSquare className="h-4 w-4 text-accent-blue" />
+            <span className="text-sm font-medium text-primary">Run Copilot</span>
+            <span className="text-[10px] text-muted font-mono">sonnet</span>
             <button
               onClick={() => setCopilotMaximized(!copilotMaximized)}
-              className="ml-1 p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+              className="ml-1 p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
               title={copilotMaximized ? 'Minimize' : 'Maximize'}
             >
               {copilotMaximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
@@ -265,9 +244,9 @@ export default function RunConversation({ runId }: Props) {
           {/* Message counter */}
           <span className={cn(
             'text-xs font-mono tabular-nums',
-            userCount >= MAX_MESSAGES - 2 ? 'text-accent-rose' :
+            userCount >= MAX_MESSAGES - 2 ? 'text-accent-red' :
             userCount >= MAX_MESSAGES / 2   ? 'text-accent-amber' :
-                                              'text-zinc-600'
+                                              'text-muted'
           )}>
             {userCount}/{MAX_MESSAGES}
           </span>
@@ -291,7 +270,7 @@ export default function RunConversation({ runId }: Props) {
                 : <Wrench className="h-3 w-3" />}
               Apply to Run
               {permissions && permissions.maxApplySuggestions > 0 && (
-                <span className="text-[10px] font-mono text-zinc-500 ml-1">
+                <span className="text-[10px] font-mono text-muted ml-1">
                   {activeRun.applySuggestionCount ?? 0}/{permissions.maxApplySuggestions}
                 </span>
               )}
@@ -302,7 +281,7 @@ export default function RunConversation({ runId }: Props) {
           {hasConversation && messages.length >= 2 && (
             <button
               onClick={compileSpec}
-              className="flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all bg-amber-500/15 text-amber-400 hover:bg-amber-500/25"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all bg-amber-500/15 text-accent-amber hover:bg-amber-500/25"
             >
               <FileText className="h-3 w-3" />
               Compile as Spec
@@ -314,7 +293,7 @@ export default function RunConversation({ runId }: Props) {
             onClick={() => { setShowIterateBox((v) => !v); setShowApplyBox(false); }}
             className={cn(
               'flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all',
-              'bg-accent-violet/15 text-accent-violet hover:bg-accent-violet/25',
+              'bg-accent-blue/15 text-accent-blue hover:bg-accent-blue/25',
               iterating && 'opacity-50 cursor-not-allowed'
             )}
             disabled={iterating}
@@ -335,18 +314,18 @@ export default function RunConversation({ runId }: Props) {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden border-b border-white/[0.06] flex-shrink-0"
+            className="overflow-hidden border-b border-[var(--border-default)] flex-shrink-0"
           >
             <div className="px-4 py-3 space-y-2 bg-emerald-500/[0.03]">
-              <p className="text-xs text-zinc-500 leading-relaxed">
+              <p className="text-xs text-muted leading-relaxed">
                 Apply improvements directly to this run. The system will create a mini-plan
                 ({'\u2264'}6 tasks), append them to the existing task graph, and execute them.
               </p>
               <textarea
                 className={cn(
-                  'w-full bg-white/[0.04] border border-white/[0.08] rounded-sm px-3 py-2',
-                  'text-sm text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none',
-                  'focus:border-emerald-500/40 focus:bg-white/[0.06] transition-colors'
+                  'w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm px-3 py-2',
+                  'text-sm text-primary placeholder-[var(--text-muted)] resize-none focus:outline-none',
+                  'focus:border-emerald-500/40 focus:bg-[var(--gray-200)] transition-colors'
                 )}
                 rows={3}
                 placeholder={buildSuggestedRequest() || 'Describe the improvement to apply\u2026'}
@@ -356,7 +335,7 @@ export default function RunConversation({ runId }: Props) {
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setShowApplyBox(false)}
-                  className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="px-3 py-1.5 text-xs text-muted hover:text-secondary transition-colors"
                 >
                   Cancel
                 </button>
@@ -365,7 +344,7 @@ export default function RunConversation({ runId }: Props) {
                   disabled={applying || (!applyInput.trim() && !buildSuggestedRequest())}
                   className={cn(
                     'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
-                    'bg-emerald-600 text-white hover:bg-emerald-500',
+                    'bg-emerald-600 text-primary hover:bg-emerald-500',
                     'disabled:opacity-40 disabled:cursor-not-allowed'
                   )}
                 >
@@ -388,18 +367,18 @@ export default function RunConversation({ runId }: Props) {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden border-b border-white/[0.06] flex-shrink-0"
+            className="overflow-hidden border-b border-[var(--border-default)] flex-shrink-0"
           >
-            <div className="px-4 py-3 space-y-2 bg-accent-violet/[0.03]">
-              <p className="text-xs text-zinc-500 leading-relaxed">
+            <div className="px-4 py-3 space-y-2 bg-accent-blue/[0.03]">
+              <p className="text-xs text-muted leading-relaxed">
                 Describe the changes you want to implement. The new run will start with a
                 copy of this run's codebase and apply your changes via the full agent pipeline.
               </p>
               <textarea
                 className={cn(
-                  'w-full bg-white/[0.04] border border-white/[0.08] rounded-sm px-3 py-2',
-                  'text-sm text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none',
-                  'focus:border-accent-violet/40 focus:bg-white/[0.06] transition-colors'
+                  'w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm px-3 py-2',
+                  'text-sm text-primary placeholder-[var(--text-muted)] resize-none focus:outline-none',
+                  'focus:border-accent-blue/40 focus:bg-[var(--gray-200)] transition-colors'
                 )}
                 rows={3}
                 placeholder={buildSuggestedRequest() || 'Describe what you want to change or add\u2026'}
@@ -409,7 +388,7 @@ export default function RunConversation({ runId }: Props) {
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setShowIterateBox(false)}
-                  className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="px-3 py-1.5 text-xs text-muted hover:text-secondary transition-colors"
                 >
                   Cancel
                 </button>
@@ -418,7 +397,7 @@ export default function RunConversation({ runId }: Props) {
                   disabled={iterating || (!iterateInput.trim() && !buildSuggestedRequest())}
                   className={cn(
                     'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
-                    'bg-accent-violet text-white hover:bg-accent-violet/90',
+                    'bg-accent-blue text-primary hover:bg-accent-blue/90',
                     'disabled:opacity-40 disabled:cursor-not-allowed'
                   )}
                 >
@@ -441,26 +420,26 @@ export default function RunConversation({ runId }: Props) {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden border-b border-white/[0.06] flex-shrink-0"
+            className="overflow-hidden border-b border-[var(--border-default)] flex-shrink-0"
           >
             <div className="px-4 py-3 space-y-2 bg-amber-500/[0.03]">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-amber-400">Compiled Spec</span>
-                <button onClick={() => setShowCompiledSpec(false)} className="text-xs text-zinc-500 hover:text-zinc-300">Close</button>
+                <span className="text-xs font-medium text-accent-amber">Compiled Spec</span>
+                <button onClick={() => setShowCompiledSpec(false)} className="text-xs text-muted hover:text-secondary">Close</button>
               </div>
-              <div className="text-xs text-zinc-300 whitespace-pre-wrap bg-white/[0.03] rounded-sm p-3 max-h-48 overflow-y-auto">
+              <div className="text-xs text-secondary whitespace-pre-wrap bg-[var(--gray-200)] rounded-sm p-3 max-h-48 overflow-y-auto">
                 <MarkdownContent content={compiledSpec} />
               </div>
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => { setApplyInput(compiledSpec); setShowApplyBox(true); setShowCompiledSpec(false); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-emerald-600 text-primary hover:bg-emerald-500"
                 >
                   <Wrench className="h-3 w-3" /> Apply to Run
                 </button>
                 <button
                   onClick={() => { setPendingNewRunGoal(compiledSpec); setShowCompiledSpec(false); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-accent-violet text-white hover:bg-accent-violet/90"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/90"
                 >
                   <Rocket className="h-3 w-3" /> Iterate as New Run
                 </button>
@@ -476,12 +455,12 @@ export default function RunConversation({ runId }: Props) {
         {/* Empty state */}
         {!hasConversation && (
           <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-8">
-            <MessageSquare className="h-8 w-8 text-zinc-700" />
+            <MessageSquare className="h-8 w-8 text-[var(--text-muted)]" />
             <div>
-              <p className="text-sm font-medium text-zinc-400">
+              <p className="text-sm font-medium text-secondary">
                 Run Copilot
               </p>
-              <p className="text-xs text-zinc-600 mt-1 max-w-sm leading-relaxed">
+              <p className="text-xs text-muted mt-1 max-w-sm leading-relaxed">
                 Debug preview issues, get improvement suggestions, or ask about the architecture.
                 This AI has full access to your run's source code, plan, review, and Docker status.
               </p>
@@ -496,8 +475,8 @@ export default function RunConversation({ runId }: Props) {
                   disabled={sending}
                   className={cn(
                     'flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs transition-all',
-                    'bg-white/[0.04] border border-white/[0.08] text-zinc-400',
-                    'hover:bg-white/[0.08] hover:text-zinc-200 hover:border-accent-violet/30',
+                    'bg-[var(--gray-200)] border border-[var(--border-default)] text-secondary',
+                    'hover:bg-[var(--border-default)] hover:text-primary hover:border-accent-blue/30',
                     sending && 'opacity-50 cursor-not-allowed'
                   )}
                 >
@@ -523,12 +502,12 @@ export default function RunConversation({ runId }: Props) {
           >
             {msg.role === 'user' ? (
               /* User message — plain text bubble */
-              <div className="max-w-[85%] rounded-sm px-4 py-3 text-sm leading-relaxed bg-accent-violet/20 text-zinc-100 rounded-br-sm">
+              <div className="max-w-[85%] rounded-sm px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary rounded-br-sm">
                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
               </div>
             ) : (
               /* Assistant message — rendered markdown */
-              <div className="max-w-[90%] rounded-sm px-4 py-3 bg-white/[0.05] border border-white/[0.06] text-zinc-300 rounded-bl-sm">
+              <div className="max-w-[90%] rounded-sm px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary rounded-bl-sm">
                 <MarkdownContent content={msg.content} compact />
               </div>
             )}
@@ -538,14 +517,14 @@ export default function RunConversation({ runId }: Props) {
         {/* Sending indicator */}
         {sending && (
           <div className="flex justify-start">
-            <div className="bg-white/[0.05] border border-white/[0.06] rounded-sm rounded-bl-sm px-4 py-3">
+            <div className="bg-[var(--gray-300)] border border-[var(--border-default)] rounded-sm rounded-bl-sm px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 bg-accent-violet/60 rounded-full animate-bounce [animation-delay:0ms]" />
-                  <span className="h-1.5 w-1.5 bg-accent-violet/60 rounded-full animate-bounce [animation-delay:150ms]" />
-                  <span className="h-1.5 w-1.5 bg-accent-violet/60 rounded-full animate-bounce [animation-delay:300ms]" />
+                  <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:0ms]" />
+                  <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:150ms]" />
+                  <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:300ms]" />
                 </div>
-                <span className="text-[10px] text-zinc-600">Analyzing code&hellip;</span>
+                <span className="text-[10px] text-muted">Analyzing code&hellip;</span>
               </div>
             </div>
           </div>
@@ -553,7 +532,7 @@ export default function RunConversation({ runId }: Props) {
 
         {/* Error */}
         {error && (
-          <div className="mx-auto max-w-md p-3 rounded-sm bg-accent-rose/10 border border-accent-rose/20 text-xs text-accent-rose text-center">
+          <div className="mx-auto max-w-md p-3 rounded-sm bg-accent-red/10 border border-accent-red/20 text-xs text-accent-red text-center">
             {error}
           </div>
         )}
@@ -563,11 +542,11 @@ export default function RunConversation({ runId }: Props) {
 
       {/* Limit reached banner */}
       {limitReached && (
-        <div className="px-4 py-3 border-t border-white/[0.06] bg-accent-rose/[0.04] flex-shrink-0">
-          <p className="text-xs text-accent-rose text-center">
+        <div className="px-4 py-3 border-t border-[var(--border-default)] bg-accent-red/[0.04] flex-shrink-0">
+          <p className="text-xs text-accent-red text-center">
             Conversation limit reached. Click{' '}
             <button
-              className="underline text-accent-violet hover:opacity-80"
+              className="underline text-accent-blue hover:opacity-80"
               onClick={() => setShowIterateBox(true)}
             >
               Iterate as New Run
@@ -579,14 +558,14 @@ export default function RunConversation({ runId }: Props) {
 
       {/* Input area */}
       {!limitReached && (
-        <div className="px-4 py-3 border-t border-white/[0.06] flex-shrink-0">
+        <div className="px-4 py-3 border-t border-[var(--border-default)] flex-shrink-0">
           <div className={cn(
-            'flex items-end gap-2 bg-white/[0.04] border rounded-sm px-3 py-2 transition-colors',
-            input ? 'border-accent-violet/40' : 'border-white/[0.08]'
+            'flex items-end gap-2 bg-[var(--gray-200)] border rounded-sm px-3 py-2 transition-colors',
+            input ? 'border-accent-blue/40' : 'border-[var(--border-default)]'
           )}>
             <textarea
               ref={inputRef}
-              className="flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none max-h-32 min-h-[24px]"
+              className="flex-1 bg-transparent text-sm text-primary placeholder-[var(--text-muted)] resize-none focus:outline-none max-h-32 min-h-[24px]"
               placeholder="Debug issues, ask about code, request improvements\u2026"
               rows={1}
               value={input}
@@ -605,8 +584,8 @@ export default function RunConversation({ runId }: Props) {
               className={cn(
                 'p-2.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-sm flex-shrink-0 transition-all',
                 input.trim() && !sending
-                  ? 'bg-accent-violet text-white hover:bg-accent-violet/90'
-                  : 'text-zinc-600 cursor-not-allowed'
+                  ? 'bg-accent-blue text-primary hover:bg-accent-blue/90'
+                  : 'text-muted cursor-not-allowed'
               )}
             >
               {sending
@@ -615,7 +594,7 @@ export default function RunConversation({ runId }: Props) {
               }
             </button>
           </div>
-          <p className="text-[10px] text-zinc-700 mt-1 pl-1">
+          <p className="text-[10px] text-[var(--text-muted)] mt-1 pl-1">
             Press Enter to send · Shift+Enter for new line
           </p>
         </div>

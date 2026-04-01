@@ -81,8 +81,8 @@ function SecretField({
   const [show, setShow] = useState(false);
   return (
     <div>
-      <label className="text-xs text-zinc-400 mb-1 block">
-        {label} {subLabel && <span className="text-zinc-600">{subLabel}</span>}
+      <label className="text-xs text-secondary mb-1 block">
+        {label} {subLabel && <span className="text-muted">{subLabel}</span>}
       </label>
       <div className="relative">
         <input
@@ -90,12 +90,12 @@ function SecretField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none pr-10"
+          className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none pr-10"
         />
         <button
           type="button"
           onClick={() => setShow((v) => !v)}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-secondary"
         >
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
@@ -111,15 +111,15 @@ function TextField({
 }) {
   return (
     <div>
-      <label className="text-xs text-zinc-400 mb-1 block">{label}</label>
+      <label className="text-xs text-secondary mb-1 block">{label}</label>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+        className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none"
       />
-      {hint && <p className="text-xs text-zinc-600 mt-1">{hint}</p>}
+      {hint && <p className="text-xs text-muted mt-1">{hint}</p>}
     </div>
   );
 }
@@ -187,12 +187,12 @@ function JiraCredentialForm({
         onChange={setToken}
         placeholder={org.hasJiraCredentials ? '(saved)' : 'Atlassian API token'}
       />
-      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-emerald' : 'text-red-400'}`}>{msg.text}</p>}
+      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-green' : 'text-accent-red'}`}>{msg.text}</p>}
       <div className="flex gap-3 pt-1">
         <button
           type="submit"
           disabled={saving || (!baseUrl.trim() && !email.trim() && !token.trim())}
-          className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -200,7 +200,7 @@ function JiraCredentialForm({
           type="button"
           onClick={handleTest}
           disabled={testing || !baseUrl.trim() || !email.trim() || !token.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-[var(--border-default)] text-secondary text-sm hover:border-accent-blue/40 hover:text-primary disabled:opacity-40 transition-colors"
         >
           {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           Test Connection
@@ -210,7 +210,7 @@ function JiraCredentialForm({
             type="button"
             onClick={handleDisconnect}
             disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
           >
             <Unplug className="h-3.5 w-3.5" />
             Disconnect
@@ -284,12 +284,12 @@ function ConfluenceCredentialForm({
         onChange={setToken}
         placeholder={org.hasConfluenceCredentials ? '(saved)' : 'Atlassian API token'}
       />
-      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-emerald' : 'text-red-400'}`}>{msg.text}</p>}
+      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-green' : 'text-accent-red'}`}>{msg.text}</p>}
       <div className="flex gap-3 pt-1">
         <button
           type="submit"
           disabled={saving || (!baseUrl.trim() && !email.trim() && !token.trim())}
-          className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -297,7 +297,7 @@ function ConfluenceCredentialForm({
           type="button"
           onClick={handleTest}
           disabled={testing || !baseUrl.trim() || !email.trim() || !token.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-[var(--border-default)] text-secondary text-sm hover:border-accent-blue/40 hover:text-primary disabled:opacity-40 transition-colors"
         >
           {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           Test Connection
@@ -307,7 +307,7 @@ function ConfluenceCredentialForm({
             type="button"
             onClick={handleDisconnect}
             disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
           >
             <Unplug className="h-3.5 w-3.5" />
             Disconnect
@@ -366,14 +366,14 @@ function SlackConfigForm({
   if (!slackStatus?.connected) {
     return (
       <div className="space-y-3">
-        <p className="text-xs text-zinc-400">
+        <p className="text-xs text-secondary">
           Connect your Slack workspace to receive pipeline notifications in your channels.
         </p>
-        {msg && <p className={`text-xs ${msg.ok ? 'text-accent-emerald' : 'text-red-400'}`}>{msg.text}</p>}
+        {msg && <p className={`text-xs ${msg.ok ? 'text-accent-green' : 'text-accent-red'}`}>{msg.text}</p>}
         <button
           onClick={handleConnect}
           disabled={connecting}
-          className="flex items-center gap-2 px-4 py-2 rounded-sm bg-[#4A154B] text-white text-sm font-medium hover:bg-[#4A154B]/80 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-sm bg-[#4A154B] text-primary text-sm font-medium hover:bg-[#4A154B]/80 disabled:opacity-50 transition-colors"
         >
           {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
             <svg width="16" height="16" viewBox="0 0 32 32" fill="none"><path d="M8.8 19.2a2.4 2.4 0 01-2.4 2.4A2.4 2.4 0 014 19.2a2.4 2.4 0 012.4-2.4h2.4v2.4z" fill="#fff"/><path d="M10 19.2a2.4 2.4 0 012.4-2.4 2.4 2.4 0 012.4 2.4v6a2.4 2.4 0 01-2.4 2.4 2.4 2.4 0 01-2.4-2.4v-6z" fill="#fff"/><path d="M12.4 8.8a2.4 2.4 0 01-2.4-2.4A2.4 2.4 0 0112.4 4a2.4 2.4 0 012.4 2.4v2.4h-2.4z" fill="#fff"/><path d="M12.4 10a2.4 2.4 0 012.4 2.4 2.4 2.4 0 01-2.4 2.4h-6A2.4 2.4 0 014 12.4 2.4 2.4 0 016.4 10h6z" fill="#fff"/></svg>
@@ -388,40 +388,40 @@ function SlackConfigForm({
     <div className="space-y-3">
       {/* Connection status */}
       <div className="flex items-center gap-2 text-xs">
-        <CheckCircle className="h-3.5 w-3.5 text-accent-emerald" />
-        <span className="text-zinc-300">Connected to <span className="font-medium text-white">{slackStatus.teamName}</span></span>
+        <CheckCircle className="h-3.5 w-3.5 text-accent-green" />
+        <span className="text-secondary">Connected to <span className="font-medium text-primary">{slackStatus.teamName}</span></span>
         {slackStatus.channelCount != null && (
-          <span className="text-zinc-600">({slackStatus.channelCount} channel{slackStatus.channelCount !== 1 ? 's' : ''} mapped)</span>
+          <span className="text-muted">({slackStatus.channelCount} channel{slackStatus.channelCount !== 1 ? 's' : ''} mapped)</span>
         )}
       </div>
 
       {slackStatus.installedBy && (
-        <p className="text-xs text-zinc-600">
+        <p className="text-xs text-muted">
           Installed by {slackStatus.installedBy}
           {slackStatus.installedAt && ` \u00B7 ${relativeTime(slackStatus.installedAt)}`}
         </p>
       )}
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted">
         Configure project-level channel mappings from each project&apos;s settings.
         Use the test button below to verify the bot can post to a channel.
       </p>
 
-      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-emerald' : 'text-red-400'}`}>{msg.text}</p>}
+      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-green' : 'text-accent-red'}`}>{msg.text}</p>}
 
       <SlackTestSection onTest={handleTest} testingChannel={testingChannel} />
 
       <div className="flex gap-3 pt-1">
         <button
           onClick={onRefresh}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-white/[0.08] text-zinc-400 hover:text-white text-xs transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary text-xs transition-colors"
         >
           <RefreshCw className="h-3 w-3" /> Refresh Status
         </button>
         <button
           onClick={handleDisconnect}
           disabled={disconnecting}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-zinc-400 hover:text-red-400 text-xs transition-colors disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-secondary hover:text-accent-red text-xs transition-colors disabled:opacity-50"
         >
           <Unplug className="h-3 w-3" />
           {disconnecting ? 'Disconnecting...' : 'Disconnect'}
@@ -453,13 +453,13 @@ function SlackTestSection({
   return (
     <div className="flex items-end gap-2">
       <div className="flex-1">
-        <label className="text-xs text-zinc-400 mb-1 block">Send test message</label>
+        <label className="text-xs text-secondary mb-1 block">Send test message</label>
         <div className="flex gap-2">
           {channels.length === 0 ? (
             <button
               onClick={loadChannels}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-xs hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-sm border border-[var(--border-default)] text-secondary text-xs hover:border-accent-blue/40 hover:text-primary disabled:opacity-40 transition-colors"
             >
               {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Hash className="h-3 w-3" />}
               Load Channels
@@ -469,7 +469,7 @@ function SlackTestSection({
               <select
                 value={selectedChannel}
                 onChange={(e) => setSelectedChannel(e.target.value)}
-                className="flex-1 rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-xs text-white focus:border-accent-violet focus:outline-none"
+                className="flex-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-xs text-primary focus:border-accent-blue focus:outline-none"
               >
                 {channels.map((ch) => (
                   <option key={ch.channelId} value={ch.channelId}>#{ch.channelName}</option>
@@ -478,7 +478,7 @@ function SlackTestSection({
               <button
                 onClick={() => selectedChannel && onTest(selectedChannel)}
                 disabled={!selectedChannel || testingChannel != null}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-sm bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
               >
                 {testingChannel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                 Test
@@ -511,13 +511,13 @@ export default function IntegrationsPage() {
     return (
       <div className="h-full overflow-y-auto p-4 flex items-center justify-center">
         <div className="text-center space-y-3 max-w-md">
-          <div className="h-12 w-12 rounded-sm bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mx-auto">
-            <Unplug className="h-6 w-6 text-zinc-600" />
+          <div className="h-12 w-12 rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] flex items-center justify-center mx-auto">
+            <Unplug className="h-6 w-6 text-muted" />
           </div>
-          <h2 className="text-lg font-semibold text-zinc-200">Integrations Unavailable</h2>
-          <p className="text-sm text-zinc-500 leading-relaxed">
-            Managing integrations requires a <span className="text-accent-violet font-medium">PRO</span> or{' '}
-            <span className="text-accent-violet font-medium">ENTERPRISE</span> plan with org admin access.
+          <h2 className="text-lg font-semibold text-primary">Integrations Unavailable</h2>
+          <p className="text-sm text-muted leading-relaxed">
+            Managing integrations requires a <span className="text-accent-blue font-medium">PRO</span> or{' '}
+            <span className="text-accent-blue font-medium">ENTERPRISE</span> plan with org admin access.
             Contact your organization admin to upgrade.
           </p>
         </div>
@@ -578,15 +578,15 @@ export default function IntegrationsPage() {
     <div className="h-full overflow-y-auto p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-white">Integrations</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
+          <h1 className="text-lg font-semibold text-primary">Integrations</h1>
+          <p className="text-xs text-muted mt-0.5">
             External tools that can trigger agent runs.
             {isAdmin && ' Click Configure to enable an integration for your organization.'}
           </p>
         </div>
         <button
           onClick={() => setShowGuide(!showGuide)}
-          className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-accent-violet transition-colors px-3 py-1.5 rounded-sm border border-white/[0.08] hover:border-accent-violet/30"
+          className="flex items-center gap-1.5 text-xs text-secondary hover:text-accent-blue transition-colors px-3 py-1.5 rounded-sm border border-[var(--border-default)] hover:border-accent-blue/30"
         >
           <HelpCircle className="h-3.5 w-3.5" />
           Setup Guide
@@ -596,7 +596,7 @@ export default function IntegrationsPage() {
       {/* No org warning */}
       {!user?.orgId && (
         <GlassPanel className="px-4 py-3 border-amber-500/20">
-          <p className="text-xs text-amber-400">
+          <p className="text-xs text-accent-amber">
             <AlertCircle className="h-3.5 w-3.5 inline mr-1 -mt-0.5" />
             You must be part of an organization to manage integrations.
             Create one from Org Settings.
@@ -615,8 +615,8 @@ export default function IntegrationsPage() {
               key={int.key}
               className={`rounded-sm border transition-all ${
                 configured
-                  ? 'border-accent-violet/30 bg-accent-violet/[0.04]'
-                  : 'border-white/[0.06] bg-white/[0.02]'
+                  ? 'border-accent-blue/30 bg-accent-blue/[0.04]'
+                  : 'border-[var(--border-default)] bg-[var(--gray-100)]'
               } ${!configured && !int.configurable ? 'opacity-60 grayscale' : ''}`}
             >
               {/* Card header */}
@@ -625,20 +625,20 @@ export default function IntegrationsPage() {
                   <div className="flex items-center gap-2.5">
                     <IntegrationLogo integration={int.key} size={28} />
                     <div>
-                      <p className="text-sm font-medium text-zinc-200">{int.name}</p>
-                      <p className="text-xs text-zinc-500">{int.description}</p>
+                      <p className="text-sm font-medium text-primary">{int.name}</p>
+                      <p className="text-xs text-muted">{int.description}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs px-2 py-0.5 rounded-sm font-medium ${
-                      configured ? 'text-accent-emerald bg-accent-emerald/10' : 'text-zinc-600 bg-zinc-600/10'
+                      configured ? 'text-accent-green bg-accent-green/10' : 'text-muted bg-[var(--gray-400)]/10'
                     }`}>
                       {configured ? 'Enabled' : 'Disabled'}
                     </span>
                     {isAdmin && int.configurable && user?.orgId && (
                       <button
                         onClick={() => setConfiguring(isExpanded ? null : int.key)}
-                        className="flex items-center gap-1 text-xs text-zinc-400 hover:text-accent-violet transition-colors px-2 py-1 rounded-sm border border-white/[0.06] hover:border-accent-violet/30"
+                        className="flex items-center gap-1 text-xs text-secondary hover:text-accent-blue transition-colors px-2 py-1 rounded-sm border border-[var(--border-default)] hover:border-accent-blue/30"
                       >
                         <Settings2 className="h-3 w-3" />
                         {isExpanded ? 'Close' : configured ? 'Edit' : 'Configure'}
@@ -647,19 +647,19 @@ export default function IntegrationsPage() {
                   </div>
                 </div>
                 {configured && int.key === 'JIRA' && org?.jiraBaseUrl && (
-                  <p className="text-xs text-zinc-500 mt-1 truncate">URL: {org.jiraBaseUrl}</p>
+                  <p className="text-xs text-muted mt-1 truncate">URL: {org.jiraBaseUrl}</p>
                 )}
                 {configured && int.key === 'CONFLUENCE' && org?.confluenceBaseUrl && (
-                  <p className="text-xs text-zinc-500 mt-1 truncate">URL: {org.confluenceBaseUrl}</p>
+                  <p className="text-xs text-muted mt-1 truncate">URL: {org.confluenceBaseUrl}</p>
                 )}
                 {configured && int.key === 'SLACK' && slackStatus?.teamName && (
-                  <p className="text-xs text-zinc-500 mt-1 truncate">Workspace: {slackStatus.teamName}</p>
+                  <p className="text-xs text-muted mt-1 truncate">Workspace: {slackStatus.teamName}</p>
                 )}
               </div>
 
               {/* Expanded credential form */}
               {isExpanded && (int.key === 'SLACK' ? user?.orgId : org) && (
-                <div className="px-4 pb-4 pt-1 border-t border-white/[0.06]">
+                <div className="px-4 pb-4 pt-1 border-t border-[var(--border-default)]">
                   {int.key === 'JIRA' && org && (
                     <JiraCredentialForm org={org} onSaved={handleOrgUpdated} />
                   )}
@@ -679,38 +679,38 @@ export default function IntegrationsPage() {
       {/* Access Token Setup Guide */}
       {showGuide && (
         <GlassPanel className="p-4">
-          <h3 className="text-sm font-semibold text-zinc-200 mb-3 flex items-center gap-2">
-            <HelpCircle className="h-4 w-4 text-accent-violet" />
+          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
+            <HelpCircle className="h-4 w-4 text-accent-blue" />
             How to Get Access Tokens
           </h3>
-          <p className="text-xs text-zinc-500 mb-4">
+          <p className="text-xs text-muted mb-4">
             Each integration requires an API token or credentials. Follow the steps below to configure access for each service.
           </p>
           <div className="space-y-1">
             {Object.entries(SETUP_GUIDES).map(([key, guide]) => (
-              <div key={key} className="border border-white/[0.06] rounded-sm overflow-hidden">
+              <div key={key} className="border border-[var(--border-default)] rounded-sm overflow-hidden">
                 <button
                   onClick={() => toggleGuide(key)}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-[var(--gray-100)] transition-colors"
                 >
                   {openGuides[key]
-                    ? <ChevronDown className="h-3.5 w-3.5 text-zinc-500 flex-shrink-0" />
-                    : <ChevronRight className="h-3.5 w-3.5 text-zinc-500 flex-shrink-0" />
+                    ? <ChevronDown className="h-3.5 w-3.5 text-muted flex-shrink-0" />
+                    : <ChevronRight className="h-3.5 w-3.5 text-muted flex-shrink-0" />
                   }
-                  <span className="text-sm font-medium text-zinc-300">{guide.title}</span>
+                  <span className="text-sm font-medium text-secondary">{guide.title}</span>
                   <a
                     href={guide.url}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="ml-auto text-xs text-accent-violet hover:text-accent-violet/80 flex items-center gap-1"
+                    className="ml-auto text-xs text-accent-blue hover:text-accent-blue/80 flex items-center gap-1"
                   >
                     Open <ExternalLink className="h-3 w-3" />
                   </a>
                 </button>
                 {openGuides[key] && (
                   <div className="px-3 pb-3 pt-0">
-                    <ol className="list-decimal list-inside space-y-1.5 text-xs text-zinc-400 ml-5">
+                    <ol className="list-decimal list-inside space-y-1.5 text-xs text-secondary ml-5">
                       {guide.steps.map((step, i) => (
                         <li key={i} className="leading-relaxed">{step}</li>
                       ))}
@@ -726,24 +726,24 @@ export default function IntegrationsPage() {
       {/* Integration runs */}
       {runs.length > 0 && (
         <GlassPanel className="overflow-hidden">
-          <div className="px-4 py-3 border-b border-white/[0.06]">
-            <h3 className="text-sm font-semibold text-zinc-200">Integration-triggered Runs</h3>
+          <div className="px-4 py-3 border-b border-[var(--border-default)]">
+            <h3 className="text-sm font-semibold text-primary">Integration-triggered Runs</h3>
           </div>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-white/[0.04]">
+              <tr className="border-b border-[var(--border-default)]">
                 {['Run ID', 'Status', 'Goal', 'Created'].map((h) => (
-                  <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">{h}</th>
+                  <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-muted">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {runs.slice(0, 20).map((r) => (
-                <tr key={r.runId} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
-                  <td className="px-4 py-2.5 font-mono text-xs text-zinc-400">{r.runId.slice(0, 12)}</td>
-                  <td className="px-4 py-2.5 text-xs text-zinc-300">{r.status}</td>
-                  <td className="px-4 py-2.5 text-xs text-zinc-400 max-w-xs truncate">{(r.userRequest ?? '').slice(0, 60)}</td>
-                  <td className="px-4 py-2.5 text-xs text-zinc-600">{relativeTime(r.startedAt)}</td>
+                <tr key={r.runId} className="border-b border-[var(--border-default)] hover:bg-[var(--gray-100)]">
+                  <td className="px-4 py-2.5 font-mono text-xs text-secondary">{r.runId.slice(0, 12)}</td>
+                  <td className="px-4 py-2.5 text-xs text-secondary">{r.status}</td>
+                  <td className="px-4 py-2.5 text-xs text-secondary max-w-xs truncate">{(r.userRequest ?? '').slice(0, 60)}</td>
+                  <td className="px-4 py-2.5 text-xs text-muted">{relativeTime(r.startedAt)}</td>
                 </tr>
               ))}
             </tbody>

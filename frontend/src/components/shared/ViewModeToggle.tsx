@@ -5,14 +5,14 @@ export default function ViewModeToggle() {
   const { viewMode, setViewMode } = useViewMode();
 
   return (
-    <div className="flex rounded-sm border border-[var(--mc-border)] overflow-hidden">
+    <div className="flex rounded-md border border-[var(--border-default)] overflow-hidden">
       <button
         onClick={() => setViewMode('vibe')}
         className={cn(
           'px-3 py-1 text-xs font-mono font-medium uppercase tracking-wider transition-colors',
           viewMode === 'vibe'
-            ? 'bg-accent-violet text-white'
-            : 'bg-transparent text-zinc-500 hover:text-zinc-300'
+            ? 'bg-[var(--gray-300)] text-primary'
+            : 'bg-transparent text-muted hover:text-secondary'
         )}
       >
         Vibe
@@ -22,8 +22,8 @@ export default function ViewModeToggle() {
         className={cn(
           'px-3 py-1 text-xs font-mono font-medium uppercase tracking-wider transition-colors',
           viewMode === 'pro'
-            ? 'bg-accent-violet text-white'
-            : 'bg-transparent text-zinc-500 hover:text-zinc-300'
+            ? 'bg-[var(--gray-300)] text-primary'
+            : 'bg-transparent text-muted hover:text-secondary'
         )}
       >
         Pro

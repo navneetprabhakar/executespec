@@ -42,13 +42,13 @@ export default function TestProgressTracker({ runId, status }: Props) {
   if (!hasStarted) return null;
 
   return (
-    <div className="mx-4 mt-3 rounded-sm border border-white/[0.08] bg-white/[0.02] p-3">
+    <div className="mx-4 mt-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
       <div className="flex items-center gap-2 mb-2">
-        <TestTube2 className="h-4 w-4 text-violet-400" />
-        <span className="text-sm font-medium text-zinc-200">Integration Tests</span>
-        <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-accent-violet/15 text-accent-violet border border-accent-violet/25">Beta</span>
+        <TestTube2 className="h-4 w-4 text-accent-blue" />
+        <span className="text-sm font-medium text-primary">Integration Tests</span>
+        <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-accent-blue/15 text-accent-blue border border-accent-blue/25">Beta</span>
         {hasFailed && (
-          <span className="ml-auto text-xs text-red-400">Pipeline failed</span>
+          <span className="ml-auto text-xs text-accent-red">Pipeline failed</span>
         )}
         {hasReport && (
           <span className="ml-auto text-xs text-emerald-400">Complete</span>
@@ -69,14 +69,14 @@ export default function TestProgressTracker({ runId, status }: Props) {
           return (
             <div key={step.key} className="flex items-center gap-2 text-xs">
               {state === 'done' && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-              {state === 'active' && <Loader2 className="h-3.5 w-3.5 text-violet-400 animate-spin" />}
-              {state === 'pending' && <Circle className="h-3.5 w-3.5 text-zinc-600" />}
-              {state === 'failed' && <Circle className="h-3.5 w-3.5 text-red-400" />}
+              {state === 'active' && <Loader2 className="h-3.5 w-3.5 text-accent-blue animate-spin" />}
+              {state === 'pending' && <Circle className="h-3.5 w-3.5 text-muted" />}
+              {state === 'failed' && <Circle className="h-3.5 w-3.5 text-accent-red" />}
               <span className={cn(
-                state === 'done' && 'text-zinc-400',
-                state === 'active' && 'text-zinc-200',
-                state === 'pending' && 'text-zinc-600',
-                state === 'failed' && 'text-red-400',
+                state === 'done' && 'text-secondary',
+                state === 'active' && 'text-primary',
+                state === 'pending' && 'text-muted',
+                state === 'failed' && 'text-accent-red',
               )}>
                 {step.label}
               </span>

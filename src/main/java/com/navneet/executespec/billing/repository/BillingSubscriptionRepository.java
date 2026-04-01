@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,4 +26,8 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
     long countActiveFounderSubscriptions();
 
     List<BillingSubscription> findByStatus(String status);
+
+    /** Find cancelled subscriptions whose grace period has ended (currentPeriodEnd is in the past). */
+    @Query("SELECT s FROM BillingSubscription s WHERE s.status = 'CANCELLED' AND s.currentPeriodEnd < :now")
+    List<BillingSubscription> findCancelledPastPeriodEnd(@Param("now") Instant now);
 }

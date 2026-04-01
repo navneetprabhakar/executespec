@@ -47,9 +47,29 @@ public class RequestTriageService {
      * @param provider    user's selected AI provider
      * @return SINGLE_SHOT or MULTI_TASK
      */
+    /** Patterns that indicate a full-stack project — always MULTI_TASK regardless of LLM classification. */
+    private static final java.util.regex.Pattern FULL_STACK_PATTERN = java.util.regex.Pattern.compile(
+        "(?i)(?:" +
+        "full[- ]?stack|fullstack|mern|mean|pern|" +
+        "(?:express|fastify|flask|fastapi|django|spring\\s*boot|rails|nestjs|hono|koa)" +
+            "\\s.*?(?:react|vue|angular|svelte|next\\.?js|frontend|ui|dashboard)|" +
+        "(?:react|vue|angular|svelte|next\\.?js|frontend|ui|dashboard)" +
+            "\\s.*?(?:express|fastify|flask|fastapi|django|spring\\s*boot|rails|nestjs|hono|koa)|" +
+        "(?:rest\\s*api|api\\s+server|backend)\\s.*?(?:frontend|ui|react|vue|dashboard)|" +
+        "(?:todo\\s+app|task\\s+manager|blog\\s+platform|e-?commerce|chat\\s+app)" +
+            "\\s.*?(?:with|using|and)\\s.*?(?:express|react|vue|mongo|postgres|mysql|sqlite)" +
+        ")"
+    );
+
     public TriageResult classify(String userRequest, String runId, LlmProvider provider) {
         if (!triageEnabled) {
             log.info("[Triage] Disabled via config — defaulting to MULTI_TASK for run {}", runId);
+            return TriageResult.MULTI_TASK;
+        }
+
+        // Safety check: force MULTI_TASK for requests that match full-stack patterns
+        if (FULL_STACK_PATTERN.matcher(userRequest).find()) {
+            log.info("[Triage] Run {} matches full-stack pattern — forcing MULTI_TASK", runId);
             return TriageResult.MULTI_TASK;
         }
 

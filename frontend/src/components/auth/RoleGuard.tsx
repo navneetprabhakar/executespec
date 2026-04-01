@@ -14,7 +14,7 @@ export default function RoleGuard({ requireSuperAdmin, requireOrgAdmin, children
 
   if (requireSuperAdmin && user.globalRole !== 'SUPER_ADMIN') {
     return fallback ? <>{fallback}</> : (
-      <div className="flex h-full items-center justify-center text-slate-500">
+      <div className="flex h-full items-center justify-center text-muted">
         <p>403 — Not authorized</p>
       </div>
     );
@@ -24,7 +24,7 @@ export default function RoleGuard({ requireSuperAdmin, requireOrgAdmin, children
       user.globalRole !== 'SUPER_ADMIN' &&
       user.orgRole !== 'ORG_ADMIN') {
     return fallback ? <>{fallback}</> : (
-      <div className="flex h-full items-center justify-center text-slate-500">
+      <div className="flex h-full items-center justify-center text-muted">
         <p>403 — Org Admin access required</p>
       </div>
     );

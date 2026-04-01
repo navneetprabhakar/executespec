@@ -18,6 +18,8 @@ interface UiStore {
   pendingNewRunGoal: string | null;
   /** Whether the run list panel is collapsed to give more space to run detail. */
   runListCollapsed: boolean;
+  /** Width of the run list panel in pixels (persisted). */
+  runListWidth: number;
   /** Whether the copilot chat panel is maximized (full-width overlay). */
   copilotMaximized: boolean;
   /** Vibe (simplified) or Pro (full pipeline) view mode. */
@@ -31,6 +33,7 @@ interface UiStore {
   removeToast: (id: string) => void;
   setPendingNewRunGoal: (goal: string | null) => void;
   setRunListCollapsed: (v: boolean) => void;
+  setRunListWidth: (w: number) => void;
   setCopilotMaximized: (v: boolean) => void;
   setViewMode: (mode: ViewMode) => void;
 }
@@ -45,6 +48,7 @@ export const useUiStore = create<UiStore>((set) => ({
   toasts: [],
   pendingNewRunGoal: null,
   runListCollapsed: false,
+  runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
   copilotMaximized: false,
   viewMode: (localStorage.getItem('es:viewMode') as ViewMode) || 'vibe',
 
@@ -54,6 +58,10 @@ export const useUiStore = create<UiStore>((set) => ({
   setActiveTab: (t) => set({ activeTab: t }),
   setPendingNewRunGoal: (goal) => set({ pendingNewRunGoal: goal }),
   setRunListCollapsed: (v) => set({ runListCollapsed: v }),
+  setRunListWidth: (w) => {
+    localStorage.setItem('es:runListWidth', String(w));
+    set({ runListWidth: w });
+  },
   setCopilotMaximized: (v) => set({ copilotMaximized: v }),
   setViewMode: (mode) => {
     localStorage.setItem('es:viewMode', mode);

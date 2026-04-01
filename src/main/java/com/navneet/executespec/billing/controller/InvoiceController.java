@@ -110,11 +110,22 @@ public class InvoiceController {
     }
 
     @GetMapping("/api/billing/invoices/{id}/pdf")
-    public ResponseEntity<byte[]> downloadPdf(@AuthenticationPrincipal AppUserDetails principal,
-                                                @PathVariable UUID id) {
+    public ResponseEntity<?> downloadPdf(@AuthenticationPrincipal AppUserDetails principal,
+                                           @PathVariable UUID id) {
         Invoice invoice = invoiceService.getInvoice(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         requireOwnership(principal, invoice);
+
+        // For Stripe invoices with a gateway PDF URL, redirect to Stripe-hosted PDF
+        if ("stripe".equalsIgnoreCase(invoice.getGateway())
+                && invoice.getGatewayPdfUrl() != null
+                && !invoice.getGatewayPdfUrl().isBlank()) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, invoice.getGatewayPdfUrl())
+                    .build();
+        }
+
+        // For Razorpay and other gateways, generate PDF server-side
         return pdfResponse(invoice);
     }
 

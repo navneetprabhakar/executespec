@@ -11,6 +11,7 @@ import ProjectSelector from '@/components/auth/ProjectSelector';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
 import ProviderModelSelector, { getPersistedSelection } from '@/components/runs/ProviderModelSelector';
+import { useViewMode } from '@/hooks/useViewMode';
 
 interface NewRunModalProps {
   onClose: () => void;
@@ -50,6 +51,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
   const { createRun, setActiveRunId } = useRunStore();
   const { addToast } = useUiStore();
   const { user } = useAuthStore();
+  const { isVibe, vibeRunDefaults } = useViewMode();
   const navigate = useNavigate();
 
   // Auto-scroll to bottom of chat
@@ -150,9 +152,9 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
       const isPrototype = executionMode === 'PROTOTYPE';
       const runId = await createRun({
         userRequest: goal,
-        executionMode,
-        skipApproval: isPrototype,
-        autoMerge: isPrototype,
+        executionMode: isVibe ? 'PROTOTYPE' : executionMode,
+        skipApproval: isVibe ? vibeRunDefaults.skipApproval : isPrototype,
+        autoMerge: isVibe ? vibeRunDefaults.autoMerge : isPrototype,
         ...(model ? { modelName: model } : {}),
         ...(provider ? { aiProvider: provider } : {}),
         ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
@@ -200,24 +202,24 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
         transition={{ duration: 0.15 }}
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          'w-full rounded-sm bg-surface-2 border border-white/[0.08]  overflow-hidden flex flex-col',
+          'w-full rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)]  overflow-hidden flex flex-col',
           mode === 'chat' ? 'max-w-xl' : 'max-w-xl',
         )}
         style={{ maxHeight: mode === 'chat' ? 'min(95dvh, 80vh)' : '95dvh' }}
       >
         {/* ── Header ───────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
           {mode === 'chat' ? (
             <button
               onClick={() => setMode('compose')}
-              className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="flex items-center gap-1.5 text-sm text-secondary hover:text-primary transition-colors"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               Back to goal
             </button>
           ) : (
-            <h2 className="text-base font-semibold text-white flex items-center gap-2">
-              <Rocket className="h-4 w-4 text-accent-violet" />
+            <h2 className="text-base font-semibold text-primary flex items-center gap-2">
+              <Rocket className="h-4 w-4 text-accent-blue" />
               Launch New Run
             </h2>
           )}
@@ -227,13 +229,13 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               <span className={cn(
                 'text-xs font-mono tabular-nums px-2 py-0.5 rounded-sm',
                 atLimit
-                  ? 'bg-accent-rose/15 text-accent-rose'
-                  : 'bg-white/[0.06] text-zinc-400',
+                  ? 'bg-accent-red/15 text-accent-red'
+                  : 'bg-[var(--gray-200)] text-secondary',
               )}>
                 {msgCount}/{MAX_MESSAGES}
               </span>
             )}
-            <button onClick={onClose} className="p-2 -m-1 text-zinc-500 hover:text-zinc-300">
+            <button onClick={onClose} className="p-2 -m-1 text-muted hover:text-secondary">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -249,12 +251,12 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               placeholder="Describe what you want to build..."
               rows={5}
               className={cn(
-                'w-full font-mono text-sm bg-surface-1 border border-white/[0.08] rounded-sm',
-                'px-4 py-3 text-zinc-200 placeholder:text-zinc-600',
-                'focus:outline-none focus:border-accent-violet/40 resize-none',
+                'w-full font-mono text-sm bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm',
+                'px-4 py-3 text-primary placeholder:text-muted',
+                'focus:outline-none focus:border-accent-blue/40 resize-none',
               )}
             />
-            <p className="text-xs text-zinc-500 -mt-2">
+            <p className="text-xs text-muted -mt-2">
               Supported: Java, TypeScript, React, Python, Go, Rust, HTML/CSS
             </p>
 
@@ -272,8 +274,8 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               disabled={!goal.trim()}
               className={cn(
                 'w-full py-2 rounded-sm text-sm font-medium transition-all flex items-center justify-center gap-2',
-                'border border-accent-violet/30 text-accent-violet/80',
-                'hover:border-accent-violet/60 hover:text-accent-violet hover:bg-accent-violet/5',
+                'border border-accent-blue/30 text-accent-blue/80',
+                'hover:border-accent-blue/60 hover:text-accent-blue hover:bg-accent-blue/5',
                 'disabled:opacity-30 disabled:cursor-not-allowed',
               )}
             >
@@ -281,142 +283,147 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               Build My Spec
             </button>
 
-            {/* Prototype Mode toggle */}
-            <div
-              role="switch"
-              aria-checked={executionMode === 'PROTOTYPE'}
-              tabIndex={0}
-              onClick={() => setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE')}
-              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE'); } }}
-              className="flex items-center justify-between cursor-pointer select-none group"
-            >
-              <div className="flex items-center gap-2">
-                <Zap className={cn('h-3.5 w-3.5 transition-colors', executionMode === 'PROTOTYPE' ? 'text-accent-amber' : 'text-zinc-500')} />
-                <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
-                  Prototype Mode
-                  <span className="text-xs text-zinc-600 ml-1.5">
-                    {executionMode === 'PROTOTYPE'
-                      ? '(Auto-approved, fast models, auto-preview)'
-                      : '(Plan review, full validation, code review)'}
-                  </span>
-                </span>
-              </div>
-              <span
-                className={cn(
-                  'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
-                  executionMode === 'PROTOTYPE' ? 'bg-accent-amber' : 'bg-white/[0.10]',
-                )}
-              >
-                <span className={cn(
-                  'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
-                  executionMode === 'PROTOTYPE' ? 'translate-x-4' : 'translate-x-0.5',
-                )} />
-              </span>
-            </div>
-
-            {/* Provider & model selection */}
-            <ProviderModelSelector
-              provider={provider}
-              model={model}
-              onProviderChange={setProvider}
-              onModelChange={setModel}
-            />
-
-            {/* GitHub toggle */}
-            <button
-              onClick={() => setShowGitHub(!showGitHub)}
-              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300"
-            >
-              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showGitHub && 'rotate-180')} />
-              GitHub repository
-              {repoChoice !== 'NONE' && (
-                <span className="text-accent-violet">•</span>
-              )}
-            </button>
-
-            <AnimatePresence>
-              {showGitHub && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden space-y-3"
+            {/* ── Pro-only options (hidden in Vibe mode) ────────────────────── */}
+            {!isVibe && (
+              <>
+                {/* Prototype Mode toggle */}
+                <div
+                  role="switch"
+                  aria-checked={executionMode === 'PROTOTYPE'}
+                  tabIndex={0}
+                  onClick={() => setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE')}
+                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE'); } }}
+                  className="flex items-center justify-between cursor-pointer select-none group"
                 >
-                  {/* No-PAT warning */}
-                  {!user?.hasGithubPat && (
-                    <div className="flex items-center gap-1.5 text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-sm px-3 py-2">
-                      <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                      No GitHub PAT configured. Add yours in&nbsp;
-                      <strong>Settings → GitHub Integration</strong>&nbsp;first.
-                    </div>
-                  )}
-
-                  {/* Radio options */}
-                  <div className="space-y-2">
-                    {(
-                      [
-                        { value: 'NONE',     label: 'None',                   desc: "Don't push to GitHub" },
-                        { value: 'NEW',      label: 'Create new repo',        desc: 'Auto-create a private GitHub repo after merge' },
-                        { value: 'EXISTING', label: 'Start from existing repo', desc: 'Clone, modify and push back to the same repo' },
-                      ] as { value: RepoChoice; label: string; desc: string }[]
-                    ).map((opt) => (
-                      <label
-                        key={opt.value}
-                        className={cn(
-                          'flex items-start gap-2.5 rounded-sm border px-3 py-2.5 cursor-pointer transition-colors',
-                          repoChoice === opt.value
-                            ? 'border-accent-violet/40 bg-accent-violet/[0.06]'
-                            : 'border-white/[0.06] hover:border-white/[0.12]',
-                        )}
-                      >
-                        <input
-                          type="radio"
-                          name="repoChoice"
-                          value={opt.value}
-                          checked={repoChoice === opt.value}
-                          onChange={() => setRepoChoice(opt.value as RepoChoice)}
-                          className="mt-0.5 accent-accent-violet"
-                        />
-                        <div>
-                          <p className="text-sm text-zinc-200 leading-tight">{opt.label}</p>
-                          <p className="text-xs text-zinc-500 mt-0.5">{opt.desc}</p>
-                        </div>
-                      </label>
-                    ))}
+                  <div className="flex items-center gap-2">
+                    <Zap className={cn('h-3.5 w-3.5 transition-colors', executionMode === 'PROTOTYPE' ? 'text-accent-amber' : 'text-muted')} />
+                    <span className="text-sm text-secondary group-hover:text-secondary transition-colors">
+                      Prototype Mode
+                      <span className="text-xs text-muted ml-1.5">
+                        {executionMode === 'PROTOTYPE'
+                          ? '(Auto-approved, fast models, auto-preview)'
+                          : '(Plan review, full validation, code review)'}
+                      </span>
+                    </span>
                   </div>
-
-                  {/* Repo URL input — only when EXISTING */}
-                  <AnimatePresence>
-                    {repoChoice === 'EXISTING' && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="flex items-center gap-2 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 focus-within:border-accent-violet/40">
-                          <Github className="h-3.5 w-3.5 text-zinc-500 flex-shrink-0" />
-                          <input
-                            type="url"
-                            value={repoUrl}
-                            onChange={(e) => setRepoUrl(e.target.value)}
-                            placeholder="https://github.com/owner/repo"
-                            className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
-                          />
-                        </div>
-                      </motion.div>
+                  <span
+                    className={cn(
+                      'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
+                      executionMode === 'PROTOTYPE' ? 'bg-accent-amber' : 'bg-[var(--border-default)]',
                     )}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  >
+                    <span className={cn(
+                      'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
+                      executionMode === 'PROTOTYPE' ? 'translate-x-4' : 'translate-x-0.5',
+                    )} />
+                  </span>
+                </div>
+
+                {/* Provider & model selection */}
+                <ProviderModelSelector
+                  provider={provider}
+                  model={model}
+                  onProviderChange={setProvider}
+                  onModelChange={setModel}
+                />
+
+                {/* GitHub toggle */}
+                <button
+                  onClick={() => setShowGitHub(!showGitHub)}
+                  className="flex items-center gap-1.5 text-xs text-muted hover:text-secondary"
+                >
+                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showGitHub && 'rotate-180')} />
+                  GitHub repository
+                  {repoChoice !== 'NONE' && (
+                    <span className="text-accent-blue">•</span>
+                  )}
+                </button>
+
+                <AnimatePresence>
+                  {showGitHub && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden space-y-3"
+                    >
+                      {/* No-PAT warning */}
+                      {!user?.hasGithubPat && (
+                        <div className="flex items-center gap-1.5 text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-sm px-3 py-2">
+                          <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                          No GitHub PAT configured. Add yours in&nbsp;
+                          <strong>Settings → GitHub Integration</strong>&nbsp;first.
+                        </div>
+                      )}
+
+                      {/* Radio options */}
+                      <div className="space-y-2">
+                        {(
+                          [
+                            { value: 'NONE',     label: 'None',                   desc: "Don't push to GitHub" },
+                            { value: 'NEW',      label: 'Create new repo',        desc: 'Auto-create a private GitHub repo after merge' },
+                            { value: 'EXISTING', label: 'Start from existing repo', desc: 'Clone, modify and push back to the same repo' },
+                          ] as { value: RepoChoice; label: string; desc: string }[]
+                        ).map((opt) => (
+                          <label
+                            key={opt.value}
+                            className={cn(
+                              'flex items-start gap-2.5 rounded-sm border px-3 py-2.5 cursor-pointer transition-colors',
+                              repoChoice === opt.value
+                                ? 'border-accent-blue/40 bg-accent-blue/[0.06]'
+                                : 'border-[var(--border-default)] hover:border-[var(--border-default)]',
+                            )}
+                          >
+                            <input
+                              type="radio"
+                              name="repoChoice"
+                              value={opt.value}
+                              checked={repoChoice === opt.value}
+                              onChange={() => setRepoChoice(opt.value as RepoChoice)}
+                              className="mt-0.5 accent-accent-blue"
+                            />
+                            <div>
+                              <p className="text-sm text-primary leading-tight">{opt.label}</p>
+                              <p className="text-xs text-muted mt-0.5">{opt.desc}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+
+                      {/* Repo URL input — only when EXISTING */}
+                      <AnimatePresence>
+                        {repoChoice === 'EXISTING' && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="flex items-center gap-2 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 focus-within:border-accent-blue/40">
+                              <Github className="h-3.5 w-3.5 text-muted flex-shrink-0" />
+                              <input
+                                type="url"
+                                value={repoUrl}
+                                onChange={(e) => setRepoUrl(e.target.value)}
+                                placeholder="https://github.com/owner/repo"
+                                className="flex-1 bg-transparent text-sm text-primary placeholder:text-muted focus:outline-none"
+                              />
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
+            )}
 
             <button
               onClick={handleSubmit}
               disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim())}
               className={cn(
-                'w-full py-2.5 rounded-sm font-medium text-sm text-white transition-all',
-                'bg-accent-violet hover:bg-accent-violet/80',
+                'w-full py-2.5 rounded-sm font-medium text-sm text-primary transition-all',
+                'bg-accent-blue hover:bg-accent-blue/80',
                 'disabled:opacity-40 disabled:cursor-not-allowed',
                 'flex items-center justify-center gap-2',
               )}
@@ -448,15 +455,15 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
               {/* Typing indicator */}
               {chatLoading && (
                 <div className="flex gap-2 items-start">
-                  <div className="h-6 w-6 rounded-full bg-accent-violet/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Sparkles className="h-3 w-3 text-accent-violet" />
+                  <div className="h-6 w-6 rounded-full bg-accent-blue/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Sparkles className="h-3 w-3 text-accent-blue" />
                   </div>
-                  <div className="bg-white/[0.05] border border-white/[0.06] rounded-sm rounded-tl-sm px-3 py-2">
+                  <div className="bg-[var(--gray-300)] border border-[var(--border-default)] rounded-sm rounded-tl-sm px-3 py-2">
                     <span className="flex gap-1 items-center h-4">
                       {[0, 150, 300].map((delay) => (
                         <span
                           key={delay}
-                          className="h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce"
+                          className="h-1.5 w-1.5 rounded-full bg-[var(--gray-400)] animate-bounce"
                           style={{ animationDelay: `${delay}ms` }}
                         />
                       ))}
@@ -478,7 +485,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
             )}
 
             {/* Input row */}
-            <div className="border-t border-white/[0.06] px-4 py-3 flex-shrink-0">
+            <div className="border-t border-[var(--border-default)] px-4 py-3 flex-shrink-0">
               <div className="flex gap-2">
                 <input
                   autoFocus
@@ -489,9 +496,9 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                   disabled={atLimit || chatLoading}
                   placeholder={atLimit ? 'Max messages reached' : 'Reply…'}
                   className={cn(
-                    'flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2',
-                    'text-sm text-zinc-200 placeholder:text-zinc-600',
-                    'focus:outline-none focus:border-accent-violet/40',
+                    'flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2',
+                    'text-sm text-primary placeholder:text-muted',
+                    'focus:outline-none focus:border-accent-blue/40',
                     'disabled:opacity-40',
                   )}
                 />
@@ -500,11 +507,11 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                   disabled={!canSend}
                   className={cn(
                     'px-3 py-2 rounded-sm transition-all flex items-center justify-center',
-                    'bg-accent-violet hover:bg-accent-violet/80',
+                    'bg-accent-blue hover:bg-accent-blue/80',
                     'disabled:opacity-30 disabled:cursor-not-allowed',
                   )}
                 >
-                  <Send className="h-4 w-4 text-white" />
+                  <Send className="h-4 w-4 text-primary" />
                 </button>
               </div>
 
@@ -514,7 +521,7 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
                 disabled={!goal.trim() || launching}
                 className={cn(
                   'mt-2 w-full py-2 rounded-sm text-xs font-medium transition-all',
-                  'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]',
+                  'text-secondary hover:text-primary hover:bg-[var(--gray-200)]',
                   'disabled:opacity-30 disabled:cursor-not-allowed',
                   'flex items-center justify-center gap-1.5',
                 )}
@@ -561,11 +568,11 @@ function ChatBubble({
       {/* Avatar */}
       <div className={cn(
         'h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
-        isUser ? 'bg-accent-violet/25' : 'bg-white/[0.06]',
+        isUser ? 'bg-accent-blue/25' : 'bg-[var(--gray-200)]',
       )}>
         {isUser
-          ? <span className="text-[9px] font-bold text-accent-violet">You</span>
-          : <Sparkles className="h-3 w-3 text-zinc-400" />
+          ? <span className="text-[9px] font-bold text-accent-blue">You</span>
+          : <Sparkles className="h-3 w-3 text-secondary" />
         }
       </div>
 
@@ -573,8 +580,8 @@ function ChatBubble({
       <div className={cn(
         'max-w-[80%] rounded-sm px-3 py-2 text-sm leading-relaxed',
         isUser
-          ? 'bg-accent-violet/15 text-zinc-200 rounded-tr-sm'
-          : 'bg-white/[0.05] border border-white/[0.06] text-zinc-300 rounded-tl-sm',
+          ? 'bg-accent-blue/15 text-primary rounded-tr-sm'
+          : 'bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary rounded-tl-sm',
       )}>
         {isUser ? (
           /* User messages: plain pre-wrap (no markdown) */
@@ -590,8 +597,8 @@ function ChatBubble({
               />
             )}
             {/* Highlighted summary block */}
-            <div className="mt-1 p-2.5 rounded-sm bg-accent-emerald/10 border border-accent-emerald/20">
-              <p className="text-[10px] uppercase tracking-wider text-accent-emerald/70 mb-1.5 font-semibold">
+            <div className="mt-1 p-2.5 rounded-sm bg-accent-green/10 border border-accent-green/20">
+              <p className="text-[10px] uppercase tracking-wider text-accent-green/70 mb-1.5 font-semibold">
                 Requirement Summary
               </p>
               <MarkdownContent
@@ -613,10 +620,10 @@ function ChatBubble({
             className={cn(
               'mt-2 text-[11px] px-2 py-0.5 rounded transition-colors flex items-center gap-1',
               compiling
-                ? 'bg-accent-violet/20 text-accent-violet cursor-wait'
+                ? 'bg-accent-blue/20 text-accent-blue cursor-wait'
                 : summaryMatch
-                  ? 'bg-accent-emerald/20 text-accent-emerald hover:bg-accent-emerald/30'
-                  : 'bg-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.10]',
+                  ? 'bg-accent-green/20 text-accent-green hover:bg-accent-green/30'
+                  : 'bg-[var(--gray-200)] text-secondary hover:text-primary hover:bg-[var(--border-default)]',
               'disabled:opacity-70',
             )}
           >

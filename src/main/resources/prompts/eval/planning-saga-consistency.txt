@@ -1,0 +1,75 @@
+You are designing the distributed consistency layer for a financial trading saga orchestrator. Given the specific failure timeline below, design the deduplication and consistency protocol that handles this exact scenario correctly.
+
+SYSTEM CONTEXT:
+- Saga orchestrator manages multi-leg trade orders across exchanges (NYSE, NASDAQ, LSE)
+- Each leg is submitted via HTTP to the exchange's order API
+- A message broker (Kafka) delivers saga state transition events to downstream systems
+- Compensation events are also delivered via Kafka — consumers may receive duplicate deliveries due to at-least-once semantics
+
+FAILURE TIMELINE:
+
+T+0ms:      Client submits order: "Sell 500 shares AAPL on NYSE (Leg A), Buy 200 shares MSFT on NASDAQ (Leg B)"
+T+50ms:     Orchestrator acquires distributed lock for order ID "ORD-7829"
+T+120ms:    Leg A submitted to NYSE. NYSE acknowledges: FILLED at $152.30, 500 shares
+T+800ms:    Leg B submitted to NASDAQ. HTTP connection established.
+T+2800ms:   NYSE settlement engine confirms Leg A settlement (T+0 instant settlement for this security class)
+T+3200ms:   Orchestrator's HTTP client timeout fires (2400ms timeout for Leg B). Orchestrator marks Leg B as TIMED_OUT.
+T+3250ms:   Orchestrator begins compensation. Must compensate Leg A (FILLED) and handle Leg B (TIMED_OUT).
+T+3400ms:   NASDAQ actually processes the Leg B order: PARTIAL_FILL at $415.20, 340 of 500 shares filled. HTTP response is generated but the orchestrator already closed the connection.
+T+3500ms:   Orchestrator sends cancel request to NYSE for Leg A. NYSE responds: "ORDER_SETTLED — cannot cancel"
+T+3700ms:   Orchestrator sends cancel request to NASDAQ for Leg B. NASDAQ responds: "PARTIAL_FILL — 340 shares filled, 160 shares cancelled"
+T+4000ms:   Orchestrator marks saga as COMPENSATED and publishes CompensationComplete event to Kafka
+T+4200ms:   Kafka consumer processes CompensationComplete, updates portfolio service
+T+8500ms:   Kafka rebalance occurs — consumer group re-reads from offset, receives duplicate CompensationComplete event
+T+8600ms:   Portfolio service processes duplicate event — adjusts position AGAIN, creating incorrect negative position
+
+QUESTIONS TO ANSWER:
+
+1. DEDUPLICATION MECHANISM: Design the distributed dedup that prevents split-brain execution of the same order. The Redis TTL-based approach failed in production (key expired during GC pause, two instances processed same order). What replaces it?
+
+2. CONSISTENCY PROTOCOL: For this specific timeline, what is the CORRECT compensation action for each leg?
+   - Leg A: 500 shares AAPL sold on NYSE, SETTLED at T+2800ms. What compensation action and why?
+   - Leg B: 340 of 500 shares MSFT bought on NASDAQ, PARTIAL_FILL. What compensation action for the 340 filled shares?
+
+3. STATE + EVENT ATOMICITY: How do you ensure the saga's state transition and the Kafka event are published atomically? If the DB commits but the Kafka publish fails, downstream systems are inconsistent. If Kafka publishes but DB fails, the saga state is wrong.
+
+4. IDEMPOTENT COMPENSATION HANDLER: The Kafka consumer at T+8500ms receives a duplicate CompensationComplete event. Design the handler that makes this safe.
+
+5. FENCING: At T+3200ms, the orchestrator decided to compensate. But what if a network-delayed response from NASDAQ arrives at T+5000ms showing Leg B fully filled (500 shares)? How does the orchestrator prevent stale/delayed responses from corrupting the saga state?
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "deduplication": {
+    "mechanism": "what replaces Redis TTL-based dedup",
+    "lock_type": "type of distributed lock",
+    "lease_duration_reasoning": "why this specific duration, tied to what SLA",
+    "fencing_strategy": "how stale/delayed responses are rejected"
+  },
+  "compensation_actions": {
+    "leg_a": {
+      "action": "cancel or offsetting_trade",
+      "reasoning": "why this action given settlement status",
+      "quantity": "number of shares",
+      "details": "specific trade parameters"
+    },
+    "leg_b": {
+      "action": "cancel or offsetting_trade",
+      "reasoning": "why this action",
+      "quantity": "number of shares to compensate",
+      "unfilled_handling": "what about the 160 unfilled shares"
+    }
+  },
+  "atomicity": {
+    "pattern": "how state + event are made atomic",
+    "implementation": "specific mechanism (outbox table, CDC, etc.)",
+    "failure_recovery": "what happens if the publish side fails"
+  },
+  "idempotent_handler": {
+    "design": "how duplicate events are detected and handled",
+    "storage": "where idempotency keys are stored",
+    "key_schema": "what constitutes the idempotency key"
+  },
+  "anti_patterns_rejected": [
+    "pattern this design explicitly avoids and why"
+  ]
+}

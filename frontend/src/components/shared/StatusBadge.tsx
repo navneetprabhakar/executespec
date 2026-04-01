@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import { STATUS_COLORS } from '@/lib/constants';
+import GlowDot from './GlowDot';
 
 interface StatusBadgeProps {
   status: string;
@@ -7,7 +8,13 @@ interface StatusBadgeProps {
 }
 
 const DISPLAY_NAMES: Record<string, string> = {
-  COMPLETE: 'CODE GENERATED',
+  COMPLETE: 'Ready',
+  WORKING: 'Building',
+  PLANNING: 'Planning',
+  COMPILING: 'Compiling',
+  REVIEWING: 'Reviewing',
+  FAILED: 'Error',
+  CANCELLED: 'Canceled',
 };
 
 export default function StatusBadge({ status, className }: StatusBadgeProps) {
@@ -15,12 +22,12 @@ export default function StatusBadge({ status, className }: StatusBadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium',
-        colors.bg,
+        'inline-flex items-center gap-1.5 text-xs font-medium tracking-wide uppercase',
         colors.text,
         className
       )}
     >
+      <GlowDot status={status} size="sm" />
       {DISPLAY_NAMES[status] ?? status.replace(/_/g, ' ')}
     </span>
   );

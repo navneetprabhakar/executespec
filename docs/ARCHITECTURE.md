@@ -373,34 +373,64 @@ graph TB
 
 ## 5. Security Architecture
 
+> Full requirements: [docs/requirements/security-guardrails.md](requirements/security-guardrails.md)
+
+8-layer defense-in-depth model. No single layer failing results in full compromise.
+
 ```mermaid
 graph TB
-    subgraph "Authentication"
-        LOGIN[POST /auth/login] --> JWT_GEN[Generate JWT<br/>HS256, 24h TTL]
-        JWT_GEN --> ACCESS[Access Token<br/>Header: Authorization]
-        JWT_GEN --> REFRESH[Refresh Token<br/>HttpOnly Cookie, 7d]
+    subgraph "Layer 1-2: API Boundary"
+        REQ[POST /api/runs] --> VAL["@Valid RunRequest<br/>Size/Pattern/NotBlank"]
+        VAL --> SCAN["InputSanitizer<br/>26 patterns + NFKC normalization<br/>+ obfuscation detection"]
     end
 
-    subgraph "Authorization (per request)"
-        REQ[Incoming Request] --> JF[JwtFilter<br/>Validate token]
-        JF --> SC[SecurityConfig<br/>Endpoint rules]
-        SC --> RVS[RunVisibilitySpec<br/>Query-level access]
-        SC --> RAG[RunAccessGuard<br/>Resource-level access]
+    subgraph "Layer 3: LLM Prompt Defense"
+        SCAN --> PLAN["PlannerAgent<br/>⟨user_request⟩ untrusted tags"]
+        PLAN --> GATE[Plan Approval Gate]
+        GATE --> WORK["WorkerAgent<br/>SECURITY section in all 3 prompts<br/>⟨tool_result untrusted⟩ tagging"]
     end
 
-    subgraph "RBAC Hierarchy"
-        SUPER[SUPER_ADMIN] --> ALL[All resources]
-        ORG_ADMIN[ORG_ADMIN] --> ORG_RES[Org resources]
-        BILLING[BILLING_ADMIN] --> BILL_RES[Billing only]
-        DEV[DEVELOPER] --> OWN_RES[Org runs read<br/>Own runs write]
-        FREE[FREE User] --> SELF[Own runs only]
+    subgraph "Layer 4-6: Execution Sandbox"
+        WORK --> SHELL["ShellSandboxPolicy<br/>Subshell block → Blocklist → Patterns<br/>→ Chain split → Allowlist"]
+        WORK --> FS["FileSystemTool<br/>safeResolve() + CodeAbuseScanner<br/>(BLOCKING on malware)"]
+        SHELL --> PROC["ShellTool<br/>Secret stripping + 5min timeout"]
     end
 
-    subgraph "Sandbox"
-        FS[FileSystemTool<br/>safeResolve()] --> WS[workspace/{runId}/]
-        SHELL[ShellTool] --> POLICY[ShellSandboxPolicy<br/>Allow/blocklist]
+    subgraph "Layer 7: Auth & Access Control"
+        JF[JwtFilter] --> SC[SecurityConfig<br/>CSP, HSTS, CORS]
+        SC --> RAG[RunAccessGuard<br/>RBAC: SUPER_ADMIN → FREE]
+        SC --> RL[RateLimitFilter<br/>Redis sliding window]
+    end
+
+    subgraph "Layer 8: Container Hardening"
+        FS --> DI[".dockerignore<br/>.env*, credentials.json,<br/>key.json, secrets.*"]
+        DI --> IMG["Preview/Deploy Images<br/>Non-root USER"]
     end
 ```
+
+### Authentication
+- JWT: HS256, access 24h TTL, refresh 7d
+- SSE streams: `?token=` query param (EventSource limitation)
+- All `/api/**` require valid JWT (except auth, health, webhooks, shared reports)
+
+### Authorization (RBAC)
+| Role | Scope |
+|------|-------|
+| SUPER_ADMIN | All resources |
+| ORG_ADMIN | Org resources |
+| BILLING_ADMIN | Billing within org |
+| DEVELOPER | Org runs (read/write) |
+| FREE User | Own runs only |
+
+### Agent Sandbox (defense-in-depth)
+1. **InputSanitizer** — 26 regex patterns + Unicode NFKC normalization + obfuscation detection (HTTP 400)
+2. **LLM prompt defense** — untrusted input tagging + tool result `untrusted="true"` wrapping
+3. **CodeAbuseScanner** — blocks malware writes (mining, reverse shells, exfil, obfuscated payloads)
+4. **ShellSandboxPolicy** — subshell blocking + blocklist + patterns + chained-command splitting + allowlist
+5. **FileSystemTool** — path normalization + workspace boundary enforcement
+6. **ShellTool** — env var stripping + 5-min timeout
+7. **Rate limiting** — Redis sliding window, tier-based quotas
+8. **Container hardening** — .dockerignore excludes secrets, non-root execution
 
 ---
 

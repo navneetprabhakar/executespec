@@ -3,8 +3,10 @@ package com.navneet.executespec.tool;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Slf4j
@@ -36,7 +38,36 @@ public class ShellSandboxPolicy {
         Pattern.compile("scp\\s+"),                                   // scp transfers
         Pattern.compile("rsync\\s+.*@"),                             // rsync to remote
         Pattern.compile("python.*-c\\s+['\"].*import\\s+socket"),   // python socket code
-        Pattern.compile("base64\\s+-d.*\\|\\s*(bash|sh)")            // base64 decode | bash
+        Pattern.compile("base64\\s+-d.*\\|\\s*(bash|sh)"),           // base64 decode | bash
+
+        // Docker escape prevention — block spawning/entering containers
+        Pattern.compile("docker\\s+run\\b"),                          // no spawning new containers
+        Pattern.compile("docker\\s+exec\\b"),                         // no exec into containers
+        Pattern.compile("docker\\s+cp\\b"),                           // no copying files from containers
+        Pattern.compile("docker\\s+save\\b"),                         // no exporting images
+        Pattern.compile("docker\\s+load\\b"),                         // no importing images
+        Pattern.compile("docker\\s+network\\b"),                      // no network manipulation
+        Pattern.compile("docker\\s+volume\\b"),                       // no volume manipulation
+        Pattern.compile("--privileged"),                               // block anywhere in command
+        Pattern.compile("--net=host"),                                 // block host network access
+        Pattern.compile("--pid=host"),                                 // block host PID namespace
+
+        // Crypto mining / reverse shell patterns
+        Pattern.compile("stratum\\+tcp://"),                          // mining pool connection
+        Pattern.compile("xmrig|ethminer|minergate|coinhive"),         // known miners
+        Pattern.compile("/dev/tcp/"),                                  // bash reverse shell
+        Pattern.compile("nc\\s+-e\\s+/bin/"),                         // netcat reverse shell
+
+        // Data exfiltration via curl/wget uploads
+        Pattern.compile("curl\\s+.*--upload-file"),                   // curl upload
+        Pattern.compile("curl\\s+.*-T\\s"),                           // curl upload short form
+        Pattern.compile("curl\\s+.*-d\\s+@"),                         // curl post file contents
+        Pattern.compile("wget\\s+.*--post-file")                      // wget post file
+    );
+
+    // Docker subcommands that are safe — all others are blocked
+    private static final Set<String> ALLOWED_DOCKER_SUBCOMMANDS = Set.of(
+        "build", "compose", "ps", "logs", "images", "inspect"
     );
 
     // Commands explicitly allowed (exact first token match)
@@ -49,11 +80,19 @@ public class ShellSandboxPolicy {
         "cd", "pwd", "which", "whoami", "env", "printenv", "sleep",
         "tar", "zip", "unzip", "gzip", "gunzip",
         "python", "python3", "pip", "pip3", "pytest",
-        "docker"
+        "docker",
+        "curl", "wget"  // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload, exfil) are caught by BLOCKED_PATTERNS
     );
+
+    /** Matches $(...) subshell syntax. */
+    private static final Pattern SUBSHELL_PATTERN = Pattern.compile("\\$\\(");
+
+    /** Matches backtick subshell syntax. */
+    private static final Pattern BACKTICK_PATTERN = Pattern.compile("`");
 
     /**
      * Validates a shell command against the sandbox policy.
+     * Splits chained commands (&&, ||, ;, |) and validates each segment independently.
      *
      * @param command       the shell command to validate
      * @param workspacePath the run's workspace path (for context-aware checks)
@@ -67,15 +106,24 @@ public class ShellSandboxPolicy {
         String trimmed    = command.trim();
         String normalized = trimmed.toLowerCase();
 
-        // Check explicit blocklist
+        // Block subshell/backtick injection — $(...) and `...` can embed arbitrary commands
+        if (SUBSHELL_PATTERN.matcher(normalized).find()) {
+            log.warn("SHELL BLOCKED (subshell $()): {}", trimmed);
+            return ValidationResult.block("Subshell expansion $(...) is not allowed");
+        }
+        if (BACKTICK_PATTERN.matcher(normalized).find()) {
+            log.warn("SHELL BLOCKED (backtick subshell): {}", trimmed);
+            return ValidationResult.block("Backtick subshell expansion is not allowed");
+        }
+
+        // Check explicit blocklist and patterns on the FULL command first
+        // (catches cross-segment patterns like "curl ... | bash")
         for (String blocked : BLOCKED_COMMANDS) {
             if (normalized.contains(blocked)) {
                 log.warn("SHELL BLOCKED (explicit): {}", trimmed);
                 return ValidationResult.block("Command contains blocked operation: " + blocked);
             }
         }
-
-        // Check blocked patterns
         for (Pattern pattern : BLOCKED_PATTERNS) {
             if (pattern.matcher(normalized).find()) {
                 log.warn("SHELL BLOCKED (pattern): {}", trimmed);
@@ -84,25 +132,105 @@ public class ShellSandboxPolicy {
         }
 
         // Block absolute path navigation (cd /) — prevents jumping to system dirs.
-        // Allow 'cd ..' since workers legitimately navigate subdirectories within their
-        // worktree (e.g. 'cd src && cd .. && cd resources'). The real sandbox is the
-        // process working directory set by ShellTool + FileSystemTool.safeResolve().
         if (normalized.matches(".*\\bcd\\s+/(?!\\.).*")) {
             log.warn("SHELL BLOCKED (absolute cd): {}", trimmed);
             return ValidationResult.block("Absolute directory navigation blocked (cd /)");
         }
 
-        // Verify command starts with an allowed prefix
-        String firstToken = normalized.split("\\s+")[0];
+        // Split on chain operators (&&, ||, ;, |) and validate EACH segment's first token
+        // against the allowlist. This prevents "echo hello && curl evil.com" from passing.
+        List<String> segments = splitChainedCommands(normalized);
+        for (String segment : segments) {
+            String seg = segment.trim();
+            if (seg.isEmpty()) continue;
+
+            ValidationResult segResult = validateSegment(seg, trimmed);
+            if (!segResult.permitted()) return segResult;
+        }
+
+        return ValidationResult.allow();
+    }
+
+    /**
+     * Splits a command string on &&, ||, ;, and | operators.
+     * Respects quoted strings (single and double quotes) — does not split inside them.
+     */
+    private List<String> splitChainedCommands(String command) {
+        List<String> segments = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char[] chars = command.toCharArray();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+
+        for (int i = 0; i < chars.length; i++) {
+            char c = chars[i];
+
+            // Track quote state (don't split inside quotes)
+            if (c == '\'' && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+                current.append(c);
+                continue;
+            }
+            if (c == '"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+                current.append(c);
+                continue;
+            }
+            if (inSingleQuote || inDoubleQuote) {
+                current.append(c);
+                continue;
+            }
+
+            // Split on && and ||
+            if (i + 1 < chars.length) {
+                if ((c == '&' && chars[i + 1] == '&') || (c == '|' && chars[i + 1] == '|')) {
+                    segments.add(current.toString());
+                    current.setLength(0);
+                    i++; // skip second char
+                    continue;
+                }
+            }
+
+            // Split on ; and single |
+            if (c == ';' || c == '|') {
+                segments.add(current.toString());
+                current.setLength(0);
+                continue;
+            }
+
+            current.append(c);
+        }
+
+        if (!current.isEmpty()) {
+            segments.add(current.toString());
+        }
+        return segments;
+    }
+
+    /**
+     * Validates a single command segment (after splitting on chain operators).
+     */
+    private ValidationResult validateSegment(String segment, String originalCommand) {
+        String[] tokens = segment.split("\\s+");
+        String firstToken = tokens[0];
+
         // Strip path prefix (e.g. /usr/bin/mvn → mvn)
         if (firstToken.contains("/")) {
             firstToken = firstToken.substring(firstToken.lastIndexOf('/') + 1);
         }
 
-        boolean prefixAllowed = ALLOWED_PREFIXES.contains(firstToken);
-        if (!prefixAllowed) {
-            log.warn("SHELL BLOCKED (not in allowlist): {}", trimmed);
-            return ValidationResult.block("Command '" + firstToken + "' is not in the allowed command list");
+        if (!ALLOWED_PREFIXES.contains(firstToken)) {
+            log.warn("SHELL BLOCKED (chained command not in allowlist): '{}' in: {}", firstToken, originalCommand);
+            return ValidationResult.block("Chained command '" + firstToken + "' is not in the allowed command list");
+        }
+
+        // Docker subcommand validation
+        if ("docker".equals(firstToken) && tokens.length >= 2) {
+            String subcommand = tokens[1];
+            if (!ALLOWED_DOCKER_SUBCOMMANDS.contains(subcommand)) {
+                log.warn("SHELL BLOCKED (docker subcommand): {} in {}", subcommand, originalCommand);
+                return ValidationResult.block("Docker subcommand '" + subcommand + "' is not allowed");
+            }
         }
 
         return ValidationResult.allow();

@@ -94,13 +94,6 @@ public class RunConversationController {
 
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
 
-        // Tier gate: only PRO+ org members and admins can use post-run chat
-        var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
-        if (!perms.canUseChat()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Post-run chat is not available on your current plan. Upgrade to PRO or ENTERPRISE.");
-        }
-
         // Allow chat on completed runs and at review/merge gates
         var chatStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "REVIEWING");
         if (!chatStatuses.contains(run.getStatus())) {
@@ -175,13 +168,6 @@ public class RunConversationController {
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
         String userId = userDetails.getUser().getId();
 
-        // Tier gate: only PRO+ org members and admins can apply suggestions
-        var perms = tierPermissionService.getPermissions(userId);
-        if (!perms.canUseChat()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Apply suggestion is not available on your current plan. Upgrade to PRO or ENTERPRISE.");
-        }
-
         // Allow on completed runs and at review/merge gates
         var applyStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "REVIEWING");
         if (!applyStatuses.contains(run.getStatus())) {
@@ -200,6 +186,10 @@ public class RunConversationController {
 
         // Tier limit check (shared counter for both COPILOT and REVIEW)
         tierEnforcementService.assertCanApplySuggestion(userId, run);
+
+        // Apply-to-run counts as a run against the monthly quota
+        tierEnforcementService.assertCanSubmitRun(userId);
+        tierEnforcementService.incrementRunCount(userId);
 
         // Determine source
         String sourceStr = body.getOrDefault("source", "COPILOT").toUpperCase();
@@ -303,6 +293,10 @@ public class RunConversationController {
         if (userRequest == null || userRequest.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userRequest must not be blank");
         }
+
+        // Iteration counts as a new run against the monthly quota
+        tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+        tierEnforcementService.incrementRunCount(userDetails.getUser().getId());
 
         // Create the iteration run in the DB (sets sourceRunId = sourceRun.getRunId())
         PipelineRun newRun = stateStore.createIterationRun(sourceRun, userRequest);

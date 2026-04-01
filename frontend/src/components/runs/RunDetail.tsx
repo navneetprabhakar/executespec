@@ -40,12 +40,19 @@ export default function RunDetail() {
 
   // Show toast when context compaction is triggered
   const compactionShownRef = useRef<Set<string>>(new Set());
+  const budgetShownRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     for (const entry of sseEntries) {
       if (entry.type === 'COMPACTION_TRIGGERED' && !compactionShownRef.current.has(entry.id)) {
         compactionShownRef.current.add(entry.id);
         const taskId = (entry.data?.taskId as string) || 'unknown';
         addToast({ type: 'info', message: `Context compacted for task ${taskId}` });
+      }
+      if (entry.type === 'BUDGET_EXCEEDED' && !budgetShownRef.current.has(entry.id)) {
+        budgetShownRef.current.add(entry.id);
+        const parts = ((entry.data?.payload as string) || '').split('|');
+        const message = parts[2] || 'Run stopped — cost budget exceeded. Upgrade for higher limits.';
+        addToast({ type: 'error', message });
       }
     }
   }, [sseEntries]);
@@ -153,29 +160,29 @@ export default function RunDetail() {
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: '100%', opacity: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          className="flex flex-col h-full bg-surface-1 border-l border-white/[0.06]"
+          className="flex flex-col h-full bg-[var(--gray-100)] border-l border-[var(--border-default)]"
         >
           {/* ── Vibe Mode: simplified view ──────────────────────────── */}
           {isVibe ? (
             <>
               {/* Minimal header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <GlowDot status={activeRun.status} className="flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--mc-text-primary)] line-clamp-1">
+                    <p className="text-sm font-medium text-[var(--text-primary)] line-clamp-1">
                       {activeRun.runTitle ?? activeRun.userRequest?.slice(0, 60) ?? 'Run'}
                     </p>
                     <StatusBadge status={activeRun.status} />
                   </div>
                 </div>
-                <button onClick={() => setActiveRunId(null)} className="text-zinc-500 hover:text-zinc-300 flex-shrink-0 ml-2 p-1.5 -m-1">
+                <button onClick={() => setActiveRunId(null)} className="text-muted hover:text-secondary flex-shrink-0 ml-2 p-1.5 -m-1">
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
               {/* Narrative + summary */}
-              <div className="h-48 overflow-y-auto flex-shrink-0 border-b border-white/[0.06]">
+              <div className="h-48 overflow-y-auto flex-shrink-0 border-b border-[var(--border-default)]">
                 <VibeProgressNarrative />
               </div>
 
@@ -189,27 +196,27 @@ export default function RunDetail() {
           {/* Mobile back button */}
           <button
             onClick={() => setActiveRunId(null)}
-            className="lg:hidden flex items-center gap-1.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white border-b border-white/[0.06] transition-colors"
+            className="lg:hidden flex items-center gap-1.5 px-4 py-2.5 text-sm text-secondary hover:text-primary border-b border-[var(--border-default)] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
             Back to runs
           </button>
 
           {/* Header */}
-          <div className="flex items-start justify-between px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+          <div className="flex items-start justify-between px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
             <div className="flex items-start gap-2.5 min-w-0">
               <GlowDot status={activeRun.status} className="mt-1 flex-shrink-0" />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="font-mono text-xs text-zinc-400">{activeRun.runId.slice(0, 16)}</p>
+                  <p className="font-mono text-xs text-secondary">{activeRun.runId.slice(0, 16)}</p>
                   <StatusBadge status={activeRun.status} />
                 </div>
-                <p className="text-xs text-zinc-500 mt-0.5 line-clamp-1">
+                <p className="text-xs text-muted mt-0.5 line-clamp-1">
                   {describeRunStatus(activeRun.status, activeRun.tasks, activeRun.failureReason, activeRun.executionMode)}
                 </p>
               </div>
             </div>
-            <button onClick={() => setActiveRunId(null)} className="text-zinc-500 hover:text-zinc-300 flex-shrink-0 ml-2 p-1.5 -m-1">
+            <button onClick={() => setActiveRunId(null)} className="text-muted hover:text-secondary flex-shrink-0 ml-2 p-1.5 -m-1">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -232,7 +239,7 @@ export default function RunDetail() {
                 {!editingPlan ? (
                   <button
                     onClick={() => setEditingPlan(true)}
-                    className="text-xs text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
+                    className="text-xs text-secondary hover:text-primary underline underline-offset-2"
                   >
                     Edit Plan
                   </button>
@@ -243,7 +250,7 @@ export default function RunDetail() {
                       onChange={(e) => setPlanFeedback(e.target.value)}
                       placeholder="Describe what to change in the plan..."
                       rows={3}
-                      className="w-full rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none"
+                      className="w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2 text-sm text-primary placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none"
                     />
                     <div className="flex gap-2">
                       <button
@@ -269,7 +276,7 @@ export default function RunDetail() {
                       </button>
                       <button
                         onClick={() => { setEditingPlan(false); setPlanFeedback(''); }}
-                        className="px-3 py-1.5 text-xs font-medium rounded-md text-zinc-400 hover:text-zinc-200"
+                        className="px-3 py-1.5 text-xs font-medium rounded-md text-secondary hover:text-primary"
                       >
                         Cancel
                       </button>
@@ -313,60 +320,60 @@ export default function RunDetail() {
           )}
           {/* Review summary shown on COMPLETE runs */}
           {activeRun.status === 'COMPLETE' && review && (
-            <div className="mx-4 mt-3 p-3 rounded-sm border border-zinc-700 bg-zinc-800/60 text-xs">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs">
               <div className="flex items-center gap-2 mb-1">
                 <span className={cn(
                   'font-semibold',
-                  (review.recommendationCompat ?? review.recommendation) === 'MERGE' ? 'text-accent-emerald' :
-                  (review.recommendationCompat ?? review.recommendation) === 'PARTIAL_MERGE' ? 'text-accent-amber' : 'text-accent-rose'
+                  (review.recommendationCompat ?? review.recommendation) === 'MERGE' ? 'text-accent-green' :
+                  (review.recommendationCompat ?? review.recommendation) === 'PARTIAL_MERGE' ? 'text-accent-amber' : 'text-accent-red'
                 )}>
                   {(review.recommendationCompat ?? review.recommendation ?? 'MERGE').replace('_', ' ')}
                 </span>
-                <span className="text-zinc-500">·</span>
+                <span className="text-muted">·</span>
                 <span className={cn(
-                  'text-zinc-400',
-                  review.overallConfidence === 'HIGH' ? 'text-accent-emerald/80' :
-                  review.overallConfidence === 'MEDIUM' ? 'text-accent-amber/80' : 'text-accent-rose/80'
+                  'text-secondary',
+                  review.overallConfidence === 'HIGH' ? 'text-accent-green/80' :
+                  review.overallConfidence === 'MEDIUM' ? 'text-accent-amber/80' : 'text-accent-red/80'
                 )}>
                   {review.overallConfidence} confidence
                 </span>
               </div>
-              <p className="text-zinc-400 leading-relaxed">{review.summary}</p>
+              <p className="text-secondary leading-relaxed">{review.summary}</p>
             </div>
           )}
           {/* Failure reason banner */}
           {activeRun.status === 'FAILED' && activeRun.failureReason && (
-            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-rose/30 bg-accent-rose/5">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-red/30 bg-accent-red/5">
               <div className="flex items-center gap-2 mb-1">
-                <AlertTriangle className="h-4 w-4 text-accent-rose flex-shrink-0" />
-                <p className="text-xs font-medium text-accent-rose">Run failed</p>
+                <AlertTriangle className="h-4 w-4 text-accent-red flex-shrink-0" />
+                <p className="text-xs font-medium text-accent-red">Run failed</p>
               </div>
-              <p className="text-xs text-zinc-400 leading-relaxed">{activeRun.failureReason}</p>
+              <p className="text-xs text-secondary leading-relaxed">{activeRun.failureReason}</p>
             </div>
           )}
           {/* Paused banner — edit goal and restart */}
           {activeRun.status === 'PAUSED' && (
-            <div className="mx-4 mt-3 p-3 rounded-sm border border-orange-400/30 bg-orange-400/5 space-y-2">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-amber/30 bg-accent-amber/5 space-y-2">
               <div className="flex items-center gap-2">
-                <Pause className="h-4 w-4 text-orange-400 flex-shrink-0" />
-                <p className="text-xs font-medium text-orange-400">Run paused</p>
+                <Pause className="h-4 w-4 text-accent-amber flex-shrink-0" />
+                <p className="text-xs font-medium text-accent-amber">Run paused</p>
               </div>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                <span className="text-zinc-500">Current goal:</span> {activeRun.userRequest}
+              <p className="text-xs text-secondary leading-relaxed">
+                <span className="text-muted">Current goal:</span> {activeRun.userRequest}
               </p>
               {!editingGoal ? (
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleResume}
                     disabled={resuming}
-                    className="flex items-center gap-1.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-md bg-accent-blue/20 hover:bg-accent-blue/30 border border-accent-blue/30 px-3 py-1.5 text-xs font-medium text-accent-blue transition-colors disabled:opacity-50"
                   >
                     <Play className="h-3 w-3" />
                     {resuming ? 'Resuming…' : 'Resume'}
                   </button>
                   <button
                     onClick={() => { setEditingGoal(true); setNewGoal(activeRun.userRequest ?? ''); }}
-                    className="flex items-center gap-1.5 rounded-md bg-orange-400/20 hover:bg-orange-400/30 border border-orange-400/30 px-3 py-1.5 text-xs font-medium text-orange-400 transition-colors"
+                    className="flex items-center gap-1.5 rounded-md bg-accent-amber/20 hover:bg-accent-amber/30 border border-accent-amber/30 px-3 py-1.5 text-xs font-medium text-accent-amber transition-colors"
                   >
                     Edit Goal & Restart
                   </button>
@@ -377,21 +384,21 @@ export default function RunDetail() {
                     value={newGoal}
                     onChange={(e) => setNewGoal(e.target.value)}
                     rows={3}
-                    className="w-full rounded-md bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 p-2 focus:outline-none focus:border-orange-400/50 resize-none"
+                    className="w-full rounded-md bg-[var(--gray-100)] border border-[var(--border-default)] text-xs text-primary p-2 focus:outline-none focus:border-accent-amber/50 resize-none"
                     placeholder="Enter updated goal..."
                   />
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handleEditAndRestart}
                       disabled={restarting || !newGoal.trim()}
-                      className="flex items-center gap-1.5 rounded-md bg-orange-500 hover:bg-orange-600 px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                      className="flex items-center gap-1.5 rounded-md bg-accent-amber hover:bg-accent-amber/80 px-3 py-1.5 text-xs font-medium text-primary transition-colors disabled:opacity-50"
                     >
                       <Play className="h-3 w-3" />
                       {restarting ? 'Restarting…' : 'Restart with New Goal'}
                     </button>
                     <button
                       onClick={() => { setEditingGoal(false); setNewGoal(''); }}
-                      className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                      className="text-xs text-muted hover:text-secondary transition-colors"
                     >
                       Cancel
                     </button>
@@ -402,7 +409,7 @@ export default function RunDetail() {
           )}
 
           {/* Run Timeline */}
-          <div className="px-4 border-b border-white/[0.06] flex-shrink-0">
+          <div className="px-4 border-b border-[var(--border-default)] flex-shrink-0">
             <RunTimeline
               events={sseEntries.map(e => ({
                 type: e.type,
@@ -417,20 +424,20 @@ export default function RunDetail() {
           </div>
 
           {/* Action bar */}
-          <div className="flex items-center gap-1 lg:gap-2 px-3 lg:px-4 py-2 flex-shrink-0 overflow-x-auto scrollbar-hide border-b border-white/[0.06]">
+          <div className="flex items-center gap-1 lg:gap-2 px-3 lg:px-4 py-2 flex-shrink-0 overflow-x-auto scrollbar-hide border-b border-[var(--border-default)]">
             {!['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED'].includes(activeRun.status) && (
               <>
                 <button
                   onClick={handlePause}
                   disabled={pausing}
-                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-orange-400 transition-colors disabled:opacity-50 whitespace-nowrap"
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-amber transition-colors disabled:opacity-50 whitespace-nowrap"
                 >
                   <Pause className="h-3.5 w-3.5" />
                   {pausing ? 'Pausing…' : 'Pause'}
                 </button>
                 <button
                   onClick={() => handle(() => cancelRun(activeRun.runId), 'Run cancelled')}
-                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-accent-rose transition-colors whitespace-nowrap"
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-red transition-colors whitespace-nowrap"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   Cancel
@@ -441,7 +448,7 @@ export default function RunDetail() {
               <button
                 onClick={handleReRun}
                 disabled={reRunning}
-                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-accent-violet transition-colors disabled:opacity-50 whitespace-nowrap"
+                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 whitespace-nowrap"
               >
                 <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
                 {reRunning ? 'Launching…' : 'Re-run'}
@@ -450,7 +457,7 @@ export default function RunDetail() {
             <div className="flex items-center gap-2 ml-auto">
               <button
                 onClick={() => handle(() => downloadWorkspace(activeRun.runId), 'Download started')}
-                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-zinc-500 hover:text-accent-emerald transition-colors whitespace-nowrap"
+                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-green transition-colors whitespace-nowrap"
                 title="Download workspace as ZIP"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -494,10 +501,10 @@ function MobileCollapsibleReports({ runId, status }: { runId: string; status: st
   }
 
   return (
-    <div className="flex-shrink-0 border-b border-white/[0.06]">
+    <div className="flex-shrink-0 border-b border-[var(--border-default)]">
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-1.5 w-full px-4 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+        className="flex items-center gap-1.5 w-full px-4 py-1.5 text-xs text-muted hover:text-secondary transition-colors"
       >
         {collapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
         <span>Reports & Progress</span>
@@ -537,10 +544,10 @@ interface ClarificationBannerProps {
 
 function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onSkip }: ClarificationBannerProps) {
   return (
-    <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-violet/30 bg-accent-violet/5 space-y-2">
+    <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-blue/30 bg-accent-blue/5 space-y-2">
       <div className="flex items-center gap-2">
-        <HelpCircle className="h-4 w-4 text-accent-violet flex-shrink-0" />
-        <p className="text-xs text-accent-violet">
+        <HelpCircle className="h-4 w-4 text-accent-blue flex-shrink-0" />
+        <p className="text-xs text-accent-blue">
           Please provide the specific JIRA issue key (e.g., PROJ-123) or Confluence page URL to continue.
         </p>
       </div>
@@ -551,13 +558,13 @@ function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onS
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && input.trim()) onSubmit(); }}
           placeholder="e.g., PROJ-123 or https://yourorg.atlassian.net/wiki/..."
-          className="flex-1 rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+          className="flex-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-1.5 text-xs text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none"
           disabled={submitting}
         />
         <button
           onClick={onSubmit}
           disabled={submitting || !input.trim()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
         >
           {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
           Submit
@@ -565,7 +572,7 @@ function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onS
         <button
           onClick={onSkip}
           disabled={submitting}
-          className="px-3 py-1.5 rounded-sm border border-white/[0.06] text-zinc-400 hover:text-zinc-300 text-xs transition-colors disabled:opacity-50"
+          className="px-3 py-1.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-secondary text-xs transition-colors disabled:opacity-50"
         >
           Skip
         </button>
@@ -586,27 +593,27 @@ function GateBanner({ message, icon, onApprove, onReject, approveLabel, rejectLa
       <div className="flex items-center gap-2 flex-shrink-0">
         {confirming === 'reject' ? (
           <>
-            <span className="text-xs text-accent-rose">{rejectLabel}?</span>
-            <button onClick={onReject} className="text-xs text-accent-rose font-medium">Yes</button>
-            <button onClick={() => setConfirming(null)} className="text-xs text-zinc-500">No</button>
+            <span className="text-xs text-accent-red">{rejectLabel}?</span>
+            <button onClick={onReject} className="text-xs text-accent-red font-medium">Yes</button>
+            <button onClick={() => setConfirming(null)} className="text-xs text-muted">No</button>
           </>
         ) : confirming === 'approve' ? (
           <>
-            <span className="text-xs text-accent-emerald">{approveLabel}?</span>
-            <button onClick={onApprove} className="text-xs text-accent-emerald font-medium">Yes</button>
-            <button onClick={() => setConfirming(null)} className="text-xs text-zinc-500">No</button>
+            <span className="text-xs text-accent-green">{approveLabel}?</span>
+            <button onClick={onApprove} className="text-xs text-accent-green font-medium">Yes</button>
+            <button onClick={() => setConfirming(null)} className="text-xs text-muted">No</button>
           </>
         ) : (
           <>
             <button
               onClick={() => setConfirming('reject')}
-              className="px-2.5 py-1 rounded text-xs bg-accent-rose/15 text-accent-rose hover:bg-accent-rose/25"
+              className="px-2.5 py-1 rounded text-xs bg-accent-red/15 text-accent-red hover:bg-accent-red/25"
             >
               {rejectLabel}
             </button>
             <button
               onClick={() => setConfirming('approve')}
-              className="px-2.5 py-1 rounded text-xs bg-accent-emerald/15 text-accent-emerald hover:bg-accent-emerald/25"
+              className="px-2.5 py-1 rounded text-xs bg-accent-green/15 text-accent-green hover:bg-accent-green/25"
             >
               {approveLabel}
             </button>

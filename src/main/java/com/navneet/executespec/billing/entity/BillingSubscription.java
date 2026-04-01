@@ -76,6 +76,19 @@ public class BillingSubscription {
     @Column(name = "founder_batch")
     private Integer founderBatch;
 
+    /** Normalized gateway identifier: "razorpay" or "stripe". */
+    @Column(name = "gateway", length = 20)
+    @Builder.Default
+    private String gateway = "razorpay";
+
+    /** "USER" or "ORG" — the type of entity that owns this subscription. */
+    @Column(name = "billing_entity_type", length = 10)
+    private String billingEntityType;
+
+    /** The ID of the billing entity (user ID or org ID). */
+    @Column(name = "billing_entity_id")
+    private String billingEntityId;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String metadata;

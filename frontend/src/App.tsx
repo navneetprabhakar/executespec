@@ -19,13 +19,17 @@ import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from '@/pages/auth/ResetPasswordPage';
 import VerifyEmailPage from '@/pages/auth/VerifyEmailPage';
 import AcceptInvitePage from '@/pages/auth/AcceptInvitePage';
+import AuthCallbackPage from '@/pages/auth/AuthCallbackPage';
 
 // Org pages
 import OrgSettingsPage from '@/pages/org/OrgSettingsPage';
 import OrgProjectsPage from '@/pages/org/OrgProjectsPage';
 
-// Admin page
+// Admin pages
 import AdminPage from '@/pages/admin/AdminPage';
+import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
+import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
+import PricingManager from '@/pages/admin/PricingManager';
 
 // Audit page
 import AuditPage from '@/pages/AuditPage';
@@ -39,6 +43,9 @@ import DeploymentsPage from '@/pages/DeploymentsPage';
 
 // Public pages
 import SharedReportPage from '@/pages/SharedReportPage';
+import TermsPage from '@/pages/TermsPage';
+import PrivacyPage from '@/pages/PrivacyPage';
+import DpaPage from '@/pages/DpaPage';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -63,9 +70,15 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/accept-invite" element={<AcceptInvitePage />} />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
       {/* ── Public shared pages ── */}
       <Route path="/reports/shared/:shareToken" element={<SharedReportPage />} />
+
+      {/* ── Public legal pages ── */}
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/dpa" element={<DpaPage />} />
 
       {/* ── Protected app routes ── */}
       <Route element={<ProtectedRoute />}>
@@ -88,6 +101,9 @@ export default function App() {
 
           {/* Admin */}
           <Route path="admin" element={<AdminPage />} />
+          <Route path="admin/analytics" element={<OrgAdminDashboard />} />
+          <Route path="admin/pricing" element={<PricingManager />} />
+          <Route path="admin/feature-flags" element={<FeatureFlagsPage />} />
           <Route path="admin/*" element={<AdminPage />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />

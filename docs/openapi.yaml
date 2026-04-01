@@ -1,0 +1,2741 @@
+openapi: 3.0.3
+info:
+  title: ExecuteSpec API
+  description: |
+    Multi-agent code generation platform API.
+    All endpoints under `/api` except those marked public require a JWT Bearer token.
+  version: 1.0.0
+  contact:
+    name: ExecuteSpec
+    url: https://executespec.ai
+
+servers:
+  - url: https://app.executespec.ai/api
+    description: Production
+  - url: https://dev.executespec.ai/api
+    description: Development
+  - url: http://localhost:8080/api
+    description: Local
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Auth
+    description: Authentication, registration, password management
+  - name: User Settings
+    description: User-level credentials and preferences
+  - name: Runs
+    description: Pipeline run lifecycle
+  - name: Run Chat
+    description: Post-run copilot conversation
+  - name: Run Content
+    description: Files, messages, timeline for a run
+  - name: Preview
+    description: Preview container lifecycle (Docker/Cloud Run)
+  - name: Deployment
+    description: Permanent Cloud Run deployments
+  - name: GCP Credentials
+    description: GCP service account management for deployments
+  - name: Billing
+    description: Subscriptions, plans, top-ups
+  - name: Invoices
+    description: Invoice management and PDF downloads
+  - name: Accounting
+    description: Revenue, GST, trial balance
+  - name: Organization
+    description: Org management, members, invitations
+  - name: Projects
+    description: Project CRUD and member management
+  - name: Integrations
+    description: Jira, Confluence, Slack integrations
+  - name: Validation Report
+    description: Code review and test validation reports
+  - name: Test Gen
+    description: Test generation and execution
+  - name: Metrics
+    description: Dashboard metrics and analytics
+  - name: Admin
+    description: Super admin operations
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Models
+    description: Available AI models and pricing
+  - name: Conversation
+    description: Pre-run requirement clarification chat
+  - name: SSE
+    description: Server-Sent Events for live run updates
+
+paths:
+  # ──────────────────────────────────────────────────
+  # AUTH
+  # ──────────────────────────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: JWT issued. Sets httpOnly refresh_token cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      description: Uses httpOnly refresh_token cookie
+      security: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /auth/logout:
+    delete:
+      tags: [Auth]
+      summary: Logout
+      responses:
+        '204':
+          description: Session cleared
+
+  /auth/verify-email:
+    get:
+      tags: [Auth]
+      summary: Verify email address
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /auth/resend-verification:
+    post:
+      tags: [Auth]
+      summary: Resend verification email
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password with token
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change password (authenticated)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  nullable: true
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+
+  /auth/me/permissions:
+    get:
+      tags: [Auth]
+      summary: Get tier-based permissions
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TierPermissions'
+
+  # ──────────────────────────────────────────────────
+  # USER SETTINGS
+  # ──────────────────────────────────────────────────
+  /auth/settings/github:
+    put:
+      tags: [User Settings]
+      summary: Update GitHub PAT
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                githubPat:
+                  type: string
+                githubOwner:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+
+  /auth/settings/github/validate:
+    post:
+      tags: [User Settings]
+      summary: Validate GitHub PAT
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pat:
+                  type: string
+                owner:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+
+  /auth/settings/ai-keys:
+    put:
+      tags: [User Settings]
+      summary: Update AI provider API keys (PRO+ only)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                openAiApiKey:
+                  type: string
+                anthropicApiKey:
+                  type: string
+                geminiApiKey:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+
+  /auth/settings/jira:
+    put:
+      tags: [User Settings]
+      summary: Update JIRA credentials
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jiraBaseUrl:
+                  type: string
+                jiraEmail:
+                  type: string
+                jiraApiToken:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+
+  /auth/settings/jira/validate:
+    post:
+      tags: [User Settings]
+      summary: Validate JIRA credentials
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseUrl:
+                  type: string
+                email:
+                  type: string
+                apiToken:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+
+  /auth/settings/confluence:
+    put:
+      tags: [User Settings]
+      summary: Update Confluence credentials
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confluenceBaseUrl:
+                  type: string
+                confluenceEmail:
+                  type: string
+                confluenceApiToken:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+
+  /auth/settings/confluence/validate:
+    post:
+      tags: [User Settings]
+      summary: Validate Confluence credentials
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseUrl:
+                  type: string
+                email:
+                  type: string
+                apiToken:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+
+  /auth/settings/view-mode:
+    put:
+      tags: [User Settings]
+      summary: Set UI view mode
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                viewMode:
+                  type: string
+                  enum: [vibe, pro]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+
+  # ──────────────────────────────────────────────────
+  # RUNS
+  # ──────────────────────────────────────────────────
+  /runs:
+    get:
+      tags: [Runs]
+      summary: List runs
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          schema:
+            type: string
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [mine, org]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedRunResponse'
+    post:
+      tags: [Runs]
+      summary: Submit new run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunRequest'
+      responses:
+        '202':
+          description: Run accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSummary'
+
+  /runs/{runId}:
+    get:
+      tags: [Runs]
+      summary: Get run details
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetail'
+    delete:
+      tags: [Runs]
+      summary: Cancel/delete run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '204':
+          description: Run deleted
+
+  /runs/{runId}/approve:
+    post:
+      tags: [Runs]
+      summary: Approve or reject plan
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved:
+                  type: boolean
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Decision recorded
+
+  /runs/{runId}/clarify:
+    post:
+      tags: [Runs]
+      summary: Provide clarification to planner
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [response]
+              properties:
+                response:
+                  type: string
+      responses:
+        '200':
+          description: Clarification sent
+
+  /runs/{runId}/merge:
+    post:
+      tags: [Runs]
+      summary: Approve or reject merge (legacy)
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved:
+                  type: boolean
+      responses:
+        '200':
+          description: Decision recorded
+
+  /runs/{runId}/retry:
+    post:
+      tags: [Runs]
+      summary: Retry entire run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSummary'
+
+  /runs/{runId}/pause:
+    post:
+      tags: [Runs]
+      summary: Pause running pipeline
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Run paused
+
+  /runs/{runId}/resume:
+    post:
+      tags: [Runs]
+      summary: Resume paused run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Run resumed
+
+  /runs/{runId}/rework:
+    post:
+      tags: [Runs]
+      summary: Rework failed run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Rework started
+
+  /runs/{runId}/edit-and-restart:
+    post:
+      tags: [Runs]
+      summary: Edit goal and restart
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userRequest]
+              properties:
+                userRequest:
+                  type: string
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSummary'
+
+  /runs/{runId}/tasks/{taskId}/retry:
+    post:
+      tags: [Runs]
+      summary: Retry individual task
+      parameters:
+        - $ref: '#/components/parameters/runId'
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task retry started
+
+  /runs/{runId}/cost:
+    get:
+      tags: [Runs]
+      summary: Get live cost estimate
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId:
+                    type: string
+                  costUsd:
+                    type: number
+                    format: double
+
+  /runs/{runId}/project:
+    patch:
+      tags: [Runs]
+      summary: Update project association
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSummary'
+
+  /runs/{runId}/edit-plan:
+    post:
+      tags: [Runs]
+      summary: Edit run plan with feedback
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feedback]
+              properties:
+                feedback:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  version:
+                    type: string
+
+  /runs/{runId}/plan-versions:
+    get:
+      tags: [Runs]
+      summary: Get all plan versions
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  # ──────────────────────────────────────────────────
+  # RUN CHAT (Post-run copilot)
+  # ──────────────────────────────────────────────────
+  /runs/{runId}/chat:
+    get:
+      tags: [Run Chat]
+      summary: Get chat history
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatMessage'
+    post:
+      tags: [Run Chat]
+      summary: Send chat message (PRO+, COMPLETE runs only)
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply:
+                    type: string
+                  messageCount:
+                    type: integer
+                  maxMessages:
+                    type: integer
+        '429':
+          description: Chat message limit reached
+
+  /runs/{runId}/apply:
+    post:
+      tags: [Run Chat]
+      summary: Apply copilot suggestion (PRO+, COMPLETE runs only)
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [suggestion, source]
+              properties:
+                suggestion:
+                  type: string
+                source:
+                  type: string
+                  enum: [COPILOT, REVIEW]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskCount:
+                    type: integer
+                  tasks:
+                    type: array
+                    items:
+                      type: object
+        '422':
+          description: Suggestion too large
+
+  /runs/{runId}/iterate:
+    post:
+      tags: [Run Chat]
+      summary: Create iteration run from source run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userRequest]
+              properties:
+                userRequest:
+                  type: string
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId:
+                    type: string
+
+  # ──────────────────────────────────────────────────
+  # RUN CONTENT
+  # ──────────────────────────────────────────────────
+  /runs/{runId}/files:
+    get:
+      tags: [Run Content]
+      summary: List workspace files
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /runs/{runId}/file:
+    get:
+      tags: [Run Content]
+      summary: Get single file content
+      parameters:
+        - $ref: '#/components/parameters/runId'
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /runs/{runId}/download:
+    get:
+      tags: [Run Content]
+      summary: Download workspace as ZIP
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+
+  /runs/{runId}/messages:
+    get:
+      tags: [Run Content]
+      summary: Get agent message history
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /runs/{runId}/openapi.yaml:
+    get:
+      tags: [Run Content]
+      summary: Get generated OpenAPI spec
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /runs/{runId}/timeline:
+    get:
+      tags: [Run Content]
+      summary: Get run timeline (Gantt chart data)
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /runs/{runId}/task-graph:
+    get:
+      tags: [Run Content]
+      summary: Get task dependency graph
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  # ──────────────────────────────────────────────────
+  # SSE
+  # ──────────────────────────────────────────────────
+  /runs/{runId}/events:
+    get:
+      tags: [SSE]
+      summary: Subscribe to live run events
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ──────────────────────────────────────────────────
+  # PREVIEW
+  # ──────────────────────────────────────────────────
+  /runs/{runId}/preview/analyze:
+    get:
+      tags: [Preview]
+      summary: Analyze preview requirements
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  databaseType:
+                    type: string
+                    nullable: true
+                    enum: [POSTGRESQL, MYSQL, MONGODB, REDIS]
+                  requiredEnvVars:
+                    type: array
+                    items:
+                      type: string
+
+  /runs/{runId}/preview/status:
+    get:
+      tags: [Preview]
+      summary: Get preview status
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewStatus'
+
+  /runs/{runId}/preview/start:
+    post:
+      tags: [Preview]
+      summary: Start preview container
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                envVars:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewStatus'
+
+  /runs/{runId}/preview/stop:
+    delete:
+      tags: [Preview]
+      summary: Stop preview container
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Preview stopped
+
+  /runs/{runId}/preview/logs:
+    get:
+      tags: [Preview]
+      summary: Get preview container logs
+      parameters:
+        - $ref: '#/components/parameters/runId'
+        - name: lines
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: filter
+          in: query
+          schema:
+            type: string
+            enum: [all, backend, frontend, db]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId:
+                    type: string
+                  lines:
+                    type: array
+                    items:
+                      type: string
+
+  /runs/{runId}/preview/probe-api-docs:
+    get:
+      tags: [Preview]
+      summary: Probe for OpenAPI/Swagger docs
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found:
+                    type: boolean
+                  path:
+                    type: string
+                  contentType:
+                    type: string
+
+  # ──────────────────────────────────────────────────
+  # DEPLOYMENT
+  # ──────────────────────────────────────────────────
+  /deployments:
+    get:
+      tags: [Deployment]
+      summary: List deployments
+      parameters:
+        - name: runId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeploymentSummary'
+    post:
+      tags: [Deployment]
+      summary: Create deployment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [runId]
+              properties:
+                runId:
+                  type: string
+                strategy:
+                  type: string
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentSummary'
+
+  /deployments/{id}:
+    get:
+      tags: [Deployment]
+      summary: Get deployment details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentSummary'
+    delete:
+      tags: [Deployment]
+      summary: Delete deployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  /deployments/analyze:
+    post:
+      tags: [Deployment]
+      summary: Analyze run for deploy readiness
+      parameters:
+        - name: runId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  manifest:
+                    type: object
+                  decision:
+                    type: string
+                  hasGcpCredentials:
+                    type: boolean
+
+  /deployments/confirm:
+    post:
+      tags: [Deployment]
+      summary: Confirm and deploy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [runId, deploymentPath]
+              properties:
+                runId:
+                  type: string
+                deploymentPath:
+                  type: string
+                region:
+                  type: string
+                envVars:
+                  type: object
+                  additionalProperties:
+                    type: string
+                manifestJson:
+                  type: string
+                healthCheckPath:
+                  type: string
+                appPort:
+                  type: integer
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentSummary'
+
+  # ──────────────────────────────────────────────────
+  # GCP CREDENTIALS
+  # ──────────────────────────────────────────────────
+  /credentials/gcp:
+    post:
+      tags: [GCP Credentials]
+      summary: Store GCP service account JSON
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw GCP service account JSON
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+    get:
+      tags: [GCP Credentials]
+      summary: Get credential status
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+    delete:
+      tags: [GCP Credentials]
+      summary: Delete stored credential
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /credentials/gcp/all:
+    get:
+      tags: [GCP Credentials]
+      summary: List all credentials
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /credentials/gcp/validate:
+    get:
+      tags: [GCP Credentials]
+      summary: Validate credential permissions
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  issues:
+                    type: array
+                    items:
+                      type: string
+
+  /credentials/gcp/required-permissions:
+    get:
+      tags: [GCP Credentials]
+      summary: List required GCP roles
+      security: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  # ──────────────────────────────────────────────────
+  # BILLING
+  # ──────────────────────────────────────────────────
+  /billing/plans:
+    get:
+      tags: [Billing]
+      summary: List pricing plans
+      parameters:
+        - name: keyMode
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BillingPlan'
+
+  /billing/status:
+    get:
+      tags: [Billing]
+      summary: Current subscription status
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingStatus'
+
+  /billing/subscribe:
+    post:
+      tags: [Billing]
+      summary: Initiate Razorpay subscription
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId]
+              properties:
+                planId:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gatewaySubscriptionId:
+                    type: string
+                  shortUrl:
+                    type: string
+                  razorpayKeyId:
+                    type: string
+
+  /billing/verify:
+    post:
+      tags: [Billing]
+      summary: Verify subscription payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [razorpaySubscriptionId, razorpayPaymentId, razorpaySignature]
+              properties:
+                razorpaySubscriptionId:
+                  type: string
+                razorpayPaymentId:
+                  type: string
+                razorpaySignature:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingStatus'
+
+  /billing/cancel:
+    post:
+      tags: [Billing]
+      summary: Cancel subscription
+      responses:
+        '200':
+          description: Cancelled at period end
+
+  /billing/seats:
+    post:
+      tags: [Billing]
+      summary: Update seat count (PRO)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [totalSeats]
+              properties:
+                totalSeats:
+                  type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingStatus'
+
+  /billing/topup/packages:
+    get:
+      tags: [Billing]
+      summary: List run top-up packages
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /billing/topup/purchase:
+    post:
+      tags: [Billing]
+      summary: Purchase run top-up
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [packageId]
+              properties:
+                packageId:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId:
+                    type: string
+                  razorpayKeyId:
+                    type: string
+                  amountPaise:
+                    type: integer
+
+  /billing/topup/verify:
+    post:
+      tags: [Billing]
+      summary: Verify top-up payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [razorpayOrderId, razorpayPaymentId, razorpaySignature]
+              properties:
+                razorpayOrderId:
+                  type: string
+                razorpayPaymentId:
+                  type: string
+                razorpaySignature:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingStatus'
+
+  # ──────────────────────────────────────────────────
+  # INVOICES
+  # ──────────────────────────────────────────────────
+  /billing/profile:
+    get:
+      tags: [Invoices]
+      summary: Get billing profile
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+    put:
+      tags: [Invoices]
+      summary: Update billing profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /billing/invoices:
+    get:
+      tags: [Invoices]
+      summary: List user invoices
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: size
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /billing/invoices/{id}:
+    get:
+      tags: [Invoices]
+      summary: Get invoice detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /billing/invoices/{id}/pdf:
+    get:
+      tags: [Invoices]
+      summary: Download invoice PDF
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  # ──────────────────────────────────────────────────
+  # VALIDATION REPORT
+  # ──────────────────────────────────────────────────
+  /runs/{runId}/report:
+    get:
+      tags: [Validation Report]
+      summary: Get validation report
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+
+  /runs/{runId}/report/share:
+    post:
+      tags: [Validation Report]
+      summary: Generate share link
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shareToken:
+                    type: string
+                  shareUrl:
+                    type: string
+
+  /runs/{runId}/report/pdf:
+    get:
+      tags: [Validation Report]
+      summary: Download report PDF
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /reports/shared/{shareToken}:
+    get:
+      tags: [Validation Report]
+      summary: View shared report (public)
+      security: []
+      parameters:
+        - name: shareToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ──────────────────────────────────────────────────
+  # TEST GEN
+  # ──────────────────────────────────────────────────
+  /runs/{runId}/test-plan:
+    get:
+      tags: [Test Gen]
+      summary: Get test plan
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+
+  /runs/{runId}/test-graph:
+    get:
+      tags: [Test Gen]
+      summary: Get test execution graph
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+
+  /runs/{runId}/test-report:
+    get:
+      tags: [Test Gen]
+      summary: Get test execution report
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+
+  /runs/{runId}/apply-test-fixes:
+    post:
+      tags: [Test Gen]
+      summary: Apply test fix suggestions
+      parameters:
+        - $ref: '#/components/parameters/runId'
+        - name: signature
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskCount:
+                    type: integer
+                  tasks:
+                    type: array
+                    items:
+                      type: object
+
+  # ──────────────────────────────────────────────────
+  # METRICS
+  # ──────────────────────────────────────────────────
+  /metrics:
+    get:
+      tags: [Metrics]
+      summary: Dashboard metrics
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: 0 = all-time
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalRuns:
+                    type: integer
+                  completedRuns:
+                    type: integer
+                  failedRuns:
+                    type: integer
+                  activeRuns:
+                    type: integer
+                  queuedRuns:
+                    type: integer
+                  totalInputTokens:
+                    type: integer
+                    format: int64
+                  totalOutputTokens:
+                    type: integer
+                    format: int64
+
+  /model-comparison:
+    get:
+      tags: [Metrics]
+      summary: Model usage comparison
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /user-runs-summary:
+    get:
+      tags: [Metrics]
+      summary: Per-user run statistics
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ──────────────────────────────────────────────────
+  # ORGANIZATION
+  # ──────────────────────────────────────────────────
+  /org:
+    post:
+      tags: [Organization]
+      summary: Create organization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                domains:
+                  type: array
+                  items:
+                    type: string
+                adminEmail:
+                  type: string
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgDto'
+
+  /org/me:
+    get:
+      tags: [Organization]
+      summary: Get current org
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgDto'
+    put:
+      tags: [Organization]
+      summary: Update org settings (ORG_ADMIN+)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                domains:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgDto'
+
+  /org/me/members:
+    get:
+      tags: [Organization]
+      summary: List org members
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /org/me/members/{userId}:
+    delete:
+      tags: [Organization]
+      summary: Remove member (ORG_ADMIN+)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removed
+
+  /org/me/members/{userId}/role:
+    put:
+      tags: [Organization]
+      summary: Change member role (ORG_ADMIN+)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+      responses:
+        '204':
+          description: Role updated
+
+  /org/me/members/{userId}/suspend:
+    put:
+      tags: [Organization]
+      summary: Suspend/unsuspend member (ORG_ADMIN+)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [suspended]
+              properties:
+                suspended:
+                  type: boolean
+      responses:
+        '204':
+          description: Updated
+
+  /org/invite:
+    post:
+      tags: [Organization]
+      summary: Invite member (ORG_ADMIN+)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                orgRole:
+                  type: string
+                projectIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  status:
+                    type: string
+
+  /org/me/invitations:
+    get:
+      tags: [Organization]
+      summary: List pending invitations (ORG_ADMIN+)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /org/accept-invite:
+    post:
+      tags: [Organization]
+      summary: Accept invitation
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /org/me/settings/key-source:
+    put:
+      tags: [Organization]
+      summary: Configure AI key source (ORG_ADMIN+)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                keySourceMode:
+                  type: string
+                enabledProviders:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgDto'
+
+  /org/me/settings/ai-keys:
+    put:
+      tags: [Organization]
+      summary: Set org-level AI keys (ORG_ADMIN+)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                anthropicApiKey:
+                  type: string
+                openAiApiKey:
+                  type: string
+                geminiApiKey:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgDto'
+
+  # ──────────────────────────────────────────────────
+  # PROJECTS
+  # ──────────────────────────────────────────────────
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectDto'
+    post:
+      tags: [Projects]
+      summary: Create project
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                aiProvider:
+                  type: string
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDto'
+
+  /projects/{id}/settings:
+    patch:
+      tags: [Projects]
+      summary: Update project settings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                aiProvider:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDto'
+
+  # ──────────────────────────────────────────────────
+  # INTEGRATIONS
+  # ──────────────────────────────────────────────────
+  /integrations/status:
+    get:
+      tags: [Integrations]
+      summary: List enabled integrations
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabledSources:
+                    type: array
+                    items:
+                      type: string
+
+  /integrations/slack/status:
+    get:
+      tags: [Integrations]
+      summary: Get Slack connection status
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected:
+                    type: boolean
+                  teamName:
+                    type: string
+                  teamId:
+                    type: string
+                  channelCount:
+                    type: integer
+
+  /integrations/slack/install:
+    get:
+      tags: [Integrations]
+      summary: Get Slack OAuth install URL
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  installUrl:
+                    type: string
+
+  /integrations/slack/disconnect:
+    delete:
+      tags: [Integrations]
+      summary: Disconnect Slack workspace
+      responses:
+        '200':
+          description: Disconnected
+
+  /integrations/slack/channels:
+    get:
+      tags: [Integrations]
+      summary: List Slack channels
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /integrations/slack/projects/{projectId}/channels:
+    get:
+      tags: [Integrations]
+      summary: Get project channel mappings
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+    post:
+      tags: [Integrations]
+      summary: Map project to Slack channel
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channelId, channelName, verbosity]
+              properties:
+                channelId:
+                  type: string
+                channelName:
+                  type: string
+                verbosity:
+                  type: string
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /integrations/slack/test:
+    post:
+      tags: [Integrations]
+      summary: Send test notification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channelId:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  # ──────────────────────────────────────────────────
+  # CONVERSATION (Pre-run)
+  # ──────────────────────────────────────────────────
+  /conversation:
+    post:
+      tags: [Conversation]
+      summary: Pre-run requirement clarification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role:
+                        type: string
+                      content:
+                        type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply:
+                    type: string
+
+  # ──────────────────────────────────────────────────
+  # MODELS & PRICING
+  # ──────────────────────────────────────────────────
+  /models/available:
+    get:
+      tags: [Models]
+      summary: List available AI models
+      security: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /pricing:
+    get:
+      tags: [Models]
+      summary: List all model pricing
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /feasibility:
+    post:
+      tags: [Models]
+      summary: Pre-run feasibility estimate
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goal]
+              properties:
+                goal:
+                  type: string
+                provider:
+                  type: string
+                model:
+                  type: string
+                budgetUsd:
+                  type: number
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ──────────────────────────────────────────────────
+  # HEALTH
+  # ──────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [UP, DEGRADED]
+                  uptimeMs:
+                    type: integer
+                    format: int64
+                  uptime:
+                    type: string
+                  activeRuns:
+                    type: integer
+                  db:
+                    type: string
+                  redis:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      security: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  db:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+        '503':
+          description: Database not reachable
+
+# ──────────────────────────────────────────────────
+# COMPONENTS
+# ──────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token (24h TTL). Obtain via POST /auth/login.
+
+  parameters:
+    runId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, firstName, lastName, password]
+      properties:
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        password:
+          type: string
+          minLength: 8
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/UserDto'
+        accessToken:
+          type: string
+
+    UserDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        tier:
+          type: string
+          enum: [FREE, PRO, ENTERPRISE]
+        role:
+          type: string
+        orgId:
+          type: string
+          nullable: true
+        githubOwner:
+          type: string
+          nullable: true
+        hasGithubPat:
+          type: boolean
+        hasOpenAiKey:
+          type: boolean
+        hasAnthropicKey:
+          type: boolean
+        hasGeminiKey:
+          type: boolean
+        hasJiraCredentials:
+          type: boolean
+        hasConfluenceCredentials:
+          type: boolean
+        viewMode:
+          type: string
+          enum: [vibe, pro]
+        emailVerified:
+          type: boolean
+
+    TierPermissions:
+      type: object
+      properties:
+        canCreateRun:
+          type: boolean
+        canChat:
+          type: boolean
+        canApplySuggestions:
+          type: boolean
+        canPreview:
+          type: boolean
+        canDeploy:
+          type: boolean
+        monthlyRunLimit:
+          type: integer
+        runsUsed:
+          type: integer
+        runsRemaining:
+          type: integer
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    ValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        message:
+          type: string
+
+    RunRequest:
+      type: object
+      required: [userRequest]
+      properties:
+        userRequest:
+          type: string
+        executionMode:
+          type: string
+          enum: [PROTOTYPE, PRODUCTION]
+        skipApproval:
+          type: boolean
+        autoMerge:
+          type: boolean
+        modelName:
+          type: string
+        aiProvider:
+          type: string
+          enum: [anthropic, google, openai]
+        projectId:
+          type: string
+          format: uuid
+        repoMode:
+          type: string
+          enum: [FRESH, EXISTING]
+        repoUrl:
+          type: string
+
+    RunSummary:
+      type: object
+      properties:
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, PLANNING, AWAITING_APPROVAL, AWAITING_CLARIFICATION, WORKING, COMPILING, MERGING, REVIEWING, TESTING, COMPLETE, FAILED, CANCELLED, PAUSED]
+        userRequest:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        projectId:
+          type: string
+          nullable: true
+        aiProvider:
+          type: string
+        executionMode:
+          type: string
+
+    RunDetail:
+      type: object
+      properties:
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        userRequest:
+          type: string
+        plan:
+          type: object
+          nullable: true
+        tasks:
+          type: array
+          items:
+            type: object
+        review:
+          type: object
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        projectId:
+          type: string
+          nullable: true
+        aiProvider:
+          type: string
+        executionMode:
+          type: string
+        actualCostUsd:
+          type: number
+          nullable: true
+
+    PagedRunResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunSummary'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        hasNext:
+          type: boolean
+
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+
+    PreviewStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [STARTING, RUNNING, FAILED, STOPPED, TIMED_OUT]
+        url:
+          type: string
+          nullable: true
+        projectType:
+          type: string
+          nullable: true
+        databaseType:
+          type: string
+          nullable: true
+        ttlRemainingSeconds:
+          type: integer
+        error:
+          type: string
+          nullable: true
+
+    DeploymentSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        serviceUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    BillingPlan:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tier:
+          type: string
+        monthlyPriceInr:
+          type: integer
+        monthlyPriceUsd:
+          type: integer
+        monthlyRunLimit:
+          type: integer
+        features:
+          type: array
+          items:
+            type: string
+
+    BillingStatus:
+      type: object
+      properties:
+        subscription:
+          type: object
+          nullable: true
+        plan:
+          $ref: '#/components/schemas/BillingPlan'
+        usage:
+          type: array
+          items:
+            type: object
+        bonusRuns:
+          type: integer
+        tier:
+          type: string
+
+    OrgDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        domains:
+          type: array
+          items:
+            type: string
+        tier:
+          type: string
+        status:
+          type: string
+        keySourceMode:
+          type: string
+        enabledProviders:
+          type: array
+          items:
+            type: string
+
+    ProjectDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        aiProvider:
+          type: string
+          nullable: true
+        orgId:
+          type: string
+          format: uuid
+        archived:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time

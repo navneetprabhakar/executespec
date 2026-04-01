@@ -20,9 +20,9 @@ export default function PricingPage() {
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
       <GlassPanel className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/[0.06]">
-          <h2 className="text-base font-semibold text-zinc-200">Model Pricing</h2>
-          <p className="text-xs text-zinc-500 mt-0.5">Click a cost value to edit inline</p>
+        <div className="px-4 py-3 border-b border-[var(--border-default)]">
+          <h2 className="text-base font-semibold text-primary">Model Pricing</h2>
+          <p className="text-xs text-muted mt-0.5">Click a cost value to edit inline</p>
         </div>
         {loading
           ? <div className="p-4 space-y-3">{Array.from({ length: 7 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>

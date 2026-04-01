@@ -30,7 +30,10 @@ const MILESTONE_TYPES = new Set([
   'TEST_REPORT_READY', 'TEST_PIPELINE_FAILED',
   // Context & validation events
   'CONTEXT_EXTRACTED', 'CLARIFICATION_NEEDED', 'CLARIFICATION_RESOLVED',
-  'MODEL_ESCALATED', 'API_SPEC_READY', 'PREVIEW_READY',
+  'MODEL_ESCALATED', 'API_SPEC_READY',
+  // Preview lifecycle events
+  'PREVIEW_ANALYZING', 'PREVIEW_BUILDING', 'PREVIEW_STARTING',
+  'PREVIEW_READY', 'PREVIEW_STOPPED', 'PREVIEW_TIMED_OUT', 'PREVIEW_FAILED',
   'VALIDATION_STARTED', 'VALIDATION_PASSED', 'VALIDATION_FAILED',
 ]);
 
@@ -85,7 +88,7 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
 
   let icon = <Clock className="h-3.5 w-3.5" />;
   let text = '';
-  let colorClass = 'border-zinc-600 text-zinc-300 bg-white/[0.03]';
+  let colorClass = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
 
   // Task status
   if (type === 'TASK_STATUS') {
@@ -94,15 +97,15 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
     if (status === 'IN_PROGRESS' || status === 'RUNNING') {
       icon = <Zap className="h-3.5 w-3.5" />;
       text = `Task started: ${label}`;
-      colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
+      colorClass = 'border-accent-blue/50 text-secondary bg-[var(--gray-500)]/[0.06]';
     } else if (status === 'COMPLETE' || status === 'COMPLETED') {
       icon = <CheckCircle2 className="h-3.5 w-3.5" />;
       text = `Task done: ${label}`;
-      colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.06]';
+      colorClass = 'border-accent-green/50 text-accent-green bg-accent-green/[0.06]';
     } else if (status === 'FAILED') {
       icon = <XCircle className="h-3.5 w-3.5" />;
       text = `Task failed: ${label}`;
-      colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+      colorClass = 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
     } else if (status === 'PARTIAL') {
       icon = <AlertTriangle className="h-3.5 w-3.5" />;
       text = `Task partial: ${label}`;
@@ -110,7 +113,7 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
     } else {
       icon = <Clock className="h-3.5 w-3.5" />;
       text = `Task ${status.toLowerCase()}: ${label}`;
-      colorClass = 'border-zinc-600 text-zinc-400 bg-white/[0.03]';
+      colorClass = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
     }
   }
 
@@ -124,15 +127,15 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
     } else if (status === 'FAILED') {
       icon = <XCircle className="h-3.5 w-3.5" />;
       text = 'Run failed — check tasks for retry';
-      colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+      colorClass = 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
     } else if (status === 'COMPLETE') {
       icon = <CheckCircle2 className="h-3.5 w-3.5" />;
       text = 'Run completed successfully';
-      colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+      colorClass = 'border-accent-green/50 text-accent-green bg-accent-green/[0.08]';
     } else {
       icon = <Rocket className="h-3.5 w-3.5" />;
       text = `Run → ${status}`;
-      colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+      colorClass = 'border-accent-blue/50 text-accent-blue bg-accent-blue/[0.06]';
     }
   }
 
@@ -147,8 +150,8 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
     icon = approved ? <PlayCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />;
     text = `Gate ${decision.toLowerCase()}: ${String(data.gateType ?? '')}`;
     colorClass = approved
-      ? 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.06]'
-      : 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+      ? 'border-accent-green/50 text-accent-green bg-accent-green/[0.06]'
+      : 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
   }
 
   // Cost update
@@ -157,14 +160,14 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
     const cost = Number(data.totalCost ?? data.payload ?? 0);
     const tokens = data.totalTokens ?? '';
     text = `Cost update: $${cost.toFixed(4)}${tokens ? ` · ${tokens} tokens` : ''}`;
-    colorClass = 'border-accent-emerald/30 text-accent-emerald/70 bg-accent-emerald/[0.04]';
+    colorClass = 'border-accent-green/30 text-accent-green/70 bg-accent-green/[0.04]';
   }
 
   // Complete
   else if (type === 'COMPLETE') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     text = `Pipeline complete`;
-    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+    colorClass = 'border-accent-green/50 text-accent-green bg-accent-green/[0.08]';
   }
 
   // Recovery
@@ -178,37 +181,37 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   else if (type === 'DEPLOY_STARTED' || type === 'ENGINE_DEPLOY_STARTED') {
     icon = <Rocket className="h-3.5 w-3.5" />;
     text = 'Deployment started';
-    colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
+    colorClass = 'border-accent-blue/50 text-secondary bg-[var(--gray-500)]/[0.06]';
   } else if (type === 'DEPLOY_BUILDING' || type === 'ENGINE_BUILDING') {
     icon = <Rocket className="h-3.5 w-3.5" />;
     text = 'Building container image…';
-    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
   } else if (type === 'DEPLOY_PUSHING' || type === 'ENGINE_DEPLOYING') {
     icon = <Rocket className="h-3.5 w-3.5" />;
     text = type.includes('PUSHING') ? 'Pushing image…' : 'Deploying service…';
-    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
   } else if (type === 'DEPLOY_LIVE' || type === 'ENGINE_DEPLOY_LIVE') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     const url = String(data.payload ?? '').split('|').pop();
     text = `Live at ${url}`;
-    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+    colorClass = 'border-accent-green/50 text-accent-green bg-accent-green/[0.08]';
   } else if (type === 'DEPLOY_FAILED' || type === 'ENGINE_DEPLOY_FAILED') {
     icon = <XCircle className="h-3.5 w-3.5" />;
     const err = String(data.payload ?? '').split('|').pop();
     text = `Deploy failed: ${err}`;
-    colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+    colorClass = 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
   } else if (type === 'ENGINE_PHASE') {
     icon = <Rocket className="h-3.5 w-3.5" />;
     const parts = String(data.payload ?? '').split('|');
     text = `Deploy: ${parts[1] ?? parts[0] ?? ''}`;
-    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
   }
 
   // ── Review V2 events ────────────────────────────────────────────────────
   else if (type === 'REVIEW_STARTED') {
     icon = <Eye className="h-3.5 w-3.5" />;
     text = `Code review started (${String(data.payload ?? '')})`;
-    colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+    colorClass = 'border-accent-blue/50 text-accent-blue bg-accent-blue/[0.06]';
   } else if (type === 'REVIEW_ISSUE_FOUND') {
     const parts = String(data.payload ?? '').split('|');
     const severity = parts[1] ?? 'UNKNOWN';
@@ -217,20 +220,20 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
     icon = isCritical ? <Bug className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />;
     text = `Issue: ${desc}`;
     colorClass = isCritical
-      ? 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]'
+      ? 'border-accent-red/40 text-accent-red/80 bg-accent-red/[0.04]'
       : 'border-accent-amber/40 text-accent-amber/80 bg-accent-amber/[0.04]';
   } else if (type === 'REVIEW_AUTO_FIX_STARTED') {
     icon = <Wrench className="h-3.5 w-3.5" />;
     text = `Auto-fixing ${String(data.payload ?? '')}`;
-    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
   } else if (type === 'REVIEW_AUTO_FIX_RESULT') {
     const parts = String(data.payload ?? '').split('|');
     const success = parts[1] === 'PASS';
     icon = success ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />;
     text = `Auto-fix ${parts[0]}: ${success ? 'succeeded' : 'failed'}`;
     colorClass = success
-      ? 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]'
-      : 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]';
+      ? 'border-accent-green/40 text-accent-green/80 bg-accent-green/[0.04]'
+      : 'border-accent-red/40 text-accent-red/80 bg-accent-red/[0.04]';
   } else if (type === 'REVIEW_COMPLETE') {
     const parts = String(data.payload ?? '').split('|');
     const verdict = parts[0] ?? '';
@@ -238,43 +241,43 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
     icon = isGood ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />;
     text = `Review: ${verdict.replace(/_/g, ' ').toLowerCase()}`;
     colorClass = isGood
-      ? 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.06]'
-      : 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+      ? 'border-accent-green/50 text-accent-green bg-accent-green/[0.06]'
+      : 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
   }
 
   // ── Test generation pipeline events ─────────────────────────────────────
   else if (type === 'TEST_GEN_STARTED') {
     icon = <FlaskConical className="h-3.5 w-3.5" />;
     text = 'Test generation started';
-    colorClass = 'border-accent-violet/50 text-accent-violet bg-accent-violet/[0.06]';
+    colorClass = 'border-accent-blue/50 text-accent-blue bg-accent-blue/[0.06]';
   } else if (type === 'TEST_PLANNING_STARTED') {
     icon = <FlaskConical className="h-3.5 w-3.5" />;
     text = 'Planning test strategy…';
-    colorClass = 'border-accent-violet/40 text-accent-violet/80 bg-accent-violet/[0.04]';
+    colorClass = 'border-accent-blue/40 text-accent-blue/80 bg-accent-blue/[0.04]';
   } else if (type === 'TEST_PLANNING_COMPLETED') {
     icon = <FlaskConical className="h-3.5 w-3.5" />;
     text = `Test plan ready: ${String(data.payload ?? '?')} test tasks`;
-    colorClass = 'border-accent-violet/40 text-accent-violet/80 bg-accent-violet/[0.04]';
+    colorClass = 'border-accent-blue/40 text-accent-blue/80 bg-accent-blue/[0.04]';
   } else if (type === 'TEST_GENERATION_STARTED') {
     icon = <FileCode className="h-3.5 w-3.5" />;
     text = `Generating ${String(data.payload ?? '?')} test suites…`;
-    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
   } else if (type === 'TEST_COMPILATION_STARTED') {
     icon = <FlaskConical className="h-3.5 w-3.5" />;
     text = 'Compiling tests…';
-    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
   } else if (type === 'TEST_COMPILATION_PASSED') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     text = 'Tests compiled successfully';
-    colorClass = 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]';
+    colorClass = 'border-accent-green/40 text-accent-green/80 bg-accent-green/[0.04]';
   } else if (type === 'TEST_COMPILATION_FAILED') {
     icon = <XCircle className="h-3.5 w-3.5" />;
     text = `Test compilation failed: ${String(data.payload ?? '').slice(0, 100)}`;
-    colorClass = 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]';
+    colorClass = 'border-accent-red/40 text-accent-red/80 bg-accent-red/[0.04]';
   } else if (type === 'TEST_EXECUTION_STARTED') {
     icon = <FlaskConical className="h-3.5 w-3.5" />;
     text = 'Running tests against preview…';
-    colorClass = 'border-accent-cyan/50 text-accent-cyan bg-accent-cyan/[0.06]';
+    colorClass = 'border-accent-blue/50 text-secondary bg-[var(--gray-500)]/[0.06]';
   } else if (type === 'TEST_EXECUTION_SKIPPED') {
     icon = <AlertTriangle className="h-3.5 w-3.5" />;
     text = `Test execution skipped: ${String(data.payload ?? '')}`;
@@ -282,18 +285,18 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   } else if (type === 'TEST_REPORT_READY') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     text = 'Test report ready';
-    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+    colorClass = 'border-accent-green/50 text-accent-green bg-accent-green/[0.08]';
   } else if (type === 'TEST_PIPELINE_FAILED') {
     icon = <XCircle className="h-3.5 w-3.5" />;
     text = `Test pipeline failed: ${String(data.payload ?? '').slice(0, 100)}`;
-    colorClass = 'border-accent-rose/50 text-accent-rose bg-accent-rose/[0.06]';
+    colorClass = 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
   }
 
   // ── Context & validation events ─────────────────────────────────────────
   else if (type === 'CONTEXT_EXTRACTED') {
     icon = <Search className="h-3.5 w-3.5" />;
     text = `Context: ${String(data.payload ?? '').slice(0, 120)}`;
-    colorClass = 'border-zinc-600 text-zinc-300 bg-white/[0.03]';
+    colorClass = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
   } else if (type === 'CLARIFICATION_NEEDED') {
     icon = <MessageSquare className="h-3.5 w-3.5" />;
     text = 'Clarification needed from user';
@@ -301,7 +304,7 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   } else if (type === 'CLARIFICATION_RESOLVED') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     text = 'Clarification resolved';
-    colorClass = 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]';
+    colorClass = 'border-accent-green/40 text-accent-green/80 bg-accent-green/[0.04]';
   } else if (type === 'MODEL_ESCALATED') {
     const parts = String(data.payload ?? '').split('|');
     icon = <ArrowUpCircle className="h-3.5 w-3.5" />;
@@ -310,23 +313,47 @@ function MilestoneBanner({ entry }: { entry: LogEntry }) {
   } else if (type === 'API_SPEC_READY') {
     icon = <FileCode className="h-3.5 w-3.5" />;
     text = 'API spec generated';
-    colorClass = 'border-accent-cyan/40 text-accent-cyan/80 bg-accent-cyan/[0.04]';
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
+  } else if (type === 'PREVIEW_ANALYZING') {
+    icon = <Search className="h-3.5 w-3.5" />;
+    text = `Analyzing project: ${String(data.payload ?? '').slice(0, 100)}`;
+    colorClass = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
+  } else if (type === 'PREVIEW_BUILDING') {
+    icon = <Rocket className="h-3.5 w-3.5" />;
+    text = `Building preview: ${String(data.payload ?? '').slice(0, 100)}`;
+    colorClass = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
+  } else if (type === 'PREVIEW_STARTING') {
+    icon = <Rocket className="h-3.5 w-3.5" />;
+    text = `Starting preview: ${String(data.payload ?? '').slice(0, 100)}`;
+    colorClass = 'border-accent-blue/50 text-secondary bg-[var(--gray-500)]/[0.06]';
   } else if (type === 'PREVIEW_READY') {
     icon = <Globe className="h-3.5 w-3.5" />;
-    text = 'Preview ready';
-    colorClass = 'border-accent-emerald/50 text-accent-emerald bg-accent-emerald/[0.08]';
+    text = `Preview ready${data.payload ? ': ' + String(data.payload).slice(0, 80) : ''}`;
+    colorClass = 'border-accent-green/50 text-accent-green bg-accent-green/[0.08]';
+  } else if (type === 'PREVIEW_STOPPED') {
+    icon = <PauseCircle className="h-3.5 w-3.5" />;
+    text = 'Preview stopped';
+    colorClass = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
+  } else if (type === 'PREVIEW_TIMED_OUT') {
+    icon = <Clock className="h-3.5 w-3.5" />;
+    text = `Preview timed out${data.payload ? ': ' + String(data.payload).slice(0, 80) : ''}`;
+    colorClass = 'border-accent-amber/40 text-accent-amber/80 bg-accent-amber/[0.04]';
+  } else if (type === 'PREVIEW_FAILED') {
+    icon = <XCircle className="h-3.5 w-3.5" />;
+    text = `Preview failed${data.payload ? ': ' + String(data.payload).slice(0, 100) : ''}`;
+    colorClass = 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
   } else if (type === 'VALIDATION_STARTED') {
     icon = <Shield className="h-3.5 w-3.5" />;
     text = `Validating ${String(data.payload ?? '')}`;
-    colorClass = 'border-zinc-600 text-zinc-400 bg-white/[0.03]';
+    colorClass = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
   } else if (type === 'VALIDATION_PASSED') {
     icon = <CheckCircle2 className="h-3.5 w-3.5" />;
     text = 'Validation passed';
-    colorClass = 'border-accent-emerald/40 text-accent-emerald/80 bg-accent-emerald/[0.04]';
+    colorClass = 'border-accent-green/40 text-accent-green/80 bg-accent-green/[0.04]';
   } else if (type === 'VALIDATION_FAILED') {
     icon = <XCircle className="h-3.5 w-3.5" />;
     text = `Validation failed: ${String(data.payload ?? '').slice(0, 100)}`;
-    colorClass = 'border-accent-rose/40 text-accent-rose/80 bg-accent-rose/[0.04]';
+    colorClass = 'border-accent-red/40 text-accent-red/80 bg-accent-red/[0.04]';
   }
 
   if (!text) return null;
@@ -349,21 +376,21 @@ function FileOpRow({ entry, op }: { entry: LogEntry; op: FileOp }) {
   const { timestamp } = entry;
 
   const config = {
-    write:   { icon: <FilePlus2 className="h-3 w-3" />, label: 'Created', color: 'text-accent-violet/80' },
-    edit:    { icon: <FileEdit  className="h-3 w-3" />, label: 'Edited',  color: 'text-accent-cyan/80'   },
-    commit:  { icon: <GitCommit className="h-3 w-3" />, label: 'Committed to Git', color: 'text-accent-emerald/80' },
-    command: { icon: <Terminal  className="h-3 w-3" />, label: 'Command run', color: 'text-zinc-400' },
+    write:   { icon: <FilePlus2 className="h-3 w-3" />, label: 'Created', color: 'text-accent-blue/80' },
+    edit:    { icon: <FileEdit  className="h-3 w-3" />, label: 'Edited',  color: 'text-secondary/80'   },
+    commit:  { icon: <GitCommit className="h-3 w-3" />, label: 'Committed to Git', color: 'text-accent-green/80' },
+    command: { icon: <Terminal  className="h-3 w-3" />, label: 'Command run', color: 'text-secondary' },
   }[op.kind];
 
   return (
     <div className="flex items-center gap-2 px-2 py-0.5 text-[11px]">
-      <span className="text-zinc-700 flex-shrink-0 font-mono">{formatTimestamp(timestamp)}</span>
+      <span className="text-[var(--text-muted)] flex-shrink-0 font-mono">{formatTimestamp(timestamp)}</span>
       <span className={cn('flex items-center gap-1.5 flex-shrink-0', config.color)}>
         {config.icon}
         <span className="font-medium">{config.label}</span>
       </span>
       {op.path && (
-        <span className="text-zinc-400 font-mono truncate">{op.path}</span>
+        <span className="text-secondary font-mono truncate">{op.path}</span>
       )}
     </div>
   );
@@ -401,7 +428,7 @@ export default function LiveLog() {
         className="flex-1 overflow-y-auto terminal-log px-3 py-3 min-h-0"
       >
         {entries.length === 0 && (
-          <p className="text-zinc-600 italic text-xs px-2">Waiting for events…</p>
+          <p className="text-muted italic text-xs px-2">Waiting for events…</p>
         )}
 
         {entries.map((entry) => {
@@ -431,13 +458,42 @@ export default function LiveLog() {
               || msg.startsWith('Simple request')
               || msg.startsWith('Reviewer')
               || msg.startsWith('Compile')
+              || msg.startsWith('Background')
+              || msg.startsWith('Code ready')
+              || msg.startsWith('Plan')
               || /^\[[\w-]+\]/.test(msg);
 
             if (isHarnessMsg) {
+              // Determine icon and color based on prefix
+              let logIcon = null;
+              let logColor = 'text-secondary';
+              if (/^✅/.test(msg)) {
+                logIcon = <CheckCircle2 className="h-3 w-3 text-accent-green/80 flex-shrink-0" />;
+                logColor = 'text-accent-green/80';
+              } else if (/^⚠️/.test(msg)) {
+                logIcon = <AlertTriangle className="h-3 w-3 text-accent-amber/80 flex-shrink-0" />;
+                logColor = 'text-accent-amber/80';
+              } else if (/^❌/.test(msg)) {
+                logIcon = <XCircle className="h-3 w-3 text-accent-red/80 flex-shrink-0" />;
+                logColor = 'text-accent-red/80';
+              } else if (/^🔧/.test(msg)) {
+                logIcon = <Wrench className="h-3 w-3 text-secondary/80 flex-shrink-0" />;
+              } else if (/^\[compiler\]|^Compile/i.test(msg)) {
+                logIcon = <Terminal className="h-3 w-3 text-secondary/60 flex-shrink-0" />;
+              } else if (/^\[reviewer\]|^Reviewer/i.test(msg)) {
+                logIcon = <Eye className="h-3 w-3 text-secondary/60 flex-shrink-0" />;
+              } else if (/^Merging|^\[harness\]/i.test(msg)) {
+                logIcon = <GitCommit className="h-3 w-3 text-secondary/60 flex-shrink-0" />;
+              }
+
+              // Strip emoji prefix for cleaner display
+              const cleanMsg = msg.replace(/^[✅⚠️❌🔧]\s*/, '');
+
               return (
-                <div key={entry.id} className="flex gap-2 px-2 py-0.5 text-[11px]">
-                  <span className="text-zinc-700 flex-shrink-0 font-mono">{formatTimestamp(entry.timestamp)}</span>
-                  <span className="text-zinc-300">{msg.length > 200 ? msg.slice(0, 200) + '…' : msg}</span>
+                <div key={entry.id} className="flex items-start gap-2 px-2 py-0.5 text-[11px]">
+                  <span className="text-[var(--text-muted)] flex-shrink-0 font-mono mt-px">{formatTimestamp(entry.timestamp)}</span>
+                  {logIcon}
+                  <span className={logColor}>{cleanMsg.length > 200 ? cleanMsg.slice(0, 200) + '…' : cleanMsg}</span>
                 </div>
               );
             }
@@ -451,9 +507,9 @@ export default function LiveLog() {
           if (!fallbackMsg) return null;
           return (
             <div key={entry.id} className="flex gap-2 px-2 py-[1px] text-[11px] opacity-50">
-              <span className="text-zinc-700 font-mono">{formatTimestamp(entry.timestamp)}</span>
-              <span className="text-zinc-500">[{entry.type}]</span>
-              <span className="text-zinc-400 truncate">{fallbackMsg.slice(0, 160)}</span>
+              <span className="text-[var(--text-muted)] font-mono">{formatTimestamp(entry.timestamp)}</span>
+              <span className="text-muted">[{entry.type}]</span>
+              <span className="text-secondary truncate">{fallbackMsg.slice(0, 160)}</span>
             </div>
           );
         })}
@@ -462,20 +518,20 @@ export default function LiveLog() {
       </div>
 
       {/* Status bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-t border-white/[0.06] bg-surface-1 flex-shrink-0">
+      <div className="flex items-center gap-2 px-4 py-2 border-t border-[var(--border-default)] bg-[var(--gray-100)] flex-shrink-0">
         {status === 'CONNECTED' ? (
           <>
             <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-emerald" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-green" />
             </span>
-            <span className="text-xs text-zinc-500">Streaming</span>
-            <span className="animate-pulse text-accent-emerald text-xs">▋</span>
+            <span className="text-xs text-muted">Streaming</span>
+            <span className="animate-pulse text-accent-green text-xs">▋</span>
           </>
         ) : status === 'RECONNECTING' ? (
           <span className="text-xs text-accent-amber">Reconnecting…</span>
         ) : (
-          <span className="text-xs text-zinc-600">Disconnected · {entries.length} events</span>
+          <span className="text-xs text-muted">Disconnected · {entries.length} events</span>
         )}
       </div>
     </div>

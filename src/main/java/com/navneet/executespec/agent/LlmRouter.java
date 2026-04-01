@@ -109,6 +109,9 @@ public class LlmRouter {
     /** Per-run LLM call counters — for observability only (no enforcement). */
     private final ConcurrentHashMap<String, AtomicInteger> runCallCounters = new ConcurrentHashMap<>();
 
+    /** Per-run user tier cache — populated by PipelineHarness at run start. FREE tier forces gpt-5.4-mini. */
+    private final ConcurrentHashMap<String, String> runUserTierCache = new ConcurrentHashMap<>();
+
     private final ApplicationContext ctx;
     private final InboxService inboxService;
     private final RunKeyStore runKeyStore;
@@ -127,6 +130,13 @@ public class LlmRouter {
     public LlmResponse callWithFallbackTracked(String primaryProvider, String primaryModel,
                                                Prompt prompt, String runId, String agentId,
                                                FallbackMode mode, int iteration, boolean justCompacted) {
+        // FREE tier model lock: force all calls to OpenAI gpt-5.4-mini
+        String userTier = getRunUserTier(runId);
+        if ("FREE".equals(userTier)) {
+            primaryProvider = "openai";
+            primaryModel = ModelConstants.GPT5_4_MINI;
+        }
+
         // Track call count for observability (no enforcement — wall-clock limit is the safety net)
         if (runId != null) {
             runCallCounters.computeIfAbsent(runId, k -> new AtomicInteger(0)).incrementAndGet();
@@ -321,8 +331,15 @@ public class LlmRouter {
             }
 
             // If all providers were skipped due to circuit breaker (lastError is null),
-            // retry the primary provider anyway — same "force primary" pattern as ModelResolver
+            // retry the primary provider anyway — same "force primary" pattern as ModelResolver.
+            // But respect org policy: if the primary is policy-blocked, don't bypass.
             if (lastError == null) {
+                if (runKeys != null && !runKeys.isProviderAllowed(primaryProvider)) {
+                    log.warn("[LlmRouter] All providers circuit-open AND primary {} disabled by org policy — cannot force", primaryProvider);
+                    throw new ProviderUnavailableException(
+                        "All providers circuit-open and primary provider " + primaryProvider
+                        + " is disabled by org policy for agent " + agentId);
+                }
                 log.warn("[LlmRouter] All providers circuit-open — forcing primary {} for {}", primaryProvider, agentId);
                 try {
                     ChatResponse forced = callWithModelOptions(primaryProvider, primaryModel, prompt, runId);
@@ -354,6 +371,26 @@ public class LlmRouter {
                                          FallbackMode mode, int iteration, boolean justCompacted) {
         return callWithFallbackTracked(primaryProvider, primaryModel, prompt, runId, agentId,
             mode, iteration, justCompacted).response();
+    }
+
+    /**
+     * Direct LLM call that bypasses health checks, fallback chains, and per-run key resolution.
+     * Uses system API keys only. Intended for eval/admin tooling where isolation per model is required.
+     *
+     * @param provider  provider name (anthropic, google, openai)
+     * @param model     exact model string
+     * @param prompt    the prompt to send
+     * @return response with provider/model metadata
+     */
+    public LlmResponse callDirect(String provider, String model, Prompt prompt) {
+        Instant start = Instant.now();
+        ChatResponse response = callWithModelOptions(provider, model, prompt, "eval-system");
+        Duration duration = Duration.between(start, Instant.now());
+        Counter.builder(LLM_CALLS).tag("provider", provider).tag("model", model)
+                .register(meterRegistry).increment();
+        Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
+                .register(meterRegistry).record(duration);
+        return new LlmResponse(response, provider, model);
     }
 
     // ── Internal ───────────────────────────────────────────────────────────────
@@ -589,6 +626,7 @@ public class LlmRouter {
     public void clearRunCallCounter(String runId) {
         if (runId != null) {
             runCallCounters.remove(runId);
+            runUserTierCache.remove(runId);
         }
     }
 
@@ -596,6 +634,20 @@ public class LlmRouter {
     public int getRunCallCount(String runId) {
         AtomicInteger counter = runCallCounters.get(runId);
         return counter != null ? counter.get() : 0;
+    }
+
+    // ── FREE tier model lock ──────────────────────────────────────────────────
+
+    /** Register the user's subscription tier for a run. Called by PipelineHarness at run start. */
+    public void setRunUserTier(String runId, String userTier) {
+        if (runId != null && userTier != null) {
+            runUserTierCache.put(runId, userTier.toUpperCase());
+        }
+    }
+
+    /** Returns the cached user tier for a run, or null if not set. */
+    public String getRunUserTier(String runId) {
+        return runId != null ? runUserTierCache.get(runId) : null;
     }
 
     // ── Exceptions ─────────────────────────────────────────────────────────────

@@ -4,8 +4,8 @@ interface Props {
 }
 
 const TIER_STYLES: Record<string, string> = {
-  FREE: 'bg-slate-700 text-slate-300',
-  PRO: 'bg-purple-900/60 text-purple-300 border border-purple-700',
+  FREE: 'bg-[var(--gray-400)] text-secondary',
+  PRO: 'bg-purple-900/60 text-accent-blue border border-purple-700',
   ENTERPRISE: 'bg-amber-900/60 text-amber-300 border border-amber-700',
 };
 

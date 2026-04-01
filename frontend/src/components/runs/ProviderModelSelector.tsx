@@ -45,7 +45,7 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
     <div className="space-y-3">
       {/* Provider pills */}
       <div>
-        <label className="block text-sm text-zinc-400 mb-1.5">AI Provider</label>
+        <label className="block text-sm text-secondary mb-1.5">AI Provider</label>
         <div className="flex gap-2">
           {providers.map((p) => (
             <button
@@ -55,8 +55,8 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
               className={cn(
                 'flex-1 py-1.5 px-3 rounded-sm text-sm font-medium transition-all border',
                 provider === p.id
-                  ? 'border-accent-violet/50 bg-accent-violet/10 text-accent-violet'
-                  : 'border-white/[0.08] bg-surface-1 text-zinc-400 hover:text-zinc-200 hover:border-white/[0.15]',
+                  ? 'border-accent-blue/50 bg-accent-blue/10 text-accent-blue'
+                  : 'border-[var(--border-default)] bg-[var(--gray-100)] text-secondary hover:text-primary hover:border-[var(--border-default)]',
               )}
             >
               {p.label}
@@ -68,11 +68,11 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
       {/* Model dropdown — only show if provider is selected and has >1 model */}
       {provider && models.length > 0 && (
         <div>
-          <label className="block text-sm text-zinc-400 mb-1.5">Model override</label>
+          <label className="block text-sm text-secondary mb-1.5">Model override</label>
           <select
             value={model}
             onChange={(e) => handleModelChange(e.target.value)}
-            className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+            className="w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none focus:border-accent-blue/40"
           >
             <option value="">Auto (best for each agent)</option>
             {models.map((m) => (

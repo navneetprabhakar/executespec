@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head><meta charset="UTF-8"><title>Plan Upgraded</title></head>
-<body style="font-family:sans-serif;background:#0f1117;color:#e2e8f0;padding:40px">
-  <div style="max-width:480px;margin:0 auto;background:#1a1f2e;border-radius:12px;padding:32px">
-    <h1 style="color:#8b5cf6;margin:0 0 8px">executespec</h1>
+<body style="font-family:'SFMono-Regular',ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;background:#000000;color:#ededed;padding:40px">
+  <div style="max-width:480px;margin:0 auto;background:#111111;border:1px solid #252525;border-radius:6px;padding:32px">
+    <h1 style="color:#ededed;margin:0 0 8px">executespec</h1>
     <h2 style="margin:0 0 24px;font-size:20px">You've been upgraded!</h2>
     <p>Hi <span th:text="${firstName}">there</span>,</p>
     <p>Your account has been upgraded to the <strong th:text="${planName}">Pro</strong> plan (<strong th:text="${tier}">PRO</strong> tier).</p>
@@ -16,12 +16,12 @@
       <li th:if="${tier == 'ENTERPRISE'}">Unlimited team members</li>
     </ul>
     <a th:href="${baseUrl + '/billing'}" href="#"
-       style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;
-              padding:12px 28px;border-radius:8px;font-weight:600;margin:16px 0">
+       style="display:inline-block;background:#ededed;color:#000000;text-decoration:none;
+              padding:12px 28px;border-radius:4px;font-weight:600;margin:16px 0">
       View Your Plan
     </a>
-    <hr style="border:1px solid #2d3748;margin:24px 0"/>
-    <p style="color:#64748b;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#8b5cf6" href="#">executespec.ai</a></p>
+    <hr style="border:1px solid #252525;margin:24px 0"/>
+    <p style="color:#a1a1a1;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:underline" href="#">executespec.ai</a></p>
   </div>
 </body>
 </html>

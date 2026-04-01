@@ -5,6 +5,7 @@ import {
   ChevronDown, ChevronRight, Key, Building2, Shield, Loader2, ArrowUpRight,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
+import ViewModeToggle from '@/components/shared/ViewModeToggle';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import type { OrgDto } from '@/lib/api';
@@ -27,17 +28,17 @@ function IntegrationCard({ icon, title, statusBadge, children, defaultOpen = fal
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-5 py-4 text-left hover:bg-white/[0.02] transition-colors"
+        className="w-full flex items-center gap-2 px-5 py-4 text-left hover:bg-[var(--gray-100)] transition-colors"
       >
         {icon}
-        <span className="text-sm font-semibold text-zinc-200 flex-1">{title}</span>
+        <span className="text-sm font-semibold text-primary flex-1">{title}</span>
         {statusBadge}
         {open
-          ? <ChevronDown className="h-4 w-4 text-zinc-500 ml-1 flex-shrink-0" />
-          : <ChevronRight className="h-4 w-4 text-zinc-500 ml-1 flex-shrink-0" />}
+          ? <ChevronDown className="h-4 w-4 text-muted ml-1 flex-shrink-0" />
+          : <ChevronRight className="h-4 w-4 text-muted ml-1 flex-shrink-0" />}
       </button>
       {open && (
-        <div className="px-5 pb-5 pt-1 space-y-3 border-t border-white/[0.06]">
+        <div className="px-5 pb-5 pt-1 space-y-3 border-t border-[var(--border-default)]">
           {children}
         </div>
       )}
@@ -49,7 +50,7 @@ function IntegrationCard({ icon, title, statusBadge, children, defaultOpen = fal
 
 function ConfiguredBadge({ label }: { label: string }) {
   return (
-    <span className="flex items-center gap-1 text-xs text-accent-emerald">
+    <span className="flex items-center gap-1 text-xs text-accent-green">
       <CheckCircle className="h-3.5 w-3.5" /> {label}
     </span>
   );
@@ -73,8 +74,8 @@ function SecretField({
   const [show, setShow] = useState(false);
   return (
     <div>
-      <label className="text-xs text-zinc-400 mb-1 block">
-        {label} {subLabel && <span className="text-zinc-600">{subLabel}</span>}
+      <label className="text-xs text-secondary mb-1 block">
+        {label} {subLabel && <span className="text-muted">{subLabel}</span>}
       </label>
       <div className="relative">
         <input
@@ -82,12 +83,12 @@ function SecretField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none pr-10"
+          className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none pr-10"
         />
         <button
           type="button"
           onClick={() => setShow((v) => !v)}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-secondary"
         >
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
@@ -105,15 +106,15 @@ function TextField({
 }) {
   return (
     <div>
-      <label className="text-xs text-zinc-400 mb-1 block">{label}</label>
+      <label className="text-xs text-secondary mb-1 block">{label}</label>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-sm border border-white/[0.08] bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-accent-violet focus:outline-none"
+        className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none"
       />
-      {hint && <p className="text-xs text-zinc-600 mt-1">{hint}</p>}
+      {hint && <p className="text-xs text-muted mt-1">{hint}</p>}
     </div>
   );
 }
@@ -122,7 +123,7 @@ function TextField({
 
 function SaveMessage({ msg }: { msg: { ok: boolean; text: string } | null }) {
   if (!msg) return null;
-  return <p className={`text-xs ${msg.ok ? 'text-accent-emerald' : 'text-red-400'}`}>{msg.text}</p>;
+  return <p className={`text-xs ${msg.ok ? 'text-accent-green' : 'text-accent-red'}`}>{msg.text}</p>;
 }
 
 // ── Action buttons ────────────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ function SaveBar({
       <button
         type="submit"
         disabled={saving || disabled}
-        className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+        className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>
@@ -146,7 +147,7 @@ function SaveBar({
           type="button"
           onClick={onClear}
           disabled={saving}
-          className="px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+          className="px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
         >
           {clearLabel ?? 'Clear'}
         </button>
@@ -262,24 +263,37 @@ export default function SettingsPage() {
   return (
     <div className="h-full overflow-y-auto p-4 space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-white">Settings</h1>
-        <p className="text-xs text-zinc-500 mt-0.5">Account configuration and system health</p>
+        <h1 className="text-lg font-semibold text-primary">Settings</h1>
+        <p className="text-xs text-muted mt-0.5">Account configuration and system health</p>
       </div>
+
+      {/* ── Display ──────────────────────────────────────────────────────── */}
+      <GlassPanel className="px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-primary">Interface Mode</p>
+            <p className="text-xs text-muted mt-0.5">
+              Vibe mode shows a simplified view. Pro mode exposes the full pipeline, task graph, cost breakdown, and validation gates.
+            </p>
+          </div>
+          <ViewModeToggle />
+        </div>
+      </GlassPanel>
 
       {/* ── Current Plan & Upgrade ───────────────────────────────────────── */}
       <GlassPanel className="px-5 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold
             ${user?.tier === 'ENTERPRISE' ? 'bg-accent-amber/20 text-accent-amber' :
-              user?.tier === 'PRO' ? 'bg-accent-violet/20 text-accent-violet' :
-              'bg-zinc-700 text-zinc-300'}`}>
+              user?.tier === 'PRO' ? 'bg-accent-blue/20 text-accent-blue' :
+              'bg-[var(--gray-400)] text-secondary'}`}>
             {user?.tier === 'ENTERPRISE' ? 'E' : user?.tier === 'PRO' ? 'P' : 'F'}
           </div>
           <div>
-            <p className="text-sm font-semibold text-zinc-200">
+            <p className="text-sm font-semibold text-primary">
               {user?.tier === 'ENTERPRISE' ? 'Enterprise' : user?.tier === 'PRO' ? 'Pro' : 'Free'} Plan
             </p>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-muted">
               {user?.tier === 'ENTERPRISE'
                 ? 'Unlimited runs, priority support, dedicated infrastructure'
                 : user?.tier === 'PRO'
@@ -291,14 +305,14 @@ export default function SettingsPage() {
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => navigate('/billing')}
-            className="px-3 py-1.5 rounded-sm text-xs text-zinc-400 hover:text-zinc-200 border border-white/[0.08] hover:border-white/[0.15] transition-colors"
+            className="px-3 py-1.5 rounded-sm text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-[var(--border-default)] transition-colors"
           >
             View Billing
           </button>
           {user?.tier !== 'ENTERPRISE' && (
             <button
               onClick={() => navigate('/plans')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-violet text-white text-xs font-medium hover:bg-accent-violet/80 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 transition-colors"
             >
               Upgrade Plan
               <ArrowUpRight className="h-3 w-3" />
@@ -311,10 +325,10 @@ export default function SettingsPage() {
       {isOrgDeveloper && (
         <GlassPanel className="px-5 py-4">
           <div className="flex items-center gap-3">
-            <Building2 className="h-5 w-5 text-accent-violet flex-shrink-0" />
+            <Building2 className="h-5 w-5 text-accent-blue flex-shrink-0" />
             <div>
-              <p className="text-sm font-medium text-zinc-200">JIRA, Confluence & Slack Managed at Org Level</p>
-              <p className="text-xs text-zinc-500 mt-0.5">
+              <p className="text-sm font-medium text-primary">JIRA, Confluence & Slack Managed at Org Level</p>
+              <p className="text-xs text-muted mt-0.5">
                 JIRA, Confluence and Slack integrations are managed by your Org Admin.
                 GitHub PAT is configured individually below.
               </p>
@@ -325,16 +339,16 @@ export default function SettingsPage() {
 
       {/* ── GitHub (user-level — shown to all users, not org-admin gated) ── */}
       <IntegrationCard
-        icon={<Github className="h-4 w-4 text-zinc-400" />}
+        icon={<Github className="h-4 w-4 text-secondary" />}
         title="GitHub Integration"
         statusBadge={user?.hasGithubPat
           ? <ConfiguredBadge label="PAT configured" />
           : <NotConfiguredBadge label="No PAT — push disabled" />}
         defaultOpen={!user?.hasGithubPat}
       >
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted">
           Runs auto-push code to GitHub after merge. Provide a PAT with{' '}
-          <code className="text-zinc-400">repo</code> scope and your username or org name.
+          <code className="text-secondary">repo</code> scope and your username or org name.
         </p>
         <form onSubmit={handleSaveGitHub} className="space-y-3">
           <SecretField
@@ -356,7 +370,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={githubSaving || (!githubPat.trim() && !githubOwner.trim())}
-              className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+              className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
             >
               {githubSaving ? 'Saving…' : 'Save'}
             </button>
@@ -364,7 +378,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleTestGitHub}
               disabled={githubTesting || !githubPat.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-white/[0.08] text-zinc-300 text-sm hover:border-accent-violet/40 hover:text-white disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-[var(--border-default)] text-secondary text-sm hover:border-accent-blue/40 hover:text-primary disabled:opacity-40 transition-colors"
             >
               {githubTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Test Connection
@@ -374,7 +388,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={handleClearGitHub}
                 disabled={githubSaving}
-                className="px-4 py-2 rounded-sm text-zinc-400 hover:text-red-400 text-sm transition-colors disabled:opacity-50"
+                className="px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
               >
                 Clear credentials
               </button>
@@ -386,14 +400,14 @@ export default function SettingsPage() {
       {/* ── AI Provider Keys (requires canManageAiKeys) ─────────────────────── */}
       {permissions?.canManageAiKeys && (
         <IntegrationCard
-          icon={<Key className="h-4 w-4 text-zinc-400" />}
+          icon={<Key className="h-4 w-4 text-secondary" />}
           title="AI Provider Keys"
           statusBadge={hasAnyAiKey
             ? <ConfiguredBadge label={`${[user?.hasOpenAiKey && 'OpenAI', user?.hasAnthropicKey && 'Anthropic', user?.hasGeminiKey && 'Gemini'].filter(Boolean).join(', ')} configured`} />
             : <NotConfiguredBadge label="No keys saved" />}
           defaultOpen={!hasAnyAiKey}
         >
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted">
             Per-user API keys for AI providers. Leave a field blank to keep an existing key unchanged.
             Save with all fields empty to clear all keys.
           </p>
@@ -433,9 +447,9 @@ export default function SettingsPage() {
       {/* ── JIRA/Confluence note ──────────────────────────────────────────── */}
       {!isOrgDeveloper && (
         <GlassPanel className="px-5 py-3">
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted">
             JIRA and Confluence integrations are now managed at the org level.
-            Go to <a href="/integrations" className="text-accent-violet hover:text-accent-violet/80 underline">Integrations</a> to configure them.
+            Go to <a href="/integrations" className="text-accent-blue hover:text-accent-blue/80 underline">Integrations</a> to configure them.
           </p>
         </GlassPanel>
       )}
@@ -449,12 +463,12 @@ export default function SettingsPage() {
       {/* ── System Health (requires canViewMetrics) ────────────────────────── */}
       {permissions?.canViewMetrics && (
         <div>
-          <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">System Health</h3>
+          <h3 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">System Health</h3>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <HealthCard icon={<Server className="h-5 w-5 text-accent-violet" />} label="API" value="Healthy" color="text-accent-emerald" />
-            <HealthCard icon={<Database className="h-5 w-5 text-accent-cyan" />} label="Database" value="Connected" color="text-accent-emerald" />
-            <HealthCard icon={<Cpu className="h-5 w-5 text-accent-amber" />} label="Total Runs" value={String(health?.totalRuns ?? '—')} color="text-zinc-200" />
-            <HealthCard icon={<Clock className="h-5 w-5 text-accent-emerald" />} label="Active Runs" value={String(health?.activeRuns ?? '—')} color="text-zinc-200" />
+            <HealthCard icon={<Server className="h-5 w-5 text-accent-blue" />} label="API" value="Healthy" color="text-accent-green" />
+            <HealthCard icon={<Database className="h-5 w-5 text-secondary" />} label="Database" value="Connected" color="text-accent-green" />
+            <HealthCard icon={<Cpu className="h-5 w-5 text-accent-amber" />} label="Total Runs" value={String(health?.totalRuns ?? '—')} color="text-primary" />
+            <HealthCard icon={<Clock className="h-5 w-5 text-accent-green" />} label="Active Runs" value={String(health?.activeRuns ?? '—')} color="text-primary" />
           </div>
         </div>
       )}
@@ -501,16 +515,16 @@ function OrgAiKeyCard({ org, onSaved }: { org: OrgDto | null; onSaved: (o: OrgDt
 
   return (
     <IntegrationCard
-      icon={<Building2 className="h-4 w-4 text-zinc-400" />}
+      icon={<Building2 className="h-4 w-4 text-secondary" />}
       title="Organisation AI Keys"
       statusBadge={hasAnyOrgKey
         ? <ConfiguredBadge label={`Org keys: ${[org?.hasAnthropicKey && 'Anthropic', org?.hasOpenAiKey && 'OpenAI', org?.hasGeminiKey && 'Gemini'].filter(Boolean).join(', ')}`} />
         : <NotConfiguredBadge label="No org keys" />}
     >
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted">
         Org-wide API keys are used by all team members who haven't set personal keys.
         <br />
-        Resolution order: <span className="text-zinc-400">Personal key → Org key → System key</span>
+        Resolution order: <span className="text-secondary">Personal key → Org key → System key</span>
       </p>
       <form onSubmit={handleSave} className="space-y-3">
         <SecretField
@@ -612,17 +626,17 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
 
   return (
     <IntegrationCard
-      icon={<Shield className="h-4 w-4 text-zinc-400" />}
+      icon={<Shield className="h-4 w-4 text-secondary" />}
       title="Key Source & Provider Policy"
       statusBadge={
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-muted">
           {mode === 'SYSTEM' ? 'Platform' : mode === 'OWN_KEYS' ? 'Own Keys' : 'Hybrid'}
         </span>
       }
     >
       {/* Key Source Mode */}
       <div className="space-y-2">
-        <label className="text-xs text-zinc-400 block">Key Source Mode</label>
+        <label className="text-xs text-secondary block">Key Source Mode</label>
         {KEY_SOURCE_MODES.map((m) => (
           <label
             key={m.value}
@@ -634,19 +648,19 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
               value={m.value}
               checked={mode === m.value}
               onChange={() => setMode(m.value)}
-              className="mt-0.5 accent-accent-violet"
+              className="mt-0.5 accent-accent-blue"
             />
             <div>
-              <span className="text-sm text-zinc-200 group-hover:text-white">{m.label}</span>
-              <p className="text-xs text-zinc-500">{m.desc}</p>
+              <span className="text-sm text-primary group-hover:text-primary">{m.label}</span>
+              <p className="text-xs text-muted">{m.desc}</p>
             </div>
           </label>
         ))}
       </div>
 
       {/* Provider Restrictions */}
-      <div className="space-y-2 pt-2 border-t border-white/[0.06]">
-        <label className="text-xs text-zinc-400 block">Enabled Providers</label>
+      <div className="space-y-2 pt-2 border-t border-[var(--border-default)]">
+        <label className="text-xs text-secondary block">Enabled Providers</label>
         <div className="flex gap-3">
           {PROVIDERS.map((p) => (
             <label key={p.id} className="flex items-center gap-2 cursor-pointer">
@@ -654,13 +668,13 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
                 type="checkbox"
                 checked={providers.has(p.id)}
                 onChange={() => toggleProvider(p.id)}
-                className="accent-accent-violet"
+                className="accent-accent-blue"
               />
-              <span className="text-sm text-zinc-300">{p.label}</span>
+              <span className="text-sm text-secondary">{p.label}</span>
             </label>
           ))}
         </div>
-        <p className="text-xs text-zinc-600">
+        <p className="text-xs text-muted">
           Disabled providers are excluded from fallback chains for all org runs.
         </p>
       </div>
@@ -668,7 +682,7 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
       {/* Warning */}
       {missingKeys && (
         <div className="rounded-sm border border-amber-500/30 bg-amber-500/5 px-3 py-2">
-          <p className="text-xs text-amber-400">
+          <p className="text-xs text-accent-amber">
             <AlertCircle className="h-3.5 w-3.5 inline mr-1 -mt-0.5" />
             OWN_KEYS mode is selected but no org/user keys are configured for the enabled providers.
             Runs will fail at submission.
@@ -681,7 +695,7 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 rounded-sm bg-accent-violet text-white text-sm font-medium hover:bg-accent-violet/80 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -695,7 +709,7 @@ function HealthCard({ icon, label, value, color }: { icon: React.ReactNode; labe
     <GlassPanel className="p-4 flex items-center gap-3">
       {icon}
       <div>
-        <p className="text-xs text-zinc-500">{label}</p>
+        <p className="text-xs text-muted">{label}</p>
         <p className={`text-sm font-semibold ${color}`}>{value}</p>
       </div>
     </GlassPanel>

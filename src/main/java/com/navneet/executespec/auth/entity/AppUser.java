@@ -1,5 +1,6 @@
 package com.navneet.executespec.auth.entity;
 
+import com.navneet.executespec.crypto.EncryptedValueConverter;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -22,10 +23,10 @@ public class AppUser {
     @Column(name = "first_name", nullable = false, length = 100)
     private String firstName;
 
-    @Column(name = "last_name", nullable = false, length = 100)
+    @Column(name = "last_name", length = 100)
     private String lastName;
 
-    @Column(name = "password_hash", nullable = false)
+    @Column(name = "password_hash")
     private String passwordHash;
 
     /** SUPER_ADMIN | USER */
@@ -89,12 +90,15 @@ public class AppUser {
 
     // ── AI provider keys ──────────────────────────────────────────────────────
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "openai_api_key")
     private String openAiApiKey;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "anthropic_api_key")
     private String anthropicApiKey;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "gemini_api_key")
     private String geminiApiKey;
 
@@ -106,8 +110,19 @@ public class AppUser {
     @Column(name = "jira_email")
     private String jiraEmail;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "jira_api_token")
     private String jiraApiToken;
+
+    // ── Payment gateway ──────────────────────────────────────────────────────
+
+    @Column(name = "stripe_customer_id")
+    private String stripeCustomerId;
+
+    /** Preferred payment gateway: "razorpay" or "stripe". */
+    @Column(name = "payment_gateway", length = 20)
+    @Builder.Default
+    private String paymentGateway = "razorpay";
 
     // ── Confluence integration ────────────────────────────────────────────────
 
@@ -117,6 +132,24 @@ public class AppUser {
     @Column(name = "confluence_email")
     private String confluenceEmail;
 
+    @Convert(converter = EncryptedValueConverter.class)
     @Column(name = "confluence_api_token")
     private String confluenceApiToken;
+
+    // ── OAuth ────────────────────────────────────────────────────────────────
+
+    @Column(name = "oauth_provider")
+    private String oauthProvider;
+
+    @Column(name = "oauth_id")
+    private String oauthId;
+
+    @Column(name = "avatar_url")
+    private String avatarUrl;
+
+    // ── View mode ────────────────────────────────────────────────────────────
+
+    @Column(name = "view_mode")
+    @Builder.Default
+    private String viewMode = "vibe";
 }

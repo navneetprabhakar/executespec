@@ -109,6 +109,12 @@
       <artifactId>spring-boot-starter-security</artifactId>
     </dependency>
 
+    <!-- OAuth2 Client (Google + GitHub login) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-oauth2-client</artifactId>
+    </dependency>
+
     <!-- JWT (JJWT 0.12.x) -->
     <dependency>
       <groupId>io.jsonwebtoken</groupId>
@@ -320,6 +326,13 @@
       <groupId>org.testcontainers</groupId>
       <artifactId>postgresql</artifactId>
       <scope>test</scope>
+    </dependency>
+
+    <!-- Stripe Java SDK — payment gateway integration -->
+    <dependency>
+      <groupId>com.stripe</groupId>
+      <artifactId>stripe-java</artifactId>
+      <version>26.1.0</version>
     </dependency>
   </dependencies>
 

@@ -15,12 +15,12 @@ interface MetricCardProps {
 export default function MetricCard({ label, value, format, sparkData, accent = '#8B5CF6', pulse }: MetricCardProps) {
   return (
     <GlassPanel className="p-4 flex flex-col gap-2 relative overflow-hidden">
-      <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{label}</p>
+      <p className="text-xs text-muted font-medium uppercase tracking-wider">{label}</p>
       <div className="flex items-end justify-between gap-2">
         <AnimatedCounter
           value={value}
           format={format}
-          className="text-2xl font-bold text-white font-sans"
+          className="text-2xl font-bold text-primary font-sans"
         />
         {pulse && value > 0 && (
           <span className="relative flex h-2.5 w-2.5 mb-1">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
@@ -11,10 +12,10 @@ type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages' | 'reports';
 
 const TIER_LABEL: Record<string, string> = { FREE: 'Free', PRO: 'Team', ENTERPRISE: 'Enterprise' };
 const STATUS_COLOR: Record<string, string> = {
-  ACTIVE: 'text-accent-emerald bg-accent-emerald/10',
+  ACTIVE: 'text-accent-green bg-accent-green/10',
   SUSPENDED: 'text-accent-amber bg-accent-amber/10',
-  DELETED: 'text-zinc-500 bg-zinc-500/10',
-  PENDING_VERIFICATION: 'text-accent-violet bg-accent-violet/10',
+  DELETED: 'text-muted bg-[var(--gray-200)]',
+  PENDING_VERIFICATION: 'text-accent-blue bg-accent-blue/10',
 };
 
 export default function AdminPage() {
@@ -26,6 +27,7 @@ export default function AdminPage() {
 }
 
 function AdminPageInner() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('users');
   const { addToast } = useUiStore();
 
@@ -210,13 +212,36 @@ function AdminPageInner() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Page header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/[0.06] flex-shrink-0">
-        <Shield className="h-5 w-5 text-accent-violet" />
-        <h1 className="text-lg font-semibold text-white">Super Admin</h1>
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
+        <Shield className="h-5 w-5 text-accent-blue" />
+        <h1 className="text-lg font-semibold text-primary">Super Admin</h1>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => navigate('/admin/analytics')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors"
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            Analytics
+          </button>
+          <button
+            onClick={() => navigate('/admin/pricing')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors"
+          >
+            <DollarSign className="h-3.5 w-3.5" />
+            Pricing
+          </button>
+          <button
+            onClick={() => navigate('/admin/feature-flags')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors"
+          >
+            <Flag className="h-3.5 w-3.5" />
+            Feature Flags
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 px-6 pt-3 flex-shrink-0 border-b border-white/[0.06]">
+      <div className="flex gap-1 px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)]">
         {TABS.map(({ id, label, icon: Icon, count }) => (
           <button
             key={id}
@@ -224,8 +249,8 @@ function AdminPageInner() {
             className={cn(
               'flex items-center gap-1.5 px-3 py-2 text-sm rounded-t-lg border-b-2 transition-colors',
               tab === id
-                ? 'border-accent-violet text-accent-violet'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300',
+                ? 'border-accent-blue text-accent-blue'
+                : 'border-transparent text-muted hover:text-secondary',
             )}
           >
             <Icon className="h-3.5 w-3.5" />
@@ -233,7 +258,7 @@ function AdminPageInner() {
             {count !== undefined && (
               <span className={cn(
                 'ml-1 px-1.5 py-0.5 text-[10px] rounded-full font-mono',
-                tab === id ? 'bg-accent-violet/20 text-accent-violet' : 'bg-white/[0.06] text-zinc-500',
+                tab === id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-[var(--gray-200)] text-muted',
               )}>{count}</span>
             )}
           </button>
@@ -252,37 +277,37 @@ function AdminPageInner() {
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
                 placeholder="Search users…"
-                className="flex-1 bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
+                className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary placeholder:text-muted focus:outline-none focus:border-accent-blue/40"
               />
               <button
                 onClick={() => setShowInviteModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-accent-violet hover:bg-accent-violet/80 text-white text-sm font-medium rounded-sm transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors"
               >
                 + Invite User
               </button>
-              <button onClick={loadUsers} className="p-2 text-zinc-500 hover:text-zinc-300">
+              <button onClick={loadUsers} className="p-2 text-muted hover:text-secondary">
                 <RefreshCw className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-surface-1 text-zinc-500 text-xs">
+                <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Name / Email', 'Status', 'Tier', 'Org Role', 'Actions'].map((h) => (
                       <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.04]">
+                <tbody className="divide-y divide-[var(--border-default)]">
                   {filteredUsers.map((u) => (
-                    <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
+                    <tr key={u.id} className="hover:bg-[var(--gray-100)] transition-colors">
                       <td className="px-4 py-3">
-                        <p className="text-zinc-200 font-medium">{u.firstName} {u.lastName}</p>
-                        <p className="text-zinc-500 text-xs">{u.email}</p>
+                        <p className="text-primary font-medium">{u.firstName} {u.lastName}</p>
+                        <p className="text-muted text-xs">{u.email}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={cn('px-2 py-0.5 rounded-sm text-xs font-medium', STATUS_COLOR[u.status] ?? 'text-zinc-400')}>
+                        <span className={cn('px-2 py-0.5 rounded-sm text-xs font-medium', STATUS_COLOR[u.status] ?? 'text-secondary')}>
                           {u.status}
                         </span>
                       </td>
@@ -290,18 +315,18 @@ function AdminPageInner() {
                         <select
                           value={u.tier}
                           onChange={(e) => changeUserTier(u.id, e.target.value)}
-                          className="bg-surface-1 border border-white/[0.08] rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none"
+                          className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1 text-xs text-secondary focus:outline-none"
                         >
                           {Object.entries(TIER_LABEL).map(([v, l]) => (
                             <option key={v} value={v}>{l}</option>
                           ))}
                         </select>
                       </td>
-                      <td className="px-4 py-3 text-zinc-400 text-xs">{u.orgRole ?? '—'}</td>
+                      <td className="px-4 py-3 text-secondary text-xs">{u.orgRole ?? '—'}</td>
                       <td className="px-4 py-3 flex items-center gap-1.5">
                         <button
                           onClick={() => setGrantTarget({ type: 'user', id: u.id, name: `${u.firstName} ${u.lastName}` })}
-                          className="px-2.5 py-1 rounded text-xs font-medium bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20 transition-colors"
+                          className="px-2.5 py-1 rounded text-xs font-medium bg-accent-green/10 text-accent-green hover:bg-accent-green/20 transition-colors"
                           title="Grant bonus runs"
                         >
                           <Gift className="h-3 w-3 inline mr-1" />Runs
@@ -311,7 +336,7 @@ function AdminPageInner() {
                           className={cn(
                             'px-3 py-1 rounded text-xs font-medium transition-colors',
                             u.status === 'SUSPENDED'
-                              ? 'bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20'
+                              ? 'bg-accent-green/10 text-accent-green hover:bg-accent-green/20'
                               : 'bg-accent-amber/10 text-accent-amber hover:bg-accent-amber/20',
                           )}
                         >
@@ -321,7 +346,7 @@ function AdminPageInner() {
                     </tr>
                   ))}
                   {filteredUsers.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600">No users found</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">No users found</td></tr>
                   )}
                 </tbody>
               </table>
@@ -333,41 +358,41 @@ function AdminPageInner() {
         {tab === 'orgs' && (
           <div className="space-y-4">
             <div className="flex justify-end">
-              <button onClick={loadOrgs} className="p-2 text-zinc-500 hover:text-zinc-300">
+              <button onClick={loadOrgs} className="p-2 text-muted hover:text-secondary">
                 <RefreshCw className="h-4 w-4" />
               </button>
             </div>
-            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-surface-1 text-zinc-500 text-xs">
+                <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Org', 'Tier', 'Status', 'Run Limit', 'API Keys', 'Usage', 'Actions'].map((h) => (
                       <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.04]">
+                <tbody className="divide-y divide-[var(--border-default)]">
                   {orgs.map((o) => {
                     const limitEditing = editingLimits[o.id];
                     const displayLimit = o.monthlyRunLimitOverride ?? '(default)';
                     return (
-                      <tr key={o.id} className="hover:bg-white/[0.02] transition-colors">
+                      <tr key={o.id} className="hover:bg-[var(--gray-100)] transition-colors">
                         <td className="px-4 py-3">
-                          <p className="text-zinc-200 font-medium">{o.name}</p>
-                          <p className="text-zinc-500 text-xs truncate max-w-[160px]">{o.domainPatterns || '—'}</p>
+                          <p className="text-primary font-medium">{o.name}</p>
+                          <p className="text-muted text-xs truncate max-w-[160px]">{o.domainPatterns || '—'}</p>
                         </td>
                         <td className="px-4 py-3">
                           <select
                             value={o.tier}
                             onChange={(e) => changeOrgTier(o.id, e.target.value)}
-                            className="bg-surface-1 border border-white/[0.08] rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none"
+                            className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1 text-xs text-secondary focus:outline-none"
                           >
                             <option value="PRO">Team</option>
                             <option value="ENTERPRISE">Enterprise</option>
                           </select>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={cn('px-2 py-0.5 rounded-sm text-xs font-medium', STATUS_COLOR[o.status] ?? 'text-zinc-400')}>
+                          <span className={cn('px-2 py-0.5 rounded-sm text-xs font-medium', STATUS_COLOR[o.status] ?? 'text-secondary')}>
                             {o.status}
                           </span>
                         </td>
@@ -378,10 +403,10 @@ function AdminPageInner() {
                               value={limitEditing !== undefined ? limitEditing : (o.monthlyRunLimitOverride ?? '')}
                               onChange={(e) => setEditingLimits((p) => ({ ...p, [o.id]: e.target.value }))}
                               placeholder="default"
-                              className="w-20 bg-surface-1 border border-white/[0.08] rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+                              className="w-20 bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1 text-xs text-secondary focus:outline-none focus:border-accent-blue/40"
                             />
                             {limitEditing !== undefined && (
-                              <button onClick={() => saveOrgRunLimit(o.id)} className="p-1 text-accent-emerald hover:text-accent-emerald/80">
+                              <button onClick={() => saveOrgRunLimit(o.id)} className="p-1 text-accent-green hover:text-accent-green/80">
                                 <Check className="h-3.5 w-3.5" />
                               </button>
                             )}
@@ -392,7 +417,7 @@ function AdminPageInner() {
                             onClick={() => toggleApiKeys(o)}
                             className={cn(
                               'relative h-5 w-9 rounded-full transition-colors',
-                              o.apiKeysProvided ? 'bg-accent-emerald' : 'bg-white/[0.10]',
+                              o.apiKeysProvided ? 'bg-accent-green' : 'bg-[var(--border-default)]',
                             )}
                             title={o.apiKeysProvided ? 'API keys provided (Enterprise = unlimited)' : 'No API keys'}
                           >
@@ -402,14 +427,14 @@ function AdminPageInner() {
                             )} />
                           </button>
                         </td>
-                        <td className="px-4 py-3 text-zinc-400 text-xs">
+                        <td className="px-4 py-3 text-secondary text-xs">
                           {o.monthlyRunCount} runs
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5">
                             <button
                               onClick={() => setGrantTarget({ type: 'org', id: o.id, name: o.name })}
-                              className="px-2.5 py-1 rounded text-xs font-medium bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20 transition-colors"
+                              className="px-2.5 py-1 rounded text-xs font-medium bg-accent-green/10 text-accent-green hover:bg-accent-green/20 transition-colors"
                               title="Grant bonus runs"
                             >
                               <Gift className="h-3 w-3 inline mr-1" />Runs
@@ -419,7 +444,7 @@ function AdminPageInner() {
                               className={cn(
                                 'px-3 py-1 rounded text-xs font-medium transition-colors',
                                 o.status === 'SUSPENDED'
-                                  ? 'bg-accent-emerald/10 text-accent-emerald hover:bg-accent-emerald/20'
+                                  ? 'bg-accent-green/10 text-accent-green hover:bg-accent-green/20'
                                   : 'bg-accent-amber/10 text-accent-amber hover:bg-accent-amber/20',
                               )}
                             >
@@ -431,7 +456,7 @@ function AdminPageInner() {
                     );
                   })}
                   {orgs.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-600">No organisations</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No organisations</td></tr>
                   )}
                 </tbody>
               </table>
@@ -442,12 +467,12 @@ function AdminPageInner() {
         {/* ── TIER CONFIG TAB ───────────────────────────────────────────── */}
         {tab === 'tiers' && (
           <div className="space-y-4 max-w-lg">
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted">
               Set the default monthly run limits for each tier. Changes take effect immediately for new runs.
             </p>
-            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-surface-1 text-zinc-500 text-xs">
+                <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Tier</th>
                     <th className="px-4 py-3 text-left font-medium">Monthly Limit</th>
@@ -455,14 +480,14 @@ function AdminPageInner() {
                     <th className="px-4 py-3"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.04]">
+                <tbody className="divide-y divide-[var(--border-default)]">
                   {tierConfigs.map((tc) => {
                     const editing = editingTiers[tc.tier];
                     return (
-                      <tr key={tc.tier} className="hover:bg-white/[0.02]">
+                      <tr key={tc.tier} className="hover:bg-[var(--gray-100)]">
                         <td className="px-4 py-3">
-                          <span className="font-medium text-zinc-200">{TIER_LABEL[tc.tier] ?? tc.tier}</span>
-                          {tc.isFixed && <span className="ml-2 text-xs text-zinc-600">(default fixed)</span>}
+                          <span className="font-medium text-primary">{TIER_LABEL[tc.tier] ?? tc.tier}</span>
+                          {tc.isFixed && <span className="ml-2 text-xs text-muted">(default fixed)</span>}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
@@ -470,16 +495,16 @@ function AdminPageInner() {
                               type="number"
                               value={editing !== undefined ? editing : tc.monthlyRunLimit}
                               onChange={(e) => setEditingTiers((p) => ({ ...p, [tc.tier]: e.target.value }))}
-                              className="w-24 bg-surface-1 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-accent-violet/40"
+                              className="w-24 bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-secondary focus:outline-none focus:border-accent-blue/40"
                             />
                             {editing !== undefined && (
-                              <button onClick={() => saveTierLimit(tc.tier)} className="p-1.5 bg-accent-emerald/15 text-accent-emerald rounded-sm hover:bg-accent-emerald/25">
+                              <button onClick={() => saveTierLimit(tc.tier)} className="p-1.5 bg-accent-green/15 text-accent-green rounded-sm hover:bg-accent-green/25">
                                 <Check className="h-3.5 w-3.5" />
                               </button>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-zinc-500 text-xs">
+                        <td className="px-4 py-3 text-muted text-xs">
                           {tc.tier === 'ENTERPRISE'
                             ? 'Override; ENTERPRISE orgs with API keys get unlimited'
                             : tc.description}
@@ -490,8 +515,8 @@ function AdminPageInner() {
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-zinc-600">
-              Enterprise orgs with <strong className="text-zinc-400">API Keys Provided</strong> toggled on always get unlimited runs regardless of this value.
+            <p className="text-xs text-muted">
+              Enterprise orgs with <strong className="text-secondary">API Keys Provided</strong> toggled on always get unlimited runs regardless of this value.
               Per-org overrides (set in the Orgs tab) take precedence over these defaults.
             </p>
           </div>
@@ -500,29 +525,29 @@ function AdminPageInner() {
         {/* ── ESCALATIONS TAB ───────────────────────────────────────────── */}
         {tab === 'escalations' && (
           <div className="space-y-4">
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted">
               Invitations escalated because the invitee's email domain doesn't match the org's registered domains.
             </p>
             {escalations.length === 0 ? (
-              <div className="text-center py-12 text-zinc-600">No pending escalations</div>
+              <div className="text-center py-12 text-muted">No pending escalations</div>
             ) : (
               <div className="space-y-3">
                 {escalations.map((inv) => (
-                  <div key={inv.id} className="flex items-center justify-between p-4 rounded-sm bg-surface-1 border border-white/[0.06]">
+                  <div key={inv.id} className="flex items-center justify-between p-4 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
                     <div>
-                      <p className="text-zinc-200 text-sm font-medium">{inv.invitedEmail}</p>
-                      <p className="text-zinc-500 text-xs mt-0.5">Org: {inv.orgId} · Role: {inv.orgRole}</p>
+                      <p className="text-primary text-sm font-medium">{inv.invitedEmail}</p>
+                      <p className="text-muted text-xs mt-0.5">Org: {inv.orgId} · Role: {inv.orgRole}</p>
                     </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => approveEsc(inv.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-emerald/10 text-accent-emerald text-xs font-medium hover:bg-accent-emerald/20 transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-green/10 text-accent-green text-xs font-medium hover:bg-accent-green/20 transition-colors"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve
                       </button>
                       <button
                         onClick={() => rejectEsc(inv.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-rose/10 text-accent-rose text-xs font-medium hover:bg-accent-rose/20 transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-red/10 text-accent-red text-xs font-medium hover:bg-accent-red/20 transition-colors"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
                       </button>
@@ -538,17 +563,17 @@ function AdminPageInner() {
         {tab === 'packages' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-muted">
                 Manage top-up run packages available for purchase. Deactivated packages are hidden from users.
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={() => { setNewPkg(true); setEditingPkg(null); setPkgForm({ name: '', runCount: '', amountInr: '', amountUsd: '', sortOrder: '' }); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-violet hover:bg-accent-violet/80 text-white text-xs font-medium transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-blue hover:bg-accent-blue/80 text-primary text-xs font-medium transition-colors"
                 >
                   <Plus className="h-3.5 w-3.5" /> New Package
                 </button>
-                <button onClick={loadPackages} className="p-2 text-zinc-500 hover:text-zinc-300">
+                <button onClick={loadPackages} className="p-2 text-muted hover:text-secondary">
                   <RefreshCw className="h-4 w-4" />
                 </button>
               </div>
@@ -556,72 +581,72 @@ function AdminPageInner() {
 
             {/* Create / Edit form */}
             {(newPkg || editingPkg) && (
-              <div className="rounded-sm bg-surface-1 border border-accent-violet/30 p-4 space-y-3">
-                <h3 className="text-sm font-medium text-zinc-200">
+              <div className="rounded-sm bg-[var(--gray-100)] border border-accent-blue/30 p-4 space-y-3">
+                <h3 className="text-sm font-medium text-primary">
                   {editingPkg ? `Edit: ${editingPkg.name}` : 'Create New Package'}
                 </h3>
                 <div className="grid grid-cols-5 gap-3">
                   <div>
-                    <label className="block text-[10px] text-zinc-500 mb-1">Name</label>
+                    <label className="block text-[10px] text-muted mb-1">Name</label>
                     <input
                       type="text"
                       value={pkgForm.name}
                       onChange={(e) => setPkgForm((p) => ({ ...p, name: e.target.value }))}
                       placeholder="e.g. 10 Runs"
-                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                      className="w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-accent-blue/40"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-zinc-500 mb-1">Run Count</label>
+                    <label className="block text-[10px] text-muted mb-1">Run Count</label>
                     <input
                       type="number"
                       value={pkgForm.runCount}
                       onChange={(e) => setPkgForm((p) => ({ ...p, runCount: e.target.value }))}
                       placeholder="10"
-                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                      className="w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-accent-blue/40"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-zinc-500 mb-1">INR (paise)</label>
+                    <label className="block text-[10px] text-muted mb-1">INR (paise)</label>
                     <input
                       type="number"
                       value={pkgForm.amountInr}
                       onChange={(e) => setPkgForm((p) => ({ ...p, amountInr: e.target.value }))}
                       placeholder="49900"
-                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                      className="w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-accent-blue/40"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-zinc-500 mb-1">USD (cents)</label>
+                    <label className="block text-[10px] text-muted mb-1">USD (cents)</label>
                     <input
                       type="number"
                       value={pkgForm.amountUsd}
                       onChange={(e) => setPkgForm((p) => ({ ...p, amountUsd: e.target.value }))}
                       placeholder="599"
-                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                      className="w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-accent-blue/40"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-zinc-500 mb-1">Sort Order</label>
+                    <label className="block text-[10px] text-muted mb-1">Sort Order</label>
                     <input
                       type="number"
                       value={pkgForm.sortOrder}
                       onChange={(e) => setPkgForm((p) => ({ ...p, sortOrder: e.target.value }))}
                       placeholder="1"
-                      className="w-full bg-surface-2 border border-white/[0.08] rounded px-2 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+                      className="w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-accent-blue/40"
                     />
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={savePkg}
-                    className="px-4 py-1.5 rounded-sm bg-accent-emerald/15 text-accent-emerald text-xs font-medium hover:bg-accent-emerald/25 transition-colors"
+                    className="px-4 py-1.5 rounded-sm bg-accent-green/15 text-accent-green text-xs font-medium hover:bg-accent-green/25 transition-colors"
                   >
                     {editingPkg ? 'Save Changes' : 'Create'}
                   </button>
                   <button
                     onClick={resetPkgForm}
-                    className="px-4 py-1.5 rounded-sm bg-white/[0.06] text-zinc-400 text-xs font-medium hover:bg-white/[0.10] transition-colors"
+                    className="px-4 py-1.5 rounded-sm bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors"
                   >
                     Cancel
                   </button>
@@ -630,33 +655,33 @@ function AdminPageInner() {
             )}
 
             {/* Packages table */}
-            <div className="rounded-sm border border-white/[0.06] overflow-hidden">
+            <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-surface-1 text-zinc-500 text-xs">
+                <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Name', 'Runs', 'Price (INR)', 'Price (USD)', 'Order', 'Status', 'Actions'].map((h) => (
                       <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.04]">
+                <tbody className="divide-y divide-[var(--border-default)]">
                   {packages.map((p) => (
-                    <tr key={p.id} className={cn('hover:bg-white/[0.02] transition-colors', !p.active && 'opacity-50')}>
-                      <td className="px-4 py-3 text-zinc-200 font-medium">{p.name}</td>
-                      <td className="px-4 py-3 text-zinc-300">{p.runCount}</td>
-                      <td className="px-4 py-3 text-zinc-300 font-mono text-xs">
+                    <tr key={p.id} className={cn('hover:bg-[var(--gray-100)] transition-colors', !p.active && 'opacity-50')}>
+                      <td className="px-4 py-3 text-primary font-medium">{p.name}</td>
+                      <td className="px-4 py-3 text-secondary">{p.runCount}</td>
+                      <td className="px-4 py-3 text-secondary font-mono text-xs">
                         {'\u20B9'}{(p.amountInr / 100).toFixed(0)}
-                        <span className="text-zinc-600 ml-1">({p.amountInr}p)</span>
+                        <span className="text-muted ml-1">({p.amountInr}p)</span>
                       </td>
-                      <td className="px-4 py-3 text-zinc-300 font-mono text-xs">
+                      <td className="px-4 py-3 text-secondary font-mono text-xs">
                         ${(p.amountUsd / 100).toFixed(2)}
-                        <span className="text-zinc-600 ml-1">({p.amountUsd}c)</span>
+                        <span className="text-muted ml-1">({p.amountUsd}c)</span>
                       </td>
-                      <td className="px-4 py-3 text-zinc-400 text-xs">{p.sortOrder}</td>
+                      <td className="px-4 py-3 text-secondary text-xs">{p.sortOrder}</td>
                       <td className="px-4 py-3">
                         <span className={cn(
                           'px-2 py-0.5 rounded-sm text-xs font-medium',
-                          p.active ? 'text-accent-emerald bg-accent-emerald/10' : 'text-zinc-500 bg-zinc-500/10',
+                          p.active ? 'text-accent-green bg-accent-green/10' : 'text-muted bg-[var(--gray-200)]',
                         )}>
                           {p.active ? 'Active' : 'Inactive'}
                         </span>
@@ -665,7 +690,7 @@ function AdminPageInner() {
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => startEditPkg(p)}
-                            className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] transition-colors"
+                            className="p-1.5 rounded text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors"
                             title="Edit"
                           >
                             <Pencil className="h-3.5 w-3.5" />
@@ -673,7 +698,7 @@ function AdminPageInner() {
                           {p.active && (
                             <button
                               onClick={() => deactivatePkg(p.id)}
-                              className="p-1.5 rounded text-accent-rose/60 hover:text-accent-rose hover:bg-accent-rose/10 transition-colors"
+                              className="p-1.5 rounded text-accent-red/60 hover:text-accent-red hover:bg-accent-red/10 transition-colors"
                               title="Deactivate"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -684,7 +709,7 @@ function AdminPageInner() {
                     </tr>
                   ))}
                   {packages.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-600">No top-up packages</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No top-up packages</td></tr>
                   )}
                 </tbody>
               </table>
@@ -697,10 +722,10 @@ function AdminPageInner() {
         {tab === 'reports' && (
           <div className="space-y-6 max-w-xl">
             <div>
-              <h2 className="text-base font-semibold text-zinc-100 mb-1">Send Usage Reports</h2>
-              <p className="text-sm text-zinc-500 leading-relaxed">
-                Sends usage report emails to <strong className="text-zinc-400">all active users</strong> and{' '}
-                <strong className="text-zinc-400">org admins</strong>. Solo users get personal reports.
+              <h2 className="text-base font-semibold text-primary mb-1">Send Usage Reports</h2>
+              <p className="text-sm text-muted leading-relaxed">
+                Sends usage report emails to <strong className="text-secondary">all active users</strong> and{' '}
+                <strong className="text-secondary">org admins</strong>. Solo users get personal reports.
                 Org admins get aggregated reports with top contributors and per-project breakdown.
               </p>
             </div>
@@ -712,8 +737,8 @@ function AdminPageInner() {
                 className={cn(
                   'flex items-center gap-2 px-5 py-2.5 rounded-sm text-sm font-semibold transition-all',
                   reportSending === 'WEEKLY'
-                    ? 'bg-accent-violet/20 text-accent-violet cursor-wait'
-                    : 'bg-accent-violet hover:bg-accent-violet/80 text-white',
+                    ? 'bg-accent-blue/20 text-accent-blue cursor-wait'
+                    : 'bg-accent-blue hover:bg-accent-blue/80 text-primary',
                   reportSending !== null && reportSending !== 'WEEKLY' && 'opacity-50 cursor-not-allowed',
                 )}
               >
@@ -727,7 +752,7 @@ function AdminPageInner() {
                   'flex items-center gap-2 px-5 py-2.5 rounded-sm text-sm font-semibold transition-all',
                   reportSending === 'MONTHLY'
                     ? 'bg-cyan-500/20 text-cyan-400 cursor-wait'
-                    : 'bg-cyan-600 hover:bg-cyan-500 text-white',
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-primary',
                   reportSending !== null && reportSending !== 'MONTHLY' && 'opacity-50 cursor-not-allowed',
                 )}
               >
@@ -737,29 +762,29 @@ function AdminPageInner() {
             </div>
 
             {reportResult && (
-              <div className="rounded-sm bg-accent-emerald/10 border border-accent-emerald/20 px-5 py-4 flex items-center gap-3">
-                <Check className="h-5 w-5 text-accent-emerald flex-shrink-0" />
+              <div className="rounded-sm bg-accent-green/10 border border-accent-green/20 px-5 py-4 flex items-center gap-3">
+                <Check className="h-5 w-5 text-accent-green flex-shrink-0" />
                 <div>
-                  <p className="text-sm font-medium text-accent-emerald">
+                  <p className="text-sm font-medium text-accent-green">
                     Queued {reportResult.emailsSent} usage report emails
                   </p>
-                  <p className="text-xs text-zinc-500 mt-0.5">
+                  <p className="text-xs text-muted mt-0.5">
                     Period: {reportResult.period} &middot; Emails are being sent asynchronously
                   </p>
                 </div>
               </div>
             )}
 
-            <div className="rounded-sm bg-surface-1 border border-white/[0.06] p-4">
-              <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">What gets sent</h3>
-              <div className="space-y-2 text-sm text-zinc-400">
+            <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4">
+              <h3 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">What gets sent</h3>
+              <div className="space-y-2 text-sm text-secondary">
                 <div className="flex items-start gap-2">
-                  <span className="text-accent-violet mt-0.5">&#9679;</span>
-                  <span><strong className="text-zinc-300">Solo users</strong> — personal run count, token usage, cost estimate, per-project breakdown, comparison with previous period</span>
+                  <span className="text-accent-blue mt-0.5">&#9679;</span>
+                  <span><strong className="text-secondary">Solo users</strong> — personal run count, token usage, cost estimate, per-project breakdown, comparison with previous period</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="text-cyan-400 mt-0.5">&#9679;</span>
-                  <span><strong className="text-zinc-300">Org admins</strong> — aggregated org usage, top 5 contributors leaderboard, per-project breakdown, member count, period comparison</span>
+                  <span><strong className="text-secondary">Org admins</strong> — aggregated org usage, top 5 contributors leaderboard, per-project breakdown, member count, period comparison</span>
                 </div>
               </div>
             </div>

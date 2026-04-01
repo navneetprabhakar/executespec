@@ -84,7 +84,7 @@ export function useSse(runId: string | null) {
           if (data.type === 'GATE_OPENED') {
             fetchRun(runId!);
           }
-          if (data.type === 'COMPLETE' || data.type === 'RUN_RESTARTED') {
+          if (data.type === 'COMPLETE' || data.type === 'RUN_RESTARTED' || data.type === 'BUDGET_EXCEEDED') {
             fetchRun(runId!);
           }
         } catch {}

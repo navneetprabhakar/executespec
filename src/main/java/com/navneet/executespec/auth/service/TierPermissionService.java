@@ -200,12 +200,12 @@ public class TierPermissionService {
             );
         }
 
-        // DEVELOPER in org (PRO or ENTERPRISE) — limited: chat + token usage + view members + deploy
+        // DEVELOPER in org — run detail tabs unlocked for all tiers
         return new TierPermissions(
                 false, // canManageAiKeys
                 false, // canViewPricing
                 false, // canManageIntegrations
-                false, // canViewMetrics
+                true,  // canViewMetrics — unlocked for all tiers
                 false, // canViewCostBreakdown
                 true,  // canViewTokenUsage
                 true,  // canUseChat
@@ -213,7 +213,7 @@ public class TierPermissionService {
                 false, // canInviteMembers
                 true,  // canViewOrgMembers (read-only)
                 false, // canViewAudit
-                false, // canViewLiveLog (org admin & super admin only)
+                true,  // canViewLiveLog — unlocked for all tiers
                 false, // canViewInvoices
                 false, // canViewAccounting
                 false, // canManageCreditNotes
@@ -221,7 +221,7 @@ public class TierPermissionService {
                 false, // canManageSellerConfig
                 false, // canManageBillingProfile
                 limit, used, maxMembers, currentMembers, maxApply, maxPreviews,
-                canDeploy, maxDeploys  // deploy available to all org members
+                canDeploy, maxDeploys
         );
     }
 
@@ -235,15 +235,15 @@ public class TierPermissionService {
                 false, // canManageAiKeys
                 false, // canViewPricing
                 false, // canManageIntegrations
-                false, // canViewMetrics
+                true,  // canViewMetrics — unlocked for all tiers
                 false, // canViewCostBreakdown
-                false, // canViewTokenUsage
-                false, // canUseChat
+                true,  // canViewTokenUsage — unlocked for all tiers
+                true,  // canUseChat — unlocked for all tiers
                 false, // canCreateOrg
                 false, // canInviteMembers
                 false, // canViewOrgMembers
                 false, // canViewAudit
-                false, // canViewLiveLog
+                true,  // canViewLiveLog — unlocked for all tiers
                 true,  // canViewInvoices (own invoices)
                 false, // canViewAccounting
                 false, // canManageCreditNotes
@@ -251,8 +251,8 @@ public class TierPermissionService {
                 false, // canManageSellerConfig
                 true,  // canManageBillingProfile (own profile)
                 limit, used, -1, 0, maxApply, maxPreviews,
-                false, // canDeploy (FREE users cannot deploy)
-                0      // maxDeployments
+                true,  // canDeploy — unlocked for all tiers
+                3      // maxDeployments
         );
     }
 

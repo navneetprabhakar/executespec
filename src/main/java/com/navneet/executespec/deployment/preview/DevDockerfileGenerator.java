@@ -124,6 +124,16 @@ public class DevDockerfileGenerator {
                     return PreviewProjectType.NODE_BACKEND;
                 }
             }
+
+            // Root package.json exists but has no backend deps.
+            // Before defaulting to NODE_FRONTEND, check if there's a backend/ subdirectory.
+            // Common pattern: root package.json (vite/react) + backend/ with express.
+            FullStackLayout rootPkgLayout = detectFullStack(workspace);
+            if (rootPkgLayout != null && rootPkgLayout.hasBackend()) {
+                log.info("[Detect] Root package.json + backend/ subdirectory detected → FULL_STACK");
+                return PreviewProjectType.FULL_STACK;
+            }
+
             return PreviewProjectType.NODE_FRONTEND;
         }
 
@@ -201,7 +211,7 @@ public class DevDockerfileGenerator {
             }
         }
 
-        return switch (type) {
+        String dockerfile = switch (type) {
             case NODE_FRONTEND -> nodeFrontendDockerfile(workspace);
             case NODE_BACKEND -> nodeBackendDockerfile(workspace);
             case SPRING_BOOT -> springBootDockerfile(workspace);
@@ -214,6 +224,7 @@ public class DevDockerfileGenerator {
             case FULL_STACK -> singlePackageFullStackDockerfile(workspace);
             case STATIC_HTML -> staticHtmlDockerfile();
         };
+        return injectNonRootUser(dockerfile, type);
     }
 
     /**
@@ -317,7 +328,63 @@ public class DevDockerfileGenerator {
                 *.log
                 .dockerignore
                 Dockerfile
+                .env
+                .env.*
+                .env.local
+                .env.production
+                credentials.json
+                service-account.json
+                key.json
+                keyfile.json
+                secrets.yml
+                secrets.yaml
                 """;
+    }
+
+    // ── Security: inject non-root user ─────────────────────────────────────
+
+    /**
+     * Injects a non-root USER directive before the final CMD/ENTRYPOINT in the Dockerfile.
+     * Detects Alpine vs Debian base images for correct user-creation syntax.
+     * STATIC_HTML (nginx) uses the built-in nginx user.
+     */
+    private String injectNonRootUser(String dockerfile, PreviewProjectType type) {
+        if (dockerfile == null || dockerfile.isBlank()) return dockerfile;
+        // Already has a USER directive — skip
+        if (dockerfile.contains("\nUSER ")) return dockerfile;
+
+        // STATIC_HTML uses nginx image which has its own user
+        if (type == PreviewProjectType.STATIC_HTML) {
+            return injectBeforeCmd(dockerfile, "USER nginx\n");
+        }
+
+        // Detect Alpine vs Debian/Ubuntu base from FROM line
+        boolean isAlpine = dockerfile.lines()
+                .filter(l -> l.startsWith("FROM "))
+                .anyMatch(l -> l.contains("-alpine"));
+
+        String userBlock;
+        if (isAlpine) {
+            userBlock = "RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app\nUSER app\n";
+        } else {
+            userBlock = "RUN groupadd -r app && useradd -r -g app -s /sbin/nologin app && chown -R app:app /app\nUSER app\n";
+        }
+
+        return injectBeforeCmd(dockerfile, userBlock);
+    }
+
+    /** Inserts the given block just before the last CMD or ENTRYPOINT line. */
+    private String injectBeforeCmd(String dockerfile, String block) {
+        // Find the last CMD or ENTRYPOINT line
+        int lastCmd = dockerfile.lastIndexOf("\nCMD ");
+        int lastEntry = dockerfile.lastIndexOf("\nENTRYPOINT ");
+        int insertPoint = Math.max(lastCmd, lastEntry);
+        if (insertPoint < 0) {
+            // No CMD found — append at end
+            return dockerfile + "\n" + block;
+        }
+        // Insert before the CMD/ENTRYPOINT line (after the preceding newline)
+        return dockerfile.substring(0, insertPoint + 1) + block + dockerfile.substring(insertPoint + 1);
     }
 
     // ── Private Dockerfile generators ───────────────────────────────────────
@@ -332,7 +399,7 @@ public class DevDockerfileGenerator {
 
         if (hasViteConfig || hasDevScript) {
             // Always use vite with explicit --host and --port to ensure container accessibility
-            cmd = "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\", \"--allowedHosts\", \"all\"]";
+            cmd = "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\"]";
         } else {
             cmd = """
                     RUN npm install -g serve
@@ -406,7 +473,7 @@ public class DevDockerfileGenerator {
             String startCmd = (pkg != null && pkg.has("scripts") && pkg.get("scripts").has("start"))
                     ? "npm start" : "node " + findNodeEntryPoint(workspace);
             cmd = "CMD [\"sh\", \"-c\", \"" + startCmd
-                    + " & npx vite --host 0.0.0.0 --port 5173 --allowedHosts all\"]";
+                    + " & npx vite --host 0.0.0.0 --port 5173\"]";
         } else {
             // Fallback: just npm start
             cmd = "CMD [\"npm\", \"start\"]";
@@ -428,6 +495,17 @@ public class DevDockerfileGenerator {
                 COPY package*.json ./
                 RUN npm install""" + viteInstall + "\n" +
                 "COPY . .\n" +
+                // Patch package.json scripts: inject --host 0.0.0.0 into any script value that
+                // invokes "vite" without --host. Uses Node's JSON parser to target only script
+                // values (not dependency entries like "vite": "^5.x"). The old sed approach
+                // 's/"vite"/"vite --host 0.0.0.0"/g' matched dependency entries, not script usage.
+                "RUN node -e \"" +
+                "const fs=require('fs');" +
+                "const p=JSON.parse(fs.readFileSync('package.json','utf8'));" +
+                "if(p.scripts){for(const[k,v]of Object.entries(p.scripts)){" +
+                "if(typeof v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){" +
+                "p.scripts[k]=v.replace(/\\\\bvite(\\\\s*$)/,'vite --host 0.0.0.0')}}}" +
+                "fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n" +
                 "EXPOSE 5173 3000\n" +
                 cmd.stripLeading() + "\n";
     }
@@ -578,6 +656,33 @@ public class DevDockerfileGenerator {
             log.debug("Failed to scan workspace subdirectories: {}", e.getMessage());
         }
 
+        // If we found a backend subdir but no frontend subdir, check if the root itself
+        // is the frontend (has vite/react/vue in root package.json). Use "." as frontendDir.
+        if (backendDir != null && frontendDir == null) {
+            Path rootPkg = workspace.resolve("package.json");
+            if (Files.exists(rootPkg)) {
+                try {
+                    JsonNode pkg = mapper.readTree(rootPkg.toFile());
+                    boolean rootIsFrontend = false;
+                    for (String field : List.of("dependencies", "devDependencies")) {
+                        JsonNode deps = pkg != null ? pkg.get(field) : null;
+                        if (deps != null) {
+                            for (String feDep : FRONTEND_FRAMEWORK_DEPS) {
+                                if (deps.has(feDep)) { rootIsFrontend = true; break; }
+                            }
+                            if (deps.has("vite") || deps.has("webpack")) rootIsFrontend = true;
+                        }
+                        if (rootIsFrontend) break;
+                    }
+                    if (rootIsFrontend) {
+                        frontendDir = ".";
+                        frontendType = PreviewProjectType.NODE_FRONTEND;
+                        log.info("[Detect] Root is frontend (vite/react), backend in {}/", backendDir);
+                    }
+                } catch (IOException ignored) {}
+            }
+        }
+
         if (frontendDir == null && backendDir == null) return null;
         return new FullStackLayout(frontendDir, backendDir, frontendType, backendType);
     }
@@ -592,7 +697,7 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.SPRING_BOOT;
         }
 
-        // Node
+        // Node — check for own package.json with backend deps
         if (Files.exists(dir.resolve("package.json"))) {
             JsonNode pkg = null;
             try {
@@ -600,14 +705,30 @@ public class DevDockerfileGenerator {
             } catch (IOException ignored) {}
 
             if (pkg != null) {
-                JsonNode deps = pkg.get("dependencies");
-                if (deps != null) {
-                    for (String backendDep : NODE_BACKEND_DEPS) {
-                        if (deps.has(backendDep)) return PreviewProjectType.NODE_BACKEND;
+                for (String field : List.of("dependencies", "devDependencies")) {
+                    JsonNode deps = pkg.get(field);
+                    if (deps != null) {
+                        for (String backendDep : NODE_BACKEND_DEPS) {
+                            if (deps.has(backendDep)) return PreviewProjectType.NODE_BACKEND;
+                        }
                     }
                 }
             }
             return PreviewProjectType.NODE_FRONTEND;
+        }
+
+        // Node — no package.json but has JS/TS files (backend code lives in subdir,
+        // deps are in root package.json). Scan for server-like files.
+        String dirName = dir.getFileName().toString().toLowerCase();
+        if (BACKEND_DIR_NAMES.contains(dirName) && hasJsOrTsFiles(dir)) {
+            // Check for server indicators: express patterns, http.createServer, app.listen
+            try (Stream<Path> files = Files.walk(dir, 2)) {
+                boolean hasServerCode = files
+                        .filter(f -> f.toString().endsWith(".js") || f.toString().endsWith(".ts"))
+                        .anyMatch(f -> fileContainsPattern(f,
+                                "express\\(|createServer|app\\.listen|fastify|new Hono|Koa\\("));
+                if (hasServerCode) return PreviewProjectType.NODE_BACKEND;
+            } catch (IOException ignored) {}
         }
 
         // Python
@@ -637,14 +758,15 @@ public class DevDockerfileGenerator {
     private String fullStackNodeNode(Path workspace, FullStackLayout layout) {
         String fe = layout.frontendDir();
         String be = layout.backendDir();
+        boolean feIsRoot = ".".equals(fe);   // frontend lives in project root
         int backendPort = 3000;
 
         // Try to detect backend port
         if (be != null) {
             Path beDir = workspace.resolve(be);
             try {
-                JsonNode pkg = mapper.readTree(beDir.resolve("package.json").toFile());
-                backendPort = detectBackendPort(beDir, pkg);
+                JsonNode bePkg = mapper.readTree(beDir.resolve("package.json").toFile());
+                backendPort = detectBackendPort(beDir, bePkg);
             } catch (IOException ignored) {}
         }
 
@@ -653,32 +775,56 @@ public class DevDockerfileGenerator {
 
         // Install frontend deps + ensure vite is available for dev server
         if (fe != null) {
-            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install");
-            // If vite isn't in dependencies, install it explicitly (npx auto-install is too slow)
-            Path fePkg = workspace.resolve(fe).resolve("package.json");
+            if (feIsRoot) {
+                // Frontend is at root — install root deps
+                sb.append("COPY package*.json ./\n");
+                sb.append("RUN npm install");
+            } else {
+                sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+                sb.append("RUN cd ").append(fe).append(" && npm install");
+            }
+            // If vite isn't in dependencies, install it explicitly
+            Path fePkg = feIsRoot ? workspace.resolve("package.json")
+                                  : workspace.resolve(fe).resolve("package.json");
             if (Files.exists(fePkg) && !fileContainsPattern(fePkg, "\"vite\"")) {
                 sb.append(" && npm install vite");
             }
             sb.append("\n");
         }
-        // Install backend deps
+        // Install backend deps (only if backend has its own package.json)
         if (be != null) {
-            sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
-            sb.append("RUN cd ").append(be).append(" && npm install\n");
+            Path bePkgPath = workspace.resolve(be).resolve("package.json");
+            if (Files.exists(bePkgPath)) {
+                sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
+                sb.append("RUN cd ").append(be).append(" && npm install\n");
+            }
         }
 
         sb.append("COPY . .\n");
 
+        // Determine frontend cmd path — root or subdir
+        String feCmd = feIsRoot ? "/app" : "/app/" + fe;
+
         if (fe != null && be != null) {
+            // Determine backend start command — use npm start if package.json exists, else node
+            String beStartCmd;
+            Path bePkgPath = workspace.resolve(be).resolve("package.json");
+            if (Files.exists(bePkgPath)) {
+                beStartCmd = "cd /app/" + be + " && npm start";
+            } else {
+                // Backend has no package.json — find entry point and run with node
+                String entry = findNodeEntryPointInDir(workspace.resolve(be));
+                beStartCmd = "cd /app/" + be + " && node " + entry;
+            }
+
             sb.append("EXPOSE 5173 ").append(backendPort).append("\n");
-            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
-              .append(" && npm start 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
-              .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+            sb.append("CMD [\"sh\", \"-c\", \"(").append(beStartCmd)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd ").append(feCmd)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (fe != null) {
             sb.append("EXPOSE 5173\n");
-            sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(fe).append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all\"]\n");
+            sb.append("CMD [\"sh\", \"-c\", \"cd ").append(feCmd).append(" && npx vite --host 0.0.0.0 --port 5173\"]\n");
         } else {
             sb.append("EXPOSE ").append(backendPort).append("\n");
             sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be).append(" && npm start\"]\n");
@@ -715,7 +861,7 @@ public class DevDockerfileGenerator {
             sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
               .append(" && mvn spring-boot:run -DskipTests -q 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
               .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (be != null) {
             sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be)
               .append(" && mvn spring-boot:run -DskipTests -q\"]\n");
@@ -779,7 +925,7 @@ public class DevDockerfileGenerator {
             sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be).append(" && ").append(pythonCmd)
               .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
               .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (be != null) {
             sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be).append(" && ").append(pythonCmd).append("\"]\n");
         }
@@ -935,12 +1081,12 @@ public class DevDockerfileGenerator {
               .append(backendWs).append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
               .append("(npx --prefix ").append(frontendWs)
               .append(" vite --host 0.0.0.0 --port ").append(frontendPort)
-              .append(" --allowedHosts all 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+              .append(" 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
         } else if (frontendWs != null) {
             sb.append("EXPOSE ").append(frontendPort).append("\n");
             sb.append("CMD [\"npx\", \"--prefix\", \"").append(frontendWs)
               .append("\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"")
-              .append(frontendPort).append("\", \"--allowedHosts\", \"all\"]\n");
+              .append(frontendPort).append("\"]\n");
         } else if (backendWs != null) {
             sb.append("EXPOSE ").append(backendPort).append("\n");
             sb.append("CMD [\"npm\", \"run\", \"dev\", \"--prefix\", \"").append(backendWs).append("\"]\n");
@@ -1104,6 +1250,7 @@ public class DevDockerfileGenerator {
     private String staticHtmlDockerfile() {
         // Use echo with proper escaping. printf '\$uri' produces literal \$uri (bug).
         // echo '...$uri...' with single quotes preserves $uri correctly.
+        // Pre-chown nginx dirs so nginx can run with cap_drop:ALL (no runtime chown needed).
         return """
                 FROM nginx:alpine
                 WORKDIR /usr/share/nginx/html
@@ -1111,7 +1258,9 @@ public class DevDockerfileGenerator {
                 COPY . .
                 RUN rm -f /etc/nginx/conf.d/default.conf \
                     && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html index.htm; location / { try_files $uri $uri/ /index.html =404; } }' \
-                       > /etc/nginx/conf.d/default.conf
+                       > /etc/nginx/conf.d/default.conf \
+                    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx \
+                    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
                 EXPOSE 8080
                 CMD ["nginx", "-g", "daemon off;"]
                 """;
@@ -1578,6 +1727,32 @@ public class DevDockerfileGenerator {
 
         // Scan for any .js or .mjs file at workspace root (last resort, pick first alphabetically)
         try (var stream = Files.list(workspace)) {
+            return stream
+                    .filter(p -> {
+                        String fn = p.getFileName().toString();
+                        return fn.endsWith(".js") || fn.endsWith(".mjs");
+                    })
+                    .map(p -> p.getFileName().toString())
+                    .sorted()
+                    .findFirst()
+                    .orElse("index.js");
+        } catch (Exception e) {
+            return "index.js";
+        }
+    }
+
+    /**
+     * Find Node entry point in a specific directory (not workspace root).
+     * Used for backend subdirectories that may lack their own package.json.
+     */
+    private String findNodeEntryPointInDir(Path dir) {
+        String[] candidates = {"index.js", "server.js", "app.js", "main.js",
+                               "index.mjs", "server.mjs", "app.mjs",
+                               "src/index.js", "src/server.js", "src/app.js"};
+        for (String name : candidates) {
+            if (Files.exists(dir.resolve(name))) return name;
+        }
+        try (var stream = Files.list(dir)) {
             return stream
                     .filter(p -> {
                         String fn = p.getFileName().toString();

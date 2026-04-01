@@ -59,9 +59,9 @@ export default function TokenBubbleChart({ metrics }: { metrics: MetricsResponse
 
   return (
     <GlassPanel className="p-4">
-      <h3 className="text-sm font-semibold text-zinc-200 mb-3">Runs by Status</h3>
+      <h3 className="text-sm font-semibold text-primary mb-3">Runs by Status</h3>
       {!metrics
-        ? <div className="h-44 flex items-center justify-center text-zinc-600 text-sm">No data</div>
+        ? <div className="h-44 flex items-center justify-center text-muted text-sm">No data</div>
         : <svg ref={svgRef} className="w-full" />
       }
     </GlassPanel>

@@ -29,50 +29,50 @@ export default function ChangePasswordModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-sm bg-[#1a1f2e] border border-slate-700 p-8  overflow-y-auto" style={{ maxHeight: '95dvh' }}>
-        <h2 className="mb-2 text-xl font-bold text-white">Change your password</h2>
-        <p className="mb-6 text-sm text-slate-400">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-[var(--gray-200)] backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] p-8  overflow-y-auto" style={{ maxHeight: '95dvh' }}>
+        <h2 className="mb-2 text-xl font-bold text-primary">Change your password</h2>
+        <p className="mb-6 text-sm text-muted">
           Your account requires a password change before you can continue.
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           {!user.mustChangePassword && (
             <div>
-              <label className="mb-1 block text-sm text-slate-400">Current password</label>
+              <label className="mb-1 block text-sm text-muted">Current password</label>
               <input
                 type="password"
                 value={current}
                 onChange={e => setCurrent(e.target.value)}
-                className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+                className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none"
               />
             </div>
           )}
           <div>
-            <label className="mb-1 block text-sm text-slate-400">New password</label>
+            <label className="mb-1 block text-sm text-muted">New password</label>
             <input
               type="password"
               value={newPwd}
               onChange={e => setNewPwd(e.target.value)}
               required minLength={8}
-              className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+              className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none"
             />
-            <p className="mt-1 text-xs text-slate-500">Min 8 chars, 1 uppercase, 1 digit, no spaces</p>
+            <p className="mt-1 text-xs text-muted">Min 8 chars, 1 uppercase, 1 digit, no spaces</p>
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-400">Confirm new password</label>
+            <label className="mb-1 block text-sm text-muted">Confirm new password</label>
             <input
               type="password"
               value={confirm}
               onChange={e => setConfirm(e.target.value)}
               required
-              className="w-full rounded-sm border border-slate-600 bg-slate-800 px-3 py-2 text-white focus:border-purple-500 focus:outline-none"
+              className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none"
             />
           </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p className="text-sm text-accent-red">{error}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-sm bg-purple-600 py-2.5 font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
+            className="w-full rounded-sm bg-accent-blue py-2.5 font-semibold text-primary hover:bg-accent-blue disabled:opacity-50"
           >
             {loading ? 'Saving…' : 'Set new password'}
           </button>

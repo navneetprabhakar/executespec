@@ -54,16 +54,10 @@ body {
   display: none;
 }
 
-:root {
-  --background: #0A0A0F;
-  --foreground: #E4E4E7;
-  --muted: #71717A;
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: 'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--geist-bg);
+  color: var(--text-primary);
+  font-family: 'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -71,35 +65,34 @@ body {
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb { background: var(--gray-400); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-500); }
 
-/* Glass panel base — mission control: flat, sharp */
+/* Card base — Geist: flat, sharp edges, subtle border */
 .glass-panel {
-  @apply border rounded-sm;
-  background: var(--mc-bg-1);
-  border-color: var(--mc-border);
-  box-shadow: var(--mc-inset);
+  @apply border rounded-md;
+  background: var(--gray-100);
+  border-color: var(--border-default);
 }
 
 /* Terminal log styling */
 .terminal-log {
   @apply font-mono text-sm leading-relaxed;
-  background: #0D0D14;
+  background: var(--geist-bg);
 }
 
-/* Flat background — mission control */
+/* Page background */
 .gradient-mesh {
-  background: var(--mc-bg-0);
+  background: var(--geist-bg);
 }
 
 /* Shimmer animation for skeletons */
 .shimmer {
   background: linear-gradient(
     90deg,
-    rgba(255,255,255,0.03) 0%,
-    rgba(255,255,255,0.08) 50%,
-    rgba(255,255,255,0.03) 100%
+    var(--gray-200) 0%,
+    var(--gray-300) 50%,
+    var(--gray-200) 100%
   );
   background-size: 200% 100%;
   animation: shimmer 2s linear infinite;

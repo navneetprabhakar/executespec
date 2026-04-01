@@ -140,6 +140,16 @@ public class DockerfileGenerator {
             .vscode/
             *.class
             *.jar
+            .env
+            .env.*
+            .env.local
+            .env.production
+            credentials.json
+            service-account.json
+            key.json
+            keyfile.json
+            secrets.yml
+            secrets.yaml
             """;
         Files.writeString(workspacePath.resolve(".dockerignore"), content);
     }

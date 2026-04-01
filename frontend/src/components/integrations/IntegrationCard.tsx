@@ -13,20 +13,20 @@ export default function IntegrationCard({ integrationKey, name, description, ena
     <div className={cn(
       'p-4 rounded-sm border transition-all',
       enabled
-        ? 'border-accent-violet/30 bg-accent-violet/[0.04]'
-        : 'border-white/[0.06] bg-white/[0.02] opacity-60 grayscale'
+        ? 'border-accent-blue/30 bg-accent-blue/[0.04]'
+        : 'border-[var(--border-default)] bg-[var(--gray-100)] opacity-60 grayscale'
     )}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2.5">
           <IntegrationLogo integration={integrationKey} size={28} />
           <div>
-            <p className="text-sm font-medium text-zinc-200">{name}</p>
-            <p className="text-xs text-zinc-500">{description}</p>
+            <p className="text-sm font-medium text-primary">{name}</p>
+            <p className="text-xs text-muted">{description}</p>
           </div>
         </div>
         <span className={cn(
           'text-xs px-2 py-0.5 rounded-sm font-medium',
-          enabled ? 'text-accent-emerald bg-accent-emerald/10' : 'text-zinc-600 bg-zinc-600/10'
+          enabled ? 'text-accent-green bg-accent-green/10' : 'text-muted bg-[var(--gray-400)]/10'
         )}>
           {enabled ? 'Enabled' : 'Disabled'}
         </span>

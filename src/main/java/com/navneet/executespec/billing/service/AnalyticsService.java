@@ -1,0 +1,325 @@
+package com.navneet.executespec.billing.service;
+
+import com.navneet.executespec.api.dto.BillingOverview;
+import com.navneet.executespec.api.dto.MemberUsage;
+import com.navneet.executespec.api.dto.UsageMetrics;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
+import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.billing.entity.BillingPlan;
+import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.entity.Invoice;
+import com.navneet.executespec.billing.repository.BillingPlanRepository;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.billing.repository.InvoiceRepository;
+import com.navneet.executespec.billing.repository.RunTopupRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class AnalyticsService {
+
+    private final JdbcTemplate jdbc;
+    private final BillingSubscriptionRepository subscriptionRepo;
+    private final BillingPlanRepository planRepo;
+    private final InvoiceRepository invoiceRepo;
+    private final RunTopupRepository topupRepo;
+    private final AppUserRepository userRepo;
+    private final OrgRepository orgRepo;
+
+    // ── Usage Metrics ──────────────────────────────────────────────────────────
+
+    /**
+     * Get usage metrics for a user or org over a given period.
+     *
+     * @param entityType "USER" or "ORG"
+     * @param entityId   the user ID or org ID
+     * @param periodDays number of days to look back
+     */
+    public UsageMetrics getUsageMetrics(String entityType, String entityId, int periodDays) {
+        Instant since = Instant.now().minus(periodDays, ChronoUnit.DAYS);
+
+        // --- Aggregate run counts ---
+        String countSql;
+        Object[] countParams;
+        if ("ORG".equals(entityType)) {
+            countSql = """
+                SELECT
+                    COUNT(*)                                                          AS total,
+                    SUM(CASE WHEN status = 'COMPLETE' THEN 1 ELSE 0 END)              AS success,
+                    SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END)                AS failed,
+                    SUM(CASE WHEN status = 'PARTIAL' THEN 1 ELSE 0 END)               AS partial,
+                    COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - started_at)))
+                             FILTER (WHERE status = 'COMPLETE'), 0)                    AS avg_time,
+                    COALESCE(SUM(actual_cost_usd), 0)                                  AS total_cost
+                FROM pipeline_run
+                WHERE org_id = ? AND created_at > ?
+                """;
+            countParams = new Object[]{entityId, Timestamp.from(since)};
+        } else {
+            countSql = """
+                SELECT
+                    COUNT(*)                                                          AS total,
+                    SUM(CASE WHEN status = 'COMPLETE' THEN 1 ELSE 0 END)              AS success,
+                    SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END)                AS failed,
+                    SUM(CASE WHEN status = 'PARTIAL' THEN 1 ELSE 0 END)               AS partial,
+                    COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - started_at)))
+                             FILTER (WHERE status = 'COMPLETE'), 0)                    AS avg_time,
+                    COALESCE(SUM(actual_cost_usd), 0)                                  AS total_cost
+                FROM pipeline_run
+                WHERE created_by_user_id = ? AND org_id IS NULL AND created_at > ?
+                """;
+            countParams = new Object[]{entityId, Timestamp.from(since)};
+        }
+
+        int totalRuns = 0, successfulRuns = 0, failedRuns = 0, partialRuns = 0;
+        double avgTime = 0, totalCost = 0;
+
+        var countRows = jdbc.queryForList(countSql, countParams);
+        if (!countRows.isEmpty()) {
+            var row = countRows.get(0);
+            totalRuns = ((Number) row.getOrDefault("total", 0)).intValue();
+            successfulRuns = ((Number) row.getOrDefault("success", 0)).intValue();
+            failedRuns = ((Number) row.getOrDefault("failed", 0)).intValue();
+            partialRuns = ((Number) row.getOrDefault("partial", 0)).intValue();
+            avgTime = ((Number) row.getOrDefault("avg_time", 0)).doubleValue();
+            totalCost = ((Number) row.getOrDefault("total_cost", 0)).doubleValue();
+        }
+
+        // --- Runs per day ---
+        String dailySql;
+        Object[] dailyParams;
+        if ("ORG".equals(entityType)) {
+            dailySql = """
+                SELECT DATE(created_at) AS day, COUNT(*) AS total,
+                       SUM(CASE WHEN status='COMPLETE' THEN 1 ELSE 0 END) AS success
+                FROM pipeline_run
+                WHERE org_id = ? AND created_at > ?
+                GROUP BY DATE(created_at) ORDER BY day
+                """;
+            dailyParams = new Object[]{entityId, Timestamp.from(since)};
+        } else {
+            dailySql = """
+                SELECT DATE(created_at) AS day, COUNT(*) AS total,
+                       SUM(CASE WHEN status='COMPLETE' THEN 1 ELSE 0 END) AS success
+                FROM pipeline_run
+                WHERE created_by_user_id = ? AND org_id IS NULL AND created_at > ?
+                GROUP BY DATE(created_at) ORDER BY day
+                """;
+            dailyParams = new Object[]{entityId, Timestamp.from(since)};
+        }
+
+        List<UsageMetrics.DailyRunStat> runsByDay = new ArrayList<>();
+        jdbc.queryForList(dailySql, dailyParams).forEach(row -> {
+            String date = row.get("day").toString();
+            int count = ((Number) row.get("total")).intValue();
+            int success = ((Number) row.get("success")).intValue();
+            double rate = count > 0 ? (success * 100.0 / count) : 0;
+            runsByDay.add(new UsageMetrics.DailyRunStat(date, count, Math.round(rate * 10) / 10.0));
+        });
+
+        // --- Runs by project ---
+        String projectSql;
+        Object[] projectParams;
+        if ("ORG".equals(entityType)) {
+            projectSql = """
+                SELECT COALESCE(p.name, 'No Project') AS project_name, COUNT(*) AS cnt
+                FROM pipeline_run r
+                LEFT JOIN project p ON r.project_id = p.id
+                WHERE r.org_id = ? AND r.created_at > ?
+                GROUP BY project_name ORDER BY cnt DESC LIMIT 20
+                """;
+            projectParams = new Object[]{entityId, Timestamp.from(since)};
+        } else {
+            projectSql = """
+                SELECT COALESCE(p.name, 'No Project') AS project_name, COUNT(*) AS cnt
+                FROM pipeline_run r
+                LEFT JOIN project p ON r.project_id = p.id
+                WHERE r.created_by_user_id = ? AND r.org_id IS NULL AND r.created_at > ?
+                GROUP BY project_name ORDER BY cnt DESC LIMIT 20
+                """;
+            projectParams = new Object[]{entityId, Timestamp.from(since)};
+        }
+
+        Map<String, Integer> runsByProject = new LinkedHashMap<>();
+        jdbc.queryForList(projectSql, projectParams).forEach(row ->
+            runsByProject.put((String) row.get("project_name"), ((Number) row.get("cnt")).intValue()));
+
+        // --- Cost by model ---
+        // model_task_metric tracks duration/validation per model but not cost.
+        // Approximate cost per model by counting LLM call duration per model_name.
+        // TODO: Add actual cost tracking to model_task_metric for accurate per-model cost breakdown.
+        Map<String, Double> costByModel = new LinkedHashMap<>();
+        try {
+            String costSql;
+            Object[] costParams;
+            if ("ORG".equals(entityType)) {
+                costSql = """
+                    SELECT m.model_name AS model, COUNT(*) AS calls, SUM(m.duration_ms) AS total_duration_ms
+                    FROM model_task_metric m
+                    JOIN pipeline_run r ON m.run_id = r.run_id
+                    WHERE r.org_id = ? AND m.created_at > ?
+                    GROUP BY m.model_name ORDER BY calls DESC
+                    """;
+                costParams = new Object[]{entityId, Timestamp.from(since)};
+            } else {
+                costSql = """
+                    SELECT m.model_name AS model, COUNT(*) AS calls, SUM(m.duration_ms) AS total_duration_ms
+                    FROM model_task_metric m
+                    JOIN pipeline_run r ON m.run_id = r.run_id
+                    WHERE r.created_by_user_id = ? AND r.org_id IS NULL AND m.created_at > ?
+                    GROUP BY m.model_name ORDER BY calls DESC
+                    """;
+                costParams = new Object[]{entityId, Timestamp.from(since)};
+            }
+
+            jdbc.queryForList(costSql, costParams).forEach(row ->
+                costByModel.put((String) row.get("model"), ((Number) row.get("calls")).doubleValue()));
+        } catch (Exception e) {
+            log.warn("Failed to query cost by model: {}", e.getMessage());
+        }
+
+        return new UsageMetrics(
+            totalRuns, successfulRuns, failedRuns, partialRuns,
+            runsByDay, runsByProject, avgTime, totalCost, costByModel
+        );
+    }
+
+    // ── Member Usage (ORG context only) ────────────────────────────────────────
+
+    public List<MemberUsage> getMemberUsage(String orgId, int periodDays) {
+        Instant since = Instant.now().minus(periodDays, ChronoUnit.DAYS);
+
+        String sql = """
+            SELECT u.id, u.first_name, u.last_name, u.email,
+                   COUNT(r.run_id) AS runs,
+                   SUM(CASE WHEN r.status = 'COMPLETE' THEN 1 ELSE 0 END) AS success,
+                   MAX(r.created_at) AS last_run
+            FROM app_user u
+            LEFT JOIN pipeline_run r ON r.created_by_user_id = u.id
+                AND r.org_id = ? AND r.created_at > ?
+            WHERE u.org_id = ? AND u.status = 'ACTIVE'
+            GROUP BY u.id, u.first_name, u.last_name, u.email
+            ORDER BY runs DESC
+            """;
+
+        return jdbc.queryForList(sql, orgId, Timestamp.from(since), orgId).stream()
+            .map(row -> {
+                int runs = ((Number) row.getOrDefault("runs", 0)).intValue();
+                int success = ((Number) row.getOrDefault("success", 0)).intValue();
+                double rate = runs > 0 ? (success * 100.0 / runs) : 0;
+                Timestamp lastRun = (Timestamp) row.get("last_run");
+                return new MemberUsage(
+                    (String) row.get("id"),
+                    (String) row.get("first_name"),
+                    (String) row.get("last_name"),
+                    (String) row.get("email"),
+                    runs,
+                    Math.round(rate * 10) / 10.0,
+                    lastRun != null ? lastRun.toInstant() : null
+                );
+            })
+            .toList();
+    }
+
+    // ── Billing Overview ───────────────────────────────────────────────────────
+
+    public BillingOverview getBillingOverview(String entityType, String entityId) {
+        String entityName;
+        String currentPlan = "FREE";
+        String subStatus = "FREE";
+        Instant nextBilling = null;
+        int periodUsage = 0;
+        int runLimit = 5; // FREE default
+        String gateway = null;
+
+        if ("ORG".equals(entityType)) {
+            Org org = orgRepo.findById(entityId).orElse(null);
+            entityName = org != null ? org.getName() : entityId;
+            if (org != null) {
+                periodUsage = org.getMonthlyRunCount();
+            }
+        } else {
+            AppUser user = userRepo.findById(entityId).orElse(null);
+            entityName = user != null ? (user.getFirstName() + " " + Optional.ofNullable(user.getLastName()).orElse("")) : entityId;
+            if (user != null) {
+                periodUsage = user.getPersonalRunCount();
+            }
+        }
+
+        // Find active subscription
+        BillingSubscription sub = null;
+        if ("ORG".equals(entityType)) {
+            // find by orgId — look up the first user in the org and use their subscription
+            sub = subscriptionRepo.findAll().stream()
+                .filter(s -> entityId.equals(s.getOrgId()) && List.of("ACTIVE", "PAST_DUE", "FREE").contains(s.getStatus()))
+                .findFirst().orElse(null);
+        } else {
+            sub = subscriptionRepo.findActiveByUserId(entityId).orElse(null);
+        }
+
+        if (sub != null) {
+            subStatus = sub.getStatus();
+            nextBilling = sub.getCurrentPeriodEnd();
+            gateway = sub.getGateway();
+
+            // Resolve plan name and run limit
+            BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
+            if (plan != null) {
+                currentPlan = plan.getTier() + (plan.getPeriod() != null ? " (" + plan.getPeriod() + ")" : "");
+                runLimit = plan.getRunLimit();
+            }
+        }
+
+        int remainingRuns = Math.max(0, runLimit - periodUsage);
+
+        // Topup credits
+        int topupCredits;
+        if ("ORG".equals(entityType)) {
+            topupCredits = (int) topupRepo.sumRemainingByOrgId(entityId, Instant.now());
+        } else {
+            topupCredits = (int) topupRepo.sumRemainingByUserId(entityId, Instant.now());
+        }
+
+        // Recent invoices (last 10)
+        List<BillingOverview.RecentInvoice> recentInvoices;
+        if ("ORG".equals(entityType)) {
+            recentInvoices = invoiceRepo.findByOrgIdOrderByInvoiceDateDesc(entityId, PageRequest.of(0, 10))
+                .getContent().stream()
+                .map(this::toRecentInvoice)
+                .toList();
+        } else {
+            recentInvoices = invoiceRepo.findByUserIdOrderByInvoiceDateDesc(entityId, PageRequest.of(0, 10))
+                .getContent().stream()
+                .map(this::toRecentInvoice)
+                .toList();
+        }
+
+        return new BillingOverview(
+            entityType, entityName, currentPlan, subStatus,
+            nextBilling, periodUsage, remainingRuns, runLimit,
+            gateway, topupCredits, recentInvoices
+        );
+    }
+
+    private BillingOverview.RecentInvoice toRecentInvoice(Invoice inv) {
+        return new BillingOverview.RecentInvoice(
+            inv.getInvoiceNumber(),
+            inv.getTotalAmount() / 100.0, // paise → rupees/dollars
+            inv.getCurrency(),
+            inv.getStatus(),
+            inv.getInvoiceDate() != null ? inv.getInvoiceDate().atStartOfDay().toInstant(java.time.ZoneOffset.UTC) : inv.getCreatedAt()
+        );
+    }
+}

@@ -1,0 +1,113 @@
+You are a senior code reviewer specializing in concurrent systems. Review the following Java service for bugs, race conditions, security vulnerabilities, and architectural issues.
+
+This service manages a distributed rate limiter using Redis. It has been reported to occasionally allow requests through even when the rate limit should be exhausted, and sometimes blocks requests that should be allowed.
+
+```java
+@Service
+@RequiredArgsConstructor
+public class DistributedRateLimiter {
+
+    private final StringRedisTemplate redis;
+    private final MeterRegistry metrics;
+    private volatile Map<String, RateLimitConfig> configCache = new HashMap<>();
+
+    @Data
+    public static class RateLimitConfig {
+        private int maxRequests;
+        private Duration window;
+        private boolean burstAllowed;
+    }
+
+    @PostConstruct
+    public void loadConfigs() {
+        configCache = fetchConfigsFromDb();
+    }
+
+    @Scheduled(fixedRate = 30000)
+    public void refreshConfigs() {
+        configCache = fetchConfigsFromDb();
+    }
+
+    public boolean tryAcquire(String clientId, String endpoint) {
+        String key = "ratelimit:" + clientId + ":" + endpoint;
+        RateLimitConfig config = configCache.get(endpoint);
+        if (config == null) {
+            return true; // no config = no limit
+        }
+
+        String luaScript = """
+            local current = redis.call('INCR', KEYS[1])
+            if current == 1 then
+                redis.call('EXPIRE', KEYS[1], ARGV[1])
+            end
+            return current
+            """;
+
+        Long current = redis.execute(new DefaultRedisScript<>(luaScript, Long.class),
+                List.of(key), String.valueOf(config.getWindow().getSeconds()));
+
+        boolean allowed = current <= config.getMaxRequests();
+
+        if (config.isBurstAllowed() && !allowed) {
+            String burstKey = key + ":burst";
+            Long burstCount = redis.opsForValue().increment(burstKey);
+            if (burstCount == 1) {
+                redis.expire(burstKey, Duration.ofSeconds(1));
+            }
+            allowed = burstCount <= config.getMaxRequests() / 10;
+        }
+
+        Counter.builder("rate_limiter.decisions")
+                .tag("endpoint", endpoint)
+                .tag("decision", allowed ? "allowed" : "blocked")
+                .tag("client_id", clientId)
+                .register(metrics).increment();
+
+        return allowed;
+    }
+
+    public Map<String, Object> getStatus(String clientId, String endpoint) {
+        String key = "ratelimit:" + clientId + ":" + endpoint;
+        String countStr = redis.opsForValue().get(key);
+        Long ttl = redis.getExpire(key);
+        RateLimitConfig config = configCache.get(endpoint);
+
+        Map<String, Object> status = new HashMap<>();
+        status.put("current", countStr != null ? Integer.parseInt(countStr) : 0);
+        status.put("limit", config != null ? config.getMaxRequests() : -1);
+        status.put("remaining", config != null ? config.getMaxRequests() - (countStr != null ? Integer.parseInt(countStr) : 0) : -1);
+        status.put("reset_in_seconds", ttl != null ? ttl : 0);
+        return status;
+    }
+
+    private Map<String, RateLimitConfig> fetchConfigsFromDb() {
+        // simulated DB fetch
+        return Map.of();
+    }
+}
+```
+
+OUTPUT FORMAT — respond with ONLY a JSON object:
+{
+  "issues": [
+    {
+      "location": "method and line range",
+      "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+      "category": "RACE_CONDITION|SECURITY|BUG|PERFORMANCE|BEST_PRACTICE",
+      "description": "detailed explanation of why this is a bug and what happens under concurrent load",
+      "fix": "specific code-level fix"
+    }
+  ],
+  "overall_risk": "HIGH|MEDIUM|LOW",
+  "summary": "...",
+  "missed_by_junior": ["list of issues a junior reviewer would likely miss"]
+}
+
+Expected issues (do NOT skip any):
+- TOCTOU race in the Lua script (INCR + EXPIRE is not atomic for the window start)
+- Burst rate limiter has the same TOCTOU race (increment + expire separate calls)
+- volatile HashMap is not sufficient for thread-safe reads during refreshConfigs() — ConcurrentHashMap or immutable copy needed
+- High-cardinality metrics tag (client_id) will cause Prometheus OOM
+- getStatus() parses the counter twice (minor inefficiency) and has a NumberFormatException risk
+- No null-check on Lua script return value
+- Config reload interval (30s) means 30s of "no limit" on startup if DB is slow

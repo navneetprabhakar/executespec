@@ -29,10 +29,10 @@ function isRetryable(taskStatus: string, runStatus?: string): boolean {
 
 /** Colour theme for the failure-reason box based on status. */
 function reasonColorClass(status: string) {
-  if (status === 'FAILED')  return 'border-accent-rose/40  bg-accent-rose/[0.06]  text-accent-rose';
+  if (status === 'FAILED')  return 'border-accent-red/40  bg-accent-red/[0.06]  text-accent-red';
   if (status === 'BLOCKED') return 'border-accent-amber/40 bg-accent-amber/[0.06] text-accent-amber';
   if (status === 'PENDING' || status === 'LOCKED')
-    return 'border-zinc-600 bg-white/[0.02] text-zinc-400';
+    return 'border-[var(--gray-400)] bg-[var(--gray-100)] text-secondary';
   return 'border-accent-amber/30 bg-accent-amber/[0.04] text-accent-amber/80'; // PARTIAL
 }
 
@@ -54,33 +54,33 @@ export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
   const [open, setOpen] = useState(retryable && (hasReason || STUCK_RETRYABLE.has(task.status)));
 
   return (
-    <div className="rounded-sm border border-white/[0.06] bg-white/[0.02] overflow-hidden">
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02]"
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--gray-100)]"
       >
         <GlowDot status={task.status} size="sm" className="flex-shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-zinc-200 truncate">{task.title}</p>
+          <p className="text-sm text-primary truncate">{task.title}</p>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <span className="text-xs text-zinc-500 font-mono">{task.taskId.slice(0, 8)}</span>
+            <span className="text-xs text-muted font-mono">{task.taskId.slice(0, 8)}</span>
             {task.branchName && (
-              <span className="text-xs text-zinc-600 font-mono">{task.branchName}</span>
+              <span className="text-xs text-muted font-mono">{task.branchName}</span>
             )}
           </div>
         </div>
         <div className="flex items-center gap-3 text-right flex-shrink-0">
           {(task.inputTokens + task.outputTokens) > 0 && (
-            <span className="text-xs text-zinc-600">
+            <span className="text-xs text-muted">
               {fmtTokens(task.inputTokens + task.outputTokens)}
             </span>
           )}
           {task.durationMs > 0 && (
-            <span className="text-xs text-zinc-600">{fmtMs(task.durationMs)}</span>
+            <span className="text-xs text-muted">{fmtMs(task.durationMs)}</span>
           )}
           {task.readmeUpdated && (
             <span title="README updated">
-              <BookOpen className="h-3.5 w-3.5 text-accent-emerald" />
+              <BookOpen className="h-3.5 w-3.5 text-accent-green" />
             </span>
           )}
           {/* Collapsed-row warning badge */}
@@ -88,16 +88,16 @@ export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
             <AlertTriangle className="h-3.5 w-3.5 text-accent-amber" />
           )}
           <ChevronDown
-            className={cn('h-4 w-4 text-zinc-600 transition-transform', open && 'rotate-180')}
+            className={cn('h-4 w-4 text-muted transition-transform', open && 'rotate-180')}
           />
         </div>
       </button>
 
       {open && (
-        <div className="px-4 py-3 border-t border-white/[0.06] space-y-3">
+        <div className="px-4 py-3 border-t border-[var(--border-default)] space-y-3">
           {/* ── Task objective / description ─────────────────────────────── */}
           {task.objective && (
-            <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">
+            <p className="text-xs text-secondary leading-relaxed whitespace-pre-wrap">
               {task.objective}
             </p>
           )}

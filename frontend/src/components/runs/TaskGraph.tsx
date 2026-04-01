@@ -3,19 +3,17 @@ import { getTaskGraph, TaskGraphNode } from '@/lib/api';
 
 interface Props { runId: string }
 
-// ── Status colours — kept in sync with tailwind.config.ts accent palette ────
-// accent-emerald=#10B981  accent-cyan=#06B6D4  accent-amber=#F59E0B
-// accent-rose=#F43F5E     accent-violet=#8B5CF6
+// ── Status colours — Geist design system ────────────────────────────────────
 const STATUS_COLOR: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  COMPLETE:  { bg: '#051a10', border: '#10B981', text: '#6ee7b7', dot: '#10B981' },
-  WORKING:   { bg: '#021619', border: '#06B6D4', text: '#67e8f9', dot: '#06B6D4' },
-  PENDING:   { bg: '#18181b', border: '#71717a', text: '#a1a1aa', dot: '#71717a' },
-  LOCKED:    { bg: '#18181b', border: '#52525b', text: '#a1a1aa', dot: '#52525b' },
-  PARTIAL:   { bg: '#1c1407', border: '#F59E0B', text: '#fcd34d', dot: '#F59E0B' },
-  BLOCKED:   { bg: '#1c1407', border: '#F59E0B', text: '#fcd34d', dot: '#F59E0B' },
-  FAILED:    { bg: '#200510', border: '#F43F5E', text: '#fda4af', dot: '#F43F5E' },
+  COMPLETE:  { bg: '#0a1a1a', border: '#0070F3', text: '#a1a1a1', dot: '#0070F3' },
+  WORKING:   { bg: '#1a1a1a', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
+  PENDING:   { bg: '#111111', border: '#333333', text: '#666666', dot: '#666666' },
+  LOCKED:    { bg: '#111111', border: '#252525', text: '#666666', dot: '#555555' },
+  PARTIAL:   { bg: '#1a1500', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
+  BLOCKED:   { bg: '#1a1500', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
+  FAILED:    { bg: '#1a0a0a', border: '#e5484d', text: '#a1a1a1', dot: '#e5484d' },
 };
-const DEFAULT_COLOR = { bg: '#111118', border: '#374151', text: '#9ca3af', dot: '#6b7280' };
+const DEFAULT_COLOR = { bg: '#111111', border: '#333333', text: '#666666', dot: '#555555' };
 
 function statusColor(s: string) { return STATUS_COLOR[s?.toUpperCase()] ?? DEFAULT_COLOR; }
 
@@ -55,15 +53,15 @@ export default function TaskGraph({ runId }: Props) {
   }, [nodes, load]);
 
   if (loading) return (
-    <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
+    <div className="flex items-center justify-center h-48 text-muted text-sm">
       Loading execution graph…
     </div>
   );
   if (error) return (
-    <div className="flex items-center justify-center h-48 text-red-400 text-sm">{error}</div>
+    <div className="flex items-center justify-center h-48 text-accent-red text-sm">{error}</div>
   );
   if (nodes.length === 0) return (
-    <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
+    <div className="flex items-center justify-center h-48 text-muted text-sm">
       No tasks found for this run.
     </div>
   );
@@ -119,7 +117,7 @@ export default function TaskGraph({ runId }: Props) {
   };
 
   return (
-    <div className="relative w-full overflow-auto rounded-sm border border-white/10 bg-[#0a0a0f] p-2">
+    <div className="relative w-full overflow-auto rounded-sm border border-[var(--border-default)] bg-[#0a0a0f] p-2">
       {/* Legend */}
       <div className="flex flex-wrap gap-3 px-3 pt-2 pb-1 text-xs">
         {Object.entries(STATUS_COLOR).map(([s, c]) => (
@@ -128,7 +126,7 @@ export default function TaskGraph({ runId }: Props) {
             <span style={{ color: c.text }}>{s}</span>
           </span>
         ))}
-        <span className="border-l border-white/10 pl-3 flex items-center gap-1.5">
+        <span className="border-l border-[var(--border-default)] pl-3 flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-sm" style={{ background: '#8B5CF6' }} />
           <span style={{ color: '#c4b5fd' }}>COPILOT</span>
         </span>
@@ -291,12 +289,16 @@ export default function TaskGraph({ runId }: Props) {
                   <text x={10} y={62} fontSize={8.5} fill="#4b5563" fontFamily="sans-serif">
                     depends on:
                   </text>
-                  {node.dependsOn.map((d, i) => (
-                    <text key={d} x={16} y={74 + i * 14} fontSize={8.5}
-                      fill="#6366f1" fontFamily="monospace">
-                      → {d}
-                    </text>
-                  ))}
+                  {node.dependsOn.map((d, i) => {
+                    const depNode = nodes.find(n => n.taskId === d);
+                    const depLabel = depNode ? depNode.title : d;
+                    return (
+                      <text key={d} x={16} y={74 + i * 14} fontSize={8.5}
+                        fill="#6366f1" fontFamily="monospace">
+                        → {depLabel.length > 28 ? depLabel.slice(0, 27) + '…' : depLabel}
+                      </text>
+                    );
+                  })}
                 </>
               )}
             </g>

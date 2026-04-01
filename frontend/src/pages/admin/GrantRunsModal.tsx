@@ -51,31 +51,31 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-sm bg-surface-2 border border-white/[0.08]  p-6 space-y-5 overflow-y-auto"
+        className="w-full max-w-md rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)]  p-6 space-y-5 overflow-y-auto"
         style={{ maxHeight: '95dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white flex items-center gap-2">
-            <Gift className="h-4 w-4 text-accent-emerald" />
+          <h2 className="text-base font-semibold text-primary flex items-center gap-2">
+            <Gift className="h-4 w-4 text-accent-green" />
             Grant Bonus Runs
           </h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-2 -m-1">
+          <button onClick={onClose} className="text-muted hover:text-secondary p-2 -m-1">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <p className="text-sm text-zinc-400">
-          Granting to <span className="text-zinc-200 font-medium">{targetName}</span>
-          <span className="text-zinc-500 ml-1">({targetType})</span>
+        <p className="text-sm text-secondary">
+          Granting to <span className="text-primary font-medium">{targetName}</span>
+          <span className="text-muted ml-1">({targetType})</span>
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Quantity */}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Number of runs <span className="text-red-400 ml-0.5">*</span>
+            <label className="block text-xs text-secondary mb-1">
+              Number of runs <span className="text-accent-red ml-0.5">*</span>
             </label>
             <input
               type="number"
@@ -83,14 +83,14 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
               max={10000}
               value={quantity}
               onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent-violet/40"
+              className="w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-primary focus:outline-none focus:border-accent-blue/40"
               required
             />
           </div>
 
           {/* Expiry Days */}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Expires in (days)</label>
+            <label className="block text-xs text-secondary mb-1">Expires in (days)</label>
             <input
               type="number"
               min={1}
@@ -98,20 +98,20 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
               value={expiryDays}
               onChange={(e) => setExpiryDays(e.target.value === '' ? '' : parseInt(e.target.value) || 0)}
               placeholder="90"
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40"
+              className="w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue/40"
             />
-            <p className="text-[10px] text-zinc-500 mt-1">Default: 90 days. Admin grants always expire.</p>
+            <p className="text-[10px] text-muted mt-1">Default: 90 days. Admin grants always expire.</p>
           </div>
 
           {/* Reason */}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Reason</label>
+            <label className="block text-xs text-secondary mb-1">Reason</label>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="e.g., Promotional credit, customer support"
               rows={2}
-              className="w-full bg-surface-1 border border-white/[0.08] rounded-sm px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-accent-violet/40 resize-none"
+              className="w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue/40 resize-none"
             />
           </div>
 
@@ -119,8 +119,8 @@ export default function GrantRunsModal({ targetType, targetId, targetName, onClo
             type="submit"
             disabled={submitting || quantity <= 0}
             className={cn(
-              'w-full py-2.5 rounded-sm font-medium text-sm text-white transition-all',
-              'bg-accent-emerald hover:bg-accent-emerald/80 disabled:opacity-40 disabled:cursor-not-allowed',
+              'w-full py-2.5 rounded-sm font-medium text-sm text-primary transition-all',
+              'bg-accent-green hover:bg-accent-green/80 disabled:opacity-40 disabled:cursor-not-allowed',
               'flex items-center justify-center gap-2',
             )}
           >

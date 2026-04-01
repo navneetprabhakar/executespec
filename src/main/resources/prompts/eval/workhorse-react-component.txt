@@ -1,0 +1,28 @@
+Generate a React TypeScript component called `VirtualizedSearchList` — a high-performance searchable list with the following requirements:
+
+1. **Virtualized rendering** — only render visible items + a 5-item overscan buffer above and below. The list may contain 100,000+ items. Each item has variable height (calculated from content length). Use a manually implemented virtual scroll (no library — calculate positions from a cumulative height array).
+
+2. **Debounced search** — search input with 300ms debounce. Search filters items client-side by matching against `item.title` and `item.description` using fuzzy matching (characters must appear in order but not consecutively, e.g. "fbt" matches "FooBarTest"). Highlight matched characters in the rendered item.
+
+3. **Optimistic updates** — each item has a "star" toggle button. Clicking it:
+   - Immediately updates local state (optimistic)
+   - Calls `onToggleStar(itemId)` async callback
+   - If the callback throws, reverts the star state and shows an inline error on that item for 3 seconds
+   - During the async operation, the star button shows a spinner
+
+4. **Keyboard navigation** — Arrow Up/Down moves a focus indicator through visible items. Enter triggers `onSelect(item)`. Escape clears search input and resets the list. Home/End jump to first/last item.
+
+5. **Proper cleanup** — all timers, scroll listeners, and pending async operations must be cleaned up on unmount. Use AbortController pattern for in-flight star toggle operations.
+
+Props interface:
+```typescript
+interface VirtualizedSearchListProps<T extends { id: string; title: string; description: string; starred: boolean }> {
+  items: T[];
+  onSelect: (item: T) => void;
+  onToggleStar: (itemId: string) => Promise<void>;
+  estimatedItemHeight?: number; // default 72
+  containerHeight: number;
+}
+```
+
+Output ONLY the TypeScript/React source code. No explanations. Include all types inline — no separate files.
