@@ -27,6 +27,7 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
+@Slf4j
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -37,6 +38,9 @@ public class SecurityConfig {
 
     @Value("${app.cors.allowed-origins:http://localhost:5173}")
     private String allowedOrigins;
+
+    @Value("${app.mail.base-url:http://localhost:5173}")
+    private String dashboardUrl;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
             com.navneet.executespec.ratelimit.RateLimitFilter rateLimitFilter,
@@ -69,6 +73,10 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(
                         oauthEnabled ? SessionCreationPolicy.IF_REQUIRED : SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Authenticated auth endpoints (must come before /api/auth/**)
+                        .requestMatchers("/api/auth/me", "/api/auth/me/**").authenticated()
+                        .requestMatchers("/api/auth/settings/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
                         // Public auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
                         // OAuth2 login flow (Spring Security managed endpoints)
@@ -107,7 +115,10 @@ public class SecurityConfig {
                     .authorizationEndpoint(a -> a.baseUri("/api/auth/oauth2/authorize"))
                     .redirectionEndpoint(r -> r.baseUri("/api/auth/oauth2/callback/*"))
                     .successHandler(oAuthSuccessHandler)
-                    .failureHandler((req, res, ex) -> res.sendRedirect("/login?error=oauth_failed")));
+                    .failureHandler((req, res, ex) -> {
+                        log.error("OAuth2 login failed: {}", ex.getMessage(), ex);
+                        res.sendRedirect(dashboardUrl + "/login?error=oauth_failed");
+                    }));
         }
 
         return http.build();

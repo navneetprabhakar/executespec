@@ -62,12 +62,12 @@ spring:
             client-id: ${GOOGLE_OAUTH_CLIENT_ID:none}
             client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:none}
             scope: openid, email, profile
-            redirect-uri: "{baseUrl}/api/auth/oauth2/callback/{registrationId}"
+            redirect-uri: https://executespec.ai/api/auth/oauth2/callback/{registrationId}
           github:
             client-id: ${GITHUB_OAUTH_CLIENT_ID:Ov23lijrPPx9fhPemczg}
             client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:46033466197599eb1fc74d321b141a816fdcb1f5}
             scope: user:email, read:user
-            redirect-uri: "{baseUrl}/api/auth/oauth2/callback/{registrationId}"
+            redirect-uri: https://executespec.ai/api/auth/oauth2/callback/{registrationId}
         provider:
           github:
             user-name-attribute: login
