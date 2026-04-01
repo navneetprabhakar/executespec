@@ -98,14 +98,14 @@ export default function VibeProgressNarrative() {
           <div key={item.id} className="flex items-start gap-3">
             {ICON[item.variant]}
             <div className="flex-1 min-w-0">
-              <span className="text-sm text-[var(--text-primary)]">{item.text}</span>
+              <span className="text-xs font-mono text-[var(--text-primary)]">{item.text}</span>
               {tasksTotal > 0 && item.text === 'Building...' && (
-                <span className="ml-2 text-xs text-[var(--text-muted)]">
+                <span className="ml-2 text-xs font-mono text-[var(--text-muted)]">
                   {tasksDone} of {tasksTotal} tasks done
                 </span>
               )}
             </div>
-            <span className="text-xs text-[var(--text-muted)] shrink-0">
+            <span className="text-xs font-mono text-[var(--text-muted)] shrink-0">
               {new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
@@ -113,7 +113,7 @@ export default function VibeProgressNarrative() {
 
         {/* Empty state */}
         {narrative.length === 0 && isActive && (
-          <div className="flex items-center gap-3 text-sm text-[var(--text-muted)]">
+          <div className="flex items-center gap-3 text-xs font-mono text-[var(--text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" />
             Starting up...
           </div>
@@ -125,9 +125,9 @@ export default function VibeProgressNarrative() {
         {/* Failure */}
         {isFailed && activeRun && (
           <div className="mt-4 rounded-sm border border-[var(--mc-status-error)]/20 bg-[var(--mc-status-error)]/5 p-4">
-            <p className="text-sm text-[var(--mc-status-error)] font-medium mb-1">Run failed</p>
+            <p className="text-xs font-mono text-[var(--mc-status-error)] font-medium mb-1">Run failed</p>
             {activeRun.failureReason && (
-              <p className="text-xs text-[var(--text-secondary)] mb-3">{activeRun.failureReason}</p>
+              <p className="text-xs font-mono text-[var(--text-secondary)] mb-3">{activeRun.failureReason}</p>
             )}
             <button
               onClick={escalateToPro}

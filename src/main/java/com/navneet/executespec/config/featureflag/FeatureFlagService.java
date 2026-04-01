@@ -76,8 +76,31 @@ public class FeatureFlagService implements MessageListener {
         // Publish to Redis so other instances pick it up
         redisTemplate.convertAndSend(REDIS_CHANNEL, key);
 
+        // When force_logout is enabled, stamp the epoch so all existing JWTs are invalidated
+        if ("force_logout".equals(key) && "true".equalsIgnoreCase(value)) {
+            String epoch = Instant.now().toString();
+            upsertFlag("force_logout_epoch", epoch, "Force logout timestamp", userId);
+            log.info("Force logout activated — all JWTs issued before {} are now invalid", epoch);
+        }
+
         log.info("Feature flag updated: {} = {} (by userId={})", key, value, userId);
         return saved;
+    }
+
+    private void upsertFlag(String key, String value, String description, String userId) {
+        FeatureFlag flag = repository.findByFlagKey(key).orElse(
+                FeatureFlag.builder()
+                        .flagKey(key)
+                        .valueType(FeatureFlag.ValueType.STRING)
+                        .scope(FeatureFlag.Scope.PLATFORM)
+                        .description(description)
+                        .build());
+        flag.setFlagValue(value);
+        flag.setUpdatedBy(userId);
+        flag.setUpdatedAt(Instant.now());
+        repository.save(flag);
+        cache.put(key, value);
+        redisTemplate.convertAndSend(REDIS_CHANNEL, key);
     }
 
     public List<FeatureFlag> listAll() {

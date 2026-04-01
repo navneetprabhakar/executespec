@@ -40,10 +40,10 @@ export default function VibeRunSummary({ run }: Props) {
       {/* Title + summary */}
       <div>
         {run.runTitle && (
-          <h3 className="text-lg font-medium text-[var(--text-primary)] mb-1">{run.runTitle}</h3>
+          <h3 className="text-sm font-mono font-medium text-[var(--text-primary)] mb-1">{run.runTitle}</h3>
         )}
         {run.runSummary && (
-          <p className="text-sm text-[var(--text-secondary)]">{run.runSummary}</p>
+          <p className="text-xs font-mono text-[var(--text-secondary)]">{run.runSummary}</p>
         )}
       </div>
 
