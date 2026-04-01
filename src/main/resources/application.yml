@@ -321,7 +321,7 @@ executespec:
     enabled: true
 
   crypto:
-    enabled: true
+    enabled: false
     gcp-secret-name: projects/${GCP_PROJECT:executespecv1}/secrets/executespec-crypto-key/versions/latest
     local-key: ${CRYPTO_LOCAL_KEY:}  # Only for local dev — leave empty in prod
 

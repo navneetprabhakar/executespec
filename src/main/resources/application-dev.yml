@@ -61,8 +61,8 @@ spring:
       client:
         registration:
           google:
-            client-id: ${GOOGLE_OAUTH_CLIENT_ID:none}
-            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:none}
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID:1061994342941-5rrf50jalmdkg0l5rck95ucc0fenh0vr.apps.googleusercontent.com}
+            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET: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}
             scope: openid, email, profile
             redirect-uri: https://dev.executespec.ai/api/auth/oauth2/callback/{registrationId}
           github:

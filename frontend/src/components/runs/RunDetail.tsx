@@ -170,7 +170,7 @@ export default function RunDetail() {
                 <div className="flex items-center gap-2.5 min-w-0">
                   <GlowDot status={activeRun.status} className="flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--text-primary)] line-clamp-1">
+                    <p className="text-xs font-mono font-medium text-[var(--text-primary)] line-clamp-1">
                       {activeRun.runTitle ?? activeRun.userRequest?.slice(0, 60) ?? 'Run'}
                     </p>
                     <StatusBadge status={activeRun.status} />

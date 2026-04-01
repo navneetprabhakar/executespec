@@ -2,6 +2,7 @@ package com.navneet.executespec.auth.security;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.OrgMember;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
@@ -22,14 +23,17 @@ public class JwtUtil {
     private final SecretKey secretKey;
     private final long accessTokenExpiryMinutes;
     private final long refreshTokenExpiryDays;
+    private final FeatureFlagService featureFlagService;
 
     public JwtUtil(
             @Value("${app.jwt.secret}") String secret,
             @Value("${app.jwt.access-token-expiry-minutes:15}") long accessTokenExpiryMinutes,
-            @Value("${app.jwt.refresh-token-expiry-days:7}") long refreshTokenExpiryDays) {
+            @Value("${app.jwt.refresh-token-expiry-days:7}") long refreshTokenExpiryDays,
+            FeatureFlagService featureFlagService) {
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTokenExpiryMinutes = accessTokenExpiryMinutes;
         this.refreshTokenExpiryDays = refreshTokenExpiryDays;
+        this.featureFlagService = featureFlagService;
     }
 
     public String generateAccessToken(AppUser user, OrgMember orgMember) {
@@ -81,7 +85,20 @@ public class JwtUtil {
 
     public boolean isTokenValid(String token) {
         try {
-            parseToken(token);
+            Claims claims = parseToken(token);
+
+            // Force-logout check: reject tokens issued before the logout epoch
+            String epoch = featureFlagService.getString("force_logout_epoch", null);
+            if (epoch != null) {
+                Instant logoutEpoch = Instant.parse(epoch);
+                Date issuedAt = claims.getIssuedAt();
+                if (issuedAt != null && issuedAt.toInstant().isBefore(logoutEpoch)) {
+                    log.debug("JWT rejected: issued before force_logout_epoch (iat={}, epoch={})",
+                            issuedAt.toInstant(), logoutEpoch);
+                    return false;
+                }
+            }
+
             return true;
         } catch (JwtException | IllegalArgumentException e) {
             log.debug("JWT validation failed: {}", e.getMessage());
