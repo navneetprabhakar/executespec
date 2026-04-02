@@ -269,7 +269,7 @@ preview:
   enabled: true
   mode: docker                         # "docker" (Docker Compose, local) or "cloud-run" (GCP Cloud Run)
   total-startup-timeout-seconds: 480   # 8-minute total deadline (Spring Boot cold builds need extra time)
-  preview-ttl-minutes: 5              # auto-shutdown after 10 minutes
+  preview-ttl-minutes: 5              # auto-shutdown after 5 minutes
   port-range-start: 10000              # Docker Compose host port range
   port-range-end: 10100
   preview-domain: executespec.ai       # single-level: preview-{id}.executespec.ai

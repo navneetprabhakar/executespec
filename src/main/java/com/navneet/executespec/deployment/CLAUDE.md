@@ -3,7 +3,7 @@
 Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), permanent Cloud Run deployment for 11 languages, workspace management with GCS archiving, and GitHub integration.
 
 ## Key Files
-- `preview/PreviewService.java` — Dual-mode preview lifecycle (docker/cloud-run). TTL: 10min (both modes). Preview auto-starts after COMPLETE via PipelineHarness. Idempotent: returns existing session if already running.
+- `preview/PreviewService.java` — Dual-mode preview lifecycle (docker/cloud-run). TTL: 5min (both modes). Preview auto-starts after COMPLETE via PipelineHarness. Idempotent: returns existing session if already running.
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first, falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`.
@@ -43,7 +43,7 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 - Workspace: per-run isolated directory (workspace/{runId}/)
 - Preview auto-starts after COMPLETE via PipelineHarness (both PROTOTYPE and PRODUCTION)
 - TestPreviewCoordinator reuses existing preview via `previewService.getStatus()` check
-- Preview NOT stopped after test execution (stays up for user's full 10-min TTL)
+- Preview NOT stopped after test execution (stays up for user's full 5-min TTL)
 - Deployment cleanup via scheduled job (DeploymentCleanupJob)
 - All `gcloud`/`docker` subprocess calls have timeouts (deploy: 10min, delete: 5min, list: 2min)
 - Stdout/stderr read in parallel (CompletableFuture) to prevent pipe buffer deadlock
@@ -58,7 +58,7 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 
 | Mode | Environment | Infrastructure | TTL | HTTPS |
 |------|-------------|---------------|-----|-------|
-| `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | Caddy + Cloudflare Origin Cert |
-| `cloud-run` | Dev/Prod (GCE) | Artifact Registry + Cloud Run | 10 min | Managed by Cloud Run |
+| `docker` | Local dev | Docker Compose + optional Caddy proxy | 5 min | Caddy + Cloudflare Origin Cert |
+| `cloud-run` | Dev/Prod (GCE) | Artifact Registry + Cloud Run | 5 min | Managed by Cloud Run |
 
 Configured via `preview.mode` in `application.yml` (default: `docker`).

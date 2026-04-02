@@ -347,7 +347,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
           ) : (
             <iframe
               src={status.url}
-              className="w-full h-full border-0"
+              className="w-full h-full border-0 bg-white"
               title="App preview"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
@@ -362,7 +362,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                   {dbInfo.emoji} {dbInfo.label} database auto-configured
                 </p>
               )}
-              <p className="text-xs text-muted">This preview will automatically shut down in 10 minutes</p>
+              <p className="text-xs text-muted">This preview will automatically shut down in 5 minutes</p>
             </div>
           </div>
         ) : (isFailed || isTimedOut) ? (
@@ -377,7 +377,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                 'text-sm font-medium',
                 isTimedOut ? 'text-accent-amber' : 'text-accent-red'
               )}>
-                {isTimedOut ? 'Preview startup timed out (10 minutes)' : 'Preview failed to start'}
+                {isTimedOut ? 'Preview startup timed out' : 'Preview failed to start'}
               </p>
               <p className={cn(
                 'text-xs mt-1 break-all whitespace-pre-wrap',

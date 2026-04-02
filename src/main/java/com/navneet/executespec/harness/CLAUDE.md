@@ -20,7 +20,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 5. CompilerAgent fixes compilation errors
 6. Auto-merge all task branches to main
 7. **Mark run COMPLETE** (status set, `completedAt` recorded)
-8. **Auto-start preview** (10-min TTL) for both PROTOTYPE and PRODUCTION modes
+8. **Auto-start preview** (5-min TTL) for both PROTOTYPE and PRODUCTION modes
 9. **Background validation thread** (`bg-validation-{runId}` virtual thread):
    - ReviewerAgentV2 inspects + auto-fixes
    - Re-validation after auto-fix

@@ -91,7 +91,7 @@ Auto-Merge -- all task branches merged to main (no manual gate)
 ★ COMPLETE ★ (user sees run as done here -- before review/tests)
   |
   v
-Auto-Preview (10-min TTL, both modes) -- user can interact immediately
+Auto-Preview (5-min TTL, both modes) -- user can interact immediately
   |
   v
 GitHub Push (non-blocking)
@@ -219,7 +219,7 @@ SUPER_ADMIN (global -- full system access)
 
 3. PREVIEW
    Click "Preview" -> Cloud Run ephemeral container
-   10-minute TTL with countdown timer
+   5-minute TTL with countdown timer
    3 preview starts per run (FREE limit)
 
 4. DOWNLOAD
@@ -584,7 +584,7 @@ SUPER_ADMIN (global -- full system access)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Cloud Run preview | Done | 10-min ephemeral containers |
+| Cloud Run preview | Done | 5-min ephemeral containers |
 | Dockerfile auto-detect | Done | Node/React/Spring Boot/Python/Full-stack/Static HTML/Monorepo |
 | Path A: Cloud Run Direct | Done | Simple containerized deployment |
 | Path B: Docker Compose on VM | 0-10% | Multi-container with persistent storage |
@@ -698,7 +698,7 @@ SUPER_ADMIN (global -- full system access)
 | GCE | App server (n2-standard-8, systemd, us-east4) |
 | Cloud SQL | PostgreSQL 15 (private IP, auto-backup) |
 | Memorystore | Redis 7 (gate coordination + caching) |
-| Cloud Run | Ephemeral previews (10-min TTL) |
+| Cloud Run | Ephemeral previews (5-min TTL) |
 | Artifact Registry | Docker images |
 | Cloud Storage | Workspace archives |
 | Cloud Trace | Distributed tracing (OTel) |

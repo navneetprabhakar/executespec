@@ -42,7 +42,7 @@ import java.util.concurrent.TimeUnit;
  * Preview service — builds and runs ephemeral dev servers in one of two modes:
  * <ul>
  *   <li><b>docker</b> (default): Docker Compose on local machine, Caddy reverse proxy for HTTPS.
- *       TTL: 10 minutes.</li>
+ *       TTL: 5 minutes.</li>
  *   <li><b>cloud-run</b>: Build image → push to Artifact Registry → deploy to GCP Cloud Run.
  *       Cloud Run provides managed HTTPS with public URLs, no proxy needed. TTL: 5 minutes.</li>
  * </ul>

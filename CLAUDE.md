@@ -9,7 +9,7 @@
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Opus) → Plan Gate → SequentialTaskExecutor (Sonnet per task) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (10-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
+- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Opus) → Plan Gate → SequentialTaskExecutor (Sonnet per task) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
 - **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). YAML-configured model matrix maps `AgentTier × Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING (Opus-class), WORKHORSE (Sonnet-class), LIGHTWEIGHT (Haiku-class).
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
@@ -202,10 +202,10 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 ## Current State
 
 ### Working
-- Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → **COMPLETE** → auto-preview (10-min TTL) → background validation (review + test gen + test exec + report)
+- Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL) → background validation (review + test gen + test exec + report)
 - User-selected AI provider per project (Anthropic/Google/OpenAI) with YAML model matrix and health-based failover
 - 15-minute wall-clock worker time limit with stall detection and model escalation
-- Dual-mode previews: Cloud Run (dev/prod, 10-min TTL, managed HTTPS) or Docker Compose (local, 10-min TTL, Caddy proxy)
+- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 5-min TTL, Caddy proxy)
 - Caddy reverse proxy with Cloudflare Origin Certificate for local/VM preview routing
 - JWT auth with RBAC, org management, project scoping
 - Razorpay billing (subscriptions + run top-up credits)
@@ -230,12 +230,12 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - **V52 migration:** `ALTER TABLE pipeline_run ADD COLUMN github_pr_url VARCHAR(512);`
 
 ### Recent Changes (2026-03-30)
-- **Pipeline restructuring — fast preview:** Run marked COMPLETE immediately after compile+merge. Auto-preview starts (10-min TTL) for both PROTOTYPE and PRODUCTION modes. Review, test gen, test execution, and validation report run in a background virtual thread (`bg-validation-{runId}`). User can chat, submit changes, and use preview while validation runs.
+- **Pipeline restructuring — fast preview:** Run marked COMPLETE immediately after compile+merge. Auto-preview starts (5-min TTL) for both PROTOTYPE and PRODUCTION modes. Review, test gen, test execution, and validation report run in a background virtual thread (`bg-validation-{runId}`). User can chat, submit changes, and use preview while validation runs.
 - **Background validation lifecycle:** `backgroundValidationRuns` ConcurrentHashSet tracks runs with deferred cleanup. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` deferred to background thread's `finally` block.
 - **Single-package full-stack detection:** `DevDockerfileGenerator.detect()` now checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in the same `package.json`. If both present → `FULL_STACK` (not `NODE_BACKEND`). Generates Dockerfile with `npm run dev` (runs concurrently), exposes both 5173 and 3000.
 - **NODE_BACKEND port fix:** Added `ENV PORT=3000` to `nodeBackendDockerfile()`. Generated apps use `process.env.PORT || 3001` — without the env var, apps fell back to 3001 while Docker exposed 3000, causing health check failures.
 - **TestPreviewCoordinator preview reuse:** Checks for existing running preview via `previewService.getStatus(runId)` before starting a new one. Preview not stopped after test execution (stays up for user).
-- **Preview TTL unified at 10 min:** Both docker and cloud-run modes now use 10-min TTL (was 5-min for cloud-run).
+- **Preview TTL unified at 10 min:** Both docker and cloud-run modes now use 5-min TTL (was 5-min for cloud-run).
 - **Redis pool sized for concurrency:** `max-active: 50` (was 10), `min-idle: 5` (was 2).
 - **V45 migration:** Widened `plan_version` VARCHAR(36) columns to VARCHAR(255) for IDs and VARCHAR(64) for source. Prevents truncation errors on insert.
 
@@ -253,7 +253,7 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - **VM scaled:** n2-standard-8, JVM heap -Xms8g/-Xmx16g -XX:+UseG1GC
 
 ### Recent Changes (2026-03-27)
-- Preview mode: dual-mode support — `cloud-run` for dev/prod (5-min TTL, Artifact Registry + Cloud Run), `docker` for local (10-min TTL, Docker Compose + Caddy)
+- Preview mode: dual-mode support — `cloud-run` for dev/prod (5-min TTL, Artifact Registry + Cloud Run), `docker` for local (5-min TTL, Docker Compose + Caddy)
 - Caddy TLS: switched from broken internal CA to Cloudflare Origin Certificate
 - Apply-to-run: added validation report generation step (was missing from `executeApplySuggestion()`)
 - Pagination: run list API now returns `PagedResponse<RunSummary>` with page/size/totalElements

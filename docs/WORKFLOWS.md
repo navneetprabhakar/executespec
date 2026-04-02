@@ -70,7 +70,7 @@ flowchart TD
 
     W --> X[Auto-merge all task branches to main]
     X --> ZF([✅ Run COMPLETE — code ready])
-    ZF --> ZG[Auto-start preview — 10-min TTL]
+    ZF --> ZG[Auto-start preview — 5-min TTL]
     ZG --> ZH[Background validation thread starts]
     ZH --> Y[ReviewerAgentV2 — inspect merged code + auto-fix]
     Y --> Z[TestGenOrchestrator — generates + compiles tests]
@@ -116,7 +116,7 @@ sequenceDiagram
     P->>S: RUN_COMPLETED
     S->>U: ✅ Run complete — preview starting
     P->>S: PREVIEW_STARTED
-    S->>U: 🌐 Preview running (10-min TTL)
+    S->>U: 🌐 Preview running (5-min TTL)
     Note over P,S: Background validation thread
     P->>S: REVIEW_STARTED
     S->>U: 📝 Reviewing merged code (background)
@@ -451,11 +451,11 @@ Preview supports two modes, configured via `preview.mode` in application propert
 
 | Mode | Environment | Stack | TTL | URL format |
 |------|-------------|-------|-----|------------|
-| `docker` | Local dev | Docker Compose + optional Caddy proxy | 10 min | `https://{subdomain}.preview.local` (Caddy) or `http://localhost:{port}` |
-| `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 10 min | `https://*.run.app` (managed HTTPS) |
+| `docker` | Local dev | Docker Compose + optional Caddy proxy | 5 min | `https://{subdomain}.preview.local` (Caddy) or `http://localhost:{port}` |
+| `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 5 min | `https://*.run.app` (managed HTTPS) |
 
 Preview is started in two ways:
-1. **Pipeline-automated:** PipelineHarness auto-starts preview immediately after marking run COMPLETE (for both PROTOTYPE and PRODUCTION modes). Preview stays running for full 10-min TTL. TestPreviewCoordinator reuses the existing preview for test execution without stopping it.
+1. **Pipeline-automated:** PipelineHarness auto-starts preview immediately after marking run COMPLETE (for both PROTOTYPE and PRODUCTION modes). Preview stays running for full 5-min TTL. TestPreviewCoordinator reuses the existing preview for test execution without stopping it.
 2. **User-initiated:** User clicks 'Start Preview' in the UI (idempotent — returns existing session if running).
 
 ```mermaid
@@ -496,7 +496,7 @@ flowchart TD
     Y --> Z{Mode?}
     Z -->|docker| AA[docker compose down, Caddy route removed]
     Z -->|cloud-run| AB[Cloud Run service deleted]
-    W -->|No action| AC[Auto-deleted after 10-min TTL]
+    W -->|No action| AC[Auto-deleted after 5-min TTL]
 
     style A fill:#6366f1,color:#fff
     style V fill:#22c55e,color:#fff
@@ -527,7 +527,7 @@ sequenceDiagram
     BE-->>FE: Preview RUNNING — HTTPS URL
     FE-->>U: Preview link available
 
-    Note over BE,CR: Auto-delete after 10-min TTL
+    Note over BE,CR: Auto-delete after 5-min TTL
     BE->>CR: Delete Cloud Run service
     CR-->>BE: Service deleted
 ```
@@ -555,7 +555,7 @@ sequenceDiagram
     BE-->>FE: Preview RUNNING — HTTPS URL
     FE-->>U: Preview link available
 
-    Note over BE,DC: Auto-delete after 10-min TTL
+    Note over BE,DC: Auto-delete after 5-min TTL
     BE->>DC: docker compose down
     BE->>CD: Remove route
 ```
