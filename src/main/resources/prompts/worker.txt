@@ -203,40 +203,48 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      IMPORTANT — You MUST ALWAYS create index.html for static/frontend projects.
      The HTML file is the entry point. Never output only JS/CSS without HTML.
 
-     E. Canvas / Game / Animation projects (games, simulations, generative art,
-        anything using <canvas> or heavy requestAnimationFrame rendering):
-        NO framework needed. Write a complete index.html with:
-        - A <canvas> element (usually full-viewport)
-        - Custom <style> block for page layout, glow/bloom effects, HUD overlays,
-          neon filters, etc. Raw CSS is EXPECTED here — frameworks add nothing.
-        - <script src="game.js"> or inline JS for the game loop
-        This is the ONE exception where large <style> blocks are correct.
+     For EVERY category below: you MUST write a complete index.html file.
+     The HTML file is the entry point — place CDN links in <head>, structure
+     in <body>, and link external JS via <script>. Never output only JS/CSS.
 
-     For non-canvas web apps, select ONE framework. Avoid large raw <style>
-     blocks — use framework classes instead. Only use inline <style> for
-     @keyframes or edge cases the framework cannot handle.
-
-     A. Pico.css — Logic-heavy apps (data viz, tools, calculators):
-        Inject: <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+     A. Pico.css — Logic-heavy web apps (data viz, tools, calculators):
+        Write index.html with in <head>:
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
         Strategy: Zero CSS classes. Rely 100% on semantic HTML (<main>, <article>,
         <button>, <dialog>). Spend token budget on JS logic instead.
 
      B. DaisyUI + Tailwind — Dashboards, complex UI, standard components:
-        Inject: <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet" type="text/css" />
-               <script src="https://cdn.tailwindcss.com"></script>
+        Write index.html with in <head>:
+          <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet" type="text/css" />
+          <script src="https://cdn.tailwindcss.com"></script>
+        Set data-theme="dark" on <html> tag.
         Strategy: Use DaisyUI semantic classes (btn btn-primary, card, modal,
         navbar, drawer, mockup-window) for components. Tailwind utilities only
-        for micro-positioning. Set data-theme="dark" on <html>.
+        for micro-positioning.
 
      C. UnoCSS — Ultra-fast custom aesthetics beyond DaisyUI components:
-        Inject: <script src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
+        Write index.html with in <head>:
+          <script src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
         Strategy: Atomic utility classes like Tailwind but compiled in-browser
         with minimal overhead. Use when DaisyUI components are too opinionated.
 
      D. Tailwind CSS — Precise visual control (glassmorphism, gradients, exact spacing):
-        Inject: <script src="https://cdn.tailwindcss.com"></script>
+        Write index.html with in <head>:
+          <script src="https://cdn.tailwindcss.com"></script>
         Strategy: Extensive utility classes on DOM elements. Custom Tailwind
-        config via <script> block for brand colors and dark mode.
+        config via inline <script> block for brand colors and dark mode.
+
+     E. Canvas / Game / Animation (games, simulations, generative art,
+        anything using <canvas> or requestAnimationFrame rendering):
+        NO framework needed. Write index.html with:
+        - A <canvas> element (usually full-viewport)
+        - Custom <style> block for page layout, glow/bloom effects, HUD overlays,
+          neon filters, etc. Raw CSS is EXPECTED here — frameworks add nothing.
+        - <script src="game.js"> or inline JS for the game loop
+        Large <style> blocks are correct and expected for this category.
+
+     For categories A–D, avoid large raw <style> blocks — use framework
+     classes instead. Only use inline <style> for @keyframes or edge cases.
 
      DEFAULT AESTHETIC (applies to all frameworks):
        Dark mode by default. High contrast, soft drop shadows, accessible
