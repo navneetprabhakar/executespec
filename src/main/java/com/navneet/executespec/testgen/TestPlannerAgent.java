@@ -84,7 +84,7 @@ public class TestPlannerAgent {
 
         // Call LLM via ModelResolver (PLANNING tier for test planning)
         LlmProvider aiProvider = stateStore.findRun(runId)
-                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
         ResolvedModel model = modelResolver.resolve("TestPlannerAgent", aiProvider);
         LlmRouter.LlmResponse lr = callLlm(runId, model, systemPrompt, 1);
         String llmResponse = lr.response().getResult().getOutput().getText();

@@ -70,7 +70,7 @@ public class TestWorkerAgent {
 
         // Call LLM via ModelResolver
         LlmProvider aiProvider = stateStore.findRun(runId)
-                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
         ResolvedModel model = modelResolver.resolve("TestWorkerAgent", aiProvider);
         LlmRouter.LlmResponse lr = callLlmTracked(runId, model, systemPrompt);
         String code = lr.response().getResult().getOutput().getText();
@@ -108,7 +108,7 @@ public class TestWorkerAgent {
                 + "\n\nFix ALL compilation errors. Output ONLY valid, compilable Java source code.";
 
         LlmProvider aiProviderRetry = stateStore.findRun(runId)
-                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+                .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
         ResolvedModel retryModel = modelResolver.resolve("TestWorkerAgent", aiProviderRetry);
         LlmRouter.LlmResponse lr = callLlmTracked(runId, retryModel, systemPrompt);
         String code = lr.response().getResult().getOutput().getText();
