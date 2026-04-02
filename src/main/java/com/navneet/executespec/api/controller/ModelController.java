@@ -7,6 +7,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.navneet.executespec.router.LlmProvider;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -66,9 +68,15 @@ public class ModelController {
                 }
             }
 
+            String tag = "";
+            try {
+                tag = LlmProvider.valueOf(providerKey.toUpperCase()).getTag();
+            } catch (IllegalArgumentException ignored) {}
+
             providers.add(new ProviderEntry(
                 providerKey.toUpperCase(),
                 PROVIDER_LABELS.getOrDefault(providerKey, providerKey),
+                tag,
                 modelEntries
             ));
         });
@@ -77,6 +85,6 @@ public class ModelController {
     }
 
     public record AvailableModelsResponse(List<ProviderEntry> providers) {}
-    public record ProviderEntry(String id, String label, List<ModelEntry> models) {}
+    public record ProviderEntry(String id, String label, String tag, List<ModelEntry> models) {}
     public record ModelEntry(String id, String tier, String label) {}
 }

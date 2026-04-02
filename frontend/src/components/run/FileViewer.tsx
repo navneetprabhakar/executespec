@@ -1,11 +1,7 @@
-import Editor, { loader } from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import { useState } from 'react';
-import { GEIST_THEME_NAME, geistDarkTheme } from '@/lib/monacoGeistTheme';
-
-// Register Geist theme once Monaco loads
-loader.init().then((monaco) => {
-  monaco.editor.defineTheme(GEIST_THEME_NAME, geistDarkTheme);
-});
+import { GEIST_THEME_NAME } from '@/lib/monacoGeistTheme';
+import '@/lib/monacoSetup';
 
 interface FileViewerProps {
   fileName: string;

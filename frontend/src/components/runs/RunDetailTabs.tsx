@@ -37,14 +37,10 @@ import {
   Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
-import Editor, { loader } from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import type { editor as monacoEditor } from 'monaco-editor';
-import { GEIST_THEME_NAME, geistDarkTheme } from '@/lib/monacoGeistTheme';
-
-// Register Geist theme once Monaco loads
-loader.init().then((monaco) => {
-  monaco.editor.defineTheme(GEIST_THEME_NAME, geistDarkTheme);
-});
+import { GEIST_THEME_NAME } from '@/lib/monacoGeistTheme';
+import '@/lib/monacoSetup';
 
 const BASE_TABS = [
   { value: 'overview',  label: 'Overview' },

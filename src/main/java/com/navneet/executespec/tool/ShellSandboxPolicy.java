@@ -16,7 +16,7 @@ public class ShellSandboxPolicy {
     // Commands that are NEVER allowed regardless of context
     private static final Set<String> BLOCKED_COMMANDS = Set.of(
         "rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :|:& };:",
-        "chmod -R 777 /", "chown -R", "mount", "umount",
+        "chmod -R 777 /", "chown -R",
         "reboot", "shutdown", "halt", "poweroff", "init 0", "init 6",
         "kill -9 1", "pkill -9", "killall",
         "iptables", "ufw", "firewall-cmd",
@@ -62,7 +62,11 @@ public class ShellSandboxPolicy {
         Pattern.compile("curl\\s+.*--upload-file"),                   // curl upload
         Pattern.compile("curl\\s+.*-T\\s"),                           // curl upload short form
         Pattern.compile("curl\\s+.*-d\\s+@"),                         // curl post file contents
-        Pattern.compile("wget\\s+.*--post-file")                      // wget post file
+        Pattern.compile("wget\\s+.*--post-file"),                      // wget post file
+
+        // Filesystem mount/unmount — word-boundary to avoid false-positives (e.g. Express "mount" in router code)
+        Pattern.compile("\\bmount\\b"),
+        Pattern.compile("\\bumount\\b")
     );
 
     // Docker subcommands that are safe — all others are blocked

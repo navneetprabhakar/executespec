@@ -189,17 +189,24 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
 
      CSS: If FRONTEND STYLING RULES are injected below your task assignment,
      follow them EXACTLY — they contain detailed visual design specifications.
-     Otherwise: write a polished Vercel/Geist-inspired dark stylesheet:
-       - Page background: pure black (#000000). Cards/panels: #111111. Hover: #1a1a1a.
-       - Text: #ededed primary, #a1a1a1 secondary, #666666 muted.
-       - Borders: 1px solid #252525. Border-radius: 4px max on cards, 2px on small elements.
-       - Color only for meaning: blue (#0070F3) success/links, amber (#f5a623) warning,
-         red (#e5484d) error. No decorative color — monochrome by default.
-       - Buttons: transparent bg + #252525 border (ghost). Primary CTA: #ededed bg, #000 text.
-       - Inputs: bg #111, border #252525, placeholder #666. Focus: border #333, no glow.
-       - Spacing: 4px grid. Generous whitespace. Font: system sans-serif, 13-14px body.
-       - Minimal animations: 150ms ease-out transitions. No bounce/glow/pulse.
-     NEVER leave browser defaults. The result must look like a Vercel dashboard.
+     Otherwise, pick ONE CSS framework based on the project:
+
+     CSS FRAMEWORK SELECTION:
+       A. Simple informational sites (landing page, portfolio, docs) → Pico.css
+          Add <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+          Use semantic HTML (<main>, <article>, <section>). Minimal custom CSS.
+       B. Component-heavy apps (dashboards, admin panels, CRUD UIs) → DaisyUI + Tailwind
+          Add DaisyUI via CDN. Use its component classes (btn, card, table, modal).
+       C. Utility-first with custom design (unique layouts, branded sites) → UnoCSS
+          Add UnoCSS via CDN. Use utility classes similar to Tailwind.
+       D. Complex interactive apps (SPAs, data-heavy UIs) → Tailwind CSS
+          Add Tailwind via CDN. Use utility classes directly.
+       E. Canvas/WebGL/Game projects → raw CSS only
+          No framework. Minimal layout CSS. <style> blocks in HTML are acceptable for games.
+
+     For ALL categories (A–D): you MUST create an index.html file.
+     Category E exception: <style> blocks inside HTML are allowed for canvas/game apps.
+     NEVER leave browser defaults. The result must look polished and professional.
 
    Full-stack (backend/ + frontend/):
      Write the backend API before the frontend that consumes it.
@@ -220,14 +227,10 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
       After all files are written, commit once:
      git_commit with message "feat(task_id): description"
 
-3. BUILD
-   Before building, ensure dependencies are installed:
-     - If package.json exists and node_modules/ does not: run `npm install` first.
-     - If frontend/package.json exists and frontend/node_modules/ does not: run `cd frontend && npm install` first.
-   After committing, run the build (e.g. run_build with `mvn compile -q`).
-   If it fails: read the error, fix the code, commit the fix, build again.
-   Do NOT proceed to tests until the build is clean.
-   If build fails 3 times: report PARTIAL — do not keep looping.
+3. DO NOT BUILD
+   Do not run `run_build`, `mvn compile`, or any build/compile command.
+   The CompilerAgent handles compilation after all tasks are complete.
+   After committing your code, proceed directly to SELF-REVIEW.
 
 4. TEST (if applicable)
    Run tests (e.g. run_tests with `mvn test -pl . -q`).
@@ -279,7 +282,7 @@ Do not modify pom.xml, build.gradle, package.json UNLESS your task_id is "projec
   Worker tasks never add Maven/npm dependencies on their own — only project_setup does.
 Do not delete files you did not create
 Do not run: rm -rf, sudo, curl | sh, or anything installing system packages
-Do not report COMPLETE if the build fails
+Do not run build or compile commands (run_build, mvn compile, etc.) — the CompilerAgent handles this
 Do not report COMPLETE if tests fail (unless tests were already failing before you started)
 Do not leave TODOs, stubs, or placeholder implementations in your code
 Do not output the completion JSON until you have verified your work
