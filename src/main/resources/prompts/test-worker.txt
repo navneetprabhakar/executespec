@@ -28,6 +28,21 @@ FIELD MAPPING RULES:
 - Numeric fields: use reasonable domain values
 - FK fields: create the parent entity first, use its ID
 
+ASSERTION RULES — MANDATORY:
+- NEVER assert only the status code. Every test must also assert at least one response body field.
+- For 201 responses: assert the returned entity's ID is non-null and key fields match input.
+- For 200 responses on GET: assert key fields are present and have expected values.
+- For 400/409/422 responses: assert the response body contains an "error" or "message" field.
+- For 404 responses: assert the body is not the generic server error page (check Content-Type is application/json).
+- For list endpoints: assert the response is a JSON array; assert count matches expected.
+
+TEST ISOLATION — MANDATORY:
+- Every test method must use unique data that cannot conflict with other tests.
+- For string unique fields beyond email: append UUID.randomUUID().toString().substring(0,8).
+- If the test framework supports it, add an @AfterEach that deletes entities created in that test,
+  or use a @BeforeEach that seeds a clean state.
+- Never hardcode IDs — always capture the ID from the creation response.
+
 OUTPUT RULES:
 - Output ONLY the Java source code. No markdown backticks, no explanation.
 - Write the COMPLETE test class in one output — do not build it method by method.

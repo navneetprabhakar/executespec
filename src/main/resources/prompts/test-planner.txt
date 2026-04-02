@@ -37,30 +37,38 @@ Example output:
 ]
 
 RULES FOR TEST PLAN GENERATION:
-1. For EACH primary entity mentioned in the spec, generate a CRUD test class.
-   Merge validation and error handling INTO the CRUD test class for the same entity
-   (e.g., shouldRejectBlankEmail goes in UserCrudTest, not a separate ValidationTest)
-   to minimize the number of test classes.
-2. If auth/JWT/login is mentioned, generate an AuthTest class that verifies:
+1. For EACH primary entity mentioned in the spec, generate a CRUD test class for happy-path
+   operations (create, read, update, delete, list).
+2. For entities with validation or uniqueness constraints, generate a SEPARATE validation test
+   class (e.g., "UserValidationTest") — do NOT merge into the CRUD class. This keeps each
+   class focused and failure output readable.
+3. If auth/JWT/login is mentioned, generate an AuthTest class that verifies:
    - Unauthenticated requests to protected endpoints return 401
    - Login/register endpoints work correctly
    - Authenticated requests succeed with valid token
-3. If pagination is mentioned, generate a PaginationTest verifying page/size params and response shape.
-4. Generate a LifecycleTest ONLY if there are FK relationships between entities that require
+4. If pagination is mentioned, generate a PaginationTest verifying page/size params and response shape.
+5. Generate a LifecycleTest ONLY if there are FK relationships between entities that require
    ordered creation/deletion. Skip if there's a single entity.
-5. For static HTML / frontend-only projects, generate Playwright browser tests:
+6. For static HTML / frontend-only projects, generate Playwright browser tests:
    - Category: UI_INTERACTION — verify button clicks, form submissions, display updates via browser automation
    - Category: NAVIGATION — verify page transitions, link clicks, routing via browser navigation
    - Category: PAGE_CONTENT — verify page loads, headings, text content, element presence
    - Tests use com.microsoft.playwright (Playwright, Browser, Page, Locator)
    Example: {"name": "shouldDisplayResultAfterAddition", "description": "Click 5, +, 3, = buttons and verify display shows 8"}
-6. For CLI projects, generate command-line tests:
+7. For CLI projects, generate command-line tests:
    - Category: CLI_OUTPUT — verify command output for various inputs
    - Category: CLI_ERROR — verify error messages for invalid inputs
 
+REQUIRED TEST METHOD TYPES (include at least one of each where applicable):
+- Happy path: create/read/update/delete succeed with valid input
+- Not found: GET/PUT/DELETE with non-existent ID returns 404
+- Validation rejection: POST with missing/invalid required field returns 400
+- Duplicate rejection: POST with duplicate unique field returns 409
+- List shape: GET collection returns array (even if empty, not null)
+
 LIMITS — CRITICAL FOR EXECUTION SPEED:
-- Maximum 4 test classes total. Merge related concerns aggressively.
-- Maximum 6 test methods per class. Cover critical paths, not every permutation.
+- Maximum 6 test classes total. Keep classes focused on a single concern.
+- Maximum 8 test methods per class. Cover critical + error paths.
 - For simple specs (single entity, no auth, no pagination): 1-2 test classes is sufficient.
 - Fewer test classes = fewer parallel test-worker invocations = faster pipeline.
 

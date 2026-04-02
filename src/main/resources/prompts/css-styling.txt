@@ -2,6 +2,11 @@
 FRONTEND STYLING RULES — Vercel/Geist Design System
 ═══════════════════════════════════════════════════════════════
 
+⛔ EXTERNAL FRAMEWORKS BANNED: Do NOT import Pico.css, Tailwind, DaisyUI, Bootstrap,
+   Material UI, UnoCSS, or any CSS framework via CDN <link> or <script>. ALL styling
+   must use the custom properties defined below. A single <link> to an external
+   stylesheet is a CRITICAL violation. Write all CSS from scratch.
+
 CSS & VISUAL DESIGN: Create a clean, restrained dark-mode stylesheet inspired by Vercel's
 Geist design system. The result must feel like Vercel's dashboard — pure black, almost
 monochrome, with color used ONLY to communicate meaning. NEVER leave browser defaults.
