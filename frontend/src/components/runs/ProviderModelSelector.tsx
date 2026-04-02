@@ -93,7 +93,7 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
 /** Read persisted provider/model from localStorage. */
 export function getPersistedSelection(): { provider: string; model: string } {
   return {
-    provider: localStorage.getItem(LS_PROVIDER) ?? 'ANTHROPIC',
+    provider: localStorage.getItem(LS_PROVIDER) ?? 'OPENAI',
     model: localStorage.getItem(LS_MODEL) ?? '',
   };
 }

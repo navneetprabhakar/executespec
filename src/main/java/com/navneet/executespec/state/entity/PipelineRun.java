@@ -101,11 +101,11 @@ public class PipelineRun {
     /** User-selected LLM provider (copied from Project at submission time). */
     @Builder.Default
     @Column(name = "ai_provider", length = 20)
-    private String aiProvider = "ANTHROPIC";
+    private String aiProvider = "OPENAI";
 
     public com.navneet.executespec.router.LlmProvider getAiProviderEnum() {
         try { return com.navneet.executespec.router.LlmProvider.valueOf(aiProvider); }
-        catch (Exception e) { return com.navneet.executespec.router.LlmProvider.ANTHROPIC; }
+        catch (Exception e) { return com.navneet.executespec.router.LlmProvider.OPENAI; }
     }
 
     public com.navneet.executespec.harness.ExecutionMode getExecutionModeEnum() {

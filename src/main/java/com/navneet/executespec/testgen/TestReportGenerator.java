@@ -143,7 +143,7 @@ public class TestReportGenerator {
 
             // Call LLM via ModelResolver (LIGHTWEIGHT tier for template work)
             LlmProvider aiProvider = stateStore.findRun(runId)
-                    .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.ANTHROPIC);
+                    .map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
             ResolvedModel model = modelResolver.resolve("TestReportGenerator", aiProvider);
             Prompt prompt = new Prompt(List.of(
                     new SystemMessage(promptText),
