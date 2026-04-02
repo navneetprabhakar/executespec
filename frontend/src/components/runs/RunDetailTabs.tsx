@@ -117,7 +117,8 @@ export default function RunDetailTabs() {
   if (!activeRun) return null;
 
   const isTerminal = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL' || activeRun.status === 'FAILED';
-  const isActive = activeRun.status === 'WORKING' || activeRun.status === 'COMPILING';
+  const isActive = activeRun.status === 'WORKING' || activeRun.status === 'COMPILING'
+    || activeRun.status === 'REVIEWING' || activeRun.status === 'MERGING' || activeRun.status === 'AWAITING_MERGE';
   /** Preview content is ready when the pipeline is active or finished. */
   const previewReady = isTerminal || isActive;
   /** Chat is only functional after the run finishes (success or failed). */
