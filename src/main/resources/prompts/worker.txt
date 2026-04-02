@@ -195,24 +195,29 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
 
      CSS: If FRONTEND STYLING RULES are injected below your task assignment,
      follow them EXACTLY — they contain detailed visual design specifications.
-     Otherwise, pick ONE CSS framework based on the project:
+     Otherwise you MUST add Pico.css for instant styling. This is NOT optional:
 
-     CSS FRAMEWORK SELECTION:
-       A. Simple informational sites (landing page, portfolio, docs) → Pico.css
-          Add <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-          Use semantic HTML (<main>, <article>, <section>). Minimal custom CSS.
-       B. Component-heavy apps (dashboards, admin panels, CRUD UIs) → DaisyUI + Tailwind
-          Add DaisyUI via CDN. Use its component classes (btn, card, table, modal).
-       C. Utility-first with custom design (unique layouts, branded sites) → UnoCSS
-          Add UnoCSS via CDN. Use utility classes similar to Tailwind.
-       D. Complex interactive apps (SPAs, data-heavy UIs) → Tailwind CSS
-          Add Tailwind via CDN. Use utility classes directly.
-       E. Canvas/WebGL/Game projects → raw CSS only
-          No framework. Minimal layout CSS. <style> blocks in HTML are acceptable for games.
+     MANDATORY: Add this line in <head> of EVERY HTML file:
+       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 
-     For ALL categories (A–D): you MUST create an index.html file.
-     Category E exception: <style> blocks inside HTML are allowed for canvas/game apps.
-     NEVER leave browser defaults. The result must look polished and professional.
+     Then use semantic HTML tags — Pico styles them automatically:
+       - Wrap page content in <main class="container">
+       - Use <article> for cards, <section> for groups
+       - Use <header>, <footer>, <nav> for layout
+       - Buttons: <button>, <a role="button">. Primary: class="contrast"
+       - Forms: <input>, <select>, <textarea> inside <label> (auto-styled)
+       - Tables: plain <table> (auto-styled)
+       - Modals: <dialog open> with <article> inside
+
+     For complex apps ONLY (dashboards, data tables, 10+ components):
+       Use Tailwind CSS via CDN instead of Pico:
+       <script src="https://cdn.tailwindcss.com"></script>
+       Apply utility classes directly (bg-white, p-4, rounded-lg, shadow, etc.).
+
+     Canvas/WebGL/Game projects: raw CSS only. <style> blocks in HTML are fine.
+
+     CRITICAL: NEVER leave browser defaults. Every HTML page MUST have either
+     the Pico.css <link> tag or the Tailwind <script> tag in <head>.
 
    Full-stack (backend/ + frontend/):
      Write the backend API before the frontend that consumes it.
