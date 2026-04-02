@@ -133,6 +133,56 @@ public class StripePaymentGateway implements PaymentGateway {
         }
     }
 
+    /**
+     * Create a one-time payment checkout session for run top-ups.
+     */
+    public CheckoutResult createTopupCheckoutSession(BillingEntity entity, String stripePriceId,
+                                                       int quantity, String successUrl, String cancelUrl) {
+        try {
+            SessionCreateParams.Builder builder = SessionCreateParams.builder()
+                    .setMode(SessionCreateParams.Mode.PAYMENT)
+                    .setSuccessUrl(successUrl)
+                    .setCancelUrl(cancelUrl)
+                    .addLineItem(SessionCreateParams.LineItem.builder()
+                            .setPrice(stripePriceId)
+                            .setQuantity((long) quantity)
+                            .build())
+                    .putMetadata("billing_entity_id", entity.getId())
+                    .putMetadata("billing_entity_type", entity.getEntityType())
+                    .putMetadata("type", "topup");
+
+            if (entity.getStripeCustomerId() != null && !entity.getStripeCustomerId().isBlank()) {
+                builder.setCustomer(entity.getStripeCustomerId());
+            } else {
+                builder.setCustomerCreation(SessionCreateParams.CustomerCreation.ALWAYS);
+            }
+
+            Session session = Session.create(builder.build());
+            log.info("Stripe topup checkout session created: sessionId={}, entityId={}", session.getId(), entity.getId());
+            return new CheckoutResult(session.getUrl(), session.getId());
+        } catch (StripeException e) {
+            log.error("Failed to create Stripe topup checkout: {}", e.getMessage(), e);
+            throw new RuntimeException("Stripe topup checkout failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Generate a Stripe Billing Portal URL for subscription self-management.
+     */
+    public String getCustomerPortalUrl(String stripeCustomerId, String returnUrl) {
+        try {
+            var params = com.stripe.param.billingportal.SessionCreateParams.builder()
+                    .setCustomer(stripeCustomerId)
+                    .setReturnUrl(returnUrl)
+                    .build();
+            var session = com.stripe.model.billingportal.Session.create(params);
+            return session.getUrl();
+        } catch (StripeException e) {
+            log.error("Failed to create Stripe portal session for {}: {}", stripeCustomerId, e.getMessage(), e);
+            throw new RuntimeException("Stripe portal session failed: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public String gatewayType() {
         return "STRIPE";

@@ -55,7 +55,7 @@ export default function TaskGraph({ runId, nodes: externalNodes }: Props) {
     if (externalNodes) return;
     const working = nodes.some(n => n.status === 'WORKING' || n.status === 'PENDING');
     if (!working) return;
-    const id = setInterval(load, 4000);
+    const id = setInterval(() => { if (!document.hidden) load(); }, 8000);
     return () => clearInterval(id);
   }, [nodes, load, externalNodes]);
 

@@ -24,7 +24,7 @@ export default function DeploymentsPage() {
     try { setDeployments(await getDeployments()); } catch { setDeployments([]); } finally { setLoading(false); }
   };
 
-  useEffect(() => { if (canDeploy) { load(); const i = setInterval(load, 15000); return () => clearInterval(i); } }, [canDeploy]);
+  useEffect(() => { if (canDeploy) { load(); const i = setInterval(() => { if (!document.hidden) load(); }, 30000); return () => clearInterval(i); } }, [canDeploy]);
 
   // Upgrade gate for FREE users
   if (permissions && !canDeploy) {

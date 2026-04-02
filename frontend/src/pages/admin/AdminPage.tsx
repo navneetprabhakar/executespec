@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
@@ -8,7 +8,7 @@ import { useUiStore } from '@/stores/useUiStore';
 import AdminInviteModal from './AdminInviteModal';
 import GrantRunsModal from './GrantRunsModal';
 
-type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages' | 'reports';
+type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages' | 'reports' | 'audit' | 'webhooks';
 
 const TIER_LABEL: Record<string, string> = { FREE: 'Free', PRO: 'Team', ENTERPRISE: 'Enterprise' };
 const STATUS_COLOR: Record<string, string> = {
@@ -60,6 +60,18 @@ function AdminPageInner() {
   const [reportSending, setReportSending] = useState<'WEEKLY' | 'MONTHLY' | null>(null);
   const [reportResult, setReportResult] = useState<{ emailsSent: number; period: string } | null>(null);
 
+  // ── Payment Audit state ─────────────────────────────────────────────────
+  const [auditEntries, setAuditEntries] = useState<api.PaymentAuditEntry[]>([]);
+  const [auditPage, setAuditPage] = useState(0);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditFilter, setAuditFilter] = useState({ orgId: '', userId: '' });
+
+  // ── Webhook Events state ────────────────────────────────────────────────
+  const [webhookEvents, setWebhookEvents] = useState<api.WebhookEventEntry[]>([]);
+  const [webhookPage, setWebhookPage] = useState(0);
+  const [webhookTotal, setWebhookTotal] = useState(0);
+  const [webhookGateway, setWebhookGateway] = useState('');
+
   const triggerReport = async (period: 'WEEKLY' | 'MONTHLY') => {
     setReportSending(period);
     setReportResult(null);
@@ -79,6 +91,10 @@ function AdminPageInner() {
   const loadTierConfigs = () => api.adminGetTierConfig().then(setTierConfigs).catch(() => {});
   const loadEscalations = () => api.adminListEscalated().then(setEscalations).catch(() => {});
   const loadPackages    = () => api.adminListTopupPackages().then(setPackages).catch(() => {});
+  const loadAudit       = (page = 0) => api.adminListPaymentAudit(page, 50, auditFilter.orgId || undefined, auditFilter.userId || undefined)
+    .then((r) => { setAuditEntries(r.content); setAuditTotal(r.totalElements); setAuditPage(page); }).catch(() => {});
+  const loadWebhooks    = (page = 0) => api.adminListWebhookEvents(page, 50, webhookGateway || undefined)
+    .then((r) => { setWebhookEvents(r.content); setWebhookTotal(r.totalElements); setWebhookPage(page); }).catch(() => {});
 
   useEffect(() => { loadUsers(); loadOrgs(); loadTierConfigs(); loadEscalations(); loadPackages(); }, []);
 
@@ -207,6 +223,8 @@ function AdminPageInner() {
     { id: 'escalations', label: 'Escalations',  icon: GitMerge,  count: escalations.length || undefined },
     { id: 'packages',    label: 'Top-Up Pkgs',  icon: Package,   count: packages.filter((p) => p.active).length },
     { id: 'reports',     label: 'Usage Reports', icon: Mail },
+    { id: 'audit',       label: 'Payment Audit', icon: Receipt },
+    { id: 'webhooks',    label: 'Webhooks',      icon: Globe },
   ];
 
   return (
@@ -788,6 +806,166 @@ function AdminPageInner() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ── PAYMENT AUDIT TAB ──────────────────────────────────────────── */}
+        {tab === 'audit' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                value={auditFilter.orgId}
+                onChange={(e) => setAuditFilter((f) => ({ ...f, orgId: e.target.value }))}
+                placeholder="Filter by Org ID…"
+                className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary placeholder:text-muted focus:outline-none focus:border-accent-blue/40"
+              />
+              <input
+                type="text"
+                value={auditFilter.userId}
+                onChange={(e) => setAuditFilter((f) => ({ ...f, userId: e.target.value }))}
+                placeholder="Filter by User ID…"
+                className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary placeholder:text-muted focus:outline-none focus:border-accent-blue/40"
+              />
+              <button onClick={() => loadAudit(0)} className="flex items-center gap-1.5 px-3 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors">
+                Search
+              </button>
+              <button
+                onClick={() => api.adminExportPaymentAuditCsv().catch((e: any) => addToast({ type: 'error', message: e.message }))}
+                className="flex items-center gap-1.5 px-3 py-2 text-muted hover:text-secondary border border-[var(--border-default)] rounded-sm text-sm transition-colors"
+              >
+                <Download className="h-3.5 w-3.5" />
+                CSV
+              </button>
+              <button onClick={() => loadAudit(auditPage)} className="p-2 text-muted hover:text-secondary">
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-[var(--gray-100)] text-muted text-xs">
+                  <tr>
+                    {['Event', 'Entity', 'Tier Change', 'Gateway', 'Amount', 'By', 'Date'].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-default)]">
+                  {auditEntries.length === 0 && (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">
+                      {auditTotal === 0 ? 'No audit entries. Click Search to load.' : 'No results.'}
+                    </td></tr>
+                  )}
+                  {auditEntries.map((a) => (
+                    <tr key={a.id} className="hover:bg-[var(--gray-100)] transition-colors">
+                      <td className="px-4 py-3">
+                        <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-accent-blue/10 text-accent-blue">{a.eventType}</span>
+                      </td>
+                      <td className="px-4 py-3 text-secondary">
+                        <p className="text-xs">{a.entityType}</p>
+                        <p className="text-muted text-[10px] font-mono truncate max-w-[120px]" title={a.entityId}>{a.entityId}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-secondary">
+                        {a.oldTier || a.newTier ? <>{a.oldTier ?? '–'} → {a.newTier ?? '–'}</> : '–'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted">{a.gatewayProvider ?? '–'}</td>
+                      <td className="px-4 py-3 text-xs text-secondary font-mono">
+                        {a.amountMinor != null ? `${(a.amountMinor / 100).toFixed(2)} ${a.currency ?? ''}` : '–'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted truncate max-w-[100px]" title={a.performedBy ?? undefined}>{a.performedBy ?? '–'}</td>
+                      <td className="px-4 py-3 text-xs text-muted">{new Date(a.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {auditTotal > 50 && (
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>{auditTotal} total entries</span>
+                <div className="flex gap-2">
+                  <button disabled={auditPage === 0} onClick={() => loadAudit(auditPage - 1)} className="px-3 py-1 border border-[var(--border-default)] rounded-sm disabled:opacity-40">Prev</button>
+                  <span className="px-2 py-1">Page {auditPage + 1}</span>
+                  <button disabled={(auditPage + 1) * 50 >= auditTotal} onClick={() => loadAudit(auditPage + 1)} className="px-3 py-1 border border-[var(--border-default)] rounded-sm disabled:opacity-40">Next</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── WEBHOOK EVENTS TAB ────────────────────────────────────────────── */}
+        {tab === 'webhooks' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <select
+                value={webhookGateway}
+                onChange={(e) => setWebhookGateway(e.target.value)}
+                className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none focus:border-accent-blue/40"
+              >
+                <option value="">All Gateways</option>
+                <option value="RAZORPAY">Razorpay</option>
+                <option value="STRIPE">Stripe</option>
+              </select>
+              <button onClick={() => loadWebhooks(0)} className="flex items-center gap-1.5 px-3 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors">
+                Search
+              </button>
+              <button onClick={() => loadWebhooks(webhookPage)} className="p-2 text-muted hover:text-secondary">
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-[var(--gray-100)] text-muted text-xs">
+                  <tr>
+                    {['Gateway', 'Event ID', 'Event Type', 'Status', 'Attempts', 'Received'].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-default)]">
+                  {webhookEvents.length === 0 && (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">
+                      {webhookTotal === 0 ? 'No webhook events. Click Search to load.' : 'No results.'}
+                    </td></tr>
+                  )}
+                  {webhookEvents.map((w) => (
+                    <tr key={w.id} className="hover:bg-[var(--gray-100)] transition-colors">
+                      <td className="px-4 py-3">
+                        <span className={cn(
+                          'inline-block px-2 py-0.5 text-xs rounded-full',
+                          w.gateway === 'STRIPE' ? 'bg-purple-500/10 text-purple-400' : 'bg-accent-blue/10 text-accent-blue',
+                        )}>{w.gateway}</span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-secondary font-mono truncate max-w-[180px]" title={w.eventId}>{w.eventId}</td>
+                      <td className="px-4 py-3 text-xs text-secondary">{w.eventType}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn(
+                          'inline-block px-2 py-0.5 text-xs rounded-full',
+                          w.processingStatus === 'PROCESSED' && 'bg-accent-green/10 text-accent-green',
+                          w.processingStatus === 'IGNORED' && 'bg-accent-amber/10 text-accent-amber',
+                          w.processingStatus === 'FAILED' && 'bg-red-500/10 text-red-400',
+                        )}>{w.processingStatus}</span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted text-center">{w.attempts}</td>
+                      <td className="px-4 py-3 text-xs text-muted">{new Date(w.createdAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {webhookTotal > 50 && (
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>{webhookTotal} total events</span>
+                <div className="flex gap-2">
+                  <button disabled={webhookPage === 0} onClick={() => loadWebhooks(webhookPage - 1)} className="px-3 py-1 border border-[var(--border-default)] rounded-sm disabled:opacity-40">Prev</button>
+                  <span className="px-2 py-1">Page {webhookPage + 1}</span>
+                  <button disabled={(webhookPage + 1) * 50 >= webhookTotal} onClick={() => loadWebhooks(webhookPage + 1)} className="px-3 py-1 border border-[var(--border-default)] rounded-sm disabled:opacity-40">Next</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

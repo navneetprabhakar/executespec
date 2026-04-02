@@ -2,8 +2,11 @@ package com.navneet.executespec.auth.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.Map;
 
 @Entity
 @Table(name = "payment_audit")
@@ -23,8 +26,6 @@ public class PaymentAudit {
     @Column(name = "entity_id", nullable = false)
     private String entityId;
 
-    /** PLAN_ASSIGNED | PLAN_UPGRADED | PLAN_DOWNGRADED | PAYMENT_RECEIVED | PAYMENT_FAILED
-     *  | SUBSCRIPTION_CANCELLED | MANUAL_OVERRIDE */
     @Column(name = "event_type", nullable = false, length = 64)
     private String eventType;
 
@@ -42,6 +43,35 @@ public class PaymentAudit {
 
     @Column(columnDefinition = "TEXT")
     private String notes;
+
+    // ── V55 expansion fields ──
+    @Column(name = "gateway_provider", length = 20)
+    private String gatewayProvider;
+
+    @Column(name = "gateway_event_id")
+    private String gatewayEventId;
+
+    @Column(name = "gateway_payment_id")
+    private String gatewayPaymentId;
+
+    @Column(name = "currency", length = 8)
+    private String currency;
+
+    @Column(name = "amount_minor")
+    private Long amountMinor;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "metadata", columnDefinition = "jsonb")
+    private Map<String, Object> metadata;
+
+    @Column(name = "idempotency_key")
+    private String idempotencyKey;
+
+    @Column(name = "user_id")
+    private String userId;
+
+    @Column(name = "org_id")
+    private String orgId;
 
     @Column(name = "created_at", nullable = false)
     @Builder.Default

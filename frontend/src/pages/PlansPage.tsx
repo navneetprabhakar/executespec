@@ -49,7 +49,22 @@ export default function PlansPage() {
     setShowDisclaimer(false);
 
     try {
-      const result = await subscribe(selectedPlanId);
+      // Determine gateway: use Stripe for non-INR, Razorpay for INR
+      const gateway = showInr ? 'RAZORPAY' : 'STRIPE';
+      const result = await subscribe(
+        selectedPlanId,
+        gateway,
+        gateway === 'STRIPE' ? `${window.location.origin}/billing?status=success` : undefined,
+        gateway === 'STRIPE' ? `${window.location.origin}/billing?status=cancelled` : undefined,
+      );
+
+      if (result.gateway === 'STRIPE' && result.checkoutUrl) {
+        // Redirect to Stripe Checkout
+        window.location.href = result.checkoutUrl;
+        return;
+      }
+
+      // Razorpay flow — open client-side SDK
       setCheckoutData(result);
     } catch (err: any) {
       setCheckoutError(err?.message || 'Failed to create subscription');

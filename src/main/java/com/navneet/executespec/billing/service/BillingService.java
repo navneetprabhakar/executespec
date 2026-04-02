@@ -60,6 +60,12 @@ public class BillingService {
     // Multi-gateway router (Stripe + Razorpay)
     private final PaymentGatewayRouter gatewayRouter;
 
+    // Billing entity resolver (user vs org)
+    private final com.navneet.executespec.billing.gateway.BillingEntityResolver billingEntityResolver;
+
+    // Payment audit trail
+    private final com.navneet.executespec.auth.service.PaymentAuditService paymentAuditService;
+
     @Value("${billing.terms-version:2026-03-v1}")
     private String currentTermsVersion;
 
@@ -87,6 +93,11 @@ public class BillingService {
     // ─────────────────────────────────────────────────────────────
 
     public SubscriptionInitResult subscribe(String userId, UUID planId) {
+        return subscribe(userId, planId, null, null, null);
+    }
+
+    public SubscriptionInitResult subscribe(String userId, UUID planId,
+                                              String preferredGateway, String successUrl, String cancelUrl) {
         AppUser user = userRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
@@ -118,32 +129,73 @@ public class BillingService {
             isFounder = true;
         }
 
-        // Create via gateway
-        String userName = user.getFirstName() + " " + user.getLastName();
-        SubscriptionInitResult result = razorpayGateway.createSubscription(
-                userId, userName, user.getEmail(), user.getOrgId(), plan);
+        // Resolve billing entity and gateway
+        var billingEntity = billingEntityResolver.resolve(user);
+        String gatewayName = preferredGateway != null ? preferredGateway.toLowerCase()
+                : (billingEntity.getPaymentGateway() != null ? billingEntity.getPaymentGateway() : null);
+        var gateway = gatewayName != null ? gatewayRouter.resolveByName(gatewayName) : gatewayRouter.resolve(billingEntity);
 
-        // Persist subscription with status CREATED (not yet ACTIVE — activated after payment)
-        BillingSubscription sub = BillingSubscription.builder()
-                .userId(userId)
-                .orgId(user.getOrgId())
-                .billingPlanId(plan.getId())
-                .paymentGateway("RAZORPAY")
-                .gatewaySubscriptionId(result.gatewaySubscriptionId())
-                .gatewayCustomerId(result.gatewayCustomerId())
-                .status("CREATED")
-                .totalSeats(plan.getIncludedSeats())
-                .extraSeats(0)
-                .cancelAtPeriodEnd(false)
-                .termsAcceptedAt(Instant.now())
-                .termsVersion(currentTermsVersion)
-                .founderPricing(isFounder)
-                .build();
+        SubscriptionInitResult result;
 
-        subRepo.save(sub);
+        if ("STRIPE".equalsIgnoreCase(gateway.gatewayType())) {
+            // Stripe: create checkout session
+            var checkout = gateway.createCheckoutSession(
+                    billingEntity, plan.getId().toString(),
+                    successUrl != null ? successUrl : "/billing?status=success",
+                    cancelUrl != null ? cancelUrl : "/billing?status=cancelled");
 
-        log.info("Subscription created: user={}, plan={}, entityId={}",
-                userId, plan.getName(), result.gatewaySubscriptionId());
+            result = new SubscriptionInitResult(
+                    checkout.sessionId(), null, null, null,
+                    "STRIPE", checkout.url(), checkout.sessionId());
+
+            // Persist subscription with status CREATED
+            BillingSubscription sub = BillingSubscription.builder()
+                    .userId(userId)
+                    .orgId(user.getOrgId())
+                    .billingPlanId(plan.getId())
+                    .paymentGateway("STRIPE")
+                    .gatewaySubscriptionId(checkout.sessionId())
+                    .status("CREATED")
+                    .totalSeats(plan.getIncludedSeats())
+                    .extraSeats(0)
+                    .cancelAtPeriodEnd(false)
+                    .termsAcceptedAt(Instant.now())
+                    .termsVersion(currentTermsVersion)
+                    .founderPricing(isFounder)
+                    .build();
+            subRepo.save(sub);
+
+        } else {
+            // Razorpay: use legacy gateway
+            String userName = user.getFirstName() + " " + user.getLastName();
+            result = razorpayGateway.createSubscription(
+                    userId, userName, user.getEmail(), user.getOrgId(), plan);
+
+            // Persist subscription with status CREATED
+            BillingSubscription sub = BillingSubscription.builder()
+                    .userId(userId)
+                    .orgId(user.getOrgId())
+                    .billingPlanId(plan.getId())
+                    .paymentGateway("RAZORPAY")
+                    .gatewaySubscriptionId(result.gatewaySubscriptionId())
+                    .gatewayCustomerId(result.gatewayCustomerId())
+                    .status("CREATED")
+                    .totalSeats(plan.getIncludedSeats())
+                    .extraSeats(0)
+                    .cancelAtPeriodEnd(false)
+                    .termsAcceptedAt(Instant.now())
+                    .termsVersion(currentTermsVersion)
+                    .founderPricing(isFounder)
+                    .build();
+            subRepo.save(sub);
+        }
+
+        log.info("Subscription created: user={}, plan={}, gateway={}",
+                userId, plan.getName(), gateway.gatewayType());
+
+        paymentAuditService.record("USER", userId, "SUBSCRIPTION_CREATED",
+                user.getTier(), plan.getTier(), userId, "Plan: " + plan.getName(),
+                gateway.gatewayType(), null, null, null, null, userId, user.getOrgId());
 
         return result;
     }
@@ -182,6 +234,11 @@ public class BillingService {
         log.info("Subscription activated: user={}, plan={}, tier={}, entityId={}",
                 userId, plan.getName(), plan.getTier(), sub.getGatewaySubscriptionId());
 
+        paymentAuditService.record("USER", userId, "SUBSCRIPTION_ACTIVATED",
+                null, plan.getTier(), userId, "Plan: " + plan.getName(),
+                sub.getPaymentGateway(), null, request.razorpayPaymentId(),
+                "INR", null, userId, sub.getOrgId());
+
         // V1.1: Notify user
         AppUser activatedUser = userRepo.findById(userId).orElse(null);
         if (activatedUser != null) {
@@ -211,7 +268,12 @@ public class BillingService {
         }
 
         if (sub.getGatewaySubscriptionId() != null) {
-            razorpayGateway.cancelAtPeriodEnd(sub.getGatewaySubscriptionId());
+            String gw = sub.getPaymentGateway();
+            if ("STRIPE".equalsIgnoreCase(gw)) {
+                gatewayRouter.stripe().cancelSubscription(sub.getGatewaySubscriptionId());
+            } else {
+                razorpayGateway.cancelAtPeriodEnd(sub.getGatewaySubscriptionId());
+            }
         }
 
         sub.setCancelAtPeriodEnd(true);
@@ -220,6 +282,12 @@ public class BillingService {
 
         log.info("Subscription cancelled (at period end): user={}, periodEnd={}",
                 userId, sub.getCurrentPeriodEnd());
+
+        BillingPlan cancelledPlan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
+        paymentAuditService.record("USER", userId, "SUBSCRIPTION_CANCELLED",
+                cancelledPlan != null ? cancelledPlan.getTier() : null, "FREE",
+                userId, "Cancels at period end: " + sub.getCurrentPeriodEnd(),
+                sub.getPaymentGateway(), null, null, null, null, userId, sub.getOrgId());
 
         // V1.1: Notify user
         AppUser cancelledUser = userRepo.findById(userId).orElse(null);

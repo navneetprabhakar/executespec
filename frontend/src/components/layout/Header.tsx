@@ -1,7 +1,8 @@
-import { Menu, Search } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Menu, Search, ArrowUpRight } from 'lucide-react';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
-import { useSseStore } from '@/stores/useSseStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { ACTIVE_STATUSES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
@@ -10,10 +11,8 @@ import ViewModeToggle from '@/components/shared/ViewModeToggle';
 export default function Header() {
   const { setCommandPaletteOpen, mobileSidebarOpen, setMobileSidebarOpen } = useUiStore();
   const runs = useRunStore((s) => s.runs);
-  const activeRunId = useRunStore((s) => s.activeRunId);
-  const sseStatus = useSseStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
   const activeCount = runs.filter((r) => ACTIVE_STATUSES.has(r.status)).length;
-  const displayStatus = sseStatus === 'DISCONNECTED' && !activeRunId ? 'STANDBY' : sseStatus;
 
   return (
     <header className="flex items-center h-14 px-4 gap-3 bg-[var(--geist-bg)] border-b border-[var(--border-default)] flex-shrink-0 z-10">
@@ -31,22 +30,6 @@ export default function Header() {
         <span className="text-primary font-medium">ExecuteSpec</span>
         <span className="text-muted">/</span>
         <span className="text-secondary">Runs</span>
-      </div>
-
-      {/* SSE status dot */}
-      <div className="flex items-center gap-1.5">
-        <span className={cn(
-          'h-1.5 w-1.5 rounded-full',
-          displayStatus === 'CONNECTED' ? 'bg-accent-green' :
-          displayStatus === 'RECONNECTING' ? 'bg-status-building' : 'bg-[var(--gray-500)]'
-        )} />
-        <span className={cn(
-          'text-xs hidden sm:block text-muted',
-        )}>
-          {displayStatus === 'CONNECTED' ? 'Live' :
-           displayStatus === 'RECONNECTING' ? 'Reconnecting' :
-           displayStatus === 'STANDBY' ? 'Standby' : 'Offline'}
-        </span>
       </div>
 
       {/* View mode toggle */}
@@ -67,9 +50,20 @@ export default function Header() {
 
       {/* Active runs count */}
       {activeCount > 0 && (
-        <span className="text-xs text-secondary">
+        <span className="text-xs text-secondary hidden md:inline">
           {activeCount} active
         </span>
+      )}
+
+      {/* Upgrade pill */}
+      {user?.tier === 'FREE' && (
+        <Link
+          to="/plans"
+          className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-accent-blue/10 text-accent-blue text-xs font-medium hover:bg-accent-blue/20 transition-colors"
+        >
+          Upgrade
+          <ArrowUpRight className="h-3 w-3" />
+        </Link>
       )}
 
       {/* User menu */}

@@ -83,6 +83,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
     const isStartingPhase = status?.status ? STARTING_STATUSES.has(status.status) : false;
     if (isStartingPhase) {
       pollRef.current = setInterval(() => {
+        if (document.hidden) return;
         getPreviewStatus(runId).then((s) => {
           setStatus(s);
           if (!STARTING_STATUSES.has(s.status) && pollRef.current) {
@@ -90,7 +91,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
             pollRef.current = undefined;
           }
         }).catch(() => {});
-      }, 3000);
+      }, 5000);
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -128,9 +129,12 @@ export default function PreviewTab({ runId }: { runId: string }) {
     const isActive = status?.status ? (STARTING_STATUSES.has(status.status) || status.status === 'RUNNING') : false;
     const active = isActive;
     if (active) {
-      const fetchLogs = () => getPreviewLogs(runId, 0, effectiveFilter).then(r => setLogs(r.lines)).catch(() => {});
+      const fetchLogs = () => {
+        if (document.hidden) return;
+        getPreviewLogs(runId, 0, effectiveFilter).then(r => setLogs(r.lines)).catch(() => {});
+      };
       fetchLogs();
-      logPollRef.current = setInterval(fetchLogs, 5000);
+      logPollRef.current = setInterval(fetchLogs, 10000);
     }
     return () => {
       if (logPollRef.current) clearInterval(logPollRef.current);

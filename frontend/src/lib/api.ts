@@ -1492,3 +1492,69 @@ export const downloadValidationReportPdf = async (runId: string): Promise<void> 
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 };
+
+// ── Payment Audit (Admin) ────────────────────────────────────────────────────
+
+export interface PaymentAuditEntry {
+  id: string;
+  entityType: string;
+  entityId: string;
+  eventType: string;
+  oldTier: string | null;
+  newTier: string | null;
+  performedBy: string | null;
+  notes: string | null;
+  gatewayProvider: string | null;
+  gatewayEventId: string | null;
+  gatewayPaymentId: string | null;
+  currency: string | null;
+  amountMinor: number | null;
+  userId: string | null;
+  orgId: string | null;
+  createdAt: string;
+}
+
+export interface WebhookEventEntry {
+  id: number;
+  gateway: string;
+  eventId: string;
+  eventType: string;
+  payloadHash: string | null;
+  processingStatus: string;
+  errorMessage: string | null;
+  attempts: number;
+  createdAt: string;
+  processedAt: string | null;
+}
+
+export const adminListPaymentAudit = (page = 0, size = 50, orgId?: string, userId?: string) => {
+  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  if (orgId) params.set('orgId', orgId);
+  if (userId) params.set('userId', userId);
+  return req<PagedResponse<PaymentAuditEntry>>(`/admin/payment-audit?${params}`);
+};
+
+export const adminExportPaymentAuditCsv = async () => {
+  const res = await fetch(`${BASE}/admin/payment-audit/export`, {
+    headers: { ...authHeader() },
+  });
+  if (!res.ok) {
+    const raw = await res.text().catch(() => '');
+    throw new Error(parseErrorMessage(res.status, raw));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'payment-audit.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+export const adminListWebhookEvents = (page = 0, size = 50, gateway?: string) => {
+  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  if (gateway) params.set('gateway', gateway);
+  return req<PagedResponse<WebhookEventEntry>>(`/admin/webhook-events?${params}`);
+};
