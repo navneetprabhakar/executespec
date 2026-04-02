@@ -77,7 +77,7 @@ public class ShellSandboxPolicy {
         "mkdir", "cp", "mv", "touch", "echo",
         "git", "diff", "patch",
         "sort", "uniq", "sed", "awk", "tr", "cut",
-        "cd", "pwd", "which", "whoami", "env", "printenv", "sleep",
+        "cd", "pwd", "which", "whoami", "env", "printenv", "sleep", "test", "[",
         "tar", "zip", "unzip", "gzip", "gunzip",
         "python", "python3", "pip", "pip3", "pytest",
         "docker",
