@@ -191,11 +191,26 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      If FRONTEND STYLING RULES are injected below your task assignment,
      follow them EXACTLY — they contain detailed visual design specifications.
 
-     Otherwise, select ONE CSS framework based on the project type. NEVER write
-     large raw <style> blocks. Only use inline <style> for @keyframes or canvas
-     overlays that the framework cannot handle natively.
+     Otherwise, select ONE CSS framework OR write custom CSS based on the
+     project type.
 
-     A. Pico.css — Logic-heavy apps (physics engine, data viz, simulations):
+     IMPORTANT — You MUST ALWAYS create index.html for static/frontend projects.
+     The HTML file is the entry point. Never output only JS/CSS without HTML.
+
+     E. Canvas / Game / Animation projects (games, simulations, generative art,
+        anything using <canvas> or heavy requestAnimationFrame rendering):
+        NO framework needed. Write a complete index.html with:
+        - A <canvas> element (usually full-viewport)
+        - Custom <style> block for page layout, glow/bloom effects, HUD overlays,
+          neon filters, etc. Raw CSS is EXPECTED here — frameworks add nothing.
+        - <script src="game.js"> or inline JS for the game loop
+        This is the ONE exception where large <style> blocks are correct.
+
+     For non-canvas web apps, select ONE framework. Avoid large raw <style>
+     blocks — use framework classes instead. Only use inline <style> for
+     @keyframes or edge cases the framework cannot handle.
+
+     A. Pico.css — Logic-heavy apps (data viz, tools, calculators):
         Inject: <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
         Strategy: Zero CSS classes. Rely 100% on semantic HTML (<main>, <article>,
         <button>, <dialog>). Spend token budget on JS logic instead.
