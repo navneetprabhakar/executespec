@@ -158,19 +158,45 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
        - Element IDs referenced in JS match the actual IDs in HTML
      This is the #1 source of bugs in generated frontend code.
 
-     CSS: If FRONTEND STYLING RULES are injected below your task assignment,
+     CSS — FRAMEWORK SELECTION (mandatory for all frontend/static tasks):
+     If FRONTEND STYLING RULES are injected below your task assignment,
      follow them EXACTLY — they contain detailed visual design specifications.
-     Otherwise: write a polished Vercel/Geist-inspired dark stylesheet:
-       - Page background: pure black (#000000). Cards/panels: #111111. Hover: #1a1a1a.
-       - Text: #ededed primary, #a1a1a1 secondary, #666666 muted.
-       - Borders: 1px solid #252525. Border-radius: 4px max on cards, 2px on small elements.
-       - Color only for meaning: blue (#0070F3) success/links, amber (#f5a623) warning,
-         red (#e5484d) error. No decorative color — monochrome by default.
-       - Buttons: transparent bg + #252525 border (ghost). Primary CTA: #ededed bg, #000 text.
-       - Inputs: bg #111, border #252525, placeholder #666. Focus: border #333, no glow.
-       - Spacing: 4px grid. Generous whitespace. Font: system sans-serif, 13-14px body.
-       - Minimal animations: 150ms ease-out transitions. No bounce/glow/pulse.
-     NEVER leave browser defaults. The result must look like a Vercel dashboard.
+
+     Otherwise, select ONE CSS framework based on the project type. NEVER write
+     large raw <style> blocks. Only use inline <style> for @keyframes or canvas
+     overlays that the framework cannot handle natively.
+
+     A. Pico.css — Logic-heavy apps (physics engine, data viz, simulations):
+        Inject: <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+        Strategy: Zero CSS classes. Rely 100% on semantic HTML (<main>, <article>,
+        <button>, <dialog>). Spend token budget on JS logic instead.
+
+     B. DaisyUI + Tailwind — Dashboards, complex UI, standard components:
+        Inject: <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.2/dist/full.min.css" rel="stylesheet" type="text/css" />
+               <script src="https://cdn.tailwindcss.com"></script>
+        Strategy: Use DaisyUI semantic classes (btn btn-primary, card, modal,
+        navbar, drawer, mockup-window) for components. Tailwind utilities only
+        for micro-positioning. Set data-theme="dark" on <html>.
+
+     C. UnoCSS — Ultra-fast custom aesthetics beyond DaisyUI components:
+        Inject: <script src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
+        Strategy: Atomic utility classes like Tailwind but compiled in-browser
+        with minimal overhead. Use when DaisyUI components are too opinionated.
+
+     D. Tailwind CSS — Precise visual control (glassmorphism, gradients, exact spacing):
+        Inject: <script src="https://cdn.tailwindcss.com"></script>
+        Strategy: Extensive utility classes on DOM elements. Custom Tailwind
+        config via <script> block for brand colors and dark mode.
+
+     DEFAULT AESTHETIC (applies to all frameworks):
+       Dark mode by default. High contrast, soft drop shadows, accessible
+       typography, smooth transitions (duration-200 ease-in-out).
+       Fallback palette if framework has no dark theme:
+         Background: #000000. Cards: #111111. Text: #ededed / #a1a1a1 / #666666.
+         Borders: #252525. Accent blue: #0070F3. Amber: #f5a623. Red: #e5484d.
+         Buttons: ghost style (transparent bg + border). Primary CTA: #ededed bg, #000 text.
+         Spacing: 4px grid. Font: system sans-serif, 13-14px body.
+     NEVER leave browser defaults. The result must look polished and modern.
 
    Full-stack (backend/ + frontend/):
      Write the backend API before the frontend that consumes it.
