@@ -164,20 +164,28 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
 
     @Override
     public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReportV2 review) {
-        String verdict = review.getRecommendationCompat();
-        String quality = review.getOverallConfidence() != null ? review.getOverallConfidence() : "N/A";
-        String suggestions = review.getPostMergeSuggestions() != null
-                ? String.join(", ", review.getPostMergeSuggestions()) : "";
+        String msg;
+        if (review != null) {
+            String verdict = review.getRecommendationCompat();
+            String quality = review.getOverallConfidence() != null ? review.getOverallConfidence() : "N/A";
+            String suggestions = review.getPostMergeSuggestions() != null
+                    ? String.join(", ", review.getPostMergeSuggestions()) : "";
 
-        String msg = String.format("""
-                ✅ Agent run complete (run ID: %s)
-                **Verdict**: %s | **Quality**: %s
-                **Post-merge suggestions**: %s
-                **Review summary**: %s
-                Dashboard: %s/runs/%s""",
-                run.getRunId(), verdict, quality,
-                suggestions, review.getSummary() != null ? review.getSummary() : "",
-                config.getDashboardUrl(), run.getRunId());
+            msg = String.format("""
+                    ✅ Agent run complete (run ID: %s)
+                    **Verdict**: %s | **Quality**: %s
+                    **Post-merge suggestions**: %s
+                    **Review summary**: %s
+                    Dashboard: %s/runs/%s""",
+                    run.getRunId(), verdict, quality,
+                    suggestions, review.getSummary() != null ? review.getSummary() : "",
+                    config.getDashboardUrl(), run.getRunId());
+        } else {
+            msg = String.format("""
+                    ✅ Agent run complete (run ID: %s)
+                    Dashboard: %s/runs/%s""",
+                    run.getRunId(), config.getDashboardUrl(), run.getRunId());
+        }
         client.addComment(ir.getSourceId(), msg);
 
         if (config.getInReviewStatus() != null && !config.getInReviewStatus().isBlank()) {

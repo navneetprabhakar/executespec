@@ -123,8 +123,9 @@ function mapStatusToPhase(status: string): string {
     case 'PLANNING': return 'planning';
     case 'AWAITING_APPROVAL': case 'AWAITING_CLARIFICATION': return 'approval';
     case 'WORKING': return 'working';
+    case 'COMPILING': return 'compiling';
     case 'REVIEWING': return 'reviewing';
-    case 'AWAITING_MERGE': return 'merging';
+    case 'MERGING': case 'AWAITING_MERGE': return 'merging';
     case 'COMPLETE': case 'FAILED': case 'PARTIAL': return 'done';
     default: return 'planning';
   }

@@ -509,6 +509,58 @@ public class GitTool {
         }
     }
 
+    /**
+     * Creates a new branch from main and pushes it to the remote.
+     * Used for existing repos where we don't want to push directly to the default branch.
+     *
+     * @param runId     run identifier (used to locate workspace)
+     * @param repoUrl   HTTPS clone URL
+     * @param pat       GitHub PAT for authentication
+     * @param branchName name for the new branch (e.g. "executespec/abc123")
+     * @return ToolResult.ok on success, ToolResult.err on failure
+     */
+    public ToolResult pushToBranch(String runId, String repoUrl, String pat, String branchName) {
+        try {
+            String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
+            String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
+
+            // Create the branch from current HEAD (main)
+            ProcessBuilder createBranch = new ProcessBuilder(
+                    "git", "-C", wsPath, "checkout", "-b", branchName);
+            createBranch.redirectErrorStream(true);
+            Process p1 = createBranch.start();
+            String out1 = new String(p1.getInputStream().readAllBytes());
+            int exit1 = p1.waitFor();
+            if (exit1 != 0) {
+                log.warn("[GitTool] Branch creation failed (exit {}): {}", exit1, out1);
+                return ToolResult.err("Branch creation failed: " + out1);
+            }
+
+            // Push the branch to remote
+            ProcessBuilder push = new ProcessBuilder(
+                    "git", "-C", wsPath, "push", authUrl, branchName, "--force");
+            push.redirectErrorStream(true);
+            Process p2 = push.start();
+            String out2 = new String(p2.getInputStream().readAllBytes());
+            int exit2 = p2.waitFor();
+
+            // Switch back to main regardless of push result
+            new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
+                    .redirectErrorStream(true).start().waitFor();
+
+            if (exit2 == 0) {
+                log.info("[GitTool] Pushed branch {} to remote: {}", branchName, repoUrl);
+                return ToolResult.ok("Pushed branch " + branchName + " to " + repoUrl);
+            } else {
+                log.warn("[GitTool] Push branch failed (exit {}): {}", exit2, out2);
+                return ToolResult.err("Push branch failed: " + out2);
+            }
+        } catch (Exception e) {
+            log.warn("[GitTool] Push branch failed: {}", e.getMessage());
+            return ToolResult.err("Push branch failed: " + e.getMessage());
+        }
+    }
+
     // ── Conflict resolution helpers ──────────────────────────────────────────
 
     /**

@@ -72,7 +72,7 @@ export function useSse(runId: string | null) {
           if (data.type === 'RUN_STATUS' && data.payload) {
             patchRunStatus(runId!, data.payload);
             // For terminal states or transitions that add tasks, do a full refetch.
-            if (['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'PARTIAL'].includes(data.payload)) {
+            if (['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'COMPILING', 'MERGING', 'PARTIAL'].includes(data.payload)) {
               fetchRun(runId!);
             }
           }

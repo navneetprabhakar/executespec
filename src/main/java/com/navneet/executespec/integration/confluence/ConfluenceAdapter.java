@@ -112,9 +112,20 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
         String childTitle = (run.getUserRequest() != null
                 ? run.getUserRequest().lines().findFirst().orElse("Agent run")
                 : "Agent run") + " — Agent Output";
-        String content = buildOutputPage(run, review);
+        String content = review != null
+                ? buildOutputPage(run, review)
+                : String.format("""
+                        # Agent Run Output
+                        **Run ID**: %s  |  **Status**: COMPLETE
+
+                        [View Dashboard](%s/runs/%s)
+                        """, run.getRunId(), config.getDashboardUrl(), run.getRunId());
         String spaceKey = config.getSpaceKey() != null ? config.getSpaceKey() : "ENG";
-        client.createChildPage(ir.getSourceId(), spaceKey, childTitle, content);
+        try {
+            client.createChildPage(ir.getSourceId(), spaceKey, childTitle, content);
+        } catch (Exception e) {
+            log.warn("[Confluence] Could not create completion page for run {}: {}", run.getRunId(), e.getMessage());
+        }
     }
 
     @Override

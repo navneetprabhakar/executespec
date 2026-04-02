@@ -191,6 +191,8 @@ export interface RunDetail extends RunSummary {
   agentTokens?: AgentTokenEntry[];
   /** Number of apply-suggestion actions used on this run. */
   applySuggestionCount?: number;
+  /** URL of the pull request created for existing-repo runs. */
+  githubPrUrl?: string | null;
 }
 
 export interface MetricsResponse {

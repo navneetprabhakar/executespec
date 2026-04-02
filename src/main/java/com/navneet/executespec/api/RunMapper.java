@@ -166,6 +166,7 @@ public class RunMapper {
             .runTitle(r.getRunTitle())
             .runSummary(r.getRunSummary())
             .executionMode(r.getExecutionMode())
+            .githubPrUrl(r.getGithubPrUrl())
             .build();
     }
 
