@@ -1,12 +1,19 @@
 package com.navneet.executespec.billing.controller;
 
+import com.navneet.executespec.billing.entity.WebhookEventLog;
 import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
 import com.navneet.executespec.billing.gateway.WebhookResult;
+import com.navneet.executespec.billing.repository.WebhookEventLogRepository;
 import com.navneet.executespec.billing.service.BillingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.HexFormat;
 
 @RestController
 @RequestMapping("/api/webhooks")
@@ -16,6 +23,7 @@ public class BillingWebhookController {
 
     private final BillingService billingService;
     private final PaymentGatewayRouter gatewayRouter;
+    private final WebhookEventLogRepository webhookEventLogRepo;
 
     /**
      * POST /api/webhooks/razorpay
@@ -79,6 +87,10 @@ public class BillingWebhookController {
                 return ResponseEntity.status(401).build();
             }
 
+            // Log webhook event (deduplicate by gateway + eventId)
+            String eventId = result.message() != null ? result.message().replace("Event validated: ", "") : "unknown";
+            logWebhookEvent("STRIPE", eventId, result.eventType(), rawPayload);
+
             // Delegate event processing to BillingService
             billingService.processStripeWebhook(rawPayload, signature, result.eventType());
         } catch (Exception e) {
@@ -87,5 +99,44 @@ public class BillingWebhookController {
         }
 
         return ResponseEntity.ok().build();
+    }
+
+    // ── Webhook event logging ────────────────────────────────────────────────
+
+    private void logWebhookEvent(String gateway, String eventId, String eventType, String rawPayload) {
+        try {
+            var existing = webhookEventLogRepo.findByGatewayAndEventId(gateway, eventId);
+            if (existing.isPresent()) {
+                var entry = existing.get();
+                entry.setAttempts(entry.getAttempts() + 1);
+                entry.setProcessingStatus("IGNORED");
+                webhookEventLogRepo.save(entry);
+                log.info("Duplicate webhook ignored: gateway={}, eventId={}", gateway, eventId);
+                return;
+            }
+
+            String payloadHash = sha256(rawPayload);
+            webhookEventLogRepo.save(WebhookEventLog.builder()
+                    .gateway(gateway)
+                    .eventId(eventId)
+                    .eventType(eventType)
+                    .payloadHash(payloadHash)
+                    .rawPayload(rawPayload)
+                    .processingStatus("PROCESSED")
+                    .processedAt(Instant.now())
+                    .build());
+        } catch (Exception e) {
+            log.warn("Failed to log webhook event (non-blocking): {}", e.getMessage());
+        }
+    }
+
+    private static String sha256(String input) {
+        try {
+            var digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, FolderOpen, Users, User, Globe, ChevronLeft, ChevronRight, Sparkles, Archive } from 'lucide-react';
+import { Plus, FolderOpen, Users, User, Globe, ChevronLeft, ChevronRight, Archive } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import RunCard from './RunCard';
 import { RunCardSkeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
+import FirstRunSuggestions from './FirstRunSuggestions';
 import NewRunModal from './NewRunModal';
-import VibeRunSubmit from './VibeRunSubmit';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsOrgMember, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import { useUiStore } from '@/stores/useUiStore';
@@ -52,7 +52,7 @@ export default function RunList() {
   // Re-fetch whenever any filter changes
   useEffect(() => {
     fetchRuns();
-    const interval = setInterval(fetchRuns, 5000);
+    const interval = setInterval(() => { if (!document.hidden) fetchRuns(); }, 15000);
     return () => clearInterval(interval);
   }, [statusFilter, projectFilter, scopeFilter, archivedFilter]);
 
@@ -62,9 +62,9 @@ export default function RunList() {
       {isMobile && (
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
+          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-[var(--text-primary)] text-[var(--geist-bg)] text-sm font-medium hover:bg-[var(--gray-900)] transition-colors"
         >
-          <Sparkles className="h-4 w-4" />
+          <Plus className="h-4 w-4" />
           New Run
         </button>
       )}
@@ -194,18 +194,14 @@ export default function RunList() {
         {loading && runs.length === 0 ? (
           Array.from({ length: 5 }).map((_, i) => <RunCardSkeleton key={i} />)
         ) : runs.length === 0 ? (
-          <EmptyState
-            title={archivedFilter ? 'No archived runs' : 'No runs yet'}
-            description={archivedFilter ? 'Runs you archive will appear here.' : 'Launch your first run to start orchestrating agents.'}
-            action={archivedFilter ? undefined :
-              <button
-                onClick={() => setShowModal(true)}
-                className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
-              >
-                Launch Run
-              </button>
-            }
-          />
+          archivedFilter ? (
+            <EmptyState
+              title="No archived runs"
+              description="Runs you archive will appear here."
+            />
+          ) : (
+            <FirstRunSuggestions onSelect={(goal) => { setPendingNewRunGoal(goal); setShowModal(true); }} />
+          )
         ) : (
           runs.map((run, i) => (
             <RunCard
@@ -268,14 +264,10 @@ export default function RunList() {
       )}
 
       {showModal && (
-        isVibe ? (
-          <VibeRunSubmit onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }} />
-        ) : (
-          <NewRunModal
-            initialGoal={pendingNewRunGoal ?? undefined}
-            onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }}
-          />
-        )
+        <NewRunModal
+          initialGoal={pendingNewRunGoal ?? undefined}
+          onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }}
+        />
       )}
     </div>
   );

@@ -211,15 +211,6 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* Bottom status */}
-      <div className="px-4 py-3 border-t border-[var(--border-default)] flex items-center gap-2.5">
-        <span className="h-1.5 w-1.5 rounded-full bg-accent-green flex-shrink-0" />
-        {expanded && (
-          <span className="text-xs text-muted whitespace-nowrap">
-            Online
-          </span>
-        )}
-      </div>
     </>
   );
 

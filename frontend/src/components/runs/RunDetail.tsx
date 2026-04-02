@@ -230,7 +230,7 @@ export default function RunDetail() {
               </div>
 
               {/* Narrative + summary */}
-              <div className="h-48 overflow-y-auto flex-shrink-0 border-b border-[var(--border-default)]">
+              <div className="max-h-48 overflow-y-auto flex-shrink-0 border-b border-[var(--border-default)]">
                 <VibeProgressNarrative />
               </div>
 
@@ -271,7 +271,7 @@ export default function RunDetail() {
 
           {/* Gate banner */}
           {activeRun.status === 'AWAITING_APPROVAL' && (
-            <>
+            <div className="flex-shrink-0">
               <GateBanner
                 message="Review the plan and approve to continue"
                 icon={<AlertTriangle className="h-4 w-4 text-accent-amber" />}
@@ -332,9 +332,10 @@ export default function RunDetail() {
                   </div>
                 )}
               </div>
-            </>
+            </div>
           )}
           {activeRun.status === 'AWAITING_CLARIFICATION' && (
+            <div className="flex-shrink-0">
             <ClarificationBanner
               runId={activeRun.runId}
               input={clarificationInput}
@@ -365,10 +366,11 @@ export default function RunDetail() {
                 }
               }}
             />
+            </div>
           )}
           {/* Review summary shown on COMPLETE runs */}
           {activeRun.status === 'COMPLETE' && review && (
-            <div className="mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs flex-shrink-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className={cn(
                   'font-semibold',
@@ -391,7 +393,7 @@ export default function RunDetail() {
           )}
           {/* Failure reason banner */}
           {activeRun.status === 'FAILED' && activeRun.failureReason && (
-            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-red/30 bg-accent-red/5">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-red/30 bg-accent-red/5 flex-shrink-0">
               <div className="flex items-center gap-2 mb-1">
                 <AlertTriangle className="h-4 w-4 text-accent-red flex-shrink-0" />
                 <p className="text-xs font-medium text-accent-red">Run failed</p>
@@ -401,7 +403,7 @@ export default function RunDetail() {
           )}
           {/* Paused banner — edit goal and restart */}
           {activeRun.status === 'PAUSED' && (
-            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-amber/30 bg-accent-amber/5 space-y-2">
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-amber/30 bg-accent-amber/5 space-y-2 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Pause className="h-4 w-4 text-accent-amber flex-shrink-0" />
                 <p className="text-xs font-medium text-accent-amber">Run paused</p>

@@ -314,7 +314,7 @@ public class CompilerAgent {
         return switch (tool) {
             case "mvn" -> "mvn compile -q -T 1C 2>&1";
             case "gradle" -> "gradle compileJava -q --parallel 2>&1";
-            case "npm" -> "npm run build 2>&1";
+            case "npm" -> "npm install --legacy-peer-deps 2>&1 && npm run build 2>&1";
             default -> throw new IllegalArgumentException("Unknown build tool: " + tool);
         };
     }

@@ -445,7 +445,7 @@ export default function SettingsPage() {
       )}
 
       {/* ── JIRA/Confluence note ──────────────────────────────────────────── */}
-      {!isOrgDeveloper && (
+      {isOrgAdmin && (
         <GlassPanel className="px-5 py-3">
           <p className="text-xs text-muted">
             JIRA and Confluence integrations are now managed at the org level.

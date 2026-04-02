@@ -85,6 +85,10 @@ export interface SubscriptionInitResult {
   gatewayCustomerId: string;
   shortUrl: string | null;
   razorpayKeyId: string;
+  // Stripe-specific
+  gateway: string | null;
+  checkoutUrl: string | null;
+  sessionId: string | null;
 }
 
 // ─── API Functions ───
@@ -104,12 +108,13 @@ export const fetchBillingStatus = () =>
   req<BillingStatus>('/billing/status');
 
 /**
- * Initiate subscription. Returns Razorpay checkout data.
+ * Initiate subscription. Returns gateway-specific checkout data.
+ * For Stripe: redirects to checkoutUrl. For Razorpay: uses client SDK.
  */
-export const subscribe = (planId: string) =>
+export const subscribe = (planId: string, gateway?: string, successUrl?: string, cancelUrl?: string) =>
   req<SubscriptionInitResult>('/billing/subscribe', {
     method: 'POST',
-    body: JSON.stringify({ planId }),
+    body: JSON.stringify({ planId, gateway, successUrl, cancelUrl }),
   });
 
 /**

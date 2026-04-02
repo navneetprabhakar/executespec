@@ -52,7 +52,8 @@ public class BillingController {
             @RequestBody CreateSubscriptionRequest request,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         SubscriptionInitResult result = billingService.subscribe(
-                userDetails.getUser().getId(), request.planId());
+                userDetails.getUser().getId(), request.planId(),
+                request.gateway(), request.successUrl(), request.cancelUrl());
         return ResponseEntity.ok(result);
     }
 

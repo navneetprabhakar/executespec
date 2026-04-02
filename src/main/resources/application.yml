@@ -354,6 +354,11 @@ billing:
     enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
   razorpay:
     enabled: true
+  currency-gateway-map:
+    INR: RAZORPAY
+    USD: STRIPE
+    EUR: STRIPE
+    GBP: STRIPE
 
 logging:
   level:
