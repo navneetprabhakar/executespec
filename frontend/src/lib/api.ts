@@ -365,7 +365,7 @@ export const createRun = (body: {
 // ── Model matrix ────────────────────────────────────────────────────────────
 
 export interface ModelEntry { id: string; tier: string; label: string; }
-export interface ProviderEntry { id: string; label: string; models: ModelEntry[]; }
+export interface ProviderEntry { id: string; label: string; tag?: string; models: ModelEntry[]; }
 export interface AvailableModelsResponse { providers: ProviderEntry[]; }
 
 export const getAvailableModels = () =>

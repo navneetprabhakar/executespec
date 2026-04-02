@@ -60,8 +60,13 @@ public class DevDockerfileGenerator {
                 String declared = node.path("project_type").asText(null);
                 if (declared != null && !declared.isBlank() && !"UNKNOWN".equals(declared)) {
                     PreviewProjectType fromPlan = PreviewProjectType.valueOf(declared);
-                    log.info("[Detect] Using planner-declared project type: {}", fromPlan);
-                    return fromPlan;
+                    // Validate: if planner declares a Node-based type, package.json must exist
+                    if (requiresPackageJson(fromPlan) && !Files.exists(workspace.resolve("package.json"))) {
+                        log.warn("[Detect] Planner declared {} but no package.json found — falling back to detection", fromPlan);
+                    } else {
+                        log.info("[Detect] Using planner-declared project type: {}", fromPlan);
+                        return fromPlan;
+                    }
                 }
             } catch (IllegalArgumentException e) {
                 log.warn("[Detect] Invalid planner-declared project type in project.json — falling back to detection");
@@ -197,33 +202,36 @@ public class DevDockerfileGenerator {
      * Does NOT write to disk.
      */
     public String generate(PreviewProjectType type, Path workspace) {
+        String dockerfile;
+
         // Monorepo gets a specialized Dockerfile
         JsonNode pkg = parsePackageJson(workspace);
         if (pkg != null && isMonorepo(pkg, workspace)) {
-            return monorepoDockerfile(pkg, workspace, type);
-        }
-
-        // Full-stack gets a multi-service Dockerfile
-        if (type == PreviewProjectType.FULL_STACK) {
+            dockerfile = monorepoDockerfile(pkg, workspace, type);
+        } else if (type == PreviewProjectType.FULL_STACK) {
+            // Full-stack gets a multi-service Dockerfile
             FullStackLayout layout = detectFullStack(workspace);
-            if (layout != null) {
-                return fullStackDockerfile(workspace, layout);
-            }
+            dockerfile = layout != null
+                    ? fullStackDockerfile(workspace, layout)
+                    : singlePackageFullStackDockerfile(workspace);
+        } else {
+            dockerfile = switch (type) {
+                case NODE_FRONTEND -> nodeFrontendDockerfile(workspace);
+                case NODE_BACKEND -> nodeBackendDockerfile(workspace);
+                case SPRING_BOOT -> springBootDockerfile(workspace);
+                case JAVA -> cliJavaDockerfile(workspace);
+                case PYTHON -> pythonDockerfile(workspace);
+                case GO -> goDockerfile(workspace);
+                case RUBY -> rubyDockerfile(workspace);
+                case PHP -> phpDockerfile(workspace);
+                case RUST -> rustDockerfile(workspace);
+                case FULL_STACK -> singlePackageFullStackDockerfile(workspace);
+                case STATIC_HTML -> staticHtmlDockerfile();
+            };
         }
 
-        String dockerfile = switch (type) {
-            case NODE_FRONTEND -> nodeFrontendDockerfile(workspace);
-            case NODE_BACKEND -> nodeBackendDockerfile(workspace);
-            case SPRING_BOOT -> springBootDockerfile(workspace);
-            case JAVA -> cliJavaDockerfile(workspace);
-            case PYTHON -> pythonDockerfile(workspace);
-            case GO -> goDockerfile(workspace);
-            case RUBY -> rubyDockerfile(workspace);
-            case PHP -> phpDockerfile(workspace);
-            case RUST -> rustDockerfile(workspace);
-            case FULL_STACK -> singlePackageFullStackDockerfile(workspace);
-            case STATIC_HTML -> staticHtmlDockerfile();
-        };
+        // Use --legacy-peer-deps to avoid peer dependency failures in generated projects
+        dockerfile = dockerfile.replace("RUN npm install\n", "RUN npm install --legacy-peer-deps\n");
         return injectNonRootUser(dockerfile, type);
     }
 
@@ -287,6 +295,10 @@ public class DevDockerfileGenerator {
             dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
             dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:${PORT:-8080}");
         }
+        // Vite exec form → shell form so $PORT expands at runtime
+        dockerfile = dockerfile.replace(
+                "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\"]",
+                "CMD npx vite --host 0.0.0.0 --port ${PORT:-8080}");
         // Node serve: -l NNNN → -l ${PORT:-8080}
         dockerfile = dockerfile.replace("\"-l\", \"5173\"", "\"-l\", \"8080\"");
         // Convert serve exec form to shell form so PORT env var is available
@@ -1682,6 +1694,12 @@ public class DevDockerfileGenerator {
             log.debug("Failed to parse package.json at {}: {}", file, e.getMessage());
             return null;
         }
+    }
+
+    private boolean requiresPackageJson(PreviewProjectType type) {
+        return type == PreviewProjectType.NODE_FRONTEND
+            || type == PreviewProjectType.NODE_BACKEND
+            || type == PreviewProjectType.FULL_STACK;
     }
 
     private boolean fileContainsPattern(Path file, String... patterns) {

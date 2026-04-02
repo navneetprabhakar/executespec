@@ -60,6 +60,9 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
               )}
             >
               {p.label}
+              {p.tag && (
+                <span className="ml-1.5 text-[10px] font-normal text-muted opacity-70">{p.tag}</span>
+              )}
             </button>
           ))}
         </div>
