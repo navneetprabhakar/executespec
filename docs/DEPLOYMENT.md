@@ -25,7 +25,7 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1–V39).
+Flyway migrations run automatically on startup and create all tables (V1–V52).
 
 ### Redis Setup
 
@@ -1563,7 +1563,7 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 
 - [ ] **Infrastructure:** Terraform apply successful, all resources provisioned
 - [ ] **DNS:** `app.executespec.ai` resolves to LB IP, SSL certificate ACTIVE
-- [ ] **Database:** Cloud SQL accessible, Flyway V1–V39 migrations complete
+- [ ] **Database:** Cloud SQL accessible, Flyway V1–V52 migrations complete
 - [ ] **Redis:** Memorystore accessible from VPC
 - [ ] **Secrets:** All API keys in GCS/Secret Manager (Anthropic, OpenAI, Google, GitHub)
 - [ ] **Billing:** Razorpay webhook URL → `https://app.executespec.ai/api/billing/webhook`

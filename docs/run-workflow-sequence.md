@@ -251,7 +251,7 @@ Side paths:
 
 1. **Mark complete** — set status, record `completedAt` — **before review/tests**.
 2. **Auto-start preview** — `autoStartPreview()` for both PROTOTYPE and PRODUCTION modes (10-min TTL).
-3. **GitHub push** (if configured) — push main branch; failure is non-fatal.
+3. **GitHub push** (if configured) — for new repos: push main branch; for existing repos: create branch `executespec/{runId-short}`, push to branch, open PR via `GitHubRepoService.createPullRequest()`, store PR URL in `PipelineRun.githubPrUrl`. Failure is non-fatal.
 4. **Background validation thread** (`bg-validation-{runId}` virtual thread for PRODUCTION mode):
    - ReviewerAgentV2 review + auto-fix
    - Re-validation after auto-fix

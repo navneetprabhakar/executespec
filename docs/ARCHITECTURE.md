@@ -1,7 +1,7 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 2.2
-> **Date**: 2026-03-30
+> **Version**: 2.3
+> **Date**: 2026-04-02
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -346,7 +346,7 @@ graph TB
     BS --> BP
 ```
 
-### 4.2 Migration History (V1 — V45)
+### 4.2 Migration History (V1 — V52)
 
 | Version | Description | Tables Affected |
 |---------|-------------|----------------|
@@ -368,6 +368,13 @@ graph TB
 | V37 | Test generation pipeline | test_plan, test_task, test_result |
 | V38-V44 | Various (calibration, report, project provider, UI style) | pipeline_run, validation_report, project |
 | V45 | Widen plan_version columns | plan_version (VARCHAR(36) → VARCHAR(255)) |
+| V46 | Stripe and payment gateway support | billing_plan, billing_subscription |
+| V47 | OAuth support (GitHub, Google login) | app_user |
+| V48 | View mode column | pipeline_run |
+| V49 | Feature flags | feature_flag |
+| V50 | Free tier restrictions | tier_config |
+| V51 | Force logout flag | app_user |
+| V52 | GitHub PR URL | pipeline_run (github_pr_url VARCHAR(512)) |
 
 ---
 

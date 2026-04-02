@@ -659,7 +659,7 @@ SUPER_ADMIN (global -- full system access)
 
 ## 7. Database Schema
 
-### 7.1 Migrations Summary (V1-V45)
+### 7.1 Migrations Summary (V1-V52)
 
 | Range | Scope |
 |-------|-------|
@@ -679,6 +679,13 @@ SUPER_ADMIN (global -- full system access)
 | V35-V37 | Schema updates |
 | V38-V44 | Report improvements, shared reports, validation enhancements |
 | V45 | Widen plan_version VARCHAR(36) columns to VARCHAR(255)/VARCHAR(64) |
+| V46 | Stripe and payment gateway support |
+| V47 | OAuth support (GitHub, Google login) |
+| V48 | View mode column |
+| V49 | Feature flags |
+| V50 | Free tier restrictions |
+| V51 | Force logout flag |
+| V52 | GitHub PR URL on pipeline_run |
 
 ---
 

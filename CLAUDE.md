@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-03-30
+> Last updated: 2026-04-02
 
 ## Architecture
 
@@ -29,7 +29,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V45)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V52)
 
 ## Patterns: MUST Follow
 
@@ -167,7 +167,7 @@ Full API reference: see memory file `api-endpoints.md`
 | Tier permissions | `auth/service/TierPermissionService.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Slack integration | `integration/slack/SlackNotificationService.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V45) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V52) |
 | LLM prompts | `resources/prompts/*.txt` |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
@@ -182,6 +182,11 @@ Full API reference: see memory file `api-endpoints.md`
 | Test result controller | `testgen/TestResultController.java` (apply-test-fixes) |
 | Dockerfile gen (preview) | `deployment/preview/DevDockerfileGenerator.java` (reads `.agent-context/project.json`) |
 | Dockerfile gen (deploy) | `deployment/DockerfileGenerator.java` (strategy pattern, reads `project.json`) |
+| GitHub repo service | `integration/github/GitHubRepoService.java` (branch, PR creation, default branch lookup) |
+| Git tool | `tool/GitTool.java` (workspace git ops, `pushToBranch()` for existing repos) |
+| JIRA adapter | `integration/jira/JiraAdapter.java` (inbound webhook + outbound comments) |
+| Confluence adapter | `integration/confluence/ConfluenceAdapter.java` (inbound webhook + outbound child pages) |
+| Integration manager | `integration/IntegrationManager.java` (routes webhooks, listens for MergeCompleted) |
 | Infra (Terraform) | `infra/` |
 
 ## Model Matrix
@@ -204,13 +209,25 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - Caddy reverse proxy with Cloudflare Origin Certificate for local/VM preview routing
 - JWT auth with RBAC, org management, project scoping
 - Razorpay billing (subscriptions + run top-up credits)
-- JIRA/Confluence context extraction and enrichment
+- JIRA/Confluence inbound webhooks + outbound completion comments (via MergeCompleted event, both PROTOTYPE and PRODUCTION)
 - Slack notifications (Block Kit messages)
+- GitHub branch + PR creation for existing-repo runs (branch `executespec/{runId-short}`, PR opened automatically)
 - Chat copilot + apply suggestion (chat/review improvements on same run)
 - Observability: Micrometer traces + custom metrics (30+ meters) + structured logging
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
 - Metrics wired into services: PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
+
+### Recent Changes (2026-04-02)
+- **GitHub branch + PR for existing repos:** `PipelineHarness.pushToGitHubIfConfigured()` now creates branch `executespec/{runId-short}`, pushes to it (not main), and opens a PR via `GitHubRepoService.createPullRequest()`. PR URL stored in `PipelineRun.githubPrUrl` and surfaced in `RunDetail` API response and frontend overview tab.
+- **New methods:** `GitHubRepoService.getDefaultBranch()`, `GitHubRepoService.createPullRequest()`, `GitTool.pushToBranch()`.
+- **Integration outbound fix:** `IntegrationManager` now listens to `MergeCompleted` event (was `RunCompleted`). Fixes race condition where review report was null because `RunCompleted` fires before background review saves. Both PROTOTYPE and PRODUCTION modes now publish `MergeCompleted`.
+- **JIRA/Confluence null-safe:** `JiraAdapter.onRunComplete()` and `ConfluenceAdapter.onRunComplete()` handle null review gracefully (PROTOTYPE mode has no review).
+- **Cloud Run preview orphan fix:** `PreviewService` stores `cloudRunServiceName` upfront in initial session (predictable `es-preview-{runIdShort}`). Prevents orphan cleanup job from deleting services mid-deploy.
+- **Pipeline status bar fix:** Added `COMPILING` and `MERGING`/`AWAITING_MERGE` cases to `RunTimeline.mapStatusToPhase()`. Added to SSE refetch trigger list in `useSse.ts`.
+- **Copilot graph splitting:** Task graph tab groups nodes by source prefix (`_cop{N}_`, `_rev{N}_`), rendering separate collapsible graphs per copilot/review run.
+- **Per-copilot token breakdown:** Overview tab shows input/output tokens per copilot run under Live Cost section.
+- **V52 migration:** `ALTER TABLE pipeline_run ADD COLUMN github_pr_url VARCHAR(512);`
 
 ### Recent Changes (2026-03-30)
 - **Pipeline restructuring — fast preview:** Run marked COMPLETE immediately after compile+merge. Auto-preview starts (10-min TTL) for both PROTOTYPE and PRODUCTION modes. Review, test gen, test execution, and validation report run in a background virtual thread (`bg-validation-{runId}`). User can chat, submit changes, and use preview while validation runs.

@@ -27,13 +27,17 @@
 - `model/IterationEstimate` — Time/token estimate for retry
 
 ### router/ — Model selection
-- `ModelRouter` — Tier+provider routing (weighted random)
-- `ModelTier` — Enum: FAST/CAPABLE/POWER
-- `LlmProvider` — Enum: ANTHROPIC/GOOGLE/OPENAI
+- `ModelResolver` — Resolves agentTier × provider → model from YAML matrix
+- `ModelMatrixProperties` — ConfigurationProperties for YAML model matrix
+- `AgentTier` — Enum: PLANNING/WORKHORSE/LIGHTWEIGHT
+- `ResolvedModel` — DTO: requestedProvider, actualProvider, model, agentTier, fallback
+- `ProviderHealthTracker` — Redis-backed circuit breaker (5 failures → open, 60s TTL recovery)
+- `LlmProvider` — Enum: ANTHROPIC/OPENAI/GOOGLE
+- `AvailableProviderResolver` — Resolves available providers per run
 
 ### harness/ — Pipeline orchestration
-- `PipelineHarness` — Main orchestrator: plan→work→compile→merge→review→report
-- `SequentialTaskExecutor` — Executes tasks sequentially with validation
+- `PipelineHarness` — Main orchestrator: plan→work→compile→merge→COMPLETE→preview→background validation (review+test+report). Publishes MergeCompleted event for integration outbound. Creates branch+PR for existing repos via GitTool.pushToBranch()
+- `SequentialTaskExecutor` — Executes tasks in tiered parallel groups. Validation deferred to review phase
 - `ApprovalGate` — Plan approval gate interface
 - `GateStore` — Redis-backed gate storage (500ms poll, 2h TTL)
 - `GitMergeService` — Merges task branches, progressive merge
@@ -96,13 +100,13 @@
 - `InboxService` — User inbox notifications
 - `RunTitleBackfillService` — Backfills run titles
 - `ApplySource` — Enum: COPILOT/REVIEW
-- `entity/PipelineRun` — Run JPA entity (root aggregate)
+- `entity/PipelineRun` — Run JPA entity (root aggregate). Includes `githubPrUrl` (V52)
 - `entity/AgentTask` — Task JPA entity
 - `entity/AgentMessage` — Chat message entity
 - `repository/*Repository` — JPA repositories
 
 ### deployment/ — Preview & deploy
-- `preview/PreviewService` — Cloud Run preview (10-min TTL)
+- `preview/PreviewService` — Dual-mode preview (docker/cloud-run, 10-min TTL). Stores `cloudRunServiceName` upfront to prevent orphan cleanup race
 - `DeploymentService` — Full Cloud Run deployment
 - `CloudRunClient` — GCP Cloud Run API wrapper
 - `GcsWorkspaceStore` — GCS workspace storage
@@ -152,17 +156,17 @@
 - `config/` — Razorpay config
 
 ### integration/ — External systems
-- `IntegrationManager` — Coordinates adapters
+- `IntegrationManager` — Routes webhooks, listens for MergeCompleted to fire outbound comments (both PROTOTYPE and PRODUCTION)
 - `InboundAdapter/OutboundAdapter` — Adapter interfaces
-- `jira/JiraAdapter` — JIRA webhooks & context
-- `confluence/ConfluenceAdapter` — Confluence integration
+- `jira/JiraAdapter` — JIRA inbound webhooks + outbound comments/transitions (null-review safe)
+- `confluence/ConfluenceAdapter` — Confluence inbound webhooks + outbound child pages (null-review safe)
 - `slack/SlackNotificationService` — Slack Block Kit messages
 - `servicenow/ServiceNowAdapter` — ServiceNow integration
 - `pagerduty/PagerDutyAdapter` — PagerDuty integration
 
 ### tool/ — Worker tools
 - `ShellTool` — Shell command execution
-- `GitTool` — Git operations
+- `GitTool` — Git operations. `pushToBranch()` creates branch and pushes to remote for existing-repo runs
 - `FileSystemTool` — File read/write/search
 - `ToolRegistry` — Available tool registration
 - `ToolResult` — Tool execution result
@@ -204,7 +208,7 @@
 - `TenantInterceptor` — MVC interceptor
 
 ### repo/ — GitHub
-- `GitHubRepoService` — GitHub API (push/PR)
+- `GitHubRepoService` — GitHub API: `createRepo()`, `pushFiles()`, `getDefaultBranch()`, `createPullRequest()`
 
 ### pricing/
 - `ModelPricing` — Per-model pricing entity
@@ -232,7 +236,9 @@
 - `RunList` — Paginated run list
 - `NewRunModal` — Create run form
 - `TaskCard` — Task status card
-- `TaskGraph` — Task dependency DAG
+- `TaskGraph` — Task dependency DAG (accepts optional `nodes` prop for subgraph rendering, Kahn's algorithm for level recomputation)
+- `RunDetailTabs` — Tabbed detail view. Overview: PR link, per-copilot token breakdown. Graph: `TaskGraphGroups` with copilot/review splitting
+- `RunTimeline` — Pipeline status bar (maps COMPILING, MERGING, AWAITING_MERGE statuses)
 - `RunConversation` — Chat copilot
 - `PreviewTab` — Cloud Run preview + countdown
 - `ValidationReportPanel` — Validation report display

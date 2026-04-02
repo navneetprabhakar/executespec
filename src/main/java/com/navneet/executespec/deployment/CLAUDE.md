@@ -14,7 +14,7 @@ Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), per
 - `ArtifactRegistryClient.java` — Docker build + push to Artifact Registry. Build/push have timeouts.
 - `DockerfileGenerator.java` — Generates language-specific Dockerfiles (11 strategies). Also reads `.agent-context/project.json` to select correct strategy before file-based detection.
 - `GcsWorkspaceStore.java` — Archives workspaces to GCS after 24h.
-- `DeploymentGitHubService.java` — Push to GitHub (per-user PAT).
+- `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). Note: pipeline push flow uses `PipelineHarness.pushToGitHubIfConfigured()` → `GitTool.pushToBranch()` instead.
 
 ## Project Type Detection Flow
 ```
@@ -52,6 +52,7 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 - Cloud Run resources (service + AR image) cleaned up on preview failure
 - `getLogs()` supports both Docker Compose and Cloud Run (via `gcloud logging read`)
 - `probeApiDocs()` works for both Docker (localhost:port) and Cloud Run (service URL)
+- Cloud Run orphan cleanup race fix: `cloudRunServiceName` stored upfront in initial session (`es-preview-{runIdShort}`), preventing orphan cleanup job from deleting services during build/push phase
 
 ## Preview Mode Architecture
 
