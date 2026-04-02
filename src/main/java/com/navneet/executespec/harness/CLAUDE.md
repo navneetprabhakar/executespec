@@ -27,9 +27,13 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
    - TestGenOrchestrator generates integration tests (async)
    - TestPreviewCoordinator reuses existing preview → executes tests
    - ValidationReport generated
-   - MergeCompleted event published
+   - MergeCompleted event published (triggers JIRA/Confluence outbound comments via IntegrationManager)
    - Cost calculated and persisted
    - Cleanup: `backgroundValidationRuns.remove()`, `runKeyStore.remove()`, `broadcaster.complete()`
+
+**PROTOTYPE mode:** Skips review/test gen. Still publishes MergeCompleted (with null review) so integration comments fire.
+
+**Existing-repo GitHub push:** `pushToGitHubIfConfigured()` creates branch `executespec/{runId-short}`, pushes to branch (not main), opens PR via `GitHubRepoService.createPullRequest()`, stores PR URL in `PipelineRun.githubPrUrl`.
 
 **Key design:** User sees COMPLETE immediately after compile+merge. Preview is available while validation runs in background. SSE stream stays open until background validation finishes.
 

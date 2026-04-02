@@ -14,7 +14,7 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
 - Master switch: `agent.integrations.enabled` (default: false)
 - IntegrationManager routes webhooks to source-specific InboundAdapters
 - InboundAdapter interface: verify signature, parse event, map to pipeline run
-- OutboundAdapter interface: publish status updates back to source
+- OutboundAdapter interface: publish status updates back to source (triggered by MergeCompleted event, fires in both PROTOTYPE and PRODUCTION modes)
 - Deduplication via IntegrationEventLog (sourceType + eventId)
 - Graceful handling of duplicate/ignorable events
 - Per-source skip-approval configuration

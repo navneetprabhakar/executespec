@@ -12,6 +12,9 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
 ## Key Components
 - `RunDetail.tsx` — Main run view with Vibe View toggle. Shows gate banners, task list, review, report, cost estimate.
+- `RunDetailTabs.tsx` — Tabbed detail view. Overview tab shows GitHub PR link (`githubPrUrl`), per-copilot-run token breakdown. Graph tab uses `TaskGraphGroups` to split copilot/review nodes into separate collapsible sections.
+- `RunTimeline.tsx` — Pipeline status bar. `mapStatusToPhase()` maps all statuses including COMPILING, MERGING, AWAITING_MERGE.
+- `TaskGraph.tsx` — Task dependency graph. Accepts optional `nodes` prop for subgraph rendering. Strips source prefixes via `displayTaskId()`. Recomputes levels via Kahn's algorithm for subgraphs.
 - `NewRunModal.tsx` — Run submission form with AI provider selection, language validation hint.
 - `ValidationReportPanel.tsx` — Collapsible validation report display.
 - `RunConversation.tsx` — Chat copilot interface.
@@ -24,6 +27,9 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - Review display uses `recommendationCompat ?? recommendation` for V2 compat
 - Toast notifications for SSE events (compaction, model escalation)
 - Pagination: run list uses `PagedResponse<RunSummary>` with page/size/totalElements
+- Task graph groups: nodes grouped by `_cop{N}_`/`_rev{N}_` prefix into separate collapsible sections
+- SSE refetch triggers include COMPILING and MERGING statuses (useSse.ts)
+- RunDetail API includes `githubPrUrl` field — displayed as clickable link in overview tab
 
 ## Build
 ```bash

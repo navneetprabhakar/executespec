@@ -2589,6 +2589,10 @@ components:
         actualCostUsd:
           type: number
           nullable: true
+        githubPrUrl:
+          type: string
+          nullable: true
+          description: GitHub PR URL for existing-repo runs
 
     PagedRunResponse:
       type: object

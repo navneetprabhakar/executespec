@@ -105,7 +105,8 @@ Configured via `preview.mode` in `application.yml` (default: `docker`).
 - PAT priority: user-level PAT → system-level PAT
 - Clone via HTTPS with PAT authentication
 - Support shallow clone for large repos
-- Automatic branch creation and merge to main
+- **New repos:** create private repo, push main branch
+- **Existing repos:** create branch `executespec/{runId-short}`, push to branch, open PR via `GitHubRepoService.createPullRequest()`, store PR URL in `PipelineRun.githubPrUrl`
 - Optional push after merge (controlled by run properties)
 - Endpoint: `PUT /api/auth/settings/github`
 - **Manual push endpoint:** `POST /api/runs/{id}/push-github` — push workspace to GitHub on demand
@@ -134,6 +135,7 @@ Configured via `preview.mode` in `application.yml` (default: `docker`).
 - Cloud Run log fetching via `gcloud logging read` for the `GET /api/runs/{id}/preview/logs` endpoint, scoped to the preview's Cloud Run service name
 - API docs probing must work for both Docker mode (localhost:port) and Cloud Run mode (service URL), using the same detection logic
 - HTTP health check client must enforce a connect timeout of 10 seconds and a request timeout of 15 seconds to avoid blocking on unresponsive previews
+- Cloud Run orphan cleanup race prevention: `cloudRunServiceName` must be stored upfront in the initial session (predictable `es-preview-{runIdShort}`) so orphan cleanup jobs don't delete services that are still building/pushing
 
 ### Container Image Security
 
@@ -168,7 +170,8 @@ See also: [Security Guardrails](security-guardrails.md) for the full container h
 | `deployment/WorkspaceArchiveJob.java` | Hourly archive job |
 | `deployment/WorkspaceFileService.java` | File listing/reading |
 | `harness/WorkspaceInitService.java` | Workspace initialization |
-| `repo/GitHubRepoService.java` | GitHub repo create/push, random names, description updates, collision handling |
+| `repo/GitHubRepoService.java` | GitHub repo create/push, random names, description updates, collision handling, `getDefaultBranch()`, `createPullRequest()` |
+| `tool/GitTool.java` | Workspace git ops, `pushToBranch()` for existing-repo branch creation + push |
 
 ## Database Migrations
 
@@ -178,3 +181,4 @@ See also: [Security Guardrails](security-guardrails.md) for the full container h
 | V12 | GCS workspace archive columns |
 | V17 | Auto-merge flag (pipeline_run.auto_merge) |
 | V29 | Per-run preview start count limit |
+| V52 | GitHub PR URL column on pipeline_run |
