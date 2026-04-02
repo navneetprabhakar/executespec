@@ -46,7 +46,9 @@ public class PreviewController {
             String expiresAt,
             long ttlRemainingSeconds,
             int previewStartCount,
-            int maxPreviewStarts
+            int maxPreviewStarts,
+            String buildOutput,
+            String dockerfile
     ) {}
 
     public record PreviewLogsDto(
@@ -124,7 +126,8 @@ public class PreviewController {
         } catch (PreviewException e) {
             log.warn("Preview start failed for run {}: {}", runId, e.getMessage());
             return ResponseEntity.ok(new PreviewStatusDto(
-                    runId, "FAILED", null, null, null, e.getMessage(), null, null, null, 0, 0, 0
+                    runId, "FAILED", null, null, null, e.getMessage(), null, null, null, 0, 0, 0,
+                    null, null
             ));
         }
     }
@@ -230,8 +233,12 @@ public class PreviewController {
 
         if (session == null) {
             return new PreviewStatusDto(runId, "IDLE", null, null, null, null, null, null, null, 0,
-                    startCount, maxStarts);
+                    startCount, maxStarts, null, null);
         }
+
+        // Only include build diagnostics on failure (avoid bloating normal status polls)
+        boolean isFailed = session.status() == PreviewStatus.FAILED
+                || session.status() == PreviewStatus.TIMED_OUT;
 
         return new PreviewStatusDto(
                 session.runId(),
@@ -245,7 +252,9 @@ public class PreviewController {
                 session.expiresAt() != null ? session.expiresAt().toString() : null,
                 session.ttlRemainingSeconds(),
                 startCount,
-                maxStarts
+                maxStarts,
+                isFailed ? session.buildOutput() : null,
+                isFailed ? session.dockerfile() : null
         );
     }
 }

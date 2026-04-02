@@ -378,16 +378,26 @@ public class PreviewService {
             log.info("Preview Dockerfile for run {} (type={}, cloud-run):\n{}", runId, type, generatedDockerfile);
             Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
 
-            // Phase 2: Build Docker image
+            // Phase 2: Build Docker image — store Dockerfile in session for diagnostics
+            final String dockerfileContent = generatedDockerfile;
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     PreviewStatus.BUILDING, s.url(), 0, null,
-                    s.startedAt(), s.expiresAt()));
+                    s.startedAt(), s.expiresAt(), null, null, null, dockerfileContent));
             broadcaster.emit(runId, new RunEvent("PREVIEW_BUILDING", runId, null,
                     "Building Docker image...", Instant.now()));
 
             var buildResult = artifactRegistryClient.buildImage(workspace, "preview-" + shortId);
             imageUri = buildResult.imageTag();
+            // Store build output in session for copilot/frontend diagnostics on failure
+            final String buildOutput = buildResult.buildLog() != null
+                    ? buildResult.buildLog().substring(Math.max(0, buildResult.buildLog().length() - 8000))
+                    : null;
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    s.status(), s.url(), s.hostPort(), s.errorMessage(),
+                    s.startedAt(), s.expiresAt(), s.cloudRunServiceName(), s.imageUri(),
+                    buildOutput, s.dockerfile()));
             log.info("Preview image built for run {}: {}", runId, imageUri);
 
             // Phase 3: Push image to Artifact Registry
@@ -395,11 +405,12 @@ public class PreviewService {
                     "Pushing image to registry...", Instant.now()));
             artifactRegistryClient.pushImage(imageUri);
 
-            // Phase 4: Deploy to Cloud Run
+            // Phase 4: Deploy to Cloud Run (preserve buildOutput/dockerfile in session)
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     PreviewStatus.STARTING, s.url(), 0, null,
-                    s.startedAt(), s.expiresAt()));
+                    s.startedAt(), s.expiresAt(), null, null,
+                    s.buildOutput(), s.dockerfile()));
             broadcaster.emit(runId, new RunEvent("PREVIEW_STARTING", runId, null,
                     "Deploying to Cloud Run...", Instant.now()));
 
@@ -420,7 +431,14 @@ public class PreviewService {
 
             boolean healthy = cloudRunClient.healthCheck(previewUrl);
             if (!healthy) {
-                fail(runId, "Cloud Run health check failed for " + previewUrl, 0);
+                // Fetch Cloud Run logs to include in the error for diagnostics
+                String crLogs = getCloudRunLogs(serviceName, 30);
+                String errorDetail = "Cloud Run health check failed for " + previewUrl;
+                if (crLogs != null && !crLogs.isBlank()
+                        && !crLogs.startsWith("No logs") && !crLogs.startsWith("Failed to fetch")) {
+                    errorDetail += "\n\nCloud Run logs:\n" + crLogs;
+                }
+                fail(runId, errorDetail, 0);
                 cleanupCloudRun(serviceName, imageUri);
                 return;
             }
@@ -457,13 +475,14 @@ public class PreviewService {
 
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            // Store Cloud Run metadata in session so fail() can clean up
+            // Store Cloud Run metadata in session so fail() can clean up (preserve buildOutput/dockerfile)
             final String failServiceName = serviceName;
             final String failImageUri = imageUri;
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     s.status(), s.url(), s.hostPort(), s.errorMessage(),
-                    s.startedAt(), s.expiresAt(), failServiceName, failImageUri));
+                    s.startedAt(), s.expiresAt(), failServiceName, failImageUri,
+                    s.buildOutput(), s.dockerfile()));
             fail(runId, "Cloud Run preview failed: " + e.getMessage(), 0);
         } catch (Exception e) {
             final String failServiceName = serviceName;
@@ -471,7 +490,8 @@ public class PreviewService {
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                     s.status(), s.url(), s.hostPort(), s.errorMessage(),
-                    s.startedAt(), s.expiresAt(), failServiceName, failImageUri));
+                    s.startedAt(), s.expiresAt(), failServiceName, failImageUri,
+                    s.buildOutput(), s.dockerfile()));
             fail(runId, "Unexpected error in Cloud Run preview: " + e.getMessage(), 0);
             log.error("Cloud Run preview build/start failed for run {}", runId, e);
         }
@@ -788,7 +808,8 @@ public class PreviewService {
         updateSession(runId, s -> new PreviewSession(
                 s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
                 PreviewStatus.FAILED, s.url(), s.hostPort(), message,
-                s.startedAt(), s.expiresAt(), s.cloudRunServiceName(), s.imageUri()));
+                s.startedAt(), s.expiresAt(), s.cloudRunServiceName(), s.imageUri(),
+                s.buildOutput(), s.dockerfile()));
         broadcaster.emit(runId, new RunEvent("PREVIEW_FAILED", runId, null, message, Instant.now()));
         log.warn("Preview failed for run {}: {}", runId, message);
     }

@@ -567,13 +567,26 @@ public class ConversationAgent {
                 sb.append("Error: ").append(session.errorMessage()).append('\n');
             }
 
-            // Include Docker logs for debugging if preview failed or is running
+            // Include diagnostics for debugging if preview failed or is running
             if (session.status() != null) {
                 String statusName = session.status().name();
                 if ("FAILED".equals(statusName) || "RUNNING".equals(statusName) || "STARTING".equals(statusName)) {
+                    // Generated Dockerfile (helps diagnose port misconfigs, wrong base images)
+                    if (session.dockerfile() != null && !session.dockerfile().isBlank()) {
+                        sb.append("\nGenerated Dockerfile:\n```dockerfile\n");
+                        sb.append(truncate(session.dockerfile(), 2000));
+                        sb.append("\n```\n");
+                    }
+                    // Docker build output (helps diagnose missing deps, build failures)
+                    if (session.buildOutput() != null && !session.buildOutput().isBlank()) {
+                        sb.append("\nDocker build output (last 4000 chars):\n```\n");
+                        sb.append(truncate(session.buildOutput(), 4000));
+                        sb.append("\n```\n");
+                    }
+                    // Runtime container logs
                     String logs = previewService.getLogs(runId, 50, null);
                     if (logs != null && !logs.isBlank()) {
-                        sb.append("\nDocker container logs (last 50 lines):\n```\n");
+                        sb.append("\nContainer runtime logs (last 50 lines):\n```\n");
                         sb.append(truncate(logs, 4000));
                         sb.append("\n```\n");
                     }
