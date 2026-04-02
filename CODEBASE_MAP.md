@@ -106,7 +106,7 @@
 - `repository/*Repository` — JPA repositories
 
 ### deployment/ — Preview & deploy
-- `preview/PreviewService` — Dual-mode preview (docker/cloud-run, 10-min TTL). Stores `cloudRunServiceName` upfront to prevent orphan cleanup race
+- `preview/PreviewService` — Dual-mode preview (docker/cloud-run, 5-min TTL). Stores `cloudRunServiceName` upfront to prevent orphan cleanup race
 - `DeploymentService` — Full Cloud Run deployment
 - `CloudRunClient` — GCP Cloud Run API wrapper
 - `GcsWorkspaceStore` — GCS workspace storage

@@ -18,7 +18,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - `NewRunModal.tsx` — Run submission form with AI provider selection, language validation hint.
 - `ValidationReportPanel.tsx` — Collapsible validation report display.
 - `RunConversation.tsx` — Chat copilot interface.
-- `PreviewTab.tsx` — Preview with 10-minute countdown timer (auto-starts after COMPLETE).
+- `PreviewTab.tsx` — Preview with 5-minute countdown timer (auto-starts after COMPLETE).
 - `VibeView.tsx` — Simplified progress view (mission control UX) for non-technical users.
 
 ## Patterns

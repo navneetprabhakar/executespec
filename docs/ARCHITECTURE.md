@@ -189,7 +189,7 @@ graph TB
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** plan → approve → work (sequential tasks) → compile → merge → **COMPLETE** → auto-preview (10-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report
+**Pipeline flow:** plan → approve → work (sequential tasks) → compile → merge → **COMPLETE** → auto-preview (5-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report
 
 **Project type detection:** PlannerAgent outputs `project_type` in the plan JSON. This is written to `.agent-context/project.json` in the workspace. `DevDockerfileGenerator` and `DockerfileGenerator` read this value before falling back to file-based heuristics, preventing misdetection (e.g., static HTML being classified as NODE).
 
@@ -471,8 +471,8 @@ The preview system operates in two modes, selected by the `executespec.preview.m
 
 | Mode | Environment | TTL | Networking | Use Case |
 |------|-------------|-----|------------|----------|
-| `docker` | Local dev | 10 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
-| `cloud-run` | Dev / Prod | 10 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
+| `docker` | Local dev | 5 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
+| `cloud-run` | Dev / Prod | 5 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
 
 **Key implementation details:**
 - All subprocess commands enforce timeouts: `gcloud run deploy` 10 min, `gcloud run services delete` 5 min, `gcloud logging read` 2 min
@@ -511,7 +511,7 @@ sequenceDiagram
     PS->>PS: Health check (probeApiDocs)
     PS->>PS: Update session → RUNNING
     PS->>PS: Increment ACTIVE_PREVIEWS gauge
-    PS->>PS: Schedule TTL cleanup (10 min)
+    PS->>PS: Schedule TTL cleanup (5 min)
 
     Note over PS: After TTL expires:
     PS->>CR: deleteService(serviceName)
@@ -548,7 +548,7 @@ sequenceDiagram
     PS->>PS: Health check (probeApiDocs → localhost:{port})
     PS->>PS: Update session → RUNNING
     PS->>PS: Increment ACTIVE_PREVIEWS gauge
-    PS->>PS: Schedule TTL cleanup (10 min)
+    PS->>PS: Schedule TTL cleanup (5 min)
 
     Note over PS: After TTL expires:
     PS->>DC: docker compose down

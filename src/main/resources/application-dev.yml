@@ -105,7 +105,7 @@ agent:
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
   mode: cloud-run
-  preview-ttl-minutes: 10
+  preview-ttl-minutes: 5
   fallback-host: ${PREVIEW_FALLBACK_HOST:https://dev.executespec.ai}
   proxy:
     enabled: false

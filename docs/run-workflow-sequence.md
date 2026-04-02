@@ -22,7 +22,7 @@ QUEUED ─(slot available)─→ PLANNING
                      ┌────────┴────────┐
                      ↓                 ↓
               Auto-preview      Background validation
-             (10-min TTL)        (review → test gen →
+             (5-min TTL)        (review → test gen →
                                   test exec → report)
 
 Side paths:
@@ -217,7 +217,7 @@ Side paths:
 1. **Preview reuse** — `TestPreviewCoordinator` checks for existing running preview via `previewService.getStatus(runId)`. Reuses the auto-started preview (started at COMPLETE). Only starts a new preview if none is running.
 2. **Test execution** — execute compiled tests against the running preview.
 3. **Report generation** — `TestReportGenerator` generates fix suggestions for any failed tests.
-4. **Preview stays running** — preview is NOT stopped after test execution (stays up for user's full 10-min TTL).
+4. **Preview stays running** — preview is NOT stopped after test execution (stays up for user's full 5-min TTL).
 
 **Non-fatal** — test execution failure doesn't block completion (run is already COMPLETE).
 
@@ -250,7 +250,7 @@ Side paths:
 | **State** | → `COMPLETE` |
 
 1. **Mark complete** — set status, record `completedAt` — **before review/tests**.
-2. **Auto-start preview** — `autoStartPreview()` for both PROTOTYPE and PRODUCTION modes (10-min TTL).
+2. **Auto-start preview** — `autoStartPreview()` for both PROTOTYPE and PRODUCTION modes (5-min TTL).
 3. **GitHub push** (if configured) — for new repos: push main branch; for existing repos: create branch `executespec/{runId-short}`, push to branch, open PR via `GitHubRepoService.createPullRequest()`, store PR URL in `PipelineRun.githubPrUrl`. Failure is non-fatal.
 4. **Background validation thread** (`bg-validation-{runId}` virtual thread for PRODUCTION mode):
    - ReviewerAgentV2 review + auto-fix
