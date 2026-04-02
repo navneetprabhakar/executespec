@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp, Github } from 'lucide-react';
+import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp, Github, Archive } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
@@ -13,7 +13,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
-import { downloadWorkspace, editRunPlan, pushToGitHub, updateGithubSettings, type ReviewReport } from '@/lib/api';
+import { downloadWorkspace, editRunPlan, pushToGitHub, updateGithubSettings, archiveRun, type ReviewReport } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
 import VibeProgressNarrative from './VibeProgressNarrative';
@@ -41,6 +41,8 @@ export default function RunDetail() {
   const [ghOwner, setGhOwner] = useState('');
   const [ghPushing, setGhPushing] = useState(false);
   const [ghError, setGhError] = useState('');
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
   const user = useAuthStore((s) => s.user);
   const loadMe = useAuthStore((s) => s.loadMe);
@@ -520,6 +522,22 @@ export default function RunDetail() {
                 <Download className="h-3.5 w-3.5" />
                 Download
               </button>
+              {['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(activeRun.status) && !activeRun.archivedAt && (
+                <button
+                  onClick={() => setShowArchiveConfirm(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-red transition-colors whitespace-nowrap"
+                  title="Archive this run"
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                  Archive
+                </button>
+              )}
+              {activeRun.archivedAt && (
+                <span className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted whitespace-nowrap" title={`Archived on ${new Date(activeRun.archivedAt).toLocaleDateString()}`}>
+                  <Archive className="h-3.5 w-3.5" />
+                  Archived
+                </span>
+              )}
             </div>
           </div>
 
@@ -541,10 +559,10 @@ export default function RunDetail() {
     {/* GitHub PAT Modal */}
     {showGitHubModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowGitHubModal(false)}>
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-lg p-5 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-lg p-5 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-2 mb-4">
-            <Github className="h-5 w-5 text-[var(--text-default)]" />
-            <h3 className="text-sm font-semibold text-[var(--text-default)]">Connect GitHub</h3>
+            <Github className="h-5 w-5 text-primary" />
+            <h3 className="text-sm font-semibold text-primary">Connect GitHub</h3>
           </div>
           <p className="text-xs text-muted mb-3">Enter your GitHub Personal Access Token and username to publish this workspace.</p>
           <label className="block text-xs text-muted mb-1">Personal Access Token</label>
@@ -553,7 +571,7 @@ export default function RunDetail() {
             value={ghPat}
             onChange={(e) => setGhPat(e.target.value)}
             placeholder="ghp_..."
-            className="w-full px-3 py-2 mb-3 text-xs rounded border border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-default)] placeholder:text-muted focus:outline-none focus:border-accent-blue"
+            className="w-full px-3 py-2 mb-3 text-xs rounded border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
           />
           <label className="block text-xs text-muted mb-1">GitHub Owner / Username</label>
           <input
@@ -561,19 +579,56 @@ export default function RunDetail() {
             value={ghOwner}
             onChange={(e) => setGhOwner(e.target.value)}
             placeholder="your-username"
-            className="w-full px-3 py-2 mb-3 text-xs rounded border border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-default)] placeholder:text-muted focus:outline-none focus:border-accent-blue"
+            className="w-full px-3 py-2 mb-3 text-xs rounded border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
           />
           {ghError && <p className="text-xs text-accent-red mb-3">{ghError}</p>}
           <div className="flex justify-end gap-2">
             <button
               onClick={() => { setShowGitHubModal(false); setGhPat(''); setGhError(''); }}
-              className="px-3 py-1.5 text-xs text-muted hover:text-[var(--text-default)] transition-colors"
+              className="px-3 py-1.5 text-xs text-muted hover:text-primary transition-colors"
             >Cancel</button>
             <button
               onClick={handleGitHubSaveAndPush}
               disabled={ghPushing || !ghPat.trim() || !ghOwner.trim()}
               className="px-3 py-1.5 text-xs bg-accent-blue text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
             >{ghPushing ? 'Publishing…' : 'Save & Publish'}</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Archive Confirmation Modal */}
+    {showArchiveConfirm && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowArchiveConfirm(false)}>
+        <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-lg p-5 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="h-5 w-5 text-accent-red" />
+            <h3 className="text-sm font-semibold text-primary">Archive this run?</h3>
+          </div>
+          <p className="text-xs text-secondary mb-1">This action is <strong className="text-primary">permanent and cannot be undone</strong>.</p>
+          <p className="text-xs text-muted mb-4">Archived runs will be permanently deleted after <strong className="text-secondary">90 days</strong>.</p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setShowArchiveConfirm(false)}
+              className="px-3 py-1.5 text-xs text-muted hover:text-primary transition-colors"
+            >Cancel</button>
+            <button
+              onClick={async () => {
+                setArchiving(true);
+                try {
+                  await archiveRun(activeRun!.runId);
+                  addToast({ type: 'success', message: 'Run archived' });
+                  setShowArchiveConfirm(false);
+                  setActiveRunId(null);
+                } catch (e: any) {
+                  addToast({ type: 'error', message: e?.message || 'Failed to archive' });
+                } finally {
+                  setArchiving(false);
+                }
+              }}
+              disabled={archiving}
+              className="px-3 py-1.5 text-xs bg-accent-red text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+            >{archiving ? 'Archiving…' : 'Archive'}</button>
           </div>
         </div>
       </div>

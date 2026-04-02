@@ -80,6 +80,9 @@ public class RunDetail {
     /** URL of the pull request created for existing-repo runs. Null for NEW/NONE repos. */
     String githubPrUrl;
 
+    /** Timestamp when the run was archived by the user. Null for active runs. */
+    Instant archivedAt;
+
     // ── Per-agent token breakdown (V19) ─────────────────────────────────────
     /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
     List<AgentTokenEntry> agentTokens;

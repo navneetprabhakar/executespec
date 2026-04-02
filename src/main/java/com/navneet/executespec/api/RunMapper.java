@@ -53,7 +53,8 @@ public class RunMapper {
             resolveCreatorName(r.getCreatedByUserId()),
             r.getRunTitle(),
             r.getRunSummary(),
-            r.getExecutionMode()
+            r.getExecutionMode(),
+            r.getArchivedAt()
         );
     }
 
@@ -167,6 +168,7 @@ public class RunMapper {
             .runSummary(r.getRunSummary())
             .executionMode(r.getExecutionMode())
             .githubPrUrl(r.getGithubPrUrl())
+            .archivedAt(r.getArchivedAt())
             .build();
     }
 

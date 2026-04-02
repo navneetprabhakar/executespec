@@ -267,4 +267,22 @@ public class PipelineRun {
     @Column(name = "gcs_archived_at")
     private Instant gcsArchivedAt;
 
+    // ── User archive ─────────────────────────────────────────────────────────
+
+    /**
+     * Timestamp when the user archived this run. Null for active (non-archived) runs.
+     * Archived runs are permanently deleted after 90 days.
+     * This is irreversible — once archived, a run cannot be unarchived.
+     */
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
+    public void markArchived() {
+        this.archivedAt = Instant.now();
+    }
+
+    public boolean isArchived() {
+        return archivedAt != null;
+    }
+
 }

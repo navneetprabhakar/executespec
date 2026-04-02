@@ -141,6 +141,7 @@ public class RunController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String projectId,
             @RequestParam(required = false) String scope,
+            @RequestParam(defaultValue = "false") boolean archived,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         guard.requireAuthenticated(userDetails);
@@ -160,7 +161,7 @@ public class RunController {
             visSpec = visSpec.and(orgSpec);
         }
 
-        Page<PipelineRun> runs = stateStore.listRuns(status, projectId, PageRequest.of(page, size), visSpec);
+        Page<PipelineRun> runs = stateStore.listRuns(status, projectId, archived, PageRequest.of(page, size), visSpec);
         List<RunSummary> content = runs.getContent().stream().map(mapper::toSummary).toList();
         return ResponseEntity.ok(Map.of(
                 "content", content,
@@ -401,6 +402,35 @@ public class RunController {
         log.info("DELETE /api/runs/{}", runId);
         boolean cancelled = harness.cancelRun(runId);
         return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
+    }
+
+    /**
+     * Archive a run. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be archived.
+     * This is irreversible — archived runs are permanently deleted after 90 days.
+     */
+    @PostMapping("/{runId}/archive")
+    public ResponseEntity<Map<String, String>> archiveRun(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+        log.info("POST /api/runs/{}/archive (actor={})", runId, userDetails.getUser().getId());
+        try {
+            PipelineRun run = stateStore.archiveRun(runId);
+            activityAuditService.record(
+                    com.navneet.executespec.auth.entity.ActivityAudit.builder()
+                            .eventType("RUN_ARCHIVED")
+                            .entityType("RUN")
+                            .entityId(runId)
+                            .actorId(userDetails.getUser().getId())
+                            .orgId(userDetails.getUser().getOrgId())
+                            .oldValue(run.getStatus())
+                            .build());
+            return ResponseEntity.ok(Map.of("message", "Run archived successfully"));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
     }
 
     /**

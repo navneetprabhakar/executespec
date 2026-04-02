@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, FolderOpen, Users, User, Globe, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { Plus, FolderOpen, Users, User, Globe, ChevronLeft, ChevronRight, Sparkles, Archive } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import RunCard from './RunCard';
 import { RunCardSkeleton } from '@/components/shared/SkeletonLoader';
@@ -25,6 +25,7 @@ export default function RunList() {
     statusFilter, setStatusFilter,
     projectFilter, setProjectFilter,
     scopeFilter, setScopeFilter,
+    archivedFilter, setArchivedFilter,
     setActiveRunId, fetchRuns,
     page, totalElements, totalPages, hasNext, hasPrevious, setPage,
   } = useRunStore();
@@ -53,7 +54,7 @@ export default function RunList() {
     fetchRuns();
     const interval = setInterval(fetchRuns, 5000);
     return () => clearInterval(interval);
-  }, [statusFilter, projectFilter, scopeFilter]);
+  }, [statusFilter, projectFilter, scopeFilter, archivedFilter]);
 
   return (
     <div className="flex flex-col h-full">
@@ -117,10 +118,10 @@ export default function RunList() {
         {FILTERS.map((f) => (
           <button
             key={f}
-            onClick={() => setStatusFilter(f)}
+            onClick={() => { setArchivedFilter(false); setStatusFilter(f); }}
             className={cn(
               'px-2.5 lg:px-3 py-2 lg:py-2.5 text-[10px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
-              statusFilter === f
+              !archivedFilter && statusFilter === f
                 ? 'border-[var(--text-primary)] text-primary'
                 : 'border-transparent text-muted hover:text-secondary'
             )}
@@ -128,6 +129,19 @@ export default function RunList() {
             {f === 'ALL' ? 'All' : toTitleCase(f)}
           </button>
         ))}
+        <div className="w-px h-4 bg-[var(--border-default)] mx-1" />
+        <button
+          onClick={() => setArchivedFilter(!archivedFilter)}
+          className={cn(
+            'flex items-center gap-1 px-2.5 lg:px-3 py-2 lg:py-2.5 text-[10px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
+            archivedFilter
+              ? 'border-[var(--text-primary)] text-primary'
+              : 'border-transparent text-muted hover:text-secondary'
+          )}
+        >
+          <Archive className="h-3 w-3" />
+          Archived
+        </button>
       </div>
 
       {/* Project filter bar — visible for org members with projects */}
@@ -181,9 +195,9 @@ export default function RunList() {
           Array.from({ length: 5 }).map((_, i) => <RunCardSkeleton key={i} />)
         ) : runs.length === 0 ? (
           <EmptyState
-            title="No runs yet"
-            description="Launch your first run to start orchestrating agents."
-            action={
+            title={archivedFilter ? 'No archived runs' : 'No runs yet'}
+            description={archivedFilter ? 'Runs you archive will appear here.' : 'Launch your first run to start orchestrating agents.'}
+            action={archivedFilter ? undefined :
               <button
                 onClick={() => setShowModal(true)}
                 className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
