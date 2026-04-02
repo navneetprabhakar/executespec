@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp, Github } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
@@ -13,7 +13,8 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
-import { downloadWorkspace, editRunPlan, type ReviewReport } from '@/lib/api';
+import { downloadWorkspace, editRunPlan, pushToGitHub, updateGithubSettings, type ReviewReport } from '@/lib/api';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
 import VibeProgressNarrative from './VibeProgressNarrative';
 
@@ -35,7 +36,14 @@ export default function RunDetail() {
   const [editingPlan, setEditingPlan] = useState(false);
   const [planFeedback, setPlanFeedback] = useState('');
   const [submittingPlanEdit, setSubmittingPlanEdit] = useState(false);
+  const [showGitHubModal, setShowGitHubModal] = useState(false);
+  const [ghPat, setGhPat] = useState('');
+  const [ghOwner, setGhOwner] = useState('');
+  const [ghPushing, setGhPushing] = useState(false);
+  const [ghError, setGhError] = useState('');
   const downloadRef = useRef<HTMLDivElement>(null);
+  const user = useAuthStore((s) => s.user);
+  const loadMe = useAuthStore((s) => s.loadMe);
   const sseEntries = useSseStore((s) => s.entries);
 
   // Show toast when context compaction is triggered
@@ -91,6 +99,43 @@ export default function RunDetail() {
       } else {
         addToast({ type: 'error', message: e.message });
       }
+    }
+  };
+
+  const handleGitHubPush = async () => {
+    if (!activeRun) return;
+    if (!user?.hasGithubPat) {
+      setGhOwner(user?.githubOwner ?? '');
+      setGhError('');
+      setShowGitHubModal(true);
+      return;
+    }
+    setGhPushing(true);
+    try {
+      await pushToGitHub(activeRun.runId);
+      addToast({ type: 'success', message: 'Publishing to GitHub…' });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message || 'GitHub push failed' });
+    } finally {
+      setGhPushing(false);
+    }
+  };
+
+  const handleGitHubSaveAndPush = async () => {
+    if (!activeRun || !ghPat.trim() || !ghOwner.trim()) return;
+    setGhPushing(true);
+    setGhError('');
+    try {
+      await updateGithubSettings(ghPat.trim(), ghOwner.trim());
+      await loadMe();
+      await pushToGitHub(activeRun.runId);
+      setShowGitHubModal(false);
+      setGhPat('');
+      addToast({ type: 'success', message: 'Publishing to GitHub…' });
+    } catch (e: any) {
+      setGhError(e.message || 'Failed to save credentials or push');
+    } finally {
+      setGhPushing(false);
     }
   };
 
@@ -153,6 +198,7 @@ export default function RunDetail() {
   };
 
   return (
+    <>
     <AnimatePresence>
       {activeRun && (
         <motion.div
@@ -455,6 +501,17 @@ export default function RunDetail() {
               </button>
             )}
             <div className="flex items-center gap-2 ml-auto">
+              {['COMPLETE', 'PARTIAL'].includes(activeRun.status) && (
+                <button
+                  onClick={handleGitHubPush}
+                  disabled={ghPushing}
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 whitespace-nowrap"
+                  title="Publish to GitHub"
+                >
+                  <Github className="h-3.5 w-3.5" />
+                  {ghPushing ? 'Publishing…' : 'GitHub'}
+                </button>
+              )}
               <button
                 onClick={() => handle(() => downloadWorkspace(activeRun.runId), 'Download started')}
                 className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-green transition-colors whitespace-nowrap"
@@ -480,6 +537,48 @@ export default function RunDetail() {
         </motion.div>
       )}
     </AnimatePresence>
+
+    {/* GitHub PAT Modal */}
+    {showGitHubModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowGitHubModal(false)}>
+        <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-lg p-5 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 mb-4">
+            <Github className="h-5 w-5 text-[var(--text-default)]" />
+            <h3 className="text-sm font-semibold text-[var(--text-default)]">Connect GitHub</h3>
+          </div>
+          <p className="text-xs text-muted mb-3">Enter your GitHub Personal Access Token and username to publish this workspace.</p>
+          <label className="block text-xs text-muted mb-1">Personal Access Token</label>
+          <input
+            type="password"
+            value={ghPat}
+            onChange={(e) => setGhPat(e.target.value)}
+            placeholder="ghp_..."
+            className="w-full px-3 py-2 mb-3 text-xs rounded border border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-default)] placeholder:text-muted focus:outline-none focus:border-accent-blue"
+          />
+          <label className="block text-xs text-muted mb-1">GitHub Owner / Username</label>
+          <input
+            type="text"
+            value={ghOwner}
+            onChange={(e) => setGhOwner(e.target.value)}
+            placeholder="your-username"
+            className="w-full px-3 py-2 mb-3 text-xs rounded border border-[var(--border-default)] bg-[var(--bg-base)] text-[var(--text-default)] placeholder:text-muted focus:outline-none focus:border-accent-blue"
+          />
+          {ghError && <p className="text-xs text-accent-red mb-3">{ghError}</p>}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => { setShowGitHubModal(false); setGhPat(''); setGhError(''); }}
+              className="px-3 py-1.5 text-xs text-muted hover:text-[var(--text-default)] transition-colors"
+            >Cancel</button>
+            <button
+              onClick={handleGitHubSaveAndPush}
+              disabled={ghPushing || !ghPat.trim() || !ghOwner.trim()}
+              className="px-3 py-1.5 text-xs bg-accent-blue text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+            >{ghPushing ? 'Publishing…' : 'Save & Publish'}</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
