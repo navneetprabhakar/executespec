@@ -235,10 +235,17 @@ public class PreviewService {
         String projectName = composeProjectName(runId);
         Duration ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
 
+        // For Cloud Run mode, store the service name upfront so the orphan cleanup
+        // job sees it as active during the build/push/deploy cycle.
+        String crServiceName = isCloudRunMode()
+                ? "es-preview-" + (runId.length() > 8 ? runId.substring(0, 8) : runId)
+                : null;
+
         PreviewSession session = new PreviewSession(
                 runId, projectName, type, mode, null,
                 PreviewStatus.ANALYZING, null, 0, null,
-                Instant.now(), Instant.now().plus(ttl)
+                Instant.now(), Instant.now().plus(ttl),
+                crServiceName, null
         );
         active.put(runId, session);
 

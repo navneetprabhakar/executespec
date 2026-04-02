@@ -126,8 +126,13 @@ public class IntegrationManager {
         notifyOutbound(event.runId(), "PLANNING");
     }
 
+    /**
+     * Listen to MergeCompleted instead of RunCompleted — the review report is guaranteed
+     * to exist at this point. RunCompleted fires before background review starts, so the
+     * review report is null and adapters silently skip the notification.
+     */
     @EventListener
-    public void onRunCompleted(PipelineEvent.RunCompleted event) {
+    public void onMergeCompleted(PipelineEvent.MergeCompleted event) {
         notifyOutbound(event.runId(), "COMPLETE");
     }
 
@@ -159,11 +164,7 @@ public class IntegrationManager {
                         case "PLANNING" -> adapter.onRunStarted(ir, run);
                         case "COMPLETE" -> {
                             ReviewReportV2 review = stateStore.getReviewReportV2(runId);
-                            if (review != null) {
-                                adapter.onRunComplete(ir, run, review);
-                            } else {
-                                log.warn("[Integration] No review report for completed run {}", runId);
-                            }
+                            adapter.onRunComplete(ir, run, review);
                         }
                         case "FAILED" -> adapter.onRunFailed(ir, run,
                                 run.getFailureReason() != null ? run.getFailureReason() : "Unknown failure");

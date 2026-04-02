@@ -12,8 +12,9 @@ import {
   applyToRun, editRunPlan,
   getTestPlan, getTestGraph,
   getLiveCost,
+  getTaskGraph,
 } from '@/lib/api';
-import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto, TestGraphData } from '@/lib/api';
+import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto, TestGraphData, TaskGraphNode } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import TaskCard from './TaskCard';
@@ -211,11 +212,7 @@ export default function RunDetailTabs() {
         </Tabs.Content>
 
         <Tabs.Content value="graph" className="h-full overflow-auto p-4">
-          <CollapsibleGraphSection title="Task Graph" defaultOpen>
-            <div className="overflow-auto max-h-[60vh] border border-[var(--border-default)] rounded-sm">
-              <TaskGraph runId={activeRun.runId} />
-            </div>
-          </CollapsibleGraphSection>
+          <TaskGraphGroups runId={activeRun.runId} />
           {testGraph && testGraph.nodes.length > 0 && (
             <CollapsibleGraphSection title="Test Pipeline" defaultOpen>
               <div className="overflow-auto max-h-[50vh] border border-[var(--border-default)] rounded-sm">
@@ -284,6 +281,36 @@ function fmtDuration(ms: number): string {
   const h = Math.floor(m / 60);
   const rm = m % 60;
   return `${h}h ${rm}m`;
+}
+
+/** Group tasks by copilot/review source prefix. Returns only cop/rev groups (excludes original tasks). */
+function groupTasksBySource(tasks: RunDetail['tasks']): { label: string; taskCount: number; inputTokens: number; outputTokens: number; order: number }[] {
+  const groups = new Map<string, { label: string; taskCount: number; inputTokens: number; outputTokens: number; order: number }>();
+  for (const t of tasks) {
+    const copMatch = t.taskId.match(/_cop(\d+)_/);
+    const revMatch = t.taskId.match(/_rev(\d+)_/);
+    let key: string | null = null;
+    let label = '';
+    let order = 0;
+    if (copMatch) {
+      const idx = parseInt(copMatch[1], 10);
+      key = `cop${idx}`;
+      label = `Copilot ${idx}`;
+      order = 100 + idx;
+    } else if (revMatch) {
+      const idx = parseInt(revMatch[1], 10);
+      key = `rev${idx}`;
+      label = `Review Fix ${idx}`;
+      order = 200 + idx;
+    }
+    if (!key) continue;
+    const entry = groups.get(key) || { label, taskCount: 0, inputTokens: 0, outputTokens: 0, order };
+    entry.taskCount++;
+    entry.inputTokens += t.inputTokens || 0;
+    entry.outputTokens += t.outputTokens || 0;
+    groups.set(key, entry);
+  }
+  return Array.from(groups.values()).sort((a, b) => a.order - b.order);
 }
 
 /** Aggregate token counts per model from task list + pipeline agent entries (planner/reviewer/compiler). */
@@ -659,6 +686,34 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         </div>
       )}
 
+      {/* Copilot / Review runs token breakdown */}
+      {(() => {
+        const copilotGroups = groupTasksBySource(run.tasks);
+        if (copilotGroups.length === 0) return null;
+        return (
+          <div className="pt-3 border-t border-[var(--border-default)]">
+            <div className="flex items-center gap-2 mb-3">
+              <RefreshCw className="h-3.5 w-3.5 text-accent-blue/70" />
+              <span className="text-xs font-medium text-secondary uppercase tracking-wider">
+                Copilot Runs ({copilotGroups.length})
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {copilotGroups.map((g) => (
+                <div key={g.label} className="flex items-center justify-between p-2 rounded bg-[var(--gray-100)] border border-[var(--border-default)]">
+                  <span className="text-xs font-medium text-secondary">{g.label}</span>
+                  <div className="flex items-center gap-3 text-[11px] font-mono">
+                    <span className="text-muted">{g.taskCount} tasks</span>
+                    <span className="text-secondary/70">{fmtTokens(g.inputTokens)} in</span>
+                    <span className="text-accent-blue/70">{fmtTokens(g.outputTokens)} out</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Token usage by model — visible to users with canViewTokenUsage */}
       {permissions?.canViewTokenUsage && tokensByModel(run.tasks, run.agentTokens).length > 0 && (
         <div className="pt-3 border-t border-[var(--border-default)]">
@@ -707,6 +762,22 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
               : '—')}
         </p>
       </div>
+
+      {/* GitHub PR link */}
+      {run.githubPrUrl && (
+        <div className="pt-2 border-t border-[var(--border-default)]">
+          <p className="text-xs text-muted">Pull Request</p>
+          <a
+            href={run.githubPrUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-accent-blue hover:underline mt-0.5 inline-flex items-center gap-1.5 font-mono"
+          >
+            {run.githubPrUrl.replace('https://github.com/', '')}
+            <Maximize2 className="h-3 w-3" />
+          </a>
+        </div>
+      )}
 
       {/* Goal — the user's original request (markdown rendered) */}
       {run.userRequest && (
@@ -1729,6 +1800,81 @@ function TestTaskCard({ task }: { task: TestTaskDto }) {
         <p className="mt-1 ml-5.5 text-xs text-accent-red/80 font-mono line-clamp-3">{task.compilationError}</p>
       )}
     </div>
+  );
+}
+
+// ── Task Graph Groups (original + copilot + review) ─────────────────────────
+
+function TaskGraphGroups({ runId }: { runId: string }) {
+  const [groups, setGroups] = useState<{ title: string; nodes: TaskGraphNode[]; order: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getTaskGraph(runId).then((allNodes) => {
+      if (cancelled) return;
+      // Group nodes by source prefix in taskId: _cop{N}_ → Copilot N, _rev{N}_ → Review Fix N, else → original
+      const buckets = new Map<string, { title: string; nodes: TaskGraphNode[]; order: number }>();
+      buckets.set('original', { title: 'Task Graph', nodes: [], order: 0 });
+
+      for (const node of allNodes) {
+        const copMatch = node.taskId.match(/_cop(\d+)_/);
+        const revMatch = node.taskId.match(/_rev(\d+)_/);
+        if (copMatch) {
+          const idx = parseInt(copMatch[1], 10);
+          const key = `cop${idx}`;
+          if (!buckets.has(key)) buckets.set(key, { title: `Copilot ${idx}`, nodes: [], order: 100 + idx });
+          buckets.get(key)!.nodes.push(node);
+        } else if (revMatch) {
+          const idx = parseInt(revMatch[1], 10);
+          const key = `rev${idx}`;
+          if (!buckets.has(key)) buckets.set(key, { title: `Review Fix ${idx}`, nodes: [], order: 200 + idx });
+          buckets.get(key)!.nodes.push(node);
+        } else {
+          buckets.get('original')!.nodes.push(node);
+        }
+      }
+
+      // Sort by order (original first, then copilot, then review, each ascending by index)
+      const sorted = Array.from(buckets.values())
+        .filter(g => g.nodes.length > 0)
+        .sort((a, b) => a.order - b.order);
+
+      setGroups(sorted);
+      setLoading(false);
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [runId]);
+
+  if (loading && groups.length === 0) {
+    return (
+      <div className="flex items-center gap-2 text-muted text-sm py-4">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading task graph…
+      </div>
+    );
+  }
+
+  if (groups.length === 0) {
+    return <p className="text-muted text-sm py-4">No tasks to display.</p>;
+  }
+
+  return (
+    <>
+      {groups.map((group, i) => (
+        <CollapsibleGraphSection
+          key={group.title}
+          title={group.title}
+          defaultOpen={i === groups.length - 1}
+        >
+          <div className="overflow-auto max-h-[60vh] border border-[var(--border-default)] rounded-sm">
+            <TaskGraph nodes={group.nodes} />
+          </div>
+        </CollapsibleGraphSection>
+      ))}
+    </>
   );
 }
 

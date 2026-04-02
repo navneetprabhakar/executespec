@@ -1670,6 +1670,10 @@ public class PipelineHarness {
                                     "⚠️ Report generation failed"));
                             }
 
+                            // Publish MergeCompleted so integration adapters fire AFTER review is saved
+                            eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                                runId, currentRun, currentReports, review, false));
+
                             // Update actual cost after background work
                             saveActualCost(runId);
 
@@ -1682,6 +1686,10 @@ public class PipelineHarness {
                             broadcaster.complete(runId);
                         }
                     }));
+                } else {
+                    // PROTOTYPE mode: no background validation, fire integration notifications now
+                    eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                        runId, currentRun, currentReports, null, false));
                 }
 
             } catch (Exception e) {
@@ -2140,6 +2148,10 @@ public class PipelineHarness {
                         broadcaster.complete(runId);
                     }
                 }));
+            } else {
+                // PROTOTYPE mode: no background validation, fire integration notifications now
+                eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                    runId, currentRun, currentReports, null, false));
             }
 
         } catch (InterruptedException e) {
@@ -2328,12 +2340,43 @@ public class PipelineHarness {
         }
 
         log.info("Pushing workspace to GitHub: {}", remote);
-        com.navneet.executespec.tool.ToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
-        if (!result.isOk()) {
-            log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
-        } else if ("EXISTING".equals(repoMode)) {
-            // Update the repo description on GitHub so existing repos get a meaningful description
+
+        if ("EXISTING".equals(repoMode)) {
+            // For existing repos: create a branch, push to it, and open a PR
+            String branchName = "executespec/" + run.getRunId().substring(0, 8);
+            com.navneet.executespec.tool.ToolResult result = gitTool.pushToBranch(run.getRunId(), remote, pat, branchName);
+            if (!result.isOk()) {
+                log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
+                return;
+            }
+
+            // Determine default branch to target the PR against
+            String defaultBranch = gitHubRepoService.getDefaultBranch(remote, pat);
+
+            // Create a PR
+            String prTitle = run.getRunTitle() != null ? run.getRunTitle() : "ExecuteSpec changes";
+            String prBody = run.getRunSummary() != null ? run.getRunSummary() : run.getUserRequest();
+            String prUrl = gitHubRepoService.createPullRequest(remote, branchName, defaultBranch,
+                    prTitle, prBody, pat);
+
+            if (prUrl != null) {
+                // Store PR URL on the run
+                PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
+                freshRun.setGithubPrUrl(prUrl);
+                stateStore.save(freshRun);
+                run.setGithubPrUrl(prUrl);
+                log.info("Created PR for run {}: {}", run.getRunId(), prUrl);
+                broadcaster.emit(run.getRunId(),
+                        RunEvent.log(run.getRunId(), "harness", "Pull request created: " + prUrl));
+            }
+
             gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+        } else {
+            // For NEW repos: push main directly
+            com.navneet.executespec.tool.ToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
+            if (!result.isOk()) {
+                log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
+            }
         }
     }
 

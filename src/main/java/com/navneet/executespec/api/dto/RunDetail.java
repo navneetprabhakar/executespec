@@ -77,6 +77,9 @@ public class RunDetail {
     /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
     String executionMode;
 
+    /** URL of the pull request created for existing-repo runs. Null for NEW/NONE repos. */
+    String githubPrUrl;
+
     // ── Per-agent token breakdown (V19) ─────────────────────────────────────
     /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
     List<AgentTokenEntry> agentTokens;

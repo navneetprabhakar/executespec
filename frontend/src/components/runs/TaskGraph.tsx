@@ -1,7 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { getTaskGraph, TaskGraphNode } from '@/lib/api';
 
-interface Props { runId: string }
+interface Props {
+  runId?: string;
+  nodes?: TaskGraphNode[];
+}
 
 // ── Status colours — Geist design system ────────────────────────────────────
 const STATUS_COLOR: Record<string, { bg: string; border: string; text: string; dot: string }> = {
@@ -9,7 +12,7 @@ const STATUS_COLOR: Record<string, { bg: string; border: string; text: string; d
   WORKING:   { bg: '#1a1a1a', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
   PENDING:   { bg: '#111111', border: '#333333', text: '#666666', dot: '#666666' },
   LOCKED:    { bg: '#111111', border: '#252525', text: '#666666', dot: '#555555' },
-  PARTIAL:   { bg: '#1a1508', border: '#e08b1a', text: '#a1a1a1', dot: '#e08b1a' },
+  PARTIAL:   { bg: '#1a0a08', border: '#e08b1a', text: '#a1a1a1', dot: '#e08b1a' },
   BLOCKED:   { bg: '#1a0a10', border: '#d44690', text: '#a1a1a1', dot: '#d44690' },
   FAILED:    { bg: '#1a0a0a', border: '#e5484d', text: '#a1a1a1', dot: '#e5484d' },
 };
@@ -23,34 +26,38 @@ const NODE_H = 72;
 const COL_GAP = 80;   // horizontal gap between levels
 const ROW_GAP = 20;   // vertical gap between nodes in same level
 
-// ── Component ────────────────────────────────────────────────────────────────
-export default function TaskGraph({ runId }: Props) {
-  const [nodes, setNodes] = useState<TaskGraphNode[]>([]);
-  const [loading, setLoading] = useState(true);
+// ── Pure renderer (accepts nodes prop or self-fetches via runId) ─────────────
+export default function TaskGraph({ runId, nodes: externalNodes }: Props) {
+  const [internalNodes, setInternalNodes] = useState<TaskGraphNode[]>([]);
+  const [loading, setLoading] = useState(!externalNodes);
   const [error, setError] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; node: TaskGraphNode } | null>(null);
 
+  const nodes = externalNodes ?? internalNodes;
+
   const load = useCallback(async () => {
+    if (externalNodes || !runId) return;
     try {
       const data = await getTaskGraph(runId);
-      setNodes(data);
+      setInternalNodes(data);
     } catch (e: any) {
       setError(e.message ?? 'Failed to load graph');
     } finally {
       setLoading(false);
     }
-  }, [runId]);
+  }, [runId, externalNodes]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh while any task is WORKING
+  // Auto-refresh while any task is WORKING (only when self-fetching)
   useEffect(() => {
+    if (externalNodes) return;
     const working = nodes.some(n => n.status === 'WORKING' || n.status === 'PENDING');
     if (!working) return;
     const id = setInterval(load, 4000);
     return () => clearInterval(id);
-  }, [nodes, load]);
+  }, [nodes, load, externalNodes]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-48 text-muted text-sm">
@@ -62,28 +69,60 @@ export default function TaskGraph({ runId }: Props) {
   );
   if (nodes.length === 0) return (
     <div className="flex items-center justify-center h-48 text-muted text-sm">
-      No tasks found for this run.
+      No tasks found.
     </div>
   );
 
+  // ── Recompute levels within this subgraph ──────────────────────────────────
+  // When rendering a subset of nodes, the original levels may have gaps.
+  // Recompute using Kahn's algorithm scoped to this node set.
+  const nodeIds = new Set(nodes.map(n => n.taskId));
+  const relevantDeps: Record<string, string[]> = {};
+  const inDegree: Record<string, number> = {};
+  nodes.forEach(n => {
+    // Only keep dependencies that are within this subgraph
+    const deps = (n.dependsOn ?? []).filter(d => nodeIds.has(d));
+    relevantDeps[n.taskId] = deps;
+    inDegree[n.taskId] = deps.length;
+  });
+
+  const localLevel: Record<string, number> = {};
+  const queue: string[] = [];
+  nodes.forEach(n => {
+    if (inDegree[n.taskId] === 0) {
+      queue.push(n.taskId);
+      localLevel[n.taskId] = 0;
+    }
+  });
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    nodes.forEach(n => {
+      if (relevantDeps[n.taskId]?.includes(cur)) {
+        inDegree[n.taskId]--;
+        localLevel[n.taskId] = Math.max(localLevel[n.taskId] ?? 0, localLevel[cur] + 1);
+        if (inDegree[n.taskId] === 0) queue.push(n.taskId);
+      }
+    });
+  }
+  // Fallback: any node not reached gets level 0
+  nodes.forEach(n => { if (localLevel[n.taskId] === undefined) localLevel[n.taskId] = 0; });
+
   // ── Compute layout ──────────────────────────────────────────────────────
-  const maxLevel = Math.max(...nodes.map(n => n.level));
+  const maxLevel = Math.max(...nodes.map(n => localLevel[n.taskId]));
   const byLevel: Record<number, TaskGraphNode[]> = {};
   for (let i = 0; i <= maxLevel; i++) byLevel[i] = [];
-  nodes.forEach(n => byLevel[n.level].push(n));
+  nodes.forEach(n => byLevel[localLevel[n.taskId]].push(n));
 
   // Assign pixel positions
   const pos: Record<string, { x: number; y: number }> = {};
   for (let lvl = 0; lvl <= maxLevel; lvl++) {
     const col = byLevel[lvl];
-    const colHeight = col.length * NODE_H + (col.length - 1) * ROW_GAP;
     col.forEach((n, i) => {
       pos[n.taskId] = {
         x: lvl * (NODE_W + COL_GAP) + 16,
         y: i * (NODE_H + ROW_GAP) + 16,
       };
     });
-    void colHeight;
   }
 
   // SVG canvas size
@@ -91,7 +130,7 @@ export default function TaskGraph({ runId }: Props) {
   const maxRows = Math.max(...Object.values(byLevel).map(c => c.length));
   const svgH = maxRows * (NODE_H + ROW_GAP) + 32;
 
-  // Build edges
+  // Build edges (only within this subgraph)
   const edges: { from: TaskGraphNode; to: TaskGraphNode }[] = [];
   nodes.forEach(to => {
     (to.dependsOn ?? []).forEach(depId => {
@@ -114,6 +153,12 @@ export default function TaskGraph({ runId }: Props) {
     if (taskId.includes('_cop')) return { label: 'COPILOT', bg: 'rgba(139,92,246,0.20)', text: '#c4b5fd', border: '#8B5CF6' };
     if (taskId.includes('_rev')) return { label: 'REVIEW',  bg: 'rgba(6,182,212,0.20)', text: '#67e8f9', border: '#06B6D4' };
     return null;
+  };
+
+  // Strip source prefix from taskId for display (e.g. "abc_cop1_fix_bug" → "fix_bug")
+  const displayTaskId = (taskId: string): string => {
+    const stripped = taskId.replace(/^[a-f0-9]+_(?:cop|rev)\d+_/, '');
+    return stripped.length > 22 ? stripped.slice(0, 21) + '…' : stripped;
   };
 
   return (
@@ -188,9 +233,8 @@ export default function TaskGraph({ runId }: Props) {
               key={n.taskId}
               transform={`translate(${x},${y})`}
               style={{ cursor: 'pointer' }}
-              onMouseEnter={e => {
-                const rect = svgRef.current?.getBoundingClientRect();
-                if (rect) setTooltip({ x: x + NODE_W / 2, y: y, node: n });
+              onMouseEnter={() => {
+                setTooltip({ x: x + NODE_W / 2, y: y, node: n });
               }}
               onMouseLeave={() => setTooltip(null)}
             >
@@ -231,7 +275,7 @@ export default function TaskGraph({ runId }: Props) {
               {/* Task ID */}
               <text x={24} y={16} fontSize={9} fill={c.dot} fontFamily="'Geist Mono', monospace" fontWeight="600"
                 dominantBaseline="middle">
-                {n.taskId.length > 22 ? n.taskId.slice(0, 21) + '…' : n.taskId}
+                {displayTaskId(n.taskId)}
               </text>
 
               {/* Title */}
@@ -256,7 +300,7 @@ export default function TaskGraph({ runId }: Props) {
               <g transform={`translate(8, ${NODE_H - 20})`}>
                 <text x={0} y={7} fontSize={8} fill="#4b5563" fontFamily="'Geist Mono', monospace"
                   dominantBaseline="middle">
-                  L{n.level}
+                  L{localLevel[n.taskId]}
                 </text>
               </g>
             </g>
@@ -279,7 +323,7 @@ export default function TaskGraph({ runId }: Props) {
               <text x={10} y={18} fontSize={10} fill={c.text} fontWeight="700"
                 fontFamily="'Geist Sans', sans-serif">{node.taskId}</text>
               <text x={10} y={32} fontSize={9} fill="#9ca3af" fontFamily="'Geist Sans', sans-serif">
-                {node.status} · {node.complexity ?? '?'} · L{node.level}
+                {node.status} · {node.complexity ?? '?'} · L{localLevel[node.taskId]}
               </text>
               <text x={10} y={46} fontSize={8.5} fill="#6b7280" fontFamily="'Geist Mono', monospace">
                 {(node.assignedModel ?? '').replace('claude-', '').slice(0, 30)}

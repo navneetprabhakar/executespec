@@ -280,6 +280,114 @@ public class GitHubRepoService {
         return slug.replaceAll("-+$", "");
     }
 
+    // ── Branch + PR ──────────────────────────────────────────────────────────────
+
+    /**
+     * Returns the default branch name (e.g. "main", "master") for a GitHub repo.
+     *
+     * @param repoUrl     HTTPS clone URL
+     * @param overridePat per-user PAT (null falls back to system PAT)
+     * @return default branch name, or "main" on failure
+     */
+    public String getDefaultBranch(String repoUrl, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return "main";
+
+        String[] ownerRepo = extractOwnerRepo(repoUrl);
+        if (ownerRepo == null) return "main";
+
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                String body = response.body();
+                int idx = body.indexOf("\"default_branch\":");
+                if (idx >= 0) {
+                    int start = body.indexOf("\"", idx + 17) + 1;
+                    int end = body.indexOf("\"", start);
+                    return body.substring(start, end);
+                }
+            }
+            log.warn("[GitHubRepoService] Failed to get default branch for {}: status {}",
+                    repoUrl, response.statusCode());
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] Error getting default branch: {}", e.getMessage());
+        }
+        return "main";
+    }
+
+    /**
+     * Creates a pull request on a GitHub repository.
+     *
+     * @param repoUrl     HTTPS clone URL
+     * @param head        source branch name (e.g. "executespec/abc123")
+     * @param base        target branch name (e.g. "main")
+     * @param title       PR title
+     * @param prBody      PR description body
+     * @param overridePat per-user PAT (null falls back to system PAT)
+     * @return PR HTML URL (e.g. "https://github.com/owner/repo/pull/1"), or null on failure
+     */
+    public String createPullRequest(String repoUrl, String head, String base,
+                                     String title, String prBody, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) {
+            log.warn("[GitHubRepoService] No PAT — cannot create PR");
+            return null;
+        }
+
+        String[] ownerRepo = extractOwnerRepo(repoUrl);
+        if (ownerRepo == null) {
+            log.warn("[GitHubRepoService] Cannot parse owner/repo from {}", repoUrl);
+            return null;
+        }
+
+        String safeTitle = sanitiseDescription(title);
+        String safeBody = prBody != null
+                ? prBody.replace("\"", "'").replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "")
+                : "";
+
+        String requestBody = """
+                {"title":"%s","head":"%s","base":"%s","body":"%s"}"""
+                .formatted(safeTitle, head, base, safeBody);
+
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1] + "/pulls"))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 201) {
+                // Extract html_url from response
+                String responseBody = response.body();
+                int idx = responseBody.indexOf("\"html_url\":");
+                if (idx >= 0) {
+                    int start = responseBody.indexOf("\"", idx + 11) + 1;
+                    int end = responseBody.indexOf("\"", start);
+                    String prUrl = responseBody.substring(start, end);
+                    log.info("[GitHubRepoService] Created PR: {}", prUrl);
+                    return prUrl;
+                }
+            }
+            log.warn("[GitHubRepoService] Failed to create PR for {}/{}: status {} — {}",
+                    ownerRepo[0], ownerRepo[1], response.statusCode(), response.body());
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] Error creating PR: {}", e.getMessage());
+        }
+        return null;
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     /** Returns override if non-blank, otherwise falls back to the system default. */

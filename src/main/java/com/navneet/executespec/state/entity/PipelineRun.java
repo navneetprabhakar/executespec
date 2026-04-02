@@ -199,6 +199,10 @@ public class PipelineRun {
     @Column(name = "github_owner")
     private String githubOwner;
 
+    /** URL of the pull request created for existing-repo runs (e.g. "https://github.com/owner/repo/pull/1"). */
+    @Column(name = "github_pr_url", length = 512)
+    private String githubPrUrl;
+
     // ── Post-run conversation ──────────────────────────────────────────────────
 
     /**
