@@ -32,5 +32,7 @@ public record RunSummary(
     /** One-sentence plan summary from the planner. Null until planning completes. */
     String runSummary,
     /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
-    String executionMode
+    String executionMode,
+    /** Timestamp when the run was archived by the user. Null for active runs. */
+    Instant archivedAt
 ) {}

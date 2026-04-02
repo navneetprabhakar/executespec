@@ -502,9 +502,26 @@ public class StateStore {
      */
     public Page<PipelineRun> listRuns(String status, String projectId, Pageable pageable,
                                       Specification<PipelineRun> visSpec) {
+        return listRuns(status, projectId, false, pageable, visSpec);
+    }
+
+    /**
+     * Visibility-filtered + project-filtered + archive-filtered variant.
+     * When {@code archived} is true, returns only archived runs; when false, excludes them.
+     */
+    public Page<PipelineRun> listRuns(String status, String projectId, boolean archived,
+                                      Pageable pageable, Specification<PipelineRun> visSpec) {
         Specification<PipelineRun> combined = visSpec != null
                 ? Specification.where(visSpec)
                 : Specification.<PipelineRun>where(null);
+
+        // Archive filter: archived=true → only archived, false → only non-archived
+        if (archived) {
+            combined = combined.and((root, q, cb) -> cb.isNotNull(root.get("archivedAt")));
+        } else {
+            combined = combined.and((root, q, cb) -> cb.isNull(root.get("archivedAt")));
+        }
+
         if (status != null && !status.isBlank()) {
             final String s = status;
             combined = combined.and((root, q, cb) -> cb.equal(root.get("status"), s));
@@ -518,6 +535,23 @@ public class StateStore {
         Pageable sorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
                 Sort.by(Sort.Direction.DESC, "startedAt"));
         return runRepo.findAll(combined, sorted);
+    }
+
+    /**
+     * Archive a run. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be archived.
+     * This is irreversible.
+     */
+    public PipelineRun archiveRun(String runId) {
+        PipelineRun run = runRepo.findById(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+        if (run.isArchived()) {
+            throw new IllegalStateException("Run is already archived");
+        }
+        if (!List.of("COMPLETE", "FAILED", "CANCELLED", "PARTIAL").contains(run.getStatus())) {
+            throw new IllegalStateException("Only terminal runs can be archived. Current status: " + run.getStatus());
+        }
+        run.markArchived();
+        return runRepo.save(run);
     }
 
     public Optional<PipelineRun> findRun(String runId) {

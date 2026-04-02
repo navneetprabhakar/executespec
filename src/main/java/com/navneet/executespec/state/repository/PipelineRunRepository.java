@@ -146,4 +146,10 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
         ORDER BY r.completedAt ASC
         """)
     List<PipelineRun> findTerminalRunsWithoutGcsKey(@Param("cutoff") Instant cutoff, Pageable pageable);
+
+    /**
+     * Finds archived runs older than the given cutoff (for 90-day hard-delete cleanup).
+     */
+    @Query("SELECT r FROM PipelineRun r WHERE r.archivedAt IS NOT NULL AND r.archivedAt < :cutoff")
+    List<PipelineRun> findArchivedRunsOlderThan(@Param("cutoff") Instant cutoff);
 }

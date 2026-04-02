@@ -11,6 +11,7 @@ interface RunStore {
   statusFilter: string;
   projectFilter: string | null;
   scopeFilter: string | null; // 'mine' = my runs (default), null = all visible runs, 'org' = org runs (super admin)
+  archivedFilter: boolean;
 
   // Pagination
   page: number;
@@ -23,12 +24,14 @@ interface RunStore {
   setStatusFilter: (s: string) => void;
   setProjectFilter: (projectId: string | null) => void;
   setScopeFilter: (scope: string | null) => void;
+  setArchivedFilter: (archived: boolean) => void;
   setPage: (page: number) => void;
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
   createRun: (req: { userRequest: string; executionMode?: 'PROTOTYPE' | 'PRODUCTION'; skipApproval?: boolean; autoMerge?: boolean; modelName?: string; projectId?: string; repoMode?: string | null; repoUrl?: string | null }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
+  archiveRun: (id: string) => Promise<void>;
   approveRun: (id: string, approved: boolean) => Promise<void>;
   clarifyRun: (id: string, response: string) => Promise<void>;
   mergeRun: (id: string, merge: boolean) => Promise<void>;
@@ -52,6 +55,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
   statusFilter: 'ALL',
   projectFilter: null,
   scopeFilter: 'mine',
+  archivedFilter: false,
 
   // Pagination defaults
   page: 0,
@@ -70,6 +74,9 @@ export const useRunStore = create<RunStore>((set, get) => ({
   setScopeFilter: (scope) => {
     set({ scopeFilter: scope, page: 0 });
   },
+  setArchivedFilter: (archived) => {
+    set({ archivedFilter: archived, statusFilter: 'ALL', page: 0 });
+  },
   setPage: (page) => {
     set({ page });
     get().fetchRuns();
@@ -84,11 +91,12 @@ export const useRunStore = create<RunStore>((set, get) => ({
   fetchRuns: async () => {
     set({ loading: true, error: null });
     try {
-      const { statusFilter, projectFilter, scopeFilter, page, pageSize } = get();
+      const { statusFilter, projectFilter, scopeFilter, archivedFilter, page, pageSize } = get();
       const result = await api.getRuns({
         status: statusFilter === 'ALL' ? undefined : statusFilter,
         projectId: projectFilter ?? undefined,
         scope: scopeFilter ?? undefined,
+        archived: archivedFilter || undefined,
         page,
         size: pageSize,
       });
@@ -124,6 +132,12 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   cancelRun: async (id) => {
     await api.cancelRun(id);
+    await get().fetchRuns();
+    if (get().activeRunId === id) set({ activeRun: null, activeRunId: null });
+  },
+
+  archiveRun: async (id) => {
+    await api.archiveRun(id);
     await get().fetchRuns();
     if (get().activeRunId === id) set({ activeRun: null, activeRunId: null });
   },

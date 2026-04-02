@@ -109,6 +109,8 @@ export interface RunSummary {
   runSummary?: string | null;
   /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
   executionMode?: string | null;
+  /** Timestamp when run was archived. Null for active runs. */
+  archivedAt?: string | null;
 }
 
 export interface TaskSummary {
@@ -329,16 +331,20 @@ export interface PagedResponse<T> {
   hasPrevious: boolean;
 }
 
-export const getRuns = (params?: { status?: string; projectId?: string; scope?: string; page?: number; size?: number }) => {
+export const getRuns = (params?: { status?: string; projectId?: string; scope?: string; archived?: boolean; page?: number; size?: number }) => {
   const qs = new URLSearchParams();
   if (params?.status)    qs.set('status',    params.status);
   if (params?.projectId) qs.set('projectId', params.projectId);
   if (params?.scope)     qs.set('scope',     params.scope);
+  if (params?.archived)  qs.set('archived',  'true');
   if (params?.page !== undefined) qs.set('page', String(params.page));
   if (params?.size !== undefined) qs.set('size', String(params.size));
   const q = qs.toString();
   return req<PagedResponse<RunSummary>>(`/runs${q ? `?${q}` : ''}`);
 };
+
+export const archiveRun = (runId: string) =>
+  req<{ message: string }>(`/runs/${runId}/archive`, { method: 'POST' });
 
 export const getRun = (id: string) =>
   req<RunDetail>(`/runs/${id}`);
