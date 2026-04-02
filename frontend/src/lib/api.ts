@@ -662,6 +662,8 @@ export interface LocalPreviewStatus {
   ttlRemainingSeconds: number;
   previewStartCount: number;
   maxPreviewStarts: number;
+  buildOutput: string | null;
+  dockerfile: string | null;
 }
 
 export interface PreviewLogs {

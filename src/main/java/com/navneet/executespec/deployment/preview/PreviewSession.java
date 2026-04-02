@@ -16,15 +16,27 @@ public record PreviewSession(
         Instant startedAt,
         Instant expiresAt,
         String cloudRunServiceName,  // Cloud Run service name (null for Docker mode)
-        String imageUri              // Artifact Registry image URI (null for Docker mode)
+        String imageUri,             // Artifact Registry image URI (null for Docker mode)
+        String buildOutput,          // Docker build output (Cloud Run mode; null for Docker mode)
+        String dockerfile            // Generated Dockerfile content (Cloud Run mode; null for Docker mode)
 ) {
+    /** Backward-compatible constructor without build diagnostics. */
+    public PreviewSession(String runId, String composeProjectName, PreviewProjectType projectType,
+                          PreviewMode previewMode, DatabaseType databaseType, PreviewStatus status,
+                          String url, int hostPort, String errorMessage,
+                          Instant startedAt, Instant expiresAt,
+                          String cloudRunServiceName, String imageUri) {
+        this(runId, composeProjectName, projectType, previewMode, databaseType, status,
+                url, hostPort, errorMessage, startedAt, expiresAt,
+                cloudRunServiceName, imageUri, null, null);
+    }
     /** Backward-compatible constructor for Docker mode. */
     public PreviewSession(String runId, String composeProjectName, PreviewProjectType projectType,
                           PreviewMode previewMode, DatabaseType databaseType, PreviewStatus status,
                           String url, int hostPort, String errorMessage,
                           Instant startedAt, Instant expiresAt) {
         this(runId, composeProjectName, projectType, previewMode, databaseType, status,
-                url, hostPort, errorMessage, startedAt, expiresAt, null, null);
+                url, hostPort, errorMessage, startedAt, expiresAt, null, null, null, null);
     }
     public boolean isExpired() {
         return expiresAt != null && Instant.now().isAfter(expiresAt);

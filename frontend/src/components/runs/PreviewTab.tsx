@@ -386,9 +386,29 @@ export default function PreviewTab({ runId }: { runId: string }) {
                 {status?.errorMessage ?? 'Unknown error'}
               </p>
             </div>
+            {status?.dockerfile && (
+              <details className="group">
+                <summary className="text-xs text-muted font-medium cursor-pointer hover:text-secondary">
+                  Generated Dockerfile
+                </summary>
+                <pre className="mt-1 p-3 rounded-sm bg-[var(--gray-200)] text-[11px] font-mono text-secondary whitespace-pre-wrap break-all max-h-48 overflow-y-auto leading-relaxed">
+                  {status.dockerfile}
+                </pre>
+              </details>
+            )}
+            {status?.buildOutput && (
+              <details className="group">
+                <summary className="text-xs text-muted font-medium cursor-pointer hover:text-secondary">
+                  Docker build output
+                </summary>
+                <pre className="mt-1 p-3 rounded-sm bg-[var(--gray-200)] text-[11px] font-mono text-secondary whitespace-pre-wrap break-all max-h-48 overflow-y-auto leading-relaxed">
+                  {status.buildOutput}
+                </pre>
+              </details>
+            )}
             {logs.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs text-muted font-medium">Process output ({logs.length} lines):</p>
+                <p className="text-xs text-muted font-medium">Runtime logs ({logs.length} lines):</p>
                 <pre className="p-3 rounded-sm bg-[var(--gray-200)] text-[11px] font-mono text-secondary whitespace-pre-wrap break-all max-h-64 overflow-y-auto leading-relaxed">
                   {logs.join('\n')}
                 </pre>

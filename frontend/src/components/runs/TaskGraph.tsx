@@ -221,7 +221,7 @@ export default function TaskGraph({ runId }: Props) {
                 <g transform={`translate(${NODE_W - 58}, 6)`}>
                   <rect x={0} y={0} width={52} height={14} rx={4}
                     fill={sb.bg} stroke={sb.border} strokeWidth={0.5} />
-                  <text x={26} y={7} fontSize={7.5} fill={sb.text} fontFamily="monospace"
+                  <text x={26} y={7} fontSize={7.5} fill={sb.text} fontFamily="'Geist Mono', monospace"
                     textAnchor="middle" dominantBaseline="middle" fontWeight="700">
                     {sb.label}
                   </text>
@@ -229,13 +229,13 @@ export default function TaskGraph({ runId }: Props) {
               )}
 
               {/* Task ID */}
-              <text x={24} y={16} fontSize={9} fill={c.dot} fontFamily="monospace" fontWeight="600"
+              <text x={24} y={16} fontSize={9} fill={c.dot} fontFamily="'Geist Mono', monospace" fontWeight="600"
                 dominantBaseline="middle">
                 {n.taskId.length > 22 ? n.taskId.slice(0, 21) + '…' : n.taskId}
               </text>
 
               {/* Title */}
-              <text x={10} y={38} fontSize={10.5} fill={c.text} fontFamily="sans-serif"
+              <text x={10} y={38} fontSize={10.5} fill={c.text} fontFamily="'Geist Sans', sans-serif"
                 dominantBaseline="middle">
                 {n.title.length > 26 ? n.title.slice(0, 25) + '…' : n.title}
               </text>
@@ -245,7 +245,7 @@ export default function TaskGraph({ runId }: Props) {
                 <g transform={`translate(${NODE_W - 54}, ${NODE_H - 20})`}>
                   <rect x={0} y={0} width={48} height={14} rx={4}
                     fill={cb.bg} />
-                  <text x={24} y={7} fontSize={8.5} fill={cb.text} fontFamily="monospace"
+                  <text x={24} y={7} fontSize={8.5} fill={cb.text} fontFamily="'Geist Mono', monospace"
                     textAnchor="middle" dominantBaseline="middle" fontWeight="600">
                     {n.complexity?.toUpperCase()}
                   </text>
@@ -254,7 +254,7 @@ export default function TaskGraph({ runId }: Props) {
 
               {/* Level badge */}
               <g transform={`translate(8, ${NODE_H - 20})`}>
-                <text x={0} y={7} fontSize={8} fill="#4b5563" fontFamily="monospace"
+                <text x={0} y={7} fontSize={8} fill="#4b5563" fontFamily="'Geist Mono', monospace"
                   dominantBaseline="middle">
                   L{n.level}
                 </text>
@@ -277,16 +277,16 @@ export default function TaskGraph({ runId }: Props) {
               <rect x={0} y={0} width={tw} height={th} rx={8}
                 fill="#111827" stroke={c.border} strokeWidth={1.5} />
               <text x={10} y={18} fontSize={10} fill={c.text} fontWeight="700"
-                fontFamily="sans-serif">{node.taskId}</text>
-              <text x={10} y={32} fontSize={9} fill="#9ca3af" fontFamily="sans-serif">
+                fontFamily="'Geist Sans', sans-serif">{node.taskId}</text>
+              <text x={10} y={32} fontSize={9} fill="#9ca3af" fontFamily="'Geist Sans', sans-serif">
                 {node.status} · {node.complexity ?? '?'} · L{node.level}
               </text>
-              <text x={10} y={46} fontSize={8.5} fill="#6b7280" fontFamily="monospace">
+              <text x={10} y={46} fontSize={8.5} fill="#6b7280" fontFamily="'Geist Mono', monospace">
                 {(node.assignedModel ?? '').replace('claude-', '').slice(0, 30)}
               </text>
               {node.dependsOn?.length > 0 && (
                 <>
-                  <text x={10} y={62} fontSize={8.5} fill="#4b5563" fontFamily="sans-serif">
+                  <text x={10} y={62} fontSize={8.5} fill="#4b5563" fontFamily="'Geist Sans', sans-serif">
                     depends on:
                   </text>
                   {node.dependsOn.map((d, i) => {
@@ -294,7 +294,7 @@ export default function TaskGraph({ runId }: Props) {
                     const depLabel = depNode ? depNode.title : d;
                     return (
                       <text key={d} x={16} y={74 + i * 14} fontSize={8.5}
-                        fill="#6366f1" fontFamily="monospace">
+                        fill="#6366f1" fontFamily="'Geist Mono', monospace">
                         → {depLabel.length > 28 ? depLabel.slice(0, 27) + '…' : depLabel}
                       </text>
                     );

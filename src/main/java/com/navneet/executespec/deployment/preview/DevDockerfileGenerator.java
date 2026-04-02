@@ -236,8 +236,21 @@ public class DevDockerfileGenerator {
         String dockerfile = generate(type, workspace);
 
         // Cloud Run sets PORT env var automatically via --port flag.
-        // Ensure container reads it at runtime. Add ENV PORT as fallback default.
-        if (!dockerfile.contains("ENV PORT")) {
+        // Ensure container reads it at runtime. Override any non-8080 PORT to 8080,
+        // or add ENV PORT=8080 if not present. Without this, a base Dockerfile with
+        // ENV PORT=3000 would ignore the ${PORT:-8080} defaults in CMD.
+        // Handles both standalone "ENV PORT=3000" and multi-value "ENV ... PORT=8000".
+        if (dockerfile.contains("ENV PORT=") && !dockerfile.contains("ENV PORT=8080")) {
+            // Standalone: ENV PORT=3000
+            dockerfile = dockerfile.replaceFirst("ENV PORT=\\d+", "ENV PORT=8080");
+        } else if (java.util.regex.Pattern.compile("(?<=\\s)PORT=\\d+").matcher(dockerfile).find()
+                && !java.util.regex.Pattern.compile("(?<=\\s)PORT=8080").matcher(dockerfile).find()) {
+            // Multi-value: ENV FLASK_RUN_HOST=0.0.0.0 FLASK_RUN_PORT=8000 ... PORT=8000
+            // Replace ALL port-related env values (FLASK_RUN_PORT, FLASK_PORT, PORT) to 8080
+            dockerfile = java.util.regex.Pattern.compile("(?<=\\s)((?:FLASK_RUN_|FLASK_)?PORT)=\\d+")
+                    .matcher(dockerfile).replaceAll("$1=8080");
+        } else if (!dockerfile.contains("ENV PORT=")
+                && !java.util.regex.Pattern.compile("(?<=\\s)PORT=\\d+").matcher(dockerfile).find()) {
             int lastFrom = dockerfile.lastIndexOf("FROM ");
             if (lastFrom >= 0) {
                 int endOfLine = dockerfile.indexOf('\n', lastFrom);
@@ -251,22 +264,49 @@ public class DevDockerfileGenerator {
 
         // Replace hardcoded ports with $PORT for Cloud Run compatibility.
         // Use shell form (not JSON exec) so $PORT expands at runtime.
+
+        // Multi-service full-stack CMD: only remap frontend (vite) port to Cloud Run's PORT.
+        // Backend stays on its native port (8080/8000/3000) since Cloud Run only exposes one port
+        // and the frontend is what users see in the preview.
+        boolean isMultiServiceCmd = dockerfile.contains("[backend]") && dockerfile.contains("[frontend]");
+        if (isMultiServiceCmd) {
+            // Only remap the vite --port inside the [frontend] section
+            dockerfile = dockerfile.replace("npx vite --host 0.0.0.0 --port 5173",
+                    "npx vite --host 0.0.0.0 --port ${PORT:-8080}");
+        }
+
         dockerfile = dockerfile.replace("EXPOSE 5173", "EXPOSE 8080");
         dockerfile = dockerfile.replace("EXPOSE 3000", "EXPOSE 8080");
         dockerfile = dockerfile.replace("EXPOSE 8000", "EXPOSE 8080");
-        // Vite: --port NNNN → --port ${PORT:-8080}
-        dockerfile = dockerfile.replace("--port 5173", "--port ${PORT:-8080}");
-        dockerfile = dockerfile.replace("--port 3000", "--port ${PORT:-8080}");
-        // Python
-        dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
+
+        if (!isMultiServiceCmd) {
+            // Vite: --port NNNN → --port ${PORT:-8080}
+            dockerfile = dockerfile.replace("--port 5173", "--port ${PORT:-8080}");
+            dockerfile = dockerfile.replace("--port 3000", "--port ${PORT:-8080}");
+            // Python
+            dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
+            dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:${PORT:-8080}");
+        }
+        // Node serve: -l NNNN → -l ${PORT:-8080}
+        dockerfile = dockerfile.replace("\"-l\", \"5173\"", "\"-l\", \"8080\"");
+        // Convert serve exec form to shell form so PORT env var is available
+        dockerfile = dockerfile.replace(
+                "CMD [\"npx\", \"serve\", \"-s\", \".\", \"-l\", \"8080\"]",
+                "CMD npx serve -s . -l ${PORT:-8080}");
+        // Python exec-form port replacement (single-service only)
         dockerfile = dockerfile.replace("\"--port\", \"8000\"", "\"--port\", \"8080\"");
-        dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:${PORT:-8080}");
         // Node backend with exec form: convert to shell form so PORT is respected
         // CMD ["npm", "start"] → CMD PORT=${PORT:-8080} npm start
         dockerfile = dockerfile.replace("CMD [\"npm\", \"start\"]",
                 "CMD PORT=${PORT:-8080} npm start");
         dockerfile = dockerfile.replace("CMD [\"npm\", \"run\", \"dev\"]",
                 "CMD PORT=${PORT:-8080} npm run dev");
+        // Monorepo backend-only: CMD ["npm", "run", "dev", "--prefix", "ws"] → shell form
+        dockerfile = java.util.regex.Pattern.compile(
+                "CMD \\[\"npm\", \"run\", \"dev\", \"--prefix\", \"([^\"]+)\"\\]")
+                .matcher(dockerfile)
+                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement("CMD PORT=${PORT:-8080} npm run dev --prefix ")
+                        + m.group(1));
         // Node backend with explicit main file
         // Use Matcher.replaceAll with quoteReplacement to avoid ${...} being interpreted as regex group ref
         dockerfile = java.util.regex.Pattern.compile("CMD \\[\"node\", \"([^\"]+)\"\\]")
@@ -301,10 +341,26 @@ public class DevDockerfileGenerator {
                 "\"sh\", \"-c\", \"ttyd --port ${PORT:-8080}\"");
         // MCP Inspector: replace hardcoded port with $PORT
         dockerfile = dockerfile.replace("--port 8080 --", "--port ${PORT:-8080} --");
+        // Multi-service full-stack on Cloud Run: shift backend to non-conflicting port.
+        // Frontend (vite) gets PORT (8080, exposed to Cloud Run). Backend moves to 8081.
+        if (isMultiServiceCmd) {
+            // Spring Boot backend inside sh -c: inject SERVER_PORT=8081
+            dockerfile = dockerfile.replace("mvn spring-boot:run -DskipTests -q",
+                    "SERVER_PORT=8081 mvn spring-boot:run -DskipTests -q");
+            // Python backend: shift 8000 → 8081 (only inside the [backend] section of compound CMD)
+            dockerfile = dockerfile.replace("runserver 0.0.0.0:8000", "runserver 0.0.0.0:8081");
+            dockerfile = dockerfile.replace("--port 8000", "--port 8081");
+            // Node backend: shift 3000 → 8081
+            // (Node apps typically read PORT env var, but in compound CMD it's set to 8080 for frontend)
+        }
         // Full-stack: Cloud Run only supports one port — use frontend port for preview
         dockerfile = dockerfile.replaceAll("EXPOSE \\d+ \\d+", "EXPOSE 8080");
         // Ruby: Sinatra default 4567 → Cloud Run PORT
         dockerfile = dockerfile.replace("EXPOSE 4567", "EXPOSE 8080");
+        // Rackup: convert exec form to shell form so ${PORT:-8080} expands at runtime
+        dockerfile = dockerfile.replace(
+                "CMD [\"bundle\", \"exec\", \"rackup\", \"--host\", \"0.0.0.0\", \"--port\", \"4567\"]",
+                "CMD bundle exec rackup --host 0.0.0.0 --port ${PORT:-8080}");
         dockerfile = dockerfile.replace("\"--port\", \"4567\"", "\"--port\", \"${PORT:-8080}\"");
         // Go: already uses 8080, just ensure shell form for PORT support
         // PHP: built-in server port
