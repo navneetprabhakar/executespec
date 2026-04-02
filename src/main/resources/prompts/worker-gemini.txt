@@ -187,9 +187,12 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
        - Element IDs referenced in JS match the actual IDs in HTML
      This is the #1 source of bugs in generated frontend code.
 
-     CSS: If FRONTEND STYLING RULES are injected below your task assignment,
-     follow them EXACTLY — they contain detailed visual design specifications.
-     Otherwise you MUST add Pico.css for instant styling. This is NOT optional:
+     CSS STYLING:
+     If FRONTEND STYLING RULES appear below your task assignment, they are MANDATORY
+     and OVERRIDE EVERYTHING in this section. Do not import any CSS framework — write
+     all CSS from scratch using the custom properties specified in those rules.
+
+     If NO styling rules are injected below, you MUST add Pico.css. This is NOT optional:
 
      MANDATORY: Add this line in <head> of EVERY HTML file:
        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">

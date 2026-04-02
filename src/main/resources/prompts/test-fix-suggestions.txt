@@ -6,7 +6,8 @@ TEST FAILURES:
 API CONVENTIONS:
 {conventions_doc}
 
-For each failure, provide a suggestion that a developer (or coding agent) can act on directly. Be specific — name the class, the annotation, the field, or the configuration that needs to change. Keep each suggestion under 30 words.
+Analyse ALL failures listed above in a single pass. Do not request additional context.
+For each failure, provide a suggestion that a developer (or coding agent) can act on directly. Be specific — name the class, the annotation, the field, or the configuration that needs to change. Keep each suggestion under 60 words. Complex fixes (e.g., add annotation + update exception handler + change response code) require all steps to be actionable.
 
 Examples of good suggestions:
 - Java/Spring: "Add @Column(unique = true) to User.email field and handle DataIntegrityViolationException in UserController to return 409 Conflict"
