@@ -65,8 +65,13 @@ public class SecurityConfig {
                 .headers(headers -> headers
                         .frameOptions(frame -> frame.deny())
                         .contentSecurityPolicy(csp -> csp.policyDirectives(
-                                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-                                        + "img-src 'self' data:; connect-src 'self' wss:; font-src 'self' https://fonts.gstatic.com; "
+                                "default-src 'self'; "
+                                        + "script-src 'self' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; "
+                                        + "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                                        + "img-src 'self' data:; "
+                                        + "connect-src 'self' wss:; "
+                                        + "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+                                        + "worker-src 'self' blob:; "
                                         + "frame-ancestors 'none'"))
                         .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000)))
                 // IF_REQUIRED when OAuth2 is enabled (needs sessions for auth code flow),
