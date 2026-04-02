@@ -282,6 +282,18 @@ preview:
     enterprise-max: 10
 
 app:
+  security:
+    csp:
+      enabled: true
+      # Override policy string per environment if needed
+      # policy: "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net ..."
+    hsts:
+      enabled: true
+      max-age-seconds: 31536000
+      include-sub-domains: true
+    frame-options:
+      enabled: true
+      mode: DENY    # DENY or SAMEORIGIN
   mail:
     # Transport: "smtp" (recommended for server) or "gmail-api" (OAuth, local dev)
     transport: smtp

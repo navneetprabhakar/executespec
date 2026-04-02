@@ -1,6 +1,7 @@
 package com.navneet.executespec.auth.security;
 
 import com.navneet.executespec.auth.oauth.OAuthSuccessHandler;
+import com.navneet.executespec.config.SecurityProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +36,7 @@ public class SecurityConfig {
     private final com.navneet.executespec.ratelimit.RateLimitFilter rateLimitFilter;
     @Nullable
     private final OAuthSuccessHandler oAuthSuccessHandler;
+    private final SecurityProperties securityProperties;
     private final boolean oauthEnabled;
 
     @Value("${app.cors.allowed-origins:http://localhost:5173}")
@@ -46,11 +48,13 @@ public class SecurityConfig {
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
             com.navneet.executespec.ratelimit.RateLimitFilter rateLimitFilter,
             @Nullable OAuthSuccessHandler oAuthSuccessHandler,
+            SecurityProperties securityProperties,
             @Value("${spring.security.oauth2.client.registration.google.client-id:none}") String googleClientId,
             @Value("${spring.security.oauth2.client.registration.github.client-id:none}") String githubClientId) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.rateLimitFilter = rateLimitFilter;
         this.oAuthSuccessHandler = oAuthSuccessHandler;
+        this.securityProperties = securityProperties;
 
         boolean hasGoogle = googleClientId != null && !"none".equals(googleClientId) && !googleClientId.isBlank();
         boolean hasGithub = githubClientId != null && !"none".equals(githubClientId) && !githubClientId.isBlank();
@@ -62,18 +66,37 @@ public class SecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                .headers(headers -> headers
-                        .frameOptions(frame -> frame.deny())
-                        .contentSecurityPolicy(csp -> csp.policyDirectives(
-                                "default-src 'self'; "
-                                        + "script-src 'self' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; "
-                                        + "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-                                        + "img-src 'self' data:; "
-                                        + "connect-src 'self' wss:; "
-                                        + "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-                                        + "worker-src 'self' blob:; "
-                                        + "frame-ancestors 'none'"))
-                        .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000)))
+                .headers(headers -> {
+                    // Frame options — feature-flagged
+                    if (securityProperties.getFrameOptions().isEnabled()) {
+                        String mode = securityProperties.getFrameOptions().getMode();
+                        headers.frameOptions(frame -> {
+                            if ("SAMEORIGIN".equalsIgnoreCase(mode)) {
+                                frame.sameOrigin();
+                            } else {
+                                frame.deny();
+                            }
+                        });
+                    } else {
+                        headers.frameOptions(frame -> frame.disable());
+                    }
+
+                    // Content Security Policy — feature-flagged
+                    if (securityProperties.getCsp().isEnabled()) {
+                        headers.contentSecurityPolicy(csp ->
+                                csp.policyDirectives(securityProperties.getCsp().getPolicy()));
+                    }
+
+                    // HSTS — feature-flagged
+                    if (securityProperties.getHsts().isEnabled()) {
+                        var hstsProps = securityProperties.getHsts();
+                        headers.httpStrictTransportSecurity(hsts -> hsts
+                                .includeSubDomains(hstsProps.isIncludeSubDomains())
+                                .maxAgeInSeconds(hstsProps.getMaxAgeSeconds()));
+                    } else {
+                        headers.httpStrictTransportSecurity(hsts -> hsts.disable());
+                    }
+                })
                 // IF_REQUIRED when OAuth2 is enabled (needs sessions for auth code flow),
                 // STATELESS otherwise (pure JWT)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(
