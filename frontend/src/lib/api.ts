@@ -619,6 +619,11 @@ export async function downloadWorkspace(runId: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+export const pushToGitHub = (runId: string, repoMode = 'NEW') =>
+  req<{ status: string; repoUrl: string }>(
+    `/runs/${runId}/push-github?repoMode=${repoMode}`, { method: 'POST' }
+  );
+
 /** File content is served as text/plain — must NOT use res.json(). */
 export const getFile = (runId: string, filePath: string) =>
   reqText(`/runs/${runId}/file?path=${encodeURIComponent(filePath)}`);

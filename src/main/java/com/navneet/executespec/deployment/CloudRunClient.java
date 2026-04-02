@@ -163,6 +163,7 @@ public class CloudRunClient {
         // Inject env vars via YAML file to avoid shell escaping issues with special chars
         Path envFile = null;
         if (envVars != null && !envVars.isEmpty()) {
+            envVars = new java.util.HashMap<>(envVars); // defensive copy — caller may pass immutable map
             envVars.remove("PORT"); // Cloud Run sets this automatically via --port flag
             if (!envVars.isEmpty()) {
                 StringBuilder yaml = new StringBuilder();
