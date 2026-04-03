@@ -196,7 +196,11 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
       - lucide-react
       - clsx
       - tailwind-merge
-      - @vitejs/plugin-react (if creating/editing vite.config.js)
+
+      Resolution Fix:
+      When running `npm install` for local verification, ALWAYS use:
+      `npm install --legacy-peer-deps`
+      to bypass peer dependency conflicts in generated projects.
 
      DOM CONSISTENCY — MANDATORY CHECK:
      When writing JavaScript that reads from HTML elements (dataset.*, getAttribute,
