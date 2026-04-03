@@ -1,5 +1,6 @@
 package com.navneet.executespec.recovery;
 
+import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -26,6 +27,7 @@ import java.util.List;
 public class StuckRunMonitor {
 
     private final StateStore stateStore;
+    private final PipelineHarness harness;
     private final RunRecoveryService recoveryService;
     private final SseBroadcaster sseBroadcaster;
     private final RecoveryProperties props;
@@ -60,6 +62,15 @@ public class StuckRunMonitor {
                 Duration idle = Duration.between(task.getLastActivityAt(), now);
 
                 if (idle.compareTo(actThreshold) >= 0 && task.getStuckDetectedAt() == null) {
+                    // Skip if pipeline thread is still alive — it may be between
+                    // tasks or in post-processing; triggering recovery would spawn
+                    // a duplicate execution thread.
+                    if (harness.isRunActive(task.getRunId())) {
+                        log.debug("Task {} idle but pipeline thread active for run {} — skipping recovery",
+                            task.getTaskId(), task.getRunId());
+                        continue;
+                    }
+
                     stuckCount++;
                     Counter.builder(STUCK_DETECTED).register(meterRegistry).increment();
                     log.warn("Task {} idle for {}min — triggering recovery",

@@ -182,6 +182,7 @@ public class WorkerAgent {
         final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
         int toolCallCount = 0;  // total tool calls dispatched — for hard iteration limit
         int continuations = 0;  // truncation auto-continue count
+        int consecutiveNonJsonOutputs = 0; // consecutive non-tool, non-JSON outputs
         int skeletonRecoveries = 0; // skeleton recovery injection count
         int configuredMaxOutput = budgetMonitor.maxOutputTokens(model, complexity); // for calibration tracking
 
@@ -461,6 +462,7 @@ public class WorkerAgent {
                         toolCalls = parseXmlToolCalls(assistantText);
                     }
                     if (!toolCalls.isEmpty()) {
+                        consecutiveNonJsonOutputs = 0; // reset — model is cooperating
                         StringBuilder results = new StringBuilder();
                         for (ParsedToolCall tc : toolCalls) {
                             Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
@@ -527,12 +529,31 @@ public class WorkerAgent {
                             assistantText.length() <= 300 ? assistantText : assistantText.substring(0, 300) + "...");
                 }
 
+                consecutiveNonJsonOutputs++;
                 String continuePrompt;
                 long minsLeft = Duration.between(Instant.now(), deadline).toMinutes();
                 if (minsLeft <= 3) {
                     continuePrompt = "You have approximately " + minsLeft + " minute(s) remaining. " +
                             "If you have finished all your work, output ONLY your completion JSON report now. " +
                             "Otherwise, call the MOST IMPORTANT remaining tool using <tool_call> XML tags.";
+                } else if (consecutiveNonJsonOutputs >= 2) {
+                    // Escalated prompt after 2+ consecutive non-JSON outputs
+                    log.warn("[Worker {}] {} consecutive non-JSON outputs — injecting strict completion demand",
+                            taskId, consecutiveNonJsonOutputs);
+                    stateStore.appendTaskLog(taskId, "NON_JSON_ESCALATION:" + consecutiveNonJsonOutputs);
+                    continuePrompt = "STOP. You have produced " + consecutiveNonJsonOutputs +
+                            " consecutive responses that are neither tool calls nor a valid completion report. " +
+                            "This is wasting your iteration budget.\n\n" +
+                            "OUTPUT ONLY THE JSON COMPLETION REPORT NOW. No prose, no explanation, no markdown — " +
+                            "ONLY the raw JSON object starting with { and ending with }.\n\n" +
+                            "If your task is done:\n" +
+                            "{\"task_id\": \"YOUR_TASK_ID\", \"status\": \"complete\", " +
+                            "\"files_created\": [...], \"files_modified\": [...], " +
+                            "\"files_read\": [...], \"self_review\": \"...\", " +
+                            "\"blockers\": null, \"notes_for_reviewer\": \"...\"}\n\n" +
+                            "If you still need to call a tool, use EXACTLY this format:\n" +
+                            "<tool_call>{\"name\": \"TOOL_NAME\", \"args\": {\"KEY\": \"VALUE\"}}</tool_call>\n\n" +
+                            "NOTHING ELSE. Your next response must start with either { or <tool_call>.";
                 } else {
                     continuePrompt = "Your response was not recognized as a tool call. To call a tool, " +
                             "you MUST use <tool_call> XML tags. Example:\n" +

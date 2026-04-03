@@ -246,14 +246,23 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    The CompilerAgent handles compilation after all tasks are complete.
    After committing your code, proceed directly to SELF-REVIEW.
 
-4. TEST (if applicable)
-   Run tests (e.g. `mvn test -q` or `npm test`).
-   If tests fail:
+4. TEST (only if tests already exist)
+   Run tests ONLY IF a test script or test configuration already exists in the project.
+   - For Node.js/frontend projects: read package.json and check the "test" script.
+     Do NOT run `npm test` if:
+       * There is no "test" script in package.json
+       * The "test" script is the default `echo "Error: no test specified" && exit 1`
+       * You created package.json from scratch in this task (new projects have no tests)
+   - For Java/Maven projects: only run `mvn test -q` if test files exist in src/test/.
+   - For Python projects: only run tests if pytest.ini, setup.cfg [tool:pytest], or test files exist.
+   - For static HTML/CSS/JS projects: skip testing entirely — there is no test runner.
+   If you DO run tests and they fail:
      - Read the failure output carefully.
      - Fix the root cause — not the symptom.
      - Do not change tests to make them pass unless the tests are genuinely wrong.
      - Commit the fix, re-run tests.
      - If you fail the same test 3 times: stop, note it as a blocker.
+   If no tests exist, skip this step and proceed to SELF-REVIEW.
 
 5. SELF-REVIEW (verify before reporting done)
    - Does my output match the task objective and acceptance criteria?
