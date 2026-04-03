@@ -230,8 +230,10 @@ public class DevDockerfileGenerator {
             };
         }
 
-        // Use --legacy-peer-deps to avoid peer dependency failures in generated projects
-        dockerfile = dockerfile.replace("RUN npm install\n", "RUN npm install --legacy-peer-deps\n");
+        // Use --legacy-peer-deps to avoid peer dependency failures in generated projects.
+        // This is a universal fix that catches all variations of 'npm install' or 'npm ci'
+        // across all Dockerfile generators (SinglePackage, FullStack, Monorepo, etc).
+        dockerfile = dockerfile.replaceAll("(?m)^(\\s*RUN\\s+.*npm\\s+(?:install|ci))(\\b(?!.*--legacy-peer-deps))", "$1 --legacy-peer-deps");
         return injectNonRootUser(dockerfile, type);
     }
 
