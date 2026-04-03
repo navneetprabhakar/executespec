@@ -36,7 +36,7 @@ public class RecoveryProperties {
 
     // ── Orphaned run watchdog ────────────────────────────────────────────────
     /** Minutes of run inactivity (no active tasks) before watchdog triggers recovery. */
-    private int orphanedRunThresholdMinutes = 5;
+    private int orphanedRunThresholdMinutes = 15;
 
     // ── Auto-resume on startup ────────────────────────────────────────────
     /** Auto-resume non-terminal runs when application starts (after deployment). */

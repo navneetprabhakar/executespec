@@ -82,6 +82,9 @@ public class OrphanedRunWatchdog {
             // 2. Skip if currently being recovered (in-memory dedup guard)
             if (recovering.contains(runId)) continue;
 
+            // 2b. Skip if pipeline thread is still alive (prevents duplicate execution)
+            if (harness.isRunActive(runId)) continue;
+
             // 3. Skip if any task is actively executing (WORKING or LOCKED)
             List<AgentTask> activeTasks = stateStore.getActiveTasksForRun(runId);
             if (!activeTasks.isEmpty()) continue;

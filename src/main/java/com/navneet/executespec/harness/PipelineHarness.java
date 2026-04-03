@@ -171,6 +171,13 @@ public class PipelineHarness {
      */
     private final Set<String> backgroundValidationRuns = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Tracks runs with an active pipeline thread (executeRunAsync or runResumeAsync).
+     * Used by OrphanedRunWatchdog and StuckRunMonitor to avoid triggering recovery
+     * on runs that already have a live execution thread.
+     */
+    private final Set<String> activeRunThreads = ConcurrentHashMap.newKeySet();
+
     // ── Async infrastructure ──────────────────────────────────────────────────
 
     /**
@@ -728,6 +735,15 @@ public class PipelineHarness {
     }
 
     /**
+     * Returns true if the given run has an active pipeline execution thread
+     * (either executeRunAsync or runResumeAsync). Used by recovery components
+     * (OrphanedRunWatchdog, StuckRunMonitor) to avoid spawning duplicate threads.
+     */
+    public boolean isRunActive(String runId) {
+        return activeRunThreads.contains(runId);
+    }
+
+    /**
      * Resumes a PAUSED run — continues the same run from the worker phase,
      * preserving completed tasks and re-running incomplete ones.
      * Unlike restartWithNewGoal(), this does NOT create a new run.
@@ -899,6 +915,7 @@ public class PipelineHarness {
      */
     void runResumeAsync(PipelineRun run) {
         String runId = run.getRunId();
+        activeRunThreads.add(runId);
 
         Observation resumeObs = Observation.createNotStarted("executespec.run.resume", observationRegistry)
             .lowCardinalityKeyValue("run.id", runId)
@@ -1007,6 +1024,7 @@ public class PipelineHarness {
             stateStore.markFailed(runId, "Resume failed: " + e.getMessage());
             broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
         } finally {
+            activeRunThreads.remove(runId);
             resumeObs.stop();
             broadcaster.complete(runId);
             runKeyStore.remove(runId);
@@ -1404,6 +1422,7 @@ public class PipelineHarness {
 
     private void executeRunAsync(String runId, String userRequest) {
         log.info("Executing async run {}", runId);
+        activeRunThreads.add(runId);
         Metrics.ACTIVE_RUNS.incrementAndGet();
         Instant metricsRunStart = Instant.now();
 
@@ -2182,6 +2201,7 @@ public class PipelineHarness {
                 // Auto-retry disabled — runs stay at their terminal status
             }
         } finally {
+            activeRunThreads.remove(runId);
             Metrics.ACTIVE_RUNS.decrementAndGet();
             // Record run duration and count
             String finalStatus = "UNKNOWN";
