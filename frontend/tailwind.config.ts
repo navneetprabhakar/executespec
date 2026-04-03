@@ -30,6 +30,8 @@ export default {
           red: 'var(--status-error)',
           amber: 'var(--status-building)',
           green: '#17B169',
+          harness: 'var(--accent-harness)',
+          planner: 'var(--accent-planner)',
         },
         // Status colors
         status: {

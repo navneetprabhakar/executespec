@@ -474,10 +474,10 @@ public class DevDockerfileGenerator {
                     CMD ["npx", "serve", "-s", ".", "-l", "5173"]""";
         }
 
-        // Ensure vite is installed at build time (npx auto-download at runtime is too slow)
+        // Ensure vite and react plugin are installed at build time (npx auto-download at runtime is too slow)
         String viteInstall = "";
         if (cmd.contains("vite") && !fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) {
-            viteInstall = " && npm install vite";
+            viteInstall = " && npm install -D vite @vitejs/plugin-react react react-dom";
         }
 
         return """
@@ -547,11 +547,11 @@ public class DevDockerfileGenerator {
             cmd = "CMD [\"npm\", \"start\"]";
         }
 
-        // Ensure vite is available
+        // Ensure vite and react plugin are available
         String viteInstall = "";
         if ((hasDevScript || hasViteConfig)
                 && !fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) {
-            viteInstall = " && npm install vite";
+            viteInstall = " && npm install -D vite @vitejs/plugin-react react react-dom";
         }
 
         return """
