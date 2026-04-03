@@ -3,6 +3,20 @@ name: Build & Deploy
 on:
   push:
     branches: [ main, dev ]
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - main
+      target_sha:
+        description: 'Commit SHA to deploy (leave blank for latest)'
+        required: false
+        type: string
 
 env:
   JAVA_VERSION: '21'
@@ -10,14 +24,15 @@ env:
 
 jobs:
   build-and-deploy:
-    name: Build → Deploy (${{ github.ref_name == 'main' && 'prod' || 'dev' }})
+    name: Build → Deploy (${{ inputs.target_env || (github.ref_name == 'main' && 'prod' || 'dev') }})
     runs-on: ubuntu-latest
 
-    # ── Environment: main → production, dev → development ───────────────────
-    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    # ── Environment ───────────────────
+    environment: ${{ (inputs.target_env || github.ref_name) == 'main' && 'production' || 'development' }}
 
     env:
-      DEPLOY_ENV:    ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+      DEPLOY_ENV:    ${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || 'dev' }}
+      TARGET_SHA:    ${{ inputs.target_sha || github.sha }}
       GCP_PROJECT:   ${{ secrets.GCP_PROJECT }}
       GCP_REGION:    ${{ secrets.GCP_REGION }}
       GCE_ZONE:      ${{ secrets.GCE_ZONE }}
@@ -31,6 +46,9 @@ jobs:
       # ── Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0 # Ensure we can get commit messages for Slack
 
       # ── Java setup ────────────────────────────────────────────────────────
       - name: Set up Java ${{ env.JAVA_VERSION }}
@@ -92,9 +110,9 @@ jobs:
       - name: Upload JAR to GCS
         run: |
           JAR=$(ls target/*.jar | head -1)
-          gsutil cp "$JAR" ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar
-          echo "${{ github.sha }}" | gsutil cp - ${{ env.DEPLOY_BUCKET }}/CURRENT_SHA
-          echo "Uploaded: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
+          gsutil cp "$JAR" ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar
+          echo "${{ env.TARGET_SHA }}" | gsutil cp - ${{ env.DEPLOY_BUCKET }}/CURRENT_SHA
+          echo "Uploaded: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar"
 
       # ── Set static instance name (standalone VM — no MIG) ──────────────
       - name: Set instance name
@@ -224,11 +242,11 @@ jobs:
             --command="
               set -e
               sudo mkdir -p /opt/app/releases
-              sudo gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar /opt/app/releases/
+              sudo gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/releases/
               sudo bash /tmp/env-patch.sh '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy'
               rm -f /tmp/env-patch.sh
-              sudo ln -sf /opt/app/releases/app-${{ github.sha }}.jar /opt/app/app.jar
-              echo '${{ github.sha }}' | sudo tee /opt/app/RUNNING_SHA
+              sudo ln -sf /opt/app/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/app.jar
+              echo '${{ env.TARGET_SHA }}' | sudo tee /opt/app/RUNNING_SHA
               sudo systemctl restart executespec
               echo 'Deploy done — service restarting'
             "
@@ -309,7 +327,7 @@ jobs:
       # ── Prune old releases (keep last 10) ─────────────────────────────────
       - name: Prune old JAR releases
         run: |
-          CURRENT_JAR="app-${{ github.sha }}.jar"
+          CURRENT_JAR="app-${{ env.TARGET_SHA }}.jar"
           ALL_JARS=$(gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ | sort)
           COUNT=$(echo "$ALL_JARS" | wc -l)
           if [ "$COUNT" -gt 10 ]; then
@@ -325,8 +343,8 @@ jobs:
       # ── Summary ───────────────────────────────────────────────────────────
       - name: Deployment summary
         run: |
-          echo "✅ Deployed commit ${{ github.sha }} to ${GCE_INSTANCE_RESOLVED:-unknown} (${{ env.DEPLOY_ENV }})"
-          echo "   JAR: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ github.sha }}.jar"
+          echo "✅ Deployed commit ${{ env.TARGET_SHA }} to ${GCE_INSTANCE_RESOLVED:-unknown} (${{ env.DEPLOY_ENV }})"
+          echo "   JAR: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar"
           echo "   Branch: ${{ github.ref_name }}"
           echo "   Environment: ${{ env.DEPLOY_ENV }}"
 
@@ -338,7 +356,7 @@ jobs:
         run: |
           [ -z "$SLACK_WEBHOOK_URL" ] && echo "No SLACK_WEBHOOK_URL — skipping" && exit 0
           COMMIT_MSG=$(git log -1 --pretty=%s | head -c 80)
-          COMMIT_URL="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+          COMMIT_URL="https://github.com/${{ github.repository }}/commit/${{ env.TARGET_SHA }}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           # Build payload with jq to handle escaping safely
           PAYLOAD=$(jq -nc \
