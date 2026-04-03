@@ -147,8 +147,6 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    HTML/CSS/JS (static projects — no framework):
      Every HTML file that references a CSS or JS file via <link> or <script> tags MUST
       FRONTEND DOMAIN — MANDATORY RULES:
-      - If you create a vite.config.js, you MUST include "@vitejs/plugin-react", "react",
-        and "react-dom" in your package.json dependencies/devDependencies.
       - NEVER use absolute paths for assets; use relative paths.
       - If you create style.css, YOU must create style.css — do not assume another task will.
 
@@ -168,6 +166,11 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
       - clsx
       - tailwind-merge
       - @vitejs/plugin-react (if creating/editing vite.config.js)
+
+      Resolution Fix:
+      When running `npm install` for local verification, ALWAYS use:
+      `npm install --legacy-peer-deps`
+      to bypass peer dependency conflicts in generated projects.
 
       DOM CONSISTENCY — MANDATORY CHECK:
      When writing JavaScript that reads from HTML elements (dataset.*, getAttribute,

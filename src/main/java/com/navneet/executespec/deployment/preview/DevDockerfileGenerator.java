@@ -488,7 +488,7 @@ public class DevDockerfileGenerator {
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\"")) missing.append(" tailwind-merge");
 
             if (missing.length() > 0) {
-                viteInstall = " && npm install -D" + missing.toString();
+                viteInstall = " && npm install -D" + missing.toString() + " --legacy-peer-deps";
             }
         }
 
@@ -497,7 +497,7 @@ public class DevDockerfileGenerator {
                 WORKDIR /app
                 LABEL preview=true
                 COPY package*.json ./
-                RUN npm install""" + viteInstall + "\n" +
+                RUN npm install --legacy-peer-deps""" + viteInstall + "\n" +
                 "COPY . .\n" +
                 "EXPOSE 5173\n" +
                 cmd.stripLeading() + "\n";
@@ -526,7 +526,7 @@ public class DevDockerfileGenerator {
                 ENV HOST=0.0.0.0
                 ENV PORT=3000
                 COPY package*.json ./
-                RUN npm install
+                RUN npm install --legacy-peer-deps
                 COPY . .
                 EXPOSE 3000
                 """ + cmd.stripLeading() + "\n";
@@ -573,7 +573,7 @@ public class DevDockerfileGenerator {
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\"")) missing.append(" tailwind-merge");
 
             if (missing.length() > 0) {
-                viteInstall = " && npm install -D" + missing.toString();
+                viteInstall = " && npm install -D" + missing.toString() + " --legacy-peer-deps";
             }
         }
 
@@ -584,7 +584,7 @@ public class DevDockerfileGenerator {
                 ENV HOST=0.0.0.0
                 ENV PORT=3000
                 COPY package*.json ./
-                RUN npm install""" + viteInstall + "\n" +
+                RUN npm install --legacy-peer-deps""" + viteInstall + "\n" +
                 "COPY . .\n" +
                 // Patch package.json scripts: inject --host 0.0.0.0 into any script value that
                 // invokes "vite" without --host. Uses Node's JSON parser to target only script
@@ -1673,7 +1673,7 @@ public class DevDockerfileGenerator {
                 LABEL preview=true
                 RUN npm install -g @modelcontextprotocol/inspector
                 COPY package*.json ./
-                RUN npm install
+                RUN npm install --legacy-peer-deps
                 COPY . .
                 EXPOSE 8080
                 ENV CLIENT_PORT=8080
