@@ -147,7 +147,8 @@ HARD RULES — violating these causes the run to fail
 3b. Every task MUST include an "owned_files" array listing every file it will create or modify.
 - File locks are enforced at write time: a task CANNOT write to a file owned by another task.
 - Two tasks must NOT share any file in their owned_files lists.
-- Common files like README.md should be owned by the last task in the dependency chain.
+- **CRITICAL APP COMPONENT EXCEPTION**: Never put App.jsx, App.tsx, App.vue, or main application entrypoints in the owned_files of multiple tasks. If the app shell setup and component integration both need to touch App.jsx, combine them into a single task, OR assign App.jsx only to the downstream integration task while the scaffold task leaves placeholder imports.
+- File ownership is exclusive. If Task 1 owns `README.md`, Task 2 cannot own or assume it owns `README.md`.
 - Use relative paths from the workspace root (e.g., "src/main/java/com/example/UserService.java").
 - Include ALL files the task will touch, including configuration files and test files.
 - For static HTML projects: if a task creates index.html that references style.css
@@ -318,19 +319,31 @@ Do NOT split:
 FRONTEND / STATIC PROJECT TASK RULES:
   For static HTML/CSS/JS projects (no build tool, no framework):
   - ALWAYS bundle HTML + CSS + JS for the same page into ONE task if total is <200 lines
-    AND the page has ≤3 content sections. For pages with 4+ sections (landing pages,
-    portfolios), use the MULTI-SECTION SINGLE-PAGE RULE below instead.
-Splitting index.html, style.css, and script.js into separate tasks creates cross-file
-    consistency bugs (the #1 failure mode for frontend projects).
+    AND the page has ≤3 content sections.
+  - UI CONSISTENCY RULE: Group functionally related UI components into the same task,
+    to ensure CSS classes and spacing are written contiguously.
+  - THEME FIRST RULE: The first frontend task (app_shell or index setup) MUST
+    define a comprehensive set of CSS variables (shadows, spacing, font-sizes, colors) 
+    that all subsequent tasks must import and use.
+
+  Splitting index.html, style.css, and script.js into separate tasks creates cross-file
+  consistency bugs (the #1 failure mode for frontend projects).
+
 - If the project is larger, split by PAGE or FEATURE, not by file type.
-GOOD: "Create calculator UI (index.html + style.css + script.js)"
-    BAD:  "Create HTML structure" + "Create CSS styles" + "Create JS logic"
+  GOOD: "Create calculator UI (index.html + style.css + script.js)"
+  BAD:  "Create HTML structure" + "Create CSS styles" + "Create JS logic"
+
   - The task that creates HTML MUST also create any CSS/JS files it references.
-Never assume a parallel task will create the stylesheet — it won't be visible.
+    Never assume a parallel task will create the stylesheet — it won't be visible.
+
 For React/Vue/Angular/Svelte projects:
+  - THEME SETUP: The very first frontend task (`app_shell` or `layout`) MUST create 
+    a `global.css` or `index.css` file defining the design tokens (CSS variables) 
+    from the Styling Rules.
   - Split by component, not by concern (don't separate component JSX from its styles).
-- One task per component or small group of related components.
-- The project_setup task must include routing setup and global styles.
+  - One task per component or small group of related components.
+  - The project_setup task must include routing setup and global style placeholders.
+
 LAYER REMINDER: Frontend tasks must ONLY own frontend/** files (task_layer: FRONTEND).
   Backend tasks must ONLY own src/main/java/** files (task_layer: BACKEND).
   Never mix Java and React/TS files in the same task.

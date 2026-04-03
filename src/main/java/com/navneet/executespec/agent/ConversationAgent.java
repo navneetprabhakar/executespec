@@ -9,6 +9,7 @@ import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewSession;
+import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -85,6 +86,7 @@ public class ConversationAgent {
     private final PreviewService previewService;
     private final ObjectMapper objectMapper;
     private final StateStore stateStore;
+    private final ValidationReportRepository validationReportRepository;
 
     /**
      * Sends a user message in the context of a completed run and returns the assistant reply.
@@ -377,6 +379,10 @@ public class ConversationAgent {
         if (run.getFailureReason() != null && !run.getFailureReason().isBlank()) {
             failureSection = "FAILURE REASON:\n" + run.getFailureReason() + "\n";
         }
+        String validationSection = validationReportRepository.findByRunId(run.getRunId())
+                .filter(r -> r.getReportMarkdown() != null && !r.getReportMarkdown().isBlank())
+                .map(r -> "VALIDATION REPORT:\n" + truncate(r.getReportMarkdown(), 3000) + "\n")
+                .orElse("");
 
         return """
             You are an expert software engineering assistant reviewing a completed automated coding run.
@@ -390,6 +396,7 @@ public class ConversationAgent {
             Planned by: %s
             Status: %s
 
+            %s
             %s
             %s
             %s
@@ -446,7 +453,7 @@ public class ConversationAgent {
             encourage the user to click "Apply to Run" for targeted fixes, or
             "Implement as New Run" for substantial rewrites.
             """.formatted(request, run.getRunId(), model, status,
-                    planSection, reviewSection, failureSection,
+                    planSection, reviewSection, failureSection, validationSection,
                     previewContext, workspaceContext, MAX_MESSAGES);
     }
 

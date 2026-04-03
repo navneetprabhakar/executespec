@@ -1,13 +1,20 @@
 # Frontend Separation Guide
 
 > Step-by-step guide to extract the ExecuteSpec frontend into its own repository while keeping the same deployment strategy (single JAR with embedded frontend).
+> Last updated: 2026-04-03
 
 ## Current Architecture
 
 ```
 executespec/                          # Monorepo
-  frontend/                           # React 18 + Vite 5 + Tailwind + TS 5.3
+  frontend/                           # React 18 + Vite 5 + Tailwind CSS 3.4 + TS 5.3
     src/
+      pages/                          # 15 standalone pages + admin/ (6), auth/ (7), org/ (2)
+      components/                     # 11 directories: auth, billing, dashboard, deployments,
+                                      #   integrations, layout, pricing, run, runs, shared, ui
+      hooks/                          # 7 hooks (useSse, useViewMode, useKeyboardShortcuts, etc.)
+      lib/                            # 10 files (api, billing-api, invoice-api, telemetry, etc.)
+      stores/                         # 5 Zustand stores (auth, metrics, run, sse, ui)
     package.json
     vite.config.ts                    # build.outDir: '../src/main/resources/static'
     tsconfig.json
@@ -17,7 +24,7 @@ executespec/                          # Monorepo
       static/                         # <-- Vite build output lands here
         index.html
         assets/
-  .github/workflows/deploy.yml       # Builds frontend → JAR → deploys to GCE
+  .github/workflows/deploy.yml       # Builds frontend -> JAR -> deploys to GCE
 ```
 
 **How it works today:**
@@ -280,14 +287,16 @@ server: {
 | React source (`src/`) | Java backend code |
 | TypeScript types/interfaces | LLM prompts |
 | API client (`lib/api.ts`) | Agent logic |
-| UI components | Billing/auth backend |
-| Vite/Tailwind config | Database migrations |
-| CI workflow (frontend only) | Infrastructure (Terraform) |
-| | Secrets/API keys |
+| Billing API client (`lib/billing-api.ts`) | Billing/auth backend |
+| Invoice API client (`lib/invoice-api.ts`) | Database migrations |
+| UI components | Infrastructure (Terraform) |
+| Zustand stores (auth, metrics, run, sse, ui) | Secrets/API keys |
+| Vite/Tailwind config | |
+| CI workflow (frontend only) | |
 
 ### 4.3 Shared contract: API types
 
-The frontend defines TypeScript interfaces for API responses in `src/lib/api.ts`. These must stay in sync with backend DTOs.
+The frontend defines TypeScript interfaces for API responses in `src/lib/api.ts`, `src/lib/billing-api.ts`, and `src/lib/invoice-api.ts`. These must stay in sync with backend DTOs.
 
 **Coordination strategy:**
 1. Backend developer documents API changes in the OpenAPI spec (see `docs/openapi.yaml`)
@@ -336,9 +345,9 @@ jobs:
 - [ ] `FRONTEND_REPO_PAT` secret added to backend repo
 - [ ] Frontend removed from backend repo
 - [ ] `src/main/resources/static/` gitignored (with `.gitkeep`)
-- [ ] Push to `dev` branch → verify dev deployment works
+- [ ] Push to `dev` branch -> verify dev deployment works
 - [ ] Frontend developer can `npm run dev` with proxy to backend
-- [ ] Push to `main` branch → verify prod deployment works
+- [ ] Push to `main` branch -> verify prod deployment works
 
 ### 6.2 Rollback plan
 

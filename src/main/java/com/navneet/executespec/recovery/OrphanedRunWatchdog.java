@@ -66,6 +66,10 @@ public class OrphanedRunWatchdog {
     public void detectOrphanedRuns() {
         if (!props.isEnabled()) return;
 
+        // Phase 1: Detect zombie tasks (stuck WORKING with failureReason set)
+        detectZombieTasks();
+
+        // Phase 2: Detect orphaned runs (original logic)
         // 1. Query all runs in active non-terminal, non-gate statuses
         List<PipelineRun> candidates = stateStore.findRunsByStatuses(
             List.of("WORKING", "PLANNING", "REVIEWING", "STUCK")
@@ -86,8 +90,13 @@ public class OrphanedRunWatchdog {
             if (harness.isRunActive(runId)) continue;
 
             // 3. Skip if any task is actively executing (WORKING or LOCKED)
+            //    But exclude "zombie" tasks — WORKING tasks that have a failureReason
+            //    (merge conflict set the failure but status transition didn't complete)
             List<AgentTask> activeTasks = stateStore.getActiveTasksForRun(runId);
-            if (!activeTasks.isEmpty()) continue;
+            List<AgentTask> genuinelyActive = activeTasks.stream()
+                .filter(t -> t.getLastLlmFailure() == null || !t.getLastLlmFailure().contains("Merge conflict"))
+                .toList();
+            if (!genuinelyActive.isEmpty()) continue;
 
             // 4. Skip if run is at a gate (user-gated, not stuck)
             if (run.getCurrentGate() != null) continue;
@@ -110,6 +119,110 @@ public class OrphanedRunWatchdog {
             } finally {
                 recovering.remove(runId);
             }
+        }
+    }
+
+    /**
+     * Detects "zombie" tasks — tasks stuck in WORKING status where the merge
+     * conflict handler set a failureReason but didn't complete the status transition.
+     * This can happen when the virtual thread handling progressive merge encounters
+     * a race condition between stateStore.failTask() and the thread's own status tracking.
+     *
+     * <p>For each zombie task found, forces it to FAILED and checks if the parent
+     * run should transition to PARTIAL (all tasks terminated but run still WORKING).
+     */
+    private void detectZombieTasks() {
+        List<AgentTask> workingTasks = stateStore.getWorkingTasks();
+        if (workingTasks.isEmpty()) return;
+
+        Instant now = Instant.now();
+
+        for (AgentTask task : workingTasks) {
+            // A zombie: WORKING status + has a merge-conflict failure reason
+            // + no activity for > 5 minutes (safety margin)
+            boolean hasConflictFailure = task.getLastLlmFailure() != null
+                && task.getLastLlmFailure().contains("Merge conflict");
+
+            if (!hasConflictFailure) continue;
+
+            Duration idle = task.getLastActivityAt() != null
+                ? Duration.between(task.getLastActivityAt(), now)
+                : Duration.ofHours(24);
+
+            if (idle.toMinutes() < 5) continue;  // Give it a grace period
+
+            log.warn("Zombie task detected: {} — WORKING with merge conflict failure, idle {}min",
+                task.getTaskId(), idle.toMinutes());
+
+            // Force transition to FAILED
+            stateStore.failTask(task.getTaskId(),
+                task.getLastLlmFailure() + " Retry this task to regenerate the changes cleanly.");
+            broadcaster.emit(task.getRunId(),
+                RunEvent.taskStatus(task.getRunId(), task.getTaskId(), "FAILED"));
+
+            // Check if the parent run should now transition
+            forceTerminateStuckRun(task.getRunId());
+        }
+    }
+
+    /**
+     * After forcing a zombie task to FAILED, checks whether the parent run
+     * is stuck (all tasks terminal but run still in WORKING/STUCK status).
+     * If so, transitions the run to PARTIAL with a descriptive reason.
+     */
+    private void forceTerminateStuckRun(String runId) {
+        PipelineRun run = stateStore.findRun(runId).orElse(null);
+        if (run == null) return;
+        if (!"WORKING".equals(run.getStatus()) && !"STUCK".equals(run.getStatus())) return;
+
+        // Skip if pipeline thread is still alive
+        if (harness.isRunActive(runId)) return;
+
+        List<AgentTask> allTasks = stateStore.getAllTasks(runId);
+        boolean allTerminal = allTasks.stream().allMatch(t ->
+            "COMPLETE".equals(t.getStatus()) || "FAILED".equals(t.getStatus())
+            || "BLOCKED".equals(t.getStatus()) || "CANCELLED".equals(t.getStatus()));
+
+        if (!allTerminal) return;
+
+        boolean hasAnyComplete = allTasks.stream()
+            .anyMatch(t -> "COMPLETE".equals(t.getStatus()));
+
+        List<String> failedTitles = allTasks.stream()
+            .filter(t -> "FAILED".equals(t.getStatus()))
+            .map(t -> t.getTitle() + " [FAILED]")
+            .toList();
+
+        String reason = "Watchdog: " + failedTitles.size() + " task(s) failed (merge conflicts). "
+            + "Use 'Retry Task' on each failed task.";
+
+        if (hasAnyComplete) {
+            stateStore.markPartial(runId, reason);
+            broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                "⚠️ Run auto-recovered as PARTIAL — " + failedTitles.size()
+                + " task(s) had merge conflicts"));
+            broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+        } else {
+            stateStore.markFailed(runId, reason);
+            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+        }
+
+        log.info("Force-terminated stuck run {} → {} ({} tasks terminal)",
+            runId, hasAnyComplete ? "PARTIAL" : "FAILED", allTasks.size());
+
+        // Record recovery for audit trail
+        try {
+            recoveryRepo.save(RunRecovery.builder()
+                .id(UUID.randomUUID().toString())
+                .originalRunId(runId)
+                .classification(StuckClassification.UNKNOWN)
+                .classificationDetail("Zombie task merge-conflict recovery")
+                .actionTaken(hasAnyComplete ? "AUTO_PARTIAL" : "AUTO_FAIL")
+                .originalGoal(run.getUserRequest() != null ? run.getUserRequest() : "")
+                .recoveredAt(Instant.now())
+                .build());
+        } catch (Exception e) {
+            log.warn("Failed to record zombie recovery: {}", e.getMessage());
         }
     }
 

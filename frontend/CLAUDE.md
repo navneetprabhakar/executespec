@@ -1,25 +1,69 @@
 # frontend/ — React Dashboard
 
+> Last updated: 2026-04-03
+
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
 ## Structure
-- `src/pages/` — Route pages (Dashboard, RunDetail, SharedReport, Admin, Billing, etc.)
-- `src/components/runs/` — Run-related components (RunDetail, RunCard, TaskCard, NewRunModal, etc.)
-- `src/components/pricing/` — PricingTable with model role display
-- `src/hooks/useSse.ts` — SSE event stream hook (generic handler, auto-parses all event types)
-- `src/lib/api.ts` — API client (axios-based, JWT auth)
-- `src/lib/store.ts` — Zustand state store
+
+### Pages (`src/pages/`)
+- **Standalone** (15): DashboardPage, RunsPage, BillingPage, SettingsPage, DeploymentsPage, IntegrationsPage, SharedReportPage, AccountingPage, AuditPage, PricingPage, PlansPage, DpaPage, InvoicesPage, PrivacyPage, TermsPage
+- **`admin/`** (6): AdminPage, AdminInviteModal, FeatureFlagsPage, GrantRunsModal, OrgAdminDashboard, PricingManager
+- **`auth/`** (7): LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage, AuthCallbackPage, AcceptInvitePage
+- **`org/`** (2): OrgProjectsPage, OrgSettingsPage
+
+### Components (`src/components/`)
+- **`runs/`** — RunDetail, RunDetailTabs, RunCard, RunList, RunConversation, NewRunModal, TaskCard, TaskGraph, PreviewTab, LiveLog, ValidationReportPanel, TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary
+- **`run/`** — FileTree, FileViewer, RunTimeline
+- **`layout/`** — AppLayout, Header, Sidebar, CommandPalette
+- **`dashboard/`** — ActivityFeed, AgentCommGraph, DateRangeFilter, MetricCard, ModelComparisonChart, TokenBubbleChart, UserRunsChart
+- **`billing/`** — BillingProfileForm, DisclaimerModal, PlanCard, RazorpayCheckout, RazorpayOrderCheckout, UpgradeNudge, UsageBadge
+- **`deployments/`** — DeployModal, DeployWizardModal, DeploymentCard
+- **`pricing/`** — PricingTable, FeasibilityEstimator
+- **`integrations/`** — IntegrationCard, IntegrationLogo
+- **`shared/`** — AnimatedCounter, EmptyState, GlassPanel, GlowDot, MarkdownContent, SkeletonLoader, StatusBadge, Toast, ViewModeToggle
+- **`ui/`** — LockedFeature, UpgradeModal
+- **`auth/`** — Auth-related UI components
+
+### Hooks (`src/hooks/`)
+- `useSse.ts` — SSE event stream hook (generic handler, auto-parses all event types)
+- `useViewMode.ts` — Toggle between standard and Vibe view modes
+- `useKeyboardShortcuts.ts` — Global keyboard shortcut registration
+- `useKeyboardScroll.ts` — Keyboard-driven scroll navigation
+- `useIsMobile.ts` — Responsive breakpoint detection
+- `useApi.ts` — API call wrapper with error handling
+- `useTierPermissions.ts` — Tier-based feature gating
+
+### Lib (`src/lib/`)
+- `api.ts` — API client (axios-based, JWT auth)
+- `billing-api.ts` — Billing/subscription API client
+- `invoice-api.ts` — Invoice API client
+- `telemetry.ts` — Client-side telemetry/analytics
+- `techDetect.ts` — Tech stack detection from file patterns
+- `vibeNarrative.ts` — Narrative text generation for Vibe view
+- `monacoSetup.ts` — Monaco editor initialization
+- `monacoGeistTheme.ts` — Custom Monaco theme
+- `constants.ts` — App-wide constants
+- `utils.ts` — Shared utility functions
+
+### Stores (`src/stores/` — Zustand)
+- `useAuthStore.ts` — Auth state, JWT token management
+- `useRunStore.ts` — Run list and active run state
+- `useSseStore.ts` — SSE connection state and event buffering
+- `useMetricsStore.ts` — Dashboard metrics and analytics data
+- `useUiStore.ts` — UI preferences, sidebar state, modals
 
 ## Key Components
-- `RunDetail.tsx` — Main run view with Vibe View toggle. Shows gate banners, task list, review, report, cost estimate.
-- `RunDetailTabs.tsx` — Tabbed detail view. Overview tab shows GitHub PR link (`githubPrUrl`), per-copilot-run token breakdown. Graph tab uses `TaskGraphGroups` to split copilot/review nodes into separate collapsible sections.
-- `RunTimeline.tsx` — Pipeline status bar. `mapStatusToPhase()` maps all statuses including COMPILING, MERGING, AWAITING_MERGE.
-- `TaskGraph.tsx` — Task dependency graph. Accepts optional `nodes` prop for subgraph rendering. Strips source prefixes via `displayTaskId()`. Recomputes levels via Kahn's algorithm for subgraphs.
-- `NewRunModal.tsx` — Run submission form with AI provider selection, language validation hint.
-- `ValidationReportPanel.tsx` — Collapsible validation report display.
-- `RunConversation.tsx` — Chat copilot interface.
-- `PreviewTab.tsx` — Preview with 5-minute countdown timer (auto-starts after COMPLETE).
-- `VibeView.tsx` — Simplified progress view (mission control UX) for non-technical users.
+- **RunDetail.tsx** — Main run view with Vibe View toggle. Shows gate banners, task list, review, report, cost estimate.
+- **RunDetailTabs.tsx** — Tabbed detail view. Overview tab shows GitHub PR link (`githubPrUrl`), per-copilot-run token breakdown. Graph tab uses `TaskGraphGroups` to split copilot/review nodes into separate collapsible sections.
+- **RunTimeline.tsx** — Pipeline status bar. `mapStatusToPhase()` maps all statuses including COMPILING, MERGING, AWAITING_MERGE.
+- **ProviderModelSelector.tsx** — AI provider selection (Anthropic/Google/OpenAI) for run submission.
+- **CommandPalette.tsx** — Global command palette (keyboard shortcut activated).
+- **Vibe* components** — VibeRunSubmit, VibeRunSummary, VibeProgressNarrative: simplified UX for non-technical users.
+- **FileTree.tsx / FileViewer.tsx** — Workspace file browsing and viewing with Monaco editor.
+- **TestProgressTracker.tsx** — Real-time test execution progress display.
+- **DeployWizardModal.tsx** — Multi-step deploy configuration wizard.
+- **FeasibilityEstimator.tsx** — Pre-run feasibility and complexity estimation.
 
 ## Patterns
 - SSE events flow through generic `onmessage` handler — no per-type wiring needed
@@ -30,6 +74,9 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - Task graph groups: nodes grouped by `_cop{N}_`/`_rev{N}_` prefix into separate collapsible sections
 - SSE refetch triggers include COMPILING and MERGING statuses (useSse.ts)
 - RunDetail API includes `githubPrUrl` field — displayed as clickable link in overview tab
+- OAuth callback handling via `AuthCallbackPage` (redirect-based flow)
+- Razorpay checkout integration for subscriptions and order payments
+- Feature flag admin via `FeatureFlagsPage` (SUPER_ADMIN only)
 
 ## Build
 ```bash

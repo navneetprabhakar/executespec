@@ -37,6 +37,9 @@ public class AgentTask {
     @Column(columnDefinition = "TEXT")
     private String workerReportJson;
 
+    @Column(columnDefinition = "TEXT")
+    private String completionNotes;       // Worker's success/summary message
+
     private String assignedModel;
     private String branchName;          // agent/{runId}/{taskId}
 

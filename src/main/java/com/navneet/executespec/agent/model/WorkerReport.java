@@ -27,6 +27,7 @@ public class WorkerReport {
     private String selfReview;
     private String blockers;
     private String notesForReviewer;
+    private String summary;             // Worker's completion or failure summary
     private int inputTokens;
     private int outputTokens;
     private int cacheReadTokens;    // Anthropic cache_read_input_tokens  (billed at 0.10x input rate)

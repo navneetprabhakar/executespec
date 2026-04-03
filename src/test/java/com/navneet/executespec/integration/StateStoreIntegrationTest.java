@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Verifies StateStore persistence operations against a real PostgreSQL instance.
  */
 @DisplayName("StateStore (Integration)")
-class StateStoreIntegrationTest extends PostgresIntegrationBase {
+public class StateStoreIntegrationTest extends PostgresIntegrationBase {
 
     @Autowired
     private StateStore stateStore;

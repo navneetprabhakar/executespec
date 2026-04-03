@@ -1,7 +1,7 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 2.3
-> **Date**: 2026-04-02
+> **Version**: 3.0
+> **Date**: 2026-04-03
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -20,24 +20,28 @@ C4Context
     System_Ext(anthropic, "Anthropic API", "Claude models")
     System_Ext(openai, "OpenAI API", "GPT models")
     System_Ext(google, "Google AI", "Gemini models")
-    System_Ext(github, "GitHub", "Source code repos")
+    System_Ext(github, "GitHub", "Source code repos + OAuth2 login")
     System_Ext(jira, "JIRA", "Issue tracking")
     System_Ext(confluence, "Confluence", "Documentation")
     System_Ext(slack, "Slack", "Team notifications")
-    System_Ext(razorpay, "Razorpay", "Payment processing")
+    System_Ext(razorpay, "Razorpay", "Payment processing (default)")
+    System_Ext(stripe, "Stripe", "Payment processing (alt gateway)")
     System_Ext(gcp, "GCP", "Cloud Run, AR, GCS, SQL")
+    System_Ext(google_oauth, "Google OAuth", "OAuth2 login")
 
     Rel(user, es, "Submit runs, review, preview, deploy")
-    Rel(admin, es, "Manage users, orgs, billing")
-    Rel(es, anthropic, "LLM calls (primary)")
-    Rel(es, openai, "LLM calls (fallback)")
-    Rel(es, google, "LLM calls (fallback)")
-    Rel(es, github, "Push code, clone repos")
+    Rel(admin, es, "Manage users, orgs, billing, feature flags")
+    Rel(es, anthropic, "LLM calls (failover)")
+    Rel(es, openai, "LLM calls (default)")
+    Rel(es, google, "LLM calls (failover)")
+    Rel(es, github, "Push code, clone repos, create PRs")
     Rel(es, jira, "Fetch context, update status")
     Rel(es, confluence, "Fetch page content")
     Rel(es, slack, "Push notifications")
     Rel(es, razorpay, "Process payments")
+    Rel(es, stripe, "Process payments")
     Rel(es, gcp, "Preview/deploy, store artifacts")
+    Rel(es, google_oauth, "OAuth2 login")
 ```
 
 ---
@@ -50,7 +54,7 @@ graph TB
         Client[Browser / API Client]
     end
 
-    subgraph "GCP — us-central1"
+    subgraph "GCP — us-east4"
         subgraph "Network Layer"
             DNS[Cloud DNS<br/>dev.executespec.ai]
             LB[HTTPS Load Balancer<br/>SSL termination<br/>GENERATED_COOKIE affinity<br/>600s backend timeout]
@@ -69,7 +73,7 @@ graph TB
 
         subgraph "Data Layer"
             SQL[(Cloud SQL<br/>PostgreSQL 15<br/>Private IP<br/>Automated backups)]
-            REDIS[(Memorystore<br/>Redis<br/>Pool: max-active 50<br/>Gates, sessions)]
+            REDIS[(Memorystore<br/>Redis<br/>Pool: max-active 50<br/>Gates, feature flags,<br/>rate limits, sessions)]
         end
 
         subgraph "Storage"
@@ -79,8 +83,8 @@ graph TB
         end
 
         subgraph "Serverless"
-            CR1[Cloud Run<br/>Preview services<br/>es-preview-*]
-            CR2[Cloud Run<br/>Deployed services<br/>es-deploy-*]
+            CR1[Cloud Run<br/>Preview services<br/>es-preview-*<br/>5-min TTL]
+            CR2[Cloud Run<br/>Deployed services<br/>es-deploy-*<br/>7-day TTL]
         end
     end
 
@@ -113,6 +117,9 @@ graph TB
         AC[AuthController]
         BC[BillingController]
         SC[SseController]
+        MC[ModelController]
+        FFC[FeatureFlagController]
+        PAC[PaymentAuditController]
     end
 
     subgraph "Service Layer"
@@ -123,12 +130,15 @@ graph TB
         BS[BillingService]
         TE[TierEnforcementService]
         TP[TierPermissionService]
+        FFS[FeatureFlagService]
+        PAS[PaymentAuditService]
+        RLF[RateLimitFilter]
     end
 
     subgraph "Agent Layer"
         PA[PlannerAgent]
         WA[WorkerAgent]
-        RA[ReviewerAgent/V2]
+        RA[ReviewerAgentV2]
         CA[CompilerAgent]
         ConvA[ConversationAgent]
         CtxA[ContextAgent]
@@ -136,30 +146,39 @@ graph TB
         TWA[TestWorkerAgent]
         TPC[TestPreviewCoordinator]
         TRG[TestReportGenerator]
+        RTS[RequestTriageService]
     end
 
     subgraph "Infrastructure Layer"
         SS[StateStore]
         LR[LlmRouter]
-        MR[ModelRouter]
+        MR[ModelResolver]
+        PHT[ProviderHealthTracker]
         GS[GateStore]
         SB[SseBroadcaster]
         GMS[GitMergeService]
         STE[SequentialTaskExecutor]
     end
 
+    subgraph "Security Layer"
+        IS[InputSanitizer]
+        CAS[CodeAbuseScanner]
+        SP[SecurityProperties]
+    end
+
     subgraph "Tool Layer"
         FST[FileSystemTool]
         GT[GitTool]
         ST[ShellTool]
-        FLT[FileLockTool]
     end
 
     subgraph "External Clients"
         CRC[CloudRunClient]
         ARC[ArtifactRegistryClient]
         GHR[GitHubRepoService]
-        RPC[RazorpayGateway]
+        PGR[PaymentGatewayRouter]
+        RPG[RazorpayGateway]
+        SPG[StripeGateway]
     end
 
     RC --> PH
@@ -169,6 +188,9 @@ graph TB
     AC --> AS
     BC --> BS
     SC --> SB
+    MC --> MR
+    FFC --> FFS
+    PAC --> PAS
 
     PH --> PA & WA & RA & CA & TGO
     PH --> STE & GMS & GS
@@ -180,16 +202,21 @@ graph TB
 
     PA & WA & RA & CA & TGO & TWA & TRG --> LR
     LR --> MR
+    MR --> PHT
 
-    WA --> FST & GT & ST & FLT
+    WA --> FST & GT & ST
+    WA --> IS & CAS
 
     TE --> SS
-    BS --> RPC
+    BS --> PGR
+    PGR --> RPG & SPG
 ```
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** plan → approve → work (sequential tasks) → compile → merge → **COMPLETE** → auto-preview (5-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report
+**Pipeline flow:** plan → approve → work (tiered parallel tasks) → compile → merge → **COMPLETE** → auto-preview (5-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report
+
+**Background validation lifecycle:** After COMPLETE, `PipelineHarness` spawns a virtual thread (`bg-validation-{runId}`) tracked in `backgroundValidationRuns` ConcurrentHashSet. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` are deferred to the background thread's `finally` block.
 
 **Project type detection:** PlannerAgent outputs `project_type` in the plan JSON. This is written to `.agent-context/project.json` in the workspace. `DevDockerfileGenerator` and `DockerfileGenerator` read this value before falling back to file-based heuristics, preventing misdetection (e.g., static HTML being classified as NODE).
 
@@ -197,9 +224,11 @@ graph TB
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2, TestPlannerAgent | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, ApiTestSuiteAgent, ConflictResolverAgent, TestWorkerAgent | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, PromptOptimiserAgent, TestReportGenerator, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+
+Default provider: **OpenAI** (user-selected per project). Failover: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier.
 
 ```mermaid
 graph TB
@@ -212,10 +241,10 @@ graph TB
             P_OUT --> P_CTX[.agent-context/project.json<br/>project_type written here<br/>Read by DockerfileGenerator<br/>before file-based heuristics]
         end
 
-        subgraph "WorkerAgent (per task, sequential)"
+        subgraph "WorkerAgent (per task, tiered parallel)"
             W_PROMPT[Task + Context<br/>+ Workspace State] --> W_LOOP
 
-            subgraph "W_LOOP [15-min Time Loop]"
+            subgraph "W_LOOP [25-min Time Loop]"
                 W_LLM[LLM Call<br/>WORKHORSE tier] --> W_PARSE[Parse XML<br/>tool_call tags]
                 W_PARSE --> W_DISPATCH[Dispatch Tool<br/>readFile/writeFile/<br/>editFile/run/etc.]
                 W_DISPATCH --> W_RESULT[Tool Result<br/>Truncated output]
@@ -224,29 +253,29 @@ graph TB
                 W_CHECK -->|Yes| W_DONE[WorkerReport]
             end
 
-            W_STALL{Stall Detection<br/>5 min no writes} -->|Yes| W_ESCALATE[Model Escalation]
+            W_STALL{Stall Detection<br/>5 min no writes} -->|Yes| W_ESCALATE[Model Escalation<br/>WORKHORSE → PLANNING]
             W_ESCALATE --> W_LLM
         end
 
-        subgraph "ReviewerAgentV2 (two-phase)"
+        subgraph "ReviewerAgentV2 (two-phase, background)"
             R_DIFFS[Merged code on main] --> R_INSPECT[Phase 1: Inspect<br/>Read-only tool-use analysis]
             R_INSPECT --> R_ISSUES[Issues List<br/>CRITICAL/MINOR]
-            R_ISSUES --> R_FIX[Phase 2: Auto-Fix<br/>FAST → CAPABLE escalation<br/>2 attempts per issue, max 8]
-            R_FIX --> R_REPORT[ReviewReportV2<br/>APPROVED/NEEDS_FIXES/REJECTED]
+            R_ISSUES --> R_FIX[Phase 2: Auto-Fix<br/>2 attempts per issue, max 8]
+            R_FIX --> R_REPORT[ReviewReportV2<br/>PASSED/PASSED_WITH_FIXES/<br/>NEEDS_ATTENTION/FAILED]
         end
 
-        subgraph "Test Generation Pipeline (after review)"
-            TG_ORCH[TestGenOrchestrator<br/>Orchestrates full test pipeline]
-            TG_PLAN[TestPlannerAgent<br/>PLANNING tier] --> TG_WORKER[TestWorkerAgent<br/>WORKHORSE tier<br/>Generates test files]
+        subgraph "Test Generation Pipeline (background, after review)"
+            TG_ORCH[TestGenOrchestrator<br/>Language-agnostic pipeline]
+            TG_PLAN[TestPlannerAgent<br/>WORKHORSE tier] --> TG_WORKER[TestWorkerAgent<br/>WORKHORSE tier<br/>Generates test files]
             TG_WORKER --> TG_COMPILE{Tests compile?}
-            TG_COMPILE -->|Yes| TG_PREVIEW[TestPreviewCoordinator<br/>Starts preview AFTER tests compile<br/>Ensures full TTL for execution]
+            TG_COMPILE -->|Yes| TG_PREVIEW[TestPreviewCoordinator<br/>Reuses existing preview<br/>or starts new one]
             TG_COMPILE -->|No| TG_RETRY[Retry compilation]
             TG_PREVIEW --> TG_EXEC[Test Execution<br/>Against live preview]
             TG_EXEC --> TG_REPORT[TestReportGenerator<br/>LIGHTWEIGHT tier]
         end
 
-        subgraph "ValidationReportAgent (non-fatal)"
-            VR_INPUT[WorkerReports + CompileResult<br/>+ ReviewReport + TestResults] --> VR_LLM[LLM Call<br/>LIGHTWEIGHT tier]
+        subgraph "ValidationReportAgent (non-fatal, background)"
+            VR_INPUT[WorkerReports + CompileResult<br/>+ ReviewReport + TestResults] --> VR_LLM[LLM Call<br/>WORKHORSE tier]
             VR_LLM --> VR_OUT[Markdown Report<br/>+ Structured Issues<br/>+ PDF Download]
             VR_OUT --> VR_DB[(validation_report<br/>table)]
         end
@@ -257,7 +286,7 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph "CodeValidator (per task)"
+    subgraph "CodeValidator (review phase only)"
         SYNTAX[SYNTAX Gate<br/>Compile check] --> TYPE[TYPE_CHECK Gate<br/>mvn compile / tsc]
         TYPE --> LINT[LINT Gate<br/>eslint / ruff]
         LINT --> TEST[UNIT_TEST Gate<br/>vitest / pytest / mvn test]
@@ -314,13 +343,16 @@ graph TB
         MC[merge_conflict]
     end
 
-    subgraph "Billing Domain (6 tables)"
+    subgraph "Billing Domain (9 tables)"
         BP[billing_plan]
         BS[billing_subscription]
         BU[billing_usage]
         TP[topup_package]
         RT[run_topup]
         BA[billing_usage_alert]
+        WEL[webhook_event_log]
+        PAU[payment_audit]
+        INV[invoice]
     end
 
     subgraph "Integration Domain (5 tables)"
@@ -329,6 +361,17 @@ graph TB
         OSI[org_slack_integration]
         PSC[project_slack_channel]
         SNL[slack_notification_log]
+    end
+
+    subgraph "Platform Domain (2 tables)"
+        FF[feature_flag]
+        VR[validation_report]
+    end
+
+    subgraph "Test Domain (3 tables)"
+        TPL[test_plan]
+        TT[test_task]
+        TR[test_result]
     end
 
     subgraph "Analytics Domain (2 tables)"
@@ -342,11 +385,13 @@ graph TB
     ORG --> PROJ
     PR --> AT
     PR --> AM
+    PR --> VR
     AU --> BS
     BS --> BP
+    PR --> TPL
 ```
 
-### 4.2 Migration History (V1 — V52)
+### 4.2 Migration History (V1 — V55)
 
 | Version | Description | Tables Affected |
 |---------|-------------|----------------|
@@ -356,17 +401,13 @@ graph TB
 | V10-V14 | AI keys, GCS, merge, key source | app_user, org, merge_conflict |
 | V15-V16 | Model metrics, prompt audit | model_task_metric, prompt_audit_entry |
 | V17-V20 | Auto-merge, integrations, Slack | org, org_slack_integration |
-| V21 | Tier permissions | tier_config, org |
-| V22 | Activity audit | activity_audit |
-| V23-V25 | Billing | billing_plan, billing_subscription, billing_usage |
-| V26 | Run top-up | topup_package, run_topup |
-| V27 | Apply suggestion | pipeline_run, tier_config |
-| V28 | Invoicing & GST | billing_profile, invoice, etc. |
-| V29 | Preview limits | pipeline_run, tier_config |
+| V21-V22 | Tier permissions, activity audit | tier_config, activity_audit |
+| V23-V26 | Billing, run top-up | billing_plan, billing_subscription, billing_usage, topup_package, run_topup |
+| V27-V29 | Apply suggestion, invoicing, preview limits | pipeline_run, billing_profile, invoice, tier_config |
 | V32 | Plan versions | plan_version |
 | V34 | Validation report | validation_report |
-| V37 | Test generation pipeline | test_plan, test_task, test_result |
-| V38-V44 | Various (calibration, report, project provider, UI style) | pipeline_run, validation_report, project |
+| V35-V37 | Preview tracking, run title/summary, test gen | pipeline_run, test_plan, test_task, test_result |
+| V38-V44 | Calibration, report flags, project provider, UI style | pipeline_run, validation_report, project |
 | V45 | Widen plan_version columns | plan_version (VARCHAR(36) → VARCHAR(255)) |
 | V46 | Stripe and payment gateway support | billing_plan, billing_subscription |
 | V47 | OAuth support (GitHub, Google login) | app_user |
@@ -374,7 +415,10 @@ graph TB
 | V49 | Feature flags | feature_flag |
 | V50 | Free tier restrictions | tier_config |
 | V51 | Force logout flag | app_user |
-| V52 | GitHub PR URL | pipeline_run (github_pr_url VARCHAR(512)) |
+| V52 | GitHub PR URL | pipeline_run (github_pr_url) |
+| V53 | Archive run | pipeline_run (archived) |
+| V54 | Stripe multi-currency | billing_plan, billing_subscription |
+| V55 | Payment audit expansion | payment_audit |
 
 ---
 
@@ -404,9 +448,9 @@ graph TB
     end
 
     subgraph "Layer 7: Auth & Access Control"
-        JF[JwtFilter] --> SC[SecurityConfig<br/>CSP, HSTS, CORS]
+        JF[JwtFilter] --> SC[SecurityConfig<br/>CSP, HSTS, CORS<br/>via SecurityProperties]
         SC --> RAG[RunAccessGuard<br/>RBAC: SUPER_ADMIN → FREE]
-        SC --> RL[RateLimitFilter<br/>Redis sliding window]
+        SC --> RL[RateLimitFilter<br/>Redis sliding window<br/>per-tenant]
     end
 
     subgraph "Layer 8: Container Hardening"
@@ -416,18 +460,27 @@ graph TB
 ```
 
 ### Authentication
-- JWT: HS256, access 24h TTL, refresh 7d
-- SSE streams: `?token=` query param (EventSource limitation)
+- **JWT:** HS256, access 24h TTL, refresh 7d (HTTP-only cookie, rotated on refresh)
+- **OAuth2:** Google + GitHub login via `OAuthSuccessHandler` (creates user if new, generates JWT)
+- **Force logout:** Feature flag `force_logout_epoch` invalidates all tokens issued before epoch
+- **SSE streams:** `?token=` query param (EventSource limitation)
 - All `/api/**` require valid JWT (except auth, health, webhooks, shared reports)
 
 ### Authorization (RBAC)
 | Role | Scope |
 |------|-------|
-| SUPER_ADMIN | All resources |
-| ORG_ADMIN | Org resources |
+| SUPER_ADMIN | All resources, feature flags, payment audit |
+| ORG_ADMIN | Org resources, payment history |
 | BILLING_ADMIN | Billing within org |
+| PROJECT_ADMIN | Project resources |
+| PROJECT_DEVELOPER | Project runs (read/write) |
 | DEVELOPER | Org runs (read/write) |
 | FREE User | Own runs only |
+
+### Security Headers (Configurable via SecurityProperties)
+- **CSP:** Enabled by default; allows Monaco CDN (`cdn.jsdelivr.net`) and Cloudflare Insights
+- **HSTS:** Enabled (max-age 1yr, includeSubDomains)
+- **X-Frame-Options:** DENY
 
 ### Agent Sandbox (defense-in-depth)
 1. **InputSanitizer** — 26 regex patterns + Unicode NFKC normalization + obfuscation detection (HTTP 400)
@@ -474,13 +527,15 @@ The preview system operates in two modes, selected by the `executespec.preview.m
 | `docker` | Local dev | 5 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
 | `cloud-run` | Dev / Prod | 5 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
 
+**Concurrency limits:** FREE=1, PRO=3, ENTERPRISE=10 concurrent previews.
+
 **Key implementation details:**
+- `cloudRunServiceName` stored upfront in session (predictable `es-preview-{runIdShort}`) to prevent orphan cleanup race
 - All subprocess commands enforce timeouts: `gcloud run deploy` 10 min, `gcloud run services delete` 5 min, `gcloud logging read` 2 min
 - Stdout/stderr streams are read in parallel threads to prevent pipe buffer deadlock
 - Virtual threads use `ContextSnapshotFactory.captureAll().wrap(runnable)` for Micrometer trace propagation
-- `ACTIVE_PREVIEWS` gauge is correctly decremented on all terminal states (success, failure, TTL expiry)
+- `ACTIVE_PREVIEWS` gauge correctly decremented on all terminal states (success, failure, TTL expiry)
 - `probeApiDocs()` works for both modes: Docker (`localhost:{port}`) and Cloud Run (service URL)
-- `DeploymentService` also uses context-wrapped virtual threads for trace continuity
 
 #### 6.2.1 Cloud Run Preview Flow
 
@@ -492,7 +547,7 @@ sequenceDiagram
     participant CR as CloudRunClient
     participant LOG as gcloud logging
 
-    PS->>PS: Detect project type
+    PS->>PS: Detect project type<br/>(reads .agent-context/project.json)
     PS->>DDG: generateForCloudRun(type, workspace)
     Note over DDG: No ttyd — uses $PORT directly<br/>(port 8080)
     DDG-->>PS: Dockerfile
@@ -558,56 +613,112 @@ sequenceDiagram
 
 ---
 
-## 7. Concurrency Model
+## 7. Billing Architecture
+
+### 7.1 Multi-Gateway Payment System
+
+```mermaid
+graph TB
+    subgraph "Payment Flow"
+        USER[User] --> BC[BillingController]
+        BC --> BS[BillingService]
+        BS --> PGR[PaymentGatewayRouter]
+        PGR --> RPG[RazorpayPaymentGateway]
+        PGR --> SPG[StripePaymentGateway]
+    end
+
+    subgraph "Webhook Processing"
+        RZ_WH[Razorpay Webhook] --> BWC[BillingWebhookController]
+        ST_WH[Stripe Webhook] --> BWC
+        BWC --> WSV[WebhookSignatureVerifier]
+        WSV --> PGR
+        BWC --> WEL[(webhook_event_log)]
+    end
+
+    subgraph "Audit Trail"
+        BS --> PAS[PaymentAuditService]
+        PAS --> PA[(payment_audit)]
+        PAS --> CSV[CSV Export]
+    end
+```
+
+**Gateway selection:** `PaymentGatewayRouter` resolves gateway per subscription. Default: Razorpay. Stripe available as alternative (configurable via `billing.default-gateway`).
+
+**Webhook security:** Both gateways verify webhook signatures before processing. Events logged to `webhook_event_log` for auditability.
+
+### 7.2 Feature Flag System
+
+```mermaid
+graph LR
+    ADMIN[Admin UI] --> FFC[FeatureFlagController]
+    FFC --> FFS[FeatureFlagService]
+    FFS --> DB[(feature_flag table)]
+    FFS --> CACHE[ConcurrentHashMap<br/>in-memory cache]
+    FFS --> REDIS_PS[Redis Pub/Sub<br/>cache invalidation]
+    FFS --> SCHED[60s Scheduled<br/>full reload]
+```
+
+**Architecture:** DB-backed with Redis pub/sub for cross-instance cache invalidation. `ConcurrentHashMap` in-memory cache with two refresh mechanisms: Redis pub/sub for real-time invalidation + 60s scheduled full reload as safety net.
+
+**Special flags:** `submissions.paused` (maintenance mode), `force_logout_epoch` (JWT invalidation).
+
+---
+
+## 8. Concurrency Model
 
 ```mermaid
 graph TB
     subgraph "Thread Model"
         MAIN[Main Thread<br/>Spring MVC] --> SUBMIT[submitRun()]
-        SUBMIT --> SEM[Semaphore<br/>maxRuns=10]
+        SUBMIT --> SEM[Semaphore<br/>maxRuns=50]
         SEM --> POOL[CachedThreadPool<br/>Daemon threads]
         POOL --> PIPELINE[Pipeline Thread<br/>1 per run]
 
-        PIPELINE --> VT1[Virtual Thread<br/>Preview build<br/>Context-wrapped]
-        PIPELINE --> VT2[Virtual Thread<br/>Post-merge agents<br/>Context-wrapped]
+        PIPELINE --> VT_BG[Virtual Thread<br/>bg-validation-{runId}<br/>Review + Test + Report<br/>Context-wrapped]
+        PIPELINE --> VT_PV[Virtual Thread<br/>Preview build<br/>Context-wrapped]
 
         PIPELINE --> GATE_POLL[Gate Polling<br/>500ms interval<br/>Redis-backed]
     end
 
     subgraph "Shared State"
         SS_MAP[StateStore<br/>PostgreSQL]
-        REDIS_G[Redis<br/>Gate keys]
+        REDIS_G[Redis<br/>Gate keys + Feature flags<br/>+ Rate limits]
         CM[ConcurrentHashMap<br/>Preview sessions]
         RKS[RunKeyStore<br/>ConcurrentHashMap]
+        BVR[backgroundValidationRuns<br/>ConcurrentHashSet]
     end
 
     PIPELINE --> SS_MAP
     PIPELINE --> REDIS_G
-    VT1 --> CM
+    VT_PV --> CM
     PIPELINE --> RKS
+    VT_BG --> BVR
 ```
 
 ---
 
-## 8. Observability
+## 9. Observability
 
-### 8.1 Logging
+### 9.1 Logging
 
 | Component | Log Level | Key Events |
 |-----------|----------|------------|
-| PipelineHarness | INFO | Run lifecycle (start, complete, fail) |
-| WorkerAgent | INFO/DEBUG | Iteration count, tool calls, time remaining |
-| PreviewService | INFO | Preview lifecycle (start, deploy, stop) |
-| LlmRouter | WARN | Provider fallback, rate limits |
+| PipelineHarness | INFO | Run lifecycle (start, complete, fail), background validation |
+| WorkerAgent | INFO/DEBUG | Iteration count, tool calls, time remaining, stall detection |
+| PreviewService | INFO | Preview lifecycle (start, deploy, stop, TTL expiry) |
+| LlmRouter | WARN | Provider fallback, rate limits, circuit breaker state |
 | TierEnforcementService | DEBUG | Quota checks, bonus run consumption |
+| FeatureFlagService | INFO | Flag updates, cache invalidation |
+| PaymentGatewayRouter | INFO | Payment events, webhook processing |
 
-### 8.2 Metrics (Spring Actuator)
+### 9.2 Metrics (Spring Actuator)
 
 - `actuator/health` — Health check (public)
 - `actuator/prometheus` — Prometheus metrics (internal)
 - Custom: `ModelTaskMetric` — per-task execution stats
+- Custom: 30+ Micrometer gauges/timers across PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
 
-### 8.3 SSE Event Types
+### 9.3 SSE Event Types
 
 | Event | When |
 |-------|------|
@@ -615,14 +726,15 @@ graph TB
 | PLAN_READY | Plan generated, awaiting approval |
 | WORKING | Tasks executing |
 | TASK_STARTED / TASK_COMPLETED | Per-task lifecycle |
+| COMPILING | Compilation phase |
+| MERGING / AWAITING_MERGE | Merge phase |
 | VALIDATION_PASSED / VALIDATION_FAILED | Code validation |
 | MODEL_ESCALATED | Retry with upgraded model |
-| REVIEWING | Review phase |
-| REPORT_GENERATED | Validation report ready (non-fatal) |
+| REVIEWING | Review phase (background) |
+| REPORT_GENERATED | Validation report ready |
 | TEST_GENERATION_STARTED | Test generation pipeline begins |
 | TEST_EXECUTION_STARTED | Tests executing against live preview |
 | TEST_EXECUTION_COMPLETED | Test execution finished |
-| REVIEW_READY | Awaiting merge decision |
 | COMPLETE / FAILED / PARTIAL | Terminal states |
 | PREVIEW_ANALYZING / BUILDING / PUSHING / DEPLOYING / RUNNING | Preview phases |
 | PREVIEW_STOPPED | Preview terminated |
@@ -631,7 +743,7 @@ graph TB
 
 ---
 
-## 9. Technology Stack Summary
+## 10. Technology Stack Summary
 
 | Layer | Technology | Version |
 |-------|-----------|---------|
@@ -640,10 +752,10 @@ graph TB
 | AI Framework | Spring AI | 1.1.0 |
 | Build | Maven | 3.9+ |
 | Database | PostgreSQL | 15 |
-| Cache/Gates | Redis (Memorystore) | 7.x |
-| Frontend | React + Vite + Tailwind | 18 / 5 / 3 |
+| Cache/Gates/Flags | Redis (Memorystore) | 7.x |
+| Frontend | React + Vite + Tailwind + TypeScript | 18 / 5 / 3.4 / 5.3 |
 | Container | Docker | 24+ |
-| Cloud | GCP | — |
+| Cloud | GCP (us-east4) | — |
 | Compute | GCE (MIG) | n2-standard-8 |
 | Serverless | Cloud Run | Gen2 |
 | Registry | Artifact Registry | — |
@@ -651,50 +763,27 @@ graph TB
 | Database | Cloud SQL (PostgreSQL) | 15 |
 | LB | HTTPS External LB | — |
 | CI/CD | GitHub Actions | — |
-| Payment | Razorpay | API v1 |
-| JVM | G1GC | — |
+| Payment | Razorpay + Stripe | Multi-gateway |
+| Auth | JWT (JJWT 0.12.6) + OAuth2 | — |
+| PDF | OpenPDF + Flying Saucer | 2.0.3 / 9.3.0 |
+| JVM | G1GC | -Xms8g -Xmx16g |
 
 ---
 
-## 10. Key Design Decisions & Rationale
+## 11. Key Design Decisions & Rationale
 
 | Decision | Rationale | Alternative Considered |
 |----------|-----------|----------------------|
 | XML tool calls (not Spring AI native) | WorkerAgent needs `runId` injection; `@Tool` methods can't receive it | Spring AI `@Tool` annotation |
 | Redis gates (not in-memory) | MIG: approval REST call may hit different instance than pipeline thread | CompletableFuture maps |
 | Progressive merge (per-task) | Later tasks see previous output; reduces merge conflicts | Merge-all-at-end |
-| 15-min time limit (not iteration count) | Predictable behavior; iteration count was unintuitive | Iteration-based limits |
-| Dual-mode previews (docker + cloud-run) | Docker Compose + Caddy for local dev; Cloud Run for hosted envs (public HTTPS, no port exposure needed) | Single-mode only |
+| 25-min time limit (not iteration count) | Predictable behavior; iteration count was unintuitive | Iteration-based limits |
+| Dual-mode previews (docker + cloud-run) | Docker Compose + Caddy for local dev; Cloud Run for hosted envs (public HTTPS) | Single-mode only |
 | 3-provider fallback chains | Resilience; no single-provider dependency | Single provider |
-| Embedded DB for preview | Cloud Run can't run sidecars; H2/SQLite sufficient for preview | Shared Cloud SQL instance |
-| ConcurrentHashMap for preview state | In-memory is fast; orphan cleanup handles restarts | Database-backed sessions |
+| Multi-gateway billing (Razorpay + Stripe) | Geographic reach; Stripe for international, Razorpay for India | Single gateway |
+| DB-backed feature flags with Redis pub/sub | Cross-instance consistency; admin-manageable; real-time propagation | Config files / environment variables |
+| COMPLETE before review (background validation) | Fast user feedback; preview available immediately; review runs in background | Sequential review then complete |
 | FIFO bonus run consumption | Fair; oldest credits used first; prevents hoarding | LIFO or random |
-
----
-
-## 11. Design Decision Details
-
-### Tool-Call Format
-WorkerAgent uses **XML tool calls**: `<tool_call>{"name":"...", "args":{...}}</tool_call>`. NOT Spring AI native tool calling. Reason: `@Tool` methods require `runId` which the model doesn't know. Dispatch is manual via `parseXmlToolCalls()` + `dispatchTool()` with `runId` injected automatically.
-
-### Completion Detection
-WorkerAgent response must START with `{` (strict JSON check via `looksLikeCompletionReport()`). Prevents false positives on prose containing field names.
-
-### Context Window Management
-- **Sliding window**: First 2 messages + last 18 kept per API call
-- **Progress checkpoints**: Every 15 iterations, re-inject task ID, objective, criteria
-- **Completion urgency**: At iteration 75 (5 before cap), force JSON output
-- **Pre-call token estimation**: If messages > 30, estimate tokens (chars/4), compact proactively
-- **Emergency compaction**: HARD_STOP tries compaction first; only truly stops if recently compacted
-
-### Prompt Caching
-Anthropic `SYSTEM_ONLY` strategy. Cache TTL = 5 min. `AnthropicChatOptions.builder().maxTokens(maxOut).cacheOptions(SYSTEM_ONLY)` — no toolCallbacks.
-
-### API Key Resolution
-Resolution: **user key → org key → system key** based on org's `keySourceMode`:
-- `SYSTEM`: Force platform keys only
-- `OWN_KEYS`: User/org keys required
-- `HYBRID` (default): User/org first, system fallback
 
 ---
 
@@ -723,11 +812,12 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 | Branch retry fails | `GitTool.createBranch()` catches `RefAlreadyExistsException` → checkout fallback |
 | Token cost explosion | Sliding window (first 2 + last 18) + result truncation |
 | Completion false positive | `looksLikeCompletionReport()` requires response starts with `{` |
-| 80-iteration cap hit | Progress checkpoints every 15 iters + urgency at iter 75 |
-| Hard stop at 73% context | Pre-call estimation + emergency compaction |
+| Hard stop at context limit | Pre-call estimation + emergency compaction |
 | Chat has no code access | ConversationAgent injects file tree, README, context, plan, review |
 | Gate lost on server restart | `approve()` → if gate missing → auto-fail with message |
+| Background validation failure | Fire-and-forget; no retry/recovery if background thread fails silently |
+| Resume/retry path stale | `doReviewAndMerge()` not updated for background validation pattern |
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-03-30.*
+*This architecture document is maintained alongside the codebase. Last updated: 2026-04-03.*

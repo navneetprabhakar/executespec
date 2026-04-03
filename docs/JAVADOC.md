@@ -1,7 +1,7 @@
 # ExecuteSpec -- Complete System Documentation
 
-**Version:** 7fedbee (main)
-**Last Updated:** 2026-03-26
+**Version:** 28f343a (dev)
+**Last Updated:** 2026-04-03
 **Stack:** Java 21, Spring Boot 3.3.0, Spring AI 1.1.0, PostgreSQL, Redis, JGit 6.9.0
 
 ---
@@ -18,14 +18,21 @@
 8. [Pipeline Harness](#8-pipeline-harness)
 9. [Model Routing](#9-model-routing)
 10. [Auth and Multi-Tenancy](#10-auth-and-multi-tenancy)
-11. [Deployment and Preview](#11-deployment-and-preview)
-12. [REST API Reference](#12-rest-api-reference)
-13. [Server-Sent Events](#13-server-sent-events)
-14. [Recovery System](#14-recovery-system)
-15. [Configuration Reference](#15-configuration-reference)
-16. [Database Schema](#16-database-schema)
-17. [Validation and Code Quality](#17-validation-and-code-quality)
-18. [Merge Conflict Resolution](#18-merge-conflict-resolution)
+11. [OAuth2 Authentication](#11-oauth2-authentication)
+12. [Feature Flags](#12-feature-flags)
+13. [Rate Limiting](#13-rate-limiting)
+14. [Billing and Payment Gateway](#14-billing-and-payment-gateway)
+15. [Payment Audit](#15-payment-audit)
+16. [Deployment and Preview](#16-deployment-and-preview)
+17. [REST API Reference](#17-rest-api-reference)
+18. [Server-Sent Events](#18-server-sent-events)
+19. [Recovery System](#19-recovery-system)
+20. [Configuration Reference](#20-configuration-reference)
+21. [Database Schema](#21-database-schema)
+22. [Validation and Code Quality](#22-validation-and-code-quality)
+23. [Merge Conflict Resolution](#23-merge-conflict-resolution)
+24. [Eval Framework](#24-eval-framework)
+25. [Security Architecture](#25-security-architecture)
 
 ---
 
@@ -38,11 +45,17 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 - **Natural language to code:** Users submit a goal in plain English; the system produces a complete, working codebase.
 - **Multi-agent pipeline:** Planner, Worker, Compiler, Reviewer, Validation Report, and post-merge agents each handle a distinct phase.
 - **Human-in-the-loop gates:** Plan approval gate gives humans oversight before code generation begins.
-- **Automatic validation:** Per-task code validation with model escalation on failure.
+- **Background validation:** Run is marked COMPLETE immediately after compile and merge. Review, test generation, test execution, and validation report run in a background thread.
 - **Progressive merge:** Each task's branch is merged to main immediately after completion, enabling early conflict detection.
+- **GitHub integration:** Automatic branch creation (`executespec/{runId-short}`) and PR opening for existing-repo runs.
 - **Multi-tenant:** Organizations, projects, tiered access, and per-user/org API key management.
-- **Provider failover:** 3-provider fallback chains (Anthropic, Google Gemini, OpenAI) with rate-limit and overload handling.
-- **Recovery:** Automatic detection and recovery of stuck tasks with configurable retry and restart strategies.
+- **Provider failover:** 3-provider fallback chains (Anthropic, Google Gemini, OpenAI) with health-based circuit breaker (Redis-backed, 5-failure threshold, 60s TTL recovery).
+- **Recovery:** Automatic detection and recovery of stuck tasks with configurable retry and model escalation.
+- **Multi-gateway billing:** Razorpay + Stripe via PaymentGatewayRouter with full payment audit trail.
+- **OAuth2 login:** Google and GitHub social login alongside JWT email/password authentication.
+- **Feature flags:** DB-backed feature flag system with Redis pub/sub cross-instance invalidation.
+- **Rate limiting:** Redis-backed per-tenant rate limiting via RateLimitFilter.
+- **Eval framework:** Admin-only model evaluation with per-tier recommendations.
 
 ### Technology Stack
 
@@ -51,12 +64,13 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 | Runtime | Java 21 (virtual threads) |
 | Framework | Spring Boot 3.3.0 |
 | AI Framework | Spring AI 1.1.0 |
-| Database | PostgreSQL (Flyway migrations) |
+| Database | PostgreSQL (Flyway migrations V1-V55) |
 | Cache/Gate Store | Redis (Lettuce) |
 | Git Operations | JGit 6.9.0 + shell git (worktrees) |
 | Build | Maven |
-| Frontend | React + TypeScript (Vite) |
+| Frontend | React 18 + TypeScript 5.3 (Vite 5, Tailwind CSS 3.4) |
 | Logging | SLF4J via Lombok `@Slf4j` |
+| Observability | Micrometer + OTel, Prometheus + Tempo + Grafana (local), Cloud Trace + Cloud Monitoring (GCP) |
 
 ---
 
@@ -108,7 +122,7 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 User Request
     |
     v
-[1. PlannerAgent]  -->  TaskPlan (JSON)
+[1. PlannerAgent]  -->  TaskPlan (JSON) with project_type
     |
     v
 [2. Plan Approval Gate]  (human or auto-approve)
@@ -116,14 +130,12 @@ User Request
     v
 [3. SequentialTaskExecutor]
     |-- For each task (sequential, topological order):
-    |     |-- ModelRouter selects model (complexity-based)
+    |     |-- ModelResolver selects model (tier-based via model-matrix)
     |     |-- WorkerAgent.execute() in isolated worktree
     |     |     |-- Agentic loop (up to 80 iterations)
     |     |     |-- XML tool calls: read/write/edit/run/git
     |     |     |-- Budget monitoring + compaction
     |     |     \-- Completion report (JSON)
-    |     |-- CodeValidator validates output
-    |     |-- On failure: retry with error feedback + model escalation
     |     \-- Progressive merge to main
     |
     v
@@ -133,22 +145,20 @@ User Request
 [5. GitMergeService]  -->  merge all task branches to main (automatic, no gate)
     |
     v
-[6. Post-merge compile validation]
+[6. Mark COMPLETE]  -->  GitHub push (branch + PR for existing repos)
     |
     v
-[7. ReviewerAgentV2]  -->  ReviewReportV2 (JSON) + auto-fix critical issues
+[7. Auto-preview]  (5-min TTL, both PROTOTYPE and PRODUCTION modes)
     |
     v
-[8. Validation Report + Test Report]  (non-fatal, LLM summary)
+[8. Background Validation Thread (bg-validation-{runId})]
+    |-- ReviewerAgentV2 (inspect + auto-fix critical issues)
+    |-- TestGenOrchestrator (language-agnostic test generation)
+    |-- TestPreviewCoordinator (reuses preview for test execution)
+    \-- ValidationReport + TestReport (LLM summary)
     |
     v
-[9. Re-validate after auto-fix]  (compile + type check)
-    |
-    v
-[10. Mark COMPLETE]  -->  GitHub push
-    |
-    v
-[11. Post-Merge Orchestrator]
+[9. Post-Merge Orchestrator]
     |-- ContextAgent (update CODEBASE_CONTEXT.md)
     |-- PromptOptimiserAgent (improve prompts)
     \-- ApiTestSuiteAgent (generate OpenAPI spec)
@@ -173,13 +183,14 @@ All packages are under `com.navneet.executespec`.
 | `state/entity/` | JPA entities: PipelineRun, AgentTask, AgentMessage, FileLock, AgentInbox, GateEvent, CompactionEvent, RunRecovery, PromptAuditEntry, MergeConflict |
 | `state/repository/` | Spring Data JPA repositories for all entities |
 | `tool/` | Workspace tools: FileSystemTool, ShellTool, GitTool, FileLockTool, ShellSandboxPolicy, WorkspaceContext, ToolResult |
-| `config/` | Spring configuration: AgentProperties, AgentModelConfig, ModelPricingInitializer, WebConfig |
+| `config/` | Spring configuration: AgentProperties, AgentModelConfig, ModelPricingInitializer, WebConfig, SecurityProperties |
+| `config/featureflag/` | Feature flag system: FeatureFlagService, FeatureFlagController, FeatureFlag entity, FeatureFlagRepository |
 
 ### Feature Packages
 
 | Package | Description |
 |---------|-------------|
-| `router/` | Model routing: ModelRouter (2-axis complexity/provider routing), ModelTier, TaskComplexity, LlmProvider, ModelSelection, ProviderHealthTracker, AvailableProviderResolver, ModelTaskMetric |
+| `router/` | Model routing: ModelResolver (matrix-based tier x provider routing), AgentTier, LlmProvider, ModelSelection, ProviderHealthTracker (Redis-backed circuit breaker), AvailableProviderResolver, ModelTaskMetric, ModelMatrixProperties |
 | `reviewer/` | Agentic reviewer V2: ReviewerAgentV2 (two-phase inspect + fix), ReviewReportV2 |
 | `validator/` | Code validation: CodeValidator, CodeValidatorImpl, ValidationLevel, ValidationResult, ValidationVerdict, Language |
 | `validator/model/` | Validation data models |
@@ -191,21 +202,31 @@ All packages are under `com.navneet.executespec`.
 | `context/` | ContextAgent (post-merge codebase context updater), ContextAgentScanner, ContextAgentProperties |
 | `optimiser/` | PromptOptimiserAgent (self-improving prompt system), PromptPatternAnalyser, PromptAuditService |
 | `apitests/` | ApiTestSuiteAgent (post-merge OpenAPI spec generation) |
+| `testgen/` | Test generation: TestGenOrchestrator, TestPlannerAgent, TestWorkerAgent, TestPreviewCoordinator, TestExecutionService, TestResultController, TestReportGenerator |
 | `recovery/` | StuckRunMonitor, RunRecoveryService, StuckRunEvaluator, StuckClassification, LlmCallGuard, EscalationService, RecoveryProperties |
 | `deployment/` | DeploymentService, CloudRunClient, ArtifactRegistryClient, DeploymentStrategy, DockerfileGenerator, WorkspaceExportService, WorkspaceFileService, GcsWorkspaceStore |
 | `deployment/preview/` | PreviewService (dual-mode: docker/cloud-run), PreviewProperties, PreviewSession, CaddyProxyManager, DevDockerfileGenerator, ComposeFileGenerator, ComposeExecutor, DatabaseDetector, EnvVarDetector |
 | `sse/` | Server-Sent Events: RunEvent (record + factory methods), SseBroadcaster |
 | `api/controller/` | REST controllers (see REST API Reference section) |
 | `api/dto/` | Request/response DTOs: RunSummary, RunDetail, TaskSummary, RunRequest, ApprovalRequest |
-| `auth/` | Authentication: AppUser, Org, OrgMember, Project, ProjectMember, TierConfig entities; AuthService, OrgService, ProjectService, TierEnforcementService, InvitationService |
-| `auth/security/` | JWT filter, RunVisibilitySpec, AppUserDetails |
+| `auth/` | Authentication: AppUser, Org, OrgMember, Project, ProjectMember, TierConfig entities; AuthService, OrgService, ProjectService, TierEnforcementService, InvitationService, PaymentAuditService |
+| `auth/security/` | JWT filter, RunVisibilitySpec, AppUserDetails, SecurityConfig |
+| `auth/oauth/` | OAuth2 login: OAuthSuccessHandler, OAuthUserMapper, OAuthProfile, OAuthEmailConflictException |
+| `billing/` | Billing: BillingService, RunTopupService |
+| `billing/gateway/` | Multi-gateway: PaymentGatewayRouter, PaymentGateway interface, StripePaymentGateway, RazorpayPaymentGateway, BillingEntity, WebhookResult |
+| `billing/controller/` | BillingController, BillingWebhookController, PaymentAuditController |
+| `billing/entity/` | WebhookEventLog |
+| `billing/repository/` | WebhookEventLogRepository |
+| `ratelimit/` | Rate limiting: RateLimitFilter, RateLimitProperties, RateLimitPolicy |
+| `eval/` | Model evaluation: EvalController, ModelEvaluator, EvalScorer, EvalTestCaseRegistry, EvalReport |
+| `security/` | Security scanning: InputSanitizer, CodeAbuseScanner |
 | `tenant/` | TenantInterceptor (automatic tenant_id injection on JPA entities) |
-| `repo/` | GitHubRepoService (create repos, push branches) |
-| `pricing/` | ModelPricing entity + repository (DB-backed pricing for cost estimation) |
-| `integration/` | External system adapters: Jira, Confluence, ServiceNow, PagerDuty + IntegrationManager |
+| `integration/` | External system adapters: Jira, Confluence, ServiceNow, PagerDuty + IntegrationManager (listens to MergeCompleted event) |
 | `integration/slack/` | Slack push notifications: SlackClient, SlackOAuthService, SlackNotificationService, SlackMessageBuilder, SlackRateLimiter |
 | `integration/slack/entity/` | OrgSlackIntegration, ProjectSlackChannel, SlackNotificationLog |
 | `integration/context/` | JIRA/Confluence context extraction: ReferenceExtractorService, ExtractionResult |
+| `integration/github/` | GitHubRepoService (create repos, push branches, create PRs, default branch lookup) |
+| `pricing/` | ModelPricing entity + repository (DB-backed pricing for cost estimation) |
 
 ---
 
@@ -214,15 +235,15 @@ All packages are under `com.navneet.executespec`.
 ### 4.1 Run Lifecycle States
 
 ```
-PLANNING --> AWAITING_CLARIFICATION --> AWAITING_APPROVAL --> WORKING --> REVIEWING --> COMPLETE
-    |               |                      |                    |            |
-    v               v                      v                    v            v
-  FAILED      (user provides ref        FAILED              PARTIAL      FAILED
-               or skips)               (rejected)           (some tasks
-                                                             failed)
-    |
-    v
-  QUEUED  (waiting for compute slot)
+PLANNING --> AWAITING_CLARIFICATION --> AWAITING_APPROVAL --> WORKING --> COMPILING --> MERGING --> COMPLETE
+    |               |                      |                    |            |                       |
+    v               v                      v                    v            v                       v
+  FAILED      (user provides ref        FAILED              PARTIAL      FAILED               Background
+               or skips)               (rejected)           (some tasks                       Validation
+                                                             failed)                          (review +
+    |                                                                                         test gen +
+    v                                                                                         test exec +
+  QUEUED  (waiting for compute slot)                                                          report)
     |
     v
   PAUSED  (user paused, can edit goal and restart)
@@ -233,9 +254,10 @@ PLANNING --> AWAITING_CLARIFICATION --> AWAITING_APPROVAL --> WORKING --> REVIEW
 **Step 1: Run Submission**
 ```
 RunController.submit(RunRequest)
+  --> RequestTriageService (optional: classify and enrich request)
   --> PipelineHarness.submitRun(userRequest, source, repoUrl, ...)
       --> StateStore.createRun() --> PipelineRun (status=PLANNING)
-      --> Semaphore.tryAcquire()
+      --> Semaphore.tryAcquire() (max 50 concurrent runs)
           --> If no slot: status=QUEUED, block until slot available
           --> If slot available: executeRunAsync()
 ```
@@ -259,34 +281,31 @@ PlannerAgent.plan(userRequest, runId, modelOverride)
   --> LlmRouter.callWithFallback(provider, model, prompt, ...)
   --> LlmOutputParser.parse(response, TaskPlan.class)
   --> Retry up to 3 times on invalid JSON
-  --> Returns TaskPlan {planSummary, tasks: [TaskDefinition...]}
+  --> Returns TaskPlan {planSummary, tasks: [TaskDefinition...], project_type}
+  --> Writes project_type to .agent-context/project.json
 ```
 
 **Step 4: Plan Approval Gate**
 ```
 StateStore.savePlan(runId, plan) --> status=AWAITING_APPROVAL
-  --> GateStore.awaitPlanGate(runId) (polls Redis every 500ms)
+  --> GateStore.awaitPlanGate(runId) (polls Redis every 500ms, 2h TTL)
   --> Release compute slot while waiting
   --> REST: POST /api/runs/{id}/approve resolves gate via Redis
   --> Reacquire compute slot
   --> StateStore.markApproved(runId) --> status=WORKING
 ```
 
-**Step 5: Task Execution (Sequential with Validation)**
+**Step 5: Task Execution (Sequential)**
 ```
 SequentialTaskExecutor.execute(run, tasks)
   --> topologicalSort(tasks) (Kahn's algorithm)
   --> For each task in order:
       |-- Check dependency failures (skip if dep failed)
-      |-- ModelRouter.selectForTask(complexity, availableProviders)
+      |-- ModelResolver.resolve(agentTier, provider) via model-matrix
       |-- StateStore.lockTask(taskId, model, branchName)
-      |-- executeWithValidation(run, task, level, providers)
-      |   |-- WorkerAgent.execute(task, runId) in worktree
-      |   |-- CodeValidator.validateFile() on modified files
-      |   |-- On FAIL: RetryPromptBuilder.build(validation)
-      |   |             ModelRouter.selectForRetry() (escalation)
-      |   |             Loop up to maxRetries times
-      |   \-- On PASS: stateStore.completeTask()
+      |-- WorkerAgent.execute(task, runId) in worktree
+      |     |-- Max task duration: 25 minutes
+      |     |-- Stall detection: warn=8min, act=15min
       |-- commitWorktreeIfDirty(runId, taskId)
       \-- tryMergeToMain(runId, task, branchName)
           --> GitMergeService.mergeTaskBranchWithResolution()
@@ -307,32 +326,39 @@ CompilerAgent.runCompileAndFix(runId)
 ```
 GitMergeService.mergeAll(runId, tasks)
   --> Merge all task branches to main in topological order
-  --> Conflict resolution cascade (specialized mergers → LLM)
+  --> Conflict resolution cascade (specialized mergers then LLM)
   --> Post-merge compile validation
 ```
 
-**Step 8: Review**
+**Step 8: Mark COMPLETE + GitHub Push**
 ```
-ReviewerAgentV2.review(run, workerReports)
-  --> Inspect merged code on main (tool-use loop, max 10 file reads)
-  --> Produce ReviewReportV2 with verdict + issues (CRITICAL/MINOR)
-  --> Auto-fix: for each CRITICAL issue (max 8), send fix to WorkerAgent
-  --> Auto-fix retry: 2 attempts per issue (FAST → CAPABLE escalation)
-  --> Re-validate after fixes (compile + type check)
-```
-
-**Step 8b: Validation Report (non-fatal)**
-```
-ValidationReportService.generateAndPersist(runId, reportInput)
-  --> Aggregate: WorkerReports + CompileResult + ReviewReportV2 + test results
-  --> LlmCallGuard.call() with Haiku model
-  --> Parse markdown report
-  --> Persist to validation_report table
-  --> Non-fatal: on failure, log warning and continue
-  --> OTel span: executespec.run.phase.report
+stateStore.markComplete(runId)
+  --> pushToGitHubIfConfigured(runId):
+      --> Creates branch: executespec/{runId-short}
+      --> Pushes to branch (not main)
+      --> Opens PR via GitHubRepoService.createPullRequest()
+      --> Stores PR URL in PipelineRun.githubPrUrl
+  --> SSE event: COMPLETE
 ```
 
-**Step 9: Post-Merge**
+**Step 9: Auto-Preview**
+```
+previewService.start(runId) -- 5-minute TTL
+  --> Both PROTOTYPE and PRODUCTION modes
+  --> DevDockerfileGenerator reads .agent-context/project.json for project type
+```
+
+**Step 10: Background Validation (bg-validation-{runId})**
+```
+Virtual thread runs independently after COMPLETE:
+  --> ReviewerAgentV2.review(run, workerReports) -- inspect + auto-fix
+  --> TestGenOrchestrator.generate(runId) -- language-agnostic test generation
+  --> TestPreviewCoordinator.execute(runId) -- reuses preview for test execution
+  --> ValidationReportService.generateAndPersist(runId)
+  --> SSE cleanup deferred to background thread's finally block
+```
+
+**Step 11: Post-Merge**
 ```
 PostMergeOrchestrator.onMergeCompleted(event)
   --> Virtual thread: ContextAgent.runAsync() (update CODEBASE_CONTEXT.md)
@@ -348,10 +374,11 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.1 PlannerAgent
 
 **File:** `agent/PlannerAgent.java`
-**Model:** `claude-sonnet-4-6` (CAPABLE_CHAIN)
+**Tier:** PLANNING
+**Model (Anthropic):** `claude-sonnet-4-6`
 **Mode:** Single LLM call (IMMEDIATE fallback)
 
-**Purpose:** Decomposes a natural language user request into a structured task plan with dependency ordering.
+**Purpose:** Decomposes a natural language user request into a structured task plan with dependency ordering. Declares `project_type` in the plan JSON which is written to `.agent-context/project.json` for use by preview and deploy Dockerfile generators.
 
 **Key Methods:**
 
@@ -364,6 +391,7 @@ PostMergeOrchestrator.onMergeCompleted(event)
 
 **Output:** `TaskPlan` containing:
 - `planSummary` -- high-level description
+- `project_type` -- declared project type (e.g., STATIC_HTML, NODE_BACKEND, FULL_STACK)
 - `tasks` -- list of `TaskDefinition` objects, each with:
   - `taskId` (snake_case identifier)
   - `title` (human-readable description)
@@ -376,7 +404,8 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.2 WorkerAgent
 
 **File:** `agent/WorkerAgent.java`
-**Model:** `claude-haiku-4-5-20251001` (default, overridable per task)
+**Tier:** WORKHORSE
+**Model (Anthropic):** `claude-haiku-4-5-20251001`
 **Mode:** Agentic loop (up to 80 iterations)
 
 **Purpose:** Executes a single task by operating in an isolated git worktree, using XML-format tool calls to read, write, edit files, run commands, and manage git.
@@ -428,6 +457,7 @@ PostMergeOrchestrator.onMergeCompleted(event)
 - Tool calls use XML format (`<tool_call>`) NOT Spring AI native tool calling, because `@Tool` methods require `runId` which the model does not know.
 - Completion detection is **strict**: response must START with `{` and contain `"task_id"` and `"status"`.
 - `escapeControlCharsInJsonStrings()` sanitizes LLM-emitted raw control characters inside JSON string values.
+- Max task duration: 25 minutes (wall-clock). Stall detection warns at 8 minutes, recovers at 15 minutes.
 
 ### 5.3 ReviewerAgent (Legacy -- removed from pipeline)
 
@@ -436,10 +466,11 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.4 ReviewerAgentV2
 
 **File:** `reviewer/ReviewerAgentV2.java`
-**Model:** `claude-haiku-4-5-20251001` (UTILITY_CHAIN)
+**Tier:** PLANNING
+**Model (Anthropic):** `claude-sonnet-4-6`
 **Mode:** Two-phase agentic review
 
-**Purpose:** Reviews merged code on main with tool-use inspection and automatic fix application for critical issues. Runs AFTER merge (not before).
+**Purpose:** Reviews merged code on main with tool-use inspection and automatic fix application for critical issues. Runs in the background validation thread AFTER the run is marked COMPLETE.
 
 **Phases:**
 1. **Inspect Phase:** Reads file tree and selected source files via tool-use loop (max 10 tool calls). Produces a list of ReviewIssues classified as CRITICAL or MINOR.
@@ -467,7 +498,8 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.5 CompilerAgent
 
 **File:** `compiler/CompilerAgent.java`
-**Model:** `claude-haiku-4-5-20251001`
+**Tier:** WORKHORSE
+**Model (Anthropic):** `claude-haiku-4-5-20251001`
 **Mode:** Compile-and-fix loop (up to 3 attempts)
 
 **Purpose:** Runs the project build after all workers complete (before the reviewer sees the code). If compilation fails, extracts error messages and affected source files, sends them to an LLM for JSON-patch fixes, and retries.
@@ -488,7 +520,8 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.6 ConversationAgent
 
 **File:** `agent/ConversationAgent.java`
-**Model:** `claude-haiku-4-5-20251001` (UTILITY_CHAIN)
+**Tier:** LIGHTWEIGHT
+**Model (Anthropic):** `claude-haiku-4-5-20251001`
 **Mode:** Stateful conversation (up to 10 user messages)
 
 **Purpose:** Post-run conversational AI. After a run reaches COMPLETE, users can ask questions about the generated code. The agent has access to workspace file trees, README.md, CODEBASE_CONTEXT.md, plan JSON, and review JSON.
@@ -509,7 +542,8 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.7 ContextAgent
 
 **File:** `context/ContextAgent.java`
-**Model:** `claude-haiku-4-5-20251001`
+**Tier:** LIGHTWEIGHT
+**Model (Anthropic):** `claude-haiku-4-5-20251001`
 
 **Purpose:** Post-merge agent that updates `CODEBASE_CONTEXT.md` and `decisions.md` in the project workspace. Runs asynchronously in a virtual thread.
 
@@ -523,7 +557,8 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.8 PromptOptimiserAgent
 
 **File:** `optimiser/PromptOptimiserAgent.java`
-**Model:** `claude-haiku-4-5-20251001`
+**Tier:** WORKHORSE
+**Model (Anthropic):** `claude-haiku-4-5-20251001`
 
 **Purpose:** Self-improving prompt system. Analyses failure patterns across recent runs and surgically updates system prompts to address recurring issues.
 
@@ -541,13 +576,41 @@ PostMergeOrchestrator.onMergeCompleted(event)
 ### 5.9 ApiTestSuiteAgent
 
 **File:** `apitests/ApiTestSuiteAgent.java`
-**Model:** `claude-haiku-4-5-20251001`
+**Tier:** WORKHORSE
+**Model (Anthropic):** `claude-haiku-4-5-20251001`
 
 **Purpose:** Generates an OpenAPI 3.0 YAML specification for backend-only runs post-merge. Writes `api-docs/openapi.yaml` to the workspace.
 
 **Skip Conditions:**
 - Frontend files detected (.html, .jsx, .tsx, .vue, .svelte)
 - No controller files found (*Controller.java / *Resource.java)
+
+### 5.10 Test Generation Agents
+
+**TestGenOrchestrator** (`testgen/TestGenOrchestrator.java`): Orchestrates language-agnostic test generation. Coordinates TestPlannerAgent and TestWorkerAgent.
+
+**TestPlannerAgent** (`testgen/TestPlannerAgent.java`):
+- **Tier:** WORKHORSE
+- Plans test cases based on the generated code, producing a language-agnostic test plan.
+
+**TestWorkerAgent** (`testgen/TestWorkerAgent.java`):
+- **Tier:** WORKHORSE
+- Generates actual test code from the test plan. Supports multiple languages and frameworks.
+
+**TestPreviewCoordinator** (`testgen/TestPreviewCoordinator.java`):
+- Manages preview lifecycle for test execution. Reuses existing running preview if available.
+- Preview is NOT stopped after test execution (stays up for user).
+
+**TestReportGenerator** (`testgen/TestReportGenerator.java`):
+- **Tier:** LIGHTWEIGHT
+- Generates a human-readable test report from test execution results.
+
+### 5.11 RequestTriageService
+
+**File:** `api/controller/RunController.java` (invoked during submission)
+**Tier:** LIGHTWEIGHT
+
+**Purpose:** Classifies and enriches incoming run requests before they enter the pipeline. Lightweight triage step.
 
 ---
 
@@ -563,8 +626,8 @@ Provides file I/O operations for agents. All paths are resolved relative to the 
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `readFile` | `String readFile(String runId, String path)` | Read the full content of a file. |
-| `writeFile` | `String writeFile(String runId, String path, String content)` | Create or fully overwrite a file. Logs WARN for sensitive filenames (.env, credentials.json, etc.) but does NOT block. |
+| `readFile` | `String readFile(String runId, String path)` | Read file content (truncated at 8k chars). |
+| `writeFile` | `String writeFile(String runId, String path, String content)` | Create or fully overwrite a file. Logs WARN for sensitive filenames (.env, credentials.json, etc.) but does NOT block. Scanned by CodeAbuseScanner before write. |
 | `editFile` | `String editFile(String runId, String path, String oldStr, String newStr)` | Replace an exact string in a file. |
 | `listFiles` | `String listFiles(String runId, String path)` | List directory contents. Hides `worktrees/`, `target/`, `build/`, `node_modules/`, `.git/`. |
 | `searchFiles` | `String searchFiles(String runId, String pattern, String directory)` | Recursive grep with the same directory exclusions. |
@@ -573,6 +636,12 @@ Provides file I/O operations for agents. All paths are resolved relative to the 
 - `safeResolve(runId, relativePath)` -- normalizes the path and verifies it starts with the workspace root. Throws `SecurityException` on escape attempts.
 - `checkFileLock(path)` -- checks file locks from `FileLockTool`. Blocks writes to files owned by another task.
 - `SENSITIVE_FILE_NAMES` -- WARN log only (agents legitimately write these for generated projects).
+- `CodeAbuseScanner` integration -- scans file content for crypto mining, reverse shells, and other abuse patterns before write.
+
+**Truncation Limits:**
+- `readFile`: 8k chars
+- `shell`: 6k chars
+- `diff`: 5k chars
 
 ### 6.2 ShellTool
 
@@ -582,7 +651,7 @@ Executes shell commands inside the run's workspace directory.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `run` | `String run(String runId, String command, int timeoutSeconds)` | Validates via `ShellSandboxPolicy`, strips secret env vars, runs with hard 300s timeout ceiling. |
+| `run` | `String run(String runId, String command, int timeoutSeconds)` | Validates via `ShellSandboxPolicy`, strips secret env vars, runs with hard 300s timeout ceiling. Output truncated at 6k chars. |
 
 **Environment Stripping:** Removes `GITHUB_PAT`, `POSTGRES_PASSWORD`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `JIRA_API_TOKEN`, etc. from child process environment.
 
@@ -609,7 +678,7 @@ Git operations via JGit library and shell git (for worktree management).
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `status` | `String status(String runId)` | Git status output. |
-| `diff` | `String diff(String runId)` | Full diff of working tree. |
+| `diff` | `String diff(String runId)` | Full diff of working tree (truncated at 5k chars). |
 | `commit` | `String commit(String runId, String message)` | Stage all + commit. |
 | `commitIfDirty` | `void commitIfDirty(String runId)` | No-op if clean; stages and commits if dirty. |
 
@@ -617,7 +686,7 @@ Git operations via JGit library and shell git (for worktree management).
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `createWorktree` | `String createWorktree(String runId, String taskId, String branchName, List<String> depBranches)` | Creates an isolated git worktree at `workspace/{runId}/worktrees/{taskId}/`. Merges dependency branches with `-X theirs`. Handles retry by resetting existing worktrees. |
+| `createWorktree` | `String createWorktree(String runId, String taskId, String branchName, List<String> depBranches)` | Creates an isolated git worktree at `workspace/{runId}/worktrees/{taskId}/`. Merges dependency branches with `-X theirs`. Throws on dep branch merge failure. |
 | `removeWorktree` | `void removeWorktree(String runId, String taskId)` | Force-removes a task's worktree. |
 | `pruneAllWorktrees` | `void pruneAllWorktrees(String runId)` | Removes ALL worktrees for a run and prunes stale metadata. |
 
@@ -630,6 +699,7 @@ Git operations via JGit library and shell git (for worktree management).
 | `abortMerge` | `void abortMerge(String runId)` | Aborts an in-progress merge. |
 | `getFullDiff` | `String getFullDiff(String runId, String fromRef, String toRef)` | Full diff between two refs. |
 | `tagRun` | `void tagRun(String runId)` | Creates a git tag for the completed run. |
+| `pushToBranch` | `void pushToBranch(String runId, String branchName)` | Pushes workspace to a specific branch on the remote (for existing-repo GitHub PR flow). |
 
 ### 6.5 WorkspaceContext
 
@@ -707,7 +777,7 @@ Central database access layer. All run and task lifecycle operations go through 
 |-------|------|-------------|
 | `runId` | `String` (PK) | UUID assigned at creation. |
 | `userRequest` | `TEXT` | Original natural language request. |
-| `status` | `String` | PLANNING, AWAITING_APPROVAL, AWAITING_CLARIFICATION, WORKING, REVIEWING, COMPLETE, FAILED, PARTIAL, QUEUED, PAUSED. |
+| `status` | `String` | PLANNING, AWAITING_APPROVAL, AWAITING_CLARIFICATION, WORKING, COMPILING, MERGING, REVIEWING, COMPLETE, FAILED, PARTIAL, QUEUED, PAUSED. |
 | `planJson` | `TEXT` | Full TaskPlan JSON from planner. |
 | `reviewJson` | `TEXT` | ReviewReport JSON from reviewer. |
 | `plannerModel` | `String` | Model used for planning (e.g., `claude-sonnet-4-6`). |
@@ -730,11 +800,13 @@ Central database access layer. All run and task lifecycle operations go through 
 | `projectId` | `String` | Project within the org (nullable). |
 | `githubPat` | `String` | GitHub PAT captured at run creation. |
 | `githubOwner` | `String` | GitHub owner for push. |
+| `githubPrUrl` | `String` | URL of the GitHub PR created for existing-repo runs. |
 | `chatHistoryJson` | `TEXT` | Conversation history as JSON array. |
 | `chatMessageCount` | `int` | Total messages exchanged (capped at 20). |
 | `sourceRunId` | `String` | For iteration runs, the source run's ID. |
 | `gcsWorkspaceKey` | `String` | GCS object key for archived workspace. |
 | `gcsArchivedAt` | `Instant` | When workspace was archived to GCS. |
+| `archivedAt` | `Instant` | When the run was archived (V53). |
 | `tenantId` | `String` | Multi-tenant discriminator (default: "default"). |
 
 ### 7.3 AgentTask Entity
@@ -751,7 +823,7 @@ Central database access layer. All run and task lifecycle operations go through 
 | `status` | `String` | PENDING, LOCKED, WORKING, COMPLETE, PARTIAL, FAILED, BLOCKED. |
 | `taskJson` | `TEXT` | Full TaskDefinition JSON. |
 | `workerReportJson` | `TEXT` | WorkerReport JSON after completion. |
-| `assignedModel` | `String` | Model assigned by planner or ModelRouter. |
+| `assignedModel` | `String` | Model assigned by planner or ModelResolver. |
 | `branchName` | `String` | Git branch: `agent/{runId_8chars}/{taskId}`. |
 | `inputTokens` | `Integer` | Total input tokens consumed. |
 | `outputTokens` | `Integer` | Total output tokens consumed. |
@@ -773,7 +845,7 @@ Central database access layer. All run and task lifecycle operations go through 
 Central orchestrator that manages the entire pipeline lifecycle. Handles both CLI and REST execution paths.
 
 **Key Components:**
-- `Semaphore runSlots` -- limits concurrent active runs (configurable, default: 10)
+- `Semaphore runSlots` -- limits concurrent active runs (configurable, default: 50)
 - `ExecutorService executor` -- cached thread pool for async pipeline execution
 - `GateStore gateStore` -- Redis-backed gate store for cross-instance approval handling
 
@@ -787,15 +859,15 @@ Central orchestrator that manages the entire pipeline lifecycle. Handles both CL
 | `cancelRun` | `boolean cancelRun(String runId)` | Signals open gates as rejected, marks run cancelled. |
 | `pauseRun` | `boolean pauseRun(String runId)` | Pauses a run: signals gates, cancels workers, marks PAUSED. |
 | `restartWithNewGoal` | `PipelineRun restartWithNewGoal(PipelineRun pausedRun, String newGoal)` | Creates a fresh run from a paused run with an edited goal. Carries forward credentials and settings. |
-| `reopenMergeGate` | `void reopenMergeGate(String runId)` | Legacy method (merge gate removed). |
 | `implementSuggestions` | `void implementSuggestions(String runId)` | Implements post-merge suggestions (MEDIUM/LOW issues). |
 | `reworkRun` | `void reworkRun(String runId)` | Re-runs flagged tasks with reviewer feedback. |
 | `retryPartialTask` | `void retryPartialTask(String runId, String taskId)` | Retries a single failed/partial/blocked task. |
 | `startIterationRun` | `void startIterationRun(String runId, String newRequest)` | Starts a run that iterates on a completed run's workspace. |
+| `pushToGitHubIfConfigured` | `void pushToGitHubIfConfigured(String runId)` | Creates branch `executespec/{runId-short}`, pushes, and opens PR via GitHubRepoService. |
 
 **Gate Architecture (Redis-backed):**
 
-Gates use Redis polling (500ms interval) so that HTTP approve/reject calls work regardless of which server instance receives them:
+Gates use Redis polling (500ms interval, 2h TTL) so that HTTP approve/reject calls work regardless of which server instance receives them:
 
 ```
 Pipeline Thread                    REST Handler
@@ -808,6 +880,8 @@ Pipeline Thread                    REST Handler
 ```
 
 The pipeline thread releases its compute semaphore slot while waiting at a gate, so gate-waiting runs do not block new submissions.
+
+**Gate-loss fallback:** If a server restarts while a run is at a gate, `approve()` detects the missing gate and auto-fails the run with a message.
 
 ### 8.2 WorkerPool
 
@@ -831,19 +905,18 @@ Executes worker tasks sequentially in topological order with progressive merge a
 
 **File:** `harness/SequentialTaskExecutor.java`
 
-Enhanced task executor with per-task validation and model routing. Replaces direct `WorkerPool.runAll()` calls in PipelineHarness.
+Enhanced task executor with model routing via the model matrix. Replaces direct `WorkerPool.runAll()` calls in PipelineHarness.
 
 **Flow per task:**
 1. Check dependency failures (skip if any dep failed, mark BLOCKED)
-2. Select model via `ModelRouter.selectForTask(complexity, availableProviders)`
+2. Select model via `ModelResolver.resolve(agentTier, provider)` using the model-matrix
 3. Lock task in DB + set branch name
-4. Execute with validation loop:
-   - `WorkerAgent.execute(task, runId)` in isolated worktree
-   - `CodeValidator.validateFile()` on all modified files
-   - On validation FAIL: build retry prompt, escalate model, re-execute (up to `maxRetries`)
+4. Execute worker: `WorkerAgent.execute(task, runId)` in isolated worktree
 5. Auto-commit worktree if dirty
 6. Progressive merge via `GitMergeService.mergeTaskBranchWithResolution()`
 7. Track metrics via `ModelTaskMetricRepository`
+
+**Note:** Per-task validation has been removed. Validation is deferred to the review phase (CompilerAgent + ReviewerAgentV2).
 
 **Result:** `SequentialExecutionResult(reports, completedTasks, failedTasks)`
 
@@ -897,23 +970,56 @@ public void onMergeCompleted(PipelineEvent.MergeCompleted event) {
 
 All agents are non-fatal. Failures are logged but do NOT affect run status.
 
+**Integration events:** `IntegrationManager` also listens to `MergeCompleted` (not `RunCompleted`) to avoid a race condition where the review report was null because `RunCompleted` fires before background review saves. Both PROTOTYPE and PRODUCTION modes now publish `MergeCompleted`.
+
 ---
 
 ## 9. Model Routing
 
-### 9.1 LlmRouter
+### 9.1 Model Matrix (application.yml)
+
+The system uses a YAML-configured model matrix that maps `AgentTier x Provider -> Model`. The user selects a provider per project; the model is determined automatically based on the agent's tier.
+
+**Agent Tier Assignments:**
+
+| Tier | Agents |
+|------|--------|
+| PLANNING | PlannerAgent, ReviewerAgentV2 |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService |
+
+**Model Matrix:**
+
+| Tier | Anthropic | Google | OpenAI |
+|------|----------|--------|--------|
+| PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+
+**Default Provider:** OpenAI
+
+**Failover Order:**
+- Anthropic -> OpenAI -> Google
+- Google -> OpenAI -> Anthropic
+- OpenAI -> Google -> Anthropic
+
+### 9.2 ModelResolver
+
+**File:** `router/ModelResolver.java`
+
+Resolves the model for a given agent tier and provider using the model-matrix configuration from `ModelMatrixProperties`.
+
+```java
+ModelSelection resolve(AgentTier tier, LlmProvider provider)
+  --> Reads model-matrix.providers.{provider}.{tier} from application.yml
+  --> Returns ModelSelection(provider, model)
+```
+
+### 9.3 LlmRouter
 
 **File:** `agent/LlmRouter.java`
 
-Routes LLM calls with 3-provider fallback chains and per-run API key injection.
-
-**Provider Fallback Chains:**
-
-| Chain | Position 1 | Position 2 | Position 3 |
-|-------|-----------|-----------|-----------|
-| ARCHITECT | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
-| CAPABLE | `claude-sonnet-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
-| UTILITY | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+Routes LLM calls with provider fallback chains and per-run API key injection.
 
 **Fallback Modes:**
 - `IMMEDIATE` -- planner/reviewer: always fallback on any error
@@ -935,37 +1041,32 @@ Keys are resolved via `ApiKeyResolver` (user -> org -> system) and stored in `Ru
 | `callWithFallback` | `ChatResponse callWithFallback(...)` | Convenience wrapper returning only the ChatResponse. |
 | `callWithModelOptions` | `ChatResponse callWithModelOptions(provider, model, prompt, runId)` | Builds provider-specific Prompt with model options and calls it. Resolves per-run keys. |
 
-### 9.2 ModelRouter
+### 9.4 ProviderHealthTracker
 
-**File:** `router/ModelRouter.java`
+**File:** `router/ProviderHealthTracker.java`
 
-Two-axis model selection for task execution:
-- **Axis 1 (Tier):** FAST -> CAPABLE -> POWER based on task complexity + escalation
-- **Axis 2 (Provider):** 4:3:3 weighted round-robin (Anthropic:Google:OpenAI) via `RoutingProperties.java`, with health-based fallback
+Redis-backed circuit breaker that tracks LLM provider health. Used by LlmRouter to skip unhealthy providers.
 
-**Model Matrix:**
+**Configuration:**
 
-| Tier | Anthropic | OpenAI | Gemini |
-|------|----------|--------|--------|
-| FAST | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
-| CAPABLE | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
-| POWER | `claude-opus-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Failure threshold | 5 | Consecutive failures before circuit opens |
+| Recovery TTL | 60 seconds | Auto-recovery cooldown via Redis key expiry |
 
-**Complexity to Tier Mapping:**
-- LOW -> CAPABLE
-- MEDIUM -> CAPABLE
-- HIGH -> CAPABLE
+**Behavior:**
 
-**Escalation Rules:**
-- Attempts 1-2: stay at current tier
-- Attempt 3: escalate one tier (FAST -> CAPABLE)
-- Never auto-escalate to POWER (too expensive)
+```
+recordSuccess(provider)  -->  reset failure count, mark healthy (Redis)
+recordFailure(provider)  -->  increment count; mark unhealthy at threshold (Redis)
+isHealthy(provider)      -->  check Redis key; auto-recover after TTL expiry
+```
 
-### 9.3 AvailableProviderResolver
+### 9.5 AvailableProviderResolver
 
 **File:** `router/AvailableProviderResolver.java`
 
-Bridges the `ResolvedKeys` / `RunKeyStore` system with ModelRouter's `Set<LlmProvider>` filter.
+Bridges the `ResolvedKeys` / `RunKeyStore` system with ModelResolver's `Set<LlmProvider>` filter.
 
 **Resolution Rules:**
 - `SYSTEM` mode: providers with system-level keys configured
@@ -974,7 +1075,7 @@ Bridges the `ResolvedKeys` / `RunKeyStore` system with ModelRouter's `Set<LlmPro
 
 Also respects org-level `enabledProviders` policy.
 
-### 9.4 ApiKeyResolver
+### 9.6 ApiKeyResolver
 
 **File:** `agent/ApiKeyResolver.java`
 
@@ -991,7 +1092,7 @@ Resolves per-run AI provider API keys using the multi-tenant hierarchy:
 - `OWN_KEYS` -- user/org keys only; no system fallback
 - `HYBRID` (default) -- user/org first, system fallback
 
-### 9.5 TokenBudgetMonitor
+### 9.7 TokenBudgetMonitor
 
 **File:** `agent/TokenBudgetMonitor.java`
 
@@ -1012,7 +1113,9 @@ HIGH complexity tasks get +5% extra headroom on all thresholds.
 - Anthropic models: 200,000 tokens
 - OpenAI models: 128,000 tokens
 
-### 9.6 CostEstimator
+**Sliding Window:** First 2 + last 18 messages retained during compaction.
+
+### 9.8 CostEstimator
 
 **File:** `agent/CostEstimator.java`
 
@@ -1082,13 +1185,246 @@ Pricing is DB-backed (`model_pricing` table), editable via UI/REST.
 
 - Access token expiry: 1440 minutes (24 hours)
 - Refresh token expiry: 7 days
-- Admin email: `admin@executespec.ai` (password set during deployment — see DEPLOYMENT.md)
+- Admin email: `admin@executespec.ai` (password set during deployment)
+- Force-logout via feature flag: When `force_logout` feature flag is enabled, `force_logout_epoch` is set to the current timestamp. JWTs issued before this epoch are rejected by the JWT filter, effectively invalidating all existing sessions.
 
 ---
 
-## 11. Deployment and Preview
+## 11. OAuth2 Authentication
 
-### 11.1 PreviewService
+### 11.1 Overview
+
+ExecuteSpec supports social login via Google and GitHub OAuth2 alongside traditional email/password JWT authentication.
+
+**Files:**
+- `auth/oauth/OAuthSuccessHandler.java` -- handles successful OAuth2 login
+- `auth/oauth/OAuthUserMapper.java` -- maps provider-specific attributes to unified profile
+- `auth/oauth/OAuthProfile.java` -- unified profile record (provider, oauthId, email, name, avatarUrl)
+
+### 11.2 OAuth2 Flow
+
+```
+1. User clicks "Login with Google" or "Login with GitHub"
+2. Browser redirects to provider's OAuth consent page
+3. Provider redirects back to /login/oauth2/code/{provider}
+4. Spring Security exchanges code for access token
+5. OAuthSuccessHandler.onAuthenticationSuccess():
+   a. OAuthUserMapper.toProfile() extracts email, name, avatar
+   b. AuthService.findOrCreateFromOAuth() finds or creates AppUser
+   c. JwtUtil.generateAccessToken() + generateRefreshToken()
+   d. Redirects to frontend: /auth/callback?token=...&refresh=...
+6. Frontend stores JWT tokens and completes login
+```
+
+### 11.3 Provider Configuration
+
+OAuth2 providers are conditionally activated. If no client-id is configured for a provider, the `OAuthSuccessHandler` bean is not created:
+
+```java
+@ConditionalOnExpression(
+  "!'none'.equals('${spring.security.oauth2.client.registration.google.client-id:none}') " +
+  "or !'none'.equals('${spring.security.oauth2.client.registration.github.client-id:none}')")
+```
+
+**GitHub Email Fallback:** GitHub may not return an email in the OAuth profile. The handler retrieves the `OAuth2AuthorizedClient` to access the access token and fetch the email via GitHub's API.
+
+### 11.4 Error Handling
+
+| Error | Redirect |
+|-------|----------|
+| No email from provider | `/login?error=oauth_no_email` |
+| Email conflict (existing account) | `/login?error=oauth_email_conflict` |
+| Generic OAuth failure | `/login?error=oauth_failed` |
+
+---
+
+## 12. Feature Flags
+
+### 12.1 FeatureFlagService
+
+**File:** `config/featureflag/FeatureFlagService.java`
+
+DB-backed feature flag system with Redis pub/sub for cross-instance cache invalidation.
+
+**Architecture:**
+- Feature flags stored in `feature_flag` DB table
+- In-memory `ConcurrentHashMap` cache for fast reads
+- Redis pub/sub channel `executespec:feature-flag-update` for cross-instance invalidation
+- Scheduled full reload every 60 seconds as fallback
+
+**Read API:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `isEnabled` | `boolean isEnabled(String key)` | Check if flag is `"true"` |
+| `getString` | `String getString(String key, String defaultValue)` | Get flag value as string |
+| `getInt` | `int getInt(String key, int defaultValue)` | Get flag value as integer |
+
+**Write API (admin):**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `update` | `FeatureFlag update(String key, String value, String userId)` | Update flag value, publish to Redis, record updater |
+
+**Special Flags:**
+- `force_logout` -- When set to `"true"`, stamps `force_logout_epoch` to the current timestamp, invalidating all existing JWTs. Used for emergency session invalidation.
+
+### 12.2 FeatureFlagController
+
+**File:** `config/featureflag/FeatureFlagController.java`
+**Base Path:** `/api/admin/feature-flags`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/admin/feature-flags` | List all feature flags |
+| `PUT` | `/api/admin/feature-flags/{key}` | Update a feature flag value (body: `{"value": "..."}`) |
+
+**FeatureFlag Entity:**
+- `flagKey` -- unique key string
+- `flagValue` -- string value
+- `valueType` -- BOOLEAN, STRING, INTEGER
+- `scope` -- PLATFORM, ORG, PROJECT
+- `description` -- human-readable description
+- `updatedBy` -- userId of last updater
+- `updatedAt` -- timestamp of last update
+
+---
+
+## 13. Rate Limiting
+
+### 13.1 RateLimitFilter
+
+**File:** `ratelimit/RateLimitFilter.java`
+
+Redis-backed per-tenant rate limiting filter. Registered after `JwtAuthenticationFilter` in the Spring Security filter chain.
+
+**Keying Strategy:**
+- Authenticated requests: keyed by userId
+- Unauthenticated (auth endpoints, webhooks): keyed by IP address
+
+**Implementation:**
+- Uses Redis `INCR` with 60-second TTL per sliding window bucket
+- In-memory `ConcurrentHashMap` fallback counters when Redis is unavailable
+- Local counters cleared every 60s by bucket rotation
+
+**Request Classification:**
+
+| Group | Endpoints | Rate Limited |
+|-------|-----------|-------------|
+| AUTH | `/api/auth/*` | Yes (prevents brute force) |
+| RUNS | `/api/runs` (POST) | Yes (prevents run spam) |
+| WEBHOOK | `/api/webhooks/*` | Yes (prevents webhook abuse) |
+| READ | GET endpoints | No (internal app traffic) |
+| WRITE | Other write endpoints | No (internal app traffic) |
+
+**Skipped Paths:**
+- `/api/health` -- health check endpoint
+- Non-API paths (static resources, etc.)
+
+**Configuration:**
+- `RateLimitProperties` -- enabled flag, default limits
+- `RateLimitPolicy` -- classifies request group, resolves per-tier limits
+
+---
+
+## 14. Billing and Payment Gateway
+
+### 14.1 PaymentGatewayRouter
+
+**File:** `billing/gateway/PaymentGatewayRouter.java`
+
+Multi-gateway payment routing that supports both Razorpay and Stripe.
+
+**Resolution Order:**
+1. Entity's preferred gateway (if set and enabled)
+2. System default gateway (`billing.default-gateway`, default: `razorpay`)
+3. Razorpay fallback
+
+**Key Methods:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `resolve` | `PaymentGateway resolve(BillingEntity entity)` | Resolve gateway for billing entity |
+| `resolveByName` | `PaymentGateway resolveByName(String gatewayName)` | Resolve by name ("stripe" or "razorpay") |
+| `stripe()` | `PaymentGateway stripe()` | Direct Stripe gateway access (for webhooks) |
+| `razorpay()` | `PaymentGateway razorpay()` | Direct Razorpay gateway access (for webhooks) |
+| `isStripeEnabled` | `boolean isStripeEnabled()` | Check if Stripe is enabled |
+| `isRazorpayEnabled` | `boolean isRazorpayEnabled()` | Check if Razorpay is enabled |
+
+**Configuration:**
+```yaml
+billing:
+  default-gateway: razorpay
+  stripe:
+    enabled: false
+  razorpay:
+    enabled: true
+```
+
+### 14.2 PaymentGateway Interface
+
+**File:** `billing/gateway/PaymentGateway.java`
+
+Common interface implemented by both `StripePaymentGateway` and `RazorpayPaymentGateway`. Methods include subscription creation, cancellation, webhook handling, and payment verification.
+
+### 14.3 Webhook Handling
+
+**File:** `billing/controller/BillingWebhookController.java`
+
+Both webhook endpoints are NOT behind JWT auth -- authenticated via provider-specific signatures.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/webhooks/razorpay` | HMAC signature (`X-Razorpay-Signature`) | Razorpay webhook handler |
+| `POST` | `/api/webhooks/stripe` | Stripe signature (`Stripe-Signature`) | Stripe webhook handler |
+
+**Idempotency:** Webhook events are logged in `webhook_event_log` table with deduplication by `(gateway, event_id)`. Duplicate events are marked `IGNORED`.
+
+**Reliability:** Both endpoints always return 200 to prevent provider retries. Raw payload is stored for audit and reprocessing.
+
+### 14.4 Multi-Currency Support (V54)
+
+- Billing plans support USD, EUR, GBP pricing alongside INR
+- Organizations have `country` and `default_currency` fields
+- Subscriptions track `currency` and `amount_minor`
+- Topup packages support Stripe price IDs
+
+---
+
+## 15. Payment Audit
+
+### 15.1 PaymentAuditService
+
+**File:** `auth/service/PaymentAuditService.java`
+
+Records all payment-related events for audit compliance.
+
+**Fields per audit entry:**
+- `entityType` / `entityId` -- what was affected (subscription, topup, etc.)
+- `eventType` -- what happened (SUBSCRIPTION_CREATED, PAYMENT_RECEIVED, etc.)
+- `gatewayProvider` -- STRIPE or RAZORPAY
+- `gatewayEventId` / `gatewayPaymentId` -- provider-side identifiers
+- `currency` / `amountMinor` -- payment amount in minor units
+- `metadata` -- JSONB for additional context
+- `idempotencyKey` -- prevents duplicate processing
+- `userId` / `orgId` -- who was affected
+
+### 15.2 PaymentAuditController
+
+**File:** `billing/controller/PaymentAuditController.java`
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/admin/payment-audit` | SUPER_ADMIN | List audit entries (paginated, filterable by orgId or userId) |
+| `GET` | `/api/admin/payment-audit/export` | SUPER_ADMIN | Export audit as CSV download |
+| `GET` | `/api/admin/webhook-events` | SUPER_ADMIN | List webhook event log (filterable by gateway) |
+| `GET` | `/api/billing/payment-history` | ORG_ADMIN, BILLING_ADMIN | Payment history scoped to org |
+
+---
+
+## 16. Deployment and Preview
+
+### 16.1 PreviewService
 
 **File:** `deployment/preview/PreviewService.java`
 
@@ -1101,7 +1437,7 @@ Dual-mode preview service that builds and runs ephemeral dev servers for complet
 | Docker (default) | `docker` | Docker Compose on local/VM, Caddy reverse proxy | Cloudflare Origin Certificate via Caddy | `https://{runId}.preview.executespec.ai` |
 | Cloud Run | `cloud-run` | Build image, push to Artifact Registry, deploy to GCP Cloud Run | Managed by Cloud Run (automatic) | `https://es-preview-{runId8}.run.app` |
 
-**Lifecycle:** `PreviewStatus` enum: IDLE → ANALYZING → BUILDING → STARTING → RUNNING / FAILED / TIMED_OUT / STOPPED
+**Lifecycle:** `PreviewStatus` enum: IDLE -> ANALYZING -> BUILDING -> STARTING -> RUNNING / FAILED / TIMED_OUT / STOPPED
 
 **Public API:**
 - `start(runId, user, envVars)` -- starts preview on a context-wrapped virtual thread; returns immediately with ANALYZING status
@@ -1127,6 +1463,8 @@ Dual-mode preview service that builds and runs ephemeral dev servers for complet
 
 - **`fail()`** -- Marks a preview as FAILED: increments `PREVIEW_FAILURES` counter, decrements `ACTIVE_PREVIEWS` gauge, runs cleanup (Cloud Run service + image deletion for cloud-run mode, or Docker Compose teardown + port release for docker mode), updates session status, and emits `PREVIEW_FAILED` SSE event.
 
+**Cloud Run Orphan Fix:** `PreviewService` stores `cloudRunServiceName` upfront in the initial session (predictable `es-preview-{runIdShort}`). Prevents orphan cleanup job from deleting services mid-deploy.
+
 **Virtual Thread Context Propagation:**
 
 All virtual threads are wrapped with `ContextSnapshotFactory.captureAll().wrap()` to propagate Micrometer observation context (traceId/spanId) from the calling thread. This ensures distributed traces are connected across the async preview lifecycle:
@@ -1146,9 +1484,16 @@ Thread.ofVirtual().name("preview-cr-" + runId.substring(0, 8))
 
 **TTL Enforcement:**
 
-A `@Scheduled` method runs every 30 seconds to expire previews past their TTL (configurable via `preview.previewTtlMinutes`). Expired Docker previews are torn down via `docker compose down`; expired Cloud Run previews trigger `cleanupCloudRun()`.
+A `@Scheduled` method runs every 30 seconds to expire previews past their TTL (5 minutes, configurable via `preview.preview-ttl-minutes`). Expired Docker previews are torn down via `docker compose down`; expired Cloud Run previews trigger `cleanupCloudRun()`.
 
-### 11.2 CloudRunClient
+**Project Type Detection:**
+
+`DevDockerfileGenerator` reads `.agent-context/project.json` (written by PlannerAgent) to determine the project type before falling back to file-based heuristics. Detects:
+- Single-package full-stack: both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in the same `package.json` -> FULL_STACK
+- NODE_BACKEND: includes `ENV PORT=3000` to match Docker exposed port
+- STATIC_HTML: checked before `hasJsOrTsFiles()` to prevent misdetection
+
+### 16.2 CloudRunClient
 
 **File:** `deployment/CloudRunClient.java`
 
@@ -1165,7 +1510,7 @@ GCP Cloud Run CLI wrapper. All subprocess calls use bounded timeouts to prevent 
 | `deleteImage()` | Delete Artifact Registry image | 5 minutes (via `exec()`) |
 | `listPreviewServices()` | List services with `managed-by=executespec-preview` label | 2 minutes |
 | `rollbackToRevision()` | Route 100% traffic to a specific revision | 5 minutes |
-| `ensurePublicAccess()` | Set `allUsers → roles/run.invoker` IAM binding | 2 minutes |
+| `ensurePublicAccess()` | Set `allUsers -> roles/run.invoker` IAM binding | 2 minutes |
 | `exec()` | Generic subprocess helper | 5 minutes |
 
 **Pipe Deadlock Fix:** `deploy()` and `deployPreview()` read stdout and stderr in parallel using `CompletableFuture.supplyAsync()` for the stderr stream. This prevents the OS pipe buffer from filling up and blocking the subprocess when gcloud writes large amounts of progress output to stderr.
@@ -1186,7 +1531,7 @@ GCP Cloud Run CLI wrapper. All subprocess calls use bounded timeouts to prevent 
 - `PORT` env var removed from user input (Cloud Run sets it automatically via `--port`)
 - Post-deploy `ensurePublicAccess()` as fallback if `--allow-unauthenticated` silently failed
 
-### 11.3 ArtifactRegistryClient
+### 16.3 ArtifactRegistryClient
 
 **File:** `deployment/ArtifactRegistryClient.java`
 
@@ -1204,7 +1549,7 @@ Docker image build and push client for GCP Artifact Registry.
 
 **Error Detection:** Docker build checks for "Cannot connect to the Docker daemon" and provides a user-friendly message to start Docker Desktop.
 
-### 11.4 DeploymentService
+### 16.4 DeploymentService
 
 **File:** `deployment/DeploymentService.java`
 
@@ -1227,7 +1572,7 @@ Thread.ofVirtual().name("deploy-" + runId.substring(0, 8))
     .start(snapshot.wrap(() -> executeDeployPipeline(...)));
 ```
 
-**Deployment Status Flow:** PENDING → BUILDING → PUSHING → DEPLOYING → LIVE / FAILED
+**Deployment Status Flow:** PENDING -> BUILDING -> PUSHING -> DEPLOYING -> LIVE / FAILED
 
 **Observability:** Records metrics for total deploy duration, build phase duration, health check duration, deploy failures (tagged by reason), and active deploy count.
 
@@ -1236,7 +1581,7 @@ Thread.ofVirtual().name("deploy-" + runId.substring(0, 8))
 - `deleteDeployment(deploymentId)` -- manual cleanup (deletes Cloud Run service + AR image)
 - `validatePrerequisites()` -- `@PostConstruct` check for Docker, gcloud auth, and GitHub PAT availability
 
-### 11.5 PreviewController
+### 16.5 PreviewController
 
 **File:** `api/controller/PreviewController.java`
 
@@ -1267,18 +1612,32 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 - **Docker mode:** fetches via `docker compose logs` for the compose project
 - **Cloud Run mode:** fetches via `gcloud logging read` filtered by service name (last 10 minutes, max 200 lines)
 
-### 11.6 GCS Workspace Archiving
+### 16.6 GCS Workspace Archiving
 
 - Completed run workspaces are archived to GCS after `archiveAfterHours` (default: 24)
 - Archived as zip files: `workspaces/{runId}.zip`
 - Local directory deleted after successful upload
 - Download endpoint generates a 5-minute signed URL for direct GCS download
 
+### 16.7 GitHub Integration
+
+**File:** `integration/github/GitHubRepoService.java`
+
+For existing-repo runs, the pipeline automatically:
+1. Creates a branch `executespec/{runId-short}` via `GitTool.pushToBranch()`
+2. Pushes all generated code to the branch (not main)
+3. Opens a PR via `GitHubRepoService.createPullRequest()`
+4. Stores PR URL in `PipelineRun.githubPrUrl` (surfaced in RunDetail API and frontend overview tab)
+
+**Key methods:**
+- `getDefaultBranch(owner, repo)` -- looks up the default branch of the target repository
+- `createPullRequest(owner, repo, head, base, title, body)` -- creates a GitHub PR
+
 ---
 
-## 12. REST API Reference
+## 17. REST API Reference
 
-### 12.1 Run Endpoints (`RunController`)
+### 17.1 Run Endpoints (`RunController`)
 
 | Method | Path | Description | Status Code |
 |--------|------|-------------|-------------|
@@ -1322,32 +1681,38 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 }
 ```
 
-### 12.2 SSE Endpoint (`SseController`)
+### 17.2 SSE Endpoint (`SseController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/runs/{runId}/events` | SSE stream of run events |
 
-### 12.3 Timeline Endpoint (`TimelineController`)
+### 17.3 Timeline Endpoint (`TimelineController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/runs/{runId}/timeline` | Timeline of events for a run |
 
-### 12.4 Feasibility Endpoint (`FeasibilityController`)
+### 17.4 Feasibility Endpoint (`FeasibilityController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/feasibility` | Pre-run cost and plan estimate (no run created) |
 
-### 12.5 Pricing Endpoint (`PricingController`)
+### 17.5 Pricing Endpoint (`PricingController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/pricing` | Get all model pricing |
 | `PUT` | `/api/pricing` | Update model pricing |
 
-### 12.6 Preview Endpoints (`PreviewController`)
+### 17.6 Model Endpoint (`ModelController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/models/available` | Get available models per provider (from model-matrix config) |
+
+### 17.7 Preview Endpoints (`PreviewController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1358,7 +1723,7 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 | `GET` | `/api/runs/{runId}/preview/logs` | Get logs (Docker Compose or Cloud Run via `gcloud logging read`) |
 | `GET` | `/api/runs/{runId}/preview/probe-api-docs` | Probe for OpenAPI/Swagger endpoints (works for both Docker and Cloud Run) |
 
-### 12.7 Deployment Endpoints (`DeploymentController`)
+### 17.8 Deployment Endpoints (`DeploymentController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1366,14 +1731,23 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 | `GET` | `/api/runs/{runId}/deployments` | List deployments |
 | `DELETE` | `/api/runs/{runId}/deployments/{version}` | Delete a deployment |
 
-### 12.8 Conversation Endpoints (`RunConversationController`)
+### 17.9 Conversation Endpoints (`RunConversationController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/runs/{runId}/conversation` | Send a chat message about a completed run |
 | `GET` | `/api/runs/{runId}/conversation` | Get conversation history |
 
-### 12.9 Integration Endpoints (`IntegrationController`)
+### 17.10 Validation Report Endpoints (`ValidationReportController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/runs/{runId}/report` | Get validation report |
+| `GET` | `/api/runs/{runId}/report/pdf` | Download report as PDF |
+| `POST` | `/api/runs/{runId}/report/share` | Generate share link |
+| `GET` | `/api/reports/shared/{token}` | Public shared report (no auth) |
+
+### 17.11 Integration Endpoints (`IntegrationController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1382,7 +1756,7 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 | `POST` | `/api/integrations/servicenow/webhook` | ServiceNow webhook handler |
 | `POST` | `/api/integrations/pagerduty/webhook` | PagerDuty webhook handler |
 
-### 12.10 Slack Endpoints (`SlackIntegrationController`)
+### 17.12 Slack Endpoints (`SlackIntegrationController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1392,22 +1766,22 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 | `DELETE` | `/api/integrations/slack/disconnect` | Removes Slack connection |
 | `POST` | `/api/integrations/slack/test` | Sends test Block Kit message to a channel |
 | `GET` | `/api/integrations/slack/channels` | Lists available Slack channels via conversations.list |
-| `GET` | `/api/integrations/slack/channels/project/{projectId}` | Get project → channel mapping |
-| `PUT` | `/api/integrations/slack/channels/project/{projectId}` | Set project → channel mapping |
+| `GET` | `/api/integrations/slack/channels/project/{projectId}` | Get project -> channel mapping |
+| `PUT` | `/api/integrations/slack/channels/project/{projectId}` | Set project -> channel mapping |
 
-### 12.11 Clarification Endpoint (`RunController`)
+### 17.13 Clarification Endpoint (`RunController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/runs/{runId}/clarify` | Resolve clarification gate (accepts `{response: string}`) |
 
-### 12.12 Metrics Endpoint (`MetricsController`)
+### 17.14 Metrics Endpoint (`MetricsController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/metrics` | Aggregate metrics (runs, costs, success rates) |
 
-### 12.11 Auth Endpoints (`AuthController`)
+### 17.15 Auth Endpoints (`AuthController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1415,8 +1789,9 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 | `POST` | `/api/auth/login` | Login (returns JWT) |
 | `POST` | `/api/auth/refresh` | Refresh access token |
 | `GET` | `/api/auth/me` | Get current user profile |
+| `GET` | `/api/auth/me/permissions` | Tier-based permissions |
 
-### 12.12 Organization Endpoints (`OrgController`)
+### 17.16 Organization Endpoints (`OrgController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1430,7 +1805,7 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 | `POST` | `/api/org/me/settings/jira/validate` | Test JIRA connection |
 | `POST` | `/api/org/me/settings/confluence/validate` | Test Confluence connection |
 
-### 12.13 Project Endpoints (`ProjectController`)
+### 17.17 Project Endpoints (`ProjectController`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1440,11 +1815,54 @@ The logs endpoint delegates to `PreviewService.getLogs()` which routes based on 
 | `PUT` | `/api/projects/{projectId}` | Update project |
 | `GET` | `/api/projects/{projectId}/members` | List project members |
 
+### 17.18 Billing Endpoints (`BillingController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/billing/plans` | List billing plans |
+| `POST` | `/api/billing/subscribe` | Initiate subscription (routed via PaymentGatewayRouter) |
+| `POST` | `/api/billing/topup/purchase` | Buy run top-up credits |
+| `GET` | `/api/billing/payment-history` | Payment history for org (ORG_ADMIN / BILLING_ADMIN) |
+
+### 17.19 Webhook Endpoints (`BillingWebhookController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/webhooks/razorpay` | Razorpay webhook (HMAC auth, no JWT) |
+| `POST` | `/api/webhooks/stripe` | Stripe webhook (Stripe-Signature auth, no JWT) |
+
+### 17.20 Feature Flag Endpoints (`FeatureFlagController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/admin/feature-flags` | List all feature flags (SUPER_ADMIN) |
+| `PUT` | `/api/admin/feature-flags/{key}` | Update feature flag (SUPER_ADMIN) |
+
+### 17.21 Payment Audit Endpoints (`PaymentAuditController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/admin/payment-audit` | List audit entries (SUPER_ADMIN, filterable by orgId/userId) |
+| `GET` | `/api/admin/payment-audit/export` | Export audit as CSV (SUPER_ADMIN) |
+| `GET` | `/api/admin/webhook-events` | List webhook events (SUPER_ADMIN, filterable by gateway) |
+
+### 17.22 Eval Endpoint (`EvalController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/admin/eval/run` | Trigger model evaluation (SUPER_ADMIN, optional `providers` param) |
+
+### 17.23 Test Result Endpoints (`TestResultController`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/runs/{runId}/apply-test-fixes` | Apply test-driven fixes to run workspace |
+
 ---
 
-## 13. Server-Sent Events
+## 18. Server-Sent Events
 
-### 13.1 RunEvent
+### 18.1 RunEvent
 
 **File:** `sse/RunEvent.java`
 
@@ -1464,7 +1882,7 @@ public record RunEvent(
 
 | Type | Description | Payload |
 |------|-------------|---------|
-| `RUN_STATUS` | Run lifecycle state change | Status string (PLANNING, WORKING, etc.) |
+| `RUN_STATUS` | Run lifecycle state change | Status string (PLANNING, WORKING, COMPILING, MERGING, etc.) |
 | `TASK_STATUS` | Task status change | Status string (WORKING, COMPLETE, FAILED, etc.) |
 | `LOG` | General log message | Log line text |
 | `GATE_OPENED` | Approval gate opened | Gate type (PLAN_APPROVAL) |
@@ -1479,6 +1897,7 @@ public record RunEvent(
 | `DEPLOY_FAILED` | Deployment failed | "version\|error" |
 | `API_SPEC_READY` | OpenAPI spec generated | "openapi.yaml" |
 | `PREVIEW_READY` | Frontend preview available | Serve directory |
+| `PREVIEW_FAILED` | Preview failed | Error message |
 | `VALIDATION_STARTED` | File validation started | File name |
 | `VALIDATION_PASSED` | Validation passed | null |
 | `VALIDATION_FAILED` | Validation failed | Error summary |
@@ -1492,7 +1911,7 @@ public record RunEvent(
 | `CLARIFICATION_RESOLVED` | User provided clarification | null |
 | `CONTEXT_EXTRACTED` | JIRA/Confluence context fetched | Summary of extracted refs |
 
-### 13.2 SseBroadcaster
+### 18.2 SseBroadcaster
 
 **File:** `sse/SseBroadcaster.java`
 
@@ -1502,13 +1921,13 @@ Manages SSE emitter subscriptions per run ID. Uses `ConcurrentHashMap<String, Co
 |--------|-----------|-------------|
 | `subscribe` | `SseEmitter subscribe(String runId)` | Creates a no-timeout SSE emitter, registers cleanup handlers. |
 | `emit` | `void emit(String runId, RunEvent event)` | Serializes event to JSON and sends to all clients. Prunes dead emitters. |
-| `complete` | `void complete(String runId)` | Completes all emitters for a run and removes the registration. |
+| `complete` | `void complete(String runId)` | Completes all emitters for a run and removes the registration. Deferred to background validation thread's `finally` block for runs with background validation. |
 
 ---
 
-## 14. Recovery System
+## 19. Recovery System
 
-### 14.1 StuckRunMonitor
+### 19.1 StuckRunMonitor
 
 **File:** `recovery/StuckRunMonitor.java`
 
@@ -1517,10 +1936,12 @@ Scheduled task that checks for stuck worker tasks every 2 minutes.
 **Detection Logic:**
 - Finds all tasks with status=WORKING/LOCKED
 - Measures idle time (since `lastActivityAt`)
-- Warning at `warnThresholdMinutes` (default: 15 min)
-- Recovery at `actThresholdMinutes` (default: 30 min)
+- Warning at `warnThresholdMinutes` (default: 8 min)
+- Recovery at `actThresholdMinutes` (default: 15 min)
 
-### 14.2 StuckRunEvaluator
+### 19.2 StuckRunEvaluator
+
+**File:** `recovery/StuckRunEvaluator.java`
 
 Classifies stuck tasks based on their event log:
 
@@ -1531,36 +1952,6 @@ Classifies stuck tasks based on their event log:
 | `FILE_LOCK_BLOCK` | Task blocked waiting for a file lock |
 | `BUILD_FAILURE_STALL` | Build failures without progress |
 | `UNKNOWN` | Cannot determine cause |
-
-### 14.3 RunRecoveryService
-
-**File:** `recovery/RunRecoveryService.java`
-
-Handles recovery actions based on stuck classification:
-
-**Recovery Actions:**
-
-| Classification | Action |
-|---------------|--------|
-| `LLM_TIMEOUT`, `FILE_LOCK_BLOCK` | Retry task (up to `maxTaskRetries`, default: 1) |
-| `LLM_LOOP`, `BUILD_FAILURE_STALL`, `UNKNOWN` | Fresh restart (cancel all tasks, clean workspace, submit new run) |
-| Retry limit reached | Escalate to fresh restart |
-
-**Auto-Restart for Transient Failures:**
-
-The `autoRestartIfTransient()` method detects transient failures (rate limits, provider outages, etc.) and schedules automatic restarts with configurable backoff:
-
-- **Transient keywords:** "rate", "429", "overloaded", "503", "timeout", etc.
-- **Backoff:** `autoRestartBackoffSeconds` (default: 60s)
-- **Max restarts:** `maxAutoRestarts` (default: 3)
-
-Recovery actions are recorded in the `run_recovery` table for audit.
-
-### 14.4 StuckRunEvaluator
-
-**File:** `recovery/StuckRunEvaluator.java`
-
-Classifies stuck tasks by analyzing their recent event log. Uses pattern matching on log entries to determine the root cause.
 
 **Classification Logic:**
 
@@ -1591,7 +1982,33 @@ Classifies stuck tasks by analyzing their recent event log. Uses pattern matchin
 | `evaluator-log-window` | 20 | Number of recent events to analyze |
 | `loop-repeat-threshold` | 3 | Tool calls before declaring a loop |
 
-### 14.5 LlmCallGuard
+### 19.3 RunRecoveryService
+
+**File:** `recovery/RunRecoveryService.java`
+
+Handles recovery actions based on stuck classification:
+
+**Recovery Actions:**
+
+| Classification | Action |
+|---------------|--------|
+| `LLM_TIMEOUT`, `FILE_LOCK_BLOCK` | Retry task (up to `maxTaskRetries`, default: 1) |
+| `LLM_LOOP`, `BUILD_FAILURE_STALL`, `UNKNOWN` | Fresh restart (cancel all tasks, clean workspace, submit new run) |
+| Retry limit reached | Escalate to fresh restart |
+
+**Auto-Restart for Transient Failures:**
+
+The `autoRestartIfTransient()` method detects transient failures (rate limits, provider outages, etc.) and schedules automatic restarts with configurable backoff:
+
+- **Transient keywords:** "rate", "429", "overloaded", "503", "timeout", etc.
+- **Backoff:** `autoRestartBackoffSeconds` (default: 60s)
+- **Max restarts:** `maxAutoRestarts` (default: 3)
+
+**Note:** Auto-restart calls have been removed from PipelineHarness. Users resume stuck runs manually via UI.
+
+Recovery actions are recorded in the `run_recovery` table for audit.
+
+### 19.4 LlmCallGuard
 
 **File:** `recovery/LlmCallGuard.java`
 
@@ -1612,15 +2029,15 @@ WHILE attempt <= maxTransientRetries (default: 3):
   TRY:
     chatModel.call(prompt)   -- success path
   CATCH HttpClientErrorException:
-    classify → RateLimited?  sleep(retryAfterSeconds or rateLimitBackoffSeconds)
-    classify → Other?        throw LlmCallException immediately
+    classify -> RateLimited?  sleep(retryAfterSeconds or rateLimitBackoffSeconds)
+    classify -> Other?        throw LlmCallException immediately
   CATCH HttpServerErrorException:
-    exponential backoff → serverErrorBackoffSeconds * (attempt + 1)
+    exponential backoff -> serverErrorBackoffSeconds * (attempt + 1)
   CATCH Exception:
-    exponential backoff → serverErrorBackoffSeconds * (attempt + 1)
+    exponential backoff -> serverErrorBackoffSeconds * (attempt + 1)
 ```
 
-### 14.6 LlmFailure (Sealed Interface)
+### 19.5 LlmFailure (Sealed Interface)
 
 **File:** `recovery/LlmFailure.java`
 
@@ -1637,7 +2054,7 @@ Sealed interface hierarchy for typed LLM error classification:
 
 **429 Disambiguation:** A 429 response is classified as `BudgetExhausted` (not `RateLimited`) if the response body contains "quota", "billing", or "insufficient_quota". This distinction matters because budget exhaustion requires provider escalation, not simple retry.
 
-### 14.7 EscalationService
+### 19.6 EscalationService
 
 **File:** `recovery/EscalationService.java`
 
@@ -1647,14 +2064,14 @@ Manages the model/provider escalation ladder when a task is stuck or failing.
 
 ```
 Level 0-1: Upgrade to capable model (same provider)
-   |-- anthropic: claude-haiku-4-5 → capable model from props
-   |-- openai: gpt-5.4-mini → gpt-5.4
+   |-- anthropic: claude-haiku-4-5 -> capable model from props
+   |-- openai: gpt-5.4-mini -> gpt-5.4
    |
 Level 2: Switch to alternate provider entirely
-   |-- anthropic → openai
-   |-- openai → anthropic
+   |-- anthropic -> openai
+   |-- openai -> anthropic
    |
-Level 3+: Terminal — trigger fresh run restart
+Level 3+: Terminal -- trigger fresh run restart
 ```
 
 **Key Methods:**
@@ -1670,9 +2087,9 @@ Level 3+: Terminal — trigger fresh run restart
 ```
 EscalationService.escalate(task)
   |-- Determine level from task.recoveryAttempt
-  |-- Level 0-1: resolveCapableModel() → same provider, better model
-  |-- Level 2:   resolveAlternateProvider() → different provider
-  |-- Level 3+:  null → delegate to RunRecoveryService for fresh restart
+  |-- Level 0-1: resolveCapableModel() -> same provider, better model
+  |-- Level 2:   resolveAlternateProvider() -> different provider
+  |-- Level 3+:  null -> delegate to RunRecoveryService for fresh restart
   |
   |-- SSE event: MODEL_ESCALATED "fromModel|toModel"
   |-- stateStore.escalateTask(taskId, provider, model)
@@ -1680,37 +2097,15 @@ EscalationService.escalate(task)
   |-- workerPool.resubmitTask(task, runId)
 ```
 
-### 14.8 ProviderHealthTracker
+### 19.7 Worker Stall Detection
 
-**File:** `router/ProviderHealthTracker.java`
-
-Tracks LLM provider health based on consecutive call outcomes. Used by ModelRouter to skip unhealthy providers during model selection.
-
-**Configuration:**
-
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `UNHEALTHY_THRESHOLD` | 3 | Consecutive failures before marking unhealthy |
-| `RECOVERY_WINDOW` | 5 minutes | Auto-recovery cooldown period |
-
-**Behavior:**
-
-```
-recordSuccess(provider)  →  reset failure count, mark healthy
-recordFailure(provider)  →  increment count; mark unhealthy at threshold
-isHealthy(provider)      →  check status; auto-recover after RECOVERY_WINDOW
-```
-
-A provider is considered healthy when:
-1. No failure data exists (assume healthy)
-2. Consecutive failures < 3
-3. Was unhealthy but RECOVERY_WINDOW has elapsed (auto-recovery)
+The 15-minute wall-clock worker time limit includes stall detection with model escalation. WorkerAgent uses non-JSON escalation when a worker response does not start with `{` (not a completion report).
 
 ---
 
-## 15. Configuration Reference
+## 20. Configuration Reference
 
-### 15.1 application.yml Structure
+### 20.1 application.yml Structure
 
 ```yaml
 spring:
@@ -1718,6 +2113,9 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      pool:
+        max-active: 50
+        min-idle: 5
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     username: ${POSTGRES_USER:postgres}
@@ -1748,6 +2146,41 @@ spring:
           options:
             model: gemini-3-flash-preview
 
+# Model Matrix (user-selected provider x agent tier -> model)
+model-matrix:
+  providers:
+    anthropic:
+      planning: claude-sonnet-4-6
+      workhorse: claude-haiku-4-5-20251001
+      lightweight: claude-haiku-4-5-20251001
+    google:
+      planning: gemini-3-flash-preview
+      workhorse: gemini-3-flash-preview
+      lightweight: gemini-3-flash-preview
+    openai:
+      planning: gpt-5.4
+      workhorse: gpt-5.4-mini
+      lightweight: gpt-5.4-mini
+  agent-tier-map:
+    PlannerAgent: PLANNING
+    ReviewerAgentV2: PLANNING
+    TestPlannerAgent: WORKHORSE
+    WorkerAgent: WORKHORSE
+    TestWorkerAgent: WORKHORSE
+    CompilerAgent: WORKHORSE
+    ApiTestSuiteAgent: WORKHORSE
+    ConflictResolverAgent: WORKHORSE
+    ContextAgent: LIGHTWEIGHT
+    ConversationAgent: LIGHTWEIGHT
+    PromptOptimiserAgent: WORKHORSE
+    TestReportGenerator: LIGHTWEIGHT
+    ValidationReportGenerator: WORKHORSE
+    RequestTriageService: LIGHTWEIGHT
+  failover-order:
+    anthropic: [openai, google]
+    google: [openai, anthropic]
+    openai: [google, anthropic]
+
 agent:
   workspace: ./workspace
   roles:
@@ -1765,8 +2198,10 @@ agent:
     compact-pct: 0.35
     hard-stop-pct: 0.55
   concurrency:
-    max-runs: 10
+    max-runs: 50
+    max-task-duration-minutes: 25
     max-iterations: 80
+    safety-iteration-cap: 500
   github:
     pat: ${GITHUB_PAT:}
     default-owner: ${GITHUB_OWNER:}
@@ -1775,11 +2210,14 @@ agent:
     timeout-seconds: 300
   recovery:
     enabled: true
-    warn-threshold-minutes: 15
-    act-threshold-minutes: 30
+    warn-threshold-minutes: 8
+    act-threshold-minutes: 15
     max-task-retries: 1
+    evaluator-log-window: 20
+    loop-repeat-threshold: 3
     max-auto-restarts: 3
     auto-restart-backoff-seconds: 60
+    default-provider: openai
   context:
     enabled: true
     model: claude-haiku-4-5-20251001
@@ -1797,10 +2235,21 @@ agent:
   api-test-suite:
     enabled: true
     model: claude-haiku-4-5-20251001
-  preview:
-    enabled: true
-    startup-timeout-seconds: 120
-    log-buffer-lines: 200
+
+preview:
+  enabled: true
+  mode: docker
+  total-startup-timeout-seconds: 480
+  preview-ttl-minutes: 5
+  port-range-start: 10000
+  port-range-end: 10100
+  preview-domain: executespec.ai
+  proxy:
+    enabled: false
+  concurrency:
+    free-max: 1
+    pro-max: 3
+    enterprise-max: 10
 
 executespec:
   validator:
@@ -1809,6 +2258,7 @@ executespec:
     per-task-level: TYPE
     project-validation-level: FULL
     max-retries: 3
+    default-timeout: 30s
 
 app:
   jwt:
@@ -1825,9 +2275,16 @@ app:
     enterprise:
       monthly-run-limit: -1
       concurrent-run-limit: 10
+
+billing:
+  default-gateway: razorpay
+  stripe:
+    enabled: false
+  razorpay:
+    enabled: true
 ```
 
-### 15.2 Key Configuration Properties
+### 20.2 Key Configuration Properties
 
 **AgentProperties** (`@ConfigurationProperties(prefix = "agent")`):
 
@@ -1845,12 +2302,17 @@ app:
 | `compaction.warn-pct` | `double` | 0.25 | Context warning threshold |
 | `compaction.compact-pct` | `double` | 0.35 | Context compaction threshold |
 | `compaction.hard-stop-pct` | `double` | 0.55 | Context hard-stop threshold |
-| `concurrency.max-runs` | `int` | 10 | Max simultaneous active runs |
+| `concurrency.max-runs` | `int` | 50 | Max simultaneous active runs |
+| `concurrency.max-task-duration-minutes` | `int` | 25 | Max wall-clock time per task |
 | `concurrency.max-iterations` | `int` | 80 | Max agentic loop iterations per task |
+| `concurrency.safety-iteration-cap` | `int` | 500 | Hard iteration cap (safety net) |
 | `shell.sandbox-enabled` | `boolean` | true | Enable shell command sandboxing |
 | `shell.timeout-seconds` | `int` | 300 | Max shell command execution time |
 | `compiler.enabled` | `boolean` | true | Enable post-worker compilation |
 | `compiler.max-attempts` | `int` | 3 | Max compile-fix attempts |
+| `recovery.warn-threshold-minutes` | `int` | 8 | Warn after N minutes idle |
+| `recovery.act-threshold-minutes` | `int` | 15 | Recover after N minutes idle |
+| `recovery.default-provider` | `String` | `openai` | Default provider for recovery |
 
 **HTTP Client Configuration (`AgentModelConfig`):**
 - HTTP/1.1 (avoids HTTP/2 ALPN stalls)
@@ -1859,9 +2321,9 @@ app:
 
 ---
 
-## 16. Database Schema
+## 21. Database Schema
 
-### 16.1 Flyway Migrations
+### 21.1 Flyway Migrations
 
 | Version | Description |
 |---------|-------------|
@@ -1896,11 +2358,18 @@ app:
 | V32 | plan_version |
 | V34 | Validation report (validation_report table) |
 | V37 | Test schema (test_plan, test_task, test_result) |
+| V45 | Widen plan_version VARCHAR columns (VARCHAR(255) for IDs, VARCHAR(64) for source) |
+| V50 | Free tier restrictions |
+| V51 | Force logout flag (feature_flag table support) |
+| V52 | GitHub PR URL (pipeline_run.github_pr_url VARCHAR(512)) |
+| V53 | Run archive (pipeline_run.archived_at TIMESTAMPTZ + index) |
+| V54 | Stripe multi-currency (multi-currency pricing, org country/currency, tax IDs, gateway tracking) |
+| V55 | Payment audit expansion (gateway tracking, webhook_event_log table for idempotent webhook processing) |
 
-### 16.2 Entity Relationship Diagram
+### 21.2 Entity Relationship Diagram
 
 ```
-+------------------+       +------------------+
++------------------+       +----------------------+
 |   app_user       |       |     org              |
 |------------------|       |----------------------|
 | id (PK)          |------>| id (PK)              |
@@ -1912,13 +2381,15 @@ app:
 | gemini_api_key   |       | openai_api_key       |
 | github_pat       |       | gemini_api_key       |
 +------------------+       | admin_email          |
-                            | jira_base_url        |
-                            | jira_email           |
-                            | jira_api_token       |
-                            | confluence_base_url  |
-                            | confluence_email     |
-                            | confluence_api_token |
-                            +----------------------+
+                           | jira_base_url        |
+                           | jira_email           |
+                           | jira_api_token       |
+                           | confluence_base_url  |
+                           | confluence_email     |
+                           | confluence_api_token |
+                           | country              |
+                           | default_currency     |
+                           +----------------------+
         |                           |
         |                  +--------v---------+
         |                  |    project       |
@@ -1942,6 +2413,8 @@ app:
 | org_id (FK)      |
 | project_id (FK)  |
 | key_source       |
+| github_pr_url    |
+| archived_at      |
 +--------+---------+
          |
 +--------v---------+       +------------------+
@@ -1982,17 +2455,49 @@ app:
 | resolved_at      |       +------------------+
 | approved         |
 +------------------+
+
++------------------+       +------------------+
+| payment_audit    |       | webhook_event_log|
+|------------------|       |------------------|
+| id (PK)          |       | id (PK)          |
+| entity_type      |       | gateway          |
+| entity_id        |       | event_id         |
+| event_type       |       | event_type       |
+| gateway_provider |       | payload_hash     |
+| gateway_event_id |       | raw_payload      |
+| gateway_payment_id|      | processing_status|
+| currency         |       | error_message    |
+| amount_minor     |       | attempts         |
+| metadata (JSONB) |       | created_at       |
+| idempotency_key  |       | processed_at     |
+| user_id          |       +------------------+
+| org_id           |
+| created_at       |
++------------------+
+
++------------------+
+| feature_flag     |
+|------------------|
+| id (PK)          |
+| flag_key (UNIQUE)|
+| flag_value       |
+| value_type       |
+| scope            |
+| description      |
+| updated_by       |
+| updated_at       |
++------------------+
 ```
 
 ---
 
-## 17. Validation and Code Quality
+## 22. Validation and Code Quality
 
-### 17.1 CodeValidator
+### 22.1 CodeValidator
 
 **File:** `validator/CodeValidator.java` (interface), `validator/CodeValidatorImpl.java` (implementation)
 
-Per-task code validation that runs after each worker completes, before the progressive merge. The validator uses a pluggable architecture: `CodeValidatorImpl` routes requests to language-specific `LanguageToolchain` implementations through a `GateChain` that executes each validation gate in sequence.
+Code validation that runs during the review phase (CompilerAgent + ReviewerAgentV2). Per-task validation has been removed from SequentialTaskExecutor. The validator uses a pluggable architecture: `CodeValidatorImpl` routes requests to language-specific `LanguageToolchain` implementations through a `GateChain` that executes each validation gate in sequence.
 
 **Configuration (`application.yml`):**
 
@@ -2026,7 +2531,7 @@ executespec:
 | `.py` | PYTHON |
 | Others | `null` (skip validation) |
 
-### 17.2 GateChain
+### 22.2 GateChain
 
 **File:** `validator/gate/GateChain.java`
 
@@ -2068,7 +2573,7 @@ ValidationResult {
 }
 ```
 
-### 17.3 Language Toolchains
+### 22.3 Language Toolchains
 
 Each language has a dedicated `LanguageToolchain` implementation that provides the four gate operations.
 
@@ -2118,7 +2623,7 @@ Extends TypeScript toolchain behavior for `.tsx`/`.jsx` files with additional Re
 
 **Toolchain Availability:** At startup, `CodeValidatorImpl` checks each toolchain's `isAvailable()` method and logs which ones are functional. Missing toolchains cause validation to be skipped (not failed) for that language.
 
-### 17.4 RetryPromptBuilder
+### 22.4 RetryPromptBuilder
 
 **File:** `validator/prompt/RetryPromptBuilder.java`
 
@@ -2148,32 +2653,7 @@ Fix the errors above. Return COMPLETE corrected files using writeFile / write_fi
 - The prompt instructs the worker to fix ONLY the reported errors (prevents cascading rewrites).
 - `buildSummary()` provides a one-line summary for logging and SSE events.
 
-### 17.5 Validation + Retry Flow
-
-```
-1. WorkerAgent.execute(task, runId) -- runs in worktree
-2. Get list of modified files (git diff + untracked)
-3. For each modified code file:
-   a. Language.fromPath(file) -- detect language
-   b. CodeValidator.validateFile(projectRoot, filePath, language, level)
-   c. GateChain.execute() runs gates sequentially
-   d. On FAIL: return immediately with validation result
-4. On PASS: completeTask()
-5. On FAIL:
-   a. RetryPromptBuilder.build(validationResult) -- generates structured error feedback
-   b. ModelRouter.selectForRetry(complexity, attempt) -- may escalate tier
-   c. stateStore.markRetryingWithFeedback(runId, taskId, retryPrompt)
-   d. SSE event: VALIDATION_FAILED with error summary
-   e. Re-execute (back to step 1)
-6. After maxRetries exhausted: failTask()
-```
-
-**Model Escalation on Retry:**
-- Attempts 1-2: same model tier
-- Attempt 3: escalate one tier (FAST -> CAPABLE)
-- SSE event: MODEL_ESCALATED with "fromModel|toModel"
-
-### 17.6 Model Task Metrics
+### 22.5 Model Task Metrics
 
 Performance metrics are tracked per task execution for data-driven routing improvements:
 
@@ -2192,9 +2672,9 @@ Stored in `model_task_metric` table via `ModelTaskMetricRepository`. This data e
 
 ---
 
-## 18. Merge Conflict Resolution
+## 23. Merge Conflict Resolution
 
-### 18.1 Resolution Cascade
+### 23.1 Resolution Cascade
 
 GitMergeService uses a 4-tier cascade to resolve merge conflicts:
 
@@ -2217,7 +2697,7 @@ Tier 4: FAILED -- human intervention required
 
 **MergeOutcome enum:** `CLEAN`, `RESOLVED_DETERMINISTIC`, `RESOLVED_LLM`, `ESCALATED`, `FAILED`
 
-### 18.2 FileMergerRegistry
+### 23.2 FileMergerRegistry
 
 **File:** `harness/merge/FileMergerRegistry.java`
 
@@ -2229,7 +2709,7 @@ public Optional<String> tryMerge(String filePath, String base, String ours, Stri
 
 Mergers are checked in Spring `@Order` sequence. First matching merger wins.
 
-### 18.3 SpecializedMerger Interface
+### 23.3 SpecializedMerger Interface
 
 **File:** `harness/merge/SpecializedMerger.java`
 
@@ -2249,7 +2729,7 @@ public interface SpecializedMerger {
 
 Returns `Optional.empty()` when the merger detects a conflict it cannot resolve deterministically (e.g., version conflicts in pom.xml). This causes fallthrough to the LLM resolver.
 
-### 18.4 PomXmlMerger
+### 23.4 PomXmlMerger
 
 **File:** `harness/merge/PomXmlMerger.java`
 
@@ -2265,19 +2745,19 @@ Deterministic merger for Maven `pom.xml` files.
 
 **Security:** Uses `disallow-doctype-decl` to prevent XXE attacks when parsing XML.
 
-### 18.5 YamlMerger
+### 23.5 YamlMerger
 
 **File:** `harness/merge/YamlMerger.java`
 
 Handles YAML config files (application.yml, docker-compose.yml, etc.). Deep-merges YAML maps. Conflicts on scalar values fall through to LLM.
 
-### 18.6 PackageJsonMerger
+### 23.6 PackageJsonMerger
 
 **File:** `harness/merge/PackageJsonMerger.java`
 
 Handles `package.json` files. Unions `dependencies`, `devDependencies`, and `scripts` sections. Version conflicts fall through to LLM.
 
-### 18.7 Progressive Merge
+### 23.7 Progressive Merge
 
 Tasks are merged to main **immediately** after completion (not at end of run):
 
@@ -2317,7 +2797,7 @@ GitMergeService.mergeTaskBranchWithResolution(runId, task, previouslyMerged)
   |-- Any file unresolved? Abort merge, mark task FAILED
 ```
 
-### 18.8 Merge Conflict Tracking
+### 23.8 Merge Conflict Tracking
 
 **File:** `harness/merge/MergeConflictAnalyser.java`
 
@@ -2346,6 +2826,106 @@ or create explicit depends_on relationships between tasks that share these files
 
 ---
 
+## 24. Eval Framework
+
+### 24.1 Overview
+
+**File:** `eval/EvalController.java`, `eval/ModelEvaluator.java`
+
+Admin-only model evaluation framework that runs all configured models against a test case suite, scores results, normalizes costs, and generates per-tier recommendations.
+
+### 24.2 ModelEvaluator
+
+**File:** `eval/ModelEvaluator.java`
+
+Orchestrates model evaluation: runs all models against all test cases, scores results, and generates the final report.
+
+**Scope:** 6 models x 12 test cases = 72 LLM calls (includes 3 boss-level saga tests: diagnosis, consistency, compliance).
+
+**Configuration:**
+- Per-call timeout: 180 seconds
+- Models tested sequentially to avoid rate limits
+
+**Components:**
+- `EvalScorer` -- scores LLM responses against expected outcomes
+- `EvalTestCaseRegistry` -- provides the test case suite
+- `ModelMatrixProperties` -- supplies the model list from config
+
+### 24.3 EvalController
+
+**File:** `eval/EvalController.java`
+**Base Path:** `/api/admin/eval`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/admin/eval/run` | Trigger evaluation (optional `providers` filter). Returns EvalReport with per-tier recommendations. |
+
+**Security:** Requires SUPER_ADMIN role (secured via `/api/admin/**` SecurityConfig rule).
+
+**Response:**
+```json
+{
+  "evaluationId": "uuid",
+  "durationMs": 120000,
+  "modelsEvaluated": 6,
+  "recommendations": { ... },
+  "report": { ... }
+}
+```
+
+---
+
+## 25. Security Architecture
+
+### 25.1 Security Layers
+
+ExecuteSpec implements 8 security layers:
+
+| Layer | Component | Description |
+|-------|-----------|-------------|
+| 1. Input Sanitization | `InputSanitizer` | Scans user-submitted specs for prompt injection, shell embedding, and abuse patterns before they reach the LLM pipeline |
+| 2. JWT Authentication | `JwtAuthenticationFilter` | Validates JWT tokens on all API requests (except auth, webhooks, public reports) |
+| 3. OAuth2 Authentication | `OAuthSuccessHandler` | Google and GitHub social login |
+| 4. Force-Logout | `FeatureFlagService` | Feature flag-based session invalidation via `force_logout_epoch` |
+| 5. Rate Limiting | `RateLimitFilter` | Redis-backed per-tenant rate limiting on auth, run submission, and webhook endpoints |
+| 6. RBAC | `RunVisibilitySpec` | Role-based access control for runs, projects, and org resources |
+| 7. Workspace Sandbox | `FileSystemTool` + `ShellSandboxPolicy` | Directory traversal prevention, command whitelisting, environment stripping |
+| 8. Code Abuse Scanning | `CodeAbuseScanner` | Scans generated code for crypto mining, reverse shells, and other abuse patterns before file write |
+
+### 25.2 InputSanitizer
+
+**File:** `security/InputSanitizer.java`
+
+Scans user-submitted spec content for:
+- Prompt injection patterns ("ignore all previous instructions", etc.)
+- Shell command embedding
+- Other abuse patterns
+
+Integrated into the run submission flow before the request reaches the planner.
+
+### 25.3 CodeAbuseScanner
+
+**File:** `security/CodeAbuseScanner.java`
+
+Scans file content before write for:
+- Crypto mining activity (stratum+tcp://, xmrig patterns)
+- Reverse shell patterns
+- Other dangerous code patterns
+
+Integrated into `FileSystemTool.writeFile()` to flag (and optionally block) dangerous content before it is written to disk.
+
+### 25.4 SecurityProperties
+
+**File:** `config/SecurityProperties.java`
+
+Centralized security configuration via `@ConfigurationProperties(prefix = "app.security")`:
+- CSP (Content Security Policy) configuration
+- HSTS configuration
+- Frame options
+- Per-environment overrides via application.yml
+
+---
+
 ## Appendix A: Prompt Caching Strategy
 
 All agents use Anthropic's `SYSTEM_ONLY` cache strategy:
@@ -2360,26 +2940,35 @@ When context is compacted, only the conversation history is summarized. The syst
 
 The system uses Java 21 virtual threads extensively:
 - `Thread.ofVirtual().name("preview-" + runId).start(...)` -- preview processes
+- `Thread.ofVirtual().name("bg-validation-" + runId).start(...)` -- background validation
 - `Thread.ofVirtual().name("context-agent-" + runId).start(...)` -- ContextAgent
 - `Thread.ofVirtual().name("prompt-optimiser-" + runId).start(...)` -- PromptOptimiserAgent
 - `Thread.ofVirtual().name("api-spec-" + runId).start(...)` -- ApiTestSuiteAgent
 - `Thread.ofVirtual().name("worker-retry-" + taskId).start(...)` -- WorkerPool task retry
-- `Thread.ofVirtual().name("auto-restart-" + runId).start(...)` -- Recovery auto-restart
+- `Thread.ofVirtual().name("deploy-" + runId).start(...)` -- deployment pipeline
+
+All virtual threads are wrapped with `ContextSnapshotFactory.captureAll().wrap(runnable)` for Micrometer observation context propagation (traceId/spanId).
 
 ## Appendix C: Error Handling Philosophy
 
 1. **Non-fatal agents:** CompilerAgent, ContextAgent, PromptOptimiserAgent, ApiTestSuiteAgent -- failures are logged but do not affect run status.
-2. **Provider fallback:** LlmRouter exhausts all providers in the chain before throwing `ProviderUnavailableException`.
-3. **Graceful degradation:** Merge conflicts are auto-resolved when possible; unresolvable conflicts mark individual tasks FAILED rather than the entire run.
-4. **Gate loss recovery:** If a server restarts while a run is at a gate, the gate auto-fails with a message. Startup auto-resume is DISABLED -- users resume stuck runs manually via UI.
-5. **Auto-restart:** Transient provider failures trigger automatic restarts with configurable backoff and limits.
+2. **Background validation:** Review, test gen, test execution, and report run in background after COMPLETE. No retry/recovery if the background thread fails (fire-and-forget).
+3. **Provider fallback:** LlmRouter exhausts all providers in the chain before throwing `ProviderUnavailableException`.
+4. **Graceful degradation:** Merge conflicts are auto-resolved when possible; unresolvable conflicts mark individual tasks FAILED rather than the entire run.
+5. **Gate loss recovery:** If a server restarts while a run is at a gate, the gate auto-fails with a message. Startup auto-resume is DISABLED -- users resume stuck runs manually via UI.
+6. **Integration null-safety:** `JiraAdapter.onRunComplete()` and `ConfluenceAdapter.onRunComplete()` handle null review gracefully (PROTOTYPE mode has no review).
 
 ## Appendix D: Security Model
 
-1. **Workspace sandbox:** `FileSystemTool.safeResolve()` prevents directory traversal. All paths must stay within `workspace/{runId}/`.
-2. **Shell sandbox:** `ShellSandboxPolicy` blocks dangerous commands (rm -rf /, reboot, etc.) and validates against an allowed prefix whitelist.
-3. **Environment stripping:** `ShellTool` removes all secret environment variables from child process environments.
-4. **Sensitive file logging:** Writes to `.env`, `credentials.json`, etc. generate WARN logs but are NOT blocked (agents need to create these for generated projects).
-5. **JWT authentication:** All REST endpoints require valid JWT (except auth endpoints).
-6. **Run visibility:** `RunVisibilitySpec` enforces RBAC based on user tier, org role, and project membership.
-7. **API key isolation:** Per-run key resolution ensures each run uses the correct keys based on the submitting user's org policy.
+1. **Input sanitization:** `InputSanitizer` scans user-submitted specs for prompt injection and shell embedding before they reach the LLM pipeline.
+2. **Workspace sandbox:** `FileSystemTool.safeResolve()` prevents directory traversal. All paths must stay within `workspace/{runId}/`.
+3. **Shell sandbox:** `ShellSandboxPolicy` blocks dangerous commands (rm -rf /, reboot, etc.) and validates against an allowed prefix whitelist.
+4. **Environment stripping:** `ShellTool` removes all secret environment variables from child process environments.
+5. **Code abuse scanning:** `CodeAbuseScanner` scans generated file content for crypto mining, reverse shells, and other abuse before write.
+6. **Sensitive file logging:** Writes to `.env`, `credentials.json`, etc. generate WARN logs but are NOT blocked (agents need to create these for generated projects).
+7. **JWT authentication:** All REST endpoints require valid JWT (except auth endpoints, webhooks, and public shared reports).
+8. **OAuth2 authentication:** Google and GitHub social login with automatic user creation.
+9. **Force-logout:** Feature flag-based session invalidation via `force_logout_epoch` timestamp in JWT validation.
+10. **Rate limiting:** Redis-backed per-tenant rate limiting on security-sensitive endpoints (auth, run submission, webhooks).
+11. **Run visibility:** `RunVisibilitySpec` enforces RBAC based on user tier, org role, and project membership.
+12. **API key isolation:** Per-run key resolution ensures each run uses the correct keys based on the submitting user's org policy.

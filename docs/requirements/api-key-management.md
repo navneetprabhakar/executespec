@@ -1,8 +1,10 @@
 # API Key Management — Requirements
 
+> Last updated: 2026-04-03
+
 ## Overview
 
-Multi-level API key resolution with three key source modes, per-org provider restrictions, and runtime key injection. Supports user-level, org-level, and system-level keys with configurable fallback behavior.
+Multi-level API key resolution with three key source modes, per-org provider restrictions, and runtime key injection. Supports user-level, org-level, and system-level keys with configurable fallback behavior. Default provider is OpenAI; user-selected per project.
 
 ---
 
@@ -45,32 +47,46 @@ Multi-level API key resolution with three key source modes, per-org provider res
 - null = all providers allowed
 - Restricts which providers can be used for runs in that org
 - Validated by AvailableProviderResolver
-- ModelRouter respects restrictions when selecting providers
+- ModelResolver respects restrictions when selecting providers
 - Frontend shows available providers based on org settings
 
 ### 4. LLM Router (Provider Fallback)
 
 **Requirements:**
-- Three fallback chains:
-  - ARCHITECT: Opus → Gemini Pro → GPT-4o
-  - CAPABLE: Sonnet → Gemini Flash → GPT-4o
-  - UTILITY: Haiku → Gemini Flash → GPT-4o-mini
+- User-selected provider per project (Anthropic, Google, or OpenAI). Default: OpenAI.
+- YAML-configured model matrix maps AgentTier x Provider to Model via ModelResolver
+- Three agent tiers with provider-specific models:
+  - PLANNING (Opus-class): `claude-opus-4-6` / `gemini-3.1-pro-preview` / `gpt-5.4`
+  - WORKHORSE (Sonnet-class): `claude-sonnet-4-6` / `gemini-3-flash-preview` / `gpt-5.4`
+  - LIGHTWEIGHT (Haiku-class): `claude-haiku-4-5-20251001` / `gemini-3-flash-preview` / `gpt-5.4-mini`
+- Health-based failover via ProviderHealthTracker (Redis-backed circuit breaker)
+- Failover chains by primary provider:
+  - Anthropic -> [OpenAI, Google]
+  - Google -> [OpenAI, Anthropic]
+  - OpenAI -> [Google, Anthropic]
 - Fallback modes: IMMEDIATE (planner/reviewer), TASK_BOUNDARY (workers)
 - Per-minute rate limit: sleep 15s, retry once
 - Anthropic overload (529): sleep 30s, retry once
 - Per-run key injection from RunKeyStore
 - Respect org enabledProviders policy
 
-### 5. Model Router (Tier Escalation)
+### 5. ProviderHealthTracker (Circuit Breaker)
 
 **Requirements:**
-- Two-axis selection: complexity → tier, then best healthy provider
-- Tiers: FAST (Haiku) → CAPABLE (Sonnet) → POWER (Opus)
-- Complexity mapping: LOW → FAST, MEDIUM → FAST, HIGH → CAPABLE
-- Retry escalation: attempts 1-2 stay at tier, attempt 3 escalates one tier
-- Never auto-escalate to POWER
-- Provider health tracking: 3 consecutive failures = unhealthy, 5-min auto-recovery
-- Track metrics per task (model, provider, tier, pass/fail, duration)
+- Redis-backed circuit breaker for provider availability tracking
+- 5 consecutive failures per provider -> circuit OPEN (provider marked unhealthy)
+- 60-second TTL auto-recovery (circuit resets to CLOSED after TTL expires)
+- LlmRouter checks provider health before each call
+- LlmRouter records success/failure after each call
+- Metrics tracked per provider: failure count, circuit state, last failure timestamp
+
+### 6. ModelResolver (Tier-Based Model Selection)
+
+**Requirements:**
+- Two-axis selection: AgentTier (PLANNING / WORKHORSE / LIGHTWEIGHT) x Provider (Anthropic / Google / OpenAI)
+- Configuration via `application.yml` -> `model-matrix:` section
+- Returns the correct model ID for a given tier + provider combination
+- Works in conjunction with ProviderHealthTracker for failover selection
 
 ---
 
@@ -81,10 +97,12 @@ Multi-level API key resolution with three key source modes, per-org provider res
 | `agent/ApiKeyResolver.java` | Multi-level key resolution |
 | `agent/ResolvedKeys.java` | Resolved key set per run |
 | `agent/RunKeyStore.java` | Runtime key injection store |
-| `agent/LlmRouter.java` | Provider fallback chains |
-| `router/ModelRouter.java` | Tier-based model selection |
+| `agent/LlmRouter.java` | Provider fallback chains + per-run key injection |
+| `router/ModelResolver.java` | Tier-based model selection (AgentTier x Provider) |
+| `router/ModelMatrixProperties.java` | YAML model matrix configuration |
+| `router/AgentTier.java` | Agent tier enum (PLANNING, WORKHORSE, LIGHTWEIGHT) |
 | `router/AvailableProviderResolver.java` | Org provider restrictions bridge |
-| `router/ProviderHealthTracker.java` | Provider availability tracking |
+| `router/ProviderHealthTracker.java` | Redis-backed circuit breaker (5 failures, 60s TTL) |
 | `router/ModelTaskMetric.java` | Per-task metrics entity |
 
 ## Database Migrations

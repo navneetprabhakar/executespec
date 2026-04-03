@@ -464,36 +464,59 @@ export default function LiveLog() {
               || /^\[[\w-]+\]/.test(msg);
 
             if (isHarnessMsg) {
-              // Determine icon and color based on prefix
+              // Determine icon and color based on prefix — styled as milestone-like banners
               let logIcon = null;
-              let logColor = 'text-secondary';
+              let bannerColor = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
               if (/^✅/.test(msg)) {
-                logIcon = <CheckCircle2 className="h-3 w-3 text-accent-green/80 flex-shrink-0" />;
-                logColor = 'text-accent-green/80';
+                logIcon = <CheckCircle2 className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-green/50 text-accent-green bg-accent-green/[0.06]';
               } else if (/^⚠️/.test(msg)) {
-                logIcon = <AlertTriangle className="h-3 w-3 text-accent-amber/80 flex-shrink-0" />;
-                logColor = 'text-accent-amber/80';
+                logIcon = <AlertTriangle className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
               } else if (/^❌/.test(msg)) {
-                logIcon = <XCircle className="h-3 w-3 text-accent-red/80 flex-shrink-0" />;
-                logColor = 'text-accent-red/80';
+                logIcon = <XCircle className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
               } else if (/^🔧/.test(msg)) {
-                logIcon = <Wrench className="h-3 w-3 text-secondary/80 flex-shrink-0" />;
-              } else if (/^\[compiler\]|^Compile/i.test(msg)) {
-                logIcon = <Terminal className="h-3 w-3 text-secondary/60 flex-shrink-0" />;
-              } else if (/^\[reviewer\]|^Reviewer/i.test(msg)) {
-                logIcon = <Eye className="h-3 w-3 text-secondary/60 flex-shrink-0" />;
+                logIcon = <Wrench className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
+              } else if (/^Compile|^Compiling/i.test(msg)) {
+                logIcon = <Terminal className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
+              } else if (/^Code ready/i.test(msg)) {
+                logIcon = <CheckCircle2 className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-green/40 text-accent-green/80 bg-accent-green/[0.04]';
+              } else if (/^Reviewer|^\[reviewer\]/i.test(msg)) {
+                logIcon = <Eye className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
               } else if (/^Merging|^\[harness\]/i.test(msg)) {
-                logIcon = <GitCommit className="h-3 w-3 text-secondary/60 flex-shrink-0" />;
+                logIcon = <GitCommit className="h-3.5 w-3.5" />;
+                bannerColor = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
+              } else if (/^Plan/i.test(msg)) {
+                logIcon = <Zap className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
+              } else if (/^Background/i.test(msg)) {
+                logIcon = <Clock className="h-3.5 w-3.5" />;
+                bannerColor = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
+              } else if (/^Simple request/i.test(msg)) {
+                logIcon = <Zap className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-blue/50 text-accent-blue bg-accent-blue/[0.06]';
+              } else {
+                // Generic harness message
+                logIcon = <Rocket className="h-3.5 w-3.5" />;
               }
 
               // Strip emoji prefix for cleaner display
               const cleanMsg = msg.replace(/^[✅⚠️❌🔧]\s*/, '');
 
               return (
-                <div key={entry.id} className="flex items-start gap-2 px-2 py-0.5 text-[11px]">
-                  <span className="text-[var(--text-muted)] flex-shrink-0 font-mono mt-px">{formatTimestamp(entry.timestamp)}</span>
+                <div key={entry.id} className={cn(
+                  'flex items-center gap-2.5 px-3 py-1.5 rounded-sm border',
+                  'text-xs font-medium my-1',
+                  bannerColor,
+                )}>
                   {logIcon}
-                  <span className={logColor}>{cleanMsg.length > 200 ? cleanMsg.slice(0, 200) + '…' : cleanMsg}</span>
+                  <span className="flex-1">{cleanMsg.length > 200 ? cleanMsg.slice(0, 200) + '…' : cleanMsg}</span>
+                  <span className="text-[10px] opacity-50 font-mono">{formatTimestamp(entry.timestamp)}</span>
                 </div>
               );
             }

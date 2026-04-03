@@ -102,6 +102,16 @@ export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
             </p>
           )}
 
+          {/* ── Completion Notes ───────────────────────────────────────── */}
+          {task.completionNotes && (
+            <div className="bg-accent-green/[0.04] border border-accent-green/20 rounded-md p-3">
+              <span className="text-xs font-medium text-accent-green mb-1 block">Implementation Notes</span>
+              <p className="text-xs text-secondary leading-relaxed whitespace-pre-wrap">
+                {task.completionNotes}
+              </p>
+            </div>
+          )}
+
           {/* ── Failure / stuck reason ───────────────────────────────────── */}
           {retryable && (hasReason || STUCK_RETRYABLE.has(task.status)) && (
             <div

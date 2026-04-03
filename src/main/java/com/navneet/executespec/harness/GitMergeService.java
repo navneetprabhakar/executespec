@@ -170,6 +170,17 @@ public class GitMergeService {
             return TaskMergeResult.clean(task.getTaskId(), "(no branch)");
         }
 
+        // Rebase copilot and review task branches onto main before merging
+        // to ensure they are current relative to concurrently merged tasks.
+        if (task.getTaskId() != null && 
+           (task.getTaskId().contains("_cop") || task.getTaskId().contains("_rev"))) {
+            log.info("Attempting to rebase branch {} onto main", branchName);
+            boolean rebased = gitTool.rebaseBranchOnMain(runId, branchName);
+            if (!rebased) {
+                log.info("Skipping fast-forward rebase for {} due to conflict; falling back to normal merge.", branchName);
+            }
+        }
+
         // Step 1: Try normal merge (no-commit so we can inspect)
         MergeResult mergeResult = gitTool.mergeBranchNoCommit(runId, branchName);
         if (mergeResult == null) {

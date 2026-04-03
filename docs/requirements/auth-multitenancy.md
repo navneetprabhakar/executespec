@@ -1,8 +1,10 @@
 # Auth & Multi-Tenancy — Requirements
 
+> Last updated: 2026-04-03
+
 ## Overview
 
-JWT-based authentication with organizations, projects, tiered access control, and role-based visibility. Supports free self-registration through enterprise multi-tenant deployments.
+JWT-based authentication with OAuth2 social login, organizations, projects, tiered access control, and role-based visibility. Supports free self-registration through enterprise multi-tenant deployments.
 
 ---
 
@@ -11,20 +13,42 @@ JWT-based authentication with organizations, projects, tiered access control, an
 ### 1. JWT Authentication
 
 **Requirements:**
-- Access token: 1440 minutes (24 hours), refresh token: 7 days
+- Algorithm: HS256, signing key: `${JWT_SECRET}` (min 256 bits)
+- Access token: 24 hours, refresh token: 7 days
+- Refresh token delivered as HTTP-only cookie, rotated on each refresh
 - `POST /api/auth/register` — self-registration (FREE tier)
-- `POST /api/auth/login` — returns access + refresh tokens
-- `POST /api/auth/refresh` — refresh access token
+- `POST /api/auth/login` — returns access token + sets refresh cookie
+- `POST /api/auth/refresh` — rotate refresh token, issue new access token
 - `GET /api/auth/me` — current user profile
-- All REST endpoints require valid JWT (except auth endpoints + health check)
-- Signing key: `${JWT_SECRET}` (min 256 bits for HS256)
+- All REST endpoints require valid JWT (except auth endpoints, health check, OAuth callbacks, shared report URLs)
 - Default admin: `admin@executespec.ai` (password seeded by Flyway V5, hash fixed by V7 — change on first login)
 
-### 2. Subscription Tiers
+**Force Logout:**
+- Feature flag `force_logout_epoch` (stored as Unix timestamp)
+- Any JWT issued before this epoch is rejected at the filter level
+- Allows invalidating all active sessions globally (e.g., after a security incident)
+- Set via admin API or environment variable
+
+### 2. OAuth2 Social Login
+
+**Requirements:**
+- Supported providers: **Google** and **GitHub**
+- OAuth2 flow handled via Spring Security OAuth2 client with custom `OAuthSuccessHandler`
+- `OAuthUserMapper` maps OAuth2 profile attributes to `AppUser` entity
+  - If email does not exist: creates new user (FREE tier, no password)
+  - If email exists with same provider: logs in existing user
+  - If email exists with different provider: throws `OAuthEmailConflictException` (HTTP 409) with message indicating the original provider
+- OAuth2 endpoints:
+  - `GET /api/auth/oauth2/authorize/{provider}` — initiate OAuth flow (redirects to provider)
+  - `GET /api/auth/oauth2/callback/{provider}` — handle provider callback
+- On successful OAuth: issues JWT access token + refresh cookie (same format as password login)
+- OAuth users can later set a password to enable password login alongside OAuth
+
+### 3. Subscription Tiers
 
 | Tier | Monthly Runs | Concurrent Runs | Features |
 |------|-------------|-----------------|----------|
-| FREE | 10 | 1 | Own runs only, no org/project access |
+| FREE | 5 | 1 | Own runs only, no org/project access |
 | PRO | 100 (org-overridable) | 3 | Full org + project management |
 | ENTERPRISE | Unlimited* | 10 | API key management, full access |
 
@@ -37,7 +61,7 @@ JWT-based authentication with organizations, projects, tiered access control, an
 - TierConfig entity stores configurable limits per tier
 - Concurrent run limit enforced via semaphore
 
-### 3. Organization Management
+### 4. Organization Management
 
 **Requirements:**
 - Only PRO/ENTERPRISE users can create organizations
@@ -55,7 +79,7 @@ JWT-based authentication with organizations, projects, tiered access control, an
 - Member management: invite, suspend, remove
 - Domain validation for org-invited users
 
-### 4. RBAC (Role-Based Access Control)
+### 5. RBAC (Role-Based Access Control)
 
 **Organization Roles:**
 
@@ -70,32 +94,39 @@ JWT-based authentication with organizations, projects, tiered access control, an
 
 | Role | Permissions |
 |------|------------|
-| PROJECT_ADMIN | Manage project settings and members |
-| PROJECT_DEVELOPER | View and create runs in the project |
+| PROJECT_ADMIN | Manage project settings, members, and project-level configuration |
+| PROJECT_DEVELOPER | View and create runs within the project |
 
-### 5. Run Visibility (RunVisibilitySpec)
+**Role Assignment:**
+- Organization roles assigned by ORG_ADMIN or SUPER_ADMIN via org member management
+- Project roles assigned by ORG_ADMIN or PROJECT_ADMIN via project member management
+- A user can hold one org role and one project role per project simultaneously
+
+### 6. Run Visibility (RunVisibilitySpec)
 
 **Requirements:**
 - SUPER_ADMIN: sees all runs across all orgs
 - ORG_ADMIN / BILLING_ADMIN: sees all runs in their org
 - DEVELOPER: sees runs only in projects they are a member of
+- PROJECT_ADMIN: sees all runs in their administered projects
+- PROJECT_DEVELOPER: sees runs in their assigned projects
 - FREE users: sees only their own runs
 - Enforced on `GET /api/runs` list and `GET /api/runs/{id}` detail
 - `listRuns()` accepts optional `projectId` filter
 
-### 6. Projects
+### 7. Projects
 
 **Requirements:**
 - Group pipeline runs within an org
-- Only ORG_ADMIN can create/archive projects and manage members
-- DEVELOPER only sees runs in projects they're invited to
+- Only ORG_ADMIN or PROJECT_ADMIN can create/archive projects and manage members
+- DEVELOPER / PROJECT_DEVELOPER only sees runs in projects they're invited to
 - `pipeline_run.project_id` links run to project (nullable)
 - DB: `project` table (id, org_id, name, description, status, created_by)
 - DB: `project_member` (project_id, user_id, project_role)
 - Endpoints: CRUD + member management under `/api/projects/{id}/`
 - FREE users have no project access
 
-### 7. Tenant Isolation
+### 8. Tenant Isolation
 
 **Requirements:**
 - TenantInterceptor automatically injects `tenant_id` on all JPA entities
@@ -131,6 +162,8 @@ Auth & multi-tenancy is one layer of the broader security model. For the complet
 | `auth/entity/ProjectMember.java` | Project membership with role |
 | `auth/entity/TierConfig.java` | Configurable tier limits |
 | `auth/security/RunVisibilitySpec.java` | RBAC run filtering |
+| `auth/security/OAuthSuccessHandler.java` | OAuth2 callback handler, JWT issuance |
+| `auth/security/OAuthUserMapper.java` | Maps OAuth2 profile to AppUser |
 | `auth/service/AuthService.java` | Registration, login, JWT management |
 | `auth/service/TierEnforcementService.java` | Quota checks |
 | `auth/service/OrgService.java` | Org CRUD + member management |

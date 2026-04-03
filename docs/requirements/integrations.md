@@ -1,8 +1,10 @@
 # External Integrations — Requirements
 
+> Last updated: 2026-04-03
+
 ## Overview
 
-Webhook-based and manually-triggered integrations with Jira, Confluence, ServiceNow, PagerDuty, and Slack. Inbound webhooks and manual trigger endpoints create pipeline runs; outbound listeners publish run status back to source systems. Slack provides push-only pipeline notifications. JIRA/Confluence context extraction auto-enriches run requests with referenced issue/page content.
+Webhook-based and manually-triggered integrations with Jira, Confluence, ServiceNow, PagerDuty, and Slack. Inbound webhooks and manual trigger endpoints create pipeline runs; outbound listeners publish run status back to source systems via the `MergeCompleted` event (fires in both PROTOTYPE and PRODUCTION modes). Slack provides push-only pipeline notifications. JIRA/Confluence context extraction auto-enriches run requests with referenced issue/page content. GitHub integration creates branches and opens PRs for existing-repo runs.
 
 ---
 
@@ -12,28 +14,32 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
 
 **Requirements:**
 - Master switch: `agent.integrations.enabled` (default: false)
-- IntegrationManager routes webhooks to source-specific InboundAdapters
+- `IntegrationManager` routes inbound webhooks to source-specific InboundAdapters and listens for `MergeCompleted` to trigger outbound adapters
 - InboundAdapter interface: verify signature, parse event, map to pipeline run
-- OutboundAdapter interface: publish status updates back to source (triggered by MergeCompleted event, fires in both PROTOTYPE and PRODUCTION modes)
+- OutboundAdapter interface: publish status updates back to source system
+  - Triggered by the `MergeCompleted` event (not `RunCompleted`) -- this ensures the review report and validation data are available before outbound notifications fire
+  - `MergeCompleted` fires in both PROTOTYPE and PRODUCTION pipeline modes
+  - Adapters must be null-safe for review data: PROTOTYPE mode completes without a review phase, so review/report fields may be null
 - Deduplication via IntegrationEventLog (sourceType + eventId)
 - Graceful handling of duplicate/ignorable events
 - Per-source skip-approval configuration
 - Endpoints:
-  - `POST /api/integrations/{source}/webhook` — inbound webhooks
-  - `GET /api/integrations/status` — connection status
-  - `POST /api/integrations/jira/trigger` — manual Jira trigger (accepts `{issueKey, goal}`)
-  - `POST /api/integrations/confluence/trigger` — manual Confluence trigger (accepts `{pageId, goal}`)
+  - `POST /api/integrations/{source}/webhook` -- inbound webhooks
+  - `GET /api/integrations/status` -- connection status
+  - `POST /api/integrations/jira/trigger` -- manual Jira trigger (accepts `{issueKey, goal}`)
+  - `POST /api/integrations/confluence/trigger` -- manual Confluence trigger (accepts `{pageId, goal}`)
 
 ### 2. Jira Integration
 
 **Requirements:**
 - Trigger: Issue transitions to configured status (default: "Ready for Coding")
 - Extract: issue summary + description as user request
-- Status transitions:
-  - Run started → "In Progress"
-  - Run completed → "In Review"
-  - Run failed → "Backlog"
-- Manual trigger: `POST /api/integrations/jira/trigger` with `{issueKey, goal}` — fetches issue details and creates a pipeline run
+- Outbound status updates (via `MergeCompleted`):
+  - Run started -> "In Progress"
+  - Run completed -> "In Review"
+  - Run failed -> "Backlog"
+- Null-safe review handling: `JiraAdapter.onRunComplete()` gracefully handles null review data (PROTOTYPE mode has no review phase)
+- Manual trigger: `POST /api/integrations/jira/trigger` with `{issueKey, goal}` -- fetches issue details and creates a pipeline run
 - Webhook signature verification via `JIRA_WEBHOOK_SECRET`
 - Configuration:
   ```yaml
@@ -51,8 +57,9 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
 **Requirements:**
 - Trigger: Page labeled with configured label (default: "agent-run")
 - Extract: page title + body as user request
-- Manual trigger: `POST /api/integrations/confluence/trigger` with `{pageId, goal}` — fetches page content and creates a pipeline run
-- Update: add child page with run results link
+- Manual trigger: `POST /api/integrations/confluence/trigger` with `{pageId, goal}` -- fetches page content and creates a pipeline run
+- Update: add child page with run results link (via `MergeCompleted` event)
+- Null-safe review handling: `ConfluenceAdapter.onRunComplete()` gracefully handles null review data (PROTOTYPE mode has no review phase)
 - Configuration:
   ```yaml
   agent.integrations.confluence:
@@ -98,15 +105,30 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
     skip-approval: false
   ```
 
-### 6. Slack Integration
+### 6. GitHub Integration
+
+**Purpose:** Automatic branch creation and PR opening for existing-repo runs. New repos get a direct push to main.
+
+**Requirements:**
+- **New repos:** Create private repo via `GitHubRepoService`, push main branch
+- **Existing repos:**
+  - `PipelineHarness.pushToGitHubIfConfigured()` creates branch `executespec/{runId-short}`
+  - Pushes to the branch (not main) via `GitTool.pushToBranch()`
+  - Opens a PR automatically via `GitHubRepoService.createPullRequest()` against the repo's default branch (looked up via `GitHubRepoService.getDefaultBranch()`)
+  - PR URL stored in `PipelineRun.githubPrUrl` (V52 migration)
+  - PR URL surfaced in `RunDetail` API response and frontend overview tab
+- Per-user GitHub PAT stored in `app_user` table; priority: user-level PAT -> system-level PAT
+- Manual push endpoint: `POST /api/runs/{id}/push-github`
+
+### 7. Slack Integration
 
 **Purpose:** Push-only pipeline notifications to Slack channels. Org-level OAuth connection with per-project channel routing and configurable verbosity.
 
 **Requirements:**
-- OAuth 2.0 app installation flow — org admin initiates from Integrations page
+- OAuth 2.0 app installation flow -- org admin initiates from Integrations page
 - State parameter: HMAC-signed (`orgId|timestamp|hmac`) using JWT secret, 5-minute TTL
 - Per-org connection stored in `org_slack_integration` table (team_id, team_name, access_token, bot_user_id, scopes)
-- Per-project channel routing via `project_slack_channel` table (project_id → channel_id + channel_name)
+- Per-project channel routing via `project_slack_channel` table (project_id -> channel_id + channel_name)
 - Default channel on org integration for non-project runs
 - Three verbosity levels: `MINIMAL` (start/complete/fail only), `NORMAL` (+ gate events), `VERBOSE` (+ task progress, validation, cost)
 - Block Kit messages with action buttons (Approve Plan, View Run) linking to dashboard
@@ -117,14 +139,14 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
 - Retry: up to 3 attempts with 1.5s delay on transient failures
 - Notification log cleanup job: deletes entries older than 30 days
 - Endpoints:
-  - `GET /api/integrations/slack/install` — returns OAuth install URL
-  - `GET /api/integrations/slack/oauth/callback` — handles OAuth redirect
-  - `GET /api/integrations/slack/status` — connection status for current org
-  - `DELETE /api/integrations/slack/disconnect` — removes Slack connection
-  - `POST /api/integrations/slack/test` — sends test message to a channel
-  - `GET /api/integrations/slack/channels` — lists available Slack channels
-  - `GET /api/integrations/slack/channels/project/{projectId}` — get project channel mapping
-  - `PUT /api/integrations/slack/channels/project/{projectId}` — set project channel mapping
+  - `GET /api/integrations/slack/install` -- returns OAuth install URL
+  - `GET /api/integrations/slack/oauth/callback` -- handles OAuth redirect
+  - `GET /api/integrations/slack/status` -- connection status for current org
+  - `DELETE /api/integrations/slack/disconnect` -- removes Slack connection
+  - `POST /api/integrations/slack/test` -- sends test message to a channel
+  - `GET /api/integrations/slack/channels` -- lists available Slack channels
+  - `GET /api/integrations/slack/channels/project/{projectId}` -- get project channel mapping
+  - `PUT /api/integrations/slack/channels/project/{projectId}` -- set project channel mapping
 - Configuration:
   ```yaml
   agent.integrations.slack:
@@ -139,9 +161,9 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
     retry-delay-ms: 1500
   ```
 
-### 7. JIRA/Confluence Context Extraction
+### 8. JIRA/Confluence Context Extraction
 
-**Purpose:** When a user mentions JIRA issue keys or Confluence page URLs in a run request, automatically fetch the referenced content and inject it into the planner's input — giving the AI full context without manual copy-paste.
+**Purpose:** When a user mentions JIRA issue keys or Confluence page URLs in a run request, automatically fetch the referenced content and inject it into the planner's input -- giving the AI full context without manual copy-paste.
 
 **Requirements:**
 - Runs before the PlannerAgent in the pipeline (after workspace init, before planning)
@@ -150,17 +172,17 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
   - JIRA browse URLs: `https://example.atlassian.net/browse/PROJ-123`
   - Confluence page URLs: `/wiki/spaces/.../pages/{id}` or `?pageId={id}`
 - Fetches content using org-level credentials (not IntegrationProperties beans):
-  - JIRA: REST API `/rest/api/3/issue/{key}` — extracts summary, description (with ADF text extraction), status, acceptance criteria
-  - Confluence: REST API `/wiki/rest/api/content/{id}?expand=body.storage` — strips HTML, truncates to 4000 chars
-- Vague mention detection: "jira ticket", "confluence page" without specific references → opens clarification gate
+  - JIRA: REST API `/rest/api/3/issue/{key}` -- extracts summary, description (with ADF text extraction), status, acceptance criteria
+  - Confluence: REST API `/wiki/rest/api/content/{id}?expand=body.storage` -- strips HTML, truncates to 4000 chars
+- Vague mention detection: "jira ticket", "confluence page" without specific references -> opens clarification gate
 - Clarification gate: Redis-backed (same pattern as plan gate), pipeline thread blocks until user provides specific reference or skips
 - Non-fatal: all fetch failures log warning and continue with original request unchanged
 - Enriched request format: original text + `\n\n---\n## Extracted Reference Context\n` + fetched content
 - SSE events: `CLARIFICATION_NEEDED`, `CLARIFICATION_RESOLVED`, `CONTEXT_EXTRACTED`
-- Frontend: ClarificationBanner on RunDetail page — text input + Submit/Skip buttons, shown when `status === 'AWAITING_CLARIFICATION'`
-- Endpoint: `POST /api/runs/{id}/clarify` — accepts `{response: string}`, resolves clarification gate
+- Frontend: ClarificationBanner on RunDetail page -- text input + Submit/Skip buttons, shown when `status === 'AWAITING_CLARIFICATION'`
+- Endpoint: `POST /api/runs/{id}/clarify` -- accepts `{response: string}`, resolves clarification gate
 
-### 8. Org-Level Integration Credential Management
+### 9. Org-Level Integration Credential Management
 
 **Purpose:** Integration credentials (JIRA/Confluence/Slack) are managed at the org level by ORG_ADMIN users, not per-user in Settings.
 
@@ -169,17 +191,17 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
 - Integration enable/disable is determined by whether org has credentials configured (not application.yml flags)
 - Only ORG_ADMIN and SUPER_ADMIN can manage integration credentials
 - Credential management endpoints:
-  - `PUT /api/org/me/settings/jira` — save JIRA base URL, email, API token
-  - `PUT /api/org/me/settings/confluence` — save Confluence base URL, email, API token
-  - `POST /api/org/me/settings/jira/validate` — test JIRA connection (HTTP GET to /rest/api/2/myself)
-  - `POST /api/org/me/settings/confluence/validate` — test Confluence connection (HTTP GET to /wiki/rest/api/user/current)
-- OrgDto exposes boolean flags (`hasJiraCredentials`, `hasConfluenceCredentials`) + base URLs — never raw tokens
+  - `PUT /api/org/me/settings/jira` -- save JIRA base URL, email, API token
+  - `PUT /api/org/me/settings/confluence` -- save Confluence base URL, email, API token
+  - `POST /api/org/me/settings/jira/validate` -- test JIRA connection (HTTP GET to /rest/api/2/myself)
+  - `POST /api/org/me/settings/confluence/validate` -- test Confluence connection (HTTP GET to /wiki/rest/api/user/current)
+- OrgDto exposes boolean flags (`hasJiraCredentials`, `hasConfluenceCredentials`) + base URLs -- never raw tokens
 - `IntegrationStatusController` derives enabled integrations from org credentials:
   - Org users: checks org-level credentials
   - SUPER_ADMIN without org: falls back to IntegrationManager (application.yml)
   - No org, not super admin: no integrations
 
-### 9. Integration UI
+### 10. Integration UI
 
 **Purpose:** Frontend page for configuring integrations, viewing status, and manually triggering runs.
 
@@ -188,7 +210,7 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
 - Interactive integration cards with org-level credential management:
   - Not Configured: "Configure" button opens inline credential form
   - Configured: shows "Enabled" badge, "Edit" and "Disconnect" buttons
-  - Only ORG_ADMIN / SUPER_ADMIN can edit — developers see read-only status
+  - Only ORG_ADMIN / SUPER_ADMIN can edit -- developers see read-only status
 - Credential form: Base URL + Email + API Token + "Test Connection" + "Save" buttons
 - Test Connection validates credentials before save (calls /validate endpoint)
 - Disconnect clears credentials (saves empty values)
@@ -205,21 +227,23 @@ Webhook-based and manually-triggered integrations with Jira, Confluence, Service
 
 | File | Purpose |
 |------|---------|
-| `integration/IntegrationManager.java` | Webhook routing + manual triggers |
+| `integration/IntegrationManager.java` | Webhook routing, manual triggers, listens for `MergeCompleted` event |
 | `integration/InboundAdapter.java` | Inbound interface |
 | `integration/OutboundAdapter.java` | Outbound interface |
-| `integration/jira/*.java` | Jira adapter |
-| `integration/confluence/*.java` | Confluence adapter |
+| `integration/jira/*.java` | Jira adapter (null-safe review handling) |
+| `integration/confluence/*.java` | Confluence adapter (null-safe review handling) |
 | `integration/servicenow/*.java` | ServiceNow adapter |
 | `integration/pagerduty/*.java` | PagerDuty adapter |
+| `integration/github/GitHubRepoService.java` | GitHub repo create/push, `getDefaultBranch()`, `createPullRequest()` |
+| `tool/GitTool.java` | Workspace git ops, `pushToBranch()` for existing-repo branch + push |
 | `integration/slack/SlackClient.java` | HTTP client for Slack Web API (chat.postMessage, conversations.list, auth.test) |
-| `integration/slack/SlackOAuthService.java` | OAuth 2.0 flow — install URL generation, callback handling, HMAC state validation |
-| `integration/slack/SlackNotificationService.java` | @EventListener bridge — maps RunEvent to Slack messages, channel routing, verbosity filtering |
+| `integration/slack/SlackOAuthService.java` | OAuth 2.0 flow -- install URL generation, callback handling, HMAC state validation |
+| `integration/slack/SlackNotificationService.java` | @EventListener bridge -- maps RunEvent to Slack messages, channel routing, verbosity filtering |
 | `integration/slack/SlackMessageBuilder.java` | Block Kit message construction for all event types |
 | `integration/slack/SlackRateLimiter.java` | Per-workspace rate limiting (1.1s minimum interval) |
 | `integration/slack/SlackNotificationLogCleanupJob.java` | Scheduled cleanup of notification logs older than 30 days |
-| `integration/slack/entity/OrgSlackIntegration.java` | Org ↔ Slack workspace connection (team_id, access_token, verbosity, default_channel) |
-| `integration/slack/entity/ProjectSlackChannel.java` | Project ↔ Slack channel mapping |
+| `integration/slack/entity/OrgSlackIntegration.java` | Org <-> Slack workspace connection (team_id, access_token, verbosity, default_channel) |
+| `integration/slack/entity/ProjectSlackChannel.java` | Project <-> Slack channel mapping |
 | `integration/slack/entity/SlackNotificationLog.java` | Notification delivery log for audit + debugging |
 | `integration/context/ReferenceExtractorService.java` | Scans run requests for JIRA keys / Confluence URLs, fetches content, handles clarification |
 | `integration/context/ExtractionResult.java` | Result record (enriched / unchanged / needsClarification) |

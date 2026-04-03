@@ -34,6 +34,7 @@ spring:
       validation-timeout: 3000       # 3s — quick validation for health checks
       leak-detection-threshold: 60000 # 60s — log warning if connection held > 1 min
   jpa:
+    open-in-view: false
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: validate        # Hibernate only validates — Flyway manages all schema

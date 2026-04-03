@@ -37,25 +37,44 @@ public class PackageJsonMerger implements SpecializedMerger {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Optional<String> merge(String base, String ours, String theirs) {
         try {
             Map<String, Object> baseMap = parseJson(base);
             Map<String, Object> oursMap = parseJson(ours);
             Map<String, Object> theirsMap = parseJson(theirs);
 
-            for (String section : MERGE_SECTIONS) {
-                Map<String, String> baseSec = getSection(baseMap, section);
-                Map<String, String> oursSec = getSection(oursMap, section);
-                Map<String, String> theirsSec = getSection(theirsMap, section);
+            Set<String> unionKeys = new LinkedHashSet<>();
+            unionKeys.addAll(oursMap.keySet());
+            unionKeys.addAll(theirsMap.keySet());
 
-                Map<String, String> merged = mergeSections(baseSec, oursSec, theirsSec);
-                if (merged == null) {
-                    log.warn("Version conflict in package.json section '{}'", section);
-                    return Optional.empty();
-                }
-                if (!merged.isEmpty()) {
-                    oursMap.put(section, new LinkedHashMap<>(merged));
+            for (String key : unionKeys) {
+                if (MERGE_SECTIONS.contains(key)) {
+                    Map<String, String> baseSec = getSectionAsMap(baseMap, key);
+                    Map<String, String> oursSec = getSectionAsMap(oursMap, key);
+                    Map<String, String> theirsSec = getSectionAsMap(theirsMap, key);
+
+                    Map<String, String> merged = mergeSections(baseSec, oursSec, theirsSec, key);
+                    if (merged == null) {
+                        log.warn("Version conflict in package.json section '{}'", key);
+                        return Optional.empty();
+                    }
+                    if (!merged.isEmpty()) {
+                        oursMap.put(key, new LinkedHashMap<>(merged));
+                    }
+                } else {
+                    // For top-level string/primitive fields (e.g. main, type), semantics:
+                    // Copilot apply/fix branches (theirs) override original branches (ours)
+                    Object baseVal = baseMap.get(key);
+                    Object theirVal = theirsMap.get(key);
+                    if (theirsMap.containsKey(key)) {
+                        boolean theirsChanged = !Objects.equals(theirVal, baseVal);
+                        
+                        if (theirsChanged) {
+                            oursMap.put(key, theirVal); // Prefer theirs if they changed it
+                        } else if (!oursMap.containsKey(key)) {
+                            oursMap.put(key, theirVal); // Or if we don't have it
+                        }
+                    } // else if they deleted it but we kept it, we keep it (conservative)
                 }
             }
 
@@ -72,7 +91,8 @@ public class PackageJsonMerger implements SpecializedMerger {
      */
     private Map<String, String> mergeSections(Map<String, String> base,
                                                Map<String, String> ours,
-                                               Map<String, String> theirs) {
+                                               Map<String, String> theirs,
+                                               String sectionName) {
         Map<String, String> result = new LinkedHashMap<>(ours);
 
         for (Map.Entry<String, String> entry : theirs.entrySet()) {
@@ -87,10 +107,15 @@ public class PackageJsonMerger implements SpecializedMerger {
                     String baseVal = base.getOrDefault(key, null);
                     boolean oursChanged = !Objects.equals(ourVal, baseVal);
                     boolean theirsChanged = !Objects.equals(theirVal, baseVal);
+                    
                     if (oursChanged && theirsChanged) {
-                        return null; // can't auto-resolve
-                    }
-                    if (theirsChanged) {
+                        // For scripts, favor 'theirs' (copilot fix) when both changed
+                        if ("scripts".equals(sectionName)) {
+                            result.put(key, theirVal);
+                        } else {
+                            return null; // can't auto-resolve dependencies securely
+                        }
+                    } else if (theirsChanged) {
                         result.put(key, theirVal);
                     }
                 }
@@ -100,7 +125,7 @@ public class PackageJsonMerger implements SpecializedMerger {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, String> getSection(Map<String, Object> root, String key) {
+    private Map<String, String> getSectionAsMap(Map<String, Object> root, String key) {
         Object val = root.get(key);
         if (val instanceof Map) {
             Map<String, String> result = new LinkedHashMap<>();

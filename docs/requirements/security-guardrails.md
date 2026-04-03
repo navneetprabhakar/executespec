@@ -1,14 +1,14 @@
 # Security Guardrails — Requirements
 
-> **Version**: 1.0
-> **Date**: 2026-04-01
+> **Version**: 1.1
+> **Date**: 2026-04-03
 > **Audience**: Engineers, Security Reviewers, DevOps
 
 ---
 
 ## Overview
 
-ExecuteSpec runs untrusted user input through LLM agents that generate and execute code. The security model is **defense-in-depth**: seven independent layers validate, scan, sandbox, and constrain every step from API request to file write to shell execution. No single layer failing should result in full compromise.
+ExecuteSpec runs untrusted user input through LLM agents that generate and execute code. The security model is **defense-in-depth**: eight independent layers validate, scan, sandbox, and constrain every step from API request to file write to shell execution. No single layer failing should result in full compromise.
 
 ### Threat Model
 
@@ -23,7 +23,8 @@ ExecuteSpec runs untrusted user input through LLM agents that generate and execu
 | Cross-org data access | Multi-tenant API | RunAccessGuard (RBAC) + org-scoped queries |
 | Token stuffing / DoS | Oversized or repetitive input | Size limits + repetition detection + rate limiting |
 | Provider policy bypass | Org disables a provider for compliance | LlmRouter org policy check on all paths including forced-primary |
-| Webhook forgery | Fake Razorpay callbacks | HMAC-SHA256 signature verification (constant-time) |
+| Webhook forgery | Fake Razorpay/Stripe callbacks | HMAC-SHA256 signature verification (constant-time) |
+| Session hijack after compromise | Stolen JWT used after account takeover detected | Force logout via JWT epoch invalidation (feature flag) |
 
 ---
 
@@ -295,6 +296,8 @@ The following environment variables are removed from child processes before exec
 - `JIRA_API_TOKEN`
 - `CONFLUENCE_API_TOKEN`
 - `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`
+- `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 
 `JAVA_HOME` is preserved (required for Maven/javac).
 
@@ -320,7 +323,17 @@ Process working directory is set to the run's workspace (or task worktree). Comb
 - All `/api/**` endpoints require valid JWT (except: auth, health, webhooks, shared reports)
 - SSE streams authenticated via `?token=` query parameter (EventSource limitation)
 
-### 7.2 RBAC (Role-Based Access Control)
+### 7.2 Force Logout (JWT Epoch Invalidation)
+
+A feature-flag-controlled mechanism for invalidating all active JWTs for a specific user or globally:
+
+- `SecurityProperties` exposes a `jwt-epoch` configuration per environment
+- When force logout is triggered (e.g., account compromise, password reset), the user's `jwt_epoch` column is incremented
+- `JwtAuthenticationFilter` compares the token's `epoch` claim against the stored value; mismatch rejects the token
+- Global force logout: increment a system-wide epoch counter in Redis, checked on every request
+- Enables immediate session termination without waiting for token expiry
+
+### 7.3 RBAC (Role-Based Access Control)
 
 | Role | Scope |
 |------|-------|
@@ -334,20 +347,39 @@ Process working directory is set to the run's workspace (or task worktree). Comb
 
 Enforced by `RunAccessGuard` on every run-level operation.
 
-### 7.3 HTTP Security Headers
+### 7.4 HTTP Security Headers (SecurityProperties)
 
-Configured in `SecurityConfig.java`:
+Configured in `SecurityConfig.java` with values sourced from `SecurityProperties` (configurable per environment via `application.yml`):
 
 - **CSRF:** Disabled (stateless JWT — appropriate)
 - **CORS:** Configurable `allowed-origins` from environment variable
-- **X-Frame-Options:** `DENY` (clickjacking prevention)
-- **Content-Security-Policy:** `default-src 'self'; script-src 'self'; ...` (strict CSP)
-- **HSTS:** 31536000 seconds (1 year) with subdomain inclusion
+- **X-Frame-Options:** Configurable via `SecurityProperties` (`DENY` default; can be set to `SAMEORIGIN` for environments that embed the dashboard)
+- **Content-Security-Policy:** Configurable via `SecurityProperties`. Default policy:
+  - `default-src 'self'`
+  - `script-src 'self' https://cdn.jsdelivr.net https://static.cloudflareinsights.com`
+  - `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net`
+  - `font-src 'self' https://cdn.jsdelivr.net`
+  - `connect-src 'self' https://cloudflareinsights.com`
+  - `img-src 'self' data:`
+  - `worker-src 'self' blob:` (required for Monaco editor web workers)
+  - Monaco CDN (`cdn.jsdelivr.net`) is allowed for the in-browser code editor
+  - Cloudflare Insights (`cloudflareinsights.com`, `static.cloudflareinsights.com`) is allowed for analytics
+- **HSTS:** Configurable max-age via `SecurityProperties` (default: 31536000 seconds / 1 year) with subdomain inclusion
 - **Session:** `STATELESS` (or `IF_REQUIRED` when OAuth enabled)
 
-### 7.4 Rate Limiting
+`SecurityProperties` is a `@ConfigurationProperties(prefix = "app.security")` class allowing per-environment overrides:
 
-Redis-backed sliding window (60-second buckets) with tier-based quotas:
+```yaml
+app:
+  security:
+    csp: "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; ..."
+    hsts-max-age: 31536000
+    frame-options: DENY
+```
+
+### 7.5 Rate Limiting
+
+Redis-backed per-tenant sliding window (60-second buckets) with tier-based quotas:
 
 | Endpoint Group | FREE | PRO | ENTERPRISE | Default |
 |----------------|------|-----|------------|---------|
@@ -361,24 +393,36 @@ Redis-backed sliding window (60-second buckets) with tier-based quotas:
 
 **Keying strategy:**
 - Auth/webhook endpoints: keyed by IP (rightmost `X-Forwarded-For`)
-- Authenticated requests: keyed by userId
+- Authenticated requests: keyed by userId (per-tenant sliding window)
 - Fallback: in-memory `ConcurrentHashMap` at 50% limits if Redis unavailable
 
 **Response:** HTTP 429 with `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers.
 
-### 7.5 Webhook Signature Verification
+### 7.6 Webhook Signature Verification
+
+#### Razorpay
 
 Razorpay webhooks verified with HMAC-SHA256 using constant-time comparison (`MessageDigest.isEqual()`). Three verification methods:
 - Webhook signature: `HMAC(raw_payload, webhook_secret)`
 - Payment signature: `HMAC(subscription_id | payment_id, key_secret)`
 - Order payment: `HMAC(order_id | payment_id, key_secret)`
 
+#### Stripe
+
+Stripe webhooks verified using the Stripe SDK's built-in `Webhook.constructEvent()` method:
+- Reads the `Stripe-Signature` header containing timestamp and HMAC-SHA256 signature
+- Verifies against the configured `STRIPE_WEBHOOK_SECRET`
+- Rejects events with timestamps older than the default tolerance (300 seconds) to prevent replay attacks
+- Constant-time comparison provided by the Stripe SDK internally
+
 **Key files:**
 - `auth/security/SecurityConfig.java`
+- `auth/security/SecurityProperties.java`
 - `auth/security/JwtAuthenticationFilter.java`
 - `auth/security/RunAccessGuard.java`
 - `ratelimit/RateLimitFilter.java`, `ratelimit/RateLimitPolicy.java`
 - `billing/security/WebhookSignatureVerifier.java`
+- `billing/security/StripeWebhookVerifier.java`
 
 ---
 
@@ -448,46 +492,56 @@ Preview Dockerfiles inject a non-root `USER` directive before the final `CMD`/`E
 
 ```
 User Request (POST /api/runs)
-    │
-    ├── Layer 1: Jakarta @Valid (size, pattern, not-blank)
-    ├── Layer 2: InputSanitizer.scan() — 26 patterns + obfuscation checks + NFKC normalization
-    │
-    ▼
+    |
+    +-- Layer 1: Jakarta @Valid (size, pattern, not-blank)
+    +-- Layer 2: InputSanitizer.scan() — 26 patterns + obfuscation checks + NFKC normalization
+    |
+    v
 PlannerAgent
-    │
-    ├── Layer 3: User input wrapped in <user_request> + "untrusted" warning
-    ├── Planner prompt: reject adversarial requests, never plan malware
-    │
-    ▼
+    |
+    +-- Layer 3: User input wrapped in <user_request> + "untrusted" warning
+    +-- Planner prompt: reject adversarial requests, never plan malware
+    |
+    v
 Plan Approval Gate (human review)
-    │
-    ▼
+    |
+    v
 WorkerAgent (per task)
-    │
-    ├── Layer 3: Worker prompt: SECURITY section, <tool_result untrusted="true"> tagging
-    │
-    ├── Tool: writeFile()
-    │   ├── Layer 5: safeResolve() — path must stay in workspace
-    │   ├── Layer 5: FileLockTool — task ownership check
-    │   └── Layer 5: CodeAbuseScanner.scan() — BLOCKING on malware patterns
-    │
-    ├── Tool: shell/run()
-    │   ├── Layer 4: ShellSandboxPolicy.validate()
-    │   │   ├── Block $() and backtick subshells
-    │   │   ├── Check explicit blocklist (23 commands)
-    │   │   ├── Check pattern blocklist (43 regexes)
-    │   │   ├── Block absolute cd /
-    │   │   └── Split on &&/||/;/| → validate each segment against allowlist
-    │   ├── Layer 6: Strip secret env vars
-    │   └── Layer 6: 5-minute hard timeout
-    │
-    ├── Tool: readFile()
-    │   └── Layer 5: safeResolve() — path must stay in workspace
-    │
-    ▼
+    |
+    +-- Layer 3: Worker prompt: SECURITY section, <tool_result untrusted="true"> tagging
+    |
+    +-- Tool: writeFile()
+    |   +-- Layer 5: safeResolve() — path must stay in workspace
+    |   +-- Layer 5: FileLockTool — task ownership check
+    |   +-- Layer 5: CodeAbuseScanner.scan() — BLOCKING on malware patterns
+    |
+    +-- Tool: shell/run()
+    |   +-- Layer 4: ShellSandboxPolicy.validate()
+    |   |   +-- Block $() and backtick subshells
+    |   |   +-- Check explicit blocklist (23 commands)
+    |   |   +-- Check pattern blocklist (43 regexes)
+    |   |   +-- Block absolute cd /
+    |   |   +-- Split on &&/||/;/| → validate each segment against allowlist
+    |   +-- Layer 6: Strip secret env vars
+    |   +-- Layer 6: 5-minute hard timeout
+    |
+    +-- Tool: readFile()
+    |   +-- Layer 5: safeResolve() — path must stay in workspace
+    |
+    v
+Auth & Rate Limiting (all API requests)
+    |
+    +-- Layer 7: JWT + RBAC + rate limiting + security headers + webhook verification
+    |
+    v
+LLM Provider Controls
+    |
+    +-- Layer 8: Org provider policy + token budget + wall-clock time limit
+    |
+    v
 Preview / Deploy
-    │
-    └── Layer 8: .dockerignore excludes .env*, credentials.json, key.json, secrets.*
+    |
+    +-- Container Hardening: .dockerignore excludes .env*, credentials.json, key.json, secrets.*
 ```
 
 ---
@@ -509,9 +563,11 @@ Preview / Deploy
 | Planner prompt | `resources/prompts/planner.txt` |
 | JWT filter | `auth/security/JwtAuthenticationFilter.java` |
 | Security config | `auth/security/SecurityConfig.java` |
+| Security properties | `auth/security/SecurityProperties.java` |
 | RBAC guard | `auth/security/RunAccessGuard.java` |
 | Rate limiting | `ratelimit/RateLimitFilter.java`, `ratelimit/RateLimitPolicy.java` |
-| Webhook verification | `billing/security/WebhookSignatureVerifier.java` |
+| Razorpay webhook verification | `billing/security/WebhookSignatureVerifier.java` |
+| Stripe webhook verification | `billing/security/StripeWebhookVerifier.java` |
 | LLM router (policy) | `agent/LlmRouter.java` |
 | Token budget | `agent/TokenBudgetPolicy.java` |
 | Preview .dockerignore | `deployment/preview/DevDockerfileGenerator.java` |

@@ -1,7 +1,7 @@
 # ExecuteSpec — Complete Code Generation Architecture
 
 > Comprehensive technical reference for the multi-agent code generation pipeline.
-> Last updated: 2026-03-30
+> Last updated: 2026-04-03
 
 ---
 
@@ -39,7 +39,7 @@ User Request
     │
     ▼
 ┌──────────────────┐
-│  PlannerAgent     │  Opus-class model decomposes request into tasks
+│  PlannerAgent     │  PLANNING tier model decomposes request into tasks
 │  (PLANNING tier)  │  Assigns complexity, dependencies, file ownership
 └────────┬─────────┘
          │
@@ -88,7 +88,7 @@ User Request
 ┌────────┐  ┌──────────────────────────────────┐
 │ Auto   │  │  Background Validation Thread     │
 │ Preview│  │                                    │
-│ (10min)│  │  ReviewerAgentV2 → Auto-Fix       │
+│ (5min) │  │  ReviewerAgentV2 → Auto-Fix       │
 └────────┘  │  TestGenOrchestrator → Compile     │
             │  TestPreviewCoordinator (reuses    │
             │    existing preview)                │
@@ -107,6 +107,8 @@ User Request
 | Tool format | XML `<tool_call>` (Anthropic/Google), native (OpenAI) | Provider-specific optimization |
 | Token control | Fixed output ceilings per complexity | Caps latency; auto-continue handles overflow |
 | Review | Agentic with auto-fix | Zero human intervention for fixable issues |
+| Completion before review | COMPLETE fires pre-review | User gets preview/chat immediately; validation runs in background |
+| Integration events | MergeCompleted (not RunCompleted) | Avoids race where review report is null at RunCompleted time |
 
 ---
 
@@ -141,21 +143,22 @@ QUEUED ──► PLANNING ──► AWAITING_APPROVAL ──► WORKING ──�
 | `WORKING` | Plan approved | All tasks complete/fail |
 | `REVIEWING` | All tasks merged | Review verdict issued |
 | `PAUSED` | User pauses run | User edits goal and resumes |
-| `COMPLETE` | All phases pass | Terminal |
+| `COMPLETE` | Compile + merge pass | Terminal (background validation continues) |
 | `PARTIAL` | Some tasks incomplete | User can retry individual tasks |
 | `FAILED` | Unrecoverable error | Terminal |
 | `CANCELLED` | User cancels | Terminal |
+| `ARCHIVED` | User archives run (V53) | Terminal |
 
 ### Execution Modes
 
 | Mode | Review | Tests | Preview | Use Case |
 |------|--------|-------|---------|----------|
-| **PRODUCTION** | Yes (ReviewerAgentV2) | Yes (TestGenOrchestrator) | After tests compile | Full quality pipeline |
-| **PROTOTYPE** | Skipped | Skipped | Auto-start immediately | Fast iteration |
+| **PRODUCTION** | Yes (ReviewerAgentV2, background) | Yes (TestGenOrchestrator, background) | Auto-start at COMPLETE | Full quality pipeline |
+| **PROTOTYPE** | Skipped | Skipped | Auto-start at COMPLETE | Fast iteration |
 
 ### Concurrency Control
 
-- **Semaphore:** `maxRuns` (default 3) limits concurrent pipeline executions
+- **Semaphore:** `maxRuns` (default 50) limits concurrent pipeline executions
 - **Gate polling:** 500ms interval on Redis for approval/merge decisions
 - **Gate TTL:** 2 hours — auto-expires if user doesn't respond
 - **Slot release during gates:** Compute slot released while waiting for user approval, re-acquired after
@@ -199,27 +202,27 @@ QUEUED ──► PLANNING ──► AWAITING_APPROVAL ──► WORKING ──�
 - Handle merge conflicts → mark affected tasks `FAILED`
 - Conflicts → `PARTIAL`; all merged → proceed
 
-#### Phase 6: Test Generation (PRODUCTION only)
-- TestGenOrchestrator runs async (parallel to review)
-- Preview deferred until tests compile (TestPreviewCoordinator)
+#### Phase 6: COMPLETE + Auto-Preview
+- Mark run `COMPLETE` immediately after compile + merge
+- Auto-start preview (5-min TTL) for both PROTOTYPE and PRODUCTION modes
+- Push to GitHub if configured (creates branch `executespec/{runIdShort}` + opens PR)
+- Save actual cost, publish completion events
+- User can chat, submit changes, and use preview immediately
 
-#### Phase 7: Review (PRODUCTION only)
+#### Phase 7: Background Validation (PRODUCTION only)
+Runs on a dedicated virtual thread (`bg-validation-{runId}`):
 - ReviewerAgentV2 inspects merged code on main
 - Returns ReviewVerdict: `APPROVED`, `APPROVED_WITH_NOTES`, `NEEDS_FIXES`, `REJECTED`
 - Auto-fix critical issues (WORKHORSE tier → PLANNING tier on retry)
 - Re-validate after auto-fixes
+- TestGenOrchestrator runs in parallel with review (language-agnostic test generation)
+- TestPreviewCoordinator reuses existing preview for test execution
 
 #### Phase 8: Validation Report & Test Execution
 - Wait for test execution completion (CompletableFuture, 10-min timeout)
 - Generate ValidationReport with merged results
 - Include worker reports, review findings, test results
-
-#### Phase 9: Complete
-- Mark `COMPLETE` or `PARTIAL`
-- Push to GitHub (if configured)
-- Save actual cost
-- Publish completion events
-- Release SSE broadcaster
+- SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` deferred to background thread's `finally` block
 
 ### Error Handling
 
@@ -231,6 +234,7 @@ QUEUED ──► PLANNING ──► AWAITING_APPROVAL ──► WORKING ──�
 | Redis connection loss | 500ms poll retry (gates) |
 | Gate lost on restart | `GateFallback` thread handles orphaned gates |
 | All workers fail | `FAILED` (nothing to merge) |
+| Background validation failure | Fire-and-forget (no retry/recovery) |
 
 ---
 
@@ -240,7 +244,7 @@ QUEUED ──► PLANNING ──► AWAITING_APPROVAL ──► WORKING ──�
 
 **File:** `agent/PlannerAgent.java`
 
-The PlannerAgent uses an Opus-class model to decompose the user's request into an executable task plan.
+The PlannerAgent uses a PLANNING-tier model to decompose the user's request into an executable task plan.
 
 ### Planning Flow
 
@@ -347,11 +351,11 @@ Agent Request
 │                    LlmRouter                             │
 │                                                          │
 │  ┌─────────────────────────────────────────────────┐    │
-│  │ Fallback Chain (per capability tier)             │    │
+│  │ Fallback Chain (per provider)                    │    │
 │  │                                                  │    │
-│  │ ARCHITECT:  Opus → Gemini Pro → GPT-5.4         │    │
-│  │ CAPABLE:    Sonnet → Gemini Pro → GPT-5.4       │    │
-│  │ UTILITY:    Haiku → Gemini Flash → GPT-5.4-mini │    │
+│  │ Anthropic→[OpenAI, Google]                      │    │
+│  │ Google→[OpenAI, Anthropic]                      │    │
+│  │ OpenAI→[Google, Anthropic]                      │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                          │
 │  For each provider in chain:                             │
@@ -371,39 +375,42 @@ Agent Request
 
 ```yaml
 model-matrix:
+  default-provider: openai
+
   providers:
     anthropic:
-      planning:    claude-opus-4-6
-      workhorse:   claude-sonnet-4-6
+      planning:    claude-sonnet-4-6
+      workhorse:   claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning:    gemini-3.1-pro-preview
+      planning:    gemini-3-flash-preview
       workhorse:   gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
       planning:    gpt-5.4
-      workhorse:   gpt-5.4
+      workhorse:   gpt-5.4-mini
       lightweight: gpt-5.4-mini
 
   agent-tier-map:
     PlannerAgent:             PLANNING
     ReviewerAgentV2:          PLANNING
-    TestPlannerAgent:         PLANNING
     WorkerAgent:              WORKHORSE
-    TestWorkerAgent:          WORKHORSE
     CompilerAgent:            WORKHORSE
+    TestPlannerAgent:         WORKHORSE
+    TestWorkerAgent:          WORKHORSE
     ApiTestSuiteAgent:        WORKHORSE
     ConflictResolverAgent:    WORKHORSE
-    ContextAgent:             LIGHTWEIGHT
+    PromptOptimiserAgent:     WORKHORSE
+    ValidationReportGenerator: WORKHORSE
     ConversationAgent:        LIGHTWEIGHT
-    PromptOptimiserAgent:     LIGHTWEIGHT
+    ContextAgent:             LIGHTWEIGHT
     TestReportGenerator:      LIGHTWEIGHT
-    ValidationReportGenerator: LIGHTWEIGHT
+    RequestTriageService:     LIGHTWEIGHT
 
   failover-order:
-    anthropic: [google, openai]
-    google:    [anthropic, openai]
-    openai:    [anthropic, google]
+    anthropic: [openai, google]
+    google:    [openai, anthropic]
+    openai:    [google, anthropic]
 ```
 
 ### ModelResolver
@@ -520,7 +527,7 @@ WorkerAgent.execute(task, runId):
   3. Create isolated git worktree
   4. Apply complexity overrides (TokenBudgetMonitor)
   5. Initialize message history with task assignment
-  6. Calculate deadline = now + taskDurationMinutes
+  6. Calculate deadline = now + maxTaskDurationMinutes (25 min)
   7. Enter agentic loop
 ```
 
@@ -530,7 +537,7 @@ WorkerAgent.execute(task, runId):
 while (not timed out AND iterations < safetyIterationCap):
   ┌─ Pre-call checks ─────────────────────────────────────┐
   │  □ Progress checkpoint (every 5 min)                   │
-  │  □ Stall detection (every 5 min, no file writes)       │
+  │  □ Stall detection (warn at 8 min, act at 15 min)     │
   │  □ Time urgency injection (< 2 min remaining)          │
   │  □ Pre-call compaction (messages > 30, context > 80%)  │
   └────────────────────────────────────────────────────────┘
@@ -579,7 +586,7 @@ while (not timed out AND iterations < safetyIterationCap):
 | Condition | Status | Trigger |
 |-----------|--------|---------|
 | Valid completion report JSON | `complete` / `partial` / `blocked` | Response starts with `{`, has `task_id` + `status` |
-| Time limit exceeded | `partial` | `Instant.now() > deadline` |
+| Time limit exceeded | `partial` | `Instant.now() > deadline` (25 min) |
 | Safety iteration cap | `partial` | Loop counter exceeds config |
 | Tool call limit (25) | `partial` | `toolCallCount >= HARD_ITERATION_LIMIT` |
 | Context HARD_STOP | `partial` | Token usage ≥ hard-stop threshold after compaction |
@@ -594,15 +601,16 @@ while (not timed out AND iterations < safetyIterationCap):
 - **Purpose:** Refocus worker on original objective, prevent drift
 
 #### B. Stall Detection & Model Escalation
-- **Check interval:** Every `STALL_CHECK_MINUTES = 5` minutes
-- **Stall condition:** `fileWritesSinceCheck == 0` (no write-operations in last 5 min)
+- **Warn threshold:** 8 minutes with no file writes
+- **Act threshold:** 15 minutes with no file writes
+- **Stall condition:** `fileWritesSinceCheck == 0` (no write-operations in check period)
 - **Decision tree:**
 
 ```
 IF stalled AND continuations > 0 AND skeletonRecoveries < 2:
   → Inject SKELETON_RECOVERY_PROMPT
 ELSE IF stalled:
-  → Escalate model to PLANNING tier (Opus-class)
+  → Escalate model to PLANNING tier
 ```
 
 #### C. Truncation Handling
@@ -727,12 +735,10 @@ All floored to 200K for consistency across providers, even though some support l
 
 | Model | Max Output |
 |-------|-----------|
-| Claude Opus | 32,000 |
 | Claude Sonnet | 64,000 |
 | Claude Haiku | 8,192 |
 | GPT-5.4 | 16,384 |
 | GPT-5.4-mini | 16,384 |
-| Gemini Pro | 65,536 |
 | Gemini Flash | 24,576 |
 
 ---
@@ -850,6 +856,14 @@ Examples:
   agent/a1b2c3d4/update_database_schema
 ```
 
+### GitHub Integration
+
+For existing-repo runs, after COMPLETE:
+- `PipelineHarness.pushToGitHubIfConfigured()` creates branch `executespec/{runIdShort}`
+- Pushes to the branch (not main) via `GitTool.pushToBranch()`
+- Opens a PR via `GitHubRepoService.createPullRequest()` against the default branch
+- PR URL stored in `PipelineRun.githubPrUrl` and surfaced in RunDetail API response and frontend overview tab
+
 ### Thread-Local Context Propagation
 
 **File:** `tool/WorkspaceContext.java`
@@ -929,7 +943,7 @@ Tier 1: SpecializedMerger (deterministic, $0)
   If resolved → apply fix, continue merge
   If conflict in values → fall through to Tier 2
 
-Tier 2: ConflictResolverAgent (Haiku, ~$0.01)
+Tier 2: ConflictResolverAgent (WORKHORSE tier, low cost)
   Input: base version + main version + branch version + task descriptions
   Output: merged file content
   Temperature: 0.0, maxTokens: 8192
@@ -937,7 +951,7 @@ Tier 2: ConflictResolverAgent (Haiku, ~$0.01)
   If resolved → apply, continue
   If null/blank → fall through to Tier 3
 
-Tier 3: ConflictResolverAgent (Sonnet escalation, ~$0.30)
+Tier 3: ConflictResolverAgent (PLANNING tier escalation)
   Same input, PLANNING tier model
 
   If resolved → apply, continue
@@ -956,7 +970,7 @@ Every conflict (resolved or failed) is recorded in `MergeConflict` entity:
 MergeConflict {
   runId, taskId, filePath,
   conflictType: "TEXTUAL",
-  resolution: "DETERMINISTIC" | "AUTO_HAIKU" | "AUTO_SONNET" | "FAILED",
+  resolution: "DETERMINISTIC" | "AUTO_WORKHORSE" | "AUTO_PLANNING" | "FAILED",
   resolverModel, resolvedAt
 }
 ```
@@ -1017,11 +1031,11 @@ Remaining files fixed in subsequent retry passes.
 
 **File:** `reviewer/ReviewerAgentV2.java`
 
-Two-phase agentic reviewer. PRODUCTION mode only.
+Two-phase agentic reviewer. PRODUCTION mode only. Runs in background validation thread after COMPLETE.
 
 ### Phase 1: Inspection
 
-- Model tier: PLANNING (Opus-class)
+- Model tier: PLANNING
 - Max tool calls: 50 (generous — reviewer reads many files)
 - Tool set: read-only (`readFile`, `listFiles` only)
 - Timeout: 15 minutes
@@ -1064,15 +1078,13 @@ If language toolchain unavailable → graceful skip (returns pass).
 
 **File:** `testgen/TestGenOrchestrator.java`
 
-Runs on virtual thread in parallel with code review.
+Runs on virtual thread in the background validation thread, parallel with code review. Generates language-agnostic tests (not limited to Java/JUnit).
 
 ### Pipeline
 
 ```
-1. Detect project type (CLI, Static HTML, REST API)
-2. Scaffold test project:
-   Static HTML → Playwright
-   REST APIs → RestAssured + JUnit 5
+1. Detect project type (CLI, Static HTML, REST API, frontend, etc.)
+2. Scaffold test project appropriate for detected language/framework
 3. Generate API conventions document
 4. Plan tests (TestPlannerAgent → TestPlan with TestTasks)
 5. Generate test classes sequentially
@@ -1091,11 +1103,12 @@ Coordinates convergence of two independent signals:
 1. **Tests compiled** (from TestGenOrchestrator)
 2. **Preview ready** (from PreviewService)
 
-Tests execute only when BOTH signals arrive.
+Tests execute only when BOTH signals arrive. Reuses the existing preview started at COMPLETE (does not start a new one).
 
 ```
 Signal 1: onTestsReady(event)
-  → Start preview on virtual thread
+  → Check for existing running preview (reuse if available)
+  → Start preview on virtual thread only if needed
   → Mark testsReady = true
 
 Signal 2: onPreviewReady(runId, url)
@@ -1114,9 +1127,9 @@ tryExecute():
 **File:** `testgen/TestExecutionService.java`
 
 ```
-1. Build Maven command: mvn test -f {testDir}/pom.xml -Dapp.base-url={previewUrl}
+1. Build test command appropriate for detected framework
 2. Execute with 120s timeout
-3. Parse Surefire reports
+3. Parse test reports (format depends on framework)
 4. Detect connection-refused pattern (preview crashed)
 5. Return TestExecutionSummary { total, passed, failed, skipped, errors }
 ```
@@ -1163,7 +1176,7 @@ MINOR unresolved or test failures      → NEEDS_ATTENTION
 
 ### Report Content
 
-- LLM-generated markdown summary (LIGHTWEIGHT tier)
+- LLM-generated markdown summary (WORKHORSE tier — ValidationReportGenerator)
 - Structured issues with severity and fix status
 - Checks passed list (COMPILATION, CODE_REVIEW, INTEGRATION_TESTS)
 - Files generated count
@@ -1305,7 +1318,11 @@ SSE (Server-Sent Events) via `SseBroadcaster`:
 
 ExecuteSpec uses 8 independent security layers. No single layer failing results in full compromise.
 
-### Input Scanning (InputSanitizer)
+### Layer 1: Request Validation
+
+Rate limiting via Redis-backed per-tenant `RateLimitFilter`. Feature flags via DB-backed `FeatureFlagService` with Redis pub/sub cache invalidation.
+
+### Layer 2: Input Scanning (InputSanitizer)
 
 Called in `RunController.submit()` before pipeline submission:
 - **26 regex patterns** across 3 categories: prompt injection (11), shell embedding (6), abuse (9)
@@ -1313,13 +1330,13 @@ Called in `RunController.submit()` before pipeline submission:
 - **Obfuscation detection:** >60% non-printable chars → reject; 50-char substring repeated >20 times → reject
 - Returns HTTP 400 on violation
 
-### LLM Prompt Defense
+### Layer 3: LLM Prompt Defense
 
 - **Planner:** User spec wrapped in `<user_request>` tags + explicit "untrusted input" warning
 - **Worker (all 3 prompts):** Mandatory SECURITY section listing blocked categories; report `BLOCKED` on violation
 - **Tool result tagging:** All results wrapped in `<tool_result tool="..." untrusted="true">` — workers instructed to never follow instructions inside tool results (second-order injection defense)
 
-### Code Abuse Scanning (BLOCKING)
+### Layer 4: Code Abuse Scanning (BLOCKING)
 
 `CodeAbuseScanner` runs on every `writeFile()` — **rejects** files matching malware patterns:
 - Crypto mining: `stratum+tcp://`, `xmrig`, `coinhive`, `cryptonight`, `minergate`, `ethminer`
@@ -1327,7 +1344,7 @@ Called in `RunController.submit()` before pipeline submission:
 - Data exfiltration: `curl -d @`, `curl --data-binary @`, `wget --post-file`, `fetch(document.cookie)`
 - Obfuscated payloads: `eval(atob(...))`, `eval(Buffer.from(...))`, base64 strings >500 chars
 
-### Shell Command Sandbox
+### Layer 5: Shell Command Sandbox
 
 Three-layer validation + chained-command splitting:
 
@@ -1338,14 +1355,14 @@ Three-layer validation + chained-command splitting:
 5. **Allowlist (32 prefixes):** `mvn`, `npm`, `node`, `git`, `cat`, `ls`, `python`, `docker` (6 safe subcommands only), etc.
 6. **Absolute path block:** `cd /` blocked; `cd ..` allowed for worktree navigation
 
-### Path Sandboxing
+### Layer 6: Path Sandboxing
 
 - All file paths sandboxed to run's workspace directory
 - `safeResolve()` normalizes and validates paths don't escape workspace
 - Hidden directories: `worktrees/`, `target/`, `build/`, `node_modules/`, `.git/`
 - Sensitive files (`.env`, `credentials.json`, `key.json`) → log warning (not blocked — agents legitimately create these)
 
-### Environment Variable Stripping
+### Layer 7: Environment Variable Stripping
 
 Child processes have secrets removed:
 - `GITHUB_PAT`, `POSTGRES_PASSWORD`
@@ -1354,8 +1371,9 @@ Child processes have secrets removed:
 - `GOOGLE_API_KEY`
 - `JIRA_API_TOKEN`, `CONFLUENCE_API_TOKEN`
 - `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`
+- `RAZORPAY_KEY_SECRET`, `STRIPE_SECRET_KEY`
 
-### Container Image Hardening
+### Layer 8: Container Image Hardening
 
 `.dockerignore` excludes secrets from both preview and deploy images:
 `.env`, `.env.*`, `credentials.json`, `service-account.json`, `key.json`, `keyfile.json`, `secrets.yml`, `secrets.yaml`
@@ -1372,13 +1390,15 @@ Child processes have secrets removed:
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| Task duration | 15 min (configurable) | Hard deadline per task |
+| Task duration | 25 min (configurable) | Hard deadline per task |
 | Checkpoint interval | 5 min | Re-inject task context |
 | Urgency threshold | 2 min | Force completion prompt |
-| Stall check | 5 min | Detect hung worker |
+| Stall warn | 8 min | Warn about no file writes |
+| Stall act | 15 min | Escalate model on no file writes |
 | Gate TTL | 2 hours | Redis expiration for approval gates |
 | Gate poll interval | 500ms | Redis polling frequency |
-| Test execution timeout | 120s | Maven test process timeout |
+| Preview TTL | 5 min | Auto-stop preview after TTL |
+| Test execution timeout | 120s | Test process timeout |
 | Validation report timeout | 10 min | CompletableFuture safety net |
 
 ### Iteration-Based
@@ -1426,8 +1446,8 @@ Child processes have secrets removed:
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| maxRuns | 3 | Semaphore slots for concurrent pipelines |
-| maxTaskDurationMinutes | configurable | VT join timeout + 2-min grace |
+| maxRuns | 50 | Semaphore slots for concurrent pipelines |
+| maxTaskDurationMinutes | 25 | VT join timeout + 2-min grace |
 | mergeLock | synchronized | Sequential merges within tier |
 
 ---
@@ -1438,6 +1458,7 @@ Child processes have secrets removed:
 |-----------|------|
 | Pipeline orchestrator | `harness/PipelineHarness.java` |
 | Task executor | `harness/SequentialTaskExecutor.java` |
+| Run cost budget | `harness/RunCostBudgetService.java` |
 | Merge service | `harness/GitMergeService.java` |
 | Specialized mergers | `harness/merge/{PomXml,Yaml,PackageJson}Merger.java` |
 | Conflict analyser | `harness/merge/MergeConflictAnalyser.java` |
@@ -1467,10 +1488,24 @@ Child processes have secrets removed:
 | Shell tool | `tool/ShellTool.java` |
 | State store | `state/StateStore.java` |
 | SSE broadcaster | `state/SseBroadcaster.java` |
+| Security config | `auth/security/SecurityConfig.java` |
+| Security properties | `config/SecurityProperties.java` |
+| JWT utility | `auth/security/JwtUtil.java` |
+| OAuth2 handler | `auth/oauth/OAuthSuccessHandler.java` |
+| Feature flags | `config/featureflag/FeatureFlagService.java` |
+| Rate limiting | `ratelimit/RateLimitFilter.java` |
+| Input sanitizer | `security/InputSanitizer.java` |
+| Code abuse scanner | `security/CodeAbuseScanner.java` |
+| Request triage | `agent/RequestTriageService.java` |
+| Billing service | `billing/service/BillingService.java` |
+| Payment gateway router | `billing/gateway/PaymentGatewayRouter.java` |
+| GitHub repo service | `integration/github/GitHubRepoService.java` |
+| Integration manager | `integration/IntegrationManager.java` (listens for MergeCompleted) |
 | Planner prompt | `resources/prompts/planner.txt` |
 | Worker prompt (Anthropic) | `resources/prompts/worker.txt` |
 | Worker prompt (OpenAI) | `resources/prompts/worker-openai.txt` |
 | Worker prompt (Gemini) | `resources/prompts/worker-gemini.txt` |
+| DB migrations | `resources/db/migration/V*.sql` (V1-V55) |
 | App config | `resources/application.yml` |
 
 ## Appendix B: Data Flow Diagram
@@ -1479,6 +1514,10 @@ Child processes have secrets removed:
                     ┌─────────────┐
                     │  User       │
                     │  Request    │
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │ InputSanitizer│──► RateLimitFilter (Redis per-tenant)
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
@@ -1507,16 +1546,29 @@ Child processes have secrets removed:
               │      │                  │    → Truncation/stall handling
               └──────┼──────────────────┘
                      │
-         ┌───────────┼───────────┐
-         ▼           ▼           ▼
-   CompilerAgent  GitMerge   TestGenOrchestrator
-         │        Service         │
-         ▼           │     TestPreviewCoordinator
-   ReviewerAgentV2   │           │
-         │           │    TestExecutionService
-         ▼           ▼           │
-   ┌─────────────────────────────▼─┐
-   │    ValidationReportService     │
-   │    (aggregates all outputs)    │
-   └────────────────────────────────┘
+                     ▼
+               CompilerAgent + GitMerge
+                     │
+                     ▼
+               ★ COMPLETE ★
+                     │
+         ┌───────────┼───────────────────┐
+         ▼           ▼                   ▼
+   Auto-Preview   GitHub PR      Background Validation
+   (5-min TTL)   (if configured)  (virtual thread)
+                                         │
+                              ┌──────────┼──────────┐
+                              ▼          ▼          ▼
+                        Reviewer    TestGen    MergeCompleted
+                        AgentV2    Orchestrator   Event
+                              │          │          │
+                              ▼          ▼          ▼
+                        Auto-Fix   TestPreview   JIRA/Confluence
+                              │    Coordinator   Slack notifications
+                              │          │
+                              ▼          ▼
+                   ┌─────────────────────────────────┐
+                   │    ValidationReportService       │
+                   │    (aggregates all outputs)      │
+                   └─────────────────────────────────┘
 ```
