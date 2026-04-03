@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Loader2, Rocket, MessageSquare, Bug, Lightbulb, Code2, Wrench, FileText, Maximize2, Minimize2 } from 'lucide-react';
-import { getRunChat, sendRunChatMessage, applyToRun } from '@/lib/api';
-import type { RunChatMessage, ChatResponse } from '@/lib/api';
+import { Send, Loader2, Rocket, MessageSquare, Bug, Lightbulb, Code2, Wrench, FileText, Maximize2, Minimize2, AlertTriangle, Shield } from 'lucide-react';
+import { getRunChat, sendRunChatMessage, applyToRun, getValidationReport } from '@/lib/api';
+import type { RunChatMessage, ChatResponse, ValidationReportData, ReportIssue } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
@@ -21,6 +21,20 @@ const QUICK_ACTIONS = [
   { icon: Lightbulb, label: 'Suggest improvements', prompt: 'Analyze the generated code and suggest the top 3 improvements for code quality, security, and performance.' },
   { icon: Code2, label: 'Explain architecture', prompt: 'Explain the architecture of this project — how the frontend and backend interact, the data flow, and key design decisions.' },
 ];
+
+/** Build a prompt from unresolved validation issues for the copilot. */
+function buildIssuesPrompt(issues: ReportIssue[]): string {
+  if (issues.length === 0) return '';
+  let prompt = 'The validation report found the following unresolved issues that the auto-fix agent could not resolve. Please analyze each issue and provide the exact code fixes needed:\n\n';
+  issues.forEach((issue, i) => {
+    prompt += `${i + 1}. **[${issue.severity.replace(/_/g, ' ')}]** ${issue.description}`;
+    if (issue.filePath) prompt += ` (in \`${issue.filePath}\`)`;
+    if (issue.fix) prompt += `\n   Suggested fix: ${issue.fix}`;
+    prompt += '\n\n';
+  });
+  prompt += 'Please provide the corrected code for each issue.';
+  return prompt;
+}
 
 /**
  * Post-run conversational AI chat panel.
@@ -46,6 +60,9 @@ export default function RunConversation({ runId }: Props) {
   const [loading, setLoading]           = useState(true);
   const [compiledSpec, setCompiledSpec] = useState<string | null>(null);
   const [showCompiledSpec, setShowCompiledSpec] = useState(false);
+  const [validationReport, setValidationReport] = useState<ValidationReportData | null>(null);
+  const [unresolvedIssues, setUnresolvedIssues] = useState<ReportIssue[]>([]);
+  const [applyingFixes, setApplyingFixes] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const { setActiveRunId, fetchRuns } = useRunStore();
@@ -74,6 +91,21 @@ export default function RunConversation({ runId }: Props) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Fetch validation report when run is terminal — provides context for "Fix Issues" actions
+  useEffect(() => {
+    if (!activeRun) return;
+    const isTerminal = ['COMPLETE', 'PARTIAL', 'FAILED'].includes(activeRun.status);
+    if (!isTerminal) return;
+    getValidationReport(activeRun.runId).then((report) => {
+      if (!report) return;
+      setValidationReport(report);
+      // Filter to unresolved issues: those in NEEDS_ATTENTION reports
+      if (report.pipelineResult === 'NEEDS_ATTENTION' || report.pipelineResult === 'FAILED') {
+        setUnresolvedIssues(report.issues.filter((issue) => !!issue.fix));
+      }
+    });
+  }, [activeRun?.runId, activeRun?.status]);
 
   const limitReached = userCount >= MAX_MESSAGES;
   const hasConversation = messages.length > 0;
@@ -130,8 +162,9 @@ export default function RunConversation({ runId }: Props) {
     setShowIterateBox(false);
   };
 
-  const handleApply = async () => {
-    const suggestion = applyInput.trim() || buildSuggestedRequest();
+  const handleApply = async (eOrText?: any) => {
+    const suggestionOverride = typeof eOrText === 'string' ? eOrText : undefined;
+    const suggestion = (suggestionOverride ?? applyInput).trim() || buildSuggestedRequest();
     if (!suggestion || applying) return;
 
     setApplying(true);
@@ -259,7 +292,7 @@ export default function RunConversation({ runId }: Props) {
             <button
               onClick={() => { setShowApplyBox((v) => !v); setShowIterateBox(false); }}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all',
+                'flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all',
                 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25',
                 (applying || iterating) && 'opacity-50 cursor-not-allowed'
               )}
@@ -277,11 +310,50 @@ export default function RunConversation({ runId }: Props) {
             </button>
           )}
 
+          {/* Fix Remaining Issues — only when validation report has unresolved issues */}
+          {unresolvedIssues.length > 0 && activeRun && ['COMPLETE', 'PARTIAL'].includes(activeRun.status) && (
+            <button
+              onClick={async () => {
+                if (applyingFixes) return;
+                const prompt = buildIssuesPrompt(unresolvedIssues);
+                if (!prompt) return;
+                setApplyingFixes(true);
+                try {
+                  const result = await applyToRun(runId, prompt, 'COPILOT');
+                  addToast({ type: 'success', message: `Applied ${result.taskCount} fix${result.taskCount !== 1 ? 'es' : ''} for unresolved issues` });
+                  useRunStore.getState().fetchRun(runId);
+                } catch (e: any) {
+                  const msg = e.message ?? '';
+                  if (msg.includes('422')) {
+                    // Too large — fall back to iterate as new run
+                    setPendingNewRunGoal(buildIssuesPrompt(unresolvedIssues));
+                    addToast({ type: 'info', message: 'Too many fixes for apply. Redirecting to new run.' });
+                  } else {
+                    addToast({ type: 'error', message: msg || 'Failed to apply fixes.' });
+                  }
+                } finally {
+                  setApplyingFixes(false);
+                }
+              }}
+              disabled={applyingFixes}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all',
+                'bg-red-500/15 text-accent-red hover:bg-red-500/25',
+                applyingFixes && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              {applyingFixes
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <Shield className="h-3 w-3" />}
+              Fix {unresolvedIssues.length} Issue{unresolvedIssues.length !== 1 ? 's' : ''}
+            </button>
+          )}
+
           {/* Compile as Spec — consolidate discussed improvements */}
           {hasConversation && messages.length >= 2 && (
             <button
               onClick={compileSpec}
-              className="flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all bg-amber-500/15 text-accent-amber hover:bg-amber-500/25"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all bg-amber-500/15 text-accent-amber hover:bg-amber-500/25"
             >
               <FileText className="h-3 w-3" />
               Compile as Spec
@@ -292,7 +364,7 @@ export default function RunConversation({ runId }: Props) {
           <button
             onClick={() => { setShowIterateBox((v) => !v); setShowApplyBox(false); }}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 min-h-[36px] rounded text-xs font-medium transition-all',
+              'flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all',
               'bg-accent-blue/15 text-accent-blue hover:bg-accent-blue/25',
               iterating && 'opacity-50 cursor-not-allowed'
             )}
@@ -412,7 +484,7 @@ export default function RunConversation({ runId }: Props) {
         )}
       </AnimatePresence>
 
-      {/* Compiled Spec panel */}
+      {/* Compiled Spec panel — buttons outside scroll region for mobile accessibility */}
       <AnimatePresence>
         {showCompiledSpec && compiledSpec && (
           <motion.div
@@ -422,26 +494,34 @@ export default function RunConversation({ runId }: Props) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden border-b border-[var(--border-default)] flex-shrink-0"
           >
-            <div className="px-4 py-3 space-y-2 bg-amber-500/[0.03]">
-              <div className="flex items-center justify-between">
+            <div className="px-4 py-3 bg-amber-500/[0.03]">
+              <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-accent-amber">Compiled Spec</span>
-                <button onClick={() => setShowCompiledSpec(false)} className="text-xs text-muted hover:text-secondary">Close</button>
+                <button
+                  onClick={() => setShowCompiledSpec(false)}
+                  className="text-xs text-muted hover:text-secondary min-h-[44px] min-w-[44px] flex items-center justify-center"
+                >Close</button>
               </div>
-              <div className="text-xs text-secondary whitespace-pre-wrap bg-[var(--gray-200)] rounded-sm p-3 max-h-48 overflow-y-auto">
+              {/* Scrollable markdown content — buttons stay outside */}
+              <div className="text-xs text-secondary whitespace-pre-wrap bg-[var(--gray-200)] rounded-sm p-3 max-h-48 overflow-y-auto mb-3">
                 <MarkdownContent content={compiledSpec} />
               </div>
-              <div className="flex justify-end gap-2">
+              {/* Action buttons — always visible, large touch targets */}
+              <div className="flex justify-end gap-2 flex-wrap">
                 <button
-                  onClick={() => { setApplyInput(compiledSpec); setShowApplyBox(true); setShowCompiledSpec(false); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-emerald-600 text-primary hover:bg-emerald-500"
+                  onClick={() => { handleApply(compiledSpec); setShowCompiledSpec(false); }}
+                  className="flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded text-xs font-medium bg-emerald-600 text-primary hover:bg-emerald-500 transition-colors"
                 >
-                  <Wrench className="h-3 w-3" /> Apply to Run
+                  {applying
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Applying...</>
+                    : <><Wrench className="h-3.5 w-3.5" /> Apply to Run</>
+                  }
                 </button>
                 <button
                   onClick={() => { setPendingNewRunGoal(compiledSpec); setShowCompiledSpec(false); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/90"
+                  className="flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/90 transition-colors"
                 >
-                  <Rocket className="h-3 w-3" /> Iterate as New Run
+                  <Rocket className="h-3.5 w-3.5" /> Iterate as New Run
                 </button>
               </div>
             </div>
@@ -556,9 +636,25 @@ export default function RunConversation({ runId }: Props) {
         </div>
       )}
 
-      {/* Input area */}
+      {/* Input area — with safe-area bottom padding for iOS */}
       {!limitReached && (
-        <div className="px-4 py-3 border-t border-[var(--border-default)] flex-shrink-0">
+        <div className="px-4 py-3 border-t border-[var(--border-default)] flex-shrink-0" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+          {/* Unresolved issues quick-action — shows above input when issues exist */}
+          {unresolvedIssues.length > 0 && !hasConversation && (
+            <button
+              onClick={() => handleSend(buildIssuesPrompt(unresolvedIssues))}
+              disabled={sending}
+              className={cn(
+                'flex items-center gap-1.5 w-full px-3 py-2.5 mb-2 rounded-sm text-xs transition-all',
+                'bg-red-500/10 border border-red-500/20 text-accent-red',
+                'hover:bg-red-500/15 hover:border-red-500/30',
+                sending && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Ask about {unresolvedIssues.length} unresolved validation issue{unresolvedIssues.length !== 1 ? 's' : ''}
+            </button>
+          )}
           <div className={cn(
             'flex items-end gap-2 bg-[var(--gray-200)] border rounded-sm px-3 py-2 transition-colors',
             input ? 'border-accent-blue/40' : 'border-[var(--border-default)]'
@@ -582,7 +678,7 @@ export default function RunConversation({ runId }: Props) {
               onClick={() => handleSend()}
               disabled={!input.trim() || sending || limitReached}
               className={cn(
-                'p-2.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-sm flex-shrink-0 transition-all',
+                'p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-sm flex-shrink-0 transition-all',
                 input.trim() && !sending
                   ? 'bg-accent-blue text-primary hover:bg-accent-blue/90'
                   : 'text-muted cursor-not-allowed'

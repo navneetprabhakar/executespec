@@ -16,9 +16,15 @@ const STATUS_COLOR: Record<string, { bg: string; border: string; text: string; d
   BLOCKED:   { bg: '#1a0a10', border: '#d44690', text: '#a1a1a1', dot: '#d44690' },
   FAILED:    { bg: '#1a0a0a', border: '#e5484d', text: '#a1a1a1', dot: '#e5484d' },
 };
+
+
+
 const DEFAULT_COLOR = { bg: '#111111', border: '#333333', text: '#666666', dot: '#555555' };
 
-function statusColor(s: string) { return STATUS_COLOR[s?.toUpperCase()] ?? DEFAULT_COLOR; }
+function statusColor(s: string) {
+  const key = s?.toUpperCase();
+  return STATUS_COLOR[key] ?? DEFAULT_COLOR;
+}
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 const NODE_W = 200;
@@ -207,12 +213,17 @@ export default function TaskGraph({ runId, nodes: externalNodes }: Props) {
           const ty = pos[to.taskId].y + NODE_H / 2;
           const mx = (fx + tx) / 2;
           const active = from.status === 'COMPLETE';
+          // Use source-themed edge color
+          const fromIsCop = from.taskId.includes('_cop');
+          const fromIsRev = from.taskId.includes('_rev');
+          const activeEdgeColor = fromIsCop ? '#6d28d9' : fromIsRev ? '#0e7490' : '#374151';
+          const inactiveEdgeColor = fromIsCop ? '#3b0764' : fromIsRev ? '#164e63' : '#1f2937';
           return (
             <path
               key={i}
               d={`M${fx},${fy} C${mx},${fy} ${mx},${ty} ${tx},${ty}`}
               fill="none"
-              stroke={active ? '#374151' : '#1f2937'}
+              stroke={active ? activeEdgeColor : inactiveEdgeColor}
               strokeWidth={active ? 1.5 : 1}
               strokeDasharray={active ? undefined : '4 3'}
               markerEnd="url(#arrow)"

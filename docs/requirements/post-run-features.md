@@ -1,8 +1,10 @@
 # Post-Run Features — Requirements
 
+> Last updated: 2026-04-03
+
 ## Overview
 
-Post-run interactive features: conversational AI chat about generated code, run iteration, run management (pause/edit/restart/retry), and automated post-merge agents.
+Post-run interactive features: conversational AI chat about generated code, run iteration, run management (pause/edit/restart/retry), automated post-merge agents, run archival, GitHub PR creation, and background validation.
 
 ---
 
@@ -21,7 +23,7 @@ Post-run interactive features: conversational AI chat about generated code, run 
   - Review JSON (up to 1k chars)
 - Up to 10 user messages per run
 - Persistent conversation history in DB (chatHistoryJson on PipelineRun)
-- Model: `claude-haiku-4-5-20251001` (UTILITY_CHAIN) for cost efficiency
+- Model: LIGHTWEIGHT tier (claude-haiku-4-5-20251001 / gemini-3-flash-preview / gpt-5.4-mini) for cost efficiency
 - Max output: 2048 tokens
 - Endpoints:
   - `POST /api/runs/{id}/conversation` — send message, get reply
@@ -29,7 +31,7 @@ Post-run interactive features: conversational AI chat about generated code, run 
 - HTTP 429 when message limit reached
 - Frontend: RunConversation.tsx with chat UI, message counter, typing indicator
 
-### 2. Run Iteration (Chat → New Run)
+### 2. Run Iteration (Chat -> New Run)
 
 **Purpose:** Take insights from conversation and create a new run that iterates on the code.
 
@@ -52,7 +54,7 @@ Post-run interactive features: conversational AI chat about generated code, run 
 - Pause: `POST /api/runs/{id}/pause`
   - Signals open gates as rejected
   - Cancels all working tasks
-  - Status → PAUSED
+  - Status -> PAUSED
 - Edit & Restart: `POST /api/runs/{id}/edit-and-restart`
   - Creates a fresh run from paused run with edited goal
   - Carries forward credentials (GitHub PAT, API keys, org, project)
@@ -67,7 +69,7 @@ Post-run interactive features: conversational AI chat about generated code, run 
 - Accept task states: PARTIAL, BLOCKED, FAILED, PENDING, LOCKED
 - Reset task to PENDING, re-run worker
 - Auto-pick up all other incomplete sibling tasks
-- After all tasks complete: full review → auto-merge → report cycle
+- After all tasks complete: full review -> auto-merge -> report cycle
 - Completed event triggers PostMergeOrchestrator
 
 ### 5. Re-review (Legacy: Merge Gate Reopen)
@@ -86,12 +88,68 @@ Post-run interactive features: conversational AI chat about generated code, run 
 **Requirements:**
 - Implement Suggestions: `POST /api/runs/{id}/implement-suggestions`
   - Re-runs affected workers for MEDIUM/LOW reviewer issues
-  - Follows full review → auto-merge → report cycle
+  - Follows full review -> auto-merge -> report cycle
 - Rework: `POST /api/runs/{id}/rework`
   - Re-runs flagged tasks with reviewer feedback injected
-  - Follows full review → auto-merge → report cycle
+  - Follows full review -> auto-merge -> report cycle
 
-### 7. Post-Merge Agents
+### 7. Apply Suggestion (Chat Copilot)
+
+**Purpose:** Apply a single review/chat suggestion as an incremental change on the same run.
+
+**Requirements:**
+- Endpoint: `POST /api/runs/{id}/apply-suggestion`
+- Creates new tasks scoped to the suggestion
+- Runs worker -> compile -> merge cycle
+- Triggers validation report generation after merge
+- Copilot graph splitting: task graph tab groups nodes by source prefix (`_cop{N}_`, `_rev{N}_`), rendering separate collapsible graphs per copilot/review run
+- Per-copilot token breakdown: overview tab shows input/output tokens per copilot run under Live Cost section
+
+### 8. Background Validation
+
+**Purpose:** Run quality checks in the background after the run reaches COMPLETE, without blocking the user.
+
+**Requirements:**
+- Run marked COMPLETE immediately after compile + merge
+- Auto-preview starts (5-min TTL) for both PROTOTYPE and PRODUCTION modes
+- Background validation runs in a virtual thread (`bg-validation-{runId}`):
+  1. ReviewerAgentV2 — inspect code, auto-fix issues
+  2. TestGenOrchestrator — generate tests
+  3. TestPreviewCoordinator — reuse existing preview for test execution
+  4. ValidationReportGenerator — produce final report
+- User can chat, submit changes, and use preview while validation runs
+- SSE cleanup (`broadcaster.complete()`, `runKeyStore.remove()`, `runBudgetTracker.remove()`) deferred to background thread's `finally` block
+- `backgroundValidationRuns` ConcurrentHashSet tracks active background validations
+- Known limitation: no retry/recovery if background thread fails silently (fire-and-forget)
+
+### 9. GitHub PR Creation
+
+**Purpose:** Automatically push code to GitHub and open a pull request for existing-repo runs.
+
+**Requirements:**
+- Triggered automatically by `PipelineHarness.pushToGitHubIfConfigured()` after merge
+- Creates branch `executespec/{runId-short}` (not pushed to main)
+- Pushes workspace to the branch via `GitTool.pushToBranch()`
+- Opens PR automatically via `GitHubRepoService.createPullRequest()`
+  - Base branch: detected via `GitHubRepoService.getDefaultBranch()`
+- PR URL stored in `PipelineRun.githubPrUrl` (V52 migration)
+- Surfaced in `RunDetail` API response and frontend overview tab
+- Requires `GITHUB_PAT` or per-run GitHub token
+
+### 10. Run Archive
+
+**Purpose:** Allow users to archive terminal runs they no longer need in their active list.
+
+**Requirements:**
+- Endpoint: `POST /api/runs/{id}/archive`
+- Only terminal runs can be archived: COMPLETE, FAILED, CANCELLED, PARTIAL
+- Irreversible — archived runs are permanently hidden from default run list
+- Run list endpoint accepts `?archived=false` (default) or `?archived=true` to filter
+- SSE event: `RUN_ARCHIVED`
+- DB: `archived_at TIMESTAMPTZ` column on `pipeline_run` (V53 migration)
+- Partial index: `idx_pipeline_run_archived ON pipeline_run (archived_at) WHERE archived_at IS NOT NULL`
+
+### 11. Post-Merge Agents
 
 **Purpose:** Automated improvements after successful merge.
 
@@ -107,7 +165,7 @@ Post-run interactive features: conversational AI chat about generated code, run 
 
 **PromptOptimiserAgent:**
 - Analyzes failure patterns across recent runs (window: 20 runs)
-- Triggers when failure rate > 20% and pattern occurs ≥ 2 times
+- Triggers when failure rate > 20% and pattern occurs >= 2 times
 - Makes MINIMUM surgical edits to system prompts
 - Run interval: every 10 completed runs
 
@@ -126,16 +184,26 @@ Post-run interactive features: conversational AI chat about generated code, run 
 |------|---------|
 | `agent/ConversationAgent.java` | Post-run chat with workspace context |
 | `api/controller/RunConversationController.java` | Chat REST endpoints |
-| `api/controller/RunController.java` | Run lifecycle endpoints |
-| `harness/PipelineHarness.java` | Pause, edit, restart, retry, iterate |
+| `api/controller/RunController.java` | Run lifecycle endpoints (archive, retry, etc.) |
+| `harness/PipelineHarness.java` | Pause, edit, restart, retry, iterate, background validation |
 | `context/ContextAgent.java` | Post-merge documentation updates |
 | `optimiser/PromptOptimiserAgent.java` | Self-improving prompts |
 | `apitests/ApiTestSuiteAgent.java` | OpenAPI spec generation |
 | `harness/event/PostMergeOrchestrator.java` | Post-merge event handler |
+| `integration/github/GitHubRepoService.java` | Branch, PR creation, default branch lookup |
+| `tool/GitTool.java` | Workspace git ops, `pushToBranch()` |
+| `report/ValidationReportService.java` | Validation report lifecycle |
+| `report/ValidationReportGenerator.java` | Report generation (background) |
+| `testgen/TestGenOrchestrator.java` | Test generation orchestrator |
+| `testgen/TestPreviewCoordinator.java` | Preview reuse for test execution |
+| `testgen/TestResultController.java` | Apply-test-fixes endpoint |
 | `frontend/src/components/runs/RunConversation.tsx` | Chat UI |
+| `frontend/src/components/runs/ValidationReportPanel.tsx` | Report display |
 
 ## Database Migrations
 
 | Version | Description |
 |---------|-------------|
 | V9 | Conversation history + iteration run linkage |
+| V52 | `github_pr_url VARCHAR(512)` on `pipeline_run` |
+| V53 | `archived_at TIMESTAMPTZ` on `pipeline_run` + partial index |

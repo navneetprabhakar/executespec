@@ -1,6 +1,7 @@
 # ExecuteSpec — Deployment Guide
 
 > **Target audience:** Engineers running ExecuteSpec locally or deploying to Google Cloud Platform.
+> Last updated: 2026-04-03
 
 ---
 
@@ -13,7 +14,7 @@
 - Redis 7+ running on `localhost:6379`
 - Node.js 18+ and npm (for frontend build)
 - Maven 3.8+ (`mvn -version`)
-- API keys: `ANTHROPIC_API_KEY` (required), `OPENAI_API_KEY` (required for failover)
+- API keys: `OPENAI_API_KEY` (required, default provider), `ANTHROPIC_API_KEY` (required for failover)
 
 ### Database Setup
 
@@ -25,7 +26,23 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1–V52).
+Flyway migrations run automatically on startup and create all tables (V1-V55).
+
+#### Migration Reference (V45-V55)
+
+| Migration | Description |
+|-----------|-------------|
+| V45 | Widen `plan_version` VARCHAR columns (36 -> 255 for IDs, 64 for source) |
+| V46 | Stripe payment gateway support + multi-gateway schema |
+| V47 | OAuth2 login support (Google + GitHub provider columns) |
+| V48 | View mode column for run display preferences |
+| V49 | Feature flags table (DB-backed, admin-manageable) |
+| V50 | Free tier restrictions enforcement columns |
+| V51 | Force-logout flag for epoch-based JWT invalidation |
+| V52 | `github_pr_url` column on `pipeline_run` |
+| V53 | Run archive support (archive timestamp + status) |
+| V54 | Stripe multi-currency support (currency-gateway mapping) |
+| V55 | Payment audit trail expansion (webhook events, CSV export) |
 
 ### Redis Setup
 
@@ -41,14 +58,36 @@ brew install redis && brew services start redis
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
-export ANTHROPIC_API_KEY=sk-ant-...      # required
-export OPENAI_API_KEY=sk-...             # required for fallback
+export OPENAI_API_KEY=sk-...              # required (default provider)
+export ANTHROPIC_API_KEY=sk-ant-...       # required for failover
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
 export REDIS_HOST=localhost
-# Optional
-export GITHUB_PAT=ghp_...               # for GitHub integration
+
+# Optional — LLM
+export GOOGLE_API_KEY=AIzaSy-...          # for Gemini fallback chain
+
+# Optional — Integrations
+export GITHUB_PAT=ghp_...                 # for GitHub integration
 export GITHUB_OWNER=your-github-username
+
+# Optional — OAuth2 login
+export GOOGLE_OAUTH_CLIENT_ID=...         # Google OAuth2 login
+export GOOGLE_OAUTH_CLIENT_SECRET=...
+export GITHUB_OAUTH_CLIENT_ID=...         # GitHub OAuth2 login
+export GITHUB_OAUTH_CLIENT_SECRET=...
+
+# Optional — Billing (multi-gateway)
+export RAZORPAY_KEY_ID=...                # Razorpay gateway (INR)
+export RAZORPAY_KEY_SECRET=...
+export STRIPE_SECRET_KEY=...              # Stripe gateway (USD/EUR/GBP)
+export STRIPE_WEBHOOK_SECRET=...
+
+# Optional — Slack
+export SLACK_CLIENT_ID=...
+export SLACK_CLIENT_SECRET=...
+export SLACK_SIGNING_SECRET=...
+export DASHBOARD_URL=http://localhost:8080
 ```
 
 ### Build & Run
@@ -89,6 +128,29 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q     # backend
 npm --prefix frontend run build                             # frontend (tsc + vite)
 ```
 
+### Feature Flag Configuration
+
+Feature flags are managed via the `FeatureFlagService` (DB-backed with Redis pub/sub cache invalidation + 60s scheduled reload). Flags are admin-manageable through the `FeatureFlagController` API:
+
+```bash
+# List all feature flags (requires SUPER_ADMIN role)
+curl -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/feature-flags
+
+# Update a feature flag
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}' \
+  https://localhost:8080/api/feature-flags/FEATURE_KEY
+```
+
+Key feature flags:
+- **Force logout:** Epoch-based JWT invalidation — when toggled, all existing JWTs are invalidated
+- **Rate limiting:** Per-tenant rate limiting toggle (`executespec.rate-limit.enabled`)
+- **Request triage:** Single-shot fast path for simple requests (`agent.triage.enabled`)
+- **Stall recovery:** Worker stall detection and model escalation (`agent.recovery.enabled`)
+
+Feature flags checked via `FeatureFlagService.isEnabled()` — never hardcode toggles.
+
 ### Troubleshooting (Local)
 
 | Issue | Fix |
@@ -97,7 +159,9 @@ npm --prefix frontend run build                             # frontend (tsc + vi
 | `Connection refused` to PostgreSQL | Ensure PostgreSQL is running on port 5432 with database `executespec` |
 | `Connection refused` to Redis | Start Redis: `docker run -d -p 6379:6379 redis:7-alpine` |
 | Admin login fails | Flyway V5 seeds admin, V7 fixes password hash. Check `flyway_schema_history` table. |
-| LLM calls fail | Verify `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are set and valid |
+| LLM calls fail | Verify `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are set and valid |
+| OAuth2 login broken | Set `GOOGLE_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_ID` env vars. When unset, OAuth2 auto-config is excluded. |
+| Stripe webhooks not working | Verify `STRIPE_WEBHOOK_SECRET` matches the signing secret from your Stripe dashboard |
 
 ---
 
@@ -117,7 +181,7 @@ serves both the API and the SPA. There is no separate frontend server or CDN req
 
 ```
                         ┌──────────────────────────────────────────────────────────┐
-                        │                    GCP us-central1                       │
+                        │                    GCP us-east4                          │
                         │                                                          │
   Internet ──HTTPS──► Cloud Load Balancer (443 → 8080)                           │
                         │         │                                                │
@@ -125,7 +189,7 @@ serves both the API and the SPA. There is no separate frontend server or CDN req
                         │         │                                                │
                         │  ┌──────┴───────┐                                       │
                         │  │     MIG      │   Managed Instance Group              │
-                        │  │  2× n2-std-8 │   us-central1-a                      │
+                        │  │  2× n2-std-8 │   us-east4-a                         │
                         │  │  GCE VMs     │   AutoHealing on /actuator/health     │
                         │  └──────┬───────┘                                       │
                         │         │ private IP only (no-address)                  │
@@ -141,8 +205,8 @@ serves both the API and the SPA. There is no separate frontend server or CDN req
                         │  ├─ executespec-workspaces  (workspace archives)        │
                         │  └─ executespec-deploy      (JAR releases / CI-CD)      │
                         │                                                          │
-                        │  Cloud NAT  (outbound: LLM API calls to Anthropic,      │
-                        │             OpenAI, Google)                              │
+                        │  Cloud NAT  (outbound: LLM API calls to OpenAI,        │
+                        │             Anthropic, Google)                           │
                         └──────────────────────────────────────────────────────────┘
 ```
 
@@ -150,10 +214,10 @@ serves both the API and the SPA. There is no separate frontend server or CDN req
 
 | Component | Spec | Est. Cost/Month |
 |---|---|---|
-| GCE VMs (×2) | n2-standard-8 (8 vCPU, 32 GB), us-central1 | ~$260 |
-| Cloud SQL | db-custom-2-3840, 50 GB pd-ssd, us-central1 | ~$60 |
+| GCE VMs (x2) | n2-standard-8 (8 vCPU, 32 GB), us-east4 | ~$260 |
+| Cloud SQL | db-custom-2-3840, 50 GB pd-ssd, us-east4 | ~$60 |
 | Data disk (per VM) | 100 GB pd-ssd | ~$17 |
-| Cloud Memorystore Redis | 1 GB Basic, us-central1 | ~$16 |
+| Cloud Memorystore Redis | 1 GB Basic, us-east4 | ~$16 |
 | Cloud Load Balancer | Global HTTP(S) LB | ~$18 |
 | GCS storage | 50 GB total (2 buckets) | ~$1 |
 | Cloud NAT | ~10 GB egress to LLM APIs | ~$3 |
@@ -161,7 +225,7 @@ serves both the API and the SPA. There is no separate frontend server or CDN req
 | Misc (Secret Manager, logging, etc.) | | ~$23 |
 | **Total** | | **~$278/month** |
 
-> LLM API costs (Anthropic, OpenAI, Google) are billed separately by each provider and
+> LLM API costs (OpenAI, Anthropic, Google) are billed separately by each provider and
 > are NOT included above. Budget ~$50-200/month depending on run volume.
 
 ---
@@ -179,11 +243,17 @@ Complete every item before starting Step 1.
 - [ ] A domain name whose DNS you control (for the managed SSL certificate)
 - [ ] GitHub repository with the ExecuteSpec source code
 - [ ] API keys ready:
-  - [ ] `ANTHROPIC_API_KEY` — required (primary LLM provider)
-  - [ ] `OPENAI_API_KEY` — required (fallback LLM provider)
+  - [ ] `OPENAI_API_KEY` — required (default LLM provider)
+  - [ ] `ANTHROPIC_API_KEY` — required (failover LLM provider)
   - [ ] `GOOGLE_API_KEY` — optional (third-tier Gemini fallback)
 - [ ] A GitHub Personal Access Token (`GITHUB_PAT`) with `repo` scope — used by the agent pipeline to push generated code to target repos
 - [ ] Decided on a `GCP_PROJECT` ID (must be globally unique)
+- [ ] OAuth2 credentials ready (optional but recommended):
+  - [ ] Google OAuth Client ID and Secret (from Google Cloud Console → APIs & Services → Credentials)
+  - [ ] GitHub OAuth App Client ID and Secret (from GitHub → Settings → Developer settings → OAuth Apps)
+- [ ] Payment gateway credentials ready (optional):
+  - [ ] Razorpay Key ID and Secret (for INR transactions)
+  - [ ] Stripe Secret Key, Publishable Key, and Webhook Secret (for USD/EUR/GBP transactions)
 
 ---
 
@@ -193,8 +263,8 @@ Complete every item before starting Step 1.
 
 ```bash
 export PROJECT_ID=executespec-prod          # Change to your project ID
-export REGION=us-central1
-export ZONE=us-central1-a
+export REGION=us-east4
+export ZONE=us-east4-a
 
 gcloud config set project $PROJECT_ID
 gcloud config set compute/region $REGION
@@ -289,7 +359,7 @@ rm sa-key.json
 ## Step 2: Network & VPC Setup
 
 ExecuteSpec VMs have **no external IP** (`--no-address`). All outbound traffic (LLM API
-calls to Anthropic, OpenAI, Google) flows through Cloud NAT.
+calls to OpenAI, Anthropic, Google) flows through Cloud NAT.
 
 ### 2.1 Create a Cloud Router
 
@@ -494,6 +564,8 @@ echo "Redis host: $REDIS_HOST"
 
 > Save this IP — you'll store it as a secret in Step 6.
 
+Redis is used for: gate coordination (plan approval polling), provider health circuit breaker, feature flag cache invalidation (pub/sub), per-tenant rate limiting, and general caching. Pool is configured with `max-active: 50`, `min-idle: 5`.
+
 ---
 
 ## Step 6: Secret Manager — Store All Secrets
@@ -514,8 +586,8 @@ create_secret() {
 }
 
 # LLM API keys
-create_secret ANTHROPIC_API_KEY  "sk-ant-api03-YOUR-KEY-HERE"
 create_secret OPENAI_API_KEY     "sk-proj-YOUR-KEY-HERE"
+create_secret ANTHROPIC_API_KEY  "sk-ant-api03-YOUR-KEY-HERE"
 create_secret GOOGLE_API_KEY     "AIzaSy-YOUR-KEY-HERE"   # optional — leave empty string if not used
 
 # Database credentials
@@ -527,6 +599,23 @@ create_secret POSTGRES_DB        "executespec"
 # GitHub integration (agent pipeline pushes code to repos)
 create_secret GITHUB_PAT         "ghp_YOUR-PAT-HERE"
 create_secret GITHUB_OWNER       "your-github-org-or-username"
+
+# OAuth2 login (optional — leave empty to disable)
+create_secret GOOGLE_OAUTH_CLIENT_ID     "YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com"
+create_secret GOOGLE_OAUTH_CLIENT_SECRET "YOUR-GOOGLE-CLIENT-SECRET"
+create_secret GITHUB_OAUTH_CLIENT_ID     "YOUR-GITHUB-CLIENT-ID"
+create_secret GITHUB_OAUTH_CLIENT_SECRET "YOUR-GITHUB-CLIENT-SECRET"
+
+# Billing — Razorpay (INR transactions)
+create_secret RAZORPAY_KEY_ID      "rzp_live_YOUR-KEY"
+create_secret RAZORPAY_KEY_SECRET  "YOUR-RAZORPAY-SECRET"
+
+# Billing — Stripe (USD/EUR/GBP transactions)
+create_secret STRIPE_SECRET_KEY      "sk_live_YOUR-STRIPE-SECRET"
+create_secret STRIPE_WEBHOOK_SECRET  "whsec_YOUR-STRIPE-WEBHOOK-SECRET"
+create_secret STRIPE_PUBLISHABLE_KEY "pk_live_YOUR-STRIPE-PUBLISHABLE"
+create_secret STRIPE_PRO_PRICE_ID    "price_YOUR-PRO-PRICE-ID"
+create_secret STRIPE_ENTERPRISE_PRICE_ID "price_YOUR-ENTERPRISE-PRICE-ID"
 
 # Storage
 create_secret GCS_WORKSPACE_BUCKET  "executespec-workspaces"
@@ -549,6 +638,11 @@ create_secret APP_BASE_URL "https://YOUR_DOMAIN"
 # Gmail OAuth (optional — set GMAIL_ENABLED=false to skip)
 create_secret GMAIL_ENABLED       "false"
 create_secret GMAIL_SENDER_EMAIL  "admin@executespec.ai"
+
+# Slack integration (optional)
+create_secret SLACK_CLIENT_ID      "YOUR-SLACK-CLIENT-ID"
+create_secret SLACK_CLIENT_SECRET  "YOUR-SLACK-CLIENT-SECRET"
+create_secret SLACK_SIGNING_SECRET "YOUR-SLACK-SIGNING-SECRET"
 ```
 
 ### 6.2 Grant the service account access to all secrets
@@ -560,9 +654,15 @@ for SECRET in \
   ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY \
   POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_DB \
   GITHUB_PAT GITHUB_OWNER \
+  GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET \
+  GITHUB_OAUTH_CLIENT_ID GITHUB_OAUTH_CLIENT_SECRET \
+  RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET \
+  STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PUBLISHABLE_KEY \
+  STRIPE_PRO_PRICE_ID STRIPE_ENTERPRISE_PRICE_ID \
   GCS_WORKSPACE_BUCKET GCS_DEPLOY_BUCKET \
   JWT_SECRET REDIS_HOST GCP_PROJECT GCP_REGION \
-  APP_BASE_URL GMAIL_ENABLED GMAIL_SENDER_EMAIL; do
+  APP_BASE_URL GMAIL_ENABLED GMAIL_SENDER_EMAIL \
+  SLACK_CLIENT_ID SLACK_CLIENT_SECRET SLACK_SIGNING_SECRET; do
   gcloud secrets add-iam-policy-binding $SECRET \
     --member="serviceAccount:${SA}" \
     --role="roles/secretmanager.secretAccessor"
@@ -597,26 +697,63 @@ fetch_secret() {
 
 echo "[startup] Fetching secrets from Secret Manager..."
 
-export ANTHROPIC_API_KEY=$(fetch_secret ANTHROPIC_API_KEY)
+# LLM API keys
 export OPENAI_API_KEY=$(fetch_secret OPENAI_API_KEY)
+export ANTHROPIC_API_KEY=$(fetch_secret ANTHROPIC_API_KEY)
 export GOOGLE_API_KEY=$(fetch_secret GOOGLE_API_KEY)
+
+# Database
 export POSTGRES_USER=$(fetch_secret POSTGRES_USER)
 export POSTGRES_PASSWORD=$(fetch_secret POSTGRES_PASSWORD)
 export POSTGRES_HOST=$(fetch_secret POSTGRES_HOST)
 export POSTGRES_DB=$(fetch_secret POSTGRES_DB)
 export POSTGRES_PORT=5432
+
+# GitHub
 export GITHUB_PAT=$(fetch_secret GITHUB_PAT)
 export GITHUB_OWNER=$(fetch_secret GITHUB_OWNER)
+
+# OAuth2 login
+export GOOGLE_OAUTH_CLIENT_ID=$(fetch_secret GOOGLE_OAUTH_CLIENT_ID)
+export GOOGLE_OAUTH_CLIENT_SECRET=$(fetch_secret GOOGLE_OAUTH_CLIENT_SECRET)
+export GITHUB_OAUTH_CLIENT_ID=$(fetch_secret GITHUB_OAUTH_CLIENT_ID)
+export GITHUB_OAUTH_CLIENT_SECRET=$(fetch_secret GITHUB_OAUTH_CLIENT_SECRET)
+
+# Billing — Razorpay
+export RAZORPAY_KEY_ID=$(fetch_secret RAZORPAY_KEY_ID)
+export RAZORPAY_KEY_SECRET=$(fetch_secret RAZORPAY_KEY_SECRET)
+
+# Billing — Stripe
+export STRIPE_SECRET_KEY=$(fetch_secret STRIPE_SECRET_KEY)
+export STRIPE_WEBHOOK_SECRET=$(fetch_secret STRIPE_WEBHOOK_SECRET)
+export STRIPE_PUBLISHABLE_KEY=$(fetch_secret STRIPE_PUBLISHABLE_KEY)
+export STRIPE_PRO_PRICE_ID=$(fetch_secret STRIPE_PRO_PRICE_ID)
+export STRIPE_ENTERPRISE_PRICE_ID=$(fetch_secret STRIPE_ENTERPRISE_PRICE_ID)
+
+# Storage
 export GCS_WORKSPACE_BUCKET=$(fetch_secret GCS_WORKSPACE_BUCKET)
 export GCS_DEPLOY_BUCKET=$(fetch_secret GCS_DEPLOY_BUCKET)
+
+# JWT
 export JWT_SECRET=$(fetch_secret JWT_SECRET)
+
+# Redis
 export REDIS_HOST=$(fetch_secret REDIS_HOST)
+
+# GCP
 export GCP_PROJECT=$(fetch_secret GCP_PROJECT)
 export GCP_REGION=$(fetch_secret GCP_REGION)
+
+# Application
 export APP_BASE_URL=$(fetch_secret APP_BASE_URL)
 export GMAIL_ENABLED=$(fetch_secret GMAIL_ENABLED)
 export GMAIL_SENDER_EMAIL=$(fetch_secret GMAIL_SENDER_EMAIL)
 export CORS_ALLOWED_ORIGINS="$APP_BASE_URL"
+
+# Slack (optional)
+export SLACK_CLIENT_ID=$(fetch_secret SLACK_CLIENT_ID)
+export SLACK_CLIENT_SECRET=$(fetch_secret SLACK_CLIENT_SECRET)
+export SLACK_SIGNING_SECRET=$(fetch_secret SLACK_SIGNING_SECRET)
 
 echo "[startup] All secrets loaded."
 
@@ -652,11 +789,9 @@ echo "[startup] Starting ExecuteSpec..."
 
 # ── Start the app (called by systemd ExecStart, so we exec directly) ─────────
 exec java \
-  -Xms1g \
-  -Xmx6g \
-  # NOTE: Pending upgrade to -Xms8g -Xmx16g once n2-standard-8 rollout completes
-  -XX:+UseZGC \
-  -XX:+ZGenerational \
+  -Xms8g \
+  -Xmx16g \
+  -XX:+UseG1GC \
   -XX:MaxGCPauseMillis=100 \
   -Djava.security.egd=file:/dev/./urandom \
   -jar /opt/app/app.jar \
@@ -1001,7 +1136,7 @@ gcloud compute forwarding-rules create executespec-https-rule \
   --ports=443
 ```
 
-### 11.7 HTTP → HTTPS redirect
+### 11.7 HTTP -> HTTPS redirect
 
 ```bash
 # Create a URL map that redirects HTTP to HTTPS
@@ -1058,16 +1193,16 @@ It triggers on every push to `main` and performs:
 
 ### 12.1 Add GitHub Actions secrets
 
-Go to your GitHub repository → Settings → Secrets and variables → Actions → New repository secret.
+Go to your GitHub repository -> Settings -> Secrets and variables -> Actions -> New repository secret.
 
 Add each of the following:
 
 | Secret name | Value |
 |---|---|
 | `GCP_PROJECT` | Your GCP project ID (e.g., `executespec-prod`) |
-| `GCP_REGION` | `us-central1` |
+| `GCP_REGION` | `us-east4` |
 | `GCE_INSTANCE` | `executespec-prod` (or your MIG instance name) |
-| `GCE_ZONE` | `us-central1-a` |
+| `GCE_ZONE` | `us-east4-a` |
 | `GCP_SA_KEY` | Full contents of `sa-key.json` (from Step 1.5) |
 
 > If using a MIG, set `GCE_INSTANCE` to one of the MIG instance names. For full MIG
@@ -1081,7 +1216,7 @@ Add each of the following:
 git push origin main
 ```
 
-Monitor the deployment in GitHub Actions: repository → Actions tab → "Build & Deploy".
+Monitor the deployment in GitHub Actions: repository -> Actions tab -> "Build & Deploy".
 
 ### 12.3 Rollback (one-liner)
 
@@ -1117,15 +1252,18 @@ After deployment, run through this checklist to confirm everything is working:
 - [ ] `https://YOUR_DOMAIN` loads the React SPA (white screen or login page — not a 404)
 - [ ] Login with `admin@executespec.ai` and the admin password succeeds and returns a JWT
 - [ ] After login, the Runs list page loads without 401 errors
-- [ ] Submit a test run (simple spec) and verify it transitions: PENDING → PLANNING → AWAITING_APPROVAL
+- [ ] Submit a test run (simple spec) and verify it transitions: PENDING -> PLANNING -> AWAITING_APPROVAL
 - [ ] Approve the plan and verify workers start (RUNNING)
 - [ ] Run detail page shows live SSE events (the log panel updates in real time)
-- [ ] After workers complete: AWAITING_MERGE gate appears
-- [ ] Merge the run and verify it transitions to COMPLETED
+- [ ] After workers complete: run auto-merges and transitions to COMPLETED
+- [ ] Preview starts automatically (5-min TTL) after COMPLETE status
+- [ ] Background validation (review + test gen + test execution) runs and produces a validation report
 - [ ] GCS bucket `executespec-workspaces` contains an archived workspace zip after ~24h
-- [ ] LB health check console: both backend instances show HEALTHY (GCP Console → Network services → Load balancing → executespec-backend)
+- [ ] LB health check console: both backend instances show HEALTHY (GCP Console -> Network services -> Load balancing -> executespec-backend)
 - [ ] Cloud Logging shows no `ERROR` level entries from `executespec` during startup
 - [ ] `gcloud compute ssh executespec-prod --tunnel-through-iap --zone=$ZONE --command="cat /opt/app/RUNNING_SHA"` returns the expected SHA
+- [ ] OAuth2 login (Google/GitHub) works if credentials are configured
+- [ ] Feature flags are visible in admin panel (SUPER_ADMIN)
 
 **Check logs for startup errors:**
 
@@ -1184,7 +1322,76 @@ gcloud compute ssh executespec-prod \
 
 ---
 
-## Step 15: Ongoing Operations
+## Step 15: Webhook Endpoint Configuration
+
+### Stripe Webhook
+
+Configure your Stripe webhook endpoint to receive payment events:
+
+1. Go to [Stripe Dashboard -> Developers -> Webhooks](https://dashboard.stripe.com/webhooks)
+2. Add endpoint: `https://YOUR_DOMAIN/api/webhooks/stripe`
+3. Select events to listen to:
+   - `checkout.session.completed`
+   - `customer.subscription.created`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+   - `invoice.paid`
+   - `invoice.payment_failed`
+4. Copy the signing secret and store it as `STRIPE_WEBHOOK_SECRET` in Secret Manager
+
+The Stripe webhook handler verifies the `Stripe-Signature` header against the webhook secret before processing any events. No JWT authentication is required for webhook endpoints.
+
+### Razorpay Webhook
+
+Configure your Razorpay webhook endpoint:
+
+1. Go to [Razorpay Dashboard -> Settings -> Webhooks](https://dashboard.razorpay.com/app/webhooks)
+2. Add endpoint: `https://YOUR_DOMAIN/api/webhooks/razorpay`
+3. Select events: `subscription.activated`, `subscription.charged`, `payment.captured`, `payment.failed`
+4. The webhook secret is your `RAZORPAY_KEY_SECRET` (HMAC verification)
+
+### Billing Gateway Routing
+
+The `PaymentGatewayRouter` routes transactions to the appropriate gateway based on currency:
+
+| Currency | Gateway |
+|----------|---------|
+| INR | Razorpay |
+| USD | Stripe |
+| EUR | Stripe |
+| GBP | Stripe |
+
+Configure in `application.yml` under `billing.currency-gateway-map`. Default gateway is Razorpay (configurable via `billing.default-gateway`).
+
+---
+
+## Step 16: OAuth2 Redirect URI Configuration
+
+### Google OAuth2
+
+1. Go to [Google Cloud Console -> APIs & Services -> Credentials](https://console.cloud.google.com/apis/credentials)
+2. Edit your OAuth 2.0 Client ID
+3. Add Authorized redirect URIs:
+   - `https://YOUR_DOMAIN/api/auth/oauth2/callback/google`
+   - `http://localhost:8080/api/auth/oauth2/callback/google` (for local dev)
+4. Add Authorized JavaScript origins:
+   - `https://YOUR_DOMAIN`
+   - `http://localhost:8080` (for local dev)
+
+### GitHub OAuth2
+
+1. Go to [GitHub -> Settings -> Developer settings -> OAuth Apps](https://github.com/settings/developers)
+2. Edit your OAuth App
+3. Set Authorization callback URL: `https://YOUR_DOMAIN/api/auth/oauth2/callback/github`
+4. Set Homepage URL: `https://YOUR_DOMAIN`
+
+> When `GOOGLE_OAUTH_CLIENT_ID` or `GITHUB_OAUTH_CLIENT_ID` environment variables are unset,
+> the corresponding OAuth2 auto-config is excluded from SecurityConfig. The application
+> starts normally with only email/password login available.
+
+---
+
+## Step 17: Ongoing Operations
 
 ### Check what is currently deployed
 
@@ -1275,6 +1482,42 @@ gcloud compute instance-groups managed rolling-action replace executespec-mig \
   --max-unavailable=1
 ```
 
+### Feature Flag Management
+
+Feature flags are managed via the admin API (requires SUPER_ADMIN role):
+
+```bash
+# List all flags
+curl -H "Authorization: Bearer $TOKEN" https://YOUR_DOMAIN/api/feature-flags
+
+# Toggle a flag
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}' \
+  https://YOUR_DOMAIN/api/feature-flags/FEATURE_KEY
+```
+
+Feature flags use DB storage with Redis pub/sub for cross-instance cache invalidation and a 60-second scheduled reload as fallback. Changes propagate to all instances within seconds.
+
+### Payment Audit
+
+The admin panel provides payment audit capabilities (SUPER_ADMIN only):
+
+```bash
+# View payment audit log (paginated)
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://YOUR_DOMAIN/api/admin/payment-audit?page=0&size=20"
+
+# Export audit as CSV
+curl -H "Authorization: Bearer $TOKEN" \
+  -o payment-audit.csv \
+  "https://YOUR_DOMAIN/api/admin/payment-audit/export"
+
+# View webhook events (filterable by gateway)
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://YOUR_DOMAIN/api/admin/webhook-events?gateway=STRIPE"
+```
+
 ---
 
 ## Appendix: Environment Variable Reference
@@ -1284,8 +1527,8 @@ Secret Manager by `startup.sh` at boot time.
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Primary LLM provider (Planner, Worker, Reviewer) |
-| `OPENAI_API_KEY` | Yes | Fallback LLM provider |
+| `OPENAI_API_KEY` | Yes | Default LLM provider (all agent tiers) |
+| `ANTHROPIC_API_KEY` | Yes | Failover LLM provider |
 | `GOOGLE_API_KEY` | No | Third-tier Gemini fallback |
 | `POSTGRES_HOST` | Yes | Cloud SQL private IP |
 | `POSTGRES_PORT` | No | Default: 5432 |
@@ -1294,12 +1537,23 @@ Secret Manager by `startup.sh` at boot time.
 | `POSTGRES_PASSWORD` | Yes | Database password |
 | `GITHUB_PAT` | Yes | GitHub PAT for pushing generated code |
 | `GITHUB_OWNER` | Yes | GitHub org/user for default repo target |
+| `GOOGLE_OAUTH_CLIENT_ID` | No | Google OAuth2 login (omit to disable) |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | No | Google OAuth2 login secret |
+| `GITHUB_OAUTH_CLIENT_ID` | No | GitHub OAuth2 login (omit to disable) |
+| `GITHUB_OAUTH_CLIENT_SECRET` | No | GitHub OAuth2 login secret |
+| `RAZORPAY_KEY_ID` | No | Razorpay payment gateway key |
+| `RAZORPAY_KEY_SECRET` | No | Razorpay payment gateway secret |
+| `STRIPE_SECRET_KEY` | No | Stripe payment gateway secret key |
+| `STRIPE_WEBHOOK_SECRET` | No | Stripe webhook signing secret |
+| `STRIPE_PUBLISHABLE_KEY` | No | Stripe publishable key (frontend checkout) |
+| `STRIPE_PRO_PRICE_ID` | No | Stripe Price ID for PRO plan |
+| `STRIPE_ENTERPRISE_PRICE_ID` | No | Stripe Price ID for ENTERPRISE plan |
 | `GCS_WORKSPACE_BUCKET` | Yes | GCS bucket for workspace archives |
 | `JWT_SECRET` | Yes | HS256 signing key (min 256 bits) |
-| `REDIS_HOST` | No | Memorystore Redis host (if Redis integration enabled) |
+| `REDIS_HOST` | No | Memorystore Redis host (used for gates, circuit breaker, feature flags, rate limiting) |
 | `GCP_PROJECT` | Yes | GCP project ID (used by DeploymentService) |
 | `GCP_REGION` | Yes | GCP region (used by DeploymentService / Cloud Run) |
-| `APP_BASE_URL` | Yes | Public HTTPS URL (used in email links) |
+| `APP_BASE_URL` | Yes | Public HTTPS URL (used in email links, OAuth redirect) |
 | `CORS_ALLOWED_ORIGINS` | Yes | Allowed CORS origin (should match `APP_BASE_URL`) |
 | `GMAIL_ENABLED` | No | `true` to enable Gmail OAuth email sending |
 | `GMAIL_SENDER_EMAIL` | No | Gmail address for outbound emails |
@@ -1308,6 +1562,26 @@ Secret Manager by `startup.sh` at boot time.
 | `SLACK_SIGNING_SECRET` | No | Slack app signing secret (for request verification) |
 | `SLACK_REDIRECT_URI` | No | OAuth callback URL (default: `http://localhost:8080/api/integrations/slack/oauth/callback`) |
 | `DASHBOARD_URL` | No | Public dashboard URL for Slack message action buttons (default: `http://localhost:8080`) |
+
+### Application Configuration Reference
+
+Key `application.yml` settings relevant to deployment:
+
+| Setting | Default | Description |
+|---|---|---|
+| `agent.concurrency.max-runs` | 50 | Maximum concurrent pipeline runs |
+| `agent.concurrency.max-task-duration-minutes` | 25 | Wall-clock limit per worker task |
+| `agent.recovery.warn-threshold-minutes` | 8 | Warn after N minutes of worker idle |
+| `agent.recovery.act-threshold-minutes` | 15 | Stall recovery after N minutes idle |
+| `preview.mode` | `docker` | Preview mode: `docker` (local) or `cloud-run` (GCP) |
+| `preview.preview-ttl-minutes` | 5 | Auto-shutdown previews after N minutes |
+| `billing.default-gateway` | `razorpay` | Default payment gateway |
+| `billing.stripe.enabled` | `false` | Enable Stripe gateway |
+| `billing.razorpay.enabled` | `true` | Enable Razorpay gateway |
+| `app.security.csp.enabled` | `true` | Content Security Policy headers |
+| `app.security.hsts.enabled` | `true` | Strict Transport Security headers |
+| `executespec.rate-limit.enabled` | `true` | Per-tenant rate limiting |
+| `agent.triage.enabled` | `true` | Single-shot fast path for simple requests |
 
 ---
 
@@ -1322,9 +1596,10 @@ Secret Manager by `startup.sh` at boot time.
 
 ### LLM API calls fail with 401 or 403
 
-1. SSH into the VM and run `echo $ANTHROPIC_API_KEY` — if empty, secret fetch failed
+1. SSH into the VM and run `echo $OPENAI_API_KEY` — if empty, secret fetch failed
 2. Check the service account has `roles/secretmanager.secretAccessor` on the specific secrets
 3. Verify the secret names exactly match what `startup.sh` expects (case-sensitive)
+4. Check `ProviderHealthTracker` circuit breaker state in Redis — a provider may be marked unhealthy after 5 consecutive failures (auto-recovers after 60s)
 
 ### SSE stream disconnects after ~60 seconds
 
@@ -1361,6 +1636,18 @@ If login fails, check that Flyway migrations completed successfully in the start
 ```
 sudo journalctl -u executespec | grep -i flyway
 ```
+
+### Stripe webhook verification failures
+
+1. Verify `STRIPE_WEBHOOK_SECRET` matches the signing secret shown in Stripe Dashboard -> Webhooks -> your endpoint
+2. Check that the request body is not being modified by any middleware (raw body required for signature verification)
+3. Stripe webhook events can be replayed from the Stripe Dashboard for debugging
+
+### OAuth2 login redirects to error page
+
+1. Verify redirect URIs are correctly configured in Google Cloud Console / GitHub OAuth App settings
+2. Check that `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` (or GitHub equivalents) are set
+3. For production, ensure the redirect URI uses `https://` and matches the exact domain
 
 ---
 
@@ -1402,15 +1689,21 @@ terraform plan  -var-file=environments/dev.tfvars -var="project_id=executespecv1
 terraform apply -var-file=environments/dev.tfvars -var="project_id=executespecv1"
 ```
 
-**DNS (Cloudflare):** A record → `dev` → `$(terraform output lb_ip)` (DNS only until SSL is ACTIVE)
+**DNS (Cloudflare):** A record -> `dev` -> `$(terraform output lb_ip)` (DNS only until SSL is ACTIVE)
 
-**Secrets → GCS:**
+**Secrets -> GCS:**
 ```bash
 cat > /tmp/api-keys << 'EOF'
-ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=AIza...
 GITHUB_PAT=ghp_...
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
+GITHUB_OAUTH_CLIENT_ID=...
+GITHUB_OAUTH_CLIENT_SECRET=...
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
 EOF
 gsutil cp /tmp/api-keys gs://executespec-dev-deploy/config/api-keys && rm /tmp/api-keys
 ```
@@ -1446,26 +1739,32 @@ terraform apply -var-file=environments/prod.tfvars -var="project_id=executespecv
 | Record | Type | Name | Content | Proxy |
 |--------|------|------|---------|-------|
 | Main app | A | `app` | `$(terraform output lb_ip)` | Proxied (orange) |
-| Preview wildcard | A | `*` | `<VM external IP>` | DNS only (grey)¹ |
+| Preview wildcard | A | `*` | `<VM external IP>` | DNS only (grey)* |
 
-¹ Wildcard proxy requires Cloudflare Enterprise. Previews use Cloud Run URLs on prod (no wildcard DNS needed).
+\* Wildcard proxy requires Cloudflare Enterprise. Previews use Cloud Run URLs on prod (no wildcard DNS needed).
 
 **SSL/TLS Mode:** Full (not Full Strict) — uses Cloudflare Origin Certificate on origin.
 
 #### Step 3: Secrets (GCS + Secret Manager)
 
 ```bash
-# API keys → GCS (fetched by startup script)
+# API keys -> GCS (fetched by startup script)
 cat > /tmp/api-keys << 'EOF'
-ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=AIza...
 GITHUB_PAT=ghp_...
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
+GITHUB_OAUTH_CLIENT_ID=...
+GITHUB_OAUTH_CLIENT_SECRET=...
 EOF
 gsutil cp /tmp/api-keys gs://executespec-prod-deploy/config/api-keys && rm /tmp/api-keys
 
-# Billing & integrations → Secret Manager (or GCS)
-# RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET — Razorpay dashboard → API Keys
+# Billing & integrations -> Secret Manager (or GCS)
+# RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET — Razorpay dashboard -> API Keys
+# STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET — Stripe dashboard -> API Keys + Webhooks
+# STRIPE_PRO_PRICE_ID, STRIPE_ENTERPRISE_PRICE_ID — Stripe dashboard -> Products -> Prices
 # SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET — Slack App settings
 # SMTP_PASSWORD — email provider SMTP credentials
 ```
@@ -1516,6 +1815,13 @@ preview:
   proxy:
     enabled: false
 
+# Billing: Enable Stripe for international payments
+billing:
+  stripe:
+    enabled: true
+  razorpay:
+    enabled: true
+
 # Observability: GCP exporters
 spring:
   profiles:
@@ -1525,7 +1831,7 @@ spring:
 #### Step 7: Deploy
 
 ```bash
-git push origin main    # triggers GitHub Actions → build → deploy to prod VM
+git push origin main    # triggers GitHub Actions -> build -> deploy to prod VM
 ```
 
 #### Step 8: Verify
@@ -1539,16 +1845,22 @@ curl -s -X POST https://app.executespec.ai/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@executespec.ai","password":"Admin@123"}' | jq .token
 
-# Flyway migrations
+# Flyway migrations (should show V1-V55)
 gcloud compute ssh executespec-prod-vm --zone=us-east4-a --tunnel-through-iap \
   -- 'sudo journalctl -u executespec | grep -i "flyway\|migration" | tail -20'
 
-# Preview test (start a run, wait for COMPLETE, then start preview)
+# Preview test (start a run, wait for COMPLETE, then preview auto-starts with 5-min TTL)
 # Preview URL will be a *.run.app Cloud Run URL
 
 # Cloud Run logs for preview debugging
 gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=es-preview-XXXXXXXX" \
   --limit=50 --format="value(textPayload)" --freshness=10m --order=asc
+
+# Webhook test (Stripe)
+# Use Stripe CLI: stripe listen --forward-to https://app.executespec.ai/api/webhooks/stripe
+
+# Webhook test (Razorpay)
+# Use Razorpay dashboard test mode to send test events
 ```
 
 > **Reliability notes:**
@@ -1563,17 +1875,25 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 
 - [ ] **Infrastructure:** Terraform apply successful, all resources provisioned
 - [ ] **DNS:** `app.executespec.ai` resolves to LB IP, SSL certificate ACTIVE
-- [ ] **Database:** Cloud SQL accessible, Flyway V1–V52 migrations complete
+- [ ] **Database:** Cloud SQL accessible, Flyway V1-V55 migrations complete
 - [ ] **Redis:** Memorystore accessible from VPC
-- [ ] **Secrets:** All API keys in GCS/Secret Manager (Anthropic, OpenAI, Google, GitHub)
-- [ ] **Billing:** Razorpay webhook URL → `https://app.executespec.ai/api/billing/webhook`
-- [ ] **Slack:** App installed to workspace, OAuth redirect → `https://app.executespec.ai/api/integrations/slack/oauth/callback`
+- [ ] **Secrets:** All API keys in GCS/Secret Manager (OpenAI, Anthropic, Google, GitHub)
+- [ ] **OAuth2:** Google and GitHub OAuth redirect URIs configured for production domain
+- [ ] **Billing (Razorpay):** Webhook URL -> `https://app.executespec.ai/api/webhooks/razorpay`
+- [ ] **Billing (Stripe):** Webhook URL -> `https://app.executespec.ai/api/webhooks/stripe`, signing secret stored
+- [ ] **Billing (Stripe):** Pro and Enterprise Price IDs configured
+- [ ] **Slack:** App installed to workspace, OAuth redirect -> `https://app.executespec.ai/api/integrations/slack/oauth/callback`
+- [ ] **Feature flags:** Verified via admin panel (SUPER_ADMIN) — all flags in expected state
+- [ ] **Rate limiting:** Redis-backed rate limiting enabled and tested
+- [ ] **Security headers:** CSP, HSTS, X-Frame-Options verified via `curl -I`
 - [ ] **Monitoring:** Cloud Monitoring alerts for 5xx rate, latency > 5s, instance health
 - [ ] **IAM:** Service account has all required roles (run.admin, artifactregistry.*, etc.)
 - [ ] **Health check:** `/api/health` returns UP
 - [ ] **Auth:** Admin login works, forced password change on first login
+- [ ] **Auth:** OAuth2 login (Google + GitHub) works
 - [ ] **Pipeline test:** Submit a run, approve plan, verify COMPLETE status
-- [ ] **Preview test:** Start preview, verify Cloud Run URL accessible
+- [ ] **Preview test:** Verify auto-preview starts after COMPLETE (5-min TTL), Cloud Run URL accessible
+- [ ] **Validation test:** Background validation completes (review + test gen + report)
 - [ ] **Rollback plan:** Previous JAR in GCS, can redeploy via SHA
 
 ### Useful Terraform Commands
@@ -1592,7 +1912,7 @@ sudo journalctl -u executespec -f           # app logs on VM
 
 | Resource | Dev | Prod |
 |----------|-----|------|
-| Compute | $49/mo (e2-standard-2 ×1) | $388/mo (n2-standard-8 ×2) |
+| Compute | $49/mo (e2-standard-2 x1) | $388/mo (n2-standard-8 x2) |
 | Cloud SQL | $25/mo (db-g1-small) | $80/mo (db-custom-2-3840 HA) |
 | Redis | $36/mo (1GB Basic) | $73/mo (1GB Standard HA) |
 | Load Balancer | $18/mo | $18/mo |

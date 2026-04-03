@@ -1,7 +1,7 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 3.2
-> **Last Updated:** 2026-03-30
+> **Version:** 4.0
+> **Last Updated:** 2026-04-03
 > **Status:** Production (v1)
 > **Author:** Navneet Prabhakar
 
@@ -11,7 +11,7 @@
 
 **ExecuteSpec** is an autonomous coding platform that transforms natural language requirements into production-ready code through a multi-agent AI pipeline. Users describe what they want built, and the system plans, implements, validates, reviews, and deploys the code -- with a human approval gate at the plan stage.
 
-The platform serves individual developers, teams, and enterprises through a tiered SaaS model with integrated billing, role-based access, and deployment to Google Cloud.
+The platform serves individual developers, teams, and enterprises through a tiered SaaS model with integrated billing (Razorpay + Stripe), role-based access, OAuth2 login, and deployment to Google Cloud.
 
 ### Value Proposition
 
@@ -19,7 +19,7 @@ The platform serves individual developers, teams, and enterprises through a tier
 |-----|-------|
 | **Solo developers** | Skip boilerplate -- describe a feature, get working code in minutes |
 | **Teams** | Standardized code quality via automated validation and review gates |
-| **Enterprises** | BYOK (Bring Your Own Keys), audit trails, org-scoped projects, GST-compliant invoicing |
+| **Enterprises** | BYOK (Bring Your Own Keys), audit trails, org-scoped projects, GST-compliant invoicing, payment audit with CSV export |
 
 ---
 
@@ -30,12 +30,14 @@ The platform serves individual developers, teams, and enterprises through a tier
 ```
 User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
                                        |                    |
-                                       +-- PostgreSQL       +-- PlannerAgent (PLANNING tier / Opus)
-                                       +-- Redis            +-- WorkerAgent (WORKHORSE tier / Sonnet)
-                                       +-- GitHub           +-- CompilerAgent (WORKHORSE tier / Sonnet)
-                                       +-- Razorpay         +-- ReviewerAgentV2 (PLANNING tier / Opus)
-                                                            +-- ConversationAgent (LIGHTWEIGHT tier / Haiku)
-                                                            +-- TestGenOrchestrator (WORKHORSE/PLANNING)
+                                       +-- PostgreSQL       +-- PlannerAgent (PLANNING tier)
+                                       +-- Redis            +-- WorkerAgent (WORKHORSE tier)
+                                       +-- GitHub           +-- CompilerAgent (WORKHORSE tier)
+                                       +-- Razorpay/Stripe  +-- ReviewerAgentV2 (PLANNING tier)
+                                       +-- OAuth2 (Google,  +-- ConversationAgent (LIGHTWEIGHT tier)
+                                           GitHub)          +-- TestGenOrchestrator (WORKHORSE/PLANNING)
+                                       +-- Feature Flags    +-- RequestTriageService (LIGHTWEIGHT tier)
+                                       +-- Rate Limiter
 ```
 
 ### 2.2 Technology Stack
@@ -44,10 +46,11 @@ User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
 |-------|-----------|
 | **Frontend** | React 18, TypeScript 5.3, Vite 5, Tailwind CSS 3.4, Zustand, Monaco Editor |
 | **Backend** | Java 21, Spring Boot 3.3, Spring AI 1.1.0 |
-| **Database** | PostgreSQL (Cloud SQL), Redis (Memorystore) |
-| **AI Providers** | Anthropic (Claude), Google (Gemini), OpenAI (GPT) -- 3-provider fallback |
+| **Database** | PostgreSQL (Cloud SQL), Redis (Memorystore) -- caching, gate coordination, feature flags, rate limiting |
+| **AI Providers** | OpenAI (default), Anthropic (Claude), Google (Gemini) -- user-selectable per project, health-based failover |
 | **Infrastructure** | GCP N. Virginia (us-east4) -- Cloud Run, GCE, Artifact Registry, GCS |
-| **Payments** | Razorpay (subscriptions + one-time orders) |
+| **Payments** | Multi-gateway via PaymentGatewayRouter: Razorpay + Stripe (subscriptions + one-time orders) |
+| **Auth** | JWT (RS256) + OAuth2 (Google, GitHub login) |
 | **Observability** | Micrometer + OpenTelemetry, Grafana/Tempo (local), Cloud Trace/Monitoring (prod) |
 
 ### 2.3 Multi-Agent Pipeline
@@ -56,30 +59,28 @@ User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
 POST /api/runs
   |
   v
+Request Triage -- single-shot fast path for simple requests (skips full pipeline)
+  |
+  v
 Reference Extraction (JIRA/Confluence context enrichment)
   |
   v
 [Optional] Clarification Gate -- user provides missing context
   |
   v
-PlannerAgent (Claude Sonnet) -- natural language -> structured task plan
+PlannerAgent (PLANNING tier) -- natural language -> structured task plan
   |
   v
-Plan Approval Gate -- user reviews & approves/rejects plan
+Plan Approval Gate -- user reviews & approves/rejects plan (Redis, 500ms polling, 2h TTL)
   |
   v
-SequentialTaskExecutor (tasks run one at a time)
-  +-- WorkerAgent per task (Claude Haiku, escalates to Sonnet/Opus on stall)
+SequentialTaskExecutor (tasks run one at a time, progressive merge)
+  +-- WorkerAgent per task (WORKHORSE tier, escalates to PLANNING tier on stall)
   |     +-- Tool dispatch: readFile, writeFile, shell, git, diff
-  |     +-- 15-min wall-clock limit, stall detection at 5min
+  |     +-- 25-min wall-clock limit, stall detection at 5min
   |     +-- Sliding window: first 2 + last 18 messages (context control)
   |     +-- Token truncation: readFile 8K, shell 6K, diff 5K chars
-  |
-  +-- CodeValidator (pluggable gate chain: SYNTAX -> TYPE -> LINT -> TEST)
-       +-- Java: javac, Checkstyle
-       +-- TypeScript: tsc, eslint
-       +-- Python: mypy, pylint
-       +-- React: eslint, component tests
+  |     +-- Each task merged to main immediately after completion
   |
   v
 CompilerAgent -- compile & fix build errors (up to 3 iterations)
@@ -94,12 +95,12 @@ Auto-Merge -- all task branches merged to main (no manual gate)
 Auto-Preview (5-min TTL, both modes) -- user can interact immediately
   |
   v
-GitHub Push (non-blocking)
+GitHub Push (non-blocking) -- branch `executespec/{runId-short}` + auto PR
   |
   v
-Background Validation Thread (PRODUCTION mode, non-blocking):
+Background Validation Thread (non-blocking):
   +-- ReviewerAgentV2 -- inspect merged code, auto-fix issues (2 attempts, max 8 issues)
-  +-- TestGenOrchestrator -- generate integration tests
+  +-- TestGenOrchestrator -- generate language-agnostic integration tests
   +-- TestPreviewCoordinator -- reuse existing preview, execute tests
   +-- ValidationReportAgent -- LLM-generated quality summary (non-fatal)
   |     +-- Aggregates: WorkerReports, CompileResult, ReviewReport, TestResults
@@ -112,24 +113,35 @@ Background Validation Thread (PRODUCTION mode, non-blocking):
 
 ### 2.4 LLM Router & Model Matrix
 
-The system uses a 3-provider fallback chain with tier-based model escalation and weighted round-robin load distribution (Anthropic 4 : Google 3 : OpenAI 3):
+The system uses a user-selected provider (default: OpenAI) with tier-based model routing and health-based failover via Redis-backed circuit breaker (5 failures opens circuit, 60s TTL auto-recovery):
 
-| Chain | Primary | Fallback 1 | Fallback 2 |
-|-------|---------|-----------|-----------|
-| ARCHITECT | Claude Opus 4.6 | Gemini 3.1 Pro Preview | GPT-4o |
-| CAPABLE | Claude Sonnet 4.6 | Gemini 3 Flash Preview | GPT-4o |
-| UTILITY | Claude Haiku 4.5 | Gemini 3 Flash Preview | GPT-4o Mini |
+| Agent Tier | Agents | Anthropic | Google | OpenAI |
+|------------|--------|-----------|--------|--------|
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
 
-| Agent | Default Model | Escalation Path |
-|-------|--------------|-----------------|
-| PlannerAgent | Sonnet | -- |
-| WorkerAgent | Haiku | Haiku -> Sonnet -> Opus (on stall/retry) |
-| CompilerAgent | Haiku | -- |
-| ReviewerAgentV2 | Haiku | -- |
-| ConversationAgent | Haiku | -- |
-| ContextAgent | Haiku | -- |
-| PromptOptimiserAgent | Haiku | -- |
-| ApiTestSuiteAgent | Haiku | -- |
+**Failover order:** Anthropic -> [OpenAI, Google], Google -> [OpenAI, Anthropic], OpenAI -> [Google, Anthropic].
+**Stall escalation:** WorkerAgent promoted from WORKHORSE -> PLANNING tier on stall/retry.
+
+### 2.5 Security Model (8-Layer Defense-in-Depth)
+
+| Layer | Component | Description |
+|-------|-----------|-------------|
+| 1 | Request validation | Input size limits, content-type enforcement |
+| 2 | Input sanitization | `InputSanitizer` -- XSS, injection prevention |
+| 3 | LLM prompt defense | Prompt injection detection and filtering |
+| 4 | Code abuse scanning | `CodeAbuseScanner` -- detects malicious code patterns |
+| 5 | Shell sandbox | Restricted command execution environment |
+| 6 | File sandbox | Workspace isolation, path traversal prevention |
+| 7 | Process isolation | Virtual threads with context wrapping |
+| 8 | Container hardening | Docker/Cloud Run security policies |
+
+Additional security controls:
+- Configurable CSP, HSTS, X-Frame-Options via `SecurityProperties`
+- Per-tenant rate limiting via Redis-backed `RateLimitFilter`
+- Payment webhook signature verification (Razorpay HMAC, Stripe `Stripe-Signature`)
+- Force-logout via feature flag epoch-based JWT invalidation
 
 ---
 
@@ -140,7 +152,7 @@ The system uses a 3-provider fallback chain with tier-based model escalation and
 | Capability | FREE | PRO | ENTERPRISE |
 |-----------|------|-----|------------|
 | Monthly runs | 5 | 100 | Unlimited |
-| Concurrent runs | 1 | 3 | 10+ |
+| Max concurrent runs | 1 | 3 | 50 |
 | Chat copilot | No | 10 msgs/run | Unlimited |
 | Apply suggestions | 2/run | 10/run | Unlimited |
 | Preview starts | 3/run | 10/run | Unlimited |
@@ -203,19 +215,24 @@ SUPER_ADMIN (global -- full system access)
 **Persona:** Solo developer exploring the platform.
 
 ```
-1. REGISTER
-   POST /api/auth/register -> email verification link
-   Verify email -> account active, tier = FREE
+1. REGISTER (Email or OAuth2)
+   Option A: POST /api/auth/register -> email verification link -> account active
+   Option B: GET /api/auth/oauth2/authorize?provider=google -> Google consent ->
+             GET /api/auth/oauth2/callback/google -> JWT issued, tier = FREE
+   Option C: GET /api/auth/oauth2/authorize?provider=github -> GitHub consent ->
+             GET /api/auth/oauth2/callback/github -> JWT issued, tier = FREE
 
 2. FIRST RUN
    "Build a React todo app with local storage"
    POST /api/runs (goal, source=WEB)
-   -> PlannerAgent generates task plan
+   -> Request triage: simple enough for single-shot fast path? -> skip full pipeline
+   -> Otherwise: PlannerAgent generates task plan
    -> User reviews plan in UI, clicks "Approve"
    -> WorkerAgent creates files (App.tsx, TodoList.tsx, etc.)
    -> CompilerAgent validates build
-   -> ReviewerAgentV2 reviews & auto-fixes issues
-   -> Code auto-merged to main, workspace ready
+   -> ★ COMPLETE ★ (run done from user perspective)
+   -> Auto-preview starts (5-min TTL)
+   -> Background: ReviewerAgentV2 reviews & auto-fixes, tests generated & run
 
 3. PREVIEW
    Click "Preview" -> Cloud Run ephemeral container
@@ -232,7 +249,7 @@ SUPER_ADMIN (global -- full system access)
    Sees only own runs
 
 6. UPGRADE PATH
-   /plans page -> Razorpay checkout -> PRO tier activated
+   /plans page -> Razorpay or Stripe checkout -> PRO tier activated
 ```
 
 **Permissions:**
@@ -257,6 +274,7 @@ SUPER_ADMIN (global -- full system access)
 2. CREATE PROJECT
    POST /api/projects (name, description)
    Assign team members to project
+   Select AI provider per project (OpenAI default, or Anthropic/Google)
 
 3. SUBMIT RUN WITH CONTEXT
    "Implement the user authentication flow from JIRA ticket AUTH-42"
@@ -275,8 +293,8 @@ SUPER_ADMIN (global -- full system access)
    "Apply" button -> creates new worker tasks on same run
 
 6. REVIEW & ITERATE
-   Reviewer auto-fixes issues (CRITICAL/MINOR severity, up to 8 issues)
-   Auto-fix: 2 attempts with FAST -> CAPABLE model escalation
+   Background validation auto-fixes issues (CRITICAL/MINOR severity, up to 8 issues)
+   Auto-fix: 2 attempts with WORKHORSE -> PLANNING model escalation
    Click "Apply Suggestions" from chat -> apply additional fixes
    Max 10 apply suggestions per run (PRO limit)
 
@@ -286,14 +304,24 @@ SUPER_ADMIN (global -- full system access)
    5 active deployments max
 
 8. GITHUB INTEGRATION
-   Settings page -> save GitHub PAT + owner
-   Runs auto-push to configured repo on merge
+   Settings page -> save GitHub PAT + owner + repo
+   On merge: auto-creates branch `executespec/{runId-short}` + opens PR
+   PR URL shown in run overview tab
    Manual: POST /api/runs/{runId}/push-github
 
-9. SLACK NOTIFICATIONS
-   Configured by ORG_ADMIN
-   Receives run events in project-linked Slack channels
-   Verbosity: BRIEF / NORMAL / DETAILED
+9. VIEW GITHUB PR
+   Run overview tab shows "View PR" link when `githubPrUrl` is set
+   Click -> opens PR on GitHub in new tab
+   PR includes all task changes on dedicated branch
+
+10. ARCHIVE OLD RUNS
+    POST /api/runs/{id}/archive -> move run to archived state
+    Archived runs hidden from default list, retrievable via filter
+
+11. SLACK NOTIFICATIONS
+    Configured by ORG_ADMIN
+    Receives run events in project-linked Slack channels
+    Verbosity: BRIEF / NORMAL / DETAILED
 ```
 
 **Permissions:**
@@ -377,33 +405,46 @@ SUPER_ADMIN (global -- full system access)
 **Persona:** Finance team member managing subscriptions and payments.
 
 ```
-1. SUBSCRIBE
+1. SUBSCRIBE (Multi-Gateway)
    /plans -> select PRO plan
-   POST /api/billing/subscribe -> Razorpay checkout
-   POST /api/billing/verify -> activate subscription
-   Seat-based pricing (included seats + per-seat add-on)
+   POST /api/billing/subscribe -> PaymentGatewayRouter selects gateway
+   Option A: Razorpay checkout (INR, Indian payments)
+   Option B: Stripe checkout (USD/global, card payments)
+   Webhook verification: Razorpay HMAC or Stripe-Signature
+   -> Subscription activated on webhook confirmation
 
-2. MANAGE SUBSCRIPTION
-   GET /api/billing/status -> current plan, usage, renewal date
+2. STRIPE PAYMENT FLOW
+   POST /api/billing/subscribe {gateway: "stripe"}
+   -> Stripe Checkout Session created
+   -> User redirected to Stripe hosted page
+   -> POST /api/webhooks/stripe (checkout.session.completed)
+   -> Subscription activated, invoice generated
+
+3. MANAGE SUBSCRIPTION
+   GET /api/billing/status -> current plan, usage, renewal date, gateway
    POST /api/billing/seats -> add/remove seats
    POST /api/billing/cancel -> cancel at period end
 
-3. BUY RUN CREDITS
+4. BUY RUN CREDITS
    GET /api/billing/topup/packages -> available packages
-   POST /api/billing/topup/purchase -> Razorpay one-time order
-   POST /api/billing/topup/verify -> credits added to org
+   POST /api/billing/topup/purchase -> routed to active gateway
+   -> Credits added to org on payment confirmation
    Credits consumed FIFO (oldest first)
 
-4. BILLING PROFILE
+5. BILLING PROFILE
    PUT /api/billing/profile -> GSTIN, PAN, address, currency
    Required for GST-compliant invoicing
 
-5. VIEW INVOICES
+6. VIEW INVOICES
    GET /api/billing/invoices -> list with tax breakdown
    GET /api/billing/invoices/{id}/pdf -> download invoice PDF
    Invoice types: SUBSCRIPTION, TOPUP, CREDIT_NOTE
 
-6. TRACK USAGE
+7. VIEW PAYMENT HISTORY
+   GET /api/billing/payment-history -> org-scoped payment history
+   Shows all transactions across both gateways
+
+8. TRACK USAGE
    /billing -> QuotaUsageBar showing runs used / remaining
    Monthly reset on subscription renewal
    Top-up credits shown separately (never expire)
@@ -415,6 +456,7 @@ SUPER_ADMIN (global -- full system access)
 - Purchase run top-up credits
 - Update billing profile (GSTIN, address)
 - View invoices and download PDFs
+- View payment history
 
 ---
 
@@ -426,6 +468,7 @@ SUPER_ADMIN (global -- full system access)
 1. PROJECT SETUP
    POST /api/projects (name, description, repoUrl)
    Link to GitHub repository for code context
+   Select AI provider for project (OpenAI default)
 
 2. TEAM MANAGEMENT
    POST /api/projects/{id}/members -> add developers
@@ -489,11 +532,25 @@ SUPER_ADMIN (global -- full system access)
    GET /api/pricing -> pricing table (per provider/model)
    PUT /api/pricing/{provider}/{model} -> update input/output token prices
 
-6. GLOBAL AUDIT
+6. FEATURE FLAG ADMINISTRATION
+   GET /api/feature-flags -> list all platform feature flags
+   POST /api/feature-flags/{key} -> toggle feature flag on/off
+   Flags cached in Redis with pub/sub invalidation + 60s scheduled reload
+   Use cases: force-logout, maintenance mode, feature rollout, A/B testing
+   Changes propagate to all app instances via Redis pub/sub
+
+7. PAYMENT AUDIT
+   GET /api/admin/payment-audit -> paginated audit log of all payments
+   Filter by gateway, status, date range, org
+   GET /api/admin/payment-audit/export -> download full audit as CSV
+   GET /api/admin/webhook-events -> webhook event log (filterable)
+   Full trail: payment initiated -> webhook received -> subscription activated
+
+8. GLOBAL AUDIT
    GET /api/admin/audit-logs -> all activity across platform
    Filter by user, org, event type, date range
 
-7. PLATFORM MONITORING
+9. PLATFORM MONITORING
    Grafana dashboards (local) / Cloud Monitoring (prod)
    30+ custom metrics + standard auto-instrumented
    All runs visible regardless of org/project scoping
@@ -503,6 +560,8 @@ SUPER_ADMIN (global -- full system access)
 - Unlimited everything (-1 for all limits)
 - Full access to all runs, users, orgs
 - Tier and pricing configuration
+- Feature flag management
+- Payment audit with CSV export
 - Global audit log access
 
 ---
@@ -525,6 +584,7 @@ SUPER_ADMIN (global -- full system access)
 3. REVENUE REPORTING
    GET /api/accounting/revenue -> revenue summary by period
    Breakdown: subscriptions, top-ups, credit notes
+   Breakdown by gateway: Razorpay vs Stripe
 
 4. GST COMPLIANCE
    GET /api/accounting/gst-summary -> CGST/SGST/IGST totals
@@ -544,28 +604,117 @@ SUPER_ADMIN (global -- full system access)
 
 ---
 
+### 4.9 OAuth2 Login Journey
+
+**Persona:** Any user logging in via Google or GitHub.
+
+```
+1. INITIATE OAUTH2
+   User clicks "Sign in with Google" or "Sign in with GitHub"
+   GET /api/auth/oauth2/authorize?provider=google (or github)
+   -> Redirect to provider consent screen
+
+2. PROVIDER CONSENT
+   User grants permissions on Google/GitHub
+   Provider redirects to callback URL with authorization code
+
+3. CALLBACK & TOKEN EXCHANGE
+   GET /api/auth/oauth2/callback/{provider}?code=xxx
+   -> Backend exchanges code for provider access token
+   -> Fetches user profile (email, name, avatar)
+   -> If email matches existing account: link OAuth identity, issue JWT
+   -> If new user: create account (tier=FREE), issue JWT
+
+4. SESSION ESTABLISHED
+   OAuthSuccessHandler issues JWT (access 24h, refresh 7d)
+   Frontend stores access token, refresh in httpOnly cookie
+   User lands on dashboard, fully authenticated
+
+5. SUBSEQUENT LOGINS
+   "Sign in with Google/GitHub" -> skip consent (already granted)
+   -> Instant JWT issuance, no password needed
+```
+
+---
+
+### 4.10 GitHub PR Viewing Journey
+
+**Persona:** Developer reviewing generated code on GitHub.
+
+```
+1. CONFIGURE GITHUB
+   Settings page -> save GitHub PAT + owner + repo URL
+   Validates credentials on save
+
+2. RUN COMPLETES
+   Pipeline reaches COMPLETE
+   PipelineHarness.pushToGitHubIfConfigured() fires:
+   -> Creates branch: executespec/{runId-short}
+   -> Pushes all generated code to branch
+   -> Opens PR via GitHubRepoService.createPullRequest()
+   -> PR URL stored in PipelineRun.githubPrUrl
+
+3. VIEW PR IN UI
+   Run overview tab shows "View PR on GitHub" link
+   githubPrUrl returned in RunDetail API response
+   Click -> opens GitHub PR in new tab
+
+4. REVIEW ON GITHUB
+   PR shows all file changes from the run
+   Team can review, comment, request changes via standard GitHub flow
+   PR targets default branch (looked up via GitHubRepoService.getDefaultBranch())
+```
+
+---
+
+### 4.11 Run Archive Journey
+
+**Persona:** Developer cleaning up completed runs.
+
+```
+1. ARCHIVE A RUN
+   From run list, select completed run
+   POST /api/runs/{id}/archive
+   Run moved to archived state
+
+2. VIEW ARCHIVED RUNS
+   Default run list hides archived runs
+   Toggle filter to show archived runs
+   Archived runs are read-only (no new actions)
+
+3. WORKSPACE PRESERVED
+   Archived runs retain workspace, preview history, validation report
+   Can still download zip, view report, access shared report links
+```
+
+---
+
 ## 5. Feature Inventory
 
 ### 5.1 Core Pipeline
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Plan generation | Done | PlannerAgent (Sonnet) converts NL to task plan |
+| Request triage | Done | Single-shot fast path for simple requests via `RequestTriageService` |
+| Plan generation | Done | PlannerAgent (PLANNING tier) converts NL to task plan with `project_type` |
 | Plan approval gate | Done | Redis-backed, 500ms polling, 2h TTL |
-| Sequential task execution | Done | Tasks run one at a time, virtual threads, context propagation |
+| Sequential task execution | Done | Tasks run one at a time, virtual threads, context propagation, progressive merge |
 | Worker code generation | Done | XML tool_call format, manual dispatch |
-| Code validation | Done | Pluggable gate chain (Java/TS/Python/React) |
-| Model escalation | Done | HAIKU -> SONNET -> OPUS on stall/retry |
+| Code validation | Done | Pluggable gate chain (Java/TS/Python/React) -- deferred to review phase |
+| Model escalation | Done | WORKHORSE -> PLANNING tier on stall/retry |
 | Compiler agent | Done | Compile & fix (3 iterations) |
-| Agentic reviewer | Done | INSPECT merged code -> auto-fix (2 attempts, FAST->CAPABLE escalation, max 8 issues, CRITICAL/MINOR severity) |
+| Background validation | Done | Review, test gen, test exec, report run in background after COMPLETE |
+| Agentic reviewer | Done | INSPECT merged code -> auto-fix (2 attempts, WORKHORSE->PLANNING escalation, max 8 issues, CRITICAL/MINOR severity) |
+| Language-agnostic test gen | Done | TestGenOrchestrator generates tests matching project language/framework |
 | Validation report | Done | LLM-generated quality summary with share & PDF export |
 | Auto-merge | Done | Automatic merge of all task branches to main after compile (no manual gate) |
 | Post-merge agents | Done | Context, optimizer, API test suite |
 | Task retry | Done | Retry individual failed tasks |
 | Run pause/resume | Done | Graceful pause with state preservation |
 | Manual resume | Done | Users resume stuck runs manually via UI (auto-resume disabled) |
+| Run archive | Done | Archive completed runs, hide from default list |
 | Stall detection | Done | 5min no output -> model escalation |
-| 15-min time limit | Done | Wall-clock limit per task |
+| 25-min time limit | Done | Wall-clock limit per task |
 
 ### 5.2 Integrations
 
@@ -574,9 +723,9 @@ SUPER_ADMIN (global -- full system access)
 | JIRA context extraction | Done | Auto-detect keys, fetch issue details |
 | Confluence extraction | Done | Fetch page content for enrichment |
 | Clarification gate | Done | Pause pipeline, ask for missing context |
-| GitHub push | Done | Auto-push on merge |
+| GitHub push + PR | Done | Auto-creates branch `executespec/{runId-short}` + opens PR |
 | Slack notifications | Done | Block Kit, per-project channels, verbosity |
-| JIRA/Confluence webhooks | Done | Auto-submit runs from events |
+| JIRA/Confluence webhooks | Done | Auto-submit runs from events, outbound comments on MergeCompleted |
 | ServiceNow adapter | Done | Incident/change request integration |
 | PagerDuty adapter | Done | Incident response integration |
 
@@ -584,8 +733,10 @@ SUPER_ADMIN (global -- full system access)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Cloud Run preview | Done | 5-min ephemeral containers |
+| Cloud Run preview | Done | 5-min ephemeral containers (auto-start on COMPLETE) |
+| Docker Compose preview | Done | 5-min TTL, Caddy proxy with Cloudflare Origin Certificate |
 | Dockerfile auto-detect | Done | Node/React/Spring Boot/Python/Full-stack/Static HTML/Monorepo |
+| Project type from planner | Done | Planner declares `project_type` -> `.agent-context/project.json` |
 | Path A: Cloud Run Direct | Done | Simple containerized deployment |
 | Path B: Docker Compose on VM | 0-10% | Multi-container with persistent storage |
 | Path C: Terraform + Managed | 0-10% | Cloud SQL + LB + auto-scaling |
@@ -596,24 +747,40 @@ SUPER_ADMIN (global -- full system access)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| JWT auth | Done | Access 24h, refresh 7d |
+| JWT auth | Done | Access 24h, refresh 7d (RS256) |
+| OAuth2 login | Done | Google and GitHub providers via `OAuthSuccessHandler` |
 | RBAC | Done | 8 roles across 3 levels |
+| Force-logout | Done | Feature flag epoch-based JWT invalidation |
 | Org management | Done | Create, invite, domain enforcement |
 | Project scoping | Done | Member management, run filtering |
 | Activity audit | Done | 35+ event types |
-| API key management | Done | User + org + system fallback |
+| API key management | Done | User + org + system fallback, encrypted at rest |
 
-### 5.5 Billing
+### 5.5 Billing & Payments
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Razorpay subscriptions | Done | Monthly/annual, seat-based |
+| Multi-gateway billing | Done | PaymentGatewayRouter: Razorpay + Stripe |
+| Razorpay subscriptions | Done | Monthly/annual, seat-based (INR) |
+| Stripe subscriptions | Done | Monthly/annual, seat-based (USD/global) |
 | Run top-up credits | Done | Packs + admin grants, FIFO |
 | GST invoicing | Done | Sequential numbering, tax breakdown, PDF |
 | Double-entry accounting | Done | Journal entries per transaction |
 | GSTR-1 export | Done | Compliance filing data |
+| Payment audit trail | Done | Full audit log with CSV export (`PaymentAuditService`) |
+| Webhook event log | Done | Filterable log of all payment webhooks |
+| Payment history | Done | Org-scoped transaction history across gateways |
 
-### 5.6 Observability
+### 5.6 Platform Controls
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Feature flags | Done | DB-backed, Redis pub/sub cache invalidation, 60s reload, admin UI |
+| Rate limiting | Done | Redis-backed per-tenant via `RateLimitFilter` |
+| 8-layer security | Done | Request validation through container hardening |
+| Configurable security headers | Done | CSP, HSTS, X-Frame-Options via `SecurityProperties` |
+
+### 5.7 Observability
 
 | Feature | Status | Description |
 |---------|--------|-------------|
@@ -625,6 +792,7 @@ SUPER_ADMIN (global -- full system access)
 | GCP export | Done | Cloud Trace + Cloud Monitoring |
 | Pre-built dashboards | Done | ExecuteSpec Overview + JVM/HTTP |
 | Browser tracing | Done | OTel Web SDK |
+| Model evaluation | Done | `eval/` package with EvalController + ModelEvaluator |
 
 ---
 
@@ -632,34 +800,115 @@ SUPER_ADMIN (global -- full system access)
 
 | Route | Page | Accessible By |
 |-------|------|--------------|
-| `/` | RunsPage -- run list, submit new run | All authenticated |
+| `/` | RunsPage -- run list, submit new run, archive toggle | All authenticated |
 | `/dashboard` | DashboardPage -- analytics, model comparison | PRO+ |
 | `/pricing` | PricingPage -- public pricing info | All |
-| `/plans` | PlansPage -- subscription management | All |
-| `/billing` | BillingPage -- usage, invoices, top-ups | BILLING_ADMIN+ |
+| `/plans` | PlansPage -- subscription management (Razorpay/Stripe) | All |
+| `/billing` | BillingPage -- usage, invoices, top-ups, payment history | BILLING_ADMIN+ |
 | `/integrations` | IntegrationsPage -- JIRA, Confluence, Slack | PRO+ ORG_ADMIN |
-| `/settings` | SettingsPage -- GitHub, AI keys, JIRA, Confluence | All authenticated |
+| `/settings` | SettingsPage -- GitHub, AI keys, JIRA, Confluence, OAuth2 linked accounts | All authenticated |
 | `/audit` | AuditPage -- activity audit trail | ORG_ADMIN, SUPER_ADMIN |
 | `/invoices` | InvoicesPage -- invoice management | FINANCE |
 | `/accounting` | AccountingPage -- ledger, GST, revenue | FINANCE |
 | `/deployments` | DeploymentsPage -- deployment history | PRO+ |
-| `/admin` | AdminPage -- user/org/tier management | SUPER_ADMIN |
+| `/admin` | AdminPage -- user/org/tier management, feature flags, payment audit | SUPER_ADMIN |
 
 ### Key UI Components
 
-- **NewRunModal** -- Goal input, repo selection, model override, Fast Mode toggle
-- **RunDetail** -- Live task graph, agent logs, file viewer (Monaco), timeline
-- **PreviewTab** -- Cloud Run preview with 10-min countdown, build logs
+- **NewRunModal** -- Goal input, repo selection, model override, Fast Mode toggle, AI provider selection
+- **RunDetail** -- Live task graph, agent logs, file viewer (Monaco), timeline, GitHub PR link
+- **PreviewTab** -- Cloud Run preview with 5-min countdown, build logs
 - **RunConversation** -- Chat copilot with apply suggestion
-- **TaskGraph** -- Visual task dependency graph
+- **TaskGraph** -- Visual task dependency graph (grouped by source: copilot/review)
+- **ValidationReportPanel** -- Quality report with share link and PDF download
 - **DeployWizardModal** -- Guided deployment flow
 - **CommandPalette** -- Keyboard navigation (Cmd+K)
 
 ---
 
-## 7. Database Schema
+## 7. API Contracts
 
-### 7.1 Migrations Summary (V1-V52)
+### 7.1 Run Lifecycle
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/runs` | Submit run (202) |
+| GET | `/api/runs` | List runs (paginated, filtered by visibility + tier) |
+| GET | `/api/runs/{id}` | Run detail (includes `githubPrUrl`) |
+| POST | `/api/runs/{id}/approve` | Plan gate approval |
+| POST | `/api/runs/{id}/merge` | Merge gate (legacy -- merge is now automatic) |
+| DELETE | `/api/runs/{id}` | Cancel/delete run |
+| POST | `/api/runs/{id}/archive` | Archive run |
+| POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
+| GET | `/api/runs/{id}/events` | SSE event stream |
+
+### 7.2 Validation Report
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/runs/{id}/report` | Get validation report |
+| GET | `/api/runs/{id}/report/pdf` | Download report as PDF |
+| POST | `/api/runs/{id}/report/share` | Generate share link |
+| GET | `/api/reports/shared/{token}` | Public shared report (no auth) |
+
+### 7.3 Preview & Deploy
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker) |
+| DELETE | `/api/runs/{id}/preview/stop` | Stop preview |
+| POST | `/api/runs/{id}/deploy` | Deploy to Cloud Run (permanent) |
+| POST | `/api/runs/{id}/push-github` | Push to GitHub (creates branch + PR) |
+
+### 7.4 Auth & Org
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/register` | Self-register |
+| POST | `/api/auth/login` | Login -> JWT |
+| POST | `/api/auth/refresh` | Refresh JWT token |
+| DELETE | `/api/auth/logout` | Logout (clears refresh cookie) |
+| POST | `/api/auth/forgot-password` | Request password reset email |
+| POST | `/api/auth/reset-password` | Reset password with token |
+| GET | `/api/auth/verify-email` | Verify email link |
+| GET | `/api/auth/me/permissions` | Tier-based permissions |
+| GET | `/api/auth/oauth2/authorize` | OAuth2 authorization redirect (Google/GitHub) |
+| GET | `/api/auth/oauth2/callback/{provider}` | OAuth2 callback handler |
+| POST | `/api/org` | Create org |
+| POST | `/api/org/invite` | Invite user |
+
+### 7.5 Billing & Payments
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/billing/plans` | List billing plans |
+| POST | `/api/billing/subscribe` | Initiate subscription (routed to Razorpay or Stripe) |
+| POST | `/api/billing/topup/purchase` | Buy run top-up credits |
+| GET | `/api/billing/payment-history` | Org-scoped payment history |
+| POST | `/api/webhooks/razorpay` | Razorpay webhook (HMAC verified, no auth) |
+| POST | `/api/webhooks/stripe` | Stripe webhook (Stripe-Signature verified, no auth) |
+
+### 7.6 Models & Feature Flags
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/models/available` | Model matrix + provider tags |
+| GET | `/api/feature-flags` | List all feature flags (SUPER_ADMIN) |
+| POST | `/api/feature-flags/{key}` | Update feature flag (SUPER_ADMIN) |
+
+### 7.7 Admin
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/admin/payment-audit` | Payment audit log (paginated, SUPER_ADMIN) |
+| GET | `/api/admin/payment-audit/export` | Export audit as CSV (SUPER_ADMIN) |
+| GET | `/api/admin/webhook-events` | Webhook event log (filterable, SUPER_ADMIN) |
+
+---
+
+## 8. Database Schema
+
+### 8.1 Migrations Summary (V1-V55)
 
 | Range | Scope |
 |-------|-------|
@@ -686,29 +935,30 @@ SUPER_ADMIN (global -- full system access)
 | V50 | Free tier restrictions |
 | V51 | Force logout flag |
 | V52 | GitHub PR URL on pipeline_run |
+| V53-V55 | Rate limiting, payment audit, security enhancements |
 
 ---
 
-## 8. Infrastructure
+## 9. Infrastructure
 
-### 8.1 GCP Resources
+### 9.1 GCP Resources
 
 | Service | Usage |
 |---------|-------|
 | GCE | App server (n2-standard-8, systemd, us-east4) |
 | Cloud SQL | PostgreSQL 15 (private IP, auto-backup) |
-| Memorystore | Redis 7 (gate coordination + caching) |
+| Memorystore | Redis 7 (gate coordination, caching, feature flags, rate limiting) |
 | Cloud Run | Ephemeral previews (5-min TTL) |
 | Artifact Registry | Docker images |
 | Cloud Storage | Workspace archives |
 | Cloud Trace | Distributed tracing (OTel) |
 | Cloud Monitoring | Custom + standard metrics |
 | Cloud Logging | Structured JSON logs |
-| Secret Manager | API keys, DB passwords |
+| Secret Manager | API keys, DB passwords, OAuth secrets |
 | Cloud IAP | Admin SSH access |
 | Load Balancer | HTTPS termination (managed SSL) |
 
-### 8.2 Service Account Roles
+### 9.2 Service Account Roles
 
 | Role | Purpose |
 |------|---------|
@@ -724,9 +974,9 @@ SUPER_ADMIN (global -- full system access)
 
 ---
 
-## 9. Observability
+## 10. Observability
 
-### 9.1 Span Hierarchy
+### 10.1 Span Hierarchy
 
 ```
 executespec.run (root)
@@ -740,12 +990,13 @@ executespec.run (root)
   |     |     +-- executespec.llm.call
   +-- executespec.run.phase.compile
   +-- executespec.run.phase.merge
-  +-- executespec.run.phase.review
-  +-- executespec.run.phase.report
+  +-- executespec.run.phase.review (background)
+  +-- executespec.run.phase.test_gen (background)
+  +-- executespec.run.phase.report (background)
   +-- executespec.run.phase.post_merge
 ```
 
-### 9.2 Key Custom Metrics
+### 10.2 Key Custom Metrics
 
 | Metric | Type | Tags |
 |--------|------|------|
@@ -759,48 +1010,75 @@ executespec.run (root)
 | `executespec.preview.*` | Counter/Timer | -- |
 | `executespec.deploy.*` | Counter/Timer | -- |
 
-### 9.3 Pre-built Dashboards
+### 10.3 Pre-built Dashboards
 
 1. **ExecuteSpec Overview** -- 18 panels: runs, LLM latency/tokens/errors, tasks, handovers, gates, preview/deploy lifecycle
 2. **JVM & HTTP** -- 8 panels: HTTP rate/latency, JVM heap/GC, threads, HikariCP, Redis
 
 ---
 
-## 10. Security
+## 11. Security
 
-### 10.1 Authentication
+### 11.1 Authentication
 - JWT (RS256): access 24h, refresh 7d (httpOnly cookie)
-- Email verification required
+- OAuth2: Google and GitHub login via `OAuthSuccessHandler`
+- Email verification required (email/password registration)
 - Password policy: min 8 chars, forced change for admin
+- Force-logout: feature flag epoch-based JWT invalidation
 
-### 10.2 Authorization
+### 11.2 Authorization
 - RBAC: 8 roles across global, org, project levels
 - RunAccessGuard + RunVisibilitySpec: query-level filtering
 - TierPermissionService: feature flags per user/tier
+- Feature flags: DB-backed with Redis pub/sub cache invalidation
 
-### 10.3 Data Protection
+### 11.3 Data Protection
 - API keys encrypted at rest
 - GCP deployment credentials encrypted (V30)
-- Secret Manager for production keys
+- Secret Manager for production keys (including OAuth secrets)
 - HTTPS enforced (managed SSL)
 - Configurable CORS
+- Configurable CSP, HSTS, X-Frame-Options via `SecurityProperties`
+
+### 11.4 Input & Runtime Security
+- `InputSanitizer`: XSS and injection prevention
+- `CodeAbuseScanner`: malicious code pattern detection
+- Shell sandbox: restricted command execution
+- File sandbox: workspace isolation, path traversal prevention
+- Per-tenant rate limiting via Redis-backed `RateLimitFilter`
+
+### 11.5 Payment Security
+- Razorpay webhook HMAC verification
+- Stripe webhook `Stripe-Signature` verification
+- Full payment audit trail with CSV export
 
 ---
 
-## 11. Current State & Roadmap
+## 12. Current State & Roadmap
 
 ### Working (Production)
-- Full multi-agent pipeline with plan approval gate and automatic merge
-- 3-provider LLM fallback with model escalation and 4:3:3 weighted round-robin
-- Cloud Run previews with auto-detect Dockerfile generation
-- JWT auth with RBAC (8 roles, 3 levels)
-- Razorpay billing (subscriptions + top-up credits)
+- Full multi-agent pipeline with plan approval gate, automatic merge, and background validation
+- Request triage: single-shot fast path for simple requests
+- User-selected AI provider (default: OpenAI) with YAML model matrix and health-based failover
+- 25-min wall-clock worker time limit with stall detection and model escalation
+- Cloud Run previews with auto-detect Dockerfile generation (5-min TTL)
+- Dual-mode previews: Cloud Run (dev/prod) or Docker Compose (local, Caddy proxy)
+- JWT auth + OAuth2 (Google, GitHub) with RBAC (8 roles, 3 levels)
+- Multi-gateway billing via PaymentGatewayRouter (Razorpay + Stripe)
 - GST-compliant invoicing with double-entry accounting
+- Payment audit trail with CSV export
+- Feature flag system (DB + Redis pub/sub + admin UI)
+- Redis-backed per-tenant rate limiting
+- 8-layer security model
 - JIRA/Confluence/Slack/GitHub integrations
+- GitHub branch + PR creation for existing repos
 - Chat copilot with apply suggestion
+- Run archive feature
+- Language-agnostic test generation
 - Activity audit trail (35+ events)
 - Full observability stack (traces, metrics, structured logs)
 - Cloud Run Direct deployment (Path A)
+- Model evaluation framework
 
 ### In Progress
 | Feature | Progress |
@@ -815,9 +1093,9 @@ executespec.run (root)
 - `doReviewAndMerge()` not updated for background validation pattern (runs synchronous in resume/retry paths)
 - Background validation thread has no retry on failure (single attempt)
 - `@Lazy @Autowired` field injection on PreviewService in TestPreviewCoordinator (circular dependency workaround)
-- Model matrix mismatch: WORKHORSE tier uses Sonnet for all worker tasks (expensive for simple tasks)
 - test-worker.txt prompt still hardcodes Java/RestAssured references despite language-agnostic test gen
+- Model matrix cost: WORKHORSE tier for Anthropic uses Haiku -- consider Sonnet for complex tasks
 
 ---
 
-*Document generated 2026-03-30. For implementation details, see CLAUDE.md and memory files.*
+*Document generated 2026-04-03. For implementation details, see CLAUDE.md and memory files.*

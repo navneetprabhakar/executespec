@@ -133,6 +133,8 @@ export interface TaskSummary {
   failureReason?: string | null;
   /** The planner's objective/description for this task — shown in the expanded card. */
   objective?: string | null;
+  /** The worker's summary of what was implemented. */
+  completionNotes?: string | null;
 }
 
 // ── Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue) ─────

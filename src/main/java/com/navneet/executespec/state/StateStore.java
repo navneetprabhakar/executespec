@@ -347,6 +347,7 @@ public class StateStore {
         // Persist actual provider/model used (may differ from assignedModel due to failover/escalation)
         if (report.getProvider() != null) task.setProvider(report.getProvider());
         if (report.getModel() != null) task.setModel(report.getModel());
+        if (report.getSummary() != null) task.setCompletionNotes(report.getSummary());
         task.setCompletedAt(Instant.now());
         task.setDurationMs(task.getStartedAt() != null
             ? Duration.between(task.getStartedAt(), Instant.now()).toMillis() : 0);

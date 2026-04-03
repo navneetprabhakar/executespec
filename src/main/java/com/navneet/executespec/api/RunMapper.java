@@ -5,14 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.RunDetail;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.api.dto.TaskSummary;
-import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
-import com.navneet.executespec.testgen.model.TestPlan;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -205,7 +203,8 @@ public class RunMapper {
             t.getStartedAt(),
             t.getCompletedAt(),
             extractFailureReason(t),
-            extractObjective(t.getTaskJson())
+            extractObjective(t.getTaskJson()),
+            t.getCompletionNotes()
         );
     }
 

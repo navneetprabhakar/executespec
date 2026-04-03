@@ -368,6 +368,47 @@ public class GitTool {
     }
 
     /**
+     * Attempts to rebase branchName onto main.
+     * If conflicts occur, it aborts the rebase and returns false.
+     * Uses shell git because JGit rebase can be flaky with worktrees.
+     */
+    public boolean rebaseBranchOnMain(String runId, String branchName) {
+        Path wsPath = getWorkspacePath(runId);
+        try {
+            // Check out the branch
+            ProcessBuilder cb = new ProcessBuilder("git", "checkout", branchName)
+                    .directory(wsPath.toFile()).redirectErrorStream(true);
+            cb.start().waitFor();
+            
+            // Try to rebase
+            ProcessBuilder rb = new ProcessBuilder("git", "rebase", "main")
+                    .directory(wsPath.toFile()).redirectErrorStream(true);
+            Process rp = rb.start();
+            String out = new String(rp.getInputStream().readAllBytes());
+            int exit = rp.waitFor();
+            
+            if (exit == 0) {
+                log.info("[GitTool] Successfully rebased {} onto main", branchName);
+                return true;
+            } else {
+                log.warn("[GitTool] Rebase conflict for {}. Aborting rebase. Output: {}", branchName, out);
+                // Abort
+                ProcessBuilder ab = new ProcessBuilder("git", "rebase", "--abort")
+                        .directory(wsPath.toFile()).redirectErrorStream(true);
+                ab.start().waitFor();
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("[GitTool] Rebase failed for {}: {}", branchName, e.getMessage());
+            try {
+                new ProcessBuilder("git", "rebase", "--abort")
+                        .directory(wsPath.toFile()).redirectErrorStream(true).start().waitFor();
+            } catch (Exception ignore) {}
+            return false;
+        }
+    }
+
+    /**
      * Stage and commit any pending changes on the current branch.
      * No-ops silently if the working tree is already clean (nothing to commit).
      * Used by post-merge agents (e.g. ApiTestSuiteAgent) to persist generated

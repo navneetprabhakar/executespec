@@ -188,23 +188,51 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      This is the #1 source of bugs in generated frontend code.
 
      CSS STYLING:
-     If FRONTEND STYLING RULES appear below your task assignment, they are MANDATORY
-     and OVERRIDE EVERYTHING in this section. Do not import any CSS framework — write
+     If FRONTEND STYLING RULES appear below your task assignment, they are MANDATORY 
+     and OVERRIDE EVERYTHING in this section. Do not import any CSS framework — write 
      all CSS from scratch using the custom properties specified in those rules.
 
-     If NO styling rules are injected below, you MUST add Pico.css. This is NOT optional:
+     If NO styling rules are injected below, you MUST apply this modern, 
+     high-quality CSS reset and default theme. Do NOT use Pico.css or Tailwind 
+     unless explicitly requested or styling rules are absent.
 
-     MANDATORY: Add this line in <head> of EVERY HTML file:
-       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+     MANDATORY: Add this <style> block in <head> of EVERY HTML file:
+     <style>
+       :root {
+         --bg: #fafafa; --fg: #1a1a1a; --acc: #0070f3; --border: #eaeaea;
+         --font: 'Inter', system-ui, -apple-system, sans-serif;
+       }
+       @media (prefers-color-scheme: dark) {
+         :root { --bg: #000; --fg: #ededed; --acc: #0070f3; --border: #333; }
+       }
+       * { box-sizing: border-box; margin: 0; padding: 0; }
+       body { background: var(--bg); color: var(--fg); font-family: var(--font); line-height: 1.6; padding: 2rem; }
+       .container { max-width: 800px; margin: 0 auto; }
+       h1, h2, h3 { line-height: 1.25; margin-bottom: 1rem; font-weight: 700; letter-spacing: -0.02em; }
+       p { margin-bottom: 1.5rem; color: var(--fg); opacity: 0.9; }
+       button, .btn { 
+         background: var(--fg); color: var(--bg); border: none; padding: 0.6rem 1.2rem; 
+         border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.2s; 
+       }
+       button:hover { opacity: 0.9; transform: translateY(-1px); }
+       input, select, textarea { 
+         width: 100%; padding: 0.6rem; margin-bottom: 1rem; border-radius: 6px; 
+         border: 1px solid var(--border); background: var(--bg); color: var(--fg); 
+       }
+       input:focus { outline: 2px solid var(--acc); border-color: transparent; }
+       article, .card { 
+         border: 1px solid var(--border); padding: 1.5rem; border-radius: 8px; 
+         margin-bottom: 1.5rem; background: var(--bg); 
+       }
+     </style>
 
-     Then use semantic HTML tags — Pico styles them automatically:
+     Then use semantic HTML tags:
        - Wrap page content in <main class="container">
        - Use <article> for cards, <section> for groups
        - Use <header>, <footer>, <nav> for layout
-       - Buttons: <button>, <a role="button">. Primary: class="contrast"
        - Forms: <input>, <select>, <textarea> inside <label> (auto-styled)
-       - Tables: plain <table> (auto-styled)
-       - Modals: <dialog open> with <article> inside
+       - Tables: plain <table> with border-collapse: collapse; width: 100%;
+
 
      For complex apps ONLY (dashboards, data tables, 10+ components):
        Use Tailwind CSS via CDN instead of Pico:

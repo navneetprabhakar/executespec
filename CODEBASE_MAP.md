@@ -1,14 +1,15 @@
 # ExecuteSpec Codebase Map
 
-> Quick reference: every class → one-line purpose. Auto-generated, keep updated.
+> Quick reference: every class → one-line purpose. Keep updated.
+> Last updated: 2026-04-03
 
 ## Java (com.navneet.executespec.*)
 
 ### agent/ — LLM agents & routing
-- `PlannerAgent` — Generates task plans from specs (Sonnet)
-- `WorkerAgent` — Executes tasks, dispatches tools, 15-min limit
-- `ConversationAgent` — Chat copilot (CAPABLE tier via ModelRouter)
-- `LlmRouter` — Multi-provider fallback (Anthropic→Google→OpenAI)
+- `PlannerAgent` — Generates task plans from specs (PLANNING tier)
+- `WorkerAgent` — Executes tasks, dispatches tools, 25-min limit, stall escalation
+- `ConversationAgent` — Chat copilot (LIGHTWEIGHT tier)
+- `LlmRouter` — Multi-provider fallback (failover order per provider, circuit breaker integration)
 - `LlmOutputParser` — Parses structured JSON from LLM responses
 - `ApiKeyResolver` — Resolves API keys: user→org→system
 - `ResolvedKeys` — Container for resolved credentials per provider
@@ -16,7 +17,8 @@
 - `TokenBudgetPolicy` — Token limits & escalation thresholds
 - `RunKeyStore` — Caches resolved keys per run
 - `CostEstimator` — Estimates run cost from plan
-- `ConflictResolverAgent` — Resolves merge conflicts
+- `ConflictResolverAgent` — Resolves merge conflicts (WORKHORSE tier)
+- `RequestTriageService` — Single-shot fast path for simple requests (LIGHTWEIGHT tier)
 - `ApplySuggestionTooLargeException` — Exception for oversized suggestions
 - `model/TaskDefinition` — Single task in plan
 - `model/TaskPlan` — Multi-task plan container (includes `projectType` field declared by planner)
@@ -26,35 +28,42 @@
 - `model/ReviewIssue` — Review issue detail
 - `model/IterationEstimate` — Time/token estimate for retry
 
-### router/ — Model selection
-- `ModelResolver` — Resolves agentTier × provider → model from YAML matrix
+### router/ — Model selection & health tracking
+- `ModelResolver` — Resolves agentTier x provider → model from YAML matrix
 - `ModelMatrixProperties` — ConfigurationProperties for YAML model matrix
 - `AgentTier` — Enum: PLANNING/WORKHORSE/LIGHTWEIGHT
 - `ResolvedModel` — DTO: requestedProvider, actualProvider, model, agentTier, fallback
 - `ProviderHealthTracker` — Redis-backed circuit breaker (5 failures → open, 60s TTL recovery)
-- `LlmProvider` — Enum: ANTHROPIC/OPENAI/GOOGLE
-- `AvailableProviderResolver` — Resolves available providers per run
+- `LlmProvider` — Enum: ANTHROPIC/OPENAI/GOOGLE (with `.getTag()` for UI badges)
+- `AvailableProviderResolver` — Resolves available providers per run based on API keys
 
 ### harness/ — Pipeline orchestration
-- `PipelineHarness` — Main orchestrator: plan→work→compile→merge→COMPLETE→preview→background validation (review+test+report). Publishes MergeCompleted event for integration outbound. Creates branch+PR for existing repos via GitTool.pushToBranch()
-- `SequentialTaskExecutor` — Executes tasks in tiered parallel groups. Validation deferred to review phase
+- `PipelineHarness` — Main orchestrator: plan→work→compile→merge→COMPLETE→preview→background validation. Publishes MergeCompleted for integration outbound. Creates branch+PR for existing repos. Manages `backgroundValidationRuns` set and deferred cleanup
+- `SequentialTaskExecutor` — Executes tasks in tiered parallel groups (virtual threads). Validation deferred to review phase. Budget checks (LLM calls + USD cost)
 - `ApprovalGate` — Plan approval gate interface
 - `GateStore` — Redis-backed gate storage (500ms poll, 2h TTL)
-- `GitMergeService` — Merges task branches, progressive merge
+- `GitMergeService` — Merges task branches, progressive merge under `mergeLock`
+- `WorkerPool` — Thread pool for workers
+- `WorkspaceInitService` — Git repo initialization per run
+- `UiStyleResolver` — UI style detection from user request/defaults
 - `LanguageValidator` — Blocks unsupported languages at submission
+- `RunBudgetTracker` — LLM call budget tracking per run
+- `RunCostBudgetService` — USD cost budget enforcement per tier
+- `SingleShotExecutor` — Fast-path executor for trivial requests
 - `StartupRunResumer` — (DISABLED) Auto-resumes stuck runs
+- `ExecutionMode` — Enum: PROTOTYPE/PRODUCTION
 - `MergeAnalysis/MergeDecision/MergeOutcome` — Merge decision models
 - `MergeBlockedException` — Merge conflict exception
-- `event/` — Pipeline event models
+- `event/` — Pipeline event models (MergeCompleted, TestsReady, TestExecutionCompleted)
 
 ### compiler/ — Compilation
-- `CompilerAgent` — Compiles code (3 rounds), fixes errors
+- `CompilerAgent` — Compiles full project (3 rounds), fixes errors (WORKHORSE tier)
 - `CompileResult` — Compilation output model
 - `CompilerProperties` — Config
-- `DevDockerfileGenerator` — Generates preview Dockerfile (reads `.agent-context/project.json` for planner-declared project type)
+- `DevDockerfileGenerator` — Generates preview Dockerfile (reads `.agent-context/project.json` for planner-declared project type, falls back to file-based heuristics)
 
 ### reviewer/ — Code review
-- `ReviewerAgentV2` — Inspects merged code, auto-fixes (FAST→CAPABLE)
+- `ReviewerAgentV2` — Inspects merged code, auto-fixes CRITICAL/MINOR issues (PLANNING tier)
 - `model/ReviewReportV2` — V2 review with flat issues[]
 - `model/ReviewVerdict` — Enum: PASSED/PASSED_WITH_FIXES/NEEDS_ATTENTION/FAILED
 - `model/IssueSeverity` — Enum: CRITICAL/MINOR
@@ -62,9 +71,9 @@
 - `model/FixInstruction` — Per-issue fix instruction
 
 ### report/ — Validation reports
-- `ValidationReportService` — Aggregates data, generates report
-- `ValidationReportGenerator` — LLM-powered report text (Haiku)
-- `ValidationReportPdfService` — Report → PDF
+- `ValidationReportService` — Aggregates data, generates report, persists
+- `ValidationReportGenerator` — LLM-powered report text (WORKHORSE tier)
+- `ValidationReportPdfService` — Report → PDF (OpenPDF + Flying Saucer)
 - `ValidationReportController` — REST: report/PDF/share/public
 - `ValidationReportRepository` — JPA repository
 - `UsageReportService` — Usage analytics reports
@@ -89,9 +98,10 @@
 - `prompt/RetryPromptBuilder` — Retry prompts with error context
 
 ### recovery/ — Failure handling
-- `RunRecoveryService` — Detects stuck runs, triggers recovery
+- `RunRecoveryService` — Detects stuck runs (warn: 8min, act: 15min)
 - `StuckRunEvaluator` — Classifies stuck run root causes
-- `EscalationService` — Model escalation on failures
+- `EscalationService` — Model escalation on failures (WORKHORSE → PLANNING)
+- `OrphanedRunWatchdog` — Detects and recovers orphaned runs (8min threshold)
 - `LlmCallGuard` — Protects LLM calls (timeouts/retries)
 - `RecoveryProperties` — Recovery config
 
@@ -100,18 +110,24 @@
 - `InboxService` — User inbox notifications
 - `RunTitleBackfillService` — Backfills run titles
 - `ApplySource` — Enum: COPILOT/REVIEW
-- `entity/PipelineRun` — Run JPA entity (root aggregate). Includes `githubPrUrl` (V52)
+- `entity/PipelineRun` — Run JPA entity (root aggregate). Includes `githubPrUrl` (V52), `archived` (V53)
 - `entity/AgentTask` — Task JPA entity
 - `entity/AgentMessage` — Chat message entity
 - `repository/*Repository` — JPA repositories
 
 ### deployment/ — Preview & deploy
-- `preview/PreviewService` — Dual-mode preview (docker/cloud-run, 5-min TTL). Stores `cloudRunServiceName` upfront to prevent orphan cleanup race
-- `DeploymentService` — Full Cloud Run deployment
-- `CloudRunClient` — GCP Cloud Run API wrapper
-- `GcsWorkspaceStore` — GCS workspace storage
+- `preview/PreviewService` — Dual-mode preview (docker/cloud-run, 5-min TTL). Stores `cloudRunServiceName` upfront (prevents orphan cleanup race). Concurrency: FREE=1, PRO=3, ENTERPRISE=10
+- `preview/PreviewProperties` — Config: mode, TTL, concurrency, port-range
+- `preview/CaddyProxyManager` — Caddy reverse proxy for Docker mode (Cloudflare Origin Certificate)
+- `preview/ComposeFileGenerator` — Docker Compose YAML generation
+- `preview/ComposeExecutor` — Docker Compose process runner
+- `DeploymentService` — Full Cloud Run deployment (11 languages)
+- `CloudRunClient` — GCP Cloud Run API wrapper (timeouts: deploy 10min, delete 5min, list 2min)
+- `ArtifactRegistryClient` — Docker image build + push (10-min timeout)
+- `GcsWorkspaceStore` — GCS workspace archival (24h delay)
+- `WorkspaceRestoreService` — On-demand workspace restore
 - `DeploymentGitHubService` — GitHub push integration
-- `DockerfileGenerator` — Per-language Dockerfile generation
+- `DockerfileGenerator` — Per-language production Dockerfile generation (reads `project.json`)
 - `PreviewAgent` — Auto-preview after workers
 - `WorkspaceArchiveJob` — Archives workspaces after 24h
 - `DeploymentCleanupJob` — Cleans expired deployments
@@ -121,80 +137,155 @@
 - `strategy/` — Deployment strategy selection
 
 ### testgen/ — Test generation
-- `TestGenOrchestrator` — Orchestrates full test gen pipeline (sequential after review)
-- `TestPreviewCoordinator` — Coordinates preview readiness + test compilation, starts preview after tests compile, owns preview lifecycle for test execution
-- `TestPlannerAgent` — Creates test plan from user spec
-- `TestWorkerAgent` — Generates test code per test task
-- `TestReportGenerator` — Generates fix suggestions for failed tests
-- `TestGenerationAgent` — Generates tests parallel with workers
-- `TestExecutionOrchestrator` — Runs test suites
+- `TestGenOrchestrator` — Orchestrates full pipeline: plan→generate→compile→execute (language-agnostic)
+- `TestPreviewCoordinator` — Coordinates preview readiness + test execution. Reuses existing preview if running. Owns preview lifecycle for tests
+- `TestPlannerAgent` — Creates test plan from spec (WORKHORSE tier)
+- `TestWorkerAgent` — Generates test code per task (WORKHORSE tier)
+- `TestReportGenerator` — Generates fix suggestions for failed tests (LIGHTWEIGHT tier)
+- `TestCompilationGate` — Test compilation + error fixing loop
+- `TestProjectScaffold` — Maven/Gradle test project setup
+- `TestExecutionService` — Runs compiled tests
+- `TestExecutionOrchestrator` — Orchestrates test suite execution
 - `TestResultController` — REST: apply-test-fixes
-- `model/*` — Test plan/result/summary models
+- `model/*` — Test plan/result/summary entities
 - `repository/*` — Test JPA repositories
 
-### auth/ — Authentication & RBAC
-- `security/SecurityConfig` — Spring Security config
-- `security/JwtUtil` — JWT gen/validation (24h/7d)
+### auth/ — Authentication, OAuth2 & RBAC
+- `security/SecurityConfig` — Spring Security config (JWT, OAuth2, CSP, HSTS, X-Frame-Options)
+- `security/JwtUtil` — JWT gen/validation (HS256, 24h access/7d refresh, force-logout epoch check)
 - `security/JwtAuthenticationFilter` — JWT HTTP filter
 - `security/RunAccessGuard` — Run visibility RBAC
-- `service/TierEnforcementService` — Tier limit enforcement
+- `service/AuthService` — Register, login, refresh, password reset, email verification
+- `service/OrgService` — Org management (create, invite, roles)
+- `service/ProjectService` — Project CRUD
+- `service/TierEnforcementService` — Tier limit enforcement (run/cost limits per tier)
 - `service/TierPermissionService` — Tier feature permissions
+- `oauth/OAuthSuccessHandler` — OAuth2 login success → JWT generation (creates user if new)
+- `oauth/OAuthUserMapper` — Maps OAuth2 profile to AppUser
+- `oauth/OAuthProfile` — OAuth2 user profile DTO
+- `oauth/OAuthEmailConflictException` — Email already registered with different provider
 - `entity/AppUser` — User entity
 - `entity/Org` — Organization entity
 - `entity/Project` — Project entity
-- `controller/AuthController` — Login/register/logout
+- `controller/AuthController` — Login/register/logout/refresh/OAuth2/password-reset
 - `dto/*` — Auth DTOs
 
-### billing/ — Payments & subscriptions
-- `service/BillingService` — Razorpay subscription handling
+### billing/ — Payments, subscriptions & audit
+- `service/BillingService` — Multi-gateway subscription handling (Razorpay + Stripe)
 - `service/RunTopupService` — Run credit purchases (FIFO)
 - `service/UsageTrackingService` — Usage tracking per org
-- `service/InvoiceService` — Invoice generation + GST
-- `entity/*` — Subscription/topup/invoice/usage entities
-- `gateway/` — Payment gateway integration
-- `scheduler/` — Billing scheduled jobs
-- `config/` — Razorpay config
+- `service/InvoiceService` — Invoice generation + GST calculation
+- `service/InvoicePdfService` — Invoice PDF generation
+- `service/InvoiceEmailService` — Invoice email delivery
+- `service/AnalyticsService` — Usage analytics (run costs, token usage, provider breakdown)
+- `service/AccountingService` — Accounting entries & reconciliation
+- `service/BillingNotificationService` — Usage alerts, upgrade prompts
+- `service/PaymentAuditService` — Payment audit trail + CSV export
+- `service/GstCalculationService` — GST tax calculation
+- `service/PlanSeederService` — Seeds default billing plans
+- `service/RunQuotaRefundListener` — Refunds run quota on failure
+- `gateway/PaymentGateway` — Payment gateway interface
+- `gateway/PaymentGatewayRouter` — Routes to Razorpay or Stripe based on subscription
+- `gateway/RazorpayPaymentGateway` — Razorpay implementation
+- `gateway/StripePaymentGateway` — Stripe implementation
+- `gateway/BillingEntity` — Billing entity model
+- `gateway/BillingEntityResolver` — Resolves user vs org billing entity
+- `gateway/BillingGateway` — Enum: RAZORPAY/STRIPE
+- `gateway/CheckoutResult` — Checkout session result
+- `gateway/WebhookResult` — Webhook processing result
+- `security/WebhookSignatureVerifier` — Webhook HMAC/signature verification
+- `controller/BillingController` — Subscription/payment endpoints
+- `controller/BillingWebhookController` — Razorpay + Stripe webhook handlers
+- `controller/PaymentAuditController` — Payment audit log + CSV export (SUPER_ADMIN)
+- `controller/AccountingController` — Accounting endpoints
+- `scheduler/DunningScheduler` — Failed payment retry
+- `scheduler/PeriodEndDowngradeScheduler` — Auto-downgrade on subscription end
+- `entity/BillingPlan` — Available plans
+- `entity/BillingSubscription` — User/org subscription
+- `entity/BillingPlanLimit` — Tier-specific limits
+- `entity/Invoice` — Generated invoices with line items
+- `entity/RunTopup` — Run credit top-ups
+- `entity/TopupPackage` — Predefined top-up packages
+- `entity/WebhookEventLog` — Webhook event audit trail
+- `entity/AccountingEntry` — Accounting line items
+- `entity/BillingProfile` — Billing profile (name, address, GST)
+- `entity/SellerConfig` — Seller details for invoices
+- `entity/InvoiceSequence` — Invoice number sequence
+- `entity/PaymentAudit` — Payment transaction audit
+- `config/*` — Razorpay/Stripe config
 
 ### integration/ — External systems
-- `IntegrationManager` — Routes webhooks, listens for MergeCompleted to fire outbound comments (both PROTOTYPE and PRODUCTION)
+- `IntegrationManager` — Routes webhooks, listens for MergeCompleted to fire outbound (both PROTOTYPE and PRODUCTION)
 - `InboundAdapter/OutboundAdapter` — Adapter interfaces
 - `jira/JiraAdapter` — JIRA inbound webhooks + outbound comments/transitions (null-review safe)
 - `confluence/ConfluenceAdapter` — Confluence inbound webhooks + outbound child pages (null-review safe)
 - `slack/SlackNotificationService` — Slack Block Kit messages
 - `servicenow/ServiceNowAdapter` — ServiceNow integration
 - `pagerduty/PagerDutyAdapter` — PagerDuty integration
+- `github/GitHubRepoService` — GitHub API: `createRepo()`, `pushFiles()`, `getDefaultBranch()`, `createPullRequest()`
+- `IntegrationEventLog` — Deduplication entity
 
 ### tool/ — Worker tools
-- `ShellTool` — Shell command execution
-- `GitTool` — Git operations. `pushToBranch()` creates branch and pushes to remote for existing-repo runs
-- `FileSystemTool` — File read/write/search
+- `ShellTool` — Shell command execution (3-layer sandbox, 300s timeout)
+- `GitTool` — Git operations. `pushToBranch()` creates branch and pushes for existing-repo runs
+- `FileSystemTool` — File read/write/search (`safeResolve()` path boundary check)
 - `ToolRegistry` — Available tool registration
 - `ToolResult` — Tool execution result
 
 ### context/ — External data enrichment
-- `ContextAgent` — Extracts JIRA/Confluence context
+- `ContextAgent` — Extracts JIRA/Confluence context (LIGHTWEIGHT tier)
 - `ContextAgentScanner` — Scans for context keywords
 
 ### optimiser/ — Prompt optimization
-- `PromptOptimiserAgent` — Improves prompts from feedback
-- `PromptOptimiserProperties` — Config (CAPABLE tier)
+- `PromptOptimiserAgent` — Improves prompts from feedback (WORKHORSE tier)
+- `PromptOptimiserProperties` — Config
 
 ### config/ — App configuration
 - `ModelConstants` — Model name constants
-- `ModelPricingInitializer` — Loads model pricing
-- `RoutingProperties` — Provider weights (4:3:3)
+- `ModelPricingInitializer` — Loads model pricing on startup
+- `RoutingProperties` — Provider weights
 - `AgentProperties` — Agent timeouts/prompts config
 - `ObservabilityConfig` — OTel exporter setup
-- `CustomMetricsConfig` — Micrometer meters
+- `CustomMetricsConfig` — Micrometer meters (30+ gauges/timers)
 - `WebConfig` — CORS & HTTP config
 - `SpaFallbackController` — SPA index.html fallback
+- `SecurityProperties` — Configurable CSP, HSTS, X-Frame-Options per environment
+- `RedisListenerConfig` — Redis pub/sub listener setup (feature flag invalidation)
+
+### config/featureflag/ — Feature flags
+- `FeatureFlag` — JPA entity (flagKey, flagValue, valueType, scope)
+- `FeatureFlagService` — DB-backed flags with Redis pub/sub cache invalidation + 60s scheduled reload
+- `FeatureFlagController` — Admin CRUD endpoints (SUPER_ADMIN)
+- `FeatureFlagRepository` — JPA repository
+
+### ratelimit/ — Rate limiting
+- `RateLimitFilter` — Redis-backed per-tenant rate limiting
+- `RateLimitPolicy` — Rate limit policy definitions
+- `RateLimitProperties` — Config
+
+### security/ — Input security
+- `InputSanitizer` — Content-level sanitization for run submissions
+- `CodeAbuseScanner` — Scans for prompt injection and malicious patterns
+
+### eval/ — Model evaluation
+- `EvalController` — REST: trigger evaluations
+- `ModelEvaluator` — Runs evaluation test cases against models
+- `EvalScorer` — Scores evaluation results
+- `EvalTestCase` — Single evaluation test case
+- `EvalTestCaseRegistry` — Registry of test cases
+- `EvalReport` — Evaluation report
+- `EvalResult` — Individual evaluation result
 
 ### api/ — REST controllers
-- `controller/RunController` — Run lifecycle CRUD
-- `controller/AuthController` — Auth endpoints
+- `controller/RunController` — Run lifecycle CRUD + archive
+- `controller/AuthController` — Auth endpoints (login/register/OAuth2/password-reset)
 - `controller/OrgController` — Org management
 - `controller/BillingController` — Billing endpoints
 - `controller/AdminController` — Super-admin endpoints
+- `controller/AdminAnalyticsController` — Admin analytics dashboard
+- `controller/ModelController` — Model matrix + provider tags
+- `controller/PreviewController` — Preview lifecycle
+- `controller/RunConversationController` — Chat copilot endpoints
 - `RunMapper` — Entity→DTO mapping
 - `dto/*` — Request/response DTOs
 
@@ -206,9 +297,6 @@
 - `TenantContext` — ThreadLocal org/user context
 - `TenantFilter` — HTTP filter for tenant
 - `TenantInterceptor` — MVC interceptor
-
-### repo/ — GitHub
-- `GitHubRepoService` — GitHub API: `createRepo()`, `pushFiles()`, `getDefaultBranch()`, `createPullRequest()`
 
 ### pricing/
 - `ModelPricing` — Per-model pricing entity
@@ -222,55 +310,154 @@
 
 ### pages/
 - `DashboardPage` — Org dashboard with metrics
-- `RunsPage` — Run list & filters
-- `BillingPage` — Subscription management
+- `RunsPage` — Run list & filters (paginated)
+- `BillingPage` — Subscription management (Razorpay + Stripe)
 - `SettingsPage` — User settings
 - `DeploymentsPage` — Active deployments
 - `IntegrationsPage` — JIRA/Confluence/Slack config
 - `SharedReportPage` — Public report view (no auth)
-- `admin/AdminPage` — Super-admin panel
+- `PricingPage` — Public pricing display
+- `PlansPage` — Plan comparison
+- `InvoicesPage` — Invoice history
+- `AccountingPage` — Accounting entries
+- `AuditPage` — Audit trail
+- `PrivacyPage` — Privacy policy
+- `TermsPage` — Terms of service
+- `DpaPage` — Data processing agreement
+
+### pages/admin/
+- `AdminPage` — Super-admin panel
+- `OrgAdminDashboard` — Org admin dashboard
+- `FeatureFlagsPage` — Feature flag management
+- `PricingManager` — Plan pricing CRUD
+- `GrantRunsModal` — Grant run credits to orgs
+- `AdminInviteModal` — Invite admin users
+
+### pages/auth/
+- `LoginPage` — Email/password login
+- `RegisterPage` — Self-registration
+- `AcceptInvitePage` — Accept org invitation
+- `ForgotPasswordPage` — Password reset request
+- `ResetPasswordPage` — Set new password
+- `VerifyEmailPage` — Email verification
+- `AuthCallbackPage` — OAuth2 callback handler (Google/GitHub)
+
+### pages/org/
+- `OrgProjectsPage` — Org project list
+- `OrgSettingsPage` — Org settings & members
 
 ### components/runs/
-- `RunDetail` — Main run view (gates, tasks, review, report, cost)
+- `RunDetail` — Main run view (gates, tasks, review, report, cost, vibe toggle)
 - `RunCard` — Run summary card
 - `RunList` — Paginated run list
-- `NewRunModal` — Create run form
+- `NewRunModal` — Create run form (execution mode, AI provider selection)
 - `TaskCard` — Task status card
-- `TaskGraph` — Task dependency DAG (accepts optional `nodes` prop for subgraph rendering, Kahn's algorithm for level recomputation)
-- `RunDetailTabs` — Tabbed detail view. Overview: PR link, per-copilot token breakdown. Graph: `TaskGraphGroups` with copilot/review splitting
-- `RunTimeline` — Pipeline status bar (maps COMPILING, MERGING, AWAITING_MERGE statuses)
-- `RunConversation` — Chat copilot
-- `PreviewTab` — Cloud Run preview + countdown
-- `ValidationReportPanel` — Validation report display
-- `TestReportPanel` — Test results
-- `LiveLog` — Real-time log stream
+- `TaskGraph` — Task dependency DAG (Kahn's algorithm for level recomputation, accepts `nodes` prop for subgraph)
+- `TaskGraphGroups` — Groups nodes by source prefix (`_cop{N}_`, `_rev{N}_`) for copilot/review splitting
+- `RunDetailTabs` — Tabbed detail view. Overview: PR link, per-copilot token breakdown. Graph: grouped DAGs
+- `RunTimeline` — Pipeline status bar (maps COMPILING, MERGING, AWAITING_MERGE)
+- `RunConversation` — Chat copilot interface
+- `PreviewTab` — Cloud Run/Docker preview + countdown
+- `ValidationReportPanel` — Collapsible validation report
+- `TestReportPanel` — Test results visualization
+- `TestProgressTracker` — Test gen/exec progress display
+- `LiveLog` — Real-time SSE log stream (SCREAMING_SNAKE_CASE event types)
+- `VibeRunSubmit` — Simplified run submission (vibe mode)
+- `VibeRunSummary` — Vibe mode run summary
+- `VibeProgressNarrative` — Mission Control narrative generation
+- `FirstRunSuggestions` — Onboarding suggestions
+- `TechBadges` — Technology detection badges
+- `ProviderModelSelector` — Dynamic AI provider/model picker
 
 ### components/billing/
 - `PlanCard` — Subscription plan display
-- `RazorpayCheckout` — Payment modal
+- `RazorpayCheckout` — Razorpay payment modal
+- `RazorpayOrderCheckout` — Razorpay order checkout
 - `UpgradeNudge` — Tier upgrade prompt
+- `DisclaimerModal` — Payment disclaimer
+- `BillingProfileForm` — Billing profile (name, address, GST)
+- `UsageBadge` — Usage indicator
+- `PricingTable` — Pricing comparison (with model role display)
+- `FeasibilityEstimator` — Run cost estimation
 
 ### components/dashboard/
 - `MetricCard` — Generic metric card
 - `AgentCommGraph` — Agent execution timeline
 - `TokenBubbleChart` — Token usage visualization
+- `ModelComparisonChart` — Provider/model comparison
+- `UserRunsChart` — User run history
+- `ActivityFeed` — Recent activity stream
+- `DateRangeFilter` — Date range picker
+
+### components/layout/
+- `AppLayout` — Main app layout
+- `Header` — Top navigation
+- `Sidebar` — Side navigation
+- `CommandPalette` — Cmd+K command palette
+
+### components/deploy/
+- `DeploymentCard` — Deployment status card
+- `DeployModal` — Simple deploy dialog
+- `DeployWizardModal` — Multi-step deployment wizard
+
+### components/files/
+- `FileViewer` — Code file viewer (Monaco)
+- `FileTree` — File tree browser
+
+### components/shared/
+- `Toast` — Notification toasts
+- `SkeletonLoader` — Loading placeholders
+- `EmptyState` — Empty state display
+- `StatusBadge` — Status indicator
+- `MarkdownContent` — Markdown renderer
+- `GlassPanel` — Frosted glass UI panel
+- `GlowDot` — Animated status indicator
+- `ViewModeToggle` — Vibe/standard view switch
+- `AnimatedCounter` — Number animation
+- `LockedFeature` — Tier-gated feature indicator
+- `UpgradeModal` — Upgrade prompt dialog
+
+### components/auth/
+- `ProtectedRoute` — Auth-required route wrapper
+- `RoleGuard` — Role-based access guard
+- `ProjectSelector` — Project context picker
+- `UserMenu` — User dropdown menu
+- `ChangePasswordModal` — Password change form
+- `TierBadge` — Subscription tier badge
+- `QuotaUsageBar` — Quota usage progress bar
+
+### components/integrations/
+- `IntegrationCard` — Integration status card
+- `IntegrationLogo` — Integration icon/logo
 
 ### lib/
-- `api.ts` — REST API client (all endpoints)
-- `billing-api.ts` — Billing API helpers
-- `utils.ts` — Formatting/parsing utilities
+- `api.ts` — REST API client (~1560 lines, all endpoints)
+- `billing-api.ts` — Billing API helpers (Razorpay + Stripe)
+- `invoice-api.ts` — Invoice endpoints
+- `utils.ts` — Formatting (USD, percentages, dates, status colors)
 - `constants.ts` — App constants
+- `techDetect.ts` — Language/framework detection
+- `telemetry.ts` — OpenTelemetry client initialization
+- `vibeNarrative.ts` — Mission Control narrative generation
+- `monacoSetup.ts` — Monaco editor setup
+- `monacoGeistTheme.ts` — Monaco Geist theme
 
 ### hooks/
-- `useSse.ts` — SSE connection hook
-- `useApi.ts` — HTTP request hook
+- `useSse.ts` — SSE connection hook (all event types)
+- `useApi.ts` — HTTP request hook with loading/error states
 - `useTierPermissions.ts` — Tier feature check
+- `useViewMode.ts` — Vibe View toggle state
+- `useKeyboardShortcuts.ts` — Global hotkey bindings
+- `useKeyboardScroll.ts` — Keyboard scroll navigation
+- `useIsMobile.ts` — Mobile detection
 
-### stores/
-- `useAuthStore.ts` — Auth state (user/org/jwt)
-- `useRunStore.ts` — Run state
-- `useUiStore.ts` — UI state
+### stores/ (Zustand)
+- `useAuthStore.ts` — Auth state (user, org, JWT)
+- `useRunStore.ts` — Active run state
+- `useUiStore.ts` — UI flags (modals, panels)
+- `useSseStore.ts` — SSE event buffering
+- `useMetricsStore.ts` — Dashboard metrics cache
 
 ---
 
-**Total: ~462 Java classes, ~100 frontend files**
+**Total: ~513 Java classes, ~130+ frontend files**

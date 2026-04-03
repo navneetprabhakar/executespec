@@ -1,22 +1,25 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-02
+> Last updated: 2026-04-03
 
 ## Architecture
 
 - **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.0
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
-- **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination
+- **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Multi-agent pipeline:** PipelineHarness → PlannerAgent (Opus) → Plan Gate → SequentialTaskExecutor (Sonnet per task) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
+- **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → SequentialTaskExecutor (parallel tiers) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
-- **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). YAML-configured model matrix maps `AgentTier × Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING (Opus-class), WORKHORSE (Sonnet-class), LIGHTWEIGHT (Haiku-class).
+- **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). Default provider: OpenAI. YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
 - **Progressive merge:** Each task merged to main immediately after completion (validation deferred to review phase)
-- **Auth:** JWT (access 24h, refresh 7d), RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles
+- **Auth:** JWT (access 24h, refresh 7d) + OAuth2 (Google, GitHub). RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles. Force-logout via feature flag epoch-based JWT invalidation.
 - **Tiers:** FREE (5 runs/month) → PRO (100/month) → ENTERPRISE (unlimited)
-- **Billing:** Razorpay integration for subscriptions + run top-up credits
+- **Billing:** Multi-gateway via `PaymentGatewayRouter` (Razorpay + Stripe). Subscriptions, run top-up credits, invoicing with GST, payment audit trail.
+- **Security:** 8-layer defense-in-depth: request validation, input sanitization (`InputSanitizer`), LLM prompt defense, code abuse scanning (`CodeAbuseScanner`), shell sandbox, file sandbox, process isolation, container hardening. Configurable CSP/HSTS/X-Frame-Options via `SecurityProperties`.
+- **Feature flags:** DB-backed `FeatureFlagService` with Redis pub/sub cache invalidation + 60s scheduled reload. Admin-manageable via `FeatureFlagController`.
+- **Rate limiting:** Redis-backed per-tenant rate limiting via `RateLimitFilter`.
 - **Observability:** Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP)
 
 ## Code Conventions
@@ -29,7 +32,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V52)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V55)
 
 ## Patterns: MUST Follow
 
@@ -42,6 +45,8 @@
 - Sliding window for LLM context: first 2 + last 18 messages
 - Token cost control: `readFile` 8k chars, `shell` 6k chars, `diff` 5k chars truncation limits
 - `JAVA_HOME=/opt/homebrew/opt/openjdk@21` must be set before any Maven command (shell sessions may not inherit it)
+- Payment webhook signatures verified before processing (Razorpay HMAC, Stripe `Stripe-Signature`)
+- Feature flags checked via `FeatureFlagService.isEnabled()` — never hardcode toggles
 
 ## Patterns: MUST NOT Use
 
@@ -81,19 +86,35 @@ cd observability && docker compose up -d
 
 ```bash
 # Required
+OPENAI_API_KEY=          # OpenAI API key (default provider)
 ANTHROPIC_API_KEY=       # Claude API key
-OPENAI_API_KEY=          # OpenAI API key
 
-# Optional
+# Optional — LLM
 GOOGLE_API_KEY=          # Gemini API key (for LLM fallback chain)
+
+# Optional — Integrations
 GITHUB_PAT=              # GitHub Personal Access Token
-REDIS_HOST=              # Default: localhost
 SLACK_CLIENT_ID=         # Slack app credentials
 SLACK_CLIENT_SECRET=
 SLACK_SIGNING_SECRET=
 DASHBOARD_URL=           # Frontend URL for Slack links
 
-# Observability
+# Optional — OAuth2
+GOOGLE_OAUTH_CLIENT_ID=      # Google OAuth2 login
+GOOGLE_OAUTH_CLIENT_SECRET=
+GITHUB_OAUTH_CLIENT_ID=      # GitHub OAuth2 login
+GITHUB_OAUTH_CLIENT_SECRET=
+
+# Optional — Billing
+RAZORPAY_KEY_ID=         # Razorpay payment gateway
+RAZORPAY_KEY_SECRET=
+STRIPE_SECRET_KEY=       # Stripe payment gateway
+STRIPE_WEBHOOK_SECRET=
+
+# Optional — Infrastructure
+REDIS_HOST=              # Default: localhost
+
+# Optional — Observability
 OTEL_SAMPLING_PROBABILITY=1.0    # Trace sampling (1.0 = 100%)
 OTEL_METRICS_ENABLED=false       # OTLP metrics export
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
@@ -105,39 +126,70 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/runs` | Submit run (202) |
-| GET | `/api/runs` | List runs (filtered by visibility + tier) |
-| GET | `/api/runs/{id}` | Run detail |
-| POST | `/api/runs/{id}/approve` | Plan gate |
+| GET | `/api/runs` | List runs (paginated, filtered by visibility + tier) |
+| GET | `/api/runs/{id}` | Run detail (includes `githubPrUrl`) |
+| POST | `/api/runs/{id}/approve` | Plan gate approval |
 | POST | `/api/runs/{id}/merge` | Merge gate (legacy — merge is now automatic) |
 | DELETE | `/api/runs/{id}` | Cancel/delete run |
+| POST | `/api/runs/{id}/archive` | Archive run |
 | POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
 | GET | `/api/runs/{id}/events` | SSE event stream |
 
 ### Validation Report
+| Method | Path | Description |
+|--------|------|-------------|
 | GET | `/api/runs/{id}/report` | Get validation report |
 | GET | `/api/runs/{id}/report/pdf` | Download report as PDF |
 | POST | `/api/runs/{id}/report/share` | Generate share link |
 | GET | `/api/reports/shared/{token}` | Public shared report (no auth) |
 
 ### Preview & Deploy
-| POST | `/api/runs/{id}/preview/start` | Start Cloud Run preview |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker) |
 | DELETE | `/api/runs/{id}/preview/stop` | Stop preview |
 | POST | `/api/runs/{id}/deploy` | Deploy to Cloud Run (permanent) |
-| POST | `/api/runs/{id}/push-github` | Push to GitHub |
+| POST | `/api/runs/{id}/push-github` | Push to GitHub (creates branch + PR) |
 
 ### Auth & Org
+| Method | Path | Description |
+|--------|------|-------------|
 | POST | `/api/auth/register` | Self-register |
 | POST | `/api/auth/login` | Login → JWT |
+| POST | `/api/auth/refresh` | Refresh JWT token |
+| DELETE | `/api/auth/logout` | Logout (clears refresh cookie) |
+| POST | `/api/auth/forgot-password` | Request password reset email |
+| POST | `/api/auth/reset-password` | Reset password with token |
+| GET | `/api/auth/verify-email` | Verify email link |
 | GET | `/api/auth/me/permissions` | Tier-based permissions |
+| GET | `/api/auth/oauth2/authorize` | OAuth2 authorization redirect |
+| GET | `/api/auth/oauth2/callback/{provider}` | OAuth2 callback (Google/GitHub) |
 | POST | `/api/org` | Create org |
 | POST | `/api/org/invite` | Invite user |
 
-### Billing
+### Billing & Payments
+| Method | Path | Description |
+|--------|------|-------------|
 | GET | `/api/billing/plans` | List billing plans |
-| POST | `/api/billing/subscribe` | Initiate Razorpay subscription |
+| POST | `/api/billing/subscribe` | Initiate subscription (routed to Razorpay or Stripe) |
 | POST | `/api/billing/topup/purchase` | Buy run top-up credits |
+| GET | `/api/billing/payment-history` | Org-scoped payment history |
+| POST | `/api/webhooks/razorpay` | Razorpay webhook (HMAC verified, no auth) |
+| POST | `/api/webhooks/stripe` | Stripe webhook (Stripe-Signature verified, no auth) |
 
-Full API reference: see memory file `api-endpoints.md`
+### Models & Feature Flags
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/models/available` | Model matrix + provider tags |
+| GET | `/api/feature-flags` | List all feature flags (SUPER_ADMIN) |
+| POST | `/api/feature-flags/{key}` | Update feature flag (SUPER_ADMIN) |
+
+### Admin
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/admin/payment-audit` | Payment audit log (paginated, SUPER_ADMIN) |
+| GET | `/api/admin/payment-audit/export` | Export audit as CSV (SUPER_ADMIN) |
+| GET | `/api/admin/webhook-events` | Webhook event log (filterable, SUPER_ADMIN) |
 
 ## Key File Locations
 
@@ -145,9 +197,12 @@ Full API reference: see memory file `api-endpoints.md`
 |---------|------|
 | Pipeline orchestrator | `harness/PipelineHarness.java` |
 | Sequential task executor | `harness/SequentialTaskExecutor.java` |
+| Run cost budget | `harness/RunCostBudgetService.java` |
 | Worker agent | `agent/WorkerAgent.java` |
 | LLM router (multi-provider) | `agent/LlmRouter.java` |
 | Model resolver (matrix-based) | `router/ModelResolver.java` |
+| Model matrix config | `router/ModelMatrixProperties.java` |
+| Provider circuit breaker | `router/ProviderHealthTracker.java` (Redis-backed) |
 | State store | `state/StateStore.java` |
 | Code validator | `validator/CodeValidatorImpl.java` |
 | Compiler agent | `compiler/CompilerAgent.java` |
@@ -164,117 +219,87 @@ Full API reference: see memory file `api-endpoints.md`
 | Cloud Run client | `deployment/CloudRunClient.java` |
 | Artifact Registry | `deployment/ArtifactRegistryClient.java` |
 | Deployment service | `deployment/DeploymentService.java` |
-| Tier permissions | `auth/service/TierPermissionService.java` |
-| Billing service | `billing/service/BillingService.java` |
-| Slack integration | `integration/slack/SlackNotificationService.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V52) |
-| LLM prompts | `resources/prompts/*.txt` |
-| App config | `resources/application.yml` |
-| Frontend entry | `frontend/src/main.tsx` |
-| Frontend API client | `frontend/src/lib/api.ts` |
-| Observability stack | `observability/docker-compose.yml` |
-| OTel config | `config/ObservabilityConfig.java`, `config/CustomMetricsConfig.java` |
-| Model matrix config | `router/ModelMatrixProperties.java` (agent tiers, provider models, failover order) |
-| Provider circuit breaker | `router/ProviderHealthTracker.java` (Redis-backed, 5-failure threshold, 60s TTL recovery) |
-| Test generation orchestrator | `testgen/TestGenOrchestrator.java` |
-| Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
-| Test execution service | `testgen/TestExecutionService.java` |
-| Test result controller | `testgen/TestResultController.java` (apply-test-fixes) |
 | Dockerfile gen (preview) | `deployment/preview/DevDockerfileGenerator.java` (reads `.agent-context/project.json`) |
 | Dockerfile gen (deploy) | `deployment/DockerfileGenerator.java` (strategy pattern, reads `project.json`) |
+| Security config | `auth/security/SecurityConfig.java` |
+| Security properties | `config/SecurityProperties.java` (CSP, HSTS, X-Frame-Options) |
+| JWT utility | `auth/security/JwtUtil.java` |
+| OAuth2 handler | `auth/oauth/OAuthSuccessHandler.java` |
+| Tier permissions | `auth/service/TierPermissionService.java` |
+| Tier enforcement | `auth/service/TierEnforcementService.java` |
+| Billing service | `billing/service/BillingService.java` |
+| Payment gateway router | `billing/gateway/PaymentGatewayRouter.java` (Razorpay + Stripe) |
+| Stripe gateway | `billing/gateway/StripePaymentGateway.java` |
+| Invoice service | `billing/service/InvoiceService.java` |
+| Payment audit | `billing/service/PaymentAuditService.java` |
+| Analytics service | `billing/service/AnalyticsService.java` |
+| Feature flags | `config/featureflag/FeatureFlagService.java`, `config/featureflag/FeatureFlagController.java` |
+| Rate limiting | `ratelimit/RateLimitFilter.java` |
+| Input sanitizer | `security/InputSanitizer.java` |
+| Code abuse scanner | `security/CodeAbuseScanner.java` |
+| Request triage | `agent/RequestTriageService.java` |
+| Slack integration | `integration/slack/SlackNotificationService.java` |
 | GitHub repo service | `integration/github/GitHubRepoService.java` (branch, PR creation, default branch lookup) |
 | Git tool | `tool/GitTool.java` (workspace git ops, `pushToBranch()` for existing repos) |
 | JIRA adapter | `integration/jira/JiraAdapter.java` (inbound webhook + outbound comments) |
 | Confluence adapter | `integration/confluence/ConfluenceAdapter.java` (inbound webhook + outbound child pages) |
 | Integration manager | `integration/IntegrationManager.java` (routes webhooks, listens for MergeCompleted) |
+| Test generation orchestrator | `testgen/TestGenOrchestrator.java` |
+| Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
+| Test execution service | `testgen/TestExecutionService.java` |
+| Test result controller | `testgen/TestResultController.java` (apply-test-fixes) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V55) |
+| LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
+| App config | `resources/application.yml` |
+| Frontend entry | `frontend/src/main.tsx` |
+| Frontend API client | `frontend/src/lib/api.ts` |
+| Observability stack | `observability/docker-compose.yml` |
+| OTel config | `config/ObservabilityConfig.java`, `config/CustomMetricsConfig.java` |
+| Eval framework | `eval/EvalController.java`, `eval/ModelEvaluator.java` |
 | Infra (Terraform) | `infra/` |
 
 ## Model Matrix
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2, TestPlannerAgent, WorkerAgent (stall escalation) | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, ApiTestSuiteAgent, ConflictResolverAgent, TestWorkerAgent | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, PromptOptimiserAgent, ValidationReportGenerator, TestReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
 
-Provider is user-selected per project. See `application.yml` → `model-matrix:` for full configuration.
+Default provider: OpenAI (user-selected per project). Failover order: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier. See `application.yml` → `model-matrix:` for full configuration.
 
 ## Current State
 
 ### Working
-- Full pipeline: plan → approve → work (sequential, progressive merge) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL) → background validation (review + test gen + test exec + report)
+- Full pipeline: plan → approve → work (tiered parallel, progressive merge) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL) → background validation (review + test gen + test exec + report)
 - User-selected AI provider per project (Anthropic/Google/OpenAI) with YAML model matrix and health-based failover
-- 15-minute wall-clock worker time limit with stall detection and model escalation
-- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 5-min TTL, Caddy proxy)
-- Caddy reverse proxy with Cloudflare Origin Certificate for local/VM preview routing
-- JWT auth with RBAC, org management, project scoping
-- Razorpay billing (subscriptions + run top-up credits)
+- 25-minute wall-clock worker time limit with stall detection and model escalation
+- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 5-min TTL, Caddy proxy with Cloudflare Origin Certificate)
+- JWT auth + OAuth2 (Google, GitHub) with RBAC, org management, project scoping
+- Multi-gateway billing via PaymentGatewayRouter (Razorpay + Stripe): subscriptions, run top-up credits, invoicing with GST
+- Payment audit trail with CSV export + webhook event log (admin)
+- Feature flag system (DB + Redis pub/sub + admin UI) for platform toggles
+- Force-logout via feature flag epoch-based JWT invalidation
+- Redis-backed per-tenant rate limiting
+- 8-layer security: request validation, input sanitization, LLM prompt defense, code abuse scanning, shell sandbox, file sandbox, process isolation, container hardening
+- Configurable security headers (CSP, HSTS, X-Frame-Options) via SecurityProperties
 - JIRA/Confluence inbound webhooks + outbound completion comments (via MergeCompleted event, both PROTOTYPE and PRODUCTION)
 - Slack notifications (Block Kit messages)
 - GitHub branch + PR creation for existing-repo runs (branch `executespec/{runId-short}`, PR opened automatically)
 - Chat copilot + apply suggestion (chat/review improvements on same run)
+- Run archive feature
+- Request triage (single-shot fast path for simple requests)
 - Observability: Micrometer traces + custom metrics (30+ meters) + structured logging
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
-- Metrics wired into services: PipelineHarness, SequentialTaskExecutor, LlmRouter, PreviewService, DeploymentService, StuckRunMonitor, CodeValidatorImpl
-
-### Recent Changes (2026-04-02)
-- **GitHub branch + PR for existing repos:** `PipelineHarness.pushToGitHubIfConfigured()` now creates branch `executespec/{runId-short}`, pushes to it (not main), and opens a PR via `GitHubRepoService.createPullRequest()`. PR URL stored in `PipelineRun.githubPrUrl` and surfaced in `RunDetail` API response and frontend overview tab.
-- **New methods:** `GitHubRepoService.getDefaultBranch()`, `GitHubRepoService.createPullRequest()`, `GitTool.pushToBranch()`.
-- **Integration outbound fix:** `IntegrationManager` now listens to `MergeCompleted` event (was `RunCompleted`). Fixes race condition where review report was null because `RunCompleted` fires before background review saves. Both PROTOTYPE and PRODUCTION modes now publish `MergeCompleted`.
-- **JIRA/Confluence null-safe:** `JiraAdapter.onRunComplete()` and `ConfluenceAdapter.onRunComplete()` handle null review gracefully (PROTOTYPE mode has no review).
-- **Cloud Run preview orphan fix:** `PreviewService` stores `cloudRunServiceName` upfront in initial session (predictable `es-preview-{runIdShort}`). Prevents orphan cleanup job from deleting services mid-deploy.
-- **Pipeline status bar fix:** Added `COMPILING` and `MERGING`/`AWAITING_MERGE` cases to `RunTimeline.mapStatusToPhase()`. Added to SSE refetch trigger list in `useSse.ts`.
-- **Copilot graph splitting:** Task graph tab groups nodes by source prefix (`_cop{N}_`, `_rev{N}_`), rendering separate collapsible graphs per copilot/review run.
-- **Per-copilot token breakdown:** Overview tab shows input/output tokens per copilot run under Live Cost section.
-- **V52 migration:** `ALTER TABLE pipeline_run ADD COLUMN github_pr_url VARCHAR(512);`
-
-### Recent Changes (2026-03-30)
-- **Pipeline restructuring — fast preview:** Run marked COMPLETE immediately after compile+merge. Auto-preview starts (5-min TTL) for both PROTOTYPE and PRODUCTION modes. Review, test gen, test execution, and validation report run in a background virtual thread (`bg-validation-{runId}`). User can chat, submit changes, and use preview while validation runs.
-- **Background validation lifecycle:** `backgroundValidationRuns` ConcurrentHashSet tracks runs with deferred cleanup. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` deferred to background thread's `finally` block.
-- **Single-package full-stack detection:** `DevDockerfileGenerator.detect()` now checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in the same `package.json`. If both present → `FULL_STACK` (not `NODE_BACKEND`). Generates Dockerfile with `npm run dev` (runs concurrently), exposes both 5173 and 3000.
-- **NODE_BACKEND port fix:** Added `ENV PORT=3000` to `nodeBackendDockerfile()`. Generated apps use `process.env.PORT || 3001` — without the env var, apps fell back to 3001 while Docker exposed 3000, causing health check failures.
-- **TestPreviewCoordinator preview reuse:** Checks for existing running preview via `previewService.getStatus(runId)` before starting a new one. Preview not stopped after test execution (stays up for user).
-- **Preview TTL unified at 10 min:** Both docker and cloud-run modes now use 5-min TTL (was 5-min for cloud-run).
-- **Redis pool sized for concurrency:** `max-active: 50` (was 10), `min-idle: 5` (was 2).
-- **V45 migration:** Widened `plan_version` VARCHAR(36) columns to VARCHAR(255) for IDs and VARCHAR(64) for source. Prevents truncation errors on insert.
-
-### Recent Changes (2026-03-28)
-- **Planner-declared project type:** Planner outputs `project_type` field in plan JSON. Written to `.agent-context/project.json`. Preview (`DevDockerfileGenerator`) and deploy (`DockerfileGenerator`) read this before file-based heuristics. Fixes static HTML misdetected as NODE_BACKEND.
-- **Static HTML detection fix:** `DevDockerfileGenerator.detect()` now checks `hasStaticHtml()` before `hasJsOrTsFiles()` fallback — projects with `script.js` no longer misdetected as NODE.
-- **Pipeline sequencing fix:** Preview no longer starts in parallel with test gen. `TestPreviewCoordinator.onTestsReady()` starts preview AFTER tests compile, ensuring full TTL for test execution. `autoStartPreview()` removed from PRODUCTION block in PipelineHarness.
-- **Prompt overhaul (11 files):** Added frontend/static HTML quality rules to worker prompts, DOM consistency checks, cross-file self-review, static HTML checklist in reviewer, language-agnostic test generation, frontend task decomposition rules in planner.
-- **Redis-backed circuit breaker:** `ProviderHealthTracker` rewritten from in-memory to Redis. LlmRouter now checks provider health before each call and records success/failure. 5-failure threshold, 60s TTL auto-recovery.
-- **Per-task validation removed:** `SequentialTaskExecutor` no longer runs `CodeValidator` after each task. Validation deferred to review phase (CompilerAgent + ReviewerAgentV2).
-- **LLM call limits removed:** Per-run LLM call circuit breaker removed from `LlmRouter`. Wall-clock time limit remains as safety net.
-- **Dependency merge fix:** `GitTool.createWorktree()` now throws on dep branch merge failure instead of silently continuing.
-- **Auto-restart disabled:** `autoRetryRunIfEligible()` and `autoRestartIfTransient()` calls removed from `PipelineHarness`.
-- **LiveLog fix:** Event type checks updated from camelCase to SCREAMING_SNAKE_CASE to match backend. Tool-result log noise removed.
-- **VM scaled:** n2-standard-8, JVM heap -Xms8g/-Xmx16g -XX:+UseG1GC
-
-### Recent Changes (2026-03-27)
-- Preview mode: dual-mode support — `cloud-run` for dev/prod (5-min TTL, Artifact Registry + Cloud Run), `docker` for local (5-min TTL, Docker Compose + Caddy)
-- Caddy TLS: switched from broken internal CA to Cloudflare Origin Certificate
-- Apply-to-run: added validation report generation step (was missing from `executeApplySuggestion()`)
-- Pagination: run list API now returns `PagedResponse<RunSummary>` with page/size/totalElements
-- Startup script: Caddy JSON config with dynamic route management via admin API
-- **Reliability fixes (deploy/preview):**
-  - All `gcloud`/`docker` subprocess commands have timeouts (deploy: 10min, delete: 5min, list: 2min)
-  - `deploy()` method fixed for pipe buffer deadlock (stdout/stderr read in parallel)
-  - ACTIVE_PREVIEWS gauge correctly decremented on ALL terminal states (FAILED, TIMED_OUT, STOPPED)
-  - `fail()` now cleans up Cloud Run resources (service + image) on preview failure
-  - `getLogs()` works for Cloud Run (fetches via `gcloud logging read`)
-  - `probeApiDocs()` works for both Docker (localhost:port) and Cloud Run (service URL)
-  - Virtual threads in PreviewService and DeploymentService wrapped with `ContextSnapshotFactory` for trace propagation
-  - `healthCheck()` HTTP client has connect timeout (10s) and per-request timeout (15s)
-  - `pushImage()` in ArtifactRegistryClient has 10-min timeout
+- Model evaluation framework (`eval/` package)
 
 ### In Progress
 - Production deployment preparation
 
 ### Known Tech Debt
-- **Model matrix mismatch:** WORKHORSE tier for Anthropic is `claude-sonnet-4-6` (should be Haiku for cost/speed). All worker tasks run on Sonnet, making runs slow and expensive.
-- **test-worker.txt OUTPUT RULES:** Lines 41-45 still hardcode "Output ONLY the Java source code" and mention RestAssured/JUnit 5, contradicting the new language-agnostic framework section added above.
+- **Model matrix cost:** WORKHORSE tier for Anthropic is `claude-haiku-4-5-20251001` — consider whether Sonnet should be used for complex tasks
+- **test-worker.txt OUTPUT RULES:** Lines 41-45 still hardcode "Output ONLY the Java source code" and mention RestAssured/JUnit 5, contradicting the language-agnostic framework section
 - V3 migration type mismatch: `actual_cost_usd` must be `DOUBLE PRECISION` (not `DECIMAL(10,6)`)
 - Branch retry: `GitTool.createBranch()` catches RefAlreadyExistsException → checkout fallback
 - Gate lost on restart: approve() → if gate missing → auto-fail with message
@@ -282,5 +307,5 @@ Provider is user-selected per project. See `application.yml` → `model-matrix:`
 - ReviewerAgent V1 class still wired as @Service bean but unused in pipeline (blocks deletion of reviewer.txt prompt)
 - Apply-to-run: `plan_version` duplicate key error on retry (incrementPlanVersion may not be working correctly)
 - `@Lazy @Autowired` on `PreviewService` in `TestPreviewCoordinator` — only field injection in codebase, needed to break circular dependency
-- `doReviewAndMerge()` (resume/retry paths, lines ~1085-1154) NOT updated for background validation pattern — still runs synchronous review+test flow
+- `doReviewAndMerge()` (resume/retry paths) NOT updated for background validation pattern — still runs synchronous review+test flow
 - Background validation: no retry/recovery if background thread fails silently (fire-and-forget)

@@ -1,8 +1,8 @@
 # User Onboarding, Org Management, Tiers & RBAC — Requirements Document
 
 **Project:** executespec
-**Date:** 2026-03-03
-**Status:** Draft v2.0 (major revision — multi-org, project-scoped runs)
+**Date:** 2026-04-03
+**Status:** Draft v2.1 (OAuth2, admin features, project-scoped roles, force logout)
 **Author:** Navneet Prabhakar
 
 ---
@@ -30,40 +30,43 @@
 ## 1. Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────┐
-│  SUPER ADMIN  (admin@executespec.ai)            │
-│  • Manages all orgs, approves cross-domain      │
-│    invitations, handles escalations             │
-└─────────────────────────────────────────────────┘
-          │ creates / manages
-          ▼
-┌──────────────────────────────────────────────┐
-│  ORGANIZATION   (e.g. Acme Corp)            │
-│  • Domain pattern: @acme.com                │
-│  • Plan: PRO or ENTERPRISE (org-level)      │
-│  • Shared run quota across all members      │
-│  ┌──────────────┐   ┌──────────────────┐   │
-│  │  Project A   │   │    Project B     │   │
-│  │  (members)   │   │    (members)     │   │
-│  └──────────────┘   └──────────────────┘   │
-└──────────────────────────────────────────────┘
-          │ invited by Org Admin
-          ▼
-┌───────────────────────────────────────────┐
-│  ORG USERS                               │
-│  • Role: ORG_ADMIN / DEVELOPER /         │
-│          BILLING_ADMIN                   │
-│  • See only runs in their projects       │
-│  • Consume from org's shared quota       │
-└───────────────────────────────────────────┘
++---------------------------------------------------+
+|  SUPER ADMIN  (admin@executespec.ai)              |
+|  * Manages all orgs, approves cross-domain        |
+|    invitations, handles escalations               |
+|  * Feature flags, pricing, grant runs             |
++---------------------------------------------------+
+          | creates / manages
+          v
++----------------------------------------------+
+|  ORGANIZATION   (e.g. Acme Corp)            |
+|  * Domain pattern: @acme.com                |
+|  * Plan: PRO or ENTERPRISE (org-level)      |
+|  * Shared run quota across all members      |
+|  +------------------+  +-----------------+  |
+|  |  Project A       |  |   Project B     |  |
+|  |  PROJECT_ADMIN   |  |  PROJECT_ADMIN  |  |
+|  |  PROJECT_DEVELOPER|  | PROJECT_DEVELOPER| |
+|  +------------------+  +-----------------+  |
++----------------------------------------------+
+          | invited by Org Admin
+          v
++-------------------------------------------+
+|  ORG USERS                               |
+|  * Role: ORG_ADMIN / DEVELOPER /         |
+|          BILLING_ADMIN                   |
+|  * See only runs in their projects       |
+|  * Consume from org's shared quota       |
++-------------------------------------------+
 
-┌───────────────────────────────────────────┐
-│  FREE USERS  (standalone, no org)        │
-│  • Self-registered after email verify   │
-│  • Own personal quota (10 runs/month)   │
-│  • See only their own runs              │
-│  • Can later be invited into an org     │
-└───────────────────────────────────────────┘
++-------------------------------------------+
+|  FREE USERS  (standalone, no org)        |
+|  * Self-registered (email/password or    |
+|    OAuth2: Google / GitHub)              |
+|  * Own personal quota (10 runs/month)    |
+|  * See only their own runs              |
+|  * Can later be invited into an org     |
++-------------------------------------------+
 ```
 
 **Key principles:**
@@ -71,6 +74,7 @@
 - Run visibility = **Project-scoped** within orgs. Free users see only their own runs.
 - Org creation = available to any **PRO or ENTERPRISE user** (they become Org Admin).
 - Cross-domain invitations are **escalated to Super Admin** for manual approval.
+- OAuth2 login (Google, GitHub) supported alongside email/password registration.
 
 ---
 
@@ -78,22 +82,23 @@
 
 ```
 super_admin (1)
-  └─ org (0..*)
-       ├─ org_member (user × role, 1..*)
-       └─ project (1..*)
-            ├─ project_member (user × role, 0..*)
-            └─ pipeline_run (0..*)
-                  └─ agent_task, agent_message, ...
+  +-- org (0..*)
+       +-- org_member (user x role, 1..*)
+       +-- project (1..*)
+            +-- project_member (user x role, 0..*)
+            |     roles: PROJECT_ADMIN | PROJECT_DEVELOPER
+            +-- pipeline_run (0..*)
+                  +-- agent_task, agent_message, ...
 
 free_user (standalone, no org)
-  └─ pipeline_run (personal, no org/project)
+  +-- pipeline_run (personal, no org/project)
 ```
 
 ---
 
 ## 3. User Onboarding
 
-### 3.1 Free Tier Self-Registration
+### 3.1 Free Tier Self-Registration (Email/Password)
 
 Anyone can create a FREE account directly.
 
@@ -101,12 +106,12 @@ Anyone can create a FREE account directly.
 1. Visit /register
 2. Fill in: first name, last name, email, password (+ confirm)
 3. POST /api/auth/register
-   → Create app_user (status = PENDING_VERIFICATION, tier = FREE, org_id = null)
-   → Send verification email from admin@executespec.ai
-4. UI: "Check your inbox — verification link sent to <email>"
-5. Click link → GET /api/auth/verify-email?token=<uuid>
-   → Token valid (24h TTL) → user status = ACTIVE
-   → Auto-login → redirect to /
+   -> Create app_user (status = PENDING_VERIFICATION, tier = FREE, org_id = null)
+   -> Send verification email from admin@executespec.ai
+4. UI: "Check your inbox -- verification link sent to <email>"
+5. Click link -> GET /api/auth/verify-email?token=<uuid>
+   -> Token valid (24h TTL) -> user status = ACTIVE
+   -> Auto-login -> redirect to /
 ```
 
 **Password Rules:**
@@ -118,53 +123,102 @@ Anyone can create a FREE account directly.
 - Cannot log in until email is verified
 - PENDING_VERIFICATION accounts > 7 days eligible for cleanup
 
-### 3.2 Org-Invited User Onboarding
+### 3.2 OAuth2 Registration & Login (Google + GitHub)
+
+Users can register or log in via Google or GitHub OAuth2.
+
+```
+1. Visit /login -> click "Continue with Google" or "Continue with GitHub"
+2. Redirect to provider's OAuth2 consent screen
+3. On success, provider redirects to /api/auth/oauth2/callback/{provider}
+4. OAuthSuccessHandler processes the callback:
+   a. Extract email + profile from OAuth2 user info
+   b. Lookup app_user by email:
+      - If user exists with SAME provider -> login (issue JWT)
+      - If user exists with DIFFERENT provider -> throw OAuthEmailConflictException
+        -> Redirect to /login?error=email-conflict
+        -> UI shows: "This email is already registered with {existingProvider}. Please log in with {existingProvider} instead."
+      - If no user exists -> create app_user:
+        -> status = ACTIVE (no email verification needed -- provider verified)
+        -> tier = FREE, org_id = null
+        -> password_hash = null (OAuth-only account)
+        -> oauth_provider = GOOGLE | GITHUB
+        -> oauth_provider_id = provider's unique user ID
+   c. Issue JWT access token + refresh token
+   d. Redirect to /auth/callback?token=<accessToken>
+5. AuthCallbackPage.tsx reads token from URL, stores in auth store, redirects to /
+```
+
+**Business Rules:**
+- OAuth accounts have no password; password reset/change is disabled for these accounts
+- `OAuthEmailConflictException` prevents account hijacking (email registered with provider A cannot be claimed by provider B)
+- OAuth provider ID stored for idempotent account linking
+- If an OAuth user is later invited to an org, they accept the invite normally (no re-registration)
+
+**Key files:**
+- `auth/security/OAuthSuccessHandler.java`
+- `auth/security/OAuthEmailConflictException.java`
+- `auth/security/SecurityConfig.java` (OAuth2 login configuration)
+
+### 3.3 Org-Invited User Onboarding
 
 When an Org Admin invites someone:
 
 ```
 1. Org Admin sends invite: POST /api/org/invite  { email, projectIds[], role }
 2. Server checks email domain against org's domain_patterns
-   a. Domain matches → OrgInvitation (status = PENDING) → send invite email
-   b. Domain doesn't match → OrgInvitation (status = ESCALATED)
-      → notify Super Admin at admin@executespec.ai
-      → Super Admin reviews & approves/rejects via Admin UI
-      → On approval → send invite email to the user
-3. Invited user clicks link → /accept-invite?token=<uuid>
-   a. If existing account found (same email) → link account to org → done
-   b. If no account → show abbreviated register form (email pre-filled, name + password only)
-      → Create account (status = ACTIVE, email_verified = true — skipped, link is proof)
-      → Associate with org + assigned projects
-4. Redirect to / — user is now an org member
+   a. Domain matches -> OrgInvitation (status = PENDING) -> send invite email
+   b. Domain doesn't match -> OrgInvitation (status = ESCALATED)
+      -> notify Super Admin at admin@executespec.ai
+      -> Super Admin reviews & approves/rejects via Admin UI
+      -> On approval -> send invite email to the user
+3. Invited user clicks link -> /accept-invite?token=<uuid>
+   a. If existing account found (same email) -> link account to org -> done
+   b. If no account -> show abbreviated register form (email pre-filled, name + password only)
+      -> Create account (status = ACTIVE, email_verified = true -- skipped, link is proof)
+      -> Associate with org + assigned projects
+4. Redirect to / -- user is now an org member
 ```
 
 **Invitation Expiry:** 7 days. Resend available from Admin UI.
 
-### 3.3 Login Flow
+### 3.4 Login Flow
 
 ```
 POST /api/auth/login { email, password }
-→ Validate credentials + status = ACTIVE
-→ Check must_change_password
-→ Issue JWT access token (15 min) + refresh token cookie (7 days)
-→ JWT payload: { sub: userId, email, globalRole, tier, orgId, orgRole, iat, exp }
+-> Validate credentials + status = ACTIVE
+-> Check must_change_password
+-> Check jwt_epoch (for force logout detection)
+-> Issue JWT access token (24h) + refresh token cookie (7 days)
+-> JWT payload: { sub: userId, email, globalRole, tier, orgId, orgRole, epoch, iat, exp }
 ```
 
-### 3.4 Password Reset
+### 3.5 Password Reset
 
 ```
-/forgot-password → enter email → POST /api/auth/forgot-password
-→ Generate reset token → send email (1h TTL)
-/reset-password?token=<uuid> → enter new password → POST /api/auth/reset-password
-→ Token invalidated → redirect to /login
+/forgot-password -> enter email -> POST /api/auth/forgot-password
+-> Generate reset token -> send email (1h TTL)
+/reset-password?token=<uuid> -> enter new password -> POST /api/auth/reset-password
+-> Token invalidated -> increment jwt_epoch (force logout all sessions) -> redirect to /login
 ```
 
-### 3.5 Forced Password Change (Admin Seeded Accounts)
+### 3.6 Forced Password Change (Admin Seeded Accounts)
 
 When `must_change_password = true` on login:
 - Fullscreen modal blocks all routes until password is changed
 - Current password + new password + confirm required
 - On success: `must_change_password = false`, modal dismissed
+
+### 3.7 Force Logout (JWT Epoch Invalidation)
+
+Mechanism for immediately invalidating all active sessions for a user:
+
+- Each user has a `jwt_epoch` integer column (default 0)
+- JWT tokens include an `epoch` claim matching the user's `jwt_epoch` at issuance
+- `JwtAuthenticationFilter` compares token `epoch` against stored `jwt_epoch`; mismatch rejects the token
+- Triggers: password reset, account compromise, admin action
+- Super Admin can force-logout any user via `PUT /api/admin/users/{id}/force-logout`
+- Global force logout: system-wide epoch counter in Redis, checked on every request (feature-flag gated)
 
 ---
 
@@ -179,13 +233,13 @@ Only a **PRO or ENTERPRISE user** can create an org. A FREE user must upgrade th
    (or visits /org/settings directly)
 2. Fills in:
    - Org name (required)
-   - Email domain(s) (required, e.g. "acme.com" — can add multiple)
+   - Email domain(s) (required, e.g. "acme.com" -- can add multiple)
    - Admin email (required, pre-filled with user's email)
 3. POST /api/org  { name, domains, adminEmail }
-   → Create org record (status = ACTIVE, plan = creator's tier, admin_email set)
-   → Associate creator as ORG_ADMIN
-   → Creator's free-user quota now replaced by org quota
-   → loadMe() refreshes auth state (orgId now populated)
+   -> Create org record (status = ACTIVE, plan = creator's tier, admin_email set)
+   -> Associate creator as ORG_ADMIN
+   -> Creator's free-user quota now replaced by org quota
+   -> loadMe() refreshes auth state (orgId now populated)
 4. Redirect to /org/settings (org dashboard with members, invites, etc.)
 ```
 
@@ -206,7 +260,7 @@ boolean domainMatches = org.getDomainPatterns()
 if (domainMatches) {
     createPendingInvitation(invite);          // normal path
 } else {
-    createEscalatedInvitation(invite);        // → Super Admin review
+    createEscalatedInvitation(invite);        // -> Super Admin review
     notifySuperAdmin(invite, org);
 }
 ```
@@ -214,8 +268,8 @@ if (domainMatches) {
 **Super Admin Escalation Flow:**
 - Email to `admin@executespec.ai`: "Org [Acme Corp] wants to invite [jane@contractor.com] who is outside their registered domains. Approve?"
 - Super Admin clicks Approve / Reject link in email (or uses Admin UI)
-- On Approve → invitation email sent to invitee as normal
-- On Reject → Org Admin notified
+- On Approve -> invitation email sent to invitee as normal
+- On Reject -> Org Admin notified
 
 ### 4.3 Org Settings (managed by Org Admin)
 
@@ -245,13 +299,13 @@ if (domainMatches) {
 | **Workspace storage** | 500 MB | 5 GB | Unlimited |
 | **Active previews** | 1 | 5 | Unlimited |
 | **Priority queue** | Standard | Priority | Dedicated slot |
-| **External integrations** | ❌ | ✅ | ✅ |
-| **Projects** | ❌ (no org) | ✅ | ✅ |
-| **Org creation** | ❌ | ✅ | ✅ |
+| **External integrations** | No | Yes | Yes |
+| **Projects** | No (no org) | Yes | Yes |
+| **Org creation** | No | Yes | Yes |
 | **Custom domain invite** | N/A | Requires Super Admin approval | Requires Super Admin approval |
 | **Support** | Community | Email | Dedicated |
 
-> **⚠️ TBD:** Exact pricing, seat model (per-seat vs flat org), and enterprise custom limits to be confirmed.
+> **TBD:** Exact pricing, seat model (per-seat vs flat org), and enterprise custom limits to be confirmed.
 
 ### 5.2 Quota Ownership
 
@@ -268,24 +322,24 @@ When a free user joins an org:
 
 | Check | Where enforced |
 |---|---|
-| Monthly run count | `TierEnforcementService.assertCanSubmitRun(userId)` — checks user's org (if any) or personal counter |
-| Concurrent runs | Same service — queries active runs for org or user |
-| Model access | `RunController` — validates model against tier's allowed list |
-| Org creation | `OrgController` — rejects if user tier = FREE |
-| Integration access | `IntegrationController` — checks org tier |
+| Monthly run count | `TierEnforcementService.assertCanSubmitRun(userId)` -- checks user's org (if any) or personal counter |
+| Concurrent runs | Same service -- queries active runs for org or user |
+| Model access | `RunController` -- validates model against tier's allowed list |
+| Org creation | `OrgController` -- rejects if user tier = FREE |
+| Integration access | `IntegrationController` -- checks org tier |
 
 ---
 
-## 6. RBAC — Roles & Permissions
+## 6. RBAC -- Roles & Permissions
 
 ### 6.1 Role Taxonomy
 
-Roles operate at two levels: **global** (system-wide) and **org-scoped**.
+Roles operate at three levels: **global** (system-wide), **org-scoped**, and **project-scoped**.
 
 **Global Roles** (stored on `app_user.global_role`):
 | Role | Who | Scope |
 |---|---|---|
-| `SUPER_ADMIN` | admin@executespec.ai only | Full system — all orgs, all users, all runs |
+| `SUPER_ADMIN` | admin@executespec.ai only | Full system -- all orgs, all users, all runs |
 | `USER` | All other registered users | Own data + org/project scoped data |
 
 **Org Roles** (stored on `org_member.org_role`):
@@ -295,36 +349,48 @@ Roles operate at two levels: **global** (system-wide) and **org-scoped**.
 | `DEVELOPER` | Standard org member | Submit runs, approve/merge within assigned projects |
 | `BILLING_ADMIN` | Finance/ops member | View costs, change org plan, manage invoices |
 
-> A user can only belong to **one org** at a time (v1). Their effective permissions = global role + org role.
+**Project Roles** (stored on `project_member.project_role`):
+| Role | Who | Scope |
+|---|---|---|
+| `PROJECT_ADMIN` | Designated project leads | Add/remove project members; inherits DEVELOPER permissions within the project |
+| `PROJECT_DEVELOPER` | Standard project member | Submit, approve, merge runs within this project |
+
+> A user can only belong to **one org** at a time (v1). Their effective permissions = global role + org role + project role(s).
+> Org Admins implicitly have PROJECT_ADMIN on all projects in their org.
 
 ### 6.2 Permission Matrix
 
-| Action | SUPER_ADMIN | ORG_ADMIN | DEVELOPER | BILLING_ADMIN | FREE User |
-|---|---|---|---|---|---|
-| **Runs** | | | | | |
-| Submit run | ✅ | ✅ (own org projects) | ✅ (assigned projects) | ❌ | ✅ (own only) |
-| View run | ✅ | ✅ (org runs) | ✅ (assigned projects only) | ✅ (list + cost) | ✅ (own only) |
-| Approve plan | ✅ | ✅ | ✅ | ❌ | ✅ (own only) |
-| Trigger merge | ✅ | ✅ | ✅ | ❌ | ✅ (own only) |
-| Cancel/delete run | ✅ | ✅ | ✅ (own runs) | ❌ | ✅ (own only) |
-| **Org Management** | | | | | |
-| Create org | ✅ | ✅ (already have one) | ❌ | ❌ | ❌ |
-| Invite member | ✅ | ✅ (domain-match only; else → escalate) | ❌ | ❌ | ❌ |
-| Approve cross-domain invite | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Remove member | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Change member org role | ✅ | ✅ | ❌ | ❌ | ❌ |
-| **Projects** | | | | | |
-| Create project | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Add member to project | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Archive project | ✅ | ✅ | ❌ | ❌ | ❌ |
-| **Billing / Pricing** | | | | | |
-| View org cost/usage | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Change org plan/tier | ✅ | ❌ | ❌ | ✅ | ❌ |
-| Edit model pricing | ✅ | ❌ | ❌ | ✅ | ❌ |
-| **Admin** | | | | | |
-| View all users (system) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Suspend any user | ✅ | ❌ | ❌ | ❌ | ❌ |
-| View/manage all orgs | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Action | SUPER_ADMIN | ORG_ADMIN | DEVELOPER | BILLING_ADMIN | PROJECT_ADMIN | PROJECT_DEVELOPER | FREE User |
+|---|---|---|---|---|---|---|---|
+| **Runs** | | | | | | | |
+| Submit run | Yes | Yes (own org projects) | Yes (assigned projects) | No | Yes (own project) | Yes (own project) | Yes (own only) |
+| View run | Yes | Yes (org runs) | Yes (assigned projects only) | Yes (list + cost) | Yes (own project) | Yes (own project) | Yes (own only) |
+| Approve plan | Yes | Yes | Yes | No | Yes | Yes | Yes (own only) |
+| Trigger merge | Yes | Yes | Yes | No | Yes | Yes | Yes (own only) |
+| Cancel/delete run | Yes | Yes | Yes (own runs) | No | Yes (project runs) | Yes (own runs) | Yes (own only) |
+| **Org Management** | | | | | | | |
+| Create org | Yes | Yes (already have one) | No | No | No | No | No |
+| Invite member | Yes | Yes (domain-match only; else escalate) | No | No | No | No | No |
+| Approve cross-domain invite | Yes | No | No | No | No | No | No |
+| Remove member | Yes | Yes | No | No | No | No | No |
+| Change member org role | Yes | Yes | No | No | No | No | No |
+| **Projects** | | | | | | | |
+| Create project | Yes | Yes | No | No | No | No | No |
+| Add member to project | Yes | Yes | No | No | Yes | No | No |
+| Remove member from project | Yes | Yes | No | No | Yes | No | No |
+| Archive project | Yes | Yes | No | No | No | No | No |
+| **Billing / Pricing** | | | | | | | |
+| View org cost/usage | Yes | Yes | No | Yes | No | No | No |
+| Change org plan/tier | Yes | No | No | Yes | No | No | No |
+| Edit model pricing | Yes | No | No | Yes | No | No | No |
+| **Admin** | | | | | | | |
+| View all users (system) | Yes | No | No | No | No | No | No |
+| Suspend any user | Yes | No | No | No | No | No | No |
+| View/manage all orgs | Yes | No | No | No | No | No | No |
+| Grant runs to user/org | Yes | No | No | No | No | No | No |
+| Manage feature flags | Yes | No | No | No | No | No | No |
+| Manage pricing config | Yes | No | No | No | No | No | No |
+| Force logout user | Yes | No | No | No | No | No | No |
 
 ---
 
@@ -338,7 +404,7 @@ A Project is a named group within an Org that:
 - Has a display name and optional description
 - Can be archived (runs preserved, no new runs allowed)
 
-**Free-tier users have no projects** — their runs are personal and unscoped.
+**Free-tier users have no projects** -- their runs are personal and unscoped.
 
 ### 7.2 Project Membership Roles
 
@@ -352,8 +418,8 @@ A Project is a named group within an Org that:
 ### 7.3 Project Lifecycle
 
 ```
-Create (Org Admin) → Active → Archived
-                         ↑ unarchive possible
+Create (Org Admin) -> Active -> Archived
+                         ^ unarchive possible
 ```
 
 Archived projects: read-only; existing runs still visible; no new runs.
@@ -376,12 +442,14 @@ Every `pipeline_run` will carry:
 
 ```
 GET /api/runs
-  ↓
-  if SUPER_ADMIN            → return all runs
-  if ORG_ADMIN              → return all runs where org_id = user.orgId
-  if BILLING_ADMIN          → return all runs where org_id = user.orgId (summary/cost fields only)
-  if DEVELOPER (org member) → return runs where project_id IN user's assigned projects
-  if FREE user              → return runs where created_by_user_id = user.id
+  |
+  if SUPER_ADMIN            -> return all runs
+  if ORG_ADMIN              -> return all runs where org_id = user.orgId
+  if BILLING_ADMIN          -> return all runs where org_id = user.orgId (summary/cost fields only)
+  if DEVELOPER (org member) -> return runs where project_id IN user's assigned projects
+  if PROJECT_ADMIN           -> return runs where project_id = admin's project
+  if PROJECT_DEVELOPER       -> return runs where project_id = member's project
+  if FREE user              -> return runs where created_by_user_id = user.id
 ```
 
 All run-fetching queries in `RunRepository` and `StateStore` will be filtered by calling
@@ -422,12 +490,12 @@ INSERT INTO app_user (
     'ACTIVE',
     true,          -- must change password on first login
     true,          -- pre-verified
-    null,          -- no org — super admin is system-level
+    null,          -- no org -- super admin is system-level
     NOW(), NOW()
 ) ON CONFLICT (email) DO NOTHING;
 ```
 
-**First Login:** Login with `admin@executespec.ai` / `admin` → forced password change modal.
+**First Login:** Login with `admin@executespec.ai` / `admin` -> forced password change modal.
 
 ---
 
@@ -446,7 +514,7 @@ spring:
     host: smtp.gmail.com
     port: 587
     username: ${MAIL_USERNAME:admin@executespec.ai}
-    password: ${MAIL_PASSWORD:}     # GSuite App Password — set via env var
+    password: ${MAIL_PASSWORD:}     # GSuite App Password -- set via env var
     properties:
       mail.smtp.auth: true
       mail.smtp.starttls.enable: true
@@ -458,7 +526,7 @@ app:
     base-url: ${APP_BASE_URL:http://localhost:5173}
 ```
 
-> **Action required:** Enable 2FA on `admin@executespec.ai` → Google Admin Console → Security → App Passwords → generate for "Mail".
+> **Action required:** Enable 2FA on `admin@executespec.ai` -> Google Admin Console -> Security -> App Passwords -> generate for "Mail".
 
 ### 10.3 Email Templates (Thymeleaf)
 
@@ -467,16 +535,16 @@ app:
 | Self-registration | "Verify your executespec account" | Registering user |
 | Org invitation (domain-match) | "You've been invited to [Org Name] on executespec" | Invitee |
 | Org invitation (cross-domain, on approval) | "You've been invited to [Org Name] on executespec" | Invitee |
-| Escalation to Super Admin | "Cross-domain invite requires your approval: [email] → [Org]" | admin@executespec.ai |
-| Escalation rejected → Org Admin | "Invite for [email] was rejected by executespec admin" | Org Admin |
+| Escalation to Super Admin | "Cross-domain invite requires your approval: [email] -> [Org]" | admin@executespec.ai |
+| Escalation rejected -> Org Admin | "Invite for [email] was rejected by executespec admin" | Org Admin |
 | Password reset | "Reset your executespec password" | User |
 | Welcome (post-verify) | "Welcome to executespec" | New user |
 | New user alert | "New user registered: [email]" | admin@executespec.ai |
 
 ### 10.4 Email Sending Rules
-- All email sending is `@Async` — never blocks the HTTP response
+- All email sending is `@Async` -- never blocks the HTTP response
 - Max 3 verification emails per address per hour (rate-limited in Redis or in-DB counter)
-- Errors are logged as WARN — never propagate to caller
+- Errors are logged as WARN -- never propagate to caller
 
 ---
 
@@ -486,11 +554,11 @@ app:
 
 The requirement is to track:
 1. Whether a user/org has paid (boolean verified status)
-2. A payment reference ID that can be correlated against an external payment provider (Stripe, etc.) later
+2. A payment reference ID that can be correlated against an external payment provider (Razorpay, Stripe, etc.) later
 3. A basic audit log of payment-related events
 
 ```sql
--- Stub table — to be expanded when billing is implemented
+-- Stub table -- to be expanded when billing is implemented
 CREATE TABLE IF NOT EXISTS payment_audit (
     id              VARCHAR(255)    PRIMARY KEY,
     entity_type     VARCHAR(32)     NOT NULL,  -- 'USER' | 'ORG'
@@ -500,7 +568,7 @@ CREATE TABLE IF NOT EXISTS payment_audit (
                                                -- | SUBSCRIPTION_CANCELLED | MANUAL_OVERRIDE
     old_tier        VARCHAR(32),
     new_tier        VARCHAR(32),
-    payment_ref_id  VARCHAR(255),              -- External payment provider reference (Stripe charge ID, etc.)
+    payment_ref_id  VARCHAR(255),              -- External payment provider reference (Razorpay/Stripe ID, etc.)
     performed_by    VARCHAR(255),              -- User ID who triggered the event
     notes           TEXT,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
@@ -517,9 +585,9 @@ plan_expires_at         TIMESTAMP WITH TIME ZONE,
 ```
 
 **Rules (manual for now):**
-- `is_payment_verified = true` → org has access to its tier's features
-- `is_payment_verified = false` → org runs in degraded mode (FREE tier limits apply)
-- Super Admin and Billing Admin can set `is_payment_verified` manually until Stripe is integrated
+- `is_payment_verified = true` -> org has access to its tier's features
+- `is_payment_verified = false` -> org runs in degraded mode (FREE tier limits apply)
+- Super Admin and Billing Admin can set `is_payment_verified` manually until Razorpay/Stripe is fully integrated
 - Every change to `is_payment_verified` or `tier` writes a row to `payment_audit`
 
 ---
@@ -531,13 +599,13 @@ plan_expires_at         TIMESTAMP WITH TIME ZONE,
 ```sql
 -- V4__user_auth_and_org.sql
 
--- ── app_user ──────────────────────────────────────────────────────────────
+-- app_user
 CREATE TABLE IF NOT EXISTS app_user (
     id                   VARCHAR(255)  PRIMARY KEY,
     email                VARCHAR(255)  NOT NULL UNIQUE,
     first_name           VARCHAR(100)  NOT NULL,
     last_name            VARCHAR(100)  NOT NULL,
-    password_hash        VARCHAR(255)  NOT NULL,
+    password_hash        VARCHAR(255),            -- NULL for OAuth-only accounts
     global_role          VARCHAR(32)   NOT NULL DEFAULT 'USER',
                                        -- SUPER_ADMIN | USER
     tier                 VARCHAR(32)   NOT NULL DEFAULT 'FREE',
@@ -546,7 +614,10 @@ CREATE TABLE IF NOT EXISTS app_user (
                                        -- PENDING_VERIFICATION | ACTIVE | SUSPENDED | DELETED
     must_change_password BOOLEAN       NOT NULL DEFAULT FALSE,
     email_verified       BOOLEAN       NOT NULL DEFAULT FALSE,
-    org_id               VARCHAR(255),  -- FK to org.id (nullable — free users have no org)
+    oauth_provider       VARCHAR(32),  -- GOOGLE | GITHUB | null (email/password)
+    oauth_provider_id    VARCHAR(255), -- provider's unique user ID
+    jwt_epoch            INTEGER       NOT NULL DEFAULT 0,  -- incremented on force logout
+    org_id               VARCHAR(255),  -- FK to org.id (nullable -- free users have no org)
     personal_run_count   INTEGER       NOT NULL DEFAULT 0,  -- used only for FREE users (no org)
     run_count_reset_at   TIMESTAMP WITH TIME ZONE,
     last_login_at        TIMESTAMP WITH TIME ZONE,
@@ -558,8 +629,9 @@ CREATE TABLE IF NOT EXISTS app_user (
 CREATE INDEX IF NOT EXISTS idx_user_email  ON app_user (email);
 CREATE INDEX IF NOT EXISTS idx_user_org_id ON app_user (org_id);
 CREATE INDEX IF NOT EXISTS idx_user_status ON app_user (status);
+CREATE INDEX IF NOT EXISTS idx_user_oauth  ON app_user (oauth_provider, oauth_provider_id);
 
--- ── org ───────────────────────────────────────────────────────────────────
+-- org
 CREATE TABLE IF NOT EXISTS org (
     id                   VARCHAR(255)  PRIMARY KEY,
     name                 VARCHAR(255)  NOT NULL,
@@ -586,7 +658,7 @@ CREATE TABLE IF NOT EXISTS org (
     deleted_at           TIMESTAMP WITH TIME ZONE
 );
 
--- ── org_member ────────────────────────────────────────────────────────────
+-- org_member
 -- Explicit join table: a user's role WITHIN a specific org
 CREATE TABLE IF NOT EXISTS org_member (
     id          VARCHAR(255)  PRIMARY KEY,
@@ -601,7 +673,7 @@ CREATE TABLE IF NOT EXISTS org_member (
 CREATE INDEX IF NOT EXISTS idx_org_member_user ON org_member (user_id);
 CREATE INDEX IF NOT EXISTS idx_org_member_org  ON org_member (org_id);
 
--- ── org_invitation ────────────────────────────────────────────────────────
+-- org_invitation
 CREATE TABLE IF NOT EXISTS org_invitation (
     id              VARCHAR(255)  PRIMARY KEY,
     org_id          VARCHAR(255)  NOT NULL REFERENCES org(id) ON DELETE CASCADE,
@@ -622,7 +694,7 @@ CREATE INDEX IF NOT EXISTS idx_invitation_token ON org_invitation (token);
 CREATE INDEX IF NOT EXISTS idx_invitation_org   ON org_invitation (org_id);
 CREATE INDEX IF NOT EXISTS idx_invitation_email ON org_invitation (invited_email);
 
--- ── project ───────────────────────────────────────────────────────────────
+-- project
 CREATE TABLE IF NOT EXISTS project (
     id              VARCHAR(255)  PRIMARY KEY,
     org_id          VARCHAR(255)  NOT NULL REFERENCES org(id) ON DELETE CASCADE,
@@ -637,7 +709,7 @@ CREATE TABLE IF NOT EXISTS project (
 
 CREATE INDEX IF NOT EXISTS idx_project_org ON project (org_id);
 
--- ── project_member ────────────────────────────────────────────────────────
+-- project_member
 CREATE TABLE IF NOT EXISTS project_member (
     id              VARCHAR(255)  PRIMARY KEY,
     project_id      VARCHAR(255)  NOT NULL REFERENCES project(id) ON DELETE CASCADE,
@@ -651,7 +723,7 @@ CREATE TABLE IF NOT EXISTS project_member (
 CREATE INDEX IF NOT EXISTS idx_project_member_user    ON project_member (user_id);
 CREATE INDEX IF NOT EXISTS idx_project_member_project ON project_member (project_id);
 
--- ── email_token ───────────────────────────────────────────────────────────
+-- email_token
 CREATE TABLE IF NOT EXISTS email_token (
     id          VARCHAR(255)  PRIMARY KEY,
     user_id     VARCHAR(255)  NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -664,7 +736,7 @@ CREATE TABLE IF NOT EXISTS email_token (
 
 CREATE INDEX IF NOT EXISTS idx_email_token_token ON email_token (token);
 
--- ── refresh_token_blocklist ───────────────────────────────────────────────
+-- refresh_token_blocklist
 CREATE TABLE IF NOT EXISTS refresh_token_blocklist (
     jti         VARCHAR(255)  PRIMARY KEY,
     user_id     VARCHAR(255)  NOT NULL,
@@ -674,7 +746,7 @@ CREATE TABLE IF NOT EXISTS refresh_token_blocklist (
 
 CREATE INDEX IF NOT EXISTS idx_blocklist_expires ON refresh_token_blocklist (expires_at);
 
--- ── payment_audit ─────────────────────────────────────────────────────────
+-- payment_audit
 CREATE TABLE IF NOT EXISTS payment_audit (
     id              VARCHAR(255)  PRIMARY KEY,
     entity_type     VARCHAR(32)   NOT NULL,  -- 'USER' | 'ORG'
@@ -720,7 +792,7 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/auth/register` | Self-register (FREE tier) |
-| `POST` | `/api/auth/login` | Authenticate → JWT + refresh cookie |
+| `POST` | `/api/auth/login` | Authenticate -> JWT + refresh cookie |
 | `POST` | `/api/auth/refresh` | Renew access token via refresh cookie |
 | `DELETE` | `/api/auth/logout` | Invalidate refresh token |
 | `GET` | `/api/auth/verify-email?token=` | Verify email address |
@@ -729,8 +801,10 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | `POST` | `/api/auth/reset-password` | Apply password reset |
 | `POST` | `/api/auth/change-password` | Change password (authenticated) |
 | `GET` | `/api/auth/me` | Get current user profile |
+| `GET` | `/api/auth/me/permissions` | Tier-based permissions |
+| `GET` | `/api/auth/oauth2/callback/{provider}` | OAuth2 callback (Google, GitHub) |
 
-### 13.2 Org Endpoints (`/api/org/**` — authenticated)
+### 13.2 Org Endpoints (`/api/org/**` -- authenticated)
 
 | Method | Path | Who | Description |
 |---|---|---|---|
@@ -745,7 +819,7 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | `DELETE` | `/api/org/me/invitations/{id}` | ORG_ADMIN | Cancel invitation |
 | `POST` | `/api/org/accept-invite?token=` | Anyone | Accept an org invitation |
 
-### 13.3 Project Endpoints (`/api/projects/**` — authenticated, org members only)
+### 13.3 Project Endpoints (`/api/projects/**` -- authenticated, org members only)
 
 | Method | Path | Who | Description |
 |---|---|---|---|
@@ -757,8 +831,9 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | `GET` | `/api/projects/{id}/members` | ORG_ADMIN or PROJECT_ADMIN | List project members |
 | `POST` | `/api/projects/{id}/members` | ORG_ADMIN or PROJECT_ADMIN | Add member to project |
 | `DELETE` | `/api/projects/{id}/members/{userId}` | ORG_ADMIN or PROJECT_ADMIN | Remove from project |
+| `PUT` | `/api/projects/{id}/members/{userId}/role` | ORG_ADMIN or PROJECT_ADMIN | Change project role |
 
-### 13.4 Super Admin Endpoints (`/api/admin/**` — SUPER_ADMIN only)
+### 13.4 Super Admin Endpoints (`/api/admin/**` -- SUPER_ADMIN only)
 
 | Method | Path | Description |
 |---|---|---|
@@ -767,6 +842,8 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | `PUT` | `/api/admin/users/{id}/status` | Activate / suspend / delete |
 | `PUT` | `/api/admin/users/{id}/tier` | Change user tier |
 | `PUT` | `/api/admin/users/{id}/role` | Change global role |
+| `PUT` | `/api/admin/users/{id}/force-logout` | Force logout (increment jwt_epoch) |
+| `POST` | `/api/admin/users/{id}/grant-runs` | Grant additional runs to user/org |
 | `GET` | `/api/admin/orgs` | List all orgs |
 | `GET` | `/api/admin/orgs/{id}` | Get org detail |
 | `PUT` | `/api/admin/orgs/{id}/status` | Suspend / restore org |
@@ -774,12 +851,16 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | `GET` | `/api/admin/invitations/escalated` | List pending cross-domain invites |
 | `POST` | `/api/admin/invitations/{id}/approve` | Approve escalated invite |
 | `POST` | `/api/admin/invitations/{id}/reject` | Reject escalated invite |
+| `GET` | `/api/admin/feature-flags` | List feature flags |
+| `PUT` | `/api/admin/feature-flags/{key}` | Toggle feature flag |
+| `GET` | `/api/admin/pricing` | Get pricing configuration |
+| `PUT` | `/api/admin/pricing` | Update pricing configuration |
 
 ### 13.5 Amendments to Existing Endpoints
 
 - All `/api/runs/**` now require `Authorization: Bearer <token>`
 - `POST /api/runs` body gets new optional fields: `projectId` (required for org members)
-- `GET /api/runs` filtered by `SecurityContext.getRunFilter(currentUser)` — see §8.2
+- `GET /api/runs` filtered by `SecurityContext.getRunFilter(currentUser)` -- see section 8.2
 
 ---
 
@@ -794,14 +875,17 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | `/forgot-password` | `ForgotPasswordPage.tsx` | Public |
 | `/reset-password` | `ResetPasswordPage.tsx` | Public (token) |
 | `/verify-email` | `VerifyEmailPage.tsx` | Public (token) |
+| `/auth/callback` | `AuthCallbackPage.tsx` | Public (OAuth2 redirect target) |
 | `/accept-invite` | `AcceptInvitePage.tsx` | Public (token) |
 | `/org/settings` | `OrgSettingsPage.tsx` | ORG_ADMIN |
 | `/org/members` | `OrgMembersPage.tsx` | ORG_ADMIN |
-| `/org/projects` | `OrgProjectsPage.tsx` | ORG_ADMIN |
+| `/org/projects` | `OrgProjectsPage.tsx` | ORG_ADMIN, PROJECT_ADMIN |
 | `/admin` | `SuperAdminPage.tsx` | SUPER_ADMIN |
 | `/admin/users` | `AdminUsersPage.tsx` | SUPER_ADMIN |
 | `/admin/orgs` | `AdminOrgsPage.tsx` | SUPER_ADMIN |
 | `/admin/invitations` | `AdminEscalationsPage.tsx` | SUPER_ADMIN |
+| `/admin/feature-flags` | `FeatureFlagsPage.tsx` | SUPER_ADMIN |
+| `/admin/pricing` | `PricingManager.tsx` | SUPER_ADMIN |
 
 ### 14.2 New Components
 
@@ -818,6 +902,8 @@ CREATE INDEX IF NOT EXISTS idx_run_project_id ON pipeline_run (project_id);
 | `PendingInvitesTable.tsx` | List of sent invitations + status chips |
 | `EscalatedInvitesTable.tsx` | Super Admin view of cross-domain invites (approve/reject actions) |
 | `QuotaUsageBar.tsx` | Shows monthly run usage vs. limit (runs page header) |
+| `GrantRunsModal.tsx` | Admin modal to grant additional runs to a user or org |
+| `OAuthLoginButtons.tsx` | "Continue with Google" / "Continue with GitHub" buttons on login/register pages |
 
 ### 14.3 Auth Store (Zustand)
 
@@ -831,6 +917,7 @@ interface AuthUser {
   globalRole: 'SUPER_ADMIN' | 'USER';
   tier: 'FREE' | 'PRO' | 'ENTERPRISE';
   mustChangePassword: boolean;
+  oauthProvider: 'GOOGLE' | 'GITHUB' | null;
   // Org context (null for free users)
   orgId: string | null;
   orgName: string | null;
@@ -842,6 +929,7 @@ interface AuthStore {
   user: AuthUser | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithOAuth: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshAccessToken: () => Promise<void>;
   clearAuth: () => void;
@@ -880,6 +968,12 @@ interface AuthStore {
     <artifactId>spring-boot-starter-security</artifactId>
 </dependency>
 
+<!-- Spring OAuth2 Client (Google + GitHub) -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-oauth2-client</artifactId>
+</dependency>
+
 <!-- JWT (JJWT 0.12.x) -->
 <dependency>
     <groupId>io.jsonwebtoken</groupId>
@@ -916,43 +1010,46 @@ interface AuthStore {
 
 ```
 com.navneet.executespec
-├── auth/
-│   ├── controller/
-│   │   ├── AuthController.java
-│   │   ├── OrgController.java
-│   │   ├── ProjectController.java
-│   │   └── SuperAdminController.java
-│   ├── service/
-│   │   ├── AuthService.java
-│   │   ├── OrgService.java
-│   │   ├── ProjectService.java
-│   │   ├── InvitationService.java         # handles invite logic + domain validation
-│   │   ├── TierEnforcementService.java    # quota checks
-│   │   ├── MailService.java
-│   │   └── PaymentAuditService.java       # logs tier/payment changes
-│   ├── entity/
-│   │   ├── AppUser.java
-│   │   ├── Org.java
-│   │   ├── OrgMember.java
-│   │   ├── OrgInvitation.java
-│   │   ├── Project.java
-│   │   ├── ProjectMember.java
-│   │   ├── EmailToken.java
-│   │   ├── RefreshTokenBlocklist.java
-│   │   └── PaymentAudit.java
-│   ├── repository/  (one per entity)
-│   ├── security/
-│   │   ├── SecurityConfig.java
-│   │   ├── JwtUtil.java
-│   │   ├── JwtAuthenticationFilter.java
-│   │   ├── UserDetailsServiceImpl.java
-│   │   └── RunVisibilitySpec.java         # JPA Specification for run filtering
-│   └── dto/
-│       ├── RegisterRequest.java
-│       ├── LoginRequest.java / LoginResponse.java
-│       ├── UserDto.java / OrgDto.java / ProjectDto.java
-│       ├── InviteRequest.java
-│       └── ChangePasswordRequest.java
++-- auth/
+|   +-- controller/
+|   |   +-- AuthController.java
+|   |   +-- OrgController.java
+|   |   +-- ProjectController.java
+|   |   +-- SuperAdminController.java
+|   +-- service/
+|   |   +-- AuthService.java
+|   |   +-- OrgService.java
+|   |   +-- ProjectService.java
+|   |   +-- InvitationService.java         # handles invite logic + domain validation
+|   |   +-- TierEnforcementService.java    # quota checks
+|   |   +-- MailService.java
+|   |   +-- PaymentAuditService.java       # logs tier/payment changes
+|   +-- entity/
+|   |   +-- AppUser.java
+|   |   +-- Org.java
+|   |   +-- OrgMember.java
+|   |   +-- OrgInvitation.java
+|   |   +-- Project.java
+|   |   +-- ProjectMember.java
+|   |   +-- EmailToken.java
+|   |   +-- RefreshTokenBlocklist.java
+|   |   +-- PaymentAudit.java
+|   +-- repository/  (one per entity)
+|   +-- security/
+|   |   +-- SecurityConfig.java
+|   |   +-- SecurityProperties.java         # configurable CSP, HSTS, X-Frame-Options
+|   |   +-- JwtUtil.java
+|   |   +-- JwtAuthenticationFilter.java
+|   |   +-- UserDetailsServiceImpl.java
+|   |   +-- RunVisibilitySpec.java          # JPA Specification for run filtering
+|   |   +-- OAuthSuccessHandler.java        # OAuth2 callback handler
+|   |   +-- OAuthEmailConflictException.java
+|   +-- dto/
+|       +-- RegisterRequest.java
+|       +-- LoginRequest.java / LoginResponse.java
+|       +-- UserDto.java / OrgDto.java / ProjectDto.java
+|       +-- InviteRequest.java
+|       +-- ChangePasswordRequest.java
 ```
 
 ### 15.3 JWT Payload
@@ -965,6 +1062,7 @@ com.navneet.executespec
   "orgId": "org-uuid",
   "orgRole": "DEVELOPER",
   "tier": "PRO",
+  "epoch": 0,
   "iat": 1234567890,
   "exp": 1234568790
 }
@@ -980,7 +1078,25 @@ app:
     # Production: https://app.executespec.ai
 ```
 
-### 15.5 Run Submission Quota Check
+### 15.5 OAuth2 Configuration (application.yml)
+
+```yaml
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+            scope: openid, email, profile
+          github:
+            client-id: ${GITHUB_OAUTH_CLIENT_ID:}
+            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
+            scope: user:email, read:user
+```
+
+### 15.6 Run Submission Quota Check
 
 ```java
 // TierEnforcementService
@@ -1003,21 +1119,23 @@ public void assertCanSubmitRun(String userId) {
 
 | # | Question | Impact | Assumption Used |
 |---|---|---|---|
-| 1 | Exact run/concurrency limits for PRO and ENTERPRISE? | Tier enforcement thresholds | 100/3 (PRO), unlimited/10 (Enterprise) — placeholder |
-| 2 | Can an org have multiple ORG_ADMINs? | Org admin count enforcement | Yes — no limit on ORG_ADMIN count in one org |
-| 3 | When a user joins an org, do their previously created FREE runs become visible to the org? | Run migration logic | No — personal runs stay personal; only new runs go to org/project |
+| 1 | Exact run/concurrency limits for PRO and ENTERPRISE? | Tier enforcement thresholds | 100/3 (PRO), unlimited/10 (Enterprise) -- placeholder |
+| 2 | Can an org have multiple ORG_ADMINs? | Org admin count enforcement | Yes -- no limit on ORG_ADMIN count in one org |
+| 3 | When a user joins an org, do their previously created FREE runs become visible to the org? | Run migration logic | No -- personal runs stay personal; only new runs go to org/project |
 | 4 | Can a user leave an org (self-service)? Or only removed by ORG_ADMIN? | Offboarding flow | Only removable by ORG_ADMIN or SUPER_ADMIN (v1) |
 | 5 | What happens to a user's runs when removed from the org? | Data ownership | Runs remain attributed to org/project; user loses access |
-| 6 | Payment: Stripe or another provider? Per-seat or flat org fee? | Billing schema expansion | Deferred — Stripe assumed when ready |
+| 6 | Payment: Razorpay primary, Stripe secondary? Per-seat or flat org fee? | Billing schema expansion | Razorpay for Indian billing, Stripe for international -- deferred |
 | 7 | Can an org be downgraded while members are actively running? | Tier downgrade logic | Downgrade effective at next billing cycle; in-flight runs not interrupted |
-| 8 | Should FREE users see an "Upgrade" CTA when hitting quota limits? | Frontend UX | Yes — upsell modal (copy TBD) |
+| 8 | Should FREE users see an "Upgrade" CTA when hitting quota limits? | Frontend UX | Yes -- upsell modal (copy TBD) |
 | 9 | Org run count: does it reset on 1st of calendar month or org creation anniversary? | Counter reset logic | Calendar month (1st) assumed |
-| 10 | Is email domain matching case-sensitive? | Invitation validation | No — lowercase both sides for comparison |
-| 11 | Should the Super Admin be able to see run content (plan JSON, files) for any run? | Admin privacy policy | Yes — SUPER_ADMIN has full system access |
-| 12 | Project-level quota? Or only org-level? | Quota granularity | Org-level only (v1) — no per-project limits |
-| 13 | Can a PRO org upgrade to ENTERPRISE self-serve, or does it require Super Admin? | Tier upgrade flow | Self-serve via Billing Admin (post-Stripe); manual via Super Admin until then |
+| 10 | Is email domain matching case-sensitive? | Invitation validation | No -- lowercase both sides for comparison |
+| 11 | Should the Super Admin be able to see run content (plan JSON, files) for any run? | Admin privacy policy | Yes -- SUPER_ADMIN has full system access |
+| 12 | Project-level quota? Or only org-level? | Quota granularity | Org-level only (v1) -- no per-project limits |
+| 13 | Can a PRO org upgrade to ENTERPRISE self-serve, or does it require Super Admin? | Tier upgrade flow | Self-serve via Billing Admin (post-billing integration); manual via Super Admin until then |
+| 14 | Should OAuth accounts be allowed to set a password later (for dual login)? | Account flexibility | No (v1) -- OAuth accounts remain OAuth-only |
+| 15 | Global force logout (all users): when should it be used? | Operational runbook | Security incidents only; gated behind feature flag |
 
 ---
 
 *Document owner: Navneet Prabhakar*
-*Status: v2.0 — pending tier limit confirmation (Q1), then ready for implementation sprint.*
+*Status: v2.1 -- pending tier limit confirmation, OAuth2 client credentials, then ready for implementation sprint.*
