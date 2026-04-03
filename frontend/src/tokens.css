@@ -45,6 +45,8 @@
   /* Accent */
   --accent-blue:        #0070F3;
   --accent-blue-hover:  #0060D0;
+  --accent-harness:     #8b5cf6;
+  --accent-planner:     #10b981;
 
   /* Status — color only for meaning */
   --status-success:     #0070F3;

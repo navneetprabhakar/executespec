@@ -453,7 +453,14 @@ export default function LiveLog() {
             if (isInternalWorkerNoise) return null;
 
             // Show harness-level messages (emoji-prefixed or from known agents)
+            const taskId = String(entry.data.taskId ?? '');
             const isHarnessMsg = /^[✅⚠️❌🔧]/.test(msg)
+              || taskId === 'harness'
+              || taskId === 'planner'
+              || taskId === 'compiler'
+              || taskId === 'reviewer'
+              || taskId === 'report'
+              || taskId === 'preview-agent'
               || msg.startsWith('Merging')
               || msg.startsWith('Simple request')
               || msg.startsWith('Reviewer')
@@ -464,49 +471,44 @@ export default function LiveLog() {
               || /^\[[\w-]+\]/.test(msg);
 
             if (isHarnessMsg) {
-              // Determine icon and color based on prefix — styled as milestone-like banners
-              let logIcon = null;
+              // Determine icon and color based on taskId or prefix
+              let logIcon = <Rocket className="h-3.5 w-3.5" />;
               let bannerColor = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
-              if (/^✅/.test(msg)) {
+
+              if (/^✅/.test(msg) || msg.includes('successfully') || msg.includes('passed')) {
                 logIcon = <CheckCircle2 className="h-3.5 w-3.5" />;
                 bannerColor = 'border-accent-green/50 text-accent-green bg-accent-green/[0.06]';
-              } else if (/^⚠️/.test(msg)) {
+              } else if (/^⚠️/.test(msg) || msg.includes('WARNING')) {
                 logIcon = <AlertTriangle className="h-3.5 w-3.5" />;
                 bannerColor = 'border-accent-amber/50 text-accent-amber bg-accent-amber/[0.06]';
-              } else if (/^❌/.test(msg)) {
+              } else if (/^❌/.test(msg) || msg.includes('failed') || msg.includes('Error')) {
                 logIcon = <XCircle className="h-3.5 w-3.5" />;
                 bannerColor = 'border-accent-red/50 text-accent-red bg-accent-red/[0.06]';
-              } else if (/^🔧/.test(msg)) {
+              } else if (/^🔧/.test(msg) || taskId === 'reviewer' && msg.includes('fix')) {
                 logIcon = <Wrench className="h-3.5 w-3.5" />;
                 bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
-              } else if (/^Compile|^Compiling/i.test(msg)) {
+              } else if (taskId === 'planner' || /^Plan/i.test(msg)) {
+                logIcon = <Zap className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-planner/50 text-accent-planner bg-accent-planner/[0.06]';
+              } else if (taskId === 'harness' || /^Merging|^\[harness\]/i.test(msg) || /^Background/i.test(msg)) {
+                logIcon = <GitCommit className="h-3.5 w-3.5" />;
+                bannerColor = 'border-accent-harness/50 text-accent-harness bg-accent-harness/[0.06]';
+              } else if (taskId === 'compiler' || /^Compile|^Compiling/i.test(msg)) {
                 logIcon = <Terminal className="h-3.5 w-3.5" />;
-                bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
-              } else if (/^Code ready/i.test(msg)) {
-                logIcon = <CheckCircle2 className="h-3.5 w-3.5" />;
-                bannerColor = 'border-accent-green/40 text-accent-green/80 bg-accent-green/[0.04]';
-              } else if (/^Reviewer|^\[reviewer\]/i.test(msg)) {
+                bannerColor = 'border-accent-blue/50 text-accent-blue bg-accent-blue/[0.06]';
+              } else if (taskId === 'reviewer' || /^Reviewer|^\[reviewer\]/i.test(msg)) {
                 logIcon = <Eye className="h-3.5 w-3.5" />;
                 bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
-              } else if (/^Merging|^\[harness\]/i.test(msg)) {
-                logIcon = <GitCommit className="h-3.5 w-3.5" />;
-                bannerColor = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
-              } else if (/^Plan/i.test(msg)) {
-                logIcon = <Zap className="h-3.5 w-3.5" />;
+              } else if (taskId === 'preview-agent') {
+                logIcon = <Globe className="h-3.5 w-3.5" />;
                 bannerColor = 'border-accent-blue/40 text-secondary/80 bg-[var(--gray-500)]/[0.04]';
-              } else if (/^Background/i.test(msg)) {
-                logIcon = <Clock className="h-3.5 w-3.5" />;
-                bannerColor = 'border-[var(--gray-400)] text-secondary bg-[var(--gray-200)]';
               } else if (/^Simple request/i.test(msg)) {
                 logIcon = <Zap className="h-3.5 w-3.5" />;
                 bannerColor = 'border-accent-blue/50 text-accent-blue bg-accent-blue/[0.06]';
-              } else {
-                // Generic harness message
-                logIcon = <Rocket className="h-3.5 w-3.5" />;
               }
 
-              // Strip emoji prefix for cleaner display
-              const cleanMsg = msg.replace(/^[✅⚠️❌🔧]\s*/, '');
+              // Strip emoji prefix / tag for cleaner display
+              const cleanMsg = msg.replace(/^[✅⚠️❌🔧]\s*/, '').replace(/^\[[\w-]+\]\s*/, '');
 
               return (
                 <div key={entry.id} className={cn(
