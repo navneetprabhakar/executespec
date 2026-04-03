@@ -181,6 +181,23 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
       - NEVER use absolute paths for assets; use relative paths.
       - If you create style.css, YOU must create style.css — do not assume another task will.
 
+      PREVIEW ENVIRONMENT DEFAULTS — MANDATORY:
+      When configuring database connections (e.g., Spring properties, .env, Prisma):
+      - Host:     db (never use 'localhost' for inter-container communication)
+      - User:     preview
+      - Password: preview
+      - Database: preview
+      - Ports:    PostgreSQL (5432), MySQL (3306), MongoDB (27017), Redis (6379)
+
+      DEPENDENCY HYGIENE — MANDATORY:
+      Every package you import in your code MUST be present in package.json.
+      Commonly forgotten packages you MUST include if used:
+      - prop-types
+      - lucide-react
+      - clsx
+      - tailwind-merge
+      - @vitejs/plugin-react (if creating/editing vite.config.js)
+
      DOM CONSISTENCY — MANDATORY CHECK:
      When writing JavaScript that reads from HTML elements (dataset.*, getAttribute,
      querySelector selectors), ALWAYS re-read the HTML file first to verify:
