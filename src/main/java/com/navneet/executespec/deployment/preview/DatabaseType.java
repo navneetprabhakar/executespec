@@ -13,19 +13,19 @@ public enum DatabaseType {
     POSTGRESQL(
             "postgres:16-alpine", 5432,
             "pg_isready -U preview",
-            "preview", "preview", "previewdb",
+            "preview", "preview", "preview",
             "/var/lib/postgresql/data"
     ),
     MYSQL(
             "mysql:8-oracle", 3306,
             "mysqladmin ping -h localhost -u preview -ppreview --silent",
-            "preview", "preview", "previewdb",
+            "preview", "preview", "preview",
             "/var/lib/mysql"
     ),
     MONGODB(
             "mongo:7", 27017,
             "mongosh --eval 'db.runCommand({ping:1})' --quiet",
-            null, null, "previewdb",
+            null, null, "preview",
             "/data/db"
     ),
     REDIS(

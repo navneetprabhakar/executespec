@@ -474,10 +474,22 @@ public class DevDockerfileGenerator {
                     CMD ["npx", "serve", "-s", ".", "-l", "5173"]""";
         }
 
-        // Ensure vite and react plugin are installed at build time (npx auto-download at runtime is too slow)
+        // Ensure vite and common React dependencies are installed at build time
         String viteInstall = "";
-        if (cmd.contains("vite") && !fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) {
-            viteInstall = " && npm install -D vite @vitejs/plugin-react react react-dom";
+        if (cmd.contains("vite")) {
+            StringBuilder missing = new StringBuilder();
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) missing.append(" vite");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"@vitejs/plugin-react\"")) missing.append(" @vitejs/plugin-react");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"react\"")) missing.append(" react");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"react-dom\"")) missing.append(" react-dom");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"prop-types\"")) missing.append(" prop-types");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"lucide-react\"")) missing.append(" lucide-react");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"clsx\"")) missing.append(" clsx");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\"")) missing.append(" tailwind-merge");
+
+            if (missing.length() > 0) {
+                viteInstall = " && npm install -D" + missing.toString();
+            }
         }
 
         return """
@@ -547,11 +559,22 @@ public class DevDockerfileGenerator {
             cmd = "CMD [\"npm\", \"start\"]";
         }
 
-        // Ensure vite and react plugin are available
+        // Ensure vite and common React dependencies are available
         String viteInstall = "";
-        if ((hasDevScript || hasViteConfig)
-                && !fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) {
-            viteInstall = " && npm install -D vite @vitejs/plugin-react react react-dom";
+        if (hasDevScript || hasViteConfig) {
+            StringBuilder missing = new StringBuilder();
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) missing.append(" vite");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"@vitejs/plugin-react\"")) missing.append(" @vitejs/plugin-react");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"react\"")) missing.append(" react");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"react-dom\"")) missing.append(" react-dom");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"prop-types\"")) missing.append(" prop-types");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"lucide-react\"")) missing.append(" lucide-react");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"clsx\"")) missing.append(" clsx");
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\"")) missing.append(" tailwind-merge");
+
+            if (missing.length() > 0) {
+                viteInstall = " && npm install -D" + missing.toString();
+            }
         }
 
         return """

@@ -65,6 +65,26 @@ This is used by the preview system to generate the correct Dockerfile.
 If the spec says "no frameworks" or "vanilla HTML/CSS/JS", use STATIC_HTML — NOT NODE_FRONTEND.
 
 ═══════════════════════════════════════════════════════════
+PREVIEW ENVIRONMENT DEFAULTS — MANDATORY FOR DATA TASKS
+═══════════════════════════════════════════════════════════
+
+When assigning tasks that involve database connection strings, .env files,
+or backend configuration, you MUST instruct the worker to use these defaults:
+
+  - Database Host: db (never localhost inside the container)
+  - Admin User:    preview
+  - Admin Pass:    preview
+  - Default DB:    preview
+
+Port Mapping:
+  - PostgreSQL: 5432
+  - MySQL:      3306
+  - MongoDB:    27017 (no auth by default)
+  - Redis:      6379 (no auth by default)
+
+Explicitly mention: "Use host 'db', user 'preview', and database 'preview' for local configuration."
+
+═══════════════════════════════════════════════════════════
 TASK COMPLEXITY — CONTROLS OUTPUT TOKEN BUDGET AND SPEED
 ═══════════════════════════════════════════════════════════
 
