@@ -376,10 +376,10 @@ billing:
 
 logging:
   level:
-    com.navneet.executespec: INFO
-    org.springframework.ai: WARN
-    io.opentelemetry: WARN
-    io.micrometer.tracing: INFO
+    "[com.navneet.executespec]": INFO
+    "[org.springframework.ai]": WARN
+    "[io.opentelemetry]": WARN
+    "[io.micrometer.tracing]": INFO
 
 # ── Observability (Actuator + OTel + Metrics) ────────────────────────────────
 management:
