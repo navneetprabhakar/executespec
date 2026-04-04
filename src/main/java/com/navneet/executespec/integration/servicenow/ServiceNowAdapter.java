@@ -36,9 +36,33 @@ public class ServiceNowAdapter implements InboundAdapter, OutboundAdapter {
 
     @Override
     public void verifySignature(Map<String, String> headers, String rawBody) {
-        // ServiceNow Business Rules can add a custom header for signature verification
-        // Default: no signature verification (Basic Auth on outbound calls is separate)
-        // Production: implement HMAC or token-based verification here if configured
+        String signatureHeader = headers.get("x-servicenow-signature");
+        if (signatureHeader == null && config.getWebhookSecret() == null) return;
+
+        if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) {
+            throw new WebhookSignatureException("ServiceNow webhook secret not configured but signature header present");
+        }
+        if (signatureHeader == null || signatureHeader.isBlank()) {
+            throw new WebhookSignatureException("Missing x-servicenow-signature header");
+        }
+
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(
+                    config.getWebhookSecret().getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
+            String computed = java.util.HexFormat.of().formatHex(
+                    mac.doFinal(rawBody.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+            // Header format: "sha256=<hex_hash>" or plain hex
+            String expected = signatureHeader.startsWith("sha256=")
+                    ? signatureHeader.substring(7) : signatureHeader;
+
+            if (!java.security.MessageDigest.isEqual(computed.getBytes(), expected.getBytes())) {
+                throw new WebhookSignatureException("ServiceNow HMAC signature mismatch");
+            }
+        } catch (java.security.NoSuchAlgorithmException | java.security.InvalidKeyException e) {
+            throw new WebhookSignatureException("ServiceNow HMAC computation failed: " + e.getMessage());
+        }
     }
 
     @Override

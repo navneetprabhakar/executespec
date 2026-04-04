@@ -69,12 +69,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         String group = policy.classifyGroup(method, path);
 
-        // Only rate-limit security-sensitive groups (AUTH, RUNS, WEBHOOK).
-        // READ and WRITE are internal app traffic — no limit needed.
-        if ("READ".equals(group) || "WRITE".equals(group)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
+        // All groups are now rate-limited (READ, WRITE, PREVIEW, DEPLOY included)
 
         String identifier = resolveIdentifier(request, group);
         String tier = resolveTier(request, group);

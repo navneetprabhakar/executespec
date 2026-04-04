@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -205,10 +206,24 @@ public class ComposeExecutor {
         try {
             var pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
-            pb.environment().putAll(System.getenv());
+            // SECURITY: Only whitelist safe env vars — never leak API keys or secrets to Docker subprocesses
+            Map<String, String> env = pb.environment();
+            env.clear();
+            var allowedVars = List.of(
+                    "PATH", "HOME", "USER", "LANG", "LC_ALL", "TZ", "TMPDIR",
+                    "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CERT_PATH",
+                    "JAVA_HOME", "NODE_ENV",
+                    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"
+            );
+            Map<String, String> systemEnv = System.getenv();
+            for (String key : allowedVars) {
+                if (systemEnv.containsKey(key)) {
+                    env.put(key, systemEnv.get(key));
+                }
+            }
             // Augment PATH — JVM may inherit minimal PATH missing docker/node
-            String currentPath = pb.environment().getOrDefault("PATH", "/usr/bin:/bin");
-            pb.environment().put("PATH", PATH_AUGMENT + ":" + currentPath);
+            String currentPath = env.getOrDefault("PATH", "/usr/bin:/bin");
+            env.put("PATH", PATH_AUGMENT + ":" + currentPath);
             if (workDir != null) {
                 pb.directory(workDir.toFile());
             }

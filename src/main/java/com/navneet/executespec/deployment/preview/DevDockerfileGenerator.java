@@ -608,12 +608,12 @@ public class DevDockerfileGenerator {
                 "  const runsBoth=Object.values(p.scripts).some(v=>v.includes('concurrently')||(v.includes('vite')&&v.includes('node')));" +
                 "  if(hasServer && !runsBoth){" +
                 "    const serverCmd=p.scripts.server?'npm run server':(p.scripts.backend?'npm run backend':(fs.existsSync('server/server.js')?'node server/server.js':'node server.js'));" +
-                "    p.scripts['dev:all']=`concurrently \\\"npm run dev\\\" \\\"${serverCmd}\\\"`;" +
+                "    p.scripts['dev:all']='concurrently \\\"npm run dev\\\" \\\"'+serverCmd+'\\\"';" +
                 "  }" +
                 "}" +
                 "fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n" +
                 "EXPOSE 5173 3001\n" +
-                "CMD [\"sh\", \"-c\", \"if [ -n \\\"$(node -e 'console.log(JSON.parse(fs.readFileSync(\\\"package.json\\\")).scripts[\\\"dev:all\\\"]||\\\"\\\")')\\\" ]; then npm run dev:all; else npm run dev; fi\"]\n";
+                "CMD [\"sh\", \"-c\", \"node -e \\\"var s=JSON.parse(require('fs').readFileSync('package.json')).scripts;process.exit(s['dev:all']?0:1)\\\" && npm run dev:all || npm run dev\"]\n";
     }
 
     private String springBootDockerfile(Path workspace) {

@@ -201,6 +201,10 @@ INTEGRATION_TEST_PLAN.md
 # Service account keys — never commit
 sa-key.json
 
+# Eval output (generated at runtime)
+eval-reports/
+eval-output/
+
 # Temporary/Generated items
 javac.*.args
 scripts/e2e-preview-results.json

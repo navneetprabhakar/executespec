@@ -20,34 +20,46 @@ import java.util.Map;
 public class RateLimitPolicy {
 
     /** Endpoint group → tier → max requests per minute. */
-    private static final Map<String, Map<String, Integer>> LIMITS = Map.of(
-            "AUTH", Map.of(
+    private static final Map<String, Map<String, Integer>> LIMITS = Map.ofEntries(
+            Map.entry("AUTH", Map.of(
                     "login", 10,
                     "register", 5,
                     "forgot", 3,
                     "DEFAULT", 10
-            ),
-            "RUNS", Map.of(
+            )),
+            Map.entry("RUNS", Map.of(
                     "FREE", 5,
                     "PRO", 20,
                     "ENTERPRISE", 60,
                     "DEFAULT", 5
-            ),
-            "WEBHOOK", Map.of(
+            )),
+            Map.entry("WEBHOOK", Map.of(
                     "DEFAULT", 100
-            ),
-            "READ", Map.of(
+            )),
+            Map.entry("READ", Map.of(
                     "FREE", 300,
                     "PRO", 600,
                     "ENTERPRISE", 2000,
                     "DEFAULT", 300
-            ),
-            "WRITE", Map.of(
+            )),
+            Map.entry("WRITE", Map.of(
                     "FREE", 60,
                     "PRO", 200,
                     "ENTERPRISE", 1000,
                     "DEFAULT", 60
-            )
+            )),
+            Map.entry("PREVIEW", Map.of(
+                    "FREE", 10,
+                    "PRO", 30,
+                    "ENTERPRISE", 100,
+                    "DEFAULT", 10
+            )),
+            Map.entry("DEPLOY", Map.of(
+                    "FREE", 5,
+                    "PRO", 20,
+                    "ENTERPRISE", 60,
+                    "DEFAULT", 5
+            ))
     );
 
     /**
@@ -75,6 +87,12 @@ public class RateLimitPolicy {
         }
         if ("POST".equalsIgnoreCase(method) && path.equals("/api/runs")) {
             return "RUNS";
+        }
+        if (path.contains("/preview/")) {
+            return "PREVIEW";
+        }
+        if (path.contains("/deploy") || path.contains("/push-github")) {
+            return "DEPLOY";
         }
         if ("GET".equalsIgnoreCase(method)) {
             return "READ";

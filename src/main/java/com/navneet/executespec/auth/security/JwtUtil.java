@@ -75,6 +75,39 @@ public class JwtUtil {
                 .compact();
     }
 
+    /**
+     * Generates a short-lived SSE-scoped token for a specific run.
+     * Avoids exposing the full access token in SSE query params (browser history, logs).
+     * 5-minute TTL, scoped to a single runId.
+     */
+    public String generateSseToken(String userId, String runId) {
+        Instant now = Instant.now();
+        Instant exp = now.plus(5, ChronoUnit.MINUTES);
+        return Jwts.builder()
+                .subject(userId)
+                .claim("scope", "sse")
+                .claim("runId", runId)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .signWith(secretKey)
+                .compact();
+    }
+
+    /**
+     * Validates an SSE token and checks it is scoped to the given runId.
+     * Returns the userId if valid, null otherwise.
+     */
+    public String validateSseToken(String token, String runId) {
+        try {
+            Claims claims = parseToken(token);
+            if (!"sse".equals(claims.get("scope", String.class))) return null;
+            if (!runId.equals(claims.get("runId", String.class))) return null;
+            return claims.getSubject();
+        } catch (JwtException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     public Claims parseToken(String token) {
         return Jwts.parser()
                 .verifyWith(secretKey)

@@ -6,7 +6,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.text.Normalizer;
+import java.util.Base64;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -55,6 +57,12 @@ public class InputSanitizer {
         Pattern.compile("\\bcredential\\s+(stealer|harvester)\\b", Pattern.CASE_INSENSITIVE)
     );
 
+    /** Zero-width and invisible Unicode characters used to evade pattern matching. */
+    private static final Pattern ZERO_WIDTH_CHARS = Pattern.compile("[\\u200B-\\u200F\\u2060\\uFEFF\\u00AD]");
+
+    /** Base64 block detection — 100+ consecutive base64 chars may hide payload. */
+    private static final Pattern BASE64_BLOCK = Pattern.compile("[A-Za-z0-9+/=]{100,}");
+
     /** Maximum allowed percentage of non-printable characters. */
     private static final double MAX_NON_PRINTABLE_RATIO = 0.6;
 
@@ -70,9 +78,12 @@ public class InputSanitizer {
     public void scan(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return;
 
+        // Strip zero-width characters before normalization — prevents evasion via invisible chars
+        String stripped = ZERO_WIDTH_CHARS.matcher(userRequest).replaceAll("");
+
         // Unicode NFKC normalization — collapses homoglyphs (e.g., Cyrillic 'а' → Latin 'a',
         // fullwidth 'ｉｇｎｏｒｅ' → 'ignore') before pattern matching to prevent evasion.
-        String normalized = Normalizer.normalize(userRequest, Normalizer.Form.NFKC);
+        String normalized = Normalizer.normalize(stripped, Normalizer.Form.NFKC);
 
         // Check prompt injection patterns
         for (Pattern p : INJECTION_PATTERNS) {
@@ -98,6 +109,39 @@ public class InputSanitizer {
                 log.warn("INPUT BLOCKED (abuse): pattern={}", p.pattern());
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Request describes software that violates our acceptable use policy.");
+            }
+        }
+
+        // Base64 payload detection — decode and scan embedded base64 blocks
+        Matcher b64Matcher = BASE64_BLOCK.matcher(normalized);
+        while (b64Matcher.find()) {
+            try {
+                byte[] decoded = Base64.getDecoder().decode(b64Matcher.group());
+                String decodedStr = new String(decoded);
+                // Scan decoded content against all pattern lists
+                for (Pattern p : INJECTION_PATTERNS) {
+                    if (p.matcher(decodedStr).find()) {
+                        log.warn("INPUT BLOCKED (base64 prompt injection): decoded content matched {}", p.pattern());
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                                "Request contains encoded content that violates our security policy.");
+                    }
+                }
+                for (Pattern p : SHELL_PATTERNS) {
+                    if (p.matcher(decodedStr).find()) {
+                        log.warn("INPUT BLOCKED (base64 shell embedding): decoded content matched {}", p.pattern());
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                                "Request contains encoded content that violates our security policy.");
+                    }
+                }
+                for (Pattern p : ABUSE_PATTERNS) {
+                    if (p.matcher(decodedStr).find()) {
+                        log.warn("INPUT BLOCKED (base64 abuse): decoded content matched {}", p.pattern());
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                                "Request contains encoded content that violates our acceptable use policy.");
+                    }
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Not valid base64 — skip
             }
         }
 

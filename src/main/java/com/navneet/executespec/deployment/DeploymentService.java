@@ -22,6 +22,10 @@ import io.micrometer.context.ContextSnapshotFactory;
 import static com.navneet.executespec.config.CustomMetricsConfig.*;
 import com.navneet.executespec.config.CustomMetricsConfig;
 
+import com.navneet.executespec.auth.entity.TierConfig;
+import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.auth.service.TierEnforcementService;
+
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.temporal.ChronoUnit;
@@ -42,13 +46,21 @@ public class DeploymentService {
     private final SseBroadcaster sseBroadcaster;
     private final StateStore stateStore;
     private final MeterRegistry meterRegistry;
+    private final WorkspaceLockService workspaceLockService;
+    private final WorkspaceRestoreService workspaceRestoreService;
+    private final TierEnforcementService tierEnforcementService;
+    private final TierConfigRepository tierConfigRepo;
 
     public DeploymentService(DeploymentProperties props, AgentProperties agentProps,
                               DeploymentRepository deploymentRepo, RunRepoRepository runRepoRepo,
                               DockerfileGenerator dockerfileGenerator,
                               ArtifactRegistryClient artifactRegistry, CloudRunClient cloudRun,
                               DeploymentGitHubService gitHubService, SseBroadcaster sseBroadcaster,
-                              StateStore stateStore, MeterRegistry meterRegistry) {
+                              StateStore stateStore, MeterRegistry meterRegistry,
+                              WorkspaceLockService workspaceLockService,
+                              WorkspaceRestoreService workspaceRestoreService,
+                              TierEnforcementService tierEnforcementService,
+                              TierConfigRepository tierConfigRepo) {
         this.props = props;
         this.agentProps = agentProps;
         this.deploymentRepo = deploymentRepo;
@@ -60,6 +72,10 @@ public class DeploymentService {
         this.sseBroadcaster = sseBroadcaster;
         this.stateStore = stateStore;
         this.meterRegistry = meterRegistry;
+        this.workspaceLockService = workspaceLockService;
+        this.workspaceRestoreService = workspaceRestoreService;
+        this.tierEnforcementService = tierEnforcementService;
+        this.tierConfigRepo = tierConfigRepo;
     }
 
     @PostConstruct
@@ -126,12 +142,40 @@ public class DeploymentService {
                 "Can only deploy COMPLETE runs. Current status: " + run.getStatus());
         }
 
+        // Guard: tier-based deployment limit
+        String userId = run.getCreatedByUserId();
+        if (userId != null) {
+            String tier = tierEnforcementService.resolveUserTier(userId);
+            int maxDeploys = tierConfigRepo.findById(tier)
+                    .map(TierConfig::getMaxDeployments)
+                    .orElse(0);
+            if (maxDeploys == 0) {
+                throw new IllegalStateException(
+                    "Deployments are not available on the " + tier + " plan. Upgrade to deploy.");
+            }
+            if (maxDeploys > 0) { // -1 = unlimited
+                long currentDeploys = deploymentRepo.countActiveByUserId(userId);
+                if (currentDeploys >= maxDeploys) {
+                    throw new IllegalStateException(
+                        "Deployment limit reached (" + currentDeploys + "/" + maxDeploys
+                        + " for " + tier + " tier). Upgrade your plan or delete old deployments.");
+                }
+            }
+        }
+
         // Guard: no concurrent deploy for same run
         int active = deploymentRepo.countActiveByRunId(runId);
         if (active > 0) {
             throw new IllegalStateException(
                 "Deploy already in progress for run " + runId.substring(0, 8)
                 + ". Wait for it to complete or fail before redeploying.");
+        }
+
+        // Ensure workspace is available (restore from GCS if archived)
+        try {
+            workspaceRestoreService.ensureWorkspaceAvailable(runId);
+        } catch (Exception e) {
+            return createFailed(runId, "Workspace not available: " + e.getMessage());
         }
 
         // Resolve workspace path
@@ -179,6 +223,26 @@ public class DeploymentService {
         java.time.Instant deployStart = java.time.Instant.now();
         java.time.Instant buildPhaseStart = null;
         java.time.Instant healthCheckStart = null;
+        String pushedImageTag = null; // track for cleanup on failure
+
+        // Acquire workspace lock to prevent concurrent preview/deploy
+        var lock = workspaceLockService.getLock(deployment.getRunId());
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(10, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (!locked) {
+            deployment.markFailed("Workspace locked by another operation (preview in progress?)");
+            deploymentRepo.save(deployment);
+            sseBroadcaster.emit(deployment.getRunId(),
+                RunEvent.deployFailed(deployment.getRunId(), deployment.getVersionTag(),
+                    "Workspace locked"));
+            Metrics.ACTIVE_DEPLOYS.decrementAndGet();
+            return;
+        }
+
         try {
             // ── Phase 1: GitHub (optional) ──
             RunRepo repo = handleGitHub(deployment, run, workspacePath, repoMode, repoUrl, repoName);
@@ -204,6 +268,7 @@ public class DeploymentService {
                 RunEvent.deployPushing(deployment.getRunId(), deployment.getVersionTag()));
 
             artifactRegistry.pushImage(buildResult.imageTag());
+            pushedImageTag = buildResult.imageTag();
 
             // ── Phase 4: Deploy to Cloud Run ──
             deployment.setStatus(DeployStatus.DEPLOYING);
@@ -212,21 +277,31 @@ public class DeploymentService {
             CloudRunClient.DeployResult deployResult =
                 cloudRun.deploy(deployment.getServiceName(), deployment.getImageUri());
 
+            // 6.6: Validate service URL before proceeding
+            if (deployResult.serviceUrl() == null || deployResult.serviceUrl().isBlank()) {
+                throw new IOException("Cloud Run returned no service URL for "
+                        + deployment.getServiceName()
+                        + ". Deploy may have succeeded but URL extraction failed.");
+            }
+
             // Record build duration (phases 2-4)
             if (buildPhaseStart != null) {
                 Timer.builder(DEPLOY_BUILD_DURATION).register(meterRegistry)
                         .record(java.time.Duration.between(buildPhaseStart, java.time.Instant.now()));
             }
 
-            // ── Phase 5: Health check ──
+            // ── Phase 5: Health check (status set BEFORE check, not LIVE) ──
             healthCheckStart = java.time.Instant.now();
+            deployment.setStatus(DeployStatus.HEALTH_CHECK);
+            deploymentRepo.save(deployment);
+
             if (!cloudRun.healthCheck(deployResult.serviceUrl())) {
                 throw new IOException(
                     "Post-deploy health check failed — service returned 5xx at "
                     + deployResult.serviceUrl());
             }
 
-            // ── Success ──
+            // ── Success — only now mark LIVE ──
             deployment.markLive(deployResult.serviceUrl(), deployResult.revisionName());
             deploymentRepo.save(deployment);
 
@@ -255,7 +330,19 @@ public class DeploymentService {
             sseBroadcaster.emit(deployment.getRunId(),
                 RunEvent.deployFailed(deployment.getRunId(), deployment.getVersionTag(),
                     e.getMessage()));
+
+            // 6.3: Clean up pushed image if deploy/health-check failed
+            if (pushedImageTag != null) {
+                try {
+                    log.info("Cleaning up AR image after deploy failure: {}", deployment.getImageUri());
+                    cloudRun.deleteImage(deployment.getImageUri());
+                } catch (Exception cleanupEx) {
+                    log.warn("Failed to cleanup image {} after deploy failure: {}",
+                            deployment.getImageUri(), cleanupEx.getMessage());
+                }
+            }
         } finally {
+            lock.unlock();
             Metrics.ACTIVE_DEPLOYS.decrementAndGet();
         }
     }

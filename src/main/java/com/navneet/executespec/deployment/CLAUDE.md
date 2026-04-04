@@ -8,8 +8,8 @@ Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), per
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first, falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`.
 - `preview/PreviewProjectType.java` — Enum: SPRING_BOOT, JAVA, NODE_FRONTEND, NODE_BACKEND, PYTHON, GO, RUST, RUBY, PHP, FULL_STACK, STATIC_HTML (11 types).
-- `preview/ComposeFileGenerator.java` — Generates docker-compose.yml for Docker previews. Port mapping uses `PreviewProjectType.getContainerPort()`.
-- `DeploymentService.java` — Full Cloud Run deployment. 11-language support, 7-day TTL.
+- `preview/ComposeFileGenerator.java` — Generates docker-compose.yml for Docker previews. Port mapping uses `PreviewProjectType.getContainerPort()`. Blocks cloud metadata endpoints via `extra_hosts` (metadata.google.internal + 169.254.169.254 → 127.0.0.1). App containers hardened with `no-new-privileges`, `cap_drop: ALL`.
+- `DeploymentService.java` — Full Cloud Run deployment. 11-language support, 7-day TTL. Tier-based deployment limits enforced via `TierConfig.maxDeployments` (FREE=0, PRO=5, ENTERPRISE=-1).
 - `CloudRunClient.java` — GCP Cloud Run API client. All subprocess calls have timeouts.
 - `ArtifactRegistryClient.java` — Docker build + push to Artifact Registry. Build/push have timeouts.
 - `DockerfileGenerator.java` — Generates language-specific Dockerfiles (11 strategies). Also reads `.agent-context/project.json` to select correct strategy before file-based detection.
@@ -53,6 +53,13 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 - `getLogs()` supports both Docker Compose and Cloud Run (via `gcloud logging read`)
 - `probeApiDocs()` works for both Docker (localhost:port) and Cloud Run (service URL)
 - Cloud Run orphan cleanup race fix: `cloudRunServiceName` stored upfront in initial session (`es-preview-{runIdShort}`), preventing orphan cleanup job from deleting services during build/push phase
+
+## Security
+- **Env var whitelist:** `ComposeExecutor` clears inherited env vars and only passes: PATH, HOME, USER, LANG, TZ, DOCKER_HOST, DOCKER_CONFIG, JAVA_HOME, HTTP_PROXY, HTTPS_PROXY, NO_PROXY. Prevents leaking JWT_SECRET, API keys, etc.
+- **Metadata blocking:** App containers get `extra_hosts` to redirect cloud metadata endpoints (169.254.169.254, metadata.google.internal) to 127.0.0.1.
+- **Container hardening:** App containers run with `no-new-privileges:true`, `cap_drop: ALL`. DB containers are exempt (need chown/chmod).
+- **Concurrent limit:** Preview start is synchronized to prevent TOCTOU race on the concurrent limit check.
+- **Test execution:** Runs inside Docker container (`maven:3.9-eclipse-temurin-21`) with `--read-only`, `--memory=4g`, `--cpus=2`, `--cap-drop ALL`, `--security-opt no-new-privileges:true`. Workspace mounted read-only.
 
 ## Preview Mode Architecture
 

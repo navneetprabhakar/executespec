@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li><b>Accuracy (50%)</b> — pattern matching + structural validation</li>
  *   <li><b>Speed (25%)</b> — latency relative to tier budget</li>
- *   <li><b>Cost (25%)</b> — normalized across models per test case (post-processing)</li>
+ *   <li><b>Cost (25%)</b> — normalized across models per tier (post-processing)</li>
  * </ul>
  */
 @Slf4j
@@ -103,39 +103,48 @@ public class EvalScorer {
      * while keeping scores in a useful 1-10 range:
      * <ul>
      *   <li>Cheapest model → 10.0</li>
-     *   <li>2x more expensive → ~7.5</li>
-     *   <li>5x more expensive → ~4.5</li>
-     *   <li>10x more expensive → ~2.5</li>
-     *   <li>20x+ more expensive → 1.0</li>
+     *   <li>2x more expensive → 8.5</li>
+     *   <li>4x more expensive → 7.0</li>
+     *   <li>8x more expensive → 5.5</li>
+     *   <li>16x more expensive → 4.0</li>
+     *   <li>32x more expensive → 2.5</li>
+     *   <li>64x+ more expensive → 1.0</li>
      * </ul>
      *
-     * @param costs array of costs (one per model)
+     * @param costs array of costs (one per model). Negative values (-1) indicate
+     *              unknown cost (token extraction failed) and receive a neutral score of 5.0.
      * @return array of scores (1-10)
      */
     public double[] normalizeCostScores(double[] costs) {
         if (costs.length == 0) return new double[0];
-        if (costs.length == 1) return new double[]{10.0};
+        if (costs.length == 1) {
+            return new double[]{costs[0] < 0 ? 5.0 : 10.0};
+        }
 
         double min = Double.MAX_VALUE;
         for (double c : costs) {
             if (c > 0 && c < min) min = c;
         }
-        // If all costs are zero, everyone gets 10
+        // If all costs are zero or unknown, everyone gets 10 (or 5 for unknown)
         if (min == Double.MAX_VALUE) {
             double[] scores = new double[costs.length];
-            java.util.Arrays.fill(scores, 10.0);
+            for (int i = 0; i < costs.length; i++) {
+                scores[i] = costs[i] < 0 ? 5.0 : 10.0;
+            }
             return scores;
         }
 
         double[] scores = new double[costs.length];
         for (int i = 0; i < costs.length; i++) {
-            if (costs[i] <= 0) {
+            if (costs[i] < 0) {
+                scores[i] = 5.0; // unknown cost — neutral, neither penalized nor rewarded
+            } else if (costs[i] <= 0) {
                 scores[i] = 10.0; // free = max score
             } else {
-                // ratio = 1.0 for cheapest, higher for more expensive
                 double ratio = costs[i] / min;
-                // log2 scale: score = 10 - 3 * log2(ratio), clamped to [1, 10]
-                double logPenalty = 3.0 * (Math.log(ratio) / Math.log(2));
+                // Gentler log2 scale with 1.5 multiplier for wider dynamic range:
+                // 1x→10, 2x→8.5, 4x→7, 8x→5.5, 16x→4, 32x→2.5, 64x→1
+                double logPenalty = 1.5 * (Math.log(ratio) / Math.log(2));
                 scores[i] = Math.max(1.0, Math.min(10.0, 10.0 - logPenalty));
             }
         }
@@ -183,6 +192,21 @@ public class EvalScorer {
      */
     public boolean isWithinLengthLimit(String response, int maxLength) {
         return maxLength <= 0 || response == null || response.length() <= maxLength;
+    }
+
+    /**
+     * Compute a length penalty for verbose responses.
+     * <ul>
+     *   <li>Within limit → 0.0</li>
+     *   <li>1.5x over → -1.0 point</li>
+     *   <li>2x over → -2.0 points</li>
+     *   <li>Capped at -3.0</li>
+     * </ul>
+     */
+    public double lengthPenalty(String response, int maxLength) {
+        if (maxLength <= 0 || response == null || response.length() <= maxLength) return 0.0;
+        double overageRatio = (double) response.length() / maxLength;
+        return Math.min(3.0, (overageRatio - 1.0) * 2.0);
     }
 
     /**

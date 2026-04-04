@@ -84,8 +84,28 @@ public class TokenBudgetMonitor {
      * @param taskId             for logging
      * @return effective complexity after overrides
      */
+    /**
+     * @deprecated Use {@link #resolveEffectiveComplexity(String, String, String, int, String)} with model parameter.
+     */
+    @Deprecated
     public String resolveEffectiveComplexity(String originalComplexity, String projectType,
                                               int ownedFilesCount, String taskId) {
+        return resolveEffectiveComplexity(originalComplexity, null, projectType, ownedFilesCount, taskId);
+    }
+
+    /**
+     * Apply complexity overrides before resolving token budget.
+     * Last line of defense against planner over-assignment.
+     *
+     * @param originalComplexity the planner-assigned complexity (LOW/MEDIUM/HIGH)
+     * @param model              the resolved model name (for model-max-based downgrades)
+     * @param projectType        the project type from .agent-context/project.json (e.g. "STATIC_HTML")
+     * @param ownedFilesCount    number of files in the task's owned_files list
+     * @param taskId             for logging
+     * @return effective complexity after overrides
+     */
+    public String resolveEffectiveComplexity(String originalComplexity, String model,
+                                              String projectType, int ownedFilesCount, String taskId) {
         String c = originalComplexity != null ? originalComplexity.toUpperCase() : "MEDIUM";
 
         // STATIC_HTML / NODE_FRONTEND: clamp to MEDIUM (8192 output tokens).
@@ -103,6 +123,17 @@ public class TokenBudgetMonitor {
                 return "MEDIUM";
             }
             return c; // already MEDIUM
+        }
+
+        // Model-max-based downgrade: if model max output ≤ 8192, HIGH is impossible —
+        // the ceiling (12288) would exceed what the model can produce, causing truncation loops.
+        if ("HIGH".equals(c) && model != null) {
+            int modelMax = modelRegistry.maxOutputForModel(model);
+            if (modelMax <= 8_192) {
+                log.info("Complexity override: task {} downgraded HIGH → MEDIUM (model {} max output = {})",
+                        taskId, model, modelMax);
+                return "MEDIUM";
+            }
         }
 
         // Tasks with ≤2 owned files are almost never HIGH.
@@ -126,12 +157,24 @@ public class TokenBudgetMonitor {
         // producing one massive response that gets truncated and loses writeFile calls.
         // LOW bumped from 4K→6K to reduce truncation loops on CSS/HTML files.
         // If a task genuinely needs more, WorkerAgent auto-continues on truncation (max 2).
-        return switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
+        int complexityCeiling = switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
             case "LOW"    -> 6_144;
             case "MEDIUM" -> 8_192;
             case "HIGH"   -> 12_288;
             default       -> 8_192;
         };
+
+        // Cap to model's physical max output — prevents silently exceeding what the model
+        // can produce (e.g., Haiku max=8192 but MEDIUM ceiling=8192, HIGH ceiling=12288).
+        if (model != null) {
+            int modelMax = modelRegistry.maxOutputForModel(model);
+            if (modelMax > 0 && modelMax < complexityCeiling) {
+                log.debug("[Budget] Capping output from {} to {} for model {}",
+                        complexityCeiling, modelMax, model);
+                return modelMax;
+            }
+        }
+        return complexityCeiling;
     }
 
     /** @deprecated Use {@link #maxOutputTokens(String, String)} with model parameter. */

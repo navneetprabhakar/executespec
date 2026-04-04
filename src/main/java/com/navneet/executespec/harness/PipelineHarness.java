@@ -211,11 +211,17 @@ public class PipelineHarness {
     void init() {
         int maxRuns = props.getConcurrency() != null ? props.getConcurrency().getMaxRuns() : 3;
         runSlots = new Semaphore(maxRuns);
-        executor = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "pipeline-run");
-            t.setDaemon(true);
-            return t;
-        });
+        executor = new java.util.concurrent.ThreadPoolExecutor(
+                maxRuns, maxRuns * 3,
+                60L, TimeUnit.SECONDS,
+                new java.util.concurrent.LinkedBlockingQueue<>(maxRuns * 2),
+                r -> {
+                    Thread t = new Thread(r, "pipeline-run");
+                    t.setDaemon(true);
+                    return t;
+                },
+                new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
+        );
         log.info("PipelineHarness ready — max concurrent runs: {}", maxRuns);
     }
 
@@ -601,7 +607,12 @@ public class PipelineHarness {
                         if (orphaned == MergeDecision.MERGE) {
                             doReviewAndMerge(run, false, false);
                         } else {
-                            doReviewAndMerge(run, false, false);
+                            // SECURITY: DECLINE must NOT merge. Mark run as failed.
+                            log.info("[GateFallback] User declined merge for run {}", runId);
+                            run.setStatus("FAILED");
+                            run.setFailureReason("Merge declined by user");
+                            stateStore.saveRun(run);
+                            broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
                         }
                     } finally {
                         activeResumeGuard.remove(runId);
@@ -756,15 +767,30 @@ public class PipelineHarness {
             return false;
         }
 
+        // Acquire semaphore slot to respect concurrency limits
+        if (!runSlots.tryAcquire()) {
+            log.warn("[Resume] No available run slots for run {}", runId);
+            return false;
+        }
+
         boolean resumed = stateStore.resumeRun(runId);
-        if (!resumed) return false;
+        if (!resumed) {
+            runSlots.release();
+            return false;
+        }
 
         broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
         broadcaster.emit(runId, RunEvent.log(runId, "harness",
             "▶️ Resuming paused run — re-running incomplete tasks"));
 
         final PipelineRun frozenRun = stateStore.findRun(runId).orElse(run);
-        Thread.ofVirtual().name("resume-" + runId).start(() -> runResumeAsync(frozenRun));
+        Thread.ofVirtual().name("resume-" + runId).start(() -> {
+            try {
+                runResumeAsync(frozenRun);
+            } finally {
+                runSlots.release();
+            }
+        });
         return true;
     }
 
@@ -1267,6 +1293,12 @@ public class PipelineHarness {
      * @param taskIds IDs of the newly appended tasks to execute
      */
     public void executeApplySuggestion(String runId, List<String> taskIds) {
+        // Acquire semaphore slot to respect concurrency limits
+        if (!runSlots.tryAcquire()) {
+            log.warn("[ApplySuggestion] No available run slots for run {}", runId);
+            throw new IllegalStateException("Server at capacity — cannot apply suggestion right now. Try again shortly.");
+        }
+
         executor.submit(() -> {
             log.info("[ApplySuggestion] Starting execution of {} tasks for run {}", taskIds.size(), runId);
             PipelineRun run = stateStore.findRun(runId).orElseThrow();
@@ -1361,6 +1393,8 @@ public class PipelineHarness {
                 run.setCurrentGate(null);
                 stateStore.save(run);
                 broadcaster.emit(runId, RunEvent.runStatus(runId, previousStatus));
+            } finally {
+                runSlots.release();
             }
         });
     }
@@ -1620,91 +1654,19 @@ public class PipelineHarness {
                 // ── Background validation (production mode only) ─────────────
                 if (execMode.isProduction()) {
                     final String bgUserReq = effectiveRequest;
+                    String bgPlanJson;
+                    try {
+                        bgPlanJson = mapper.writeValueAsString(singleShotResult.syntheticPlan());
+                    } catch (JsonProcessingException jsonEx) {
+                        bgPlanJson = "{}";
+                        log.warn("[SingleShot] Could not serialize synthetic plan for run {}: {}", runId, jsonEx.getMessage());
+                    }
+                    final String finalBgPlanJson = bgPlanJson;
                     backgroundValidationRuns.add(runId);
                     var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                     Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
-                        try {
-                            // Test generation (async)
-                            try {
-                                final String planJson = mapper.writeValueAsString(singleShotResult.syntheticPlan());
-                                testCompletionFutures.put(runId, new CompletableFuture<>());
-                                testGenOrchestrator.runTestGenPipeline(runId, bgUserReq, planJson);
-                                log.info("[SingleShot] Run {} — test gen pipeline completed in background", runId);
-                            } catch (Exception e) {
-                                testCompletionFutures.remove(runId);
-                                log.warn("[SingleShot] Test gen failed for run {}: {}", runId, e.getMessage());
-                            }
-
-                            // Review merged code
-                            ReviewReportV2 review = null;
-                            try {
-                                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background review starting..."));
-                                var providers = availableProviderResolver.resolve(runId);
-                                review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
-                                        currentRun.getUserRequest(), providers);
-                                stateStore.saveReviewV2(runId, review);
-
-                                if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
-                                        || review.getVerdict() == ReviewVerdict.REJECTED) {
-                                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                                        "⚠️ Reviewer found issues: " + review.getSummary()));
-                                } else {
-                                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                                        "✅ Review passed: " + review.getSummary()));
-                                }
-                            } catch (Exception e) {
-                                log.warn("[SingleShot] Review failed for run {}: {}", runId, e.getMessage());
-                                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                                    "⚠️ Background review failed: " + e.getMessage()));
-                            }
-
-                            // Re-validate after auto-fix
-                            boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
-                            if (fixesApplied) {
-                                broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                                    "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
-                                try {
-                                    CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
-                                    if (revalidation.passed() || revalidation.skipped()) {
-                                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
-                                            "✅ Re-validation passed — all fixes confirmed"));
-                                    } else {
-                                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
-                                            "⚠️ Re-validation found issues: " + revalidation.errorSummary()));
-                                    }
-                                } catch (Exception revalEx) {
-                                    log.warn("[SingleShot] Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
-                                }
-                            }
-
-                            // Cancel pending test execution if preview never started
-                            testPreviewCoordinator.cancelIfPending(runId);
-
-                            // Validation report
-                            try {
-                                generateValidationReport(runId, currentRun, currentReports,
-                                        review, finalCompileResult);
-                            } catch (Exception reportEx) {
-                                log.warn("[SingleShot] Report generation failed for run {}: {}", runId, reportEx.getMessage());
-                                broadcaster.emit(runId, RunEvent.log(runId, "report",
-                                    "⚠️ Report generation failed"));
-                            }
-
-                            // Publish MergeCompleted so integration adapters fire AFTER review is saved
-                            eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                                runId, currentRun, currentReports, review, false));
-
-                            // Update actual cost after background work
-                            saveActualCost(runId);
-
-                            log.info("[SingleShot] Run {} — background validation complete", runId);
-                        } finally {
-                            backgroundValidationRuns.remove(runId);
-                            runKeyStore.remove(runId);
-                            runBudgetTracker.remove(runId);
-                    runCostBudgetService.remove(runId);
-                            broadcaster.complete(runId);
-                        }
+                        runBackgroundValidation(runId, currentRun, currentReports,
+                                finalBgPlanJson, bgUserReq, finalCompileResult, false);
                     }));
                 } else {
                     // PROTOTYPE mode: no background validation, fire integration notifications now
@@ -2073,100 +2035,19 @@ public class PipelineHarness {
             // don't block the user from seeing the preview.
             if (execMode.isProduction()) {
                 final CompileResult finalPostMergeCompile = postMergeCompile != null ? postMergeCompile : mainCompileResult;
+                String bgPlanJson;
+                try {
+                    bgPlanJson = mapper.writeValueAsString(plan);
+                } catch (JsonProcessingException jsonEx) {
+                    bgPlanJson = "{}";
+                    log.warn("Could not serialize plan for run {}: {}", runId, jsonEx.getMessage());
+                }
+                final String finalBgPlanJson = bgPlanJson;
                 backgroundValidationRuns.add(runId);
                 var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                 Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
-                    try {
-                        // 6a. Test generation (async — fires TestsReadyEvent when done)
-                        try {
-                            final String planJson = mapper.writeValueAsString(plan);
-                            final String userReq = currentRun.getUserRequest();
-                            testCompletionFutures.put(runId, new CompletableFuture<>());
-                            testGenOrchestrator.runTestGenPipeline(runId, userReq, planJson);
-                            log.info("Run {} — test gen pipeline completed in background", runId);
-                        } catch (Exception e) {
-                            testCompletionFutures.remove(runId);
-                            log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
-                        }
-
-                        // 6b. Review merged code (sync within background thread)
-                        ReviewReportV2 review = null;
-                        Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
-                            .lowCardinalityKeyValue("run.id", runId)
-                            .start();
-                        try (Observation.Scope reviewScope = reviewObs.openScope()) {
-                            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background review starting..."));
-                            var providers = availableProviderResolver.resolve(runId);
-                            review = reviewerAgentV2.review(currentRun, stateStore.getAllTasks(runId),
-                                    currentRun.getUserRequest(), providers);
-                            stateStore.saveReviewV2(runId, review);
-
-                            if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
-                                    || review.getVerdict() == ReviewVerdict.REJECTED) {
-                                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                                    "⚠️ Reviewer found issues: " + review.getSummary()));
-                            } else {
-                                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                                    "✅ Review passed: " + review.getSummary()));
-                            }
-                        } catch (Exception e) {
-                            reviewObs.error(e);
-                            log.warn("Run {} — background review failed: {}", runId, e.getMessage());
-                            broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
-                                "⚠️ Background review failed: " + e.getMessage()));
-                        } finally {
-                            reviewObs.stop();
-                        }
-
-                        // 6c. Re-validate after auto-fix
-                        boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
-                        if (fixesApplied) {
-                            broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                                "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
-                            try {
-                                CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
-                                if (revalidation.passed() || revalidation.skipped()) {
-                                    broadcaster.emit(runId, RunEvent.log(runId, "compiler",
-                                        "✅ Re-validation passed — all fixes confirmed"));
-                                } else {
-                                    broadcaster.emit(runId, RunEvent.log(runId, "compiler",
-                                        "⚠️ Re-validation found issues: " + revalidation.errorSummary()));
-                                }
-                            } catch (Exception revalEx) {
-                                log.warn("Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
-                            }
-                        }
-
-                        // 6d. Cancel pending test execution if preview never started
-                        testPreviewCoordinator.cancelIfPending(runId);
-
-                        // 6e. Validation report
-                        try {
-                            generateValidationReport(runId, currentRun, currentReports, review, finalPostMergeCompile);
-                        } catch (Exception reportEx) {
-                            log.warn("Background validation report failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
-                            broadcaster.emit(runId, RunEvent.log(runId, "report",
-                                "⚠️ Report generation failed"));
-                        }
-
-                        // 6f. Publish MergeCompleted for post-merge agents
-                        boolean hadFailures = currentReports.stream()
-                            .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
-                                           "partial".equalsIgnoreCase(r.getStatus()));
-                        eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                            runId, currentRun, currentReports, review, hadFailures));
-
-                        // Update actual cost after background work
-                        saveActualCost(runId);
-
-                        log.info("Run {} — background validation complete (review + report)", runId);
-                    } finally {
-                        backgroundValidationRuns.remove(runId);
-                        runKeyStore.remove(runId);
-                        runBudgetTracker.remove(runId);
-                    runCostBudgetService.remove(runId);
-                        broadcaster.complete(runId);
-                    }
+                    runBackgroundValidation(runId, currentRun, currentReports,
+                            finalBgPlanJson, currentRun.getUserRequest(), finalPostMergeCompile, true);
                 }));
             } else {
                 // PROTOTYPE mode: no background validation, fire integration notifications now
@@ -2287,6 +2168,120 @@ public class PipelineHarness {
                 pushToGitHubIfConfigured(run);
                 stateStore.markComplete(run.getRunId());
             }
+        }
+    }
+
+    // ── Shared background validation logic ─────────────────────────────────────
+
+    /**
+     * Runs the full background validation pipeline: test gen, review, re-validation,
+     * test preview cancellation, validation report, MergeCompleted event, and cost update.
+     * Called from both the single-shot and normal pipeline background threads.
+     *
+     * @param runId              the pipeline run ID
+     * @param run                the current PipelineRun snapshot
+     * @param reports            worker reports from the completed run
+     * @param planJson           serialized plan JSON (synthetic for single-shot, full for normal)
+     * @param userRequest        the user's original request text
+     * @param compileResult      compile result to include in the validation report
+     * @param computeHadFailures if true, compute hadFailures from reports; if false, pass false
+     */
+    private void runBackgroundValidation(String runId, PipelineRun run,
+                                         List<WorkerReport> reports, String planJson,
+                                         String userRequest, CompileResult compileResult,
+                                         boolean computeHadFailures) {
+        try {
+            // Test generation (async — fires TestsReadyEvent when done)
+            try {
+                testCompletionFutures.put(runId, new CompletableFuture<>());
+                testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
+                log.info("Run {} — test gen pipeline completed in background", runId);
+            } catch (Exception e) {
+                testCompletionFutures.remove(runId);
+                log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
+            }
+
+            // Review merged code
+            ReviewReportV2 review = null;
+            Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
+                .lowCardinalityKeyValue("run.id", runId)
+                .start();
+            try (Observation.Scope reviewScope = reviewObs.openScope()) {
+                broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background review starting..."));
+                var providers = availableProviderResolver.resolve(runId);
+                review = reviewerAgentV2.review(run, stateStore.getAllTasks(runId),
+                        run.getUserRequest(), providers);
+                stateStore.saveReviewV2(runId, review);
+
+                if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
+                        || review.getVerdict() == ReviewVerdict.REJECTED) {
+                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                        "⚠️ Reviewer found issues: " + review.getSummary()));
+                } else {
+                    broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                        "✅ Review passed: " + review.getSummary()));
+                }
+            } catch (Exception e) {
+                reviewObs.error(e);
+                log.warn("Run {} — background review failed: {}", runId, e.getMessage());
+                broadcaster.emit(runId, RunEvent.log(runId, "reviewer",
+                    "⚠️ Background review failed: " + e.getMessage()));
+            } finally {
+                reviewObs.stop();
+            }
+
+            // Re-validate after auto-fix
+            boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
+            if (fixesApplied) {
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                    "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
+                try {
+                    CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
+                    if (revalidation.passed() || revalidation.skipped()) {
+                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                            "✅ Re-validation passed — all fixes confirmed"));
+                    } else {
+                        broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                            "⚠️ Re-validation found issues: " + revalidation.errorSummary()));
+                    }
+                } catch (Exception revalEx) {
+                    log.warn("Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
+                }
+            }
+
+            // Cancel pending test execution if preview never started
+            testPreviewCoordinator.cancelIfPending(runId);
+
+            // Validation report
+            try {
+                generateValidationReport(runId, run, reports, review, compileResult);
+            } catch (Exception reportEx) {
+                log.warn("Background validation report failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
+                broadcaster.emit(runId, RunEvent.log(runId, "report",
+                    "⚠️ Report generation failed"));
+            }
+
+            // Publish MergeCompleted for post-merge agents / integration adapters
+            boolean hadFailures = computeHadFailures && reports.stream()
+                .anyMatch(r -> "blocked".equalsIgnoreCase(r.getStatus()) ||
+                               "partial".equalsIgnoreCase(r.getStatus()));
+            eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
+                runId, run, reports, review, hadFailures));
+
+            // Update actual cost after background work
+            saveActualCost(runId);
+
+            log.info("Run {} — background validation complete", runId);
+        } catch (Exception e) {
+            log.error("Background validation failed for run {}: {}", runId, e.getMessage(), e);
+            broadcaster.emit(runId, RunEvent.validationFailed(runId, null,
+                "Validation could not complete: " + e.getMessage()));
+        } finally {
+            backgroundValidationRuns.remove(runId);
+            runKeyStore.remove(runId);
+            runBudgetTracker.remove(runId);
+            runCostBudgetService.remove(runId);
+            broadcaster.complete(runId);
         }
     }
 

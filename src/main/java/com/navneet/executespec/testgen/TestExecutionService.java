@@ -52,18 +52,27 @@ public class TestExecutionService {
         Instant start = Instant.now();
 
         try {
-            String javaHome = System.getenv("JAVA_HOME");
-            if (javaHome == null || javaHome.isBlank()) {
-                javaHome = "/opt/homebrew/opt/openjdk@21";
-            }
-
+            // Run tests inside a Docker container for isolation:
+            // --network=host to access preview, --memory=4g, --cpus=2, --read-only (tmpfs for Maven cache)
+            Path absTestDir = testProjectDir.toAbsolutePath();
             ProcessBuilder pb = new ProcessBuilder(
+                    "docker", "run", "--rm",
+                    "--network=host",
+                    "--memory=4g",
+                    "--cpus=2",
+                    "--read-only",
+                    "--tmpfs", "/tmp:rw,size=512m",
+                    "--tmpfs", "/root/.m2:rw,size=1g",
+                    "--security-opt", "no-new-privileges:true",
+                    "--cap-drop", "ALL",
+                    "-v", absTestDir + ":/workspace:ro",
+                    "-v", absTestDir.resolve("target") + ":/workspace/target:rw",
+                    "-w", "/workspace",
+                    "maven:3.9-eclipse-temurin-21",
                     "mvn", "test",
-                    "-f", pomFile.toString(),
                     "-Dapp.base-url=" + previewBaseUrl,
                     "-T", "1C"
             );
-            pb.environment().put("JAVA_HOME", javaHome);
             pb.redirectErrorStream(true);
 
             Process process = pb.start();

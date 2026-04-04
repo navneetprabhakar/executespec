@@ -58,6 +58,7 @@ public class IntegrationProperties {
         private String baseUrl;
         private String username;
         private String password;
+        private String webhookSecret;
         private List<String> triggerCategories = List.of("application");
         private boolean autoResolve = false;
         private String dashboardUrl = "http://localhost:8080";

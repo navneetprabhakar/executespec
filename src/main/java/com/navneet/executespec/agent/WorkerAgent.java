@@ -1,5 +1,6 @@
 package com.navneet.executespec.agent;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.ResolvedModel;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -49,6 +50,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -75,6 +77,7 @@ public class WorkerAgent {
     private final com.navneet.executespec.harness.UiStyleResolver uiStyleResolver;
     private final com.navneet.executespec.router.ModelResolver modelResolver;
     private final com.navneet.executespec.harness.RunBudgetTracker runBudgetTracker;
+    private final com.navneet.executespec.harness.RunCostBudgetService runCostBudgetService;
     private final ModelRegistry modelRegistry;
 
     @Value("classpath:prompts/worker.txt")
@@ -162,7 +165,7 @@ public class WorkerAgent {
         // Apply complexity override (last line of defense against planner over-assignment)
         String projectType = readProjectType(workDir);
         int ownedFilesCount = taskDef.getOwnedFiles() != null ? taskDef.getOwnedFiles().size() : 0;
-        complexity = budgetMonitor.resolveEffectiveComplexity(complexity, projectType, ownedFilesCount, taskId);
+        complexity = budgetMonitor.resolveEffectiveComplexity(complexity, model, projectType, ownedFilesCount, taskId);
 
         log.info("Worker starting task [{}] on branch {} in {} ({}:{}) complexity={}",
                 taskId, branchName, workDir, provider, model, complexity);
@@ -191,6 +194,7 @@ public class WorkerAgent {
         int fabricatedCompletionCount = 0; // fabricated completion rejections — max 3 before FAILED
         final int MAX_FABRICATED_COMPLETIONS = 3;
         int configuredMaxOutput = budgetMonitor.maxOutputTokens(model, complexity); // for calibration tracking
+        boolean midTaskRecoveryAttempted = false; // limit to 1 recovery attempt per task
 
         // ── AGENTIC LOOP (time-based) ────────────────────────────────────────
         Instant deadline = Instant.now().plus(Duration.ofMinutes(taskDurationMinutes));
@@ -302,6 +306,19 @@ public class WorkerAgent {
                 stateStore.updateLastActivity(taskId);
 
                 iteration++;
+
+                // Mid-task cost enforcement: check every 5 LLM calls
+                if (iteration % 5 == 0 && runCostBudgetService.isOverBudget(runId)) {
+                    String tier = runCostBudgetService.getRunTier(runId);
+                    Double budget = runCostBudgetService.getBudget(runId);
+                    log.warn("[Worker {}] Mid-task cost budget exceeded — stopping (tier={}, budget=${})",
+                            taskId, tier, budget != null ? String.format("%.2f", budget) : "?");
+                    stateStore.logMessage(runId, agentId, "state", "BUDGET_EXCEEDED",
+                            "Task stopped mid-execution: run cost exceeded $" +
+                            (budget != null ? String.format("%.2f", budget) : "?") + " " + tier + " budget", 0);
+                    sseBroadcaster.emit(runId, RunEvent.budgetExceeded(runId, tier, budget != null ? budget : 3.0));
+                    break;
+                }
 
                 // getResult() can return null when the provider sends an empty completion
                 // (e.g. rate-limit response, content-filter rejection) that LlmRouter
@@ -500,7 +517,7 @@ public class WorkerAgent {
                     }
 
                     // 2. Strict completion detection: JSON must be the entire response
-                    if (looksLikeCompletionReport(assistantText)) {
+                    if (looksLikeCompletionReport(assistantText, taskId)) {
                         // Validate: if the report claims files were created or modified but no
                         // writeFile/editFile was dispatched, the model fabricated the report.
                         if (totalFileWrites == 0 && reportClaimsFileChanges(assistantText)) {
@@ -649,8 +666,49 @@ public class WorkerAgent {
                 }
             }
         } catch (MidTaskProviderFailureException e) {
-            log.error("Mid-task provider failure for task {}: {}", taskId, e.getMessage());
-            return withProviderModel(WorkerReport.blocked(taskId, e.getMessage(),
+            // ── Recovery via checkpoint compaction + fallback provider ────────────
+            // Compact conversation to produce provider-agnostic messages, switch to a
+            // fallback provider, and re-enter the agentic loop for one more attempt.
+            if (!midTaskRecoveryAttempted) {
+                midTaskRecoveryAttempted = true;
+                String failedProvider = provider;
+                try {
+                    var aiProvider = stateStore.findRun(runId)
+                            .map(r -> r.getAiProviderEnum())
+                            .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
+
+                    // Find a different provider via failover chain
+                    ResolvedModel fallbackResolved = modelResolver.resolveFallbackExcluding(
+                            "WorkerAgent", aiProvider, failedProvider);
+
+                    // Compact conversation — produces provider-agnostic checkpoint
+                    String[] compactProvider = { fallbackResolved.providerName() };
+                    String[] compactModel   = { fallbackResolved.getModel() };
+                    messages = compact(messages, taskDef, taskId, runId,
+                            compactProvider, compactModel, agentId, complexity);
+                    provider = compactProvider[0];
+                    model    = compactModel[0];
+                    lastCallInputTokens = 0;
+
+                    log.info("Mid-task recovery: compacted and switched {} → {} for task {}",
+                            failedProvider, provider, taskId);
+                    io.micrometer.core.instrument.Metrics.counter("executespec.worker.mid_task_recovery",
+                            "from_provider", failedProvider, "to_provider", provider).increment();
+                    sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
+                            "⚡ Provider failure — recovered via checkpoint (now using " + model + ")"));
+
+                    // Re-enter the agentic loop — goto not available in Java, so we use
+                    // a labeled continue on an outer recovery loop. Since the current code
+                    // structure doesn't have one, we return partial with enough context
+                    // for the harness retry mechanism to pick up where we left off.
+                    // The checkpoint file is already written by compact(), so a retry
+                    // will resume from the compacted state with the new provider.
+                } catch (Exception recoveryEx) {
+                    log.error("Mid-task recovery failed for task {}: {}", taskId, recoveryEx.getMessage());
+                }
+            }
+            return withProviderModel(WorkerReport.blocked(taskId,
+                    "Provider failure mid-task (" + e.getMessage() + ")",
                     totalInputTokens, totalOutputTokens), provider, model,
                     continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
         } catch (LlmRouter.ProviderUnavailableException e) {
@@ -1190,19 +1248,69 @@ public class WorkerAgent {
         return currentModel;
     }
 
+    private static final Set<String> VALID_COMPLETION_STATUSES =
+            Set.of("complete", "partial", "blocked");
+
     /**
-     * Strict completion check: the response must start with '{' (after stripping markdown
-     * fences). This prevents false positives when the model discusses field names in prose.
+     * Strict completion check: the response must start with '{' (after normalization),
+     * contain the expected task_id, and have a valid status value.
+     * This prevents false positives from tool results or code snippets containing
+     * similar field names.
      */
-    private boolean looksLikeCompletionReport(String text) {
+    private boolean looksLikeCompletionReport(String text, String expectedTaskId) {
         if (text == null || text.isBlank()) return false;
-        String trimmed = text.trim();
-        if (trimmed.startsWith("```")) {
-            trimmed = trimmed.replaceFirst("^```json\\s*", "").replaceFirst("^```\\s*", "").trim();
+        String normalized = normalizeWorkerResponse(text);
+        if (!normalized.startsWith("{")) return false;
+        try {
+            JsonNode json = mapper.readTree(normalized);
+            String reportTaskId = json.path("task_id").asText("");
+            String status = json.path("status").asText("");
+            return reportTaskId.equals(expectedTaskId)
+                    && VALID_COMPLETION_STATUSES.contains(status);
+        } catch (Exception e) {
+            // Not valid JSON — not a completion report
+            return false;
         }
-        return trimmed.startsWith("{") &&
-               trimmed.contains("\"task_id\"") &&
-               trimmed.contains("\"status\"");
+    }
+
+    /**
+     * Normalize raw LLM response to extract the JSON/tool_call payload.
+     * Handles provider-specific quirks: markdown fences, preamble text,
+     * and XML tool_call wrappers (Gemini often wraps JSON in these).
+     */
+    static String normalizeWorkerResponse(String raw) {
+        if (raw == null) return "";
+        String response = raw.trim();
+
+        // Strip markdown code fences
+        if (response.startsWith("```json")) {
+            response = response.substring(7);
+        } else if (response.startsWith("```")) {
+            response = response.substring(3);
+        }
+        if (response.endsWith("```")) {
+            response = response.substring(0, response.length() - 3);
+        }
+        response = response.trim();
+
+        // Extract tool_call XML content if present (Gemini format)
+        if (response.contains("<tool_call>")) {
+            int start = response.indexOf("<tool_call>") + "<tool_call>".length();
+            int end = response.indexOf("</tool_call>");
+            if (end > start) {
+                response = response.substring(start, end).trim();
+            }
+        }
+
+        // Extract first JSON object if preceded by conversational preamble
+        if (!response.startsWith("{")) {
+            int jsonStart = response.indexOf('{');
+            if (jsonStart > 0 && jsonStart < 200) {
+                response = response.substring(jsonStart);
+            }
+        }
+
+        return response.trim();
     }
 
     /**

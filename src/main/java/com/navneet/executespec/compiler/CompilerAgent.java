@@ -133,7 +133,7 @@ public class CompilerAgent {
             log.warn("CompilerAgent: compile errors (attempt {}/{}) for run {}", attempt, maxAttempts, runId);
             broadcaster.emit(runId, RunEvent.log(runId, "compiler",
                     "⚠️ Compile errors (attempt " + attempt + "/" + maxAttempts + "):\n"
-                            + truncate(errors, 600)));
+                            + truncate(errors, maxErrorCharsForSse(errors))));
 
             if (attempt < maxAttempts) {
                 broadcaster.emit(runId, RunEvent.log(runId, "compiler",
@@ -293,6 +293,26 @@ public class CompilerAgent {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Dynamic SSE error truncation limit based on how many files have errors.
+     * Few files → show more context per file. Many files → keep it brief.
+     */
+    private int maxErrorCharsForSse(String errors) {
+        int fileCount = countErrorFiles(errors);
+        if (fileCount <= 3) return 2000;
+        if (fileCount <= 6) return 1200;
+        return 800;
+    }
+
+    /** Counts unique source file paths mentioned in compile error output. */
+    private int countErrorFiles(String errors) {
+        Pattern filePattern = Pattern.compile("([\\w/.-]+\\.(?:java|ts|js|tsx|jsx|py|go|rs))");
+        Matcher m = filePattern.matcher(errors);
+        var files = new java.util.HashSet<String>();
+        while (m.find()) files.add(m.group(1));
+        return files.size();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

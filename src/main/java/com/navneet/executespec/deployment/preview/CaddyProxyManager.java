@@ -103,11 +103,15 @@ public class CaddyProxyManager {
                 routeIds.put(runId, routeId);
                 log.info("Caddy route added: {} → localhost:{}", host, port);
             } else {
-                log.warn("Caddy addRoute failed ({}): {} — route: {}", response.statusCode(), response.body(), host);
+                throw new PreviewException("Caddy addRoute failed (" + response.statusCode()
+                        + "): " + response.body() + " — route: " + host);
             }
+        } catch (PreviewException e) {
+            throw e; // re-throw our own exceptions
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            log.warn("Failed to add Caddy route for {} ({}): {}", runId, host, e.getMessage());
+            throw new PreviewException("Failed to add Caddy route for " + runId
+                    + " (" + host + "): " + e.getMessage());
         }
     }
 

@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
@@ -53,6 +54,44 @@ public class TierEnforcementService {
     private static final double DEFAULT_PRO_COST_BUDGET  = 5.0;
 
     // ── Public API ────────────────────────────────────────────────────────────
+
+    /**
+     * Atomically checks quota AND increments the run count in a single transaction
+     * with pessimistic locking. Prevents TOCTOU race where two concurrent submissions
+     * both pass the quota check before either increments.
+     * Throws 429/402 if quota exceeded.
+     */
+    @Transactional
+    public void assertAndIncrementRunCount(String userId) {
+        AppUser user = userRepo.findByIdForUpdate(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
+
+        if (user.getOrgId() != null) {
+            Org org = orgRepo.findByIdForUpdate(user.getOrgId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Org not found"));
+            assertOrgQuota(org);
+            // Increment within the same TX (lock held)
+            maybeResetOrgCounter(org);
+            org.setMonthlyRunCount(org.getMonthlyRunCount() + 1);
+            orgRepo.save(org);
+            int limit = effectiveOrgLimit(org);
+            if (limit >= 0 && org.getMonthlyRunCount() > limit) {
+                runTopupService.consumeBonusRunForOrg(org.getId());
+            }
+        } else {
+            assertUserQuota(user);
+            // Increment within the same TX (lock held)
+            maybeResetUserCounter(user);
+            user.setPersonalRunCount(user.getPersonalRunCount() + 1);
+            userRepo.save(user);
+            int limit = getMonthlyLimit(user.getTier());
+            if (limit >= 0 && user.getPersonalRunCount() > limit) {
+                runTopupService.consumeBonusRun(userId);
+            }
+        }
+    }
 
     /** Assert the given user can submit another run. Throws 429 if quota exceeded. */
     public void assertCanSubmitRun(String userId) {

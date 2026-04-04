@@ -91,8 +91,8 @@ public class RunController {
                     "Run submissions are temporarily paused for maintenance. Please try again later.");
         }
 
-        // Enforce tier quota (throws 429 if over limit)
-        tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+        // Enforce tier quota atomically (check + increment in single TX with pessimistic lock)
+        tierEnforcementService.assertAndIncrementRunCount(userDetails.getUser().getId());
         // Enforce billing usage limits (throws 402 if limit exceeded)
         usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
         // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
@@ -124,8 +124,7 @@ public class RunController {
             executionMode
         );
 
-        // Increment run counter after successful submission
-        tierEnforcementService.incrementRunCount(userDetails.getUser().getId());
+        // Run count already incremented atomically in assertAndIncrementRunCount above
         usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));

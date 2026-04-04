@@ -116,8 +116,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/webhooks/stripe").permitAll()
                         // Public health check
                         .requestMatchers("/api/health", "/api/health/**").permitAll()
-                        // Actuator endpoints (health, metrics, prometheus)
-                        .requestMatchers("/actuator/**").permitAll()
+                        // Actuator: health public, prometheus for scraping, rest admin-only
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers("/actuator/prometheus").permitAll()
+                        .requestMatchers("/actuator/**").hasRole("SUPER_ADMIN")
                         // Integration webhooks (external — secured by signature, not JWT)
                         .requestMatchers("/api/integrations/*/webhook").permitAll()
                         // Slack OAuth callback (external redirect — no JWT)

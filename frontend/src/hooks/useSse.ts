@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useSseStore } from '@/stores/useSseStore';
 import { useRunStore } from '@/stores/useRunStore';
-import { getMessages } from '@/lib/api';
+import { getMessages, getSseToken } from '@/lib/api';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -37,15 +37,22 @@ export function useSse(runId: string | null) {
       });
     }).catch(() => { /* non-fatal */ });
 
-    function connect() {
+    async function connect() {
       esRef.current?.close();
       setStatus(attemptRef.current === 0 ? 'CONNECTING' : 'RECONNECTING');
 
-      // Pass JWT via query param (EventSource can't set Authorization headers)
-      const token = localStorage.getItem('access_token');
-      const sseUrl = token
-        ? `/api/runs/${runId}/events?token=${encodeURIComponent(token)}`
-        : `/api/runs/${runId}/events`;
+      // Fetch a short-lived scoped SSE token (avoids exposing full JWT in URL)
+      let sseUrl = `/api/runs/${runId}/events`;
+      try {
+        const { token: sseToken } = await getSseToken(runId!);
+        sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(sseToken)}`;
+      } catch {
+        // Fallback to full JWT if SSE token endpoint fails
+        const fallbackToken = localStorage.getItem('access_token');
+        if (fallbackToken) {
+          sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(fallbackToken)}`;
+        }
+      }
       const es = new EventSource(sseUrl);
       esRef.current = es;
 

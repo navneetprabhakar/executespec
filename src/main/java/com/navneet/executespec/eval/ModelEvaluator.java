@@ -41,9 +41,10 @@ public class ModelEvaluator {
     private final EvalScorer scorer;
     private final EvalTestCaseRegistry testCaseRegistry;
     private final ModelMatrixProperties matrixProps;
+    private final LlmJudgeValidator llmJudge;
 
     /** Max time for a single LLM call before it's killed and scored as failed. */
-    private static final Duration PER_CALL_TIMEOUT = Duration.ofSeconds(180);
+    private static final Duration PER_CALL_TIMEOUT = Duration.ofSeconds(240);
 
     /** Max wall-clock time for the entire evaluation run. */
     private static final Duration EVAL_DEADLINE = Duration.ofMinutes(45);
@@ -135,8 +136,11 @@ public class ModelEvaluator {
         // Post-processing: normalize cost scores per test case
         normalizeCosts(resultsByModel);
 
+        // Load previous report for cross-run comparison
+        EvalReport previousReport = loadMostRecentReport();
+
         // Build report
-        EvalReport report = buildReport(evalId, start, resultsByModel);
+        EvalReport report = buildReport(evalId, start, resultsByModel, previousReport);
 
         // Write to file
         writeReport(report);
@@ -237,10 +241,19 @@ public class ModelEvaluator {
                 inputTokens = usage.getPromptTokens();
                 outputTokens = usage.getCompletionTokens();
             } catch (Exception e) {
-                // token extraction best-effort
+                log.warn("[ModelEvaluator] Token extraction failed for {}/{}: {}",
+                        provider, model, e.getMessage());
+                inputTokens = -1;  // sentinel: unknown tokens
+                outputTokens = -1;
             }
 
-            double costUsd = costEstimator.computeCost(provider, model, inputTokens, outputTokens);
+            // Unknown tokens → flag cost as unknown (-1); scorer will assign neutral 5.0
+            double costUsd;
+            if (inputTokens < 0 || outputTokens < 0) {
+                costUsd = -1.0;
+            } else {
+                costUsd = costEstimator.computeCost(provider, model, inputTokens, outputTokens);
+            }
             double accuracy = scorer.scoreAccuracy(responseText, testCase.validationPatterns(), testCase.requiredJsonKeys());
             double speed = scorer.scoreSpeed(latencyMs, testCase.latencyCeilingMs());
             int matched = scorer.countMatchedPatterns(responseText, testCase.validationPatterns());
@@ -249,10 +262,21 @@ public class ModelEvaluator {
             List<EvalReport.PatternResult> patternResults = computePatternResults(
                     responseText, testCase.validationPatterns(), testCase.patternLabels());
 
-            // Length penalty for LIGHTWEIGHT tests
-            if (testCase.maxResponseLength() > 0 && responseText != null
-                    && responseText.length() > testCase.maxResponseLength()) {
-                accuracy = Math.max(1.0, accuracy - 2.0);
+            // LLM-as-judge second pass for REGEX_AND_LLM tests (saga tests)
+            if (testCase.validationMode() == EvalTestCase.ValidationMode.REGEX_AND_LLM) {
+                double judgeAccuracy = llmJudge.judge(testCase, responseText);
+                if (judgeAccuracy > 0 && judgeAccuracy > accuracy) {
+                    log.info("[ModelEvaluator] LLM judge upgraded accuracy for {}/{}: regex={} → judge={}",
+                            provider + ":" + model, testCase.id(),
+                            String.format("%.1f", accuracy), String.format("%.1f", judgeAccuracy));
+                    accuracy = judgeAccuracy;
+                }
+            }
+
+            // Length penalty for LIGHTWEIGHT tests (graduated: 1.5x→-1pt, 2x→-2pt, max -3pt)
+            double lenPenalty = scorer.lengthPenalty(responseText, testCase.maxResponseLength());
+            if (lenPenalty > 0) {
+                accuracy = Math.max(1.0, accuracy - lenPenalty);
             }
 
             boolean passed = matched == testCase.validationPatterns().size();
@@ -284,46 +308,65 @@ public class ModelEvaluator {
     }
 
     /**
-     * Normalize cost scores across all models for each test case.
-     * Cheapest = 10, most expensive = 1.
+     * Normalize cost scores per tier (not per test case).
+     * Uses average cost per model within each tier so the same model gets a
+     * consistent cost score across all tests in that tier.
      */
     private void normalizeCosts(Map<String, List<EvalResult>> resultsByModel) {
-        List<EvalTestCase> allTests = testCaseRegistry.allTestCases();
+        List<String> modelKeys = new ArrayList<>(resultsByModel.keySet());
 
-        for (int testIdx = 0; testIdx < allTests.size(); testIdx++) {
-            final int idx = testIdx;
-            String testId = allTests.get(idx).id();
-
-            // Collect costs for this test across all models
-            List<String> modelKeys = new ArrayList<>(resultsByModel.keySet());
-            double[] costs = new double[modelKeys.size()];
+        for (AgentTier tier : AgentTier.values()) {
+            // Compute average cost per model for this tier
+            double[] avgCosts = new double[modelKeys.size()];
             for (int m = 0; m < modelKeys.size(); m++) {
-                costs[m] = resultsByModel.get(modelKeys.get(m)).get(idx).costUsd();
+                List<EvalResult> tierResults = resultsByModel.get(modelKeys.get(m)).stream()
+                        .filter(r -> r.tier() == tier)
+                        .toList();
+                if (tierResults.isEmpty()) {
+                    avgCosts[m] = 0;
+                    continue;
+                }
+                // Exclude unknown (-1) and zero costs from average
+                double totalCost = tierResults.stream()
+                        .mapToDouble(EvalResult::costUsd)
+                        .filter(c -> c > 0)
+                        .sum();
+                long validCount = tierResults.stream()
+                        .mapToDouble(EvalResult::costUsd)
+                        .filter(c -> c > 0)
+                        .count();
+                avgCosts[m] = validCount > 0 ? totalCost / validCount : tierResults.get(0).costUsd();
             }
 
-            double[] costScores = scorer.normalizeCostScores(costs);
+            double[] costScores = scorer.normalizeCostScores(avgCosts);
 
-            // Update results with normalized cost scores (tier-aware weights)
+            // Apply the same normalized cost score to ALL tests for this model in this tier
             for (int m = 0; m < modelKeys.size(); m++) {
+                double tierCostScore = costScores[m];
                 List<EvalResult> modelResults = resultsByModel.get(modelKeys.get(m));
-                EvalResult old = modelResults.get(idx);
-                double newCost = costScores[m];
-                double newOverall = scorer.overallScore(old.accuracyScore(), old.speedScore(), newCost, old.tier());
-                String updatedReasoning = old.reasoning()
-                        + String.format(" | Cost: $%.6f (score %.1f/10, normalized across %d models)",
-                        old.costUsd(), newCost, modelKeys.size());
 
-                modelResults.set(idx, old.toBuilder()
-                        .costScore(newCost)
-                        .overallScore(newOverall)
-                        .reasoning(updatedReasoning)
-                        .build());
+                for (int idx = 0; idx < modelResults.size(); idx++) {
+                    EvalResult old = modelResults.get(idx);
+                    if (old.tier() != tier) continue;
+
+                    double newOverall = scorer.overallScore(old.accuracyScore(), old.speedScore(), tierCostScore, tier);
+                    String updatedReasoning = old.reasoning()
+                            + String.format(" | Cost: $%.6f (tier-normalized score %.1f/10 across %d models)",
+                            old.costUsd(), tierCostScore, modelKeys.size());
+
+                    modelResults.set(idx, old.toBuilder()
+                            .costScore(tierCostScore)
+                            .overallScore(newOverall)
+                            .reasoning(updatedReasoning)
+                            .build());
+                }
             }
         }
     }
 
     private EvalReport buildReport(String evalId, Instant start,
-                                   Map<String, List<EvalResult>> resultsByModel) {
+                                   Map<String, List<EvalResult>> resultsByModel,
+                                   EvalReport previousReport) {
         long durationMs = Instant.now().toEpochMilli() - start.toEpochMilli();
 
         List<EvalReport.ModelReport> modelReports = new ArrayList<>();
@@ -395,9 +438,9 @@ public class ModelEvaluator {
                         String reason = String.format("Pass rate %.0f%% (%d/%d) below 50%% minimum for PLANNING",
                                 passRate * 100, passed, total);
                         disqualifications.add(new EvalReport.Disqualification(
-                                mr.provider(), mr.model(), tier, reason));
-                        log.info("[ModelEvaluator] DISQUALIFIED {}:{} from {} — {}",
-                                mr.provider(), mr.model(), tier, reason);
+                                mr.provider(), mr.model(), tier, reason, ts.overall()));
+                        log.info("[ModelEvaluator] DISQUALIFIED {}:{} from {} — {} (would have scored %.1f)",
+                                mr.provider(), mr.model(), tier, reason, String.format("%.1f", ts.overall()));
                         continue; // skip this model for this tier's recommendation
                     }
 
@@ -409,9 +452,9 @@ public class ModelEvaluator {
                         String reason = String.format("Test %s accuracy %.1f below 6.0 floor",
                                 weakTest.get().testCaseId(), weakTest.get().accuracy());
                         disqualifications.add(new EvalReport.Disqualification(
-                                mr.provider(), mr.model(), tier, reason));
-                        log.info("[ModelEvaluator] DISQUALIFIED {}:{} from {} — {}",
-                                mr.provider(), mr.model(), tier, reason);
+                                mr.provider(), mr.model(), tier, reason, ts.overall()));
+                        log.info("[ModelEvaluator] DISQUALIFIED {}:{} from {} — {} (would have scored {})",
+                                mr.provider(), mr.model(), tier, reason, String.format("%.1f", ts.overall()));
                         continue;
                     }
                 }
@@ -432,7 +475,104 @@ public class ModelEvaluator {
             }
         }
 
-        return new EvalReport(evalId, Instant.now(), durationMs, modelReports, recommendations, disqualifications);
+        // Cross-run comparison
+        List<EvalReport.CrossRunDelta> crossRunDeltas = computeCrossRunDeltas(modelReports, previousReport);
+
+        return new EvalReport(evalId, Instant.now(), durationMs, modelReports, recommendations, disqualifications, crossRunDeltas);
+    }
+
+    /**
+     * Load the most recent eval report from the reports directory.
+     * Returns null if no previous reports exist or on read error.
+     */
+    private EvalReport loadMostRecentReport() {
+        try {
+            if (!Files.isDirectory(REPORT_DIR)) return null;
+            Optional<Path> latest = Files.list(REPORT_DIR)
+                    .filter(p -> p.getFileName().toString().startsWith("eval-") && p.toString().endsWith(".json"))
+                    .max(Comparator.comparingLong(p -> {
+                        try { return Files.getLastModifiedTime(p).toMillis(); }
+                        catch (IOException e) { return 0L; }
+                    }));
+            if (latest.isEmpty()) return null;
+            EvalReport report = mapper.readValue(latest.get().toFile(), EvalReport.class);
+            log.info("[ModelEvaluator] Loaded previous report {} for cross-run comparison", report.evaluationId());
+            return report;
+        } catch (Exception e) {
+            log.warn("[ModelEvaluator] Could not load previous report for comparison: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Compute per-model, per-tier accuracy deltas against the previous evaluation run.
+     */
+    private List<EvalReport.CrossRunDelta> computeCrossRunDeltas(
+            List<EvalReport.ModelReport> currentReports, EvalReport previousReport) {
+        List<EvalReport.CrossRunDelta> deltas = new ArrayList<>();
+
+        if (previousReport == null) {
+            // No previous run — mark all models as NEW
+            for (EvalReport.ModelReport mr : currentReports) {
+                for (Map.Entry<AgentTier, EvalReport.TierScore> entry : mr.tierScores().entrySet()) {
+                    deltas.add(new EvalReport.CrossRunDelta(
+                            mr.provider(), mr.model(), entry.getKey(),
+                            0.0, entry.getValue().accuracy(), entry.getValue().accuracy(),
+                            "NEW", null));
+                }
+            }
+            return deltas;
+        }
+
+        // Build lookup: "provider:model:tier" → previous accuracy
+        Map<String, Double> prevAccuracy = new HashMap<>();
+        for (EvalReport.ModelReport pmr : previousReport.modelResults()) {
+            for (Map.Entry<AgentTier, EvalReport.TierScore> entry : pmr.tierScores().entrySet()) {
+                prevAccuracy.put(pmr.provider() + ":" + pmr.model() + ":" + entry.getKey(), entry.getValue().accuracy());
+            }
+        }
+
+        for (EvalReport.ModelReport mr : currentReports) {
+            for (Map.Entry<AgentTier, EvalReport.TierScore> entry : mr.tierScores().entrySet()) {
+                String key = mr.provider() + ":" + mr.model() + ":" + entry.getKey();
+                double currentAcc = entry.getValue().accuracy();
+                Double prevAcc = prevAccuracy.get(key);
+
+                String flag;
+                double prev;
+                double delta;
+
+                if (prevAcc == null) {
+                    flag = "NEW";
+                    prev = 0.0;
+                    delta = currentAcc;
+                } else if (prevAcc < 1.0) {
+                    // Previous score near zero indicates infra failure
+                    flag = "INFRA_RECOVERY";
+                    prev = prevAcc;
+                    delta = currentAcc - prevAcc;
+                } else {
+                    prev = prevAcc;
+                    delta = currentAcc - prevAcc;
+                    if (delta < -1.0) flag = "REGRESSION";
+                    else if (delta > 1.0) flag = "IMPROVEMENT";
+                    else flag = "OK";
+                }
+
+                deltas.add(new EvalReport.CrossRunDelta(
+                        mr.provider(), mr.model(), entry.getKey(),
+                        prev, currentAcc, delta, flag, previousReport.evaluationId()));
+
+                if (!"OK".equals(flag) && !"NEW".equals(flag)) {
+                    log.info("[ModelEvaluator] Cross-run {} {}:{} {} — prev={} curr={} delta={}",
+                            flag, mr.provider(), mr.model(), entry.getKey(),
+                            String.format("%.1f", prev), String.format("%.1f", currentAcc),
+                            String.format("%+.1f", delta));
+                }
+            }
+        }
+
+        return deltas;
     }
 
     private void writeReport(EvalReport report) throws IOException {
