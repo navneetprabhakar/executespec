@@ -1191,11 +1191,12 @@ It triggers on every push to `main` and also supports **manual redeploy** via `w
 **Steps:**
 1. Build the JAR with `mvn package -DskipTests` (frontend is embedded via the build)
 2. Upload JAR to `gs://executespec-deploy/releases/app-<SHA>.jar`
-3. SSH to the GCE instance via IAP tunnel
-4. Symlink the new JAR to `/opt/app/app.jar`
-5. Restart the systemd service
-6. Wait 20 seconds, run health check
-7. Prune old JARs (keep last 10)
+3. Sync design system files from `gs://{DEPLOY_BUCKET}/designs/design-md/` to `/opt/executespec/designs/design-md/`
+4. SSH to the GCE instance via IAP tunnel
+5. Symlink the new JAR to `/opt/app/app.jar`
+6. Restart the systemd service
+7. Wait 20 seconds, run health check
+8. Prune old JARs (keep last 10)
 
 Manual redeploy allows deploying any historical commit without pushing new code.
 
@@ -1932,6 +1933,32 @@ Preview containers and test execution containers are hardened:
 - [ ] **Preview test:** Verify auto-preview starts after COMPLETE (5-min TTL), Cloud Run URL accessible
 - [ ] **Validation test:** Background validation completes (review + test gen + report)
 - [ ] **Rollback plan:** Previous JAR in GCS, can redeploy via SHA
+- [ ] **Design systems:** Design files synced to `/opt/executespec/designs/design-md/` (verify with `ls /opt/executespec/designs/design-md/ | wc -l`)
+
+### Design System Files (v1.1.0)
+
+Design system DESIGN.md files are stored in GCS and synced to the GCE instance on every deploy and boot.
+
+**Initial upload (one-time per environment):**
+```bash
+# Dev
+gsutil -m rsync -r /path/to/uxdesigns/design-md gs://executespec-dev-deploy/designs/design-md/
+
+# Prod
+gsutil -m rsync -r /path/to/uxdesigns/design-md gs://executespec-prod-deploy/designs/design-md/
+```
+
+**Update designs (without app deploy):**
+```bash
+# Re-sync to GCS
+gsutil -m rsync -r /path/to/uxdesigns/design-md gs://executespec-dev-deploy/designs/design-md/
+
+# SSH to VM and sync from GCS
+gcloud compute ssh executespec-dev-vm --zone=us-east4-b --tunnel-through-iap \
+  --command="sudo gsutil -m rsync -r gs://executespec-dev-deploy/designs/design-md/ /opt/executespec/designs/design-md/"
+```
+
+**Config:** `application.yml` → `executespec.designs.root-path` (default: `/opt/executespec/designs/design-md`)
 
 ### Useful Terraform Commands
 

@@ -45,7 +45,8 @@
 - `GitMergeService` — Merges task branches, progressive merge under `mergeLock`
 - `WorkerPool` — Thread pool for workers
 - `WorkspaceInitService` — Git repo initialization per run
-- `UiStyleResolver` — UI style detection from user request/defaults
+- `UiStyleResolver` — Design system integration: filesystem DESIGN.md loading, Caffeine cache, fuzzy matching, 3-signal resolution (explicit hint > planner > heuristic), token-budget truncation
+- `DesignSystemProperties` — Config: rootPath, cacheTtl, maxTokens, defaultStyle, curatedStyles
 - `LanguageValidator` — Blocks unsupported languages at submission
 - `RunBudgetTracker` — LLM call budget tracking per run
 - `RunCostBudgetService` — USD cost budget enforcement per tier
