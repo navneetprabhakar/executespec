@@ -325,6 +325,25 @@ else
   log "No deploy bucket configured — skipping JAR download"
 fi
 
+# ── 8b. Sync design system files from GCS ───────────────────────────────────
+
+log "Phase 8b: Design system files"
+
+DESIGNS_DIR="/opt/executespec/designs/design-md"
+mkdir -p "$DESIGNS_DIR"
+
+if [ -n "$DEPLOY_BUCKET" ]; then
+  DESIGNS_BUCKET="gs://${DEPLOY_BUCKET}/designs/design-md"
+  if gsutil -q stat "${DESIGNS_BUCKET}/vercel/DESIGN.md" 2>/dev/null; then
+    gsutil -m rsync -r "$DESIGNS_BUCKET" "$DESIGNS_DIR"
+    log "Design systems synced: $(ls "$DESIGNS_DIR" | wc -l) directories"
+  else
+    log "No design files in GCS bucket — app will use fallback styling"
+  fi
+else
+  log "No deploy bucket — skipping design system sync"
+fi
+
 # ── 9. Start the app ────────────────────────────────────────────────────────
 
 log "Phase 9: Starting application"

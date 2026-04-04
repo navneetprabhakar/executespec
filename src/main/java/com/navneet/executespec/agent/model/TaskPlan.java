@@ -19,6 +19,7 @@ import java.util.List;
 public class TaskPlan {
 
     private String projectType;     // planner-declared: SPRING_BOOT, STATIC_HTML, NODE_FRONTEND, etc.
+    private String uiStyle;         // planner-declared: "stripe", "vercel", "notion", etc. (nullable)
     private String planTitle;
     private String planSummary;
     private List<TaskDefinition> tasks;

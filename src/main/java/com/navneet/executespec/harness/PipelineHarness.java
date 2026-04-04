@@ -1610,6 +1610,20 @@ public class PipelineHarness {
             broadcaster.emit(runId, RunEvent.log(runId, "harness", "Simple request detected — running single-shot fast path"));
 
             try {
+                // Resolve and persist ui_style for frontend task generation (single-shot path)
+                try {
+                    String explicitHint = uiStyleResolver.extractStyleHint(effectiveRequest);
+                    String designName = uiStyleResolver.resolveDesignName(
+                            explicitHint, null, null); // no planner style or project type in single-shot
+                    if (designName == null) designName = "vercel"; // default for single-shot frontend
+                    String uiStyleJson = uiStyleResolver.resolve(effectiveRequest, null);
+                    uiStyleJson = uiStyleResolver.enrichWithDesignName(uiStyleJson, designName);
+                    stateStore.setUiStyle(runId, uiStyleJson);
+                    log.info("[Run {}] Single-shot ui_style: {} (design={})", runId, uiStyleJson, designName);
+                } catch (Exception ue) {
+                    log.debug("[Run {}] Could not resolve ui_style for single-shot: {}", runId, ue.getMessage());
+                }
+
                 // Execute single-shot: synthetic plan → auto-approve → worker on main branch
                 var singleShotResult = singleShotExecutor.execute(run, effectiveRequest);
 
@@ -1704,11 +1718,23 @@ public class PipelineHarness {
                 plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
                 stateStore.savePlan(runId, plan);
 
-                // Resolve and persist ui_style for frontend task generation
+                // Resolve and persist ui_style for frontend task generation (3-signal priority)
                 try {
+                    // Signal 1: explicit hint from user request text
+                    String explicitHint = uiStyleResolver.extractStyleHint(effectiveRequest);
+                    // Signal 2: planner-declared ui_style from plan JSON
+                    String plannerStyle = plan.getUiStyle();
+                    // Signal 3: project type heuristic (inside resolveDesignName)
+                    String designName = uiStyleResolver.resolveDesignName(
+                            explicitHint, plannerStyle, plan.getProjectType());
+
+                    // Build the legacy ui_style JSON and enrich with resolved design_name
                     String uiStyleJson = uiStyleResolver.resolve(effectiveRequest, null);
+                    if (designName != null) {
+                        uiStyleJson = uiStyleResolver.enrichWithDesignName(uiStyleJson, designName);
+                    }
                     stateStore.setUiStyle(runId, uiStyleJson);
-                    log.info("[Run {}] Resolved ui_style: {}", runId, uiStyleJson);
+                    log.info("[Run {}] Resolved ui_style: {} (design={})", runId, uiStyleJson, designName);
                 } catch (Exception ue) {
                     log.debug("[Run {}] Could not resolve ui_style: {}", runId, ue.getMessage());
                 }

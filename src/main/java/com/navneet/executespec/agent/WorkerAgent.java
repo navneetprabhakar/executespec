@@ -50,6 +50,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -83,8 +84,6 @@ public class WorkerAgent {
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
 
-    @Value("classpath:prompts/css-styling.txt")
-    private Resource cssStylingPrompt;
 
     /**
      * Parsed representation of a single tool call extracted from assistant text.
@@ -1506,26 +1505,35 @@ public class WorkerAgent {
 
         var sb = new StringBuilder();
 
-        // Load CSS styling prompt (visual craftsmanship rules)
-        try {
-            String cssRules = cssStylingPrompt.getContentAsString(StandardCharsets.UTF_8);
-            sb.append("\n").append(cssRules);
-        } catch (Exception e) {
-            log.debug("Could not load css-styling.txt: {}", e.getMessage());
-        }
-
-        // Append run-specific design system constraints (theme, shadcn/daisy, etc.)
+        // Load design system content and build constraint block
         try {
             var run = stateStore.findRun(runId).orElse(null);
             if (run != null) {
                 String uiStyleJson = run.getUiStyle();
-                String constraintBlock = uiStyleResolver.buildFrontendConstraintBlock(uiStyleJson);
+
+                // Extract design_name from ui_style JSON and load DESIGN.md
+                String designContent = null;
+                if (uiStyleJson != null && !uiStyleJson.isBlank()) {
+                    try {
+                        var styleMap = mapper.readValue(uiStyleJson,
+                                new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {});
+                        String designName = styleMap.get("design_name");
+                        if (designName != null && !designName.isBlank()) {
+                            designContent = uiStyleResolver.loadDesignContent(designName);
+                        }
+                    } catch (Exception je) {
+                        log.debug("Could not parse ui_style JSON for run {}: {}", runId, je.getMessage());
+                    }
+                }
+
+                // Build constraint block (design content or legacy fallback)
+                String constraintBlock = uiStyleResolver.buildFrontendConstraintBlock(uiStyleJson, designContent);
                 if (constraintBlock != null) {
                     sb.append("\n").append(constraintBlock);
                 }
             }
         } catch (Exception e) {
-            log.debug("Could not load ui_style for run {}: {}", runId, e.getMessage());
+            log.debug("Could not load design system for run {}: {}", runId, e.getMessage());
         }
 
         return sb.isEmpty() ? null : sb.toString();

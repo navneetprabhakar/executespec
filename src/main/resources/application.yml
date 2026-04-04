@@ -421,6 +421,25 @@ app:
       concurrent-run-limit: 10
 
 executespec:
+  designs:
+    root-path: /opt/executespec/designs/design-md
+    cache-ttl: 30m
+    max-tokens: 2500
+    default-style: vercel
+    curated-styles:
+      - airbnb
+      - claude
+      - figma
+      - linear.app
+      - notion
+      - stripe
+      - supabase
+      - vercel
+      - spotify
+      - posthog
+      - resend
+      - mintlify
+
   rate-limit:
     enabled: true
 
