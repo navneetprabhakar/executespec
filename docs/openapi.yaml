@@ -4,7 +4,7 @@ info:
   description: |
     Multi-agent code generation platform API.
     All endpoints under `/api` except those marked public require a JWT Bearer token.
-  version: 1.0.0
+  version: 1.1.0
   contact:
     name: ExecuteSpec
     url: https://executespec.ai
@@ -654,6 +654,16 @@ paths:
         '200':
           description: Task retry started
 
+  /runs/{runId}/archive:
+    post:
+      tags: [Runs]
+      summary: Archive run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Run archived
+
   /runs/{runId}/cost:
     get:
       tags: [Runs]
@@ -956,8 +966,28 @@ paths:
     get:
       tags: [SSE]
       summary: Subscribe to live run events
+      description: |
+        Server-Sent Events stream. Requires a scoped SSE token (obtain via GET /runs/{runId}/sse-token).
+        Event types: RUN_STATUS, TASK_STATUS, LOG, GATE_OPENED, GATE_RESOLVED, COST_UPDATE,
+        QUEUED, COMPLETE, CLARIFICATION_NEEDED, CLARIFICATION_RESOLVED, CONTEXT_EXTRACTED,
+        RECOVERY_ATTEMPTED, RUN_RESTARTED, DEPLOY_STARTED, DEPLOY_BUILDING, DEPLOY_PUSHING,
+        DEPLOY_LIVE, DEPLOY_FAILED, DEPLOY_DELETED, ENGINE_DEPLOY_STARTED, ENGINE_PHASE,
+        ENGINE_BUILDING, ENGINE_DEPLOYING, ENGINE_DEPLOY_LIVE, ENGINE_DEPLOY_FAILED,
+        API_SPEC_READY, PREVIEW_READY, VALIDATION_STARTED, VALIDATION_PASSED, VALIDATION_FAILED,
+        MODEL_ESCALATED, COMPACTION_TRIGGERED, REVIEW_STARTED, REVIEW_ISSUE_FOUND,
+        REVIEW_AUTO_FIX_STARTED, REVIEW_AUTO_FIX_RESULT, REVIEW_COMPLETE,
+        TEST_GEN_STARTED, TEST_PLANNING_STARTED, TEST_PLANNING_COMPLETED,
+        TEST_GENERATION_STARTED, TEST_COMPILATION_STARTED, TEST_COMPILATION_PASSED,
+        TEST_COMPILATION_FAILED, TEST_EXECUTION_STARTED, TEST_EXECUTION_SKIPPED,
+        TEST_REPORT_READY, TEST_PIPELINE_FAILED, BUDGET_EXCEEDED
       parameters:
         - $ref: '#/components/parameters/runId'
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Scoped SSE token from GET /runs/{runId}/sse-token
       responses:
         '200':
           description: Server-Sent Events stream
@@ -965,6 +995,23 @@ paths:
             text/event-stream:
               schema:
                 type: string
+
+  /runs/{runId}/sse-token:
+    get:
+      tags: [SSE]
+      summary: Get scoped SSE token (5-min TTL)
+      description: Returns a short-lived token scoped to a specific runId for use with the SSE event stream.
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
 
   # ──────────────────────────────────────────────────
   # PREVIEW
@@ -1085,6 +1132,34 @@ paths:
                   path:
                     type: string
                   contentType:
+                    type: string
+
+  /runs/{runId}/push-github:
+    post:
+      tags: [Deployment]
+      summary: Push workspace to GitHub (creates branch + PR)
+      parameters:
+        - $ref: '#/components/parameters/runId'
+        - name: repoUrl
+          in: query
+          schema:
+            type: string
+        - name: repoMode
+          in: query
+          schema:
+            type: string
+            enum: [NEW, EXISTING]
+            default: NEW
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  repoUrl:
                     type: string
 
   # ──────────────────────────────────────────────────
@@ -1354,7 +1429,7 @@ paths:
   /billing/subscribe:
     post:
       tags: [Billing]
-      summary: Initiate Razorpay subscription
+      summary: Initiate subscription (routed to Razorpay or Stripe)
       requestBody:
         content:
           application/json:
@@ -2372,6 +2447,226 @@ paths:
         '503':
           description: Database not reachable
 
+  # ──────────────────────────────────────────────────
+  # WEBHOOKS
+  # ──────────────────────────────────────────────────
+  /webhooks/razorpay:
+    post:
+      tags: [Billing]
+      summary: Razorpay payment webhook (HMAC verified)
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+
+  /webhooks/stripe:
+    post:
+      tags: [Billing]
+      summary: Stripe payment webhook (Stripe-Signature verified)
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Webhook processed
+
+  # ──────────────────────────────────────────────────
+  # FEATURE FLAGS
+  # ──────────────────────────────────────────────────
+  /admin/feature-flags:
+    get:
+      tags: [Admin]
+      summary: List all feature flags (SUPER_ADMIN)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    flagKey:
+                      type: string
+                    flagValue:
+                      type: string
+                    valueType:
+                      type: string
+                    scope:
+                      type: string
+                    description:
+                      type: string
+                    updatedBy:
+                      type: string
+                    updatedAt:
+                      type: string
+
+  /admin/feature-flags/{key}:
+    put:
+      tags: [Admin]
+      summary: Update feature flag value (SUPER_ADMIN)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ──────────────────────────────────────────────────
+  # ADMIN
+  # ──────────────────────────────────────────────────
+  /admin/payment-audit:
+    get:
+      tags: [Admin]
+      summary: Payment audit log (paginated, SUPER_ADMIN)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /admin/payment-audit/export:
+    get:
+      tags: [Admin]
+      summary: Export payment audit as CSV (SUPER_ADMIN)
+      responses:
+        '200':
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /admin/webhook-events:
+    get:
+      tags: [Admin]
+      summary: Webhook event log (filterable, SUPER_ADMIN)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: gateway
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /billing/payment-history:
+    get:
+      tags: [Billing]
+      summary: Org-scoped payment history
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: size
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ──────────────────────────────────────────────────
+  # OAUTH2
+  # ──────────────────────────────────────────────────
+  /auth/oauth2/authorize:
+    get:
+      tags: [Auth]
+      summary: OAuth2 authorization redirect (Google/GitHub)
+      security: []
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [google, github]
+      responses:
+        '302':
+          description: Redirect to OAuth2 provider
+
+  /auth/oauth2/callback/{provider}:
+    get:
+      tags: [Auth]
+      summary: OAuth2 callback (Google/GitHub)
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [google, github]
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JWT issued on success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
 # ──────────────────────────────────────────────────
 # COMPONENTS
 # ──────────────────────────────────────────────────
@@ -2381,7 +2676,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: JWT access token (24h TTL). Obtain via POST /auth/login.
+      description: JWT access token (1h TTL). Obtain via POST /auth/login. Refresh token (7d TTL) set as httpOnly cookie.
 
   parameters:
     runId:
@@ -2518,7 +2813,7 @@ components:
           type: string
         aiProvider:
           type: string
-          enum: [anthropic, google, openai]
+          enum: [ANTHROPIC, GOOGLE, OPENAI]
         projectId:
           type: string
           format: uuid

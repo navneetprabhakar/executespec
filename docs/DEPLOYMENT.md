@@ -1,7 +1,7 @@
 # ExecuteSpec — Deployment Guide
 
 > **Target audience:** Engineers running ExecuteSpec locally or deploying to Google Cloud Platform.
-> Last updated: 2026-04-03
+> Last updated: 2026-04-04
 
 ---
 
@@ -320,7 +320,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA}" --role="roles/iam.serviceAccountTokenCreator"
 
-# Cloud Run: deploy preview containers (PreviewAgent / DeploymentService)
+# Cloud Run: deploy preview containers (PreviewService / DeploymentService)
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA}" --role="roles/run.admin"
 
@@ -1583,6 +1583,7 @@ Key `application.yml` settings relevant to deployment:
 | `agent.recovery.act-threshold-minutes` | 15 | Stall recovery after N minutes idle |
 | `preview.mode` | `docker` | Preview mode: `docker` (local) or `cloud-run` (GCP) |
 | `preview.preview-ttl-minutes` | 5 | Auto-shutdown previews after N minutes |
+| `deploy.ttl-days` | 3 | Auto-delete permanent Cloud Run deployments after N days |
 | `billing.default-gateway` | `razorpay` | Default payment gateway |
 | `billing.stripe.enabled` | `false` | Enable Stripe gateway |
 | `billing.razorpay.enabled` | `true` | Enable Razorpay gateway |
@@ -1878,6 +1879,34 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 > - `ACTIVE_PREVIEWS` gauge is decremented on ALL terminal states (FAILED, TIMED_OUT, STOPPED)
 > - Cloud Run resources (service + AR image) are cleaned up on preview failure
 > - API docs probing works for both Docker (`localhost:port`) and Cloud Run (service URL)
+> - Cloud Run orphan cleanup: `cloudRunServiceName` (`es-preview-{runIdShort}`) stored upfront in the initial session, preventing the cleanup job from deleting services that are still building/pushing
+
+#### Container Security (Preview and Test Execution)
+
+Preview containers and test execution containers are hardened:
+
+**Preview containers (Docker Compose mode):**
+- `security_opt: no-new-privileges:true` on all app containers
+- `cap_drop: ALL` on all app containers (DB containers exempt -- they need chown/chmod)
+- Cloud metadata endpoints blocked via `extra_hosts` (169.254.169.254 and metadata.google.internal redirected to 127.0.0.1)
+- `ComposeExecutor` env var whitelist: clears all inherited env vars, only passes PATH, HOME, USER, LANG, LC_ALL, TZ, TMPDIR, DOCKER_HOST, DOCKER_CONFIG, DOCKER_CERT_PATH, JAVA_HOME, NODE_ENV, and proxy vars. Prevents leaking JWT_SECRET, API keys, etc.
+
+**Preview containers (Cloud Run mode):**
+- Managed by GCP Cloud Run with default sandboxing (gVisor)
+- Deployed with `--allow-unauthenticated` for public preview access
+- 5-minute TTL auto-cleanup via scheduled task
+
+**Test execution containers:**
+- Runs inside Docker (`maven:3.9-eclipse-temurin-21`) with `--read-only` filesystem
+- `--memory=4g`, `--cpus=2` resource limits
+- `--cap-drop ALL`, `--security-opt no-new-privileges:true`
+- Workspace mounted read-only
+- tmpfs mounts for Maven cache and tmp directories
+
+**DevDockerfileGenerator:**
+- Reads `.agent-context/project.json` (planner-declared type) first, falls back to file-based heuristics
+- 11 project types supported: SPRING_BOOT, JAVA, NODE_FRONTEND, NODE_BACKEND, PYTHON, GO, RUST, RUBY, PHP, FULL_STACK, STATIC_HTML
+- Full-stack Dockerfile generation uses Java string concatenation for inline Node.js scripts (avoids shell command substitution of backtick template literals)
 
 #### Pre-Production Checklist
 

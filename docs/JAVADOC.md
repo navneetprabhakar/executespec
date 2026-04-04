@@ -1,7 +1,7 @@
 # ExecuteSpec -- Complete System Documentation
 
 **Version:** 28f343a (dev)
-**Last Updated:** 2026-04-03
+**Last Updated:** 2026-04-04
 **Stack:** Java 21, Spring Boot 3.3.0, Spring AI 1.1.0, PostgreSQL, Redis, JGit 6.9.0
 
 ---
@@ -385,9 +385,12 @@ PostMergeOrchestrator.onMergeCompleted(event)
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `plan` | `TaskPlan plan(String userRequest, String runId, String modelOverride)` | Main entry point. Loads the planner system prompt, builds workspace context, calls LLM, parses JSON response. Retries up to 3 times on invalid JSON. |
+| `replanWithFeedback` | `TaskPlan replanWithFeedback(String originalGoal, String existingPlanJson, String feedback, String runId)` | Re-plans with user feedback at the approval gate. Uses the same `planner.txt` prompt with `{{#if editMode}}` block activated (injects existing plan + feedback as template variables). |
 | `planWithEstimates` | `TaskPlan planWithEstimates(String goal)` | Feasibility mode -- adds iteration and token estimates per task for cost preview without creating a run. |
 | `buildWorkspaceContext` | `String buildWorkspaceContext(String runId)` | Reads file listing and CODEBASE_CONTEXT.md from the workspace to give the LLM context about existing code. |
 | `buildConflictHistoryContext` | `String buildConflictHistoryContext()` | Appends historical merge conflict data so the planner can avoid patterns that frequently cause conflicts. |
+
+**Prompt Template:** `planner_edit.txt` has been merged into `planner.txt`. The single prompt uses `{{#if editMode}}...{{/if}}` blocks: fresh plans strip the edit block, while `replanWithFeedback()` activates it and substitutes the existing plan JSON and user feedback.
 
 **Output:** `TaskPlan` containing:
 - `planSummary` -- high-level description
@@ -455,9 +458,10 @@ PostMergeOrchestrator.onMergeCompleted(event)
 **Design Notes:**
 - WorkerAgent is a Spring **singleton** -- all per-task state is passed as method parameters.
 - Tool calls use XML format (`<tool_call>`) NOT Spring AI native tool calling, because `@Tool` methods require `runId` which the model does not know.
-- Completion detection is **strict**: response must START with `{` and contain `"task_id"` and `"status"`.
+- Completion detection is **strict**: `looksLikeCompletionReport(text, expectedTaskId)` checks that the response starts with `{`, contains `"task_id"` and `"status"`, and that `task_id` matches the `expectedTaskId` parameter (prevents cross-task confusion).
 - `escapeControlCharsInJsonStrings()` sanitizes LLM-emitted raw control characters inside JSON string values.
 - Max task duration: 25 minutes (wall-clock). Stall detection warns at 8 minutes, recovers at 15 minutes.
+- **Mid-task provider failure recovery:** If the LLM provider fails during the agentic loop, WorkerAgent catches the error and uses `ModelResolver.resolveFallbackExcluding()` to switch to an alternative provider, then continues the loop. The task is marked BLOCKED only if no fallback is available.
 
 ### 5.3 ReviewerAgent (Legacy -- removed from pipeline)
 
@@ -511,6 +515,13 @@ PostMergeOrchestrator.onMergeCompleted(event)
 | `runCompileAndFix` | `CompileResult runCompileAndFix(String runId)` | Entry point called by PipelineHarness. Non-fatal -- always returns. |
 | `detectBuildTool` | `String detectBuildTool(String runId)` | Checks for pom.xml (mvn), build.gradle (gradle), package.json (npm). |
 | `applyLlmFixes` | `void applyLlmFixes(String runId, String errors, String buildTool)` | Sends compile errors + affected source to LLM, applies JSON array fixes `[{path, content}]`. |
+
+**Internal Helpers:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `maxErrorCharsForSse` | `int maxErrorCharsForSse(String errors)` | Adaptive SSE truncation limit based on error file count: <=3 files -> 2000 chars, <=6 -> 1200, >6 -> 800. Keeps SSE events manageable. |
+| `countErrorFiles` | `int countErrorFiles(String errors)` | Counts unique source file paths (`.java`, `.ts`, `.js`, `.tsx`, `.jsx`, `.py`, `.go`, `.rs`) mentioned in compile error output. |
 
 **Build Commands:**
 - Maven: `mvn compile -q 2>&1`
@@ -865,6 +876,12 @@ Central orchestrator that manages the entire pipeline lifecycle. Handles both CL
 | `startIterationRun` | `void startIterationRun(String runId, String newRequest)` | Starts a run that iterates on a completed run's workspace. |
 | `pushToGitHubIfConfigured` | `void pushToGitHubIfConfigured(String runId)` | Creates branch `executespec/{runId-short}`, pushes, and opens PR via GitHubRepoService. |
 
+**Private Methods of Note:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `runBackgroundValidation` | `void runBackgroundValidation(String runId, PipelineRun run, List<WorkerReport> reports, String planJson, String userRequest, CompileResult compileResult, boolean computeHadFailures)` | Shared method that runs ReviewerAgentV2, TestGenOrchestrator, TestPreviewCoordinator, and ValidationReport generation in a background virtual thread (`bg-validation-{runId}`). Called from both the main pipeline flow and the iteration/resume paths. |
+
 **Gate Architecture (Redis-backed):**
 
 Gates use Redis polling (500ms interval, 2h TTL) so that HTTP approve/reject calls work regardless of which server instance receives them:
@@ -992,9 +1009,9 @@ The system uses a YAML-configured model matrix that maps `AgentTier x Provider -
 
 | Tier | Anthropic | Google | OpenAI |
 |------|----------|--------|--------|
-| PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
 **Default Provider:** OpenAI
 
@@ -1013,7 +1030,15 @@ Resolves the model for a given agent tier and provider using the model-matrix co
 ResolvedModel resolve(AgentTier tier, LlmProvider provider)
   --> Reads model-matrix.providers.{provider}.{tier} from application.yml
   --> Returns ResolvedModel(provider, model)
+
+ResolvedModel resolveFallbackExcluding(String agentName, LlmProvider userProvider, String excludeProvider)
+  --> Looks up the agent's tier from agent-tier-map
+  --> Iterates the failover chain for userProvider, skipping excludeProvider
+  --> Returns the first healthy fallback ResolvedModel
+  --> Throws IllegalStateException if no fallback is available
 ```
+
+Used by WorkerAgent for mid-task provider failure recovery: when the primary provider fails during an agentic loop, this method selects an alternative provider while excluding the one that just failed.
 
 ### 9.3 LlmRouter
 
@@ -1108,6 +1133,13 @@ Monitors context window usage and triggers compaction or hard-stop.
 | HARD_STOP | >= 55% | Emergency compact or force report |
 
 HIGH complexity tasks get +5% extra headroom on all thresholds.
+
+**Key Methods:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `resolveEffectiveComplexity` | `String resolveEffectiveComplexity(String originalComplexity, String model, String projectType, int ownedFilesCount, String taskId)` | Resolves effective complexity considering model capabilities, project type, and file ownership count. The overload without `model` parameter is deprecated. |
+| `maxOutputTokens` | `int maxOutputTokens(String model, String complexity)` | Returns the max output token cap for the given model and complexity. Caps to model max to avoid wasteful over-generation. The overload without `model` parameter is deprecated. |
 
 **Context Limits:**
 - Anthropic models: 200,000 tokens
@@ -2144,7 +2176,7 @@ spring:
         api-key: ${GOOGLE_API_KEY:}
         chat:
           options:
-            model: gemini-3-flash-preview
+            model: gemini-2.5-flash
 
 # Model Matrix (user-selected provider x agent tier -> model)
 model-matrix:
@@ -2154,9 +2186,9 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning: gemini-3-flash-preview
-      workhorse: gemini-3-flash-preview
-      lightweight: gemini-3-flash-preview
+      planning: gemini-2.5-flash
+      workhorse: gemini-2.5-flash
+      lightweight: gemini-2.5-flash
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4-mini

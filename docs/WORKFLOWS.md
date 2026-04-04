@@ -43,7 +43,7 @@ flowchart TD
     E --> G[Choose options: provider — default OpenAI, skipApproval]
     F --> G
     G --> H[POST /api/runs — Submit]
-    H --> I[TierEnforcementService checks quota — max 50 runs/month]
+    H --> I[TierEnforcementService checks tier quota — FREE 5/PRO 100/ENTERPRISE unlimited]
     I -->|Quota exceeded| J[HTTP 429 — Upgrade tier]
     I -->|OK| K[PipelineHarness starts]
 
@@ -60,7 +60,7 @@ flowchart TD
     L[PlannerAgent — PLANNING tier — decomposes goal, declares project_type]
     L --> M{skipApproval?}
     M -->|Yes| N[Auto-approve plan]
-    M -->|No| O[Plan Approval Gate — Redis-backed, 500ms polling, 2h TTL]
+    M -->|No| O[Plan Approval Gate — Redis-backed, 500ms polling, 2h TTL, 24h max wait]
     O -->|Approve| N
     O -->|Reject| P[Run cancelled]
     N --> N1[initAgentContext — writes .agent-context/ files including project.json]
@@ -68,11 +68,13 @@ flowchart TD
 
     Q --> R[Tasks run in tiered parallel groups — 25 min max per task]
     R --> S[Create git worktree per task]
-    S --> T[WorkerAgent — WORKHORSE tier — writes code]
+    S --> T[WorkerAgent — WORKHORSE tier — writes code, target 20 iterations, hard limit 35 tool calls]
+    T -->|Provider failure mid-task| T2[Compact conversation + switch to fallback provider + retry]
+    T2 --> T
     T --> U[Merge task branch to main — progressive merge]
     U --> V{More task groups?}
     V -->|Yes| R
-    V -->|No| W[CompilerAgent — WORKHORSE tier — fixes compilation errors]
+    V -->|No| W[CompilerAgent — WORKHORSE tier — fixes compilation errors, dynamic error truncation by file count]
 
     W --> X[Auto-merge all task branches to main]
     X --> ZF([Run COMPLETE — code ready])
@@ -98,7 +100,8 @@ sequenceDiagram
     participant S as SSE /api/runs/{id}/events
     participant P as PipelineHarness
 
-    U->>S: Subscribe to SSE stream
+    U->>S: GET /api/runs/{id}/sse-token (scoped token, 5-min TTL, per-runId)
+    U->>S: Subscribe to SSE stream with scoped token
     P->>S: RUN_STARTED
     S->>U: Run started
     P->>S: PLAN_READY
@@ -133,6 +136,9 @@ sequenceDiagram
     S->>U: Tests running against live preview
     P->>S: REPORT_GENERATED
     S->>U: Validation report ready
+    Note over P,S: If background thread fails:
+    P->>S: VALIDATION_FAILED
+    S->>U: Validation failed — error details
 ```
 
 ---
@@ -145,7 +151,7 @@ After the run is marked COMPLETE and the preview is started, a background virtua
 flowchart TD
     A([Run marked COMPLETE]) --> B[Auto-start preview — 5-min TTL]
     B --> C[Spawn background virtual thread: bg-validation-runId]
-    C --> D[ReviewerAgentV2 — PLANNING tier — inspects merged code]
+    C --> D[ReviewerAgentV2 — PLANNING tier — inspects merged code, README gate softened for small runs: taskCount <= 5 -> MINOR]
     D --> E{Issues found?}
     E -->|Yes| F[Auto-fix applied — commit to main]
     E -->|No| G[Review clean]
@@ -162,6 +168,7 @@ flowchart TD
     O --> P[ValidationReportGenerator — LIGHTWEIGHT tier — produces report]
     P --> Q[Report persisted to DB]
     Q --> R([Background validation complete — SSE: REPORT_GENERATED])
+    C -->|Thread failure| R2([SSE: VALIDATION_FAILED — error details])
 
     S([User during validation]) --> T[Preview is live — browseable]
     S --> U[Conversation tab available]
@@ -169,6 +176,7 @@ flowchart TD
 
     style A fill:#22c55e,color:#fff
     style R fill:#6366f1,color:#fff
+    style R2 fill:#ef4444,color:#fff
     style S fill:#f59e0b,color:#000
 ```
 
@@ -204,6 +212,8 @@ sequenceDiagram
     BG->>VR: generateReport(run, review, testResults)
     VR-->>BG: ValidationReport
     BG->>BG: Persist report, emit REPORT_GENERATED SSE
+    Note over BG: On unhandled exception:
+    BG->>BG: Emit VALIDATION_FAILED SSE with error details
     BG->>BG: Cleanup: broadcaster.complete(), runKeyStore.remove()
 ```
 
@@ -245,7 +255,7 @@ flowchart TD
     F -->|No| G[Invalid email or password]
     F -->|Yes| H{User status = ACTIVE?}
     H -->|No| I[Account not verified / suspended]
-    H -->|Yes| J[Issue JWT access token 24h + refresh cookie 7d]
+    H -->|Yes| J[Issue JWT access token 1h + refresh cookie 7d]
     J --> K{mustChangePassword?}
     K -->|Yes| L[Force password change modal]
     L --> M[Enter new password -> POST /api/auth/change-password]
@@ -279,7 +289,7 @@ flowchart TD
     J -->|No| M[Create new user: status=ACTIVE, email_verified=true, tier=FREE]
     L --> K
     M --> K
-    K --> N[Issue JWT access token 24h + refresh cookie 7d]
+    K --> N[Issue JWT access token 1h + refresh cookie 7d]
     N --> O[Redirect to frontend with token]
     O --> P([Dashboard — logged in via OAuth2])
 
@@ -1143,15 +1153,15 @@ sequenceDiagram
 
 ## Model Tier Reference
 
-| Tier | Purpose | Agents | Default (OpenAI) |
-|------|---------|--------|-------------------|
-| PLANNING | Strategic reasoning, complex review | PlannerAgent, ReviewerAgentV2 | `gpt-5.4` |
-| WORKHORSE | Code generation, compilation, testing | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `gpt-5.4-mini` |
-| LIGHTWEIGHT | Conversation, context, reporting | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `gpt-5.4-mini` |
+| Tier | Purpose | Agents | OpenAI | Anthropic | Google |
+|------|---------|--------|--------|-----------|--------|
+| PLANNING | Strategic reasoning, complex review | PlannerAgent, ReviewerAgentV2 | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-2.5-flash` |
+| WORKHORSE | Code generation, compilation, testing | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `gpt-5.4-mini` | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` |
+| LIGHTWEIGHT | Conversation, context, reporting | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `gpt-5.4-mini` | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` |
 
 Default provider: **OpenAI** (user-selected per project). Failover order varies by starting provider. Stall escalation promotes WorkerAgent from WORKHORSE to PLANNING tier.
 
 ---
 
-*Updated: 2026-04-03*
-*Covers: Pipeline execution (with background validation), auth (email + OAuth2), org management, integrations (JIRA/Confluence/Slack), GitHub PR creation, post-run features, deployment (dual-mode preview), test generation, recovery, billing (Stripe + Razorpay), feature flags, run archive, admin workflows.*
+*Updated: 2026-04-04*
+*Covers: Pipeline execution (with background validation + VALIDATION_FAILED SSE), auth (JWT 1h access + 7d refresh + scoped SSE tokens, OAuth2), org management, integrations (JIRA/Confluence/Slack), GitHub PR creation, post-run features, deployment (dual-mode preview), test generation, mid-task provider failure recovery, recovery, billing (Stripe + Razorpay), feature flags, run archive, admin workflows.*

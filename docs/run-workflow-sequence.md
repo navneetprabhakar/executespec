@@ -1,7 +1,7 @@
 # ExecuteSpec — Run Workflow Sequence
 
 > Complete lifecycle of a user run from submission to completion.
-> Last updated: 2026-04-03
+> Last updated: 2026-04-04
 
 ---
 
@@ -134,7 +134,7 @@ Side paths:
 
 1. **Lock & branch** — `StateStore.lockTask()`, create branch `agent/{runId}/{taskId}`.
 2. **Model routing** — `LlmRouter.call()` with tier-based model selection.
-3. **WorkerAgent agentic loop** (25-min wall-clock limit):
+3. **WorkerAgent agentic loop** (25-min wall-clock limit, target 20 iterations, hard limit 25 in prompts, `HARD_ITERATION_LIMIT=35` in code):
    - Create isolated git worktree, merge dependency branches.
    - While within deadline and iteration cap:
      - Inject inbox messages (user feedback).
@@ -174,6 +174,7 @@ Side paths:
    - Run build command.
    - If passes -> done.
    - If fails -> send errors to LLM -> apply fixes -> retry.
+   - **Dynamic error truncation** — SSE error display adapts to file count: <=3 files -> 2000 chars, <=6 files -> 1200 chars, >6 files -> 800 chars. LLM fix prompt capped at 2000 chars.
 3. **Non-fatal** — compilation failure doesn't block the pipeline.
 
 ---
@@ -200,7 +201,7 @@ Side paths:
 
 | | |
 |---|---|
-| **Trigger** | Runs in background validation thread after COMPLETE |
+| **Trigger** | Runs in `runBackgroundValidation()` thread after COMPLETE |
 | **Handler** | `ReviewerAgentV2.review()` |
 | **Model** | Opus (PLANNING tier) |
 | **State** | `COMPLETE` (run already marked complete) |
@@ -208,7 +209,7 @@ Side paths:
 ### Phase 1 — Inspection (max 10 tool calls)
 - Read file tree, selected files, task summaries.
 - Produce `ReviewIssue` list: id, severity (CRITICAL/MINOR), category, description, fixInstruction.
-- Hard gate: README not updated -> CRITICAL issue.
+- README gate: softened for small runs — `taskCount <= 5` -> MINOR, `taskCount > 5` -> CRITICAL.
 
 ### Phase 2 — Auto-Fix (max 5 issues, 3-min timeout)
 - For each issue (CRITICAL first):
@@ -275,7 +276,7 @@ Side paths:
 | | |
 |---|---|
 | **Trigger** | Validation report generated (or all background stages done) |
-| **Handler** | `PipelineHarness` background thread `finally` block |
+| **Handler** | `PipelineHarness.runBackgroundValidation()` `finally` block |
 
 1. **Publish `MergeCompleted` event** — triggers outbound integrations (JIRA comments, Confluence pages, Slack notifications). Note: uses `MergeCompleted` not `RunCompleted` to avoid race condition where review report is null.
 2. **Cost calculation** — `CostEstimator.computeCostForRun()`.
@@ -299,7 +300,7 @@ Side paths:
 | Merge conflict | Affected task `FAILED`, run `PARTIAL` |
 | Partial completion | User retries failed tasks via UI -> re-merge -> re-review -> `COMPLETE` |
 | Auto-retry eligible | New run created with `runRetryCount++`, linked to failed run |
-| Background validation fails | Fire-and-forget; run stays COMPLETE, no retry/recovery |
+| Background validation fails | Emits `VALIDATION_FAILED` SSE event with error summary; run stays COMPLETE, no retry/recovery |
 
 ---
 
@@ -308,7 +309,7 @@ Side paths:
 | Agent / Service | Stage | Model | Responsibility |
 |-----------------|-------|-------|----------------|
 | `RunController` | 0 | -- | REST entry, tier/quota checks |
-| `PipelineHarness` | 1-11 | -- | Orchestrator, async thread, gate polling, background validation |
+| `PipelineHarness` | 1-11 | -- | Orchestrator, async thread, gate polling, `runBackgroundValidation()` (shared method) |
 | `PlannerAgent` | 2 | Opus | Task decomposition, project type, cost estimation |
 | `SequentialTaskExecutor` | 4 | -- | Dependency graph, tiered parallel dispatch |
 | `WorkerAgent` | 4, 7 | Sonnet/Opus | Agentic tool-use loop (25 min), code generation |
@@ -341,6 +342,9 @@ Side paths:
 8. **Redis gate resilience** — gates survive server restarts via Redis persistence.
 9. **Token-aware billing** — per-phase accumulation with cache multipliers (read x0.1, write x1.25).
 10. **MergeCompleted for outbound** — integrations (JIRA, Confluence, Slack) fire on `MergeCompleted` event, not `RunCompleted`, so review report is available.
+11. **Extracted `runBackgroundValidation()`** — shared method called by both main pipeline path and resume/retry paths; emits `VALIDATION_FAILED` SSE on thread failure.
+12. **Mid-task provider recovery** — WorkerAgent compacts conversation + switches provider via `ModelResolver.resolveFallbackExcluding()` (1 attempt per task).
+13. **Model-aware output budgets** — `TokenBudgetMonitor` caps output to model's physical max; downgrades HIGH->MEDIUM when model max <= 8192.
 
 ---
 
@@ -350,9 +354,9 @@ Side paths:
 
 | Tier | Anthropic | OpenAI | Google |
 |------|-----------|--------|--------|
-| **LIGHTWEIGHT** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
-| **WORKHORSE** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
-| **PLANNING** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-flash-preview` |
+| **LIGHTWEIGHT** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-2.5-flash` |
+| **WORKHORSE** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-2.5-flash` |
+| **PLANNING** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-2.5-flash` |
 
 ### Provider Selection
 
@@ -422,11 +426,11 @@ Three fixed fallback chains:
 
 | Chain | Anthropic | Google | OpenAI |
 |-------|-----------|--------|--------|
-| PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
-**Mid-task guard**: Fallback is **blocked mid-execution** (iteration > 0) to prevent state loss. Allowed only at task start or after context compaction.
+**Mid-task recovery**: On provider failure mid-execution, WorkerAgent compacts the conversation to a provider-agnostic checkpoint and switches to a fallback provider via `ModelResolver.resolveFallbackExcluding()` (limited to 1 recovery attempt per task). Emits `mid_task_recovery` metric and SSE log event.
 
 ### Provider Health Tracking
 
@@ -445,7 +449,7 @@ Three fixed fallback chains:
 | 35% input tokens (~70k) | Compact (sliding window: first 2 + last 18 messages) |
 | 55% input tokens (~110k) | Hard stop |
 
-**Output token limits by complexity**: LOW=2,048 / MEDIUM=4,096 / HIGH=8,192 / Ceiling=16,000
+**Output token limits by complexity**: LOW=6,144 / MEDIUM=8,192 / HIGH=12,288. Capped to model's physical max output (e.g., Haiku max=8192 caps HIGH to 8192). `resolveEffectiveComplexity()` downgrades HIGH->MEDIUM when model max output <= 8192, preventing truncation loops.
 
 ### Escalation Flow Diagram
 
@@ -466,7 +470,7 @@ Worker agentic loop (25-min wall clock)
   |
   +-- Provider fails?
   |     +-- At task start -> Cross-provider fallback (same tier)
-  |     +-- Mid-task -> Block fallback, throw MidTaskProviderFailureException
+  |     +-- Mid-task -> Compact conversation + switch to fallback via resolveFallbackExcluding() (1 attempt)
   |
   v
 Progressive merge -> next task
