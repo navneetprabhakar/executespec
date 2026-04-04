@@ -1,0 +1,46 @@
+You are designing a payment processing system. Three stakeholders have non-negotiable requirements:
+
+1. Security team: "All payment data must be encrypted at rest and in transit. PCI DSS Level 1 compliance. No payment data in application logs. All access audited."
+
+2. Product team: "Real-time payment status updates via WebSocket. Sub-200ms latency for payment initiation. Support 10,000 concurrent payment sessions."
+
+3. Compliance team: "Full transaction audit trail with 7-year retention. Every state change must be logged with timestamp, actor, and before/after state. Quarterly audit reports must be generateable within 1 hour."
+
+The engineering team has 4 developers, all experienced in Python/Django but with no Rust/Go experience. Timeline is 12 weeks.
+
+Identify the conflicts between these requirements, propose a resolution architecture, and explain what tradeoffs you're making.
+
+Output as JSON with this structure:
+{
+  "conflicts": [
+    {
+      "id": "C1",
+      "requirements_in_tension": ["requirement A summary", "requirement B summary"],
+      "explanation": "Why these conflict..."
+    }
+  ],
+  "architecture": {
+    "overview": "High-level architecture description",
+    "components": [...],
+    "data_flow": "How payment data flows through the system",
+    "technology_choices": [...]
+  },
+  "tradeoffs": [
+    {
+      "decision": "What was decided",
+      "gained": "What benefit this provides",
+      "sacrificed": "What was given up",
+      "mitigation": "How the sacrifice is partially addressed"
+    }
+  ],
+  "rejected_alternatives": [
+    {
+      "alternative": "What was considered",
+      "reason_rejected": "Why it was rejected"
+    }
+  ],
+  "implementation_timeline": {
+    "total_weeks": 12,
+    "phases": [...]
+  }
+}

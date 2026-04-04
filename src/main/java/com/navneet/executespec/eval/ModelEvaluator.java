@@ -114,6 +114,9 @@ public class ModelEvaluator {
                 EvalResult result = runSingleTestWithTimeout(provider, model, testCase);
                 modelResults.add(result);
                 completedCalls++;
+
+                // Save raw output for post-mortem analysis
+                saveRawOutput(evalId, provider, model, testCase.id(), result.rawResponse());
                 if (result.reasoning() != null && result.reasoning().startsWith("TIMEOUT")) timedOutCalls++;
 
                 log.info("[ModelEvaluator] [{}/{}] {}/{} — accuracy={}, speed={}, latency={}ms, cost=${}",
@@ -184,7 +187,7 @@ public class ModelEvaluator {
                     1.0, 1.0, 5.0, scorer.overallScore(1.0, 1.0, 5.0),
                     latencyMs, 0.0, 0, 0,
                     false, 0, testCase.validationPatterns().size(),
-                    "TIMEOUT: exceeded " + PER_CALL_TIMEOUT.toSeconds() + "s limit", null
+                    "TIMEOUT: exceeded " + PER_CALL_TIMEOUT.toSeconds() + "s limit", null, List.of()
             );
         } catch (Exception e) {
             long latencyMs = System.currentTimeMillis() - startMs;
@@ -195,7 +198,7 @@ public class ModelEvaluator {
                     1.0, 1.0, 5.0, scorer.overallScore(1.0, 1.0, 5.0),
                     latencyMs, 0.0, 0, 0,
                     false, 0, testCase.validationPatterns().size(),
-                    "ERROR: " + e.getMessage(), null
+                    "ERROR: " + e.getMessage(), null, List.of()
             );
         } finally {
             executor.shutdownNow();
@@ -211,7 +214,7 @@ public class ModelEvaluator {
                 0.0, 0.0, 5.0, 0.0,
                 0, 0.0, 0, 0,
                 false, 0, testCase.validationPatterns().size(),
-                reason, null
+                reason, null, List.of()
         );
     }
 
@@ -242,6 +245,10 @@ public class ModelEvaluator {
             double speed = scorer.scoreSpeed(latencyMs, testCase.latencyCeilingMs());
             int matched = scorer.countMatchedPatterns(responseText, testCase.validationPatterns());
 
+            // Compute per-pattern match results for debugging
+            List<EvalReport.PatternResult> patternResults = computePatternResults(
+                    responseText, testCase.validationPatterns(), testCase.patternLabels());
+
             // Length penalty for LIGHTWEIGHT tests
             if (testCase.maxResponseLength() > 0 && responseText != null
                     && responseText.length() > testCase.maxResponseLength()) {
@@ -255,10 +262,10 @@ public class ModelEvaluator {
             return new EvalResult(
                     testCase.id(), testCase.tier(), provider, model,
                     accuracy, speed, 5.0, // cost placeholder — normalized later
-                    scorer.overallScore(accuracy, speed, 5.0),
+                    scorer.overallScore(accuracy, speed, 5.0, testCase.tier()),
                     latencyMs, costUsd, inputTokens, outputTokens,
                     passed, matched, testCase.validationPatterns().size(),
-                    reasoning, truncate(responseText, 2000)
+                    reasoning, responseText, patternResults
             );
 
         } catch (Exception e) {
@@ -271,7 +278,7 @@ public class ModelEvaluator {
                     1.0, 1.0, 5.0, scorer.overallScore(1.0, 1.0, 5.0),
                     latencyMs, 0.0, 0, 0,
                     false, 0, testCase.validationPatterns().size(),
-                    "ERROR: " + e.getMessage(), null
+                    "ERROR: " + e.getMessage(), null, List.of()
             );
         }
     }
@@ -296,12 +303,12 @@ public class ModelEvaluator {
 
             double[] costScores = scorer.normalizeCostScores(costs);
 
-            // Update results with normalized cost scores
+            // Update results with normalized cost scores (tier-aware weights)
             for (int m = 0; m < modelKeys.size(); m++) {
                 List<EvalResult> modelResults = resultsByModel.get(modelKeys.get(m));
                 EvalResult old = modelResults.get(idx);
                 double newCost = costScores[m];
-                double newOverall = scorer.overallScore(old.accuracyScore(), old.speedScore(), newCost);
+                double newOverall = scorer.overallScore(old.accuracyScore(), old.speedScore(), newCost, old.tier());
                 String updatedReasoning = old.reasoning()
                         + String.format(" | Cost: $%.6f (score %.1f/10, normalized across %d models)",
                         old.costUsd(), newCost, modelKeys.size());
@@ -338,12 +345,14 @@ public class ModelEvaluator {
                 double avgAccuracy = tierResults.stream().mapToDouble(EvalResult::accuracyScore).average().orElse(0);
                 double avgSpeed = tierResults.stream().mapToDouble(EvalResult::speedScore).average().orElse(0);
                 double avgCost = tierResults.stream().mapToDouble(EvalResult::costScore).average().orElse(0);
-                double avgOverall = tierResults.stream().mapToDouble(EvalResult::overallScore).average().orElse(0);
+                // Use tier-aware weights for the aggregate overall score
+                double avgOverall = scorer.overallScore(avgAccuracy, avgSpeed, avgCost, tier);
 
                 List<EvalReport.TestCaseResult> testResults = tierResults.stream()
                         .map(r -> new EvalReport.TestCaseResult(
                                 r.testCaseId(), r.accuracyScore(), r.speedScore(), r.costScore(),
-                                r.overallScore(), r.latencyMs(), r.costUsd(), r.passed()))
+                                r.overallScore(), r.latencyMs(), r.costUsd(), r.passed(),
+                                r.patternResults() != null ? r.patternResults() : List.of()))
                         .toList();
 
                 String reasoning = String.format(
@@ -364,15 +373,50 @@ public class ModelEvaluator {
             modelReports.add(new EvalReport.ModelReport(provider, model, tierScores, bestFit));
         }
 
-        // Recommendations: best model per tier
+        // Disqualification checks and recommendations
         Map<AgentTier, EvalReport.Recommendation> recommendations = new EnumMap<>(AgentTier.class);
+        List<EvalReport.Disqualification> disqualifications = new ArrayList<>();
+
         for (AgentTier tier : AgentTier.values()) {
             EvalReport.ModelReport best = null;
             double bestScore = -1;
 
             for (EvalReport.ModelReport mr : modelReports) {
                 EvalReport.TierScore ts = mr.tierScores().get(tier);
-                if (ts != null && ts.overall() > bestScore) {
+                if (ts == null) continue;
+
+                // Disqualification: PLANNING tier requires >= 50% pass rate
+                if (tier == AgentTier.PLANNING) {
+                    long passed = ts.testResults().stream().filter(EvalReport.TestCaseResult::passed).count();
+                    long total = ts.testResults().size();
+                    double passRate = total > 0 ? (double) passed / total : 0;
+
+                    if (passRate < 0.50) {
+                        String reason = String.format("Pass rate %.0f%% (%d/%d) below 50%% minimum for PLANNING",
+                                passRate * 100, passed, total);
+                        disqualifications.add(new EvalReport.Disqualification(
+                                mr.provider(), mr.model(), tier, reason));
+                        log.info("[ModelEvaluator] DISQUALIFIED {}:{} from {} — {}",
+                                mr.provider(), mr.model(), tier, reason);
+                        continue; // skip this model for this tier's recommendation
+                    }
+
+                    // Also disqualify if any single PLANNING test accuracy < 6.0
+                    Optional<EvalReport.TestCaseResult> weakTest = ts.testResults().stream()
+                            .filter(t -> t.accuracy() < 6.0)
+                            .findFirst();
+                    if (weakTest.isPresent()) {
+                        String reason = String.format("Test %s accuracy %.1f below 6.0 floor",
+                                weakTest.get().testCaseId(), weakTest.get().accuracy());
+                        disqualifications.add(new EvalReport.Disqualification(
+                                mr.provider(), mr.model(), tier, reason));
+                        log.info("[ModelEvaluator] DISQUALIFIED {}:{} from {} — {}",
+                                mr.provider(), mr.model(), tier, reason);
+                        continue;
+                    }
+                }
+
+                if (ts.overall() > bestScore) {
                     bestScore = ts.overall();
                     best = mr;
                 }
@@ -388,7 +432,7 @@ public class ModelEvaluator {
             }
         }
 
-        return new EvalReport(evalId, Instant.now(), durationMs, modelReports, recommendations);
+        return new EvalReport(evalId, Instant.now(), durationMs, modelReports, recommendations, disqualifications);
     }
 
     private void writeReport(EvalReport report) throws IOException {
@@ -396,6 +440,39 @@ public class ModelEvaluator {
         Path reportFile = REPORT_DIR.resolve("eval-" + report.evaluationId() + ".json");
         mapper.writeValue(reportFile.toFile(), report);
         log.info("[ModelEvaluator] Report written to {}", reportFile);
+    }
+
+    /**
+     * Save the raw (non-truncated) LLM response to eval-outputs/{evalId}/{provider}-{model}/{testCaseId}.txt.
+     * Best-effort — failures are logged but don't affect the evaluation.
+     */
+    private void saveRawOutput(String evalId, String provider, String model,
+                               String testCaseId, String rawResponse) {
+        if (rawResponse == null) return;
+        try {
+            String safeModel = model.replaceAll("[^a-zA-Z0-9._-]", "_");
+            Path outputDir = Path.of("eval-outputs", evalId, provider + "-" + safeModel);
+            Files.createDirectories(outputDir);
+            Path outputFile = outputDir.resolve(testCaseId + ".txt");
+            Files.writeString(outputFile, rawResponse);
+        } catch (IOException e) {
+            log.warn("[ModelEvaluator] Failed to save raw output for {}/{}:{}: {}",
+                    testCaseId, provider, model, e.getMessage());
+        }
+    }
+
+    /**
+     * Compute per-pattern match results for detailed debugging in reports.
+     */
+    private List<EvalReport.PatternResult> computePatternResults(
+            String response, List<java.util.regex.Pattern> patterns, List<String> labels) {
+        List<EvalReport.PatternResult> results = new ArrayList<>();
+        for (int i = 0; i < patterns.size(); i++) {
+            String label = (labels != null && i < labels.size()) ? labels.get(i) : "P" + (i + 1);
+            boolean matched = response != null && patterns.get(i).matcher(response).find();
+            results.add(new EvalReport.PatternResult(label, matched));
+        }
+        return results;
     }
 
     private String buildReasoning(int matched, int total, long latencyMs, long ceiling,

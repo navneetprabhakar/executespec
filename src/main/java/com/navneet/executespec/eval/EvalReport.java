@@ -20,7 +20,8 @@ public record EvalReport(
         Instant timestamp,
         long durationMs,
         List<ModelReport> modelResults,
-        Map<AgentTier, Recommendation> recommendations
+        Map<AgentTier, Recommendation> recommendations,
+        List<Disqualification> disqualifications
 ) {
 
     /**
@@ -56,7 +57,16 @@ public record EvalReport(
             double overall,
             long latencyMs,
             double costUsd,
-            boolean passed
+            boolean passed,
+            List<PatternResult> patternResults
+    ) {}
+
+    /**
+     * Per-pattern match result for detailed debugging.
+     */
+    public record PatternResult(
+            String patternLabel,
+            boolean matched
     ) {}
 
     /**
@@ -67,5 +77,15 @@ public record EvalReport(
             String model,
             double score,
             String reasoning
+    ) {}
+
+    /**
+     * A model disqualified from a tier due to minimum accuracy/pass-rate requirements.
+     */
+    public record Disqualification(
+            String provider,
+            String model,
+            AgentTier tier,
+            String reason
     ) {}
 }

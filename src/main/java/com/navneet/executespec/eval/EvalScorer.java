@@ -143,11 +143,27 @@ public class EvalScorer {
     }
 
     /**
-     * Compute overall weighted score.
+     * Compute overall weighted score with default (WORKHORSE) weights.
      * accuracy * 0.50 + speed * 0.25 + cost * 0.25
      */
     public double overallScore(double accuracy, double speed, double cost) {
-        return accuracy * 0.50 + speed * 0.25 + cost * 0.25;
+        return overallScore(accuracy, speed, cost, AgentTier.WORKHORSE);
+    }
+
+    /**
+     * Compute overall weighted score with tier-dependent weights.
+     * <ul>
+     *   <li>PLANNING:    accuracy=0.70, speed=0.15, cost=0.15 (wrong plan = wasted pipeline)</li>
+     *   <li>WORKHORSE:   accuracy=0.50, speed=0.25, cost=0.25 (balanced)</li>
+     *   <li>LIGHTWEIGHT: accuracy=0.40, speed=0.30, cost=0.30 (latency-sensitive)</li>
+     * </ul>
+     */
+    public double overallScore(double accuracy, double speed, double cost, AgentTier tier) {
+        return switch (tier) {
+            case PLANNING    -> accuracy * 0.70 + speed * 0.15 + cost * 0.15;
+            case WORKHORSE   -> accuracy * 0.50 + speed * 0.25 + cost * 0.25;
+            case LIGHTWEIGHT -> accuracy * 0.40 + speed * 0.30 + cost * 0.30;
+        };
     }
 
     /**
@@ -171,12 +187,16 @@ public class EvalScorer {
 
     /**
      * Latency ceiling for each agent tier.
+     * <p>
+     * PLANNING: 120s (Sonnet needs 80-170s on saga tests; 30s was unachievable)
+     * WORKHORSE: 45s (unchanged)
+     * LIGHTWEIGHT: 10s (5s was too aggressive — only Mini met it)
      */
     public static long latencyCeilingMs(AgentTier tier) {
         return switch (tier) {
-            case PLANNING -> 30_000;
+            case PLANNING -> 120_000;
             case WORKHORSE -> 45_000;
-            case LIGHTWEIGHT -> 5_000;
+            case LIGHTWEIGHT -> 10_000;
         };
     }
 

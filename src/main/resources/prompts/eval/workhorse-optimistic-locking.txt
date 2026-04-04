@@ -1,0 +1,14 @@
+Generate a Java service that implements optimistic locking with retry and exponential backoff for a banking transfer between two accounts.
+
+Requirements:
+- Two JPA entities: Account (id, balance, version) and Transfer (id, fromAccountId, toAccountId, amount, status, createdAt)
+- TransferService.executeTransfer(fromId, toId, amount) method
+- Must handle: OptimisticLockException with retry (max 3, exponential backoff starting at 100ms)
+- Must handle: insufficient balance (check-and-debit must be atomic with version check)
+- Must handle: concurrent transfers from the same source account (two threads transferring from Account A simultaneously)
+- Must handle: self-transfer rejection (fromId == toId)
+- Must use @Version annotation for optimistic locking
+- The debit and credit must happen in the SAME transaction — no partial state
+- Include a @Transactional boundary that is correct (does NOT span the retry loop)
+
+Generate the complete Java source code for all entities, the service, and the repository interfaces. Use Spring Boot 3, Spring Data JPA, and standard Jakarta annotations.
