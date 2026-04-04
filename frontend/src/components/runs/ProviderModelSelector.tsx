@@ -68,24 +68,6 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
         </div>
       </div>
 
-      {/* Model dropdown — only show if provider is selected and has >1 model */}
-      {provider && models.length > 0 && (
-        <div>
-          <label className="block text-sm text-secondary mb-1.5">Model override</label>
-          <select
-            value={model}
-            onChange={(e) => handleModelChange(e.target.value)}
-            className="w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none focus:border-accent-blue/40"
-          >
-            <option value="">Auto (best for each agent)</option>
-            {models.map((m) => (
-              <option key={`${m.id}-${m.tier}`} value={m.id}>
-                {m.label} ({m.tier === 'PLANNING' ? 'Power' : 'Capable'})
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
     </div>
   );
 }
@@ -93,7 +75,7 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
 /** Read persisted provider/model from localStorage. */
 export function getPersistedSelection(): { provider: string; model: string } {
   return {
-    provider: localStorage.getItem(LS_PROVIDER) ?? 'OPENAI',
-    model: localStorage.getItem(LS_MODEL) ?? '',
+    provider: 'OPENAI',
+    model: '',
   };
 }

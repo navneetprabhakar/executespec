@@ -28,6 +28,7 @@ public class SecurityProperties {
                 + "connect-src 'self' wss:; "
                 + "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
                 + "worker-src 'self' blob:; "
+                + "frame-src 'self' https://*.run.app https://*.executespec.ai; "
                 + "frame-ancestors 'self' https://*.executespec.ai https://*.run.app";
     }
 
