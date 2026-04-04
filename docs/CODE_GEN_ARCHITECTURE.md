@@ -1,7 +1,7 @@
 # ExecuteSpec — Complete Code Generation Architecture
 
 > Comprehensive technical reference for the multi-agent code generation pipeline.
-> Last updated: 2026-04-03
+> Last updated: 2026-04-04
 
 ---
 
@@ -147,7 +147,7 @@ QUEUED ──► PLANNING ──► AWAITING_APPROVAL ──► WORKING ──�
 | `PARTIAL` | Some tasks incomplete | User can retry individual tasks |
 | `FAILED` | Unrecoverable error | Terminal |
 | `CANCELLED` | User cancels | Terminal |
-| `ARCHIVED` | User archives run (V53) | Terminal |
+| `ARCHIVED` | User archives run | Terminal |
 
 ### Execution Modes
 
@@ -210,7 +210,7 @@ QUEUED ──► PLANNING ──► AWAITING_APPROVAL ──► WORKING ──�
 - User can chat, submit changes, and use preview immediately
 
 #### Phase 7: Background Validation (PRODUCTION only)
-Runs on a dedicated virtual thread (`bg-validation-{runId}`):
+Runs on a dedicated virtual thread (`bg-validation-{runId}`), via the shared `runBackgroundValidation()` method (extracted from inline code, reused by iteration and resume paths):
 - ReviewerAgentV2 inspects merged code on main
 - Returns ReviewVerdict: `APPROVED`, `APPROVED_WITH_NOTES`, `NEEDS_FIXES`, `REJECTED`
 - Auto-fix critical issues (WORKHORSE tier → PLANNING tier on retry)
@@ -234,7 +234,7 @@ Runs on a dedicated virtual thread (`bg-validation-{runId}`):
 | Redis connection loss | 500ms poll retry (gates) |
 | Gate lost on restart | `GateFallback` thread handles orphaned gates |
 | All workers fail | `FAILED` (nothing to merge) |
-| Background validation failure | Fire-and-forget (no retry/recovery) |
+| Background validation failure | Emits `VALIDATION_FAILED` SSE event; no retry/recovery |
 
 ---
 
@@ -249,9 +249,9 @@ The PlannerAgent uses a PLANNING-tier model to decompose the user's request into
 ### Planning Flow
 
 1. Build workspace context (directory listing + `CODEBASE_CONTEXT.md`)
-2. Load system prompt from `prompts/planner.txt`
+2. Load system prompt from `prompts/planner.txt` (edit mode uses `{{#if editMode}}` conditional block — `planner_edit.txt` was merged into `planner.txt`)
 3. Append conflict history context (last 5 merges, up to 20 conflicts)
-4. If existing repo mode: prepend codebase analysis instructions
+4. If existing repo / edit mode: activate `{{#if editMode}}` block with iteration variables
 5. Call LLM with 3-attempt retry for valid JSON
 6. Parse response into `TaskPlan` via `LlmOutputParser`
 7. Validate: non-empty task list, truncate to 35 tasks max
@@ -383,9 +383,9 @@ model-matrix:
       workhorse:   claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning:    gemini-3-flash-preview
-      workhorse:   gemini-3-flash-preview
-      lightweight: gemini-3-flash-preview
+      planning:    gemini-2.5-flash
+      workhorse:   gemini-2.5-flash
+      lightweight: gemini-2.5-flash
     openai:
       planning:    gpt-5.4
       workhorse:   gpt-5.4-mini
@@ -441,10 +441,15 @@ resolve(agentName, userProvider):
 |------|-----------|----------|
 | `IMMEDIATE` | Planner, Reviewer | Always allow fallback on any error |
 | `TASK_BOUNDARY` | Worker (iteration 0 or just compacted) | Fallback allowed at task boundary |
-| `TASK_BOUNDARY` (mid-task) | Worker (mid-execution) | NO fallback — throw `MidTaskProviderFailureException` |
+| `TASK_BOUNDARY` (mid-task) | Worker (mid-execution) | NO fallback — throw `MidTaskProviderFailureException` (WorkerAgent catches, compacts, and switches) |
 | `NO_FALLBACK` | OpenAI worker (has ToolResponseMessages) | Single attempt only |
 
 **Rationale for NO_FALLBACK on OpenAI:** ToolResponseMessage objects in the conversation history are provider-specific. Switching providers mid-conversation would produce invalid message sequences.
+
+**Mid-Task Provider Failure Recovery:** When `MidTaskProviderFailureException` is thrown mid-task, WorkerAgent catches it and:
+1. Compacts the conversation (summarizes progress, creates fresh message list)
+2. Calls `ModelResolver.resolveFallbackExcluding()` to pick a different provider, excluding the failed one
+3. Resumes the agentic loop with the fallback provider and compacted context
 
 #### Call Flow: `callWithFallbackTracked()`
 
@@ -662,6 +667,8 @@ ELSE:
 
 ### Worker Prompt Key Directives
 
+All 3 worker prompt variants (`worker.txt`, `worker-openai.txt`, `worker-gemini.txt`) are now aligned with shared rules including ROUTER NAMESPACE ISOLATION (avoid route conflicts between tasks) and FULL-STACK START SCRIPT (generate unified start scripts for preview).
+
 **Working Sequence (strict order):**
 1. **READ FIRST** — batch all reads; read context files + relevant existing files
 2. **WRITE CODE** — complete production-quality code, one file per response if >100 lines
@@ -670,7 +677,7 @@ ELSE:
 5. **SELF-REVIEW** — verify acceptance criteria, file completeness, DOM consistency
 6. **REPORT DONE** — output completion JSON
 
-**Iteration budget:** 20 tool calls target, 25 hard limit.
+**Iteration budget:** Target 20 tool calls, hard limit 25 (enforced in all 3 worker prompt variants).
 
 ---
 
@@ -684,31 +691,36 @@ ELSE:
 
 | Complexity | Max Output Tokens | Approximate Lines | Latency at 100 tok/s |
 |------------|-------------------|--------------------|-----------------------|
-| LOW | 4,096 | ~100 lines | ~40s |
-| MEDIUM | 12,288 | ~300 lines | ~2 min |
-| HIGH | 16,384 | ~400-500 lines | ~2.5 min |
+| LOW | 6,144 | ~150 lines | ~60s |
+| MEDIUM | 8,192 | ~200 lines | ~80s |
+| HIGH | 12,288 | ~300 lines | ~2 min |
 
-These are **soft ceilings** — decoupled from the model's actual max output. If a task needs more, the auto-continue mechanism handles overflow.
+These are **soft ceilings** — decoupled from the model's actual max output. If a task needs more, the auto-continue mechanism handles overflow. Ceilings are capped to the model's physical max output via `ModelRegistry.maxOutputForModel()` — prevents silently exceeding what the model can produce (e.g., Haiku max=8192 but HIGH ceiling=12288 would be capped to 8192).
 
 ### Complexity Override Rules
 
 **`resolveEffectiveComplexity()`** applies defensive overrides:
 
 ```
-Input: planner-assigned complexity + project type + owned file count
+Input: planner-assigned complexity + model + project type + owned file count
 
 Override 1: Project Type
-  IF (STATIC_HTML OR NODE_FRONTEND) AND complexity == HIGH:
-    → Downgrade to MEDIUM
+  IF (STATIC_HTML OR NODE_FRONTEND):
+    LOW → upgrade to MEDIUM (4K too small for full-page HTML/CSS/JS)
+    HIGH → downgrade to MEDIUM (unnecessary for single-file tasks)
 
-Override 2: File Count
+Override 2: Model Max Output
+  IF complexity == HIGH AND model max output ≤ 8,192:
+    → Downgrade to MEDIUM (ceiling 12,288 exceeds model capacity)
+
+Override 3: File Count
   IF complexity == HIGH AND ownedFilesCount ≤ 2:
     → Downgrade to MEDIUM
 
 Otherwise: keep original
 ```
 
-**Rationale:** Prevents budget exhaustion on simple tasks misclassified as HIGH.
+**Rationale:** Prevents budget exhaustion on simple tasks misclassified as HIGH, and avoids truncation loops when model max output is below the complexity ceiling.
 
 ### Context Window Budget Status
 
@@ -735,11 +747,11 @@ All floored to 200K for consistency across providers, even though some support l
 
 | Model | Max Output |
 |-------|-----------|
-| Claude Sonnet | 64,000 |
-| Claude Haiku | 8,192 |
+| Claude Sonnet 4 | 64,000 |
+| Claude Haiku 4.5 | 8,192 |
 | GPT-5.4 | 16,384 |
 | GPT-5.4-mini | 16,384 |
-| Gemini Flash | 24,576 |
+| Gemini 2.5 Flash | 24,576 |
 
 ---
 
@@ -998,7 +1010,7 @@ Runs after workers complete. Non-blocking: always returns a result, never throws
    Run build command
    If passes → return CompileResult.passed()
    If fails:
-     a. Truncate errors to 600 chars
+     a. Truncate errors dynamically based on file count (`maxErrorCharsForSse`: ≤3 files→2000, ≤6→1200, else 800 chars)
      b. Scope to MAX_COMPILER_FILES (10) per pass
         Priority: models → repos → services → controllers → configs → tests
      c. Extract relevant source files
@@ -1041,7 +1053,7 @@ Two-phase agentic reviewer. PRODUCTION mode only. Runs in background validation 
 - Timeout: 15 minutes
 - Output: JSON array of `ReviewIssue` objects (severity, file, problem, expected)
 
-**README Hard Gate:** If `README.md` doesn't exist or is <50 bytes → mandatory CRITICAL issue.
+**README Gate:** If `README.md` doesn't exist or is <50 bytes → issue raised. Severity is softened for small runs: taskCount ≤ 5 → MINOR severity (instead of CRITICAL).
 
 ### Phase 2: Auto-Fix
 
@@ -1056,11 +1068,12 @@ For each issue (CRITICAL first, then MINOR):
 ### Verdict Determination
 
 ```
-if (!readmeUpdated)        → REJECTED
-if (unfixedCritical > 0)   → NEEDS_FIXES
-if (unfixedMinor > 0)      → APPROVED_WITH_NOTES
-if (no issues OR all fixed) → APPROVED
+if (unfixedCritical > 0)    → NEEDS_FIXES
+if (unfixedMinor > 0)       → APPROVED_WITH_NOTES
+if (no issues OR all fixed)  → APPROVED
 ```
+
+Note: Missing README is tracked as a review issue (CRITICAL for large runs, MINOR for ≤5 tasks) and goes through auto-fix like any other issue. It is no longer a hard REJECTED gate.
 
 ### Code Validator
 
@@ -1421,9 +1434,9 @@ Child processes have secrets removed:
 
 | Complexity | Max Output | Headroom Bonus |
 |------------|-----------|----------------|
-| LOW | 4,096 | — |
-| MEDIUM | 12,288 | — |
-| HIGH | 16,384 | +5% on context thresholds |
+| LOW | 6,144 | — |
+| MEDIUM | 8,192 | — |
+| HIGH | 12,288 | +5% on context thresholds |
 
 ### Circuit Breaker
 

@@ -264,9 +264,9 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
 Default provider: OpenAI (user-selected per project). Failover order: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier. See `application.yml` → `model-matrix:` for full configuration.
 
@@ -316,13 +316,10 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 
 ### Known Tech Debt
 - **Model matrix cost:** WORKHORSE tier for Anthropic is `claude-haiku-4-5-20251001` — consider whether Sonnet should be used for complex tasks
-- **test-worker.txt OUTPUT RULES:** Lines 41-45 still hardcode "Output ONLY the Java source code" and mention RestAssured/JUnit 5, contradicting the language-agnostic framework section
 - V3 migration type mismatch: `actual_cost_usd` must be `DOUBLE PRECISION` (not `DECIMAL(10,6)`)
 - Branch retry: `GitTool.createBranch()` catches RefAlreadyExistsException → checkout fallback
 - Gate lost on restart: approve() → if gate missing → auto-fail with message
 - StartupRunResumer disabled — users resume stuck runs manually via UI
-- ReviewerAgent V1 class still wired as @Service bean but unused in pipeline (blocks deletion of reviewer.txt prompt)
 - Apply-to-run: `plan_version` duplicate key error on retry (incrementPlanVersion may not be working correctly)
 - `@Lazy @Autowired` on `PreviewService` in `TestPreviewCoordinator` — only field injection in codebase, needed to break circular dependency
-- `doReviewAndMerge()` (resume/retry paths) NOT updated for background validation pattern — still runs synchronous review+test flow
-- Background validation: no retry/recovery if background thread fails silently (fire-and-forget)
+- Default provider is OpenAI but eval results show Anthropic (Haiku) and Google (Gemini) perform better — consider changing default

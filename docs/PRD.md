@@ -1,7 +1,7 @@
 # ExecuteSpec - Product Requirements Document
 
 > **Version:** 4.0
-> **Last Updated:** 2026-04-03
+> **Last Updated:** 2026-04-04
 > **Status:** Production (v1)
 > **Author:** Navneet Prabhakar
 
@@ -50,7 +50,7 @@ User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
 | **AI Providers** | OpenAI (default), Anthropic (Claude), Google (Gemini) -- user-selectable per project, health-based failover |
 | **Infrastructure** | GCP N. Virginia (us-east4) -- Cloud Run, GCE, Artifact Registry, GCS |
 | **Payments** | Multi-gateway via PaymentGatewayRouter: Razorpay + Stripe (subscriptions + one-time orders) |
-| **Auth** | JWT (RS256) + OAuth2 (Google, GitHub login) |
+| **Auth** | JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub login), scoped SSE tokens (5-min TTL) |
 | **Observability** | Micrometer + OpenTelemetry, Grafana/Tempo (local), Cloud Trace/Monitoring (prod) |
 
 ### 2.3 Multi-Agent Pipeline
@@ -77,13 +77,16 @@ Plan Approval Gate -- user reviews & approves/rejects plan (Redis, 500ms polling
 SequentialTaskExecutor (tasks run one at a time, progressive merge)
   +-- WorkerAgent per task (WORKHORSE tier, escalates to PLANNING tier on stall)
   |     +-- Tool dispatch: readFile, writeFile, shell, git, diff
+  |     +-- Target 20 iterations, hard limit 35 tool calls (HARD_ITERATION_LIMIT)
   |     +-- 25-min wall-clock limit, stall detection at 5min
   |     +-- Sliding window: first 2 + last 18 messages (context control)
   |     +-- Token truncation: readFile 8K, shell 6K, diff 5K chars
+  |     +-- Mid-task provider failure recovery: compact conversation + switch to fallback provider
+  |     +-- Mid-task cost enforcement: checks budget every 5 LLM calls
   |     +-- Each task merged to main immediately after completion
   |
   v
-CompilerAgent -- compile & fix build errors (up to 3 iterations)
+CompilerAgent -- compile & fix build errors (up to 3 iterations, dynamic error truncation based on file count)
   |
   v
 Auto-Merge -- all task branches merged to main (no manual gate)
@@ -98,8 +101,8 @@ Auto-Preview (5-min TTL, both modes) -- user can interact immediately
 GitHub Push (non-blocking) -- branch `executespec/{runId-short}` + auto PR
   |
   v
-Background Validation Thread (non-blocking):
-  +-- ReviewerAgentV2 -- inspect merged code, auto-fix issues (2 attempts, max 8 issues)
+Background Validation Thread (non-blocking, emits VALIDATION_FAILED SSE on thread failure):
+  +-- ReviewerAgentV2 -- inspect merged code, auto-fix issues (2 attempts, max 8 issues, softened README gate: taskCount <= 5 -> MINOR)
   +-- TestGenOrchestrator -- generate language-agnostic integration tests
   +-- TestPreviewCoordinator -- reuse existing preview, execute tests
   +-- ValidationReportAgent -- LLM-generated quality summary (non-fatal)
@@ -117,11 +120,13 @@ The system uses a user-selected provider (default: OpenAI) with tier-based model
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
 **Failover order:** Anthropic -> [OpenAI, Google], Google -> [OpenAI, Anthropic], OpenAI -> [Google, Anthropic].
+**Mid-task recovery:** `ModelResolver.resolveFallbackExcluding()` for mid-task provider failure recovery (compact conversation + switch provider).
+**Token budget:** `TokenBudgetMonitor` caps output budget to model max via `ModelRegistry.maxOutputForModel()`.
 **Stall escalation:** WorkerAgent promoted from WORKHORSE -> PLANNING tier on stall/retry.
 
 ### 2.5 Security Model (8-Layer Defense-in-Depth)
@@ -626,7 +631,7 @@ SUPER_ADMIN (global -- full system access)
    -> If new user: create account (tier=FREE), issue JWT
 
 4. SESSION ESTABLISHED
-   OAuthSuccessHandler issues JWT (access 24h, refresh 7d)
+   OAuthSuccessHandler issues JWT (access 1h, refresh 7d)
    Frontend stores access token, refresh in httpOnly cookie
    User lands on dashboard, fully authenticated
 
@@ -702,9 +707,11 @@ SUPER_ADMIN (global -- full system access)
 | Worker code generation | Done | XML tool_call format, manual dispatch |
 | Code validation | Done | Pluggable gate chain (Java/TS/Python/React) -- deferred to review phase |
 | Model escalation | Done | WORKHORSE -> PLANNING tier on stall/retry |
-| Compiler agent | Done | Compile & fix (3 iterations) |
-| Background validation | Done | Review, test gen, test exec, report run in background after COMPLETE |
-| Agentic reviewer | Done | INSPECT merged code -> auto-fix (2 attempts, WORKHORSE->PLANNING escalation, max 8 issues, CRITICAL/MINOR severity) |
+| Mid-task provider recovery | Done | WorkerAgent compacts conversation and switches to fallback provider via `ModelResolver.resolveFallbackExcluding()` |
+| Token budget control | Done | `TokenBudgetMonitor` caps output budget to model max via `ModelRegistry.maxOutputForModel()` |
+| Compiler agent | Done | Compile & fix (3 iterations, dynamic error truncation based on file count) |
+| Background validation | Done | Review, test gen, test exec, report run in background after COMPLETE; emits VALIDATION_FAILED SSE on thread failure |
+| Agentic reviewer | Done | INSPECT merged code -> auto-fix (2 attempts, WORKHORSE->PLANNING escalation, max 8 issues, CRITICAL/MINOR severity, softened README gate: taskCount <= 5 -> MINOR) |
 | Language-agnostic test gen | Done | TestGenOrchestrator generates tests matching project language/framework |
 | Validation report | Done | LLM-generated quality summary with share & PDF export |
 | Auto-merge | Done | Automatic merge of all task branches to main after compile (no manual gate) |
@@ -714,7 +721,8 @@ SUPER_ADMIN (global -- full system access)
 | Manual resume | Done | Users resume stuck runs manually via UI (auto-resume disabled) |
 | Run archive | Done | Archive completed runs, hide from default list |
 | Stall detection | Done | 5min no output -> model escalation |
-| 25-min time limit | Done | Wall-clock limit per task |
+| 25-min time limit | Done | Wall-clock limit per task, target 20 iterations, hard limit 35 tool calls |
+| Mid-task cost enforcement | Done | Checks budget every 5 LLM calls in worker loop |
 
 ### 5.2 Integrations
 
@@ -735,7 +743,7 @@ SUPER_ADMIN (global -- full system access)
 |---------|--------|-------------|
 | Cloud Run preview | Done | 5-min ephemeral containers (auto-start on COMPLETE) |
 | Docker Compose preview | Done | 5-min TTL, Caddy proxy with Cloudflare Origin Certificate |
-| Dockerfile auto-detect | Done | Node/React/Spring Boot/Python/Full-stack/Static HTML/Monorepo |
+| Dockerfile auto-detect | Done | Node/React/Spring Boot/Python/Full-stack/Static HTML/Monorepo (fixed shell escape bug in full-stack Dockerfile generation) |
 | Project type from planner | Done | Planner declares `project_type` -> `.agent-context/project.json` |
 | Path A: Cloud Run Direct | Done | Simple containerized deployment |
 | Path B: Docker Compose on VM | 0-10% | Multi-container with persistent storage |
@@ -747,7 +755,7 @@ SUPER_ADMIN (global -- full system access)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| JWT auth | Done | Access 24h, refresh 7d (RS256) |
+| JWT auth | Done | Access 1h, refresh 7d (RS256), scoped SSE tokens (5-min TTL) |
 | OAuth2 login | Done | Google and GitHub providers via `OAuthSuccessHandler` |
 | RBAC | Done | 8 roles across 3 levels |
 | Force-logout | Done | Feature flag epoch-based JWT invalidation |
@@ -840,7 +848,8 @@ SUPER_ADMIN (global -- full system access)
 | DELETE | `/api/runs/{id}` | Cancel/delete run |
 | POST | `/api/runs/{id}/archive` | Archive run |
 | POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
-| GET | `/api/runs/{id}/events` | SSE event stream |
+| GET | `/api/runs/{id}/events` | SSE event stream (scoped token) |
+| GET | `/api/runs/{id}/sse-token` | Get scoped SSE token (5-min TTL) |
 
 ### 7.2 Validation Report
 

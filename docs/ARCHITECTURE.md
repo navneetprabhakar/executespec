@@ -1,7 +1,7 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 3.0
-> **Date**: 2026-04-03
+> **Version**: 3.1
+> **Date**: 2026-04-04
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -214,9 +214,9 @@ graph TB
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** plan → approve → work (tiered parallel tasks) → compile → merge → **COMPLETE** → auto-preview (5-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report
+**Pipeline flow:** plan → approve → work (tiered parallel tasks, progressive merge per task) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report. Merge is automatic (no manual gate).
 
-**Background validation lifecycle:** After COMPLETE, `PipelineHarness` spawns a virtual thread (`bg-validation-{runId}`) tracked in `backgroundValidationRuns` ConcurrentHashSet. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` are deferred to the background thread's `finally` block.
+**Background validation lifecycle:** After COMPLETE, `PipelineHarness` spawns a virtual thread (`bg-validation-{runId}`) tracked in `backgroundValidationRuns` ConcurrentHashSet. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` are deferred to the background thread's `finally` block. On failure, emits `VALIDATION_FAILED` SSE event.
 
 **Project type detection:** PlannerAgent outputs `project_type` in the plan JSON. This is written to `.agent-context/project.json` in the workspace. `DevDockerfileGenerator` and `DockerfileGenerator` read this value before falling back to file-based heuristics, preventing misdetection (e.g., static HTML being classified as NODE).
 
@@ -224,9 +224,9 @@ graph TB
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
 Default provider: **OpenAI** (user-selected per project). Failover: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier.
 
@@ -244,22 +244,25 @@ graph TB
         subgraph "WorkerAgent (per task, tiered parallel)"
             W_PROMPT[Task + Context<br/>+ Workspace State] --> W_LOOP
 
-            subgraph "W_LOOP [25-min Time Loop]"
+            subgraph "W_LOOP [25-min Time Loop, target 20 / hard 35 iterations]"
                 W_LLM[LLM Call<br/>WORKHORSE tier] --> W_PARSE[Parse XML<br/>tool_call tags]
                 W_PARSE --> W_DISPATCH[Dispatch Tool<br/>readFile/writeFile/<br/>editFile/run/etc.]
                 W_DISPATCH --> W_RESULT[Tool Result<br/>Truncated output]
                 W_RESULT --> W_CHECK{Completion?<br/>Starts with '{'}
-                W_CHECK -->|No| W_LLM
+                W_CHECK -->|No| W_BUDGET{Mid-task budget<br/>check every 5 calls}
+                W_BUDGET --> W_LLM
                 W_CHECK -->|Yes| W_DONE[WorkerReport]
             end
 
             W_STALL{Stall Detection<br/>5 min no writes} -->|Yes| W_ESCALATE[Model Escalation<br/>WORKHORSE → PLANNING]
             W_ESCALATE --> W_LLM
+            W_FAIL{Provider failure<br/>mid-task} -->|Yes| W_RECOVER[Compact history +<br/>fallback provider via<br/>ModelResolver.resolveFallbackExcluding()]
+            W_RECOVER --> W_LLM
         end
 
         subgraph "ReviewerAgentV2 (two-phase, background)"
             R_DIFFS[Merged code on main] --> R_INSPECT[Phase 1: Inspect<br/>Read-only tool-use analysis]
-            R_INSPECT --> R_ISSUES[Issues List<br/>CRITICAL/MINOR]
+            R_INSPECT --> R_ISSUES[Issues List<br/>CRITICAL/MINOR<br/>README gate: taskCount ≤ 5 → MINOR]
             R_ISSUES --> R_FIX[Phase 2: Auto-Fix<br/>2 attempts per issue, max 8]
             R_FIX --> R_REPORT[ReviewReportV2<br/>PASSED/PASSED_WITH_FIXES/<br/>NEEDS_ATTENTION/FAILED]
         end
@@ -281,6 +284,14 @@ graph TB
         end
     end
 ```
+
+**TokenBudgetMonitor:** Caps output tokens to model max. When model max output ≤ 8192, downgrades detail level from HIGH to MEDIUM to stay within budget.
+
+**CompilerAgent:** Dynamic SSE error truncation — `maxErrorCharsForSse` is computed based on file count to prevent oversized SSE events.
+
+**DevDockerfileGenerator:** Fixed shell escape in full-stack Dockerfile (prevents broken `CMD` when both frontend and backend are present).
+
+**Planner prompts:** `planner_edit.txt` has been deleted and merged into `planner.txt` using `{{#if editMode}}` conditional templating.
 
 ### 3.3 Code Validation Pipeline
 
@@ -391,7 +402,7 @@ graph TB
     PR --> TPL
 ```
 
-### 4.2 Migration History (V1 — V55)
+### 4.2 Migration History (V1 — V56)
 
 | Version | Description | Tables Affected |
 |---------|-------------|----------------|
@@ -419,6 +430,7 @@ graph TB
 | V53 | Archive run | pipeline_run (archived) |
 | V54 | Stripe multi-currency | billing_plan, billing_subscription |
 | V55 | Payment audit expansion | payment_audit |
+| V56 | Deployment tracking | deployment |
 
 ---
 
@@ -460,10 +472,12 @@ graph TB
 ```
 
 ### Authentication
-- **JWT:** HS256, access 24h TTL, refresh 7d (HTTP-only cookie, rotated on refresh)
+- **JWT:** HS256, access 1h TTL, refresh 7d (HTTP-only cookie, rotated on refresh)
+- **Scoped SSE tokens:** 5-min TTL, `scope=sse` + `runId` claim, prevents cross-run eavesdropping
 - **OAuth2:** Google + GitHub login via `OAuthSuccessHandler` (creates user if new, generates JWT)
 - **Force logout:** Feature flag `force_logout_epoch` invalidates all tokens issued before epoch
-- **SSE streams:** `?token=` query param (EventSource limitation)
+- **JWT secret validation:** `JwtSecretValidator` blocks startup in prod profile if dev placeholder secret is used
+- **SSE streams:** `?token=` query param (EventSource limitation), uses scoped SSE tokens
 - All `/api/**` require valid JWT (except auth, health, webhooks, shared reports)
 
 ### Authorization (RBAC)
@@ -820,4 +834,4 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-04-03.*
+*This architecture document is maintained alongside the codebase. Last updated: 2026-04-04.*
