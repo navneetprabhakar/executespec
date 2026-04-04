@@ -20,6 +20,9 @@ public class ShellTool {
     @Value("${agent.workspace}")
     private String workspaceRoot;
 
+    @Value("${agent.shell.path-prepend:}")
+    private String pathPrepend;
+
     /** Maximum execution time enforced on every command — 5 minutes. */
     private static final int MAX_TIMEOUT_SECONDS = 300;
 
@@ -85,6 +88,12 @@ public class ShellTool {
             String javaHome = System.getenv("JAVA_HOME");
             if (javaHome != null && !javaHome.isBlank()) {
                 env.put("JAVA_HOME", javaHome);
+            }
+
+            // Augment PATH so worker shells can find npm, node, go, python, etc.
+            if (pathPrepend != null && !pathPrepend.isBlank()) {
+                String current = env.getOrDefault("PATH", "/usr/bin:/bin");
+                env.put("PATH", pathPrepend + ":" + current);
             }
 
             // 4. Execute with enforced timeout

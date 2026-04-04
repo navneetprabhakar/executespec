@@ -1,6 +1,4 @@
 package com.navneet.executespec.recovery;
-import com.navneet.executespec.config.ModelConstants;
-
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -56,10 +54,11 @@ public class RecoveryProperties {
     private int autoRestartBackoffSeconds = 60;
 
     // ── Escalation ladder ─────────────────────────────────────────────────────
+    // Defaults match YAML values; overridden at runtime via @ConfigurationProperties binding.
     private Map<String, String> capableModels = new HashMap<>(Map.of(
-        "anthropic", ModelConstants.HAIKU,
-        "google",    ModelConstants.GEMINI_FLASH,
-        "openai",    ModelConstants.GPT4O
+        "anthropic", "claude-haiku-4-5-20251001",
+        "google",    "gemini-3-flash-preview",
+        "openai",    "gpt-5.4"
     ));
 
     private Map<String, String> alternateProvider = new HashMap<>(Map.of(

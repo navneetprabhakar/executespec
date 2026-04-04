@@ -1,8 +1,8 @@
 package com.navneet.executespec.agent;
 
 import com.navneet.executespec.config.AgentProperties;
-import com.navneet.executespec.config.ModelConstants;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ProviderHealthTracker;
 import com.navneet.executespec.state.InboxService;
 import io.micrometer.core.instrument.Counter;
@@ -65,47 +65,6 @@ public class LlmRouter {
 
     public enum FallbackMode { IMMEDIATE, TASK_BOUNDARY, NO_FALLBACK }
 
-    // ── Provider fallback chains (3-provider: Anthropic → Gemini → OpenAI) ──────
-
-    // ── Provider fallback chains: Anthropic → Gemini → OpenAI (fixed priority) ──
-    // Gemini uses GA model strings; fallback chain handles unavailability gracefully.
-
-    private static final List<String[]> ARCHITECT_CHAIN = List.of(
-        new String[]{"anthropic", ModelConstants.OPUS},
-        new String[]{"google",    ModelConstants.GEMINI_PRO},
-        new String[]{"openai",    ModelConstants.GPT5_4}
-    );
-
-    private static final List<String[]> CAPABLE_CHAIN = List.of(
-        new String[]{"anthropic", ModelConstants.SONNET},
-        new String[]{"google",    ModelConstants.GEMINI_PRO},
-        new String[]{"openai",    ModelConstants.GPT5_4}
-    );
-
-    private static final List<String[]> UTILITY_CHAIN = List.of(
-        new String[]{"anthropic", ModelConstants.HAIKU},
-        new String[]{"google",    ModelConstants.GEMINI_FLASH},
-        new String[]{"openai",    ModelConstants.GPT5_4_MINI}
-    );
-
-    private static final Map<String, List<String[]>> MODEL_CHAIN = Map.ofEntries(
-        Map.entry(ModelConstants.OPUS,              ARCHITECT_CHAIN),
-        Map.entry(ModelConstants.OPUS_LEGACY,       ARCHITECT_CHAIN),
-        Map.entry(ModelConstants.SONNET,            CAPABLE_CHAIN),
-        Map.entry(ModelConstants.SONNET_LEGACY,     CAPABLE_CHAIN),
-        Map.entry(ModelConstants.HAIKU,             UTILITY_CHAIN),
-        Map.entry(ModelConstants.HAIKU_LEGACY,      UTILITY_CHAIN),
-        Map.entry(ModelConstants.GPT5_4_MINI,       UTILITY_CHAIN),
-        Map.entry(ModelConstants.GPT4O_MINI,        UTILITY_CHAIN),  // legacy compat
-        Map.entry(ModelConstants.GPT5_4,             CAPABLE_CHAIN),
-        Map.entry(ModelConstants.GPT4O,             CAPABLE_CHAIN),  // legacy compat
-        Map.entry(ModelConstants.GEMINI_PRO,        CAPABLE_CHAIN),
-        Map.entry(ModelConstants.GEMINI_FLASH,      UTILITY_CHAIN),
-        // Legacy preview model strings (backward compat for in-flight runs)
-        Map.entry("gemini-3.1-pro-preview-customtools", ARCHITECT_CHAIN),
-        Map.entry("gemini-3.1-flash-lite-preview",      CAPABLE_CHAIN)
-    );
-
     /** Per-run LLM call counters — for observability only (no enforcement). */
     private final ConcurrentHashMap<String, AtomicInteger> runCallCounters = new ConcurrentHashMap<>();
 
@@ -118,6 +77,7 @@ public class LlmRouter {
     private final AgentProperties agentProperties;
     private final MeterRegistry meterRegistry;
     private final ProviderHealthTracker healthTracker;
+    private final ModelRegistry modelRegistry;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -130,11 +90,11 @@ public class LlmRouter {
     public LlmResponse callWithFallbackTracked(String primaryProvider, String primaryModel,
                                                Prompt prompt, String runId, String agentId,
                                                FallbackMode mode, int iteration, boolean justCompacted) {
-        // FREE tier model lock: force all calls to OpenAI gpt-5.4-mini
+        // FREE tier model lock: force all calls to configured free-tier model
         String userTier = getRunUserTier(runId);
         if ("FREE".equals(userTier)) {
-            primaryProvider = "openai";
-            primaryModel = ModelConstants.GPT5_4_MINI;
+            primaryProvider = modelRegistry.freeTierProvider();
+            primaryModel = modelRegistry.freeTierModel();
         }
 
         // Track call count for observability (no enforcement — wall-clock limit is the safety net)
@@ -580,9 +540,8 @@ public class LlmRouter {
     // ── Chain helpers ───────────────────────────────────────────────────────────
 
     private List<String[]> resolveChain(String model) {
-        if (model == null) return CAPABLE_CHAIN;
-        List<String[]> chain = MODEL_CHAIN.get(model.toLowerCase());
-        return chain != null ? chain : CAPABLE_CHAIN;
+        List<String[]> chain = modelRegistry.fallbackChainFor(model);
+        return chain != null && !chain.isEmpty() ? chain : modelRegistry.fallbackChainForTier("CAPABLE");
     }
 
     private int findIndexInChain(List<String[]> chain, String provider) {

@@ -1,5 +1,5 @@
 package com.navneet.executespec.agent;
-import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.router.ModelRegistry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +47,7 @@ public class PlannerAgent {
     private final LlmOutputParser outputParser;
     private final MergeConflictAnalyser conflictAnalyser;
     private final ModelResolver modelResolver;
+    private final ModelRegistry modelRegistry;
 
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
@@ -253,6 +254,7 @@ public class PlannerAgent {
         }
 
         String systemPrompt = editPromptText
+            .replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"))
             .replace("{goal}", originalGoal)
             .replace("{existingPlan}", existingPlanJson)
             .replace("{feedback}", feedback);
@@ -337,7 +339,9 @@ public class PlannerAgent {
 
     private String loadPrompt() {
         try {
-            return plannerPrompt.getContentAsString(StandardCharsets.UTF_8);
+            String raw = plannerPrompt.getContentAsString(StandardCharsets.UTF_8);
+            // Substitute config-driven model name so prompt templates stay model-agnostic
+            return raw.replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"));
         } catch (IOException e) {
             throw new RuntimeException("Cannot load planner prompt", e);
         }
@@ -357,14 +361,12 @@ public class PlannerAgent {
     }
 
     /**
-     * Maps provider name → default model for IMMEDIATE (planner) calls.
+     * Maps provider name → default planning model from config matrix.
      * Used only when the UI sends no model override.
      */
     private String resolveModelName(String provider) {
-        return switch (provider.toLowerCase()) {
-            case "openai" -> ModelConstants.GPT4O;
-            default -> ModelConstants.SONNET; // anthropic — strong reasoning at lower cost
-        };
+        String model = modelRegistry.planningModelFor(provider);
+        return model != null ? model : modelRegistry.planningModelFor("openai");
     }
 
     /**
@@ -447,24 +449,15 @@ public class PlannerAgent {
      * as a model override.
      */
     private boolean isConcreteModelName(String name) {
-        if (name == null) return false;
-        return name.startsWith("claude-") || name.startsWith("gpt-") || name.startsWith("gemini-");
+        return modelRegistry.isKnownModel(name);
     }
 
     /**
-     * Infers the provider from a concrete model name so the LlmRouter chain is
-     * correct
-     * when a UI model-override replaces the config default.
+     * Infers the provider from a concrete model name via ModelRegistry.
      */
     private String resolveProviderFromModel(String model) {
-        if (model == null)
-            return props.getRoles().getPlanner();
-        if (model.startsWith("claude-"))
-            return "anthropic";
-        if (model.startsWith("gpt-"))
-            return "openai";
-        if (model.startsWith("gemini-"))
-            return "google";
-        return props.getRoles().getPlanner(); // safe fallback
+        if (model == null) return props.getRoles().getPlanner();
+        String provider = modelRegistry.providerFor(model);
+        return provider != null ? provider : props.getRoles().getPlanner();
     }
 }

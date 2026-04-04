@@ -147,6 +147,7 @@ public class CloudRunClient {
             "--max-instances", "1",
             "--port", String.valueOf(containerPort),
             "--cpu-boost",
+            "--ingress", "all",
             "--allow-unauthenticated",
             "--no-cpu-throttling",
             "--timeout", "600",

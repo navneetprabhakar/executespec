@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.router.ModelRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -23,23 +24,8 @@ public class TokenBudgetMonitor {
     public record BudgetStatus(Status status, double usagePct, int contextLimit) {}
 
     private final AgentProperties props;
+    private final ModelRegistry modelRegistry;
     private final TokenBudgetPolicy budgetPolicy = new TokenBudgetPolicy();
-
-    // Context limits by model family (tokens)
-    // Floor at lowest common denominator (Anthropic 200k) for safety
-    private static final int ANTHROPIC_LIMIT  = 200_000;
-    private static final int OPENAI_LIMIT     = 200_000;  // GPT-5.4: 1.05M, GPT-5.4-mini: 400k — floor to Anthropic limit
-    private static final int GEMINI_LIMIT     = 200_000;  // Gemini: 1M+ — floor to Anthropic limit
-
-    // Max output tokens per model (from provider docs)
-    private static final int OPUS_MAX_OUTPUT    = 32_000;
-    private static final int SONNET_MAX_OUTPUT  = 64_000;
-    private static final int HAIKU_MAX_OUTPUT   = 8_192;
-    private static final int GPT54_MAX_OUTPUT   = 16_384;
-    private static final int GPT54M_MAX_OUTPUT  = 16_384;
-    private static final int GEMINI_PRO_OUTPUT  = 65_536;
-    private static final int GEMINI_FLASH_OUTPUT = 24_576;
-    private static final int DEFAULT_MAX_OUTPUT = 16_000;
 
     public BudgetStatus check(String model, String complexity, int lastCallInputTokens) {
         int limit = contextLimitFor(model);
@@ -156,29 +142,18 @@ public class TokenBudgetMonitor {
 
     /**
      * Returns the maximum output tokens supported by the given model.
+     * Reads from model-matrix.models config via ModelRegistry.
      */
     public int maxOutputForModel(String model) {
-        if (model == null) return DEFAULT_MAX_OUTPUT;
-        String m = model.toLowerCase();
-        if (m.contains("opus"))          return OPUS_MAX_OUTPUT;
-        if (m.contains("sonnet"))        return SONNET_MAX_OUTPUT;
-        if (m.contains("haiku"))         return HAIKU_MAX_OUTPUT;
-        if (m.contains("gpt-5.4-mini"))  return GPT54M_MAX_OUTPUT;
-        if (m.contains("gpt-5.4"))       return GPT54_MAX_OUTPUT;
-        if (m.contains("gemini") && m.contains("pro"))   return GEMINI_PRO_OUTPUT;
-        if (m.contains("gemini") && m.contains("flash")) return GEMINI_FLASH_OUTPUT;
-        return DEFAULT_MAX_OUTPUT;
+        return modelRegistry.maxOutputForModel(model);
     }
 
+    /**
+     * Returns the context window limit for the given model.
+     * Reads from model-matrix.models config via ModelRegistry.
+     */
     public int contextLimitFor(String model) {
-        if (model == null) return ANTHROPIC_LIMIT;
-        String m = model.toLowerCase();
-        if (m.contains("gpt") || m.contains("openai")) {
-            return OPENAI_LIMIT;
-        } else if (m.contains("gemini")) {
-            return GEMINI_LIMIT;
-        }
-        return ANTHROPIC_LIMIT; // Anthropic (claude/haiku/sonnet/opus) and safe default
+        return modelRegistry.contextLimitFor(model);
     }
 
     private int softLimitFor(String complexity, AgentProperties.TokenBudget budget) {

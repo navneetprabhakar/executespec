@@ -1,6 +1,4 @@
 package com.navneet.executespec.context;
-import com.navneet.executespec.config.ModelConstants;
-
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -11,7 +9,7 @@ import org.springframework.stereotype.Component;
 public class ContextAgentProperties {
 
     private boolean enabled = true;
-    private String model = ModelConstants.HAIKU;
+    private String model = "claude-haiku-4-5-20251001";
     private String provider = "anthropic";
 
     /** Run after every N completed runs. 1 = every run. */
