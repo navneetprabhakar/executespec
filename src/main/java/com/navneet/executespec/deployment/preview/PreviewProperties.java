@@ -11,7 +11,7 @@ public class PreviewProperties {
 
     private boolean enabled = true;
     private int totalStartupTimeoutSeconds = 480;  // 8-minute total deadline (Spring Boot cold builds need extra time)
-    private int previewTtlMinutes = 10;            // auto-shutdown after N minutes
+    private int previewTtlMinutes = 30;            // auto-shutdown after N minutes (net usable: ~22 min after 8-min startup)
 
     /** Preview mode: "docker" (local Docker Compose) or "cloud-run" (GCP Cloud Run). */
     private String mode = "docker";
@@ -19,6 +19,9 @@ public class PreviewProperties {
     // Docker Compose port range
     private int portRangeStart = 10000;
     private int portRangeEnd = 10100;
+
+    /** Use OS ephemeral port allocation (ServerSocket(0)) as primary strategy. Disable for deterministic tests. */
+    private boolean useEphemeralPorts = true;
 
     // Preview domain — URLs are: preview-{shortId}.{previewDomain}
     private String previewDomain = "executespec.ai";

@@ -39,13 +39,23 @@ class PreviewProjectTypeTest {
     }
 
     @Test
-    @DisplayName("Single-project types have distinct container ports")
-    void distinctSingleProjectPorts() {
-        // FULL_STACK intentionally shares 5173 with NODE_FRONTEND since the primary preview is frontend
-        var ports = java.util.Arrays.stream(PreviewProjectType.values())
-                .filter(t -> t != PreviewProjectType.FULL_STACK)
-                .map(PreviewProjectType::getContainerPort)
-                .toList();
-        assertThat(ports).doesNotHaveDuplicates();
+    @DisplayName("Core Node/Python types have distinct container ports")
+    void distinctCoreProjectPorts() {
+        // Only the original core types (NODE_FRONTEND, NODE_BACKEND, PYTHON) must have distinct ports.
+        // Server-side types (SPRING_BOOT, JAVA, GO, RUST, PHP, STATIC_HTML) legitimately share 8080.
+        var corePorts = java.util.List.of(
+                PreviewProjectType.NODE_FRONTEND.getContainerPort(),
+                PreviewProjectType.NODE_BACKEND.getContainerPort(),
+                PreviewProjectType.PYTHON.getContainerPort()
+        );
+        assertThat(corePorts).doesNotHaveDuplicates();
+    }
+
+    @Test
+    @DisplayName("All enum values have a positive container port")
+    void allTypesHaveValidPort() {
+        for (PreviewProjectType type : PreviewProjectType.values()) {
+            assertThat(type.getContainerPort()).isGreaterThan(0);
+        }
     }
 }

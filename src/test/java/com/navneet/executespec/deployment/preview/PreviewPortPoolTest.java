@@ -21,6 +21,7 @@ class PreviewPortPoolTest {
         var props = new PreviewProperties();
         props.setPortRangeStart(10000);
         props.setPortRangeEnd(10002); // small range for testing
+        props.setUseEphemeralPorts(false); // deterministic range-based allocation for tests
         pool = new PreviewPortPool(props);
     }
 

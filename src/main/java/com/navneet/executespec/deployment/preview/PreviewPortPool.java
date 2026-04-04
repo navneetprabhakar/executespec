@@ -22,6 +22,9 @@ public class PreviewPortPool {
     /** runId → allocated host port */
     private final ConcurrentHashMap<String, Integer> allocations = new ConcurrentHashMap<>();
 
+    /** Ports reserved but not yet bound by Docker — prevents TOCTOU between allocate() and Docker bind. */
+    private final java.util.Set<Integer> reservedPorts = ConcurrentHashMap.newKeySet();
+
     /**
      * Allocate a free port for the given run.
      * Uses OS ephemeral port assignment (ServerSocket(0)) to avoid conflicts
@@ -37,18 +40,22 @@ public class PreviewPortPool {
         if (existing != null) return existing;
 
         // Strategy 1: Let OS pick a free ephemeral port (most reliable)
-        int port = allocateEphemeralPort();
-        if (port > 0) {
-            allocations.put(runId, port);
-            log.info("Allocated ephemeral port {} for preview run {}", port, runId);
-            return port;
+        if (props.isUseEphemeralPorts()) {
+            int port = allocateEphemeralPort();
+            if (port > 0 && !reservedPorts.contains(port)) {
+                reservedPorts.add(port);
+                allocations.put(runId, port);
+                log.info("Allocated ephemeral port {} for preview run {}", port, runId);
+                return port;
+            }
         }
 
         // Strategy 2: Scan configured range as fallback
         int start = props.getPortRangeStart();
         int end = props.getPortRangeEnd();
         for (int p = start; p <= end; p++) {
-            if (!allocations.containsValue(p) && isPortAvailable(p)) {
+            if (!allocations.containsValue(p) && !reservedPorts.contains(p) && isPortAvailable(p)) {
+                reservedPorts.add(p);
                 allocations.put(runId, p);
                 log.info("Allocated range port {} for preview run {}", p, runId);
                 return p;
@@ -95,6 +102,7 @@ public class PreviewPortPool {
     public void release(String runId) {
         Integer port = allocations.remove(runId);
         if (port != null) {
+            reservedPorts.remove(port);
             log.info("Released port {} for preview run {}", port, runId);
         }
     }

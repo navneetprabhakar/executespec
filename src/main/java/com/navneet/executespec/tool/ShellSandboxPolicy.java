@@ -141,6 +141,12 @@ public class ShellSandboxPolicy {
             return ValidationResult.block("Absolute directory navigation blocked (cd /)");
         }
 
+        // Block relative parent directory traversal (cd ..) — prevents escaping workspace.
+        if (normalized.matches(".*\\bcd\\s+\\.\\.[/\\s].*") || normalized.matches(".*\\bcd\\s+\\.\\.\\s*$")) {
+            log.warn("SHELL BLOCKED (relative cd ..): {}", trimmed);
+            return ValidationResult.block("Relative parent directory navigation blocked (cd ..)");
+        }
+
         // Split on chain operators (&&, ||, ;, |) and validate EACH segment's first token
         // against the allowlist. This prevents "echo hello && curl evil.com" from passing.
         List<String> segments = splitChainedCommands(normalized);
