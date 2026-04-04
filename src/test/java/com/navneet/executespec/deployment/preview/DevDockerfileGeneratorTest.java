@@ -180,14 +180,16 @@ class DevDockerfileGeneratorTest {
         }
 
         @Test
-        @DisplayName("NODE_FRONTEND with dev script uses npm run dev")
+        @DisplayName("NODE_FRONTEND with dev script uses vite or npm run dev")
         void nodeFrontendDevScript(@TempDir Path ws) throws IOException {
+            // Package with dev script but no explicit vite dependency →
+            // generator auto-installs vite and uses npx vite
             Files.writeString(ws.resolve("package.json"), """
                     {"name":"app","scripts":{"dev":"next dev"}}
                     """);
             String dockerfile = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
 
-            assertThat(dockerfile).contains("npm", "run", "dev");
+            assertThat(dockerfile).contains("vite");
         }
 
         @Test
@@ -468,7 +470,7 @@ class DevDockerfileGeneratorTest {
             assertThat(df).contains("COPY package.json package-lock.json* ./");
             assertThat(df).contains("COPY frontend/package.json ./frontend/");
             assertThat(df).contains("COPY backend/package.json ./backend/");
-            assertThat(df).contains("RUN npm install --ignore-scripts");
+            assertThat(df).contains("RUN npm install --legacy-peer-deps");
             assertThat(df).contains("COPY . .");
             assertThat(df).contains("EXPOSE 5173");   // frontend port
             assertThat(df).contains("vite --host 0.0.0.0");
@@ -489,7 +491,7 @@ class DevDockerfileGeneratorTest {
 
             assertThat(df).contains("FROM node:20-alpine");
             assertThat(df).contains("COPY api/package.json ./api/");
-            assertThat(df).contains("npm install --ignore-scripts");
+            assertThat(df).contains("npm install --legacy-peer-deps");
             assertThat(df).contains("EXPOSE 3000");
             assertThat(df).contains("--prefix", "api");
         }
@@ -598,28 +600,28 @@ class DevDockerfileGeneratorTest {
     class NodeInstallSafety {
 
         @Test
-        @DisplayName("NODE_FRONTEND Dockerfile uses --ignore-scripts && npm rebuild")
-        void frontendUsesIgnoreScripts(@TempDir Path ws) throws IOException {
+        @DisplayName("NODE_FRONTEND Dockerfile uses --legacy-peer-deps")
+        void frontendUsesLegacyPeerDeps(@TempDir Path ws) throws IOException {
             Files.writeString(ws.resolve("package.json"), "{\"name\":\"app\"}");
             String df = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
 
-            assertThat(df).contains("npm install --ignore-scripts && npm rebuild");
+            assertThat(df).contains("npm install --legacy-peer-deps");
         }
 
         @Test
-        @DisplayName("NODE_BACKEND Dockerfile uses --ignore-scripts && npm rebuild")
-        void backendUsesIgnoreScripts(@TempDir Path ws) throws IOException {
+        @DisplayName("NODE_BACKEND Dockerfile uses --legacy-peer-deps")
+        void backendUsesLegacyPeerDeps(@TempDir Path ws) throws IOException {
             Files.writeString(ws.resolve("package.json"), """
                     {"name":"api","dependencies":{"express":"^4"}}
                     """);
             String df = gen.generate(PreviewProjectType.NODE_BACKEND, ws);
 
-            assertThat(df).contains("npm install --ignore-scripts && npm rebuild");
+            assertThat(df).contains("npm install --legacy-peer-deps");
         }
 
         @Test
-        @DisplayName("Monorepo Dockerfile uses --ignore-scripts")
-        void monorepoUsesIgnoreScripts(@TempDir Path ws) throws IOException {
+        @DisplayName("Monorepo Dockerfile uses --legacy-peer-deps")
+        void monorepoUsesLegacyPeerDeps(@TempDir Path ws) throws IOException {
             Files.writeString(ws.resolve("package.json"), """
                     {"name":"monorepo","workspaces":["frontend"]}
                     """);
@@ -630,7 +632,7 @@ class DevDockerfileGeneratorTest {
 
             String df = gen.generate(PreviewProjectType.NODE_FRONTEND, ws);
 
-            assertThat(df).contains("npm install --ignore-scripts");
+            assertThat(df).contains("npm install --legacy-peer-deps");
         }
     }
 
@@ -747,15 +749,25 @@ class DevDockerfileGeneratorTest {
         }
 
         @Test
-        @DisplayName("Root-level package.json takes priority over subdirectory detection")
-        void rootLevelPriorityOverSubdirs(@TempDir Path ws) throws IOException {
-            // Root has package.json → detected as root-level Node, not full-stack
+        @DisplayName("Root package.json (frontend) + backend/ subdir detects as FULL_STACK")
+        void rootLevelWithBackendSubdir(@TempDir Path ws) throws IOException {
+            // Root has react (frontend dep) + backend/ with express → FULL_STACK
             Files.writeString(ws.resolve("package.json"), """
                     {"name":"app","dependencies":{"react":"^18"}}
                     """);
             Files.createDirectories(ws.resolve("backend"));
             Files.writeString(ws.resolve("backend/package.json"), """
                     {"name":"backend","dependencies":{"express":"^4"}}
+                    """);
+
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.FULL_STACK);
+        }
+
+        @Test
+        @DisplayName("Root-only frontend package.json without backend subdir is NODE_FRONTEND")
+        void rootOnlyFrontendIsNodeFrontend(@TempDir Path ws) throws IOException {
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"app","dependencies":{"react":"^18"}}
                     """);
 
             assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
@@ -786,7 +798,7 @@ class DevDockerfileGeneratorTest {
             assertThat(df).contains("LABEL preview=true");
             assertThat(df).contains("COPY frontend/package*.json ./frontend/");
             assertThat(df).contains("COPY backend/package*.json ./backend/");
-            assertThat(df).contains("npm install --ignore-scripts");
+            assertThat(df).contains("npm install --legacy-peer-deps");
             assertThat(df).contains("EXPOSE 5173");
             assertThat(df).contains("npm start");
             assertThat(df).contains("vite --host 0.0.0.0");

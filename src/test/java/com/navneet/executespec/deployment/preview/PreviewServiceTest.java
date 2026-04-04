@@ -189,6 +189,19 @@ class PreviewServiceTest {
         @Test
         @DisplayName("FREE tier allows 1 concurrent preview")
         void freeTierLimit() throws Exception {
+            // Make composeExecutor.up() block so the virtual thread stays alive
+            // (prevents session removal from active map before second start)
+            java.util.concurrent.CountDownLatch blockLatch = new java.util.concurrent.CountDownLatch(1);
+            // Mock the background thread's call chain so it blocks at composeExecutor.up()
+            when(dockerfileGen.dockerIgnore()).thenReturn("node_modules\n");
+            when(dockerfileGen.generate(any(), any(), any())).thenReturn("FROM node:20\nCMD [\"echo\"]");
+            when(composeFileGen.generate(any(), any(), any(), any(), any(), anyInt()))
+                    .thenReturn(workspaceRoot.resolve("docker-compose.yml"));
+            when(composeExecutor.up(any(), any(), any())).thenAnswer(inv -> {
+                blockLatch.await(); // block until test ends
+                return null;
+            });
+
             // First preview — should succeed
             String runId1 = "run-1";
             when(stateStore.findRun(runId1)).thenReturn(Optional.of(completedRun(runId1)));
@@ -199,9 +212,6 @@ class PreviewServiceTest {
             PreviewSession s1 = service.start(runId1, freeUser());
             assertThat(s1).isNotNull();
 
-            // Wait for virtual thread to settle
-            Thread.sleep(500);
-
             // Second preview — should fail (FREE = 1 max)
             String runId2 = "run-2";
             when(stateStore.findRun(runId2)).thenReturn(Optional.of(completedRun(runId2)));
@@ -209,9 +219,13 @@ class PreviewServiceTest {
             Files.createDirectories(ws2);
             when(dockerfileGen.detect(ws2)).thenReturn(PreviewProjectType.NODE_FRONTEND);
 
-            assertThatThrownBy(() -> service.start(runId2, freeUser()))
-                    .isInstanceOf(PreviewException.class)
-                    .hasMessageContaining("Max concurrent previews");
+            try {
+                assertThatThrownBy(() -> service.start(runId2, freeUser()))
+                        .isInstanceOf(PreviewException.class)
+                        .hasMessageContaining("Max concurrent previews");
+            } finally {
+                blockLatch.countDown(); // unblock so virtual thread can finish
+            }
         }
     }
 
