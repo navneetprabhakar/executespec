@@ -2,6 +2,8 @@ package com.navneet.executespec.eval;
 
 import com.navneet.executespec.router.AgentTier;
 
+import java.util.List;
+
 /**
  * Result of evaluating a single model against a single test case.
  *
@@ -12,7 +14,7 @@ import com.navneet.executespec.router.AgentTier;
  * @param accuracyScore   accuracy score (1-10)
  * @param speedScore      speed score (1-10)
  * @param costScore       cost score (1-10, normalized post-processing)
- * @param overallScore    weighted overall: accuracy*0.5 + speed*0.25 + cost*0.25
+ * @param overallScore    weighted overall: accuracy*W_a + speed*W_s + cost*W_c (tier-dependent)
  * @param latencyMs       actual latency in milliseconds
  * @param costUsd         actual cost in USD for this call
  * @param inputTokens     input token count
@@ -22,6 +24,7 @@ import com.navneet.executespec.router.AgentTier;
  * @param totalPatterns   total validation patterns in test case
  * @param reasoning       human-readable scoring rationale
  * @param rawResponse     the raw model response (truncated for report)
+ * @param patternResults  per-pattern match results for detailed debugging
  */
 public record EvalResult(
         String testCaseId,
@@ -40,7 +43,8 @@ public record EvalResult(
         int matchedPatterns,
         int totalPatterns,
         String reasoning,
-        String rawResponse
+        String rawResponse,
+        List<EvalReport.PatternResult> patternResults
 ) {
     /** Creates a mutable builder pre-filled from this result (for post-processing cost normalization). */
     public EvalResultBuilder toBuilder() {
@@ -65,6 +69,7 @@ public record EvalResult(
         private int totalPatterns;
         private String reasoning;
         private String rawResponse;
+        private List<EvalReport.PatternResult> patternResults;
 
         EvalResultBuilder(EvalResult r) {
             this.testCaseId = r.testCaseId();
@@ -84,6 +89,7 @@ public record EvalResult(
             this.totalPatterns = r.totalPatterns();
             this.reasoning = r.reasoning();
             this.rawResponse = r.rawResponse();
+            this.patternResults = r.patternResults();
         }
 
         public EvalResultBuilder costScore(double costScore) { this.costScore = costScore; return this; }
@@ -93,7 +99,7 @@ public record EvalResult(
         public EvalResult build() {
             return new EvalResult(testCaseId, tier, provider, model, accuracyScore, speedScore,
                     costScore, overallScore, latencyMs, costUsd, inputTokens, outputTokens,
-                    passed, matchedPatterns, totalPatterns, reasoning, rawResponse);
+                    passed, matchedPatterns, totalPatterns, reasoning, rawResponse, patternResults);
         }
     }
 }

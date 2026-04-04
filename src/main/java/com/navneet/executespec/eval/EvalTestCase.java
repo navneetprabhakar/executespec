@@ -25,7 +25,24 @@ public record EvalTestCase(
         String systemPrompt,
         String userPrompt,
         List<Pattern> validationPatterns,
+        List<String> patternLabels,
         List<String> requiredJsonKeys,
         long latencyCeilingMs,
         int maxResponseLength
-) {}
+) {
+    /**
+     * Convenience constructor without pattern labels (auto-generates P1, P2, ...).
+     */
+    public EvalTestCase(String id, AgentTier tier, String description, String systemPrompt,
+                        String userPrompt, List<Pattern> validationPatterns,
+                        List<String> requiredJsonKeys, long latencyCeilingMs, int maxResponseLength) {
+        this(id, tier, description, systemPrompt, userPrompt, validationPatterns,
+                generateLabels(validationPatterns.size()), requiredJsonKeys, latencyCeilingMs, maxResponseLength);
+    }
+
+    private static List<String> generateLabels(int count) {
+        List<String> labels = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) labels.add("P" + (i + 1));
+        return labels;
+    }
+}

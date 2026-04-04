@@ -188,6 +188,8 @@ public class WorkerAgent {
         int continuations = 0;  // truncation auto-continue count
         int consecutiveNonJsonOutputs = 0; // consecutive non-tool, non-JSON outputs
         int skeletonRecoveries = 0; // skeleton recovery injection count
+        int fabricatedCompletionCount = 0; // fabricated completion rejections — max 3 before FAILED
+        final int MAX_FABRICATED_COMPLETIONS = 3;
         int configuredMaxOutput = budgetMonitor.maxOutputTokens(model, complexity); // for calibration tracking
 
         // ── AGENTIC LOOP (time-based) ────────────────────────────────────────
@@ -502,9 +504,31 @@ public class WorkerAgent {
                         // Validate: if the report claims files were created or modified but no
                         // writeFile/editFile was dispatched, the model fabricated the report.
                         if (totalFileWrites == 0 && reportClaimsFileChanges(assistantText)) {
-                            log.warn("[Worker {}] REJECTED fabricated completion report — claims files_created " +
-                                    "but 0 writeFile calls were dispatched. Forcing model to use tools.", taskId);
-                            stateStore.appendTaskLog(taskId, "FABRICATED_REPORT_REJECTED");
+                            fabricatedCompletionCount++;
+                            log.warn("[Worker {}] REJECTED fabricated completion report ({}/{}) — claims files_created " +
+                                    "but 0 writeFile calls were dispatched. Forcing model to use tools.",
+                                    taskId, fabricatedCompletionCount, MAX_FABRICATED_COMPLETIONS);
+                            stateStore.appendTaskLog(taskId, "FABRICATED_REPORT_REJECTED (" +
+                                    fabricatedCompletionCount + "/" + MAX_FABRICATED_COMPLETIONS + ")");
+
+                            // After MAX_FABRICATED_COMPLETIONS retries, give up — model cannot use tools correctly
+                            if (fabricatedCompletionCount >= MAX_FABRICATED_COMPLETIONS) {
+                                log.error("[Worker {}] Fabricated completion detected {} times — marking task FAILED. " +
+                                        "Model persistently claims file creation without using writeFile tool.",
+                                        taskId, fabricatedCompletionCount);
+                                stateStore.appendTaskLog(taskId, "FAILED: REPEATED_FABRICATED_COMPLETION");
+                                WorkerReport failReport = new WorkerReport();
+                                failReport.setTaskId(taskId);
+                                failReport.setStatus("failed");
+                                failReport.setFilesCreated(List.of());
+                                failReport.setFilesModified(List.of());
+                                failReport.setBlockers("Fabricated completion detected " +
+                                        fabricatedCompletionCount + " times — model claims files_created but " +
+                                        "never dispatched writeFile tool calls.");
+                                return withProviderModel(failReport, provider, model,
+                                        continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
+                            }
+
                             messages.add(new UserMessage(
                                     "CRITICAL ERROR: Your completion report claims files were created, but you " +
                                     "never called the writeFile tool. Files are NOT created by describing them " +

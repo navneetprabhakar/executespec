@@ -341,6 +341,10 @@ Do NOT split:
 
 FRONTEND / STATIC PROJECT TASK RULES:
   For static HTML/CSS/JS projects (no build tool, no framework):
+  - SINGLE-PAGE RULE: If the user requests a single HTML page (landing page, calculator,
+    portfolio, single-page app without framework), generate EXACTLY ONE task that creates
+    the complete index.html with inline or referenced CSS and JS. Do NOT create separate
+    tasks for CSS, JavaScript, build steps, or serving the file. One page = one task.
   - ALWAYS bundle HTML + CSS + JS for the same page into ONE task if total is <200 lines
     AND the page has ≤3 content sections.
   - UI CONSISTENCY RULE: Group functionally related UI components into the same task,

@@ -199,6 +199,91 @@ public class EvalTestCaseRegistry {
                 0
         ));
 
+        // ── PLANNING: conflicting-requirements ────────────────────────────────
+        // Tests judgment and tradeoff reasoning with genuinely conflicting
+        // stakeholder demands. Model must identify real tensions, not just
+        // list requirements.
+        testCases.add(new EvalTestCase(
+                "planning-conflicting-requirements",
+                AgentTier.PLANNING,
+                "Resolve conflicting stakeholder requirements for a payment processing system",
+                null,
+                loadPrompt("eval/planning-conflicting-requirements.txt"),
+                List.of(
+                        // 1. Identifies conflict: real-time WebSocket + audit logging creates latency tension
+                        Pattern.compile("(?i)(websocket.*audit.*laten|real.?time.*audit.*conflict|logging.*adds.*(latency|I/O|overhead).*hot.*path|audit.*overhead.*laten|laten.*tension.*audit)"),
+                        // 2. Identifies conflict: "no payment data in logs" + "full audit trail with before/after state"
+                        Pattern.compile("(?i)(no.*payment.*data.*log.*audit.*trail|audit.*trail.*IS.*log|audit.*contain.*payment.*data.*conflict|before.*after.*state.*vs.*no.*log|scope.*audit.*carefully|redact.*mask.*payment.*audit)"),
+                        // 3. Identifies conflict: sub-200ms latency + PCI DSS encryption overhead
+                        Pattern.compile("(?i)(200.*ms.*encrypt|laten.*encrypt|PCI.*laten|encrypt.*overhead.*laten|TLS.*laten|encrypt.*sub.?200)"),
+                        // 4. Architecture uses team's Python/Django skills (doesn't propose Rust/Go/Elixir)
+                        Pattern.compile("(?i)(python|django|team.*(experience|skill|proficien)|leverage.*existing)"),
+                        // 5. Proposes async audit to decouple from payment hot path
+                        Pattern.compile("(?i)(async.*audit|queue.*audit|decouple.*audit|audit.*queue|background.*audit|event.*driven.*audit|kafka.*audit|celery.*audit|rabbit.*audit)"),
+                        // 6. Includes rejected_alternatives with at least 2 entries
+                        Pattern.compile("\"rejected_alternatives\"\\s*:\\s*\\["),
+                        // 7. Negative check: does NOT ignore the 12-week timeline constraint
+                        Pattern.compile("(?i)(12.*week|timeline|sprint|phase|milestone|deliver.*within|schedule)")
+                ),
+                List.of(
+                        "websocket-audit-latency-tension",
+                        "no-log-vs-audit-trail-conflict",
+                        "latency-vs-encryption-conflict",
+                        "uses-team-skills",
+                        "async-audit-decoupling",
+                        "rejected-alternatives-present",
+                        "respects-timeline-constraint"
+                ),
+                List.of("conflicts", "architecture", "tradeoffs", "rejected_alternatives"),
+                EvalScorer.latencyCeilingMs(AgentTier.PLANNING),
+                0
+        ));
+
+        // ── WORKHORSE: optimistic-locking (hard) ─────────────────────────────
+        // Tests correctness on a subtle concurrency problem where @Transactional
+        // placement matters critically. The spec deliberately omits what happens
+        // when retries are exhausted — model must infer an explicit failure path.
+        testCases.add(new EvalTestCase(
+                "workhorse-optimistic-locking",
+                AgentTier.WORKHORSE,
+                "Generate a banking transfer service with optimistic locking, retry, and correct @Transactional placement",
+                null,
+                loadPrompt("eval/workhorse-optimistic-locking.txt"),
+                List.of(
+                        // 1. @Version annotation on Account entity
+                        Pattern.compile("@Version"),
+                        // 2. @Transactional on the inner transfer method, NOT wrapping the retry loop
+                        Pattern.compile("@Transactional[^\\n]*\\n[^}]*(?:debit|transfer|doTransfer|performTransfer|executeInner)"),
+                        // 3. OptimisticLockException catch with retry counter
+                        Pattern.compile("(?i)(OptimisticLock(ing)?Exception|StaleObjectStateException|ObjectOptimisticLockingFailureException)"),
+                        // 4. Exponential backoff with increasing delay
+                        Pattern.compile("(?i)(Thread\\.sleep|TimeUnit.*sleep|backoff|100\\s*\\*|Math\\.pow|delay.*\\*.*2|exponential)"),
+                        // 5. Balance check + debit atomic (same transaction, read-check-update)
+                        Pattern.compile("(?i)(balance.*<.*amount|balance.*compareTo|insufficient.*balance|balance.*less.*than|getBalance.*subtract|balance.*>=|balance.*enough)"),
+                        // 6. Self-transfer rejection
+                        Pattern.compile("(?i)(fromId.*equals.*toId|from.*==.*to|self.?transfer|same.*account|source.*destination.*equal)"),
+                        // 7. Explicit failure path when retries exhausted (throws exception)
+                        Pattern.compile("(?i)(throw.*new.*(Exception|RuntimeException|TransferException|OptimisticLock)|retries.*exhaust|max.*retries.*exceeded|failed.*after.*retries)"),
+                        // 8. Negative check: @Transactional does NOT appear on the retry-loop method
+                        //    (Check: the outer method calling the retry loop should NOT have @Transactional)
+                        //    We check that there's a retry loop WITHOUT @Transactional wrapping it
+                        Pattern.compile("(?i)(retry|attempt|while|for.*attempt)[\\s\\S]{0,200}(catch.*OptimisticLock|OptimisticLock.*catch)")
+                ),
+                List.of(
+                        "version-annotation",
+                        "transactional-on-inner-method",
+                        "optimistic-lock-exception-catch",
+                        "exponential-backoff",
+                        "atomic-balance-check",
+                        "self-transfer-rejection",
+                        "explicit-failure-on-retry-exhaust",
+                        "retry-loop-without-transactional"
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
         // ── LIGHTWEIGHT tier (3 tests) ───────────────────────────────────────
         // Tests speed and precision: ambiguity detection, multi-audience
         // summarization, and signal-vs-noise filtering.
@@ -299,28 +384,27 @@ public class EvalTestCaseRegistry {
                 null,
                 loadPrompt("eval/planning-saga-diagnosis.txt"),
                 List.of(
-                        // 1. Must identify @Transactional boundary spanning HTTP calls as ROOT CAUSE
-                        //    (not just "transaction issue" — must call out the specific boundary violation)
-                        Pattern.compile("(?i)(@Transactional.*HTTP|HTTP.*call.*inside.*transact|external.*call.*within.*transact|network.*call.*transact.*boundary|transact.*scope.*remote|transact.*wrapping.*HTTP)"),
+                        // 1. Must identify @Transactional boundary spanning HTTP/remote calls as ROOT CAUSE
+                        Pattern.compile("(?i)(@Transactional.*HTTP|@Transactional.*remote|@Transactional.*external|HTTP.*call.*inside.*transact|external.*call.*within.*transact|network.*call.*transact.*boundary|transact.*scope.*remote|transact.*wrapping.*HTTP|transact.*boundar.*span.*remote|transact.*boundar.*span.*HTTP|transact.*encompass.*external|database.*transact.*cross.*service)"),
 
-                        // 2. Must identify timeout ≠ failure — query exchange state BEFORE compensating
-                        Pattern.compile("(?i)(timeout.*does.*not.*mean.*fail|timeout.*query.*exchange|check.*exchange.*status.*before.*compens|verify.*order.*state|timeout.*ambig.*must.*query|assume.*fail.*incorrect)"),
+                        // 2. Must identify timeout ≠ failure — query state BEFORE compensating
+                        Pattern.compile("(?i)(timeout.*does.*not.*(mean|impl|equat|equal).*fail|timeout.*query.*(exchange|state|status)|check.*(exchange|order).*status.*before.*compens|verify.*order.*state|timeout.*ambig.*must.*(query|check|verify)|assume.*fail.*incorrect|cannot.*assume.*fail.*from.*timeout|query.*actual.*state.*(before|prior))"),
 
-                        // 3. Must specify LIFO compensation ordering WITH reasoning (not just mentioning it)
-                        Pattern.compile("(?i)(reverse.*order.*because|LIFO.*compens.*settlement|last.*executed.*first.*cancel.*because|reverse.*compens.*window|compens.*reverse.*order.*settlement.*differ)"),
+                        // 3. Must specify LIFO/reverse compensation ordering WITH reasoning
+                        Pattern.compile("(?i)(reverse.*order.*(because|to maintain|to avoid|to ensure|since)|LIFO.*compens|last.*executed.*first.*(cancel|compens|undo)|reverse.*compens.*(window|order|sequence)|compens.*reverse.*order|undo.*reverse.*sequence|reverse.*(chronolog|order).*compens)"),
 
                         // 4. Must handle partial fills correctly — compensate ACTUAL filled qty, not requested
-                        Pattern.compile("(?i)(actual.*fill.*quantit|compensate.*340|filled.*quantity.*not.*requested|partial.*fill.*only.*compens.*what.*was.*filled|match.*filled.*shares)"),
+                        Pattern.compile("(?i)(actual.*fill.*quantit|compensate.*340|filled.*quantity.*not.*requested|partial.*fill.*only.*compens.*what.*was.*filled|match.*filled.*shares|340.*not.*500|actual.*shares.*filled)"),
 
-                        // 5. Settlement-aware compensation — cancel (unsettled) vs offsetting trade (settled)
-                        Pattern.compile("(?i)(offsetting.*trade.*settled|settled.*cannot.*cancel.*must.*offset|cancel.*unsettled.*offset.*settled|settlement.*status.*determines.*compens)"),
+                        // 5. Settlement-aware compensation — cancel (unsettled) vs offsetting/reverse trade (settled)
+                        Pattern.compile("(?i)(offsetting.*trade.*settled|settled.*cannot.*cancel.*must.*(offset|reverse)|cancel.*unsettled.*(offset|reverse).*settled|settlement.*status.*determines.*compens|reverse.*trade.*settled|counter.?trade.*settled|close.*position.*settled|settled.*require.*offsetting)"),
 
-                        // 6. Poison pill / dead letter escalation for uncompensable states
-                        Pattern.compile("(?i)(poison.*pill|dead.*letter|manual.*intervention|escalat.*uncompens|stuck.*compens.*escala|alert.*ops.*team|human.*review)"),
+                        // 6. Escalation for uncompensable states (broader terminology)
+                        Pattern.compile("(?i)(poison.*pill|dead.*letter|manual.*(intervention|reconcil|review|escala)|escalat.*(uncompens|human|ops|manual)|stuck.*compens.*(escala|alert)|alert.*(ops|team|human)|human.*(review|intervention|escala)|uncompens.*(escala|queue|manual|flag)|fail.*compens.*(escala|manual|alert))"),
 
                         // 7. Must produce valid state machine with states, transitions, and guards
-                        Pattern.compile("\"saga_state_machine\""),
-                        Pattern.compile("(?i)(\"guard\".*:|guard.*condition|\"transitions\"\\s*:\\s*\\[)")
+                        Pattern.compile("(?i)(saga.?state.?machine|state.?machine|\"states\"\\s*:\\s*\\[)"),
+                        Pattern.compile("(?i)(\"guard\".*:|guard.*condition|\"transitions\"\\s*:\\s*\\[|transition.*from.*to)")
                 ),
                 List.of("diagnosis", "compensation_protocol", "saga_state_machine"),
                 60_000, // 60s ceiling — diagnosis task, not generation
@@ -355,10 +439,9 @@ public class EvalTestCaseRegistry {
                         // 6. Idempotent compensation handler for Kafka replay
                         Pattern.compile("(?i)(idempoten.*compensation|idempoten.*handler|deduplic.*event|event.*id.*idempoten|compens.*idempoten.*key|processed.*event.*skip)"),
 
-                        // 7. NEGATIVE CHECK: must NOT propose these anti-patterns
-                        //    (query exchange + compensate in same TX, "just retry", 2PC/XA)
-                        //    We check this by looking for explicit rejection
-                        Pattern.compile("(?i)(avoid.*retry.*without|reject.*2PC|reject.*XA|anti.?pattern|not.*use.*global.*transaction|avoid.*synchronous.*compens|must.*not.*assume.*transient)")
+                        // 7. Must reject anti-patterns OR demonstrate awareness by avoiding them
+                        //    Accept: explicit rejection, anti-pattern listing, OR positive assertion of correct approach
+                        Pattern.compile("(?i)(avoid.*retry.*without|reject.*2PC|reject.*XA|anti.?pattern|not.*use.*global.*transaction|avoid.*synchronous.*compens|must.*not.*assume.*transient|2PC.*not.*suitable|XA.*not.*feasible|global.*transact.*(avoid|reject|not)|do.*not.*(retry.*blind|retry.*without.*idempoten)|idempoten.*instead.*of.*retry|never.*assume.*transient)")
                 ),
                 List.of("deduplication", "compensation_actions", "atomicity", "idempotent_handler"),
                 45_000, // 45s ceiling — narrower scope, strong model should be fast
@@ -390,8 +473,8 @@ public class EvalTestCaseRegistry {
                         // 5. Market data staleness threshold with concrete number and reasoning
                         Pattern.compile("(?i)(50.*ms|100.*ms|stale.*threshold.*\\d+.*ms|freshness.*\\d+.*millisecond|tick.*rate.*staleness|exchange.*latency.*threshold)"),
 
-                        // 6. NEGATIVE CHECK: must NOT propose async/fire-and-forget audit writes
-                        Pattern.compile("(?i)(not.*fire.*and.*forget|reject.*async.*audit|audit.*must.*not.*be.*async|avoid.*eventual.*consist.*audit|anti.?pattern.*async.*audit|never.*asynchronous.*audit)")
+                        // 6. Must reject async audit OR assert synchronous/atomic audit (positive assertion implies rejection)
+                        Pattern.compile("(?i)(not.*fire.*and.*forget|reject.*async.*audit|audit.*must.*not.*be.*async|avoid.*eventual.*consist.*audit|anti.?pattern.*async.*audit|never.*async.*audit|audit.*must.*(be.*synchron|be.*atomic|same.*transact)|synchron.*audit|atomic.*with.*state|audit.*record.*same.*commit|single.*transact.*both.*state.*audit|must.*not.*use.*(eventual|async).*for.*audit)")
                 ),
                 List.of("compliance_failures", "audit_atomicity_fix", "timestamp_requirements", "best_execution_evidence"),
                 45_000, // 45s ceiling

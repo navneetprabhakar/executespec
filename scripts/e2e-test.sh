@@ -11,8 +11,25 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
 PASSWORD="${E2E_PASSWORD:-REDACTED_FOR_PUBLIC_RELEASE}"
 POLL_INTERVAL=10       # seconds between status polls
-RUN_TIMEOUT=600        # 10 minutes max per run
 PLAN_WAIT_TIMEOUT=120  # 2 minutes to wait for plan (cancel test)
+
+# Per-language timeout ceilings (seconds)
+# Simple: Python CLI, Static HTML, Ruby script
+# Moderate: Java Maven, TypeScript, PHP
+# Complex: Go (compilation), Rust (cargo build), multi-file JS/Express
+declare -A LANGUAGE_TIMEOUTS=(
+    ["Python"]=300
+    ["JavaScript"]=600
+    ["Java"]=600
+    ["TypeScript"]=600
+    ["Static HTML"]=300
+    ["Cancel"]=180
+    ["Go"]=900
+    ["Rust"]=900
+    ["Ruby"]=300
+    ["PHP"]=600
+)
+RUN_TIMEOUT_DEFAULT=600  # fallback for unknown languages
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR"
 
@@ -96,7 +113,7 @@ get_run() {
 # Returns: status|duration_seconds
 poll_until_terminal() {
     local run_id="$1"
-    local timeout="${2:-$RUN_TIMEOUT}"
+    local timeout="${2:-$RUN_TIMEOUT_DEFAULT}"
     local start_time=$(date +%s)
     local last_status=""
 
@@ -252,7 +269,8 @@ run_test_case() {
 
     # 2. Poll until terminal
     local result
-    result=$(poll_until_terminal "$run_id" "$RUN_TIMEOUT") || true
+    local lang_timeout="${LANGUAGE_TIMEOUTS[$language]:-$RUN_TIMEOUT_DEFAULT}"
+    result=$(poll_until_terminal "$run_id" "$lang_timeout") || true
 
     local status=$(echo "$result" | cut -d'|' -f1)
     local duration=$(echo "$result" | cut -d'|' -f2)
