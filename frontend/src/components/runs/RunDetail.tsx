@@ -143,19 +143,21 @@ export default function RunDetail() {
 
   const handleReRun = async () => {
     if (!activeRun) return;
-    setReRunning(true);
-    try {
-      const newRunId = await createRun({
-        userRequest: activeRun.userRequest ?? '',
-        ...(activeRun.projectId ? { projectId: activeRun.projectId } : {}),
-      });
-      setActiveRunId(newRunId);
-      addToast({ type: 'success', message: `Re-run launched: ${newRunId.slice(0, 8)}` });
-    } catch (e: any) {
-      addToast({ type: 'error', message: e.message });
-    } finally {
-      setReRunning(false);
-    }
+    
+    // Instead of launching directly, we open the NewRunModal with pre-filled config.
+    // This allows the user to toggle Prototype Mode or change models before launching.
+    const config = {
+      goal: activeRun.userRequest ?? '',
+      executionMode: (activeRun.executionMode as 'PROTOTYPE' | 'PRODUCTION') ?? 'PROTOTYPE',
+      model: activeRun.workerModel,
+      provider: activeRun.workerModel ? 'openai' : undefined, // Fallback; ProviderModelSelector handles persistence
+      projectId: activeRun.projectId ?? undefined,
+      repoMode: (activeRun.repoMode as 'NONE' | 'NEW' | 'EXISTING') ?? 'NONE',
+      repoUrl: activeRun.repoUrl ?? undefined,
+    };
+    
+    useUiStore.getState().setPendingNewRunConfig(config);
+    addToast({ type: 'info', message: 'Re-run configuration loaded. Adjust and launch when ready.' });
   };
 
   const handlePause = async () => {

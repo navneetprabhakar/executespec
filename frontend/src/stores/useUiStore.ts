@@ -6,6 +6,16 @@ export interface Toast {
   message: string;
 }
 
+export interface NewRunConfig {
+  goal: string;
+  executionMode?: 'PROTOTYPE' | 'PRODUCTION';
+  model?: string;
+  provider?: string;
+  projectId?: string;
+  repoMode?: 'NONE' | 'NEW' | 'EXISTING';
+  repoUrl?: string;
+}
+
 type ViewMode = 'vibe' | 'pro';
 
 interface UiStore {
@@ -14,8 +24,8 @@ interface UiStore {
   commandPaletteOpen: boolean;
   activeTab: string;
   toasts: Toast[];
-  /** Pre-filled goal for NewRunModal — set by RunConversation "Implement as New Run". */
-  pendingNewRunGoal: string | null;
+  /** Pre-filled config for NewRunModal — set by Re-run or Copilot "Iterate as New Run". */
+  pendingNewRunConfig: NewRunConfig | null;
   /** Whether the run list panel is collapsed to give more space to run detail. */
   runListCollapsed: boolean;
   /** Width of the run list panel in pixels (persisted). */
@@ -31,7 +41,7 @@ interface UiStore {
   setActiveTab: (t: string) => void;
   addToast: (t: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
-  setPendingNewRunGoal: (goal: string | null) => void;
+  setPendingNewRunConfig: (config: NewRunConfig | null) => void;
   setRunListCollapsed: (v: boolean) => void;
   setRunListWidth: (w: number) => void;
   setCopilotMaximized: (v: boolean) => void;
@@ -46,7 +56,7 @@ export const useUiStore = create<UiStore>((set) => ({
   commandPaletteOpen: false,
   activeTab: 'overview',
   toasts: [],
-  pendingNewRunGoal: null,
+  pendingNewRunConfig: null,
   runListCollapsed: false,
   runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
   copilotMaximized: false,
@@ -56,7 +66,7 @@ export const useUiStore = create<UiStore>((set) => ({
   setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
   setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
   setActiveTab: (t) => set({ activeTab: t }),
-  setPendingNewRunGoal: (goal) => set({ pendingNewRunGoal: goal }),
+  setPendingNewRunConfig: (config) => set({ pendingNewRunConfig: config }),
   setRunListCollapsed: (v) => set({ runListCollapsed: v }),
   setRunListWidth: (w) => {
     localStorage.setItem('es:runListWidth', String(w));

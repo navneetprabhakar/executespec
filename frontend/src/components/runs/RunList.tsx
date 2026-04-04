@@ -33,14 +33,14 @@ export default function RunList() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [showModal, setShowModal] = useState(false);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
-  const { pendingNewRunGoal, setPendingNewRunGoal } = useUiStore();
+  const { pendingNewRunConfig, setPendingNewRunConfig } = useUiStore();
   const { isVibe } = useViewMode();
   const isMobile = useIsMobile();
 
-  // Open modal when a pending goal is set (e.g., from RunConversation "Implement as New Run")
+  // Open modal when a pending config is set (e.g., from Re-run or Copilot "Iterate as New Run")
   useEffect(() => {
-    if (pendingNewRunGoal) setShowModal(true);
-  }, [pendingNewRunGoal]);
+    if (pendingNewRunConfig) setShowModal(true);
+  }, [pendingNewRunConfig]);
 
   // Load projects once (for org members only)
   useEffect(() => {
@@ -200,7 +200,7 @@ export default function RunList() {
               description="Runs you archive will appear here."
             />
           ) : (
-            <FirstRunSuggestions onSelect={(goal) => { setPendingNewRunGoal(goal); setShowModal(true); }} />
+            <FirstRunSuggestions onSelect={(goal) => { setPendingNewRunConfig({ goal }); setShowModal(true); }} />
           )
         ) : (
           runs.map((run, i) => (
@@ -265,8 +265,8 @@ export default function RunList() {
 
       {showModal && (
         <NewRunModal
-          initialGoal={pendingNewRunGoal ?? undefined}
-          onClose={() => { setShowModal(false); setPendingNewRunGoal(null); }}
+          initialConfig={pendingNewRunConfig ?? undefined}
+          onClose={() => { setShowModal(false); setPendingNewRunConfig(null); }}
         />
       )}
     </div>

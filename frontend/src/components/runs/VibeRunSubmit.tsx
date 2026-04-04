@@ -12,10 +12,10 @@ export default function VibeRunSubmit({ onClose }: Props) {
   const createRun = useRunStore((s) => s.createRun);
   const setActiveRunId = useRunStore((s) => s.setActiveRunId);
   const projectFilter = useRunStore((s) => s.projectFilter);
-  const pendingGoal = useUiStore((s) => s.pendingNewRunGoal);
-  const setPendingGoal = useUiStore((s) => s.setPendingNewRunGoal);
+  const pendingConfig = useUiStore((s) => s.pendingNewRunConfig);
+  const setPendingConfig = useUiStore((s) => s.setPendingNewRunConfig);
 
-  const [goal, setGoal] = useState(pendingGoal ?? '');
+  const [goal, setGoal] = useState(pendingConfig?.goal ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const persisted = getPersistedSelection();
@@ -37,7 +37,7 @@ export default function VibeRunSubmit({ onClose }: Props) {
         ...(model ? { modelName: model } : {}),
         ...(projectFilter ? { projectId: projectFilter } : {}),
       });
-      setPendingGoal(null);
+      setPendingConfig(null);
       setActiveRunId(runId);
       onClose();
     } catch (e: unknown) {

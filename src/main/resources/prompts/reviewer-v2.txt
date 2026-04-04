@@ -37,9 +37,10 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 - @Transactional on service methods that do multiple writes
 - Constructor injection (no @Autowired fields)
 - DTO/record for request/response bodies (no raw entity exposure)
-- GlobalExceptionHandler with @ControllerAdvice
-- Input validation (@Valid, @NotBlank, @Size, etc.)
+- GlobalExceptionHandler with @RestControllerAdvice ensuring ALL errors are JSON
+- MANDATORY: Explicit 404 Not Found handler returning JSON
 - Proper HTTP status codes (201 for create, 204 for delete, 404 for not found)
+- Input validation (@Valid, @NotBlank, @Size, etc.)
 - Repository interface extends JpaRepository, not custom JDBC unless justified
 - application.yml / application.properties present with sensible defaults
 
@@ -48,6 +49,8 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 - WSGI/ASGI entry point (gunicorn/uvicorn) — not just `app.run(debug=True)` for production
 - Type hints on function signatures
 - Exception handlers registered (Flask: @app.errorhandler, FastAPI: exception_handler)
+- MANDATORY: Explicit 404 Not Found handler returning JSON (never HTML)
+- MANDATORY: Server binds to 0.0.0.0 (not localhost)
 - SQL injection prevention (parameterized queries or ORM)
 - CORS configuration if API-only
 - Environment variable usage for secrets (no hardcoded keys)
@@ -56,11 +59,15 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 **Node.js / Express / NestJS:**
 - package.json with start script
 - Error-handling middleware (Express: 4-arg function, NestJS: ExceptionFilter)
+- MANDATORY: Explicit 404 Not Found handler returning JSON (placed BEFORE error middleware)
 - Async route handlers wrapped with try/catch or express-async-errors
 - Input validation (joi, zod, class-validator, or manual)
 - Environment config via dotenv or config module (no hardcoded secrets)
 - Proper module structure (routes/controllers separate from business logic)
 - package-lock.json or yarn.lock committed
+- MODULE CONSISTENCY: Code uses `import/export` if `"type": "module"` is in package.json, otherwise `require()`. Mixing them or using the wrong one for the project type is CRITICAL.
+- ROUTER NAMESPACE ISOLATION: If a router is mounted at a path (e.g., `app.use('/api', router)` in `app.js`), the internal routes in that router file MUST NOT repeat the path (e.g., use `router.get('/movies')`, NOT `router.get('/api/movies')`). Repeating the path (e.g. `/api/api/movies`) is CRITICAL.
+- FULL-STACK START SCRIPT: package.json MUST have a single `dev` or `start` script that runs BOTH frontend and backend concurrently.
 
 **React / Vue / Angular (Frontend):**
 - Proper component decomposition (no 500+ line god components)
@@ -75,15 +82,15 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 - go.mod present
 - Error handling on every function that returns error (no _ discards)
 - Context propagation through request handlers
-- Proper HTTP server with graceful shutdown
-- Structured logging (slog, zap, or zerolog)
+- MANDATORY: Server binds to 0.0.0.0 (not localhost)
+- MANDATORY: Explicit 404 handler returning JSON
 - Interface-based dependency injection
 
 **Rust:**
 - Cargo.toml with proper edition and dependencies
 - Error types defined (thiserror or anyhow)
-- No unwrap() in production code paths
-- Proper ownership / no unnecessary cloning
+- MANDATORY: Server binds to 0.0.0.0 (not localhost)
+- MANDATORY: Explicit 404 handler returning JSON
 - Integration or unit tests present
 
 **Static HTML / Vanilla JS:**
@@ -101,6 +108,7 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 - HTML data attributes (data-foo="bar") match JS reads (dataset.foo, NOT dataset.value)
 - API endpoint paths in frontend fetch/axios calls match backend route definitions
 - Frontend API calls use RELATIVE URLs (/api/...), NOT absolute (http://localhost:8080/api/...) — absolute URLs break in Docker preview
+- ROUTER NAMESPACE ISOLATION: Check for redundant path prefixes when mounting routers.
 - Import paths resolve to actual files that exist
 - Environment variable names used in code match what's documented in README/.env.example
 
@@ -110,10 +118,11 @@ CRITICAL (will be auto-fixed):
 - Method signature mismatch between controller <-> service <-> repository
 - Missing error handling on external/DB calls
 - Hardcoded secrets
-- Missing input validation on API endpoints
-- Language-specific violations marked CRITICAL above (e.g. no error middleware, raw entity exposure, app.run(debug=True) in production)
-- Referenced file missing (HTML links to style.css but file doesn't exist in workspace)
-- DOM attribute mismatch (HTML has data-digit but JS reads dataset.value)
+- Missing input validation on API endpoints: CRITICAL
+- Language-specific violations marked CRITICAL or MANDATORY (e.g. no error middleware, no 404 handler, raw entity exposure, app.run(debug=True) in production): CRITICAL
+- Referenced file missing (HTML links to style.css but file doesn't exist in workspace): CRITICAL
+- DOM attribute mismatch (HTML has data-digit but JS reads dataset.value): CRITICAL
+- Frontend API calls use ABSOLUTE localhost URLs (http://localhost:8080/api/...) instead of relative paths (/api/...): CRITICAL
 
 MINOR (report only):
 - Style preferences, naming, refactoring suggestions
