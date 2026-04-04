@@ -161,6 +161,19 @@ public class MailService {
     }
 
     @Async
+    public void sendContactFeedbackEmail(String adminEmail, String userEmail,
+                                          String userName, String subject, String feedbackBody) {
+        Context ctx = new Context();
+        ctx.setVariable("userEmail", userEmail);
+        ctx.setVariable("userName", userName);
+        ctx.setVariable("feedbackSubject", subject);
+        ctx.setVariable("feedbackBody", feedbackBody);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(adminEmail, "Contact feedback: " + subject,
+                "email/contact-feedback", ctx);
+    }
+
+    @Async
     public void sendWelcomeEmail(String toEmail, String firstName, String tier) {
         Context ctx = new Context();
         ctx.setVariable("firstName", firstName);

@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Contact Feedback</title></head>
+<body style="font-family:'SFMono-Regular',ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;background:#000000;color:#ededed;padding:40px">
+  <div style="max-width:480px;margin:0 auto;background:#111111;border:1px solid #252525;border-radius:6px;padding:32px">
+    <h1 style="color:#ededed;margin:0 0 8px">executespec</h1>
+    <h2 style="margin:0 0 24px;font-size:20px">Contact Feedback</h2>
+    <p><strong>From:</strong> <span th:text="${userName}">User</span> &lt;<span th:text="${userEmail}">user@example.com</span>&gt;</p>
+    <p><strong>Subject:</strong> <span th:text="${feedbackSubject}">Subject line</span></p>
+    <hr style="border:1px solid #252525;margin:16px 0"/>
+    <p style="white-space:pre-wrap" th:text="${feedbackBody}">Feedback body goes here.</p>
+    <hr style="border:1px solid #252525;margin:24px 0"/>
+    <p style="color:#a1a1a1;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:underline" href="#">executespec.ai</a></p>
+  </div>
+</body>
+</html>

@@ -179,6 +179,27 @@ if [ -n "$DEPLOY_BUCKET" ]; then
   fi
 fi
 
+# ── 6e. Contact JIRA credentials from GCS (if uploaded) ──────────────────────
+
+CONTACT_JIRA_BASE_URL=""
+CONTACT_JIRA_EMAIL=""
+CONTACT_JIRA_API_TOKEN=""
+CONTACT_JIRA_PROJECT_KEY=""
+if [ -n "$DEPLOY_BUCKET" ]; then
+  CONTACT_CREDS_FILE="/tmp/contact-jira-creds"
+  if gsutil -q stat "gs://${DEPLOY_BUCKET}/config/contact-jira-credentials" 2>/dev/null; then
+    gsutil cp "gs://${DEPLOY_BUCKET}/config/contact-jira-credentials" "$CONTACT_CREDS_FILE"
+    CONTACT_JIRA_BASE_URL=$(grep '^CONTACT_JIRA_BASE_URL=' "$CONTACT_CREDS_FILE" | cut -d= -f2-)
+    CONTACT_JIRA_EMAIL=$(grep '^CONTACT_JIRA_EMAIL=' "$CONTACT_CREDS_FILE" | cut -d= -f2-)
+    CONTACT_JIRA_API_TOKEN=$(grep '^CONTACT_JIRA_API_TOKEN=' "$CONTACT_CREDS_FILE" | cut -d= -f2-)
+    CONTACT_JIRA_PROJECT_KEY=$(grep '^CONTACT_JIRA_PROJECT_KEY=' "$CONTACT_CREDS_FILE" | cut -d= -f2-)
+    rm -f "$CONTACT_CREDS_FILE"
+    log "Contact JIRA credentials loaded from GCS"
+  else
+    log "No contact JIRA credentials in GCS — contact form will fall back to email"
+  fi
+fi
+
 # ── 6d. Derive public URL and CORS origins from environment ─────────────────
 
 if [ "$ES_ENV" = "prod" ]; then
@@ -233,6 +254,12 @@ GCP_REGION=${AR_REGION}
 # Artifact Registry
 AR_REPOSITORY=${AR_REPO}
 AR_HOST=${AR_HOST}
+
+# Contact JIRA
+CONTACT_JIRA_BASE_URL=${CONTACT_JIRA_BASE_URL}
+CONTACT_JIRA_EMAIL=${CONTACT_JIRA_EMAIL}
+CONTACT_JIRA_API_TOKEN=${CONTACT_JIRA_API_TOKEN}
+CONTACT_JIRA_PROJECT_KEY=${CONTACT_JIRA_PROJECT_KEY}
 
 # App
 SPRING_PROFILES_ACTIVE=${ES_ENV:-prod},gcp

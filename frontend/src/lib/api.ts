@@ -647,6 +647,15 @@ export interface MessageResponse {
 export const getMessages = (runId: string) =>
   req<MessageResponse[]>(`/runs/${runId}/messages`);
 
+// ── Contact ─────────────────────────────────────────────────────────────────
+
+export const submitContactForm = (subject: string, body: string) =>
+  req<{ message: string }>('/contact', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject, body }),
+  });
+
 // ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
 /** Fetch the generated OpenAPI YAML for a run (served as text/plain). */
