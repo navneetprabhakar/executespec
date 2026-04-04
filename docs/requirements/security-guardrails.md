@@ -448,7 +448,7 @@ Organizations can restrict which LLM providers are used (e.g., disable OpenAI fo
 
 ### 8.3 Wall-Clock Time Limit
 
-Each worker task has a 15-minute hard deadline (configurable). If exceeded, the task is terminated and marked failed. Stall detection (no file writes in 5 minutes) triggers model escalation (WORKHORSE → PLANNING tier) before the deadline.
+Each worker task has a 25-minute hard deadline (configurable). If exceeded, the task is terminated and marked failed. Stall detection (no file writes in 5 minutes) triggers model escalation (WORKHORSE → PLANNING tier) before the deadline.
 
 **Key files:**
 - `agent/LlmRouter.java`

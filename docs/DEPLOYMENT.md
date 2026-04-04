@@ -26,9 +26,9 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1-V55).
+Flyway migrations run automatically on startup and create all tables (V1-V56).
 
-#### Migration Reference (V45-V55)
+#### Migration Reference (V45-V56)
 
 | Migration | Description |
 |-----------|-------------|
@@ -43,6 +43,7 @@ Flyway migrations run automatically on startup and create all tables (V1-V55).
 | V53 | Run archive support (archive timestamp + status) |
 | V54 | Stripe multi-currency support (currency-gateway mapping) |
 | V55 | Payment audit trail expansion (webhook events, CSV export) |
+| V56 | Task completion notes (`agent_task.completion_notes` TEXT column) |
 
 ### Redis Setup
 
@@ -1181,8 +1182,13 @@ redirect to `https://YOUR_DOMAIN` and the managed cert should begin provisioning
 ## Step 12: CI/CD Setup (GitHub Actions)
 
 The deploy workflow is already in the repository at `.github/workflows/deploy.yml`.
-It triggers on every push to `main` and performs:
+It triggers on every push to `main` and also supports **manual redeploy** via `workflow_dispatch`:
 
+**Triggers:**
+- **Automatic:** Push to `main` or `dev` branch
+- **Manual:** GitHub Actions → Run workflow → select `target_env` (dev/main) and optional `target_sha` (commit SHA)
+
+**Steps:**
 1. Build the JAR with `mvn package -DskipTests` (frontend is embedded via the build)
 2. Upload JAR to `gs://executespec-deploy/releases/app-<SHA>.jar`
 3. SSH to the GCE instance via IAP tunnel
@@ -1190,6 +1196,8 @@ It triggers on every push to `main` and performs:
 5. Restart the systemd service
 6. Wait 20 seconds, run health check
 7. Prune old JARs (keep last 10)
+
+Manual redeploy allows deploying any historical commit without pushing new code.
 
 ### 12.1 Add GitHub Actions secrets
 
@@ -1845,7 +1853,7 @@ curl -s -X POST https://app.executespec.ai/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@executespec.ai","password":"REDACTED_FOR_PUBLIC_RELEASE"}' | jq .token
 
-# Flyway migrations (should show V1-V55)
+# Flyway migrations (should show V1-V56)
 gcloud compute ssh executespec-prod-vm --zone=us-east4-a --tunnel-through-iap \
   -- 'sudo journalctl -u executespec | grep -i "flyway\|migration" | tail -20'
 
@@ -1875,7 +1883,7 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 
 - [ ] **Infrastructure:** Terraform apply successful, all resources provisioned
 - [ ] **DNS:** `app.executespec.ai` resolves to LB IP, SSL certificate ACTIVE
-- [ ] **Database:** Cloud SQL accessible, Flyway V1-V55 migrations complete
+- [ ] **Database:** Cloud SQL accessible, Flyway V1-V56 migrations complete
 - [ ] **Redis:** Memorystore accessible from VPC
 - [ ] **Secrets:** All API keys in GCS/Secret Manager (OpenAI, Anthropic, Google, GitHub)
 - [ ] **OAuth2:** Google and GitHub OAuth redirect URIs configured for production domain

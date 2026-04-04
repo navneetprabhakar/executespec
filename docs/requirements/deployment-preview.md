@@ -81,6 +81,8 @@ Project type is determined in two stages:
 
 **Single-package full-stack detection:** `DevDockerfileGenerator.detect()` checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in the same `package.json`. If both present, the type is `FULL_STACK` (not `NODE_BACKEND`). The generated Dockerfile uses `npm run dev` to run both concurrently, exposing ports 5173 and 3000.
 
+**Dependency safety net:** `DevDockerfileGenerator` applies universal `--legacy-peer-deps` to ALL `npm install`/`npm ci` commands via regex replacement. For React/Vite projects, it auto-installs common React ecosystem dependencies (vite, @vitejs/plugin-react, react, react-dom, prop-types, lucide-react, clsx, tailwind-merge) if missing from `package.json`.
+
 **NODE_BACKEND port handling:** The generated Dockerfile includes `ENV PORT=3000`. Generated apps use `process.env.PORT || 3001` -- without the env var, apps fall back to 3001 while Docker exposes 3000, causing health check failures.
 
 ### 3. Cloud Run Deployment (11 Languages)

@@ -351,8 +351,8 @@ Side paths:
 | Tier | Anthropic | OpenAI | Google |
 |------|-----------|--------|--------|
 | **LIGHTWEIGHT** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
-| **WORKHORSE** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-flash-preview` |
-| **PLANNING** | `claude-opus-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` |
+| **WORKHORSE** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
+| **PLANNING** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-flash-preview` |
 
 ### Provider Selection
 
@@ -367,12 +367,12 @@ Provider is **user-selected per project** (not weighted random). The user choose
 | `CompilerAgent` | WORKHORSE | `LlmRouter` with WORKHORSE tier |
 | `ReviewerAgentV2` | PLANNING | `LlmRouter` with PLANNING tier |
 | `ConversationAgent` | LIGHTWEIGHT | `LlmRouter` with LIGHTWEIGHT tier |
-| `TestPlannerAgent` | PLANNING | `LlmRouter` with PLANNING tier |
+| `TestPlannerAgent` | WORKHORSE | `LlmRouter` with WORKHORSE tier |
 | `TestWorkerAgent` | WORKHORSE | `LlmRouter` with WORKHORSE tier |
 | `TestReportGenerator` | LIGHTWEIGHT | `LlmRouter` with LIGHTWEIGHT tier |
 | `ContextAgent` (Scout) | LIGHTWEIGHT | Direct Haiku assignment |
-| `PromptOptimiserAgent` | LIGHTWEIGHT | Direct Haiku assignment |
-| `ValidationReportGenerator` | LIGHTWEIGHT | Direct Haiku assignment |
+| `PromptOptimiserAgent` | WORKHORSE | `LlmRouter` with WORKHORSE tier |
+| `ValidationReportGenerator` | WORKHORSE | `LlmRouter` with WORKHORSE tier |
 
 ### Task Complexity -> Initial Tier
 
@@ -404,7 +404,7 @@ If a worker produces no file writes for 5 minutes, the model is escalated **with
 
 ```
 claude-haiku-4-5-20251001  ->  claude-sonnet-4-6
-claude-sonnet-4-6          ->  claude-opus-4-6
+claude-haiku-4-5-20251001  ->  claude-sonnet-4-6
 gpt-5.4-mini               ->  gpt-5.4
 ```
 
@@ -422,8 +422,8 @@ Three fixed fallback chains:
 
 | Chain | Anthropic | Google | OpenAI |
 |-------|-----------|--------|--------|
-| PLANNING | `claude-opus-4-6` | `gemini-3.1-pro-preview` | `gpt-5.4` |
-| WORKHORSE | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
 
 **Mid-task guard**: Fallback is **blocked mid-execution** (iteration > 0) to prevent state loss. Allowed only at task start or after context compaction.

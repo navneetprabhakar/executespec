@@ -133,7 +133,7 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 
 ## Database Migrations
 
-55 Flyway migrations (V1–V55) run automatically on startup:
+56 Flyway migrations (V1–V56) run automatically on startup:
 
 | Version | Description |
 |---------|-------------|
@@ -158,6 +158,7 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 | V53 | Archive run |
 | V54 | Stripe multi-currency |
 | V55 | Payment audit expansion |
+| V56 | Task completion notes |
 
 ---
 

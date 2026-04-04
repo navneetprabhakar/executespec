@@ -1505,7 +1505,7 @@ Child processes have secrets removed:
 | Worker prompt (Anthropic) | `resources/prompts/worker.txt` |
 | Worker prompt (OpenAI) | `resources/prompts/worker-openai.txt` |
 | Worker prompt (Gemini) | `resources/prompts/worker-gemini.txt` |
-| DB migrations | `resources/db/migration/V*.sql` (V1-V55) |
+| DB migrations | `resources/db/migration/V*.sql` (V1-V56) |
 | App config | `resources/application.yml` |
 
 ## Appendix B: Data Flow Diagram

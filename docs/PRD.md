@@ -908,7 +908,7 @@ SUPER_ADMIN (global -- full system access)
 
 ## 8. Database Schema
 
-### 8.1 Migrations Summary (V1-V55)
+### 8.1 Migrations Summary (V1-V56)
 
 | Range | Scope |
 |-------|-------|
@@ -936,6 +936,7 @@ SUPER_ADMIN (global -- full system access)
 | V51 | Force logout flag |
 | V52 | GitHub PR URL on pipeline_run |
 | V53-V55 | Rate limiting, payment audit, security enhancements |
+| V56 | Task completion notes |
 
 ---
 
