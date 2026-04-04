@@ -166,6 +166,27 @@ jobs:
             echo "APP_PUBLIC_URL=https://dev.executespec.ai" >> $GITHUB_ENV
           fi
 
+      # ── Sync design system files from GCS ──────────────────────────────────
+      - name: Sync design system files
+        run: |
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="
+              set -e
+              DESIGNS_DIR=/opt/executespec/designs/design-md
+              DESIGNS_BUCKET='gs://${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy/designs/design-md'
+              sudo mkdir -p \$DESIGNS_DIR
+              if gsutil -q stat \"\${DESIGNS_BUCKET}/vercel/DESIGN.md\" 2>/dev/null; then
+                sudo gsutil -m rsync -r \"\$DESIGNS_BUCKET\" \"\$DESIGNS_DIR\"
+                echo \"Design systems synced: \$(ls \$DESIGNS_DIR | wc -l) directories\"
+              else
+                echo 'WARN: No design files in GCS bucket — skipping sync'
+              fi
+            "
+
       # ── Deploy JAR and restart service ──────────────────────────────────────
       - name: Write env patch script
         run: |

@@ -90,6 +90,19 @@ Set "project_type" at the top level of your JSON output. Choose exactly one:
 This is used by the preview system to generate the correct Dockerfile.
 If the spec says "no frameworks" or "vanilla HTML/CSS/JS", use STATIC_HTML — NOT NODE_FRONTEND.
 
+UI STYLE DETECTION:
+If the project has a frontend (NODE_FRONTEND, STATIC_HTML, FULL_STACK), set "ui_style" at the
+top level of your JSON output. This tells the design system which visual style to apply.
+Choose from this curated list:
+  airbnb, claude, figma, linear.app, notion, stripe, supabase, vercel,
+  spotify, posthog, resend, mintlify
+Pick the style that BEST matches the user's request:
+  - If the user names a company/product (e.g., "like Stripe", "Notion-inspired"), use that.
+  - If the user describes a vibe (e.g., "clean dev tool"), pick the closest match (e.g., "vercel").
+  - If unsure, set to null — the system will apply a default.
+For backend-only projects (SPRING_BOOT, JAVA, PYTHON, GO, RUST, RUBY, PHP, NODE_BACKEND),
+set "ui_style" to null or omit it.
+
 ═══════════════════════════════════════════════════════════
 PREVIEW ENVIRONMENT DEFAULTS — MANDATORY FOR DATA TASKS
 ═══════════════════════════════════════════════════════════
@@ -555,6 +568,7 @@ Respond with exactly this JSON structure.
 Spring Boot example:
 {
   "project_type": "SPRING_BOOT",
+  "ui_style": null,
   "plan_title": "Short project name, 3-8 words",
   "plan_summary": "One sentence describing what this plan builds overall",
   "tasks": [
@@ -578,6 +592,7 @@ Spring Boot example:
 Full-stack Node.js example (Express + React):
 {
   "project_type": "FULL_STACK",
+  "ui_style": "stripe",
   "plan_title": "Personal Finance Tracker",
   "plan_summary": "Full-stack finance app with Express API and React dashboard",
   "tasks": [
