@@ -403,6 +403,14 @@ app:
       credentials-path: credentials.json
       tokens-dir: ${user.home}/.executespec/gmail-tokens
       app-name: executespec
+  contact:
+    fallback-email: admin@executespec.ai
+    jira:
+      base-url: ${CONTACT_JIRA_BASE_URL:}
+      email: ${CONTACT_JIRA_EMAIL:}
+      api-token: ${CONTACT_JIRA_API_TOKEN:}
+      project-key: ${CONTACT_JIRA_PROJECT_KEY:SUP}
+      issue-type: Task
   jwt:
     secret: executespec-local-dev-secret-key-must-be-at-least-256-bits-long-for-HS256
     access-token-expiry-minutes: 60
