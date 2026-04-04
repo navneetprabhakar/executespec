@@ -199,6 +199,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Pipeline orchestrator | `harness/PipelineHarness.java` |
 | Sequential task executor | `harness/SequentialTaskExecutor.java` |
 | Run cost budget | `harness/RunCostBudgetService.java` |
+| Design system config | `harness/DesignSystemProperties.java` |
+| UI style resolver | `harness/UiStyleResolver.java` (design loading, fuzzy match, 3-signal resolution) |
 | Worker agent | `agent/WorkerAgent.java` |
 | LLM router (multi-provider) | `agent/LlmRouter.java` |
 | Model resolver (matrix-based) | `router/ModelResolver.java` |
@@ -310,6 +312,8 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropicâ
 - Env var whitelist for Docker subprocess (PATH, HOME, DOCKER_HOST only â€” no leaked secrets)
 - ServiceNow webhook HMAC verification
 - Actuator endpoint restriction (health+prometheus public, rest SUPER_ADMIN)
+- Design system integration: 54 company DESIGN.md files loaded from filesystem, 3-signal resolution (explicit hint > planner ui_style > project type heuristic), Caffeine cache (30min), token-budget truncation (2500 tokens), GCS-synced on deploy/boot
+- CSP `frame-src` directive for Cloud Run preview iframes
 
 ### In Progress
 - Production deployment preparation

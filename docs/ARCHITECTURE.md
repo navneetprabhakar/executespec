@@ -1,7 +1,8 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 3.1
+> **Version**: 3.2
 > **Date**: 2026-04-04
+> **App Version**: v1.1.0
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -798,6 +799,8 @@ graph TB
 | DB-backed feature flags with Redis pub/sub | Cross-instance consistency; admin-manageable; real-time propagation | Config files / environment variables |
 | COMPLETE before review (background validation) | Fast user feedback; preview available immediately; review runs in background | Sequential review then complete |
 | FIFO bonus run consumption | Fair; oldest credits used first; prevents hoarding | LIFO or random |
+| Filesystem-backed design systems (GCS sync) | Decoupled from app deploys; 54 designs updated independently; Caffeine cache (30min) avoids disk I/O | Embedded in JAR / database-stored |
+| 3-signal design resolution | Explicit user hint > planner ui_style > project-type heuristic; covers all input paths | Single-signal only |
 
 ---
 
@@ -831,6 +834,40 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 | Gate lost on server restart | `approve()` → if gate missing → auto-fail with message |
 | Background validation failure | Fire-and-forget; no retry/recovery if background thread fails silently |
 | Resume/retry path stale | `doReviewAndMerge()` not updated for background validation pattern |
+
+---
+
+## 14. Design System Integration (v1.1.0)
+
+Filesystem-backed design system that injects company-specific design tokens into worker prompts for visually distinct frontend output.
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| DesignSystemProperties | `harness/DesignSystemProperties.java` | Config: rootPath, cacheTtl, maxTokens, defaultStyle, curatedStyles |
+| UiStyleResolver | `harness/UiStyleResolver.java` | Filesystem loading, Caffeine cache, fuzzy matching, token truncation, 3-signal resolution |
+| TaskPlan.uiStyle | `agent/model/TaskPlan.java` | Planner output field for detected UI style |
+| Planner prompt | `resources/prompts/planner.txt` | UI STYLE DETECTION instruction block |
+
+### 3-Signal Resolution Priority
+
+1. **Explicit hint** — user says "like Stripe" → `extractStyleHint()` → fuzzy match
+2. **Planner output** — planner sets `ui_style` in plan JSON → fuzzy match
+3. **Project type heuristic** — NODE_FRONTEND/STATIC_HTML/FULL_STACK → default style; backend types → null (no design injection)
+
+### Design File Loading
+
+- Root: `/opt/executespec/designs/design-md/` (GCS-synced on deploy + boot)
+- Local: configurable via `executespec.designs.root-path`
+- Cache: Caffeine, 60 entries, 30min TTL
+- Token budget: 2500 tokens (~10K chars), truncated keeping sections 1-5 (theme, colors, typography, components, layout)
+
+### GCS Sync
+
+Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GCE instance:
+- On every deploy (`.github/workflows/deploy.yml`)
+- On every boot/reboot (`infra/scripts/startup.sh`)
 
 ---
 

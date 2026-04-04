@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
+**v1.1.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
 
 **Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind · GCP
 
@@ -90,6 +90,7 @@ POST /api/runs  →  RequestTriageService (single-shot fast path?)
 - **Post-run AI chat** — conversation panel with workspace context injection
 - **Run archive** — archive completed runs
 - **Request triage** — single-shot fast path for trivial requests
+- **Design system integration** — 54 company design systems (Stripe, Linear, Notion, etc.) loaded from filesystem-backed DESIGN.md files with 3-signal priority resolution (explicit hint > planner > heuristic), Caffeine caching, and token-budget truncation
 - **GCP deployment** — GCE MIG + Cloud SQL + Redis + GCS + Load Balancer + Cloud Run
 
 ---

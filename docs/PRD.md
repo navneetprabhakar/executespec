@@ -1,8 +1,8 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 4.0
+> **Version:** 4.1
 > **Last Updated:** 2026-04-04
-> **Status:** Production (v1)
+> **Status:** Production (v1.1.0)
 > **Author:** Navneet Prabhakar
 
 ---
@@ -723,6 +723,7 @@ SUPER_ADMIN (global -- full system access)
 | Stall detection | Done | 5min no output -> model escalation |
 | 25-min time limit | Done | Wall-clock limit per task, target 20 iterations, hard limit 35 tool calls |
 | Mid-task cost enforcement | Done | Checks budget every 5 LLM calls in worker loop |
+| Design system integration | Done | 54 company design systems (DESIGN.md files) loaded from filesystem, 3-signal resolution (explicit hint > planner > heuristic), Caffeine cache, token-budget truncation |
 
 ### 5.2 Integrations
 
