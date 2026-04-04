@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle, ArrowLeft, ChevronDown, Github, Loader2, Rocket, Send, Sparkles, X, Zap } from 'lucide-react';
 import { useRunStore } from '@/stores/useRunStore';
-import { useUiStore } from '@/stores/useUiStore';
+import { useUiStore, type NewRunConfig } from '@/stores/useUiStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { conversationChat, ConversationMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -15,30 +15,30 @@ import { useViewMode } from '@/hooks/useViewMode';
 
 interface NewRunModalProps {
   onClose: () => void;
-  initialGoal?: string;
+  initialConfig?: NewRunConfig;
 }
 
 const MAX_MESSAGES = 50;
 
 type Mode = 'compose' | 'chat';
 
-export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) {
+export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
-  const [goal, setGoal] = useState(initialGoal ?? '');
-  const [executionMode, setExecutionMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PROTOTYPE');
-  const [showGitHub, setShowGitHub] = useState(false);
+  const [goal, setGoal] = useState(initialConfig?.goal ?? '');
+  const [executionMode, setExecutionMode] = useState<'PROTOTYPE' | 'PRODUCTION'>(initialConfig?.executionMode ?? 'PROTOTYPE');
+  const [showGitHub, setShowGitHub] = useState(initialConfig?.repoMode && initialConfig.repoMode !== 'NONE' ? true : false);
   const persisted = getPersistedSelection();
-  const [provider, setProvider] = useState(persisted.provider);
-  const [model, setModel] = useState(persisted.model);
-  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [provider, setProvider] = useState(initialConfig?.provider ?? persisted.provider);
+  const [model, setModel] = useState(initialConfig?.model ?? persisted.model);
+  const [selectedProjectId, setSelectedProjectId] = useState(initialConfig?.projectId ?? '');
   const [launching, setLaunching] = useState(false);
   const [showUpgradeNudge, setShowUpgradeNudge] = useState(false);
   const [upgradeInfo, setUpgradeInfo] = useState({ metric: 'RUNS', current: 0, max: 0 });
 
   // ── github repo options ───────────────────────────────────────────────────
   type RepoChoice = 'NONE' | 'NEW' | 'EXISTING';
-  const [repoChoice, setRepoChoice] = useState<RepoChoice>('NONE');
-  const [repoUrl, setRepoUrl] = useState('');
+  const [repoChoice, setRepoChoice] = useState<RepoChoice>(initialConfig?.repoMode ?? 'NONE');
+  const [repoUrl, setRepoUrl] = useState(initialConfig?.repoUrl ?? '');
 
   // ── chat mode state ───────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>('compose');
@@ -53,6 +53,22 @@ export default function NewRunModal({ onClose, initialGoal }: NewRunModalProps) 
   const { user } = useAuthStore();
   const { isVibe, vibeRunDefaults } = useViewMode();
   const navigate = useNavigate();
+
+  // Reset state if initialConfig changes (though usually the modal is unmounted)
+  useEffect(() => {
+    if (initialConfig) {
+      setGoal(initialConfig.goal);
+      if (initialConfig.executionMode) setExecutionMode(initialConfig.executionMode);
+      if (initialConfig.provider) setProvider(initialConfig.provider);
+      if (initialConfig.model) setModel(initialConfig.model);
+      if (initialConfig.projectId) setSelectedProjectId(initialConfig.projectId);
+      if (initialConfig.repoMode) {
+        setRepoChoice(initialConfig.repoMode);
+        setShowGitHub(initialConfig.repoMode !== 'NONE');
+      }
+      if (initialConfig.repoUrl) setRepoUrl(initialConfig.repoUrl);
+    }
+  }, [initialConfig]);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {

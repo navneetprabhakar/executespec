@@ -539,31 +539,34 @@ public class DevDockerfileGenerator {
      * in the same package.json, typically run via "concurrently" or similar.
      * Uses "npm run dev" if available, otherwise starts backend + vite in parallel.
      */
+    /**
+     * Single-package full-stack: both frontend (React/Vue/etc) and backend (Express/etc)
+     * in the same package.json, typically run via "concurrently" or similar.
+     * Uses "npm run dev:full" if available, falling back to "dev" or "start".
+     */
     private String singlePackageFullStackDockerfile(Path workspace) {
         JsonNode pkg = parsePackageJson(workspace);
-        boolean hasDevScript = pkg != null && pkg.has("scripts")
-                && pkg.get("scripts").has("dev");
         boolean hasViteConfig = Files.exists(workspace.resolve("vite.config.js"))
                 || Files.exists(workspace.resolve("vite.config.ts"));
 
-        String cmd;
-        if (hasDevScript) {
-            // "dev" script usually runs concurrently (backend + vite frontend)
-            cmd = "CMD [\"npm\", \"run\", \"dev\"]";
-        } else if (hasViteConfig) {
-            // No dev script but has vite — run backend + vite manually
-            String startCmd = (pkg != null && pkg.has("scripts") && pkg.get("scripts").has("start"))
-                    ? "npm start" : "node " + findNodeEntryPoint(workspace);
-            cmd = "CMD [\"sh\", \"-c\", \"" + startCmd
-                    + " & npx vite --host 0.0.0.0 --port 5173\"]";
-        } else {
-            // Fallback: just npm start
-            cmd = "CMD [\"npm\", \"start\"]";
+        boolean usesVite = hasViteConfig;
+
+        if (pkg != null && pkg.has("scripts")) {
+            JsonNode scripts = pkg.get("scripts");
+            // Prioritize scripts that likely run both FE and BE
+            List<String> fullStackCandidates = List.of("dev:full", "start:full", "server:full", "all", "dev", "start");
+            for (String candidate : fullStackCandidates) {
+                if (scripts.has(candidate)) {
+                    String scriptVal = scripts.get(candidate).asText("");
+                    if (scriptVal.contains("vite")) usesVite = true;
+                    break;
+                }
+            }
         }
 
-        // Ensure vite and common React dependencies are available
+        // Ensure vite, concurrently, and common React dependencies are available if it's a Vite project
         String viteInstall = "";
-        if (hasDevScript || hasViteConfig) {
+        if (usesVite) {
             StringBuilder missing = new StringBuilder();
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) missing.append(" vite");
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"@vitejs/plugin-react\"")) missing.append(" @vitejs/plugin-react");
@@ -573,6 +576,9 @@ public class DevDockerfileGenerator {
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"lucide-react\"")) missing.append(" lucide-react");
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"clsx\"")) missing.append(" clsx");
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\"")) missing.append(" tailwind-merge");
+            
+            // Mandate concurrently for full-stack projects to ensure both FE and BE start
+            if (!fileContainsPattern(workspace.resolve("package.json"), "\"concurrently\"")) missing.append(" concurrently");
 
             if (missing.length() > 0) {
                 viteInstall = " && npm install -D" + missing.toString() + " --legacy-peer-deps";
@@ -584,23 +590,30 @@ public class DevDockerfileGenerator {
                 WORKDIR /app
                 LABEL preview=true
                 ENV HOST=0.0.0.0
-                ENV PORT=3000
                 COPY package*.json ./
                 RUN npm install --legacy-peer-deps""" + viteInstall + "\n" +
                 "COPY . .\n" +
-                // Patch package.json scripts: inject --host 0.0.0.0 into any script value that
-                // invokes "vite" without --host. Uses Node's JSON parser to target only script
-                // values (not dependency entries like "vite": "^5.x"). The old sed approach
-                // 's/"vite"/"vite --host 0.0.0.0"/g' matched dependency entries, not script usage.
+                // Patch package.json:
+                // 1. Inject --host 0.0.0.0 into any vite script
+                // 2. If it's a full-stack project but 'dev' only runs vite, create 'dev:all' that runs both
                 "RUN node -e \"" +
-                "const fs=require('fs');" +
-                "const p=JSON.parse(fs.readFileSync('package.json','utf8'));" +
-                "if(p.scripts){for(const[k,v]of Object.entries(p.scripts)){" +
-                "if(typeof v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){" +
-                "p.scripts[k]=v.replace(/\\\\bvite(\\\\s*$)/,'vite --host 0.0.0.0')}}}" +
+                "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));" +
+                "if(p.scripts){" +
+                "  for(const[k,v]of Object.entries(p.scripts)){" +
+                "    if(typeof v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){" +
+                "      p.scripts[k]=v.replace(/\\\\bvite\\\\b/g,'vite --host 0.0.0.0')" +
+                "    }" +
+                "  }" +
+                "  const hasServer=p.scripts.server||p.scripts.backend||fs.existsSync('server/server.js')||fs.existsSync('server.js');" +
+                "  const runsBoth=Object.values(p.scripts).some(v=>v.includes('concurrently')||(v.includes('vite')&&v.includes('node')));" +
+                "  if(hasServer && !runsBoth){" +
+                "    const serverCmd=p.scripts.server?'npm run server':(p.scripts.backend?'npm run backend':(fs.existsSync('server/server.js')?'node server/server.js':'node server.js'));" +
+                "    p.scripts['dev:all']=`concurrently \\\"npm run dev\\\" \\\"${serverCmd}\\\"`;" +
+                "  }" +
+                "}" +
                 "fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n" +
-                "EXPOSE 5173 3000\n" +
-                cmd.stripLeading() + "\n";
+                "EXPOSE 5173 3001\n" +
+                "CMD [\"sh\", \"-c\", \"if [ -n \\\"$(node -e 'console.log(JSON.parse(fs.readFileSync(\\\"package.json\\\")).scripts[\\\"dev:all\\\"]||\\\"\\\")')\\\" ]; then npm run dev:all; else npm run dev; fi\"]\n";
     }
 
     private String springBootDockerfile(Path workspace) {
@@ -612,6 +625,8 @@ public class DevDockerfileGenerator {
                     FROM eclipse-temurin:21
                     WORKDIR /app
                     LABEL preview=true
+                    ENV SERVER_ADDRESS=0.0.0.0
+                    ENV SERVER_PORT=8080
                     COPY . .
                     RUN chmod +x gradlew 2>/dev/null || true
                     EXPOSE 8080
@@ -623,6 +638,8 @@ public class DevDockerfileGenerator {
                 FROM eclipse-temurin:21
                 WORKDIR /app
                 LABEL preview=true
+                ENV SERVER_ADDRESS=0.0.0.0
+                ENV SERVER_PORT=8080
                 RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
                 COPY pom.xml .
                 RUN mvn dependency:go-offline -q -B || true
@@ -1265,6 +1282,8 @@ public class DevDockerfileGenerator {
                 FROM golang:1.22-alpine
                 WORKDIR /app
                 LABEL preview=true
+                ENV HOST=0.0.0.0
+                ENV PORT=8080
                 COPY go.mod go.sum* ./
                 RUN go mod download 2>/dev/null || true
                 COPY . .
@@ -1301,6 +1320,8 @@ public class DevDockerfileGenerator {
                 FROM ruby:3.2-alpine
                 WORKDIR /app
                 LABEL preview=true
+                ENV HOST=0.0.0.0
+                ENV PORT=4567
                 COPY Gemfile* ./
                 """ + installStep + "\n" + """
                 COPY . .

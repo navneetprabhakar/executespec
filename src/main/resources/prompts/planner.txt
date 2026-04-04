@@ -75,12 +75,16 @@ or backend configuration, you MUST instruct the worker to use these defaults:
   - Admin User:    preview
   - Admin Pass:    preview
   - Default DB:    preview
+  - Ports:         PostgreSQL (5432), MySQL (3306), MongoDB (27017), Redis (6379)
 
-Port Mapping:
-  - PostgreSQL: 5432
-  - MySQL:      3306
-  - MongoDB:    27017 (no auth by default)
-  - Redis:      6379 (no auth by default)
+  PROJECT CONSISTENCY RULES:
+  - API PORT: If your plan involves a backend and a frontend (Vite/React), you MUST specify that the backend port (e.g. 3001) is used as the target in the vite.config.js proxy.
+  - MODULE SYSTEM: If you specify "type": "module" in package.json, ensure all subsequent tasks for backend code use ESM (import/export) instead of CommonJS.
+  - BACKEND ROBUSTNESS (Node): Every backend server task MUST include instructions to implement a centralized JSON error-handling middleware `(err, req, res, next)` AND a 404 Not Found handler.
+  - BACKEND ROBUSTNESS (Python): Every FastAPI/Flask backend MUST include instructions for a global exception handler (returning JSON) and a 404 handler.
+  - BACKEND ROBUSTNESS (Java): Every Spring Boot backend MUST include a `@RestControllerAdvice` class for centralized JSON error handling.
+  - BACKEND ROBUSTNESS (Go/Ruby/Rust/PHP): Every backend MUST include instructions for 404 handlers and global JSON error handlers.
+  - NETWORK BINDING: Every server (regardless of language) MUST be instructed to bind to `0.0.0.0` (not `localhost`) to be reachable in the preview.
 
 Explicitly mention: "Use host 'db', user 'preview', and database 'preview' for local configuration."
 
@@ -218,11 +222,10 @@ Exception: project_setup tasks for FULL_STACK projects may create both pom.xml a
 (these are auto-unlocked scaffold files) — use task_layer "INFRA" for such tasks.
 
 FULL-STACK ORDERING:
-  When the spec requires both backend and frontend:
-    Java/Spring: entity/model → repository → service → controller → frontend components
-    Node.js/Express: data store/models → Express server → API routes → React/Vue components
-    Python/FastAPI: models → schemas → routes → frontend components
-  General rule: backend data layer → backend API → frontend API client → frontend UI
+  - Backend data layer → backend API → frontend API client → frontend UI.
+  - ROUTER NAMESPACE ISOLATION: If a router is mounted at a path (e.g., `app.use('/api', router)`), the internal routes in that router MUST NOT repeat the path.
+    - GOOD: `router.get('/movies')` → results in `/api/movies`
+    - BAD:  `router.get('/api/movies')` → results in `/api/api/movies` (BREAKS FRONTEND).
   This ensures the API contract exists before frontend tasks attempt to consume it.
 
 ═══════════════════════════════════════════════════════════
@@ -242,7 +245,7 @@ SPLIT STRATEGY for Express + React (single-directory or separate frontend/backen
 
   Tier 1 (backend core — NO frontend files):
     data_store                 — In-memory storage module or database client/models
-    express_server             — Express app setup: CORS, middleware, error handler, app.listen()
+    express_server             — Express app setup: CORS, JSON middleware, 404 handler, and CENTRALIZED JSON ERROR HANDLER.
 
   Tier 2 (backend API — depends on data store + server):
     api_routes_resource_a      — CRUD routes for one resource (e.g., /api/transactions)

@@ -315,7 +315,7 @@ public class SequentialTaskExecutor {
         sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, normalizedStatus));
         log.info("  Task [{}]: {}", taskId, normalizedStatus);
 
-        if ("COMPLETE".equals(normalizedStatus)) {
+        if ("COMPLETE".equals(normalizedStatus) || "PARTIAL".equals(normalizedStatus)) {
             completed.add(task);
 
             // Commit any uncommitted files in the worktree before merge

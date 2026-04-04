@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useReducer } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
-import { useAuthStore, selectIsSuperAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
+import { useAuthStore, selectIsSuperAdmin, selectIsOrgAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import {
@@ -354,6 +354,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
   fetchRuns: () => Promise<void>;
 }) {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
   const isOrgMember = useAuthStore(selectIsOrgMember);
   const permissions = useTierPermissions();
 
@@ -711,8 +712,8 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         );
       })()}
 
-      {/* Token usage by model — visible to users with canViewTokenUsage */}
-      {permissions?.canViewTokenUsage && tokensByModel(run.tasks, run.agentTokens).length > 0 && (
+      {/* Token usage by model — visible to Org Admins and Super Admins */}
+      {isOrgAdmin && tokensByModel(run.tasks, run.agentTokens).length > 0 && (
         <div className="pt-3 border-t border-[var(--border-default)]">
           <div className="flex items-center gap-2 mb-3">
             <Cpu className="h-3.5 w-3.5 text-muted" />

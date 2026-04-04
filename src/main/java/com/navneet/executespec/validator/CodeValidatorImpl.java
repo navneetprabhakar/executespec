@@ -67,6 +67,7 @@ public class CodeValidatorImpl implements CodeValidator {
     private Language detectPrimaryLanguage(Path root) {
         if (root.resolve("pom.xml").toFile().exists() || root.resolve("build.gradle").toFile().exists()) return Language.JAVA;
         if (root.resolve("tsconfig.json").toFile().exists()) return Language.TYPESCRIPT;
+        if (root.resolve("package.json").toFile().exists()) return Language.JAVASCRIPT;
         if (root.resolve("requirements.txt").toFile().exists() || root.resolve("pyproject.toml").toFile().exists()) return Language.PYTHON;
         return null;
     }

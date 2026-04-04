@@ -4,7 +4,8 @@ public enum Language {
     JAVA,
     PYTHON,
     TYPESCRIPT,
-    REACT;
+    REACT,
+    JAVASCRIPT;
 
     /**
      * Detect language from file extension and path conventions.
@@ -28,6 +29,10 @@ public enum Language {
         // Python: .py files
         if (name.endsWith(".py")) {
             return PYTHON;
+        }
+        // Javascript: .js files
+        if (name.endsWith(".js") || name.endsWith(".mjs") || name.endsWith(".cjs")) {
+            return JAVASCRIPT;
         }
         // Non-code files — skip validation
         return null;

@@ -67,7 +67,7 @@ export default function RunConversation({ runId }: Props) {
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const { setActiveRunId, fetchRuns } = useRunStore();
   const activeRun = useRunStore((s) => s.activeRun);
-  const { addToast, setPendingNewRunGoal } = useUiStore();
+  const { addToast, setPendingNewRunConfig } = useUiStore();
   const copilotMaximized = useUiStore((s) => s.copilotMaximized);
   const setCopilotMaximized = useUiStore((s) => s.setCopilotMaximized);
 
@@ -158,7 +158,7 @@ export default function RunConversation({ runId }: Props) {
     if (!req) return;
 
     // Open NewRunModal pre-filled with the goal instead of launching directly
-    setPendingNewRunGoal(req);
+    setPendingNewRunConfig({ goal: req });
     setShowIterateBox(false);
   };
 
@@ -326,7 +326,7 @@ export default function RunConversation({ runId }: Props) {
                   const msg = e.message ?? '';
                   if (msg.includes('422')) {
                     // Too large — fall back to iterate as new run
-                    setPendingNewRunGoal(buildIssuesPrompt(unresolvedIssues));
+                    setPendingNewRunConfig({ goal: buildIssuesPrompt(unresolvedIssues) });
                     addToast({ type: 'info', message: 'Too many fixes for apply. Redirecting to new run.' });
                   } else {
                     addToast({ type: 'error', message: msg || 'Failed to apply fixes.' });
@@ -518,7 +518,7 @@ export default function RunConversation({ runId }: Props) {
                   }
                 </button>
                 <button
-                  onClick={() => { setPendingNewRunGoal(compiledSpec); setShowCompiledSpec(false); }}
+                  onClick={() => { setPendingNewRunConfig({ goal: compiledSpec }); setShowCompiledSpec(false); }}
                   className="flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/90 transition-colors"
                 >
                   <Rocket className="h-3.5 w-3.5" /> Iterate as New Run
