@@ -256,11 +256,12 @@ public class PreviewService {
 
         // Capture observation context so virtual threads propagate traceId/spanId
         var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+        String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
         if (isCloudRunMode()) {
-            Thread.ofVirtual().name("preview-cr-" + runId.substring(0, 8))
+            Thread.ofVirtual().name("preview-cr-" + shortId)
                     .start(snapshot.wrap(() -> buildAndStartCloudRun(runId, workspace, type, mode, projectName, safeEnvVars)));
         } else {
-            Thread.ofVirtual().name("preview-docker-" + runId.substring(0, 8))
+            Thread.ofVirtual().name("preview-docker-" + shortId)
                     .start(snapshot.wrap(() -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars)));
         }
 

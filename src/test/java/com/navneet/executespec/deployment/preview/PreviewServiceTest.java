@@ -47,7 +47,7 @@ class PreviewServiceTest {
     @Mock StateStore stateStore;
     @Mock TierConfigRepository tierConfigRepo;
     @Mock WorkspaceRestoreService restoreService;
-    @Mock io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    io.micrometer.core.instrument.MeterRegistry meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
 
     PreviewPortPool portPool;
 
@@ -139,9 +139,10 @@ class PreviewServiceTest {
         }
 
         @Test
-        @DisplayName("Throws when run is still WORKING (not complete)")
+        @DisplayName("Throws when run is PLANNING (not in preview-allowed statuses)")
         void throwsWhenRunNotComplete() {
-            when(stateStore.findRun("run-1")).thenReturn(Optional.of(workingRun("run-1")));
+            PipelineRun planningRun = PipelineRun.builder().runId("run-1").status("PLANNING").createdByUserId("user-1").build();
+            when(stateStore.findRun("run-1")).thenReturn(Optional.of(planningRun));
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
                     .isInstanceOf(PreviewException.class)

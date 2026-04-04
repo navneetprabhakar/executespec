@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * Orchestrates model evaluation: runs all models against all test cases,
  * scores results, normalizes costs, and generates the final report.
  *
- * <p>Total calls: 6 models x 12 test cases = 72 LLM calls.
+ * <p>Total calls: 6 models x 14 test cases = 84 LLM calls.
  * Models are tested sequentially to avoid rate limits.
  * Includes 3 boss-level saga tests (diagnosis, consistency, compliance).
  */

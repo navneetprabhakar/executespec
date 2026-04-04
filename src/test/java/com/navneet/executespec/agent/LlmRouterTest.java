@@ -28,14 +28,30 @@ class LlmRouterTest {
     @Mock private com.navneet.executespec.config.AgentProperties agentProperties;
     @Mock private io.micrometer.core.instrument.MeterRegistry meterRegistry;
     @Mock private com.navneet.executespec.router.ProviderHealthTracker providerHealthTracker;
+    @Mock private com.navneet.executespec.router.ModelRegistry modelRegistry;
     @Mock private AnthropicChatModel anthropicChatModel;
     @Mock private ChatResponse chatResponse;
+    @Mock private org.springframework.ai.chat.model.Generation generation;
+    @Mock private org.springframework.ai.chat.messages.AssistantMessage assistantMessage;
 
     private LlmRouter router;
 
     @BeforeEach
     void setUp() {
-        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties, meterRegistry, providerHealthTracker);
+        // LlmRouter reads agentProperties.getTokenBudget().getMaxTokens() for Anthropic calls
+        var tokenBudget = new com.navneet.executespec.config.AgentProperties.TokenBudget();
+        tokenBudget.setMaxTokens(8192);
+        when(agentProperties.getTokenBudget()).thenReturn(tokenBudget);
+
+        // RunKeyStore must return resolved keys for the run
+        when(runKeyStore.get(any())).thenReturn(ResolvedKeys.SYSTEM_ONLY);
+
+        // ChatResponse chain: response.getResult().getOutput() must be non-null
+        when(chatResponse.getResult()).thenReturn(generation);
+        when(generation.getOutput()).thenReturn(assistantMessage);
+        when(assistantMessage.getText()).thenReturn("test response");
+
+        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties, meterRegistry, providerHealthTracker, modelRegistry);
     }
 
     @Nested

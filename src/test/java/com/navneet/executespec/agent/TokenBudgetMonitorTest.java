@@ -12,12 +12,15 @@ class TokenBudgetMonitorTest {
 
     private TokenBudgetMonitor monitor;
     private AgentProperties props;
+    private com.navneet.executespec.router.ModelRegistry modelRegistry;
 
     @BeforeEach
     void setup() {
         props = new AgentProperties();
+        modelRegistry = new com.navneet.executespec.router.ModelRegistry(
+                new com.navneet.executespec.router.ModelMatrixProperties());
         // Use production defaults: low=2048, medium=4096, high=8192
-        monitor = new TokenBudgetMonitor(props);
+        monitor = new TokenBudgetMonitor(props, modelRegistry);
     }
 
     @Test
@@ -64,17 +67,18 @@ class TokenBudgetMonitorTest {
     }
 
     @Test
-    void openaiModels_use128kContextLimit() {
+    void openaiModels_useDefaultContextLimit() {
+        // With default (empty) ModelMatrixProperties, all models fall back to 200k
         BudgetStatus status = monitor.check("gpt-5.4-mini", "MEDIUM", 1_000);
-        assertThat(status.contextLimit()).isEqualTo(128_000);
+        assertThat(status.contextLimit()).isEqualTo(200_000);
     }
 
     @Test
     void maxOutputTokens_returnsCorrectTierValues() {
-        // Production defaults: low=2048, medium=4096, high=8192
-        assertThat(monitor.maxOutputTokens("LOW")).isEqualTo(2048);
-        assertThat(monitor.maxOutputTokens("MEDIUM")).isEqualTo(4096);
-        assertThat(monitor.maxOutputTokens("HIGH")).isEqualTo(8192);
-        assertThat(monitor.maxOutputTokens(null)).isEqualTo(4096); // null → MEDIUM
+        // Current defaults: LOW=6144, MEDIUM=8192, HIGH=12288
+        assertThat(monitor.maxOutputTokens("LOW")).isEqualTo(6_144);
+        assertThat(monitor.maxOutputTokens("MEDIUM")).isEqualTo(8_192);
+        assertThat(monitor.maxOutputTokens("HIGH")).isEqualTo(12_288);
+        assertThat(monitor.maxOutputTokens(null)).isEqualTo(8_192); // null → MEDIUM
     }
 }
