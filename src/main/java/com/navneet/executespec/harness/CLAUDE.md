@@ -7,7 +7,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 - `SequentialTaskExecutor.java` — Executes tasks in tiered parallel groups via WorkerAgent. Model resolved from matrix via ModelResolver. Validation deferred to review phase.
 - `WorkspaceInitService.java` — Creates fresh git repo for each run. Writes `.gitignore`, `.gitattributes`.
 - `ApprovalGate.java` — Plan approval gate interface
-- `GateStore.java` — Redis-backed gate storage (500ms poll, 2h TTL)
+- `GateStore.java` — Redis-backed gate storage (500ms poll, 2h TTL, 24h max wait timeout)
 - `GitMergeService.java` — Merges task branches into main. Progressive merge after each task.
 - `LanguageValidator.java` — Blocks unsupported languages at submission
 - `UiStyleResolver.java` — Resolves UI style from user request or project defaults
@@ -37,11 +37,20 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 
 **Key design:** User sees COMPLETE immediately after compile+merge. Preview is available while validation runs in background. SSE stream stays open until background validation finishes.
 
+## Cost Budget Enforcement
+- `RunCostBudgetService` uses Caffeine caches (6h TTL, 1000 max) instead of unbounded ConcurrentHashMaps
+- Mid-task cost check: WorkerAgent checks `isOverBudget(runId)` every 5 LLM iterations; emits `budgetExceeded` SSE event and stops cleanly
+
 ## Background Validation Lifecycle
 - `backgroundValidationRuns` (ConcurrentHashMap.newKeySet()) tracks runs with active background threads
 - Main `executeRunAsync()` finally block checks this set — defers cleanup for background runs
 - Background thread's own `finally` block handles: `backgroundValidationRuns.remove()`, `runKeyStore.remove()`, `runBudgetTracker.remove()`, `broadcaster.complete()`
 - Preview NOT stopped after test execution (stays up for user's full TTL)
+
+## Concurrency Controls
+- **Thread pool:** Bounded `ThreadPoolExecutor` (core=maxRuns, max=maxRuns*3, CallerRunsPolicy) — replaces unbounded `newCachedThreadPool`
+- **Run semaphore:** `runSlots.tryAcquire()` on ALL entry points: `startIterationRun()`, `resumeRun()`, `executeApplySuggestion()`. Released in `finally` block.
+- **Gate timeout:** All gate waits (`awaitPlanGate`, `awaitMergeGate`, `awaitClarificationGate`) have 24h max wait. Throws `InterruptedException` on deadline expiry.
 
 ## Patterns
 - Pipeline runs in virtual thread, MUST wrap with `ContextSnapshotFactory.captureAll()`

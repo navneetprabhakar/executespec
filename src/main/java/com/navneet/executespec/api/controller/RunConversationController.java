@@ -187,9 +187,8 @@ public class RunConversationController {
         // Tier limit check (shared counter for both COPILOT and REVIEW)
         tierEnforcementService.assertCanApplySuggestion(userId, run);
 
-        // Apply-to-run counts as a run against the monthly quota
-        tierEnforcementService.assertCanSubmitRun(userId);
-        tierEnforcementService.incrementRunCount(userId);
+        // Apply-to-run counts as a run against the monthly quota (atomic check+increment)
+        tierEnforcementService.assertAndIncrementRunCount(userId);
 
         // Determine source
         String sourceStr = body.getOrDefault("source", "COPILOT").toUpperCase();
@@ -294,9 +293,8 @@ public class RunConversationController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userRequest must not be blank");
         }
 
-        // Iteration counts as a new run against the monthly quota
-        tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
-        tierEnforcementService.incrementRunCount(userDetails.getUser().getId());
+        // Iteration counts as a new run against the monthly quota (atomic check+increment)
+        tierEnforcementService.assertAndIncrementRunCount(userDetails.getUser().getId());
 
         // Create the iteration run in the DB (sets sourceRunId = sourceRun.getRunId())
         PipelineRun newRun = stateStore.createIterationRun(sourceRun, userRequest);

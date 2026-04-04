@@ -34,11 +34,13 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -65,11 +67,17 @@ public class LlmRouter {
 
     public enum FallbackMode { IMMEDIATE, TASK_BOUNDARY, NO_FALLBACK }
 
-    /** Per-run LLM call counters — for observability only (no enforcement). */
-    private final ConcurrentHashMap<String, AtomicInteger> runCallCounters = new ConcurrentHashMap<>();
+    /** Per-run LLM call counters — for observability only (no enforcement). TTL 6h, max 1000. */
+    private final Cache<String, AtomicInteger> runCallCounters = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofHours(6))
+            .maximumSize(1000)
+            .build();
 
-    /** Per-run user tier cache — populated by PipelineHarness at run start. FREE tier forces gpt-5.4-mini. */
-    private final ConcurrentHashMap<String, String> runUserTierCache = new ConcurrentHashMap<>();
+    /** Per-run user tier cache — populated by PipelineHarness at run start. FREE tier forces gpt-5.4-mini. TTL 6h, max 1000. */
+    private final Cache<String, String> runUserTierCache = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofHours(6))
+            .maximumSize(1000)
+            .build();
 
     private final ApplicationContext ctx;
     private final InboxService inboxService;
@@ -99,7 +107,7 @@ public class LlmRouter {
 
         // Track call count for observability (no enforcement — wall-clock limit is the safety net)
         if (runId != null) {
-            runCallCounters.computeIfAbsent(runId, k -> new AtomicInteger(0)).incrementAndGet();
+            runCallCounters.get(runId, k -> new AtomicInteger(0)).incrementAndGet();
         }
 
         Observation llmObs = Observation.createNotStarted("executespec.llm.call", getObservationRegistry())
@@ -584,14 +592,14 @@ public class LlmRouter {
     /** Call when a run completes (success or failure) to free memory. */
     public void clearRunCallCounter(String runId) {
         if (runId != null) {
-            runCallCounters.remove(runId);
-            runUserTierCache.remove(runId);
+            runCallCounters.invalidate(runId);
+            runUserTierCache.invalidate(runId);
         }
     }
 
     /** Get current LLM call count for a run (for observability). */
     public int getRunCallCount(String runId) {
-        AtomicInteger counter = runCallCounters.get(runId);
+        AtomicInteger counter = runCallCounters.getIfPresent(runId);
         return counter != null ? counter.get() : 0;
     }
 
@@ -606,7 +614,7 @@ public class LlmRouter {
 
     /** Returns the cached user tier for a run, or null if not set. */
     public String getRunUserTier(String runId) {
-        return runId != null ? runUserTierCache.get(runId) : null;
+        return runId != null ? runUserTierCache.getIfPresent(runId) : null;
     }
 
     // ── Exceptions ─────────────────────────────────────────────────────────────

@@ -94,6 +94,10 @@ public class ComposeFileGenerator {
         sb.append("      - no-new-privileges:true\n");
         sb.append("    cap_drop:\n");
         sb.append("      - ALL\n");
+        // Block GCP/AWS/Azure metadata endpoints by redirecting to localhost
+        sb.append("    extra_hosts:\n");
+        sb.append("      - \"metadata.google.internal:127.0.0.1\"\n");
+        sb.append("      - \"169.254.169.254:127.0.0.1\"\n");
         sb.append("\n");
 
         // ── Database service (optional) ──────────────────────────────────────

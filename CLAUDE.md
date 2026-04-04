@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-03
+> Last updated: 2026-04-04
 
 ## Architecture
 
@@ -12,14 +12,14 @@
 - **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → SequentialTaskExecutor (parallel tiers) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
 - **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). Default provider: OpenAI. YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
-- **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL. Merge is automatic (no manual gate).
+- **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL, 24h max wait timeout. Merge is automatic (no manual gate).
 - **Progressive merge:** Each task merged to main immediately after completion (validation deferred to review phase)
-- **Auth:** JWT (access 24h, refresh 7d) + OAuth2 (Google, GitHub). RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles. Force-logout via feature flag epoch-based JWT invalidation.
+- **Auth:** JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles. Force-logout via feature flag epoch-based JWT invalidation. JWT secret validated at startup in prod (`JwtSecretValidator`).
 - **Tiers:** FREE (5 runs/month) → PRO (100/month) → ENTERPRISE (unlimited)
 - **Billing:** Multi-gateway via `PaymentGatewayRouter` (Razorpay + Stripe). Subscriptions, run top-up credits, invoicing with GST, payment audit trail.
-- **Security:** 8-layer defense-in-depth: request validation, input sanitization (`InputSanitizer`), LLM prompt defense, code abuse scanning (`CodeAbuseScanner`), shell sandbox, file sandbox, process isolation, container hardening. Configurable CSP/HSTS/X-Frame-Options via `SecurityProperties`.
+- **Security:** 8-layer defense-in-depth: request validation, input sanitization (`InputSanitizer` — NFKC normalization, zero-width strip, base64 decode+scan), LLM prompt defense, code abuse scanning (`CodeAbuseScanner` — crypto, reverse shell, PowerShell, DNS exfil, cloud metadata, obfuscation), shell sandbox, file sandbox, process isolation, container hardening (metadata endpoint blocking, env var whitelist). Configurable CSP/HSTS/X-Frame-Options via `SecurityProperties`.
 - **Feature flags:** DB-backed `FeatureFlagService` with Redis pub/sub cache invalidation + 60s scheduled reload. Admin-manageable via `FeatureFlagController`.
-- **Rate limiting:** Redis-backed per-tenant rate limiting via `RateLimitFilter`.
+- **Rate limiting:** Redis-backed per-tenant rate limiting via `RateLimitFilter`. Endpoint groups: AUTH, RUNS, WEBHOOK, READ, WRITE, PREVIEW, DEPLOY with per-tier limits.
 - **Observability:** Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP)
 
 ## Code Conventions
@@ -133,7 +133,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | DELETE | `/api/runs/{id}` | Cancel/delete run |
 | POST | `/api/runs/{id}/archive` | Archive run |
 | POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
-| GET | `/api/runs/{id}/events` | SSE event stream |
+| GET | `/api/runs/{id}/events` | SSE event stream (scoped token) |
+| GET | `/api/runs/{id}/sse-token` | Get scoped SSE token (5-min TTL) |
 
 ### Validation Report
 | Method | Path | Description |
@@ -222,8 +223,9 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Dockerfile gen (preview) | `deployment/preview/DevDockerfileGenerator.java` (reads `.agent-context/project.json`) |
 | Dockerfile gen (deploy) | `deployment/DockerfileGenerator.java` (strategy pattern, reads `project.json`) |
 | Security config | `auth/security/SecurityConfig.java` |
+| JWT secret validator | `auth/security/JwtSecretValidator.java` (prod-only startup check) |
 | Security properties | `config/SecurityProperties.java` (CSP, HSTS, X-Frame-Options) |
-| JWT utility | `auth/security/JwtUtil.java` |
+| JWT utility | `auth/security/JwtUtil.java` (includes scoped SSE tokens) |
 | OAuth2 handler | `auth/oauth/OAuthSuccessHandler.java` |
 | Tier permissions | `auth/service/TierPermissionService.java` |
 | Tier enforcement | `auth/service/TierEnforcementService.java` |
@@ -280,8 +282,8 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Payment audit trail with CSV export + webhook event log (admin)
 - Feature flag system (DB + Redis pub/sub + admin UI) for platform toggles
 - Force-logout via feature flag epoch-based JWT invalidation
-- Redis-backed per-tenant rate limiting
-- 8-layer security: request validation, input sanitization, LLM prompt defense, code abuse scanning, shell sandbox, file sandbox, process isolation, container hardening
+- Redis-backed per-tenant rate limiting (AUTH, RUNS, WEBHOOK, READ, WRITE, PREVIEW, DEPLOY groups)
+- 8-layer security: request validation, input sanitization (NFKC + zero-width strip + base64 decode), LLM prompt defense, code abuse scanning (crypto, shells, PowerShell, DNS exfil, metadata), shell sandbox, file sandbox, process isolation, container hardening (metadata blocking, env whitelist)
 - Configurable security headers (CSP, HSTS, X-Frame-Options) via SecurityProperties
 - JIRA/Confluence inbound webhooks + outbound completion comments (via MergeCompleted event, both PROTOTYPE and PRODUCTION)
 - Slack notifications (Block Kit messages)
@@ -293,6 +295,21 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
 - Model evaluation framework (`eval/` package)
+- Atomic quota enforcement (pessimistic locking, single-TX check+increment)
+- Atomic token counter updates (SQL-level increment, no read-modify-write)
+- Bounded thread pool for pipeline runs (CallerRunsPolicy backpressure)
+- Gate wait timeout (24h max, prevents indefinite thread block)
+- Semaphore enforcement on all run entry points (startIterationRun, resumeRun, executeApplySuggestion)
+- Concurrent preview limit race fix (synchronized block)
+- Scoped SSE tokens (5-min TTL, per-runId, prevents cross-run eavesdropping)
+- JWT secret startup validation (prod profile, blocks dev placeholder)
+- Tier-based deployment limits (enforces `max_deployments` from tier_config)
+- Mid-task cost enforcement (checks budget every 5 LLM calls in worker loop)
+- Caffeine TTL caches replacing unbounded ConcurrentHashMaps (LlmRouter, RunCostBudgetService)
+- Containerized test execution (Docker with --read-only, --cap-drop ALL, memory/CPU limits)
+- Env var whitelist for Docker subprocess (PATH, HOME, DOCKER_HOST only — no leaked secrets)
+- ServiceNow webhook HMAC verification
+- Actuator endpoint restriction (health+prometheus public, rest SUPER_ADMIN)
 
 ### In Progress
 - Production deployment preparation

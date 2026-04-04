@@ -34,7 +34,14 @@ public class CodeAbuseScanner {
         Pattern.compile("\\bsocat\\b.*\\bexec\\b"),
         Pattern.compile("python.*socket\\..*connect.*\\bos\\.(dup2|popen)"),
         Pattern.compile("/dev/tcp/\\d+\\.\\d+\\.\\d+\\.\\d+"),
-        Pattern.compile("\\bmkfifo\\b.*\\bnc\\b")
+        Pattern.compile("\\bmkfifo\\b.*\\bnc\\b"),
+        // PowerShell reverse shells
+        Pattern.compile("\\bInvoke-Expression\\b", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("\\bNew-Object\\s+.*\\.Net\\.Sockets\\.TCPClient\\b", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("\\bIEX\\s*\\(", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("\\bpowershell\\b.*-e(nc|ncodedcommand)?\\s+", Pattern.CASE_INSENSITIVE),
+        // Bash variable indirection (obfuscation technique)
+        Pattern.compile("\\$\\{!\\w+\\}")
     );
 
     /** Patterns that indicate data exfiltration. */
@@ -42,7 +49,21 @@ public class CodeAbuseScanner {
         Pattern.compile("curl\\s+.*-d\\s+@/etc/passwd"),
         Pattern.compile("curl\\s+.*--data-binary\\s+@"),
         Pattern.compile("wget\\s+.*--post-file"),
-        Pattern.compile("\\bfetch\\s*\\(.*document\\.cookie", Pattern.CASE_INSENSITIVE)
+        Pattern.compile("\\bfetch\\s*\\(.*document\\.cookie", Pattern.CASE_INSENSITIVE),
+        // DNS exfiltration
+        Pattern.compile("\\bdig\\b.*\\$\\("),
+        Pattern.compile("\\bnslookup\\b.*\\$\\("),
+        Pattern.compile("\\bburpcollaborator\\.net\\b", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("\\binteractsh\\.com\\b", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("\\boast\\.(fun|pro|me)\\b", Pattern.CASE_INSENSITIVE)
+    );
+
+    /** Patterns that indicate cloud metadata endpoint access. */
+    private static final List<Pattern> METADATA_PATTERNS = List.of(
+        Pattern.compile("169\\.254\\.169\\.254"),
+        Pattern.compile("metadata\\.google\\.internal", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("metadata\\.azure\\.com", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("/latest/meta-data/")
     );
 
     /** Patterns that indicate obfuscated payloads. */
@@ -91,6 +112,13 @@ public class CodeAbuseScanner {
             if (p.matcher(content).find()) {
                 log.warn("CODE ABUSE FLAGGED (exfiltration): file={}, pattern={}", filePath, p.pattern());
                 return ScanResult.flagged("DATA_EXFILTRATION", p.pattern());
+            }
+        }
+
+        for (Pattern p : METADATA_PATTERNS) {
+            if (p.matcher(content).find()) {
+                log.warn("CODE ABUSE FLAGGED (metadata access): file={}, pattern={}", filePath, p.pattern());
+                return ScanResult.flagged("METADATA_ACCESS", p.pattern());
             }
         }
 

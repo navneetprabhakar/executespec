@@ -7,7 +7,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - `entity/PipelineRun.java` — JPA entity for runs. Key fields: status, plan, costEstimate, actualCostUsd, failureReason, githubPrUrl.
 - `entity/AgentTask.java` — JPA entity for individual tasks within a run.
 - `entity/PlanVersion.java` — JPA entity for plan version history. Columns widened in V45 (id/run_id/created_by → VARCHAR(255), source → VARCHAR(64)).
-- `repository/PipelineRunRepository.java` — JPA repository for PipelineRun.
+- `repository/PipelineRunRepository.java` — JPA repository for PipelineRun. Includes `addTokens()` atomic SQL update (no read-modify-write race).
 - `InboxService.java` — User inbox/notification service.
 
 ## DB Migrations
@@ -20,9 +20,11 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - V50: Free tier restrictions
 - V51: Force logout flag
 - V52: `github_pr_url VARCHAR(512)` on `pipeline_run`
+- V53–V56: Further schema updates
 
 ## Patterns
 - StateStore is the single source of truth — no direct repository access from agents
 - Task compaction recorded via `recordCompaction()` (emits SSE event)
-- Token usage tracked per run via `addTokensToRun()`
+- Token usage tracked per run via atomic `addTokens()` SQL update (no read-modify-write race)
+- Quota enforcement: `TierEnforcementService.assertAndIncrementRunCount()` uses pessimistic lock + single TX (TOCTOU fix)
 - Plan versioning via `savePlanVersion()` / `incrementPlanVersion()` — used by apply-suggestion flows

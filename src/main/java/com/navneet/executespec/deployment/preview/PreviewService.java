@@ -173,81 +173,91 @@ public class PreviewService {
             throw new PreviewException("Run must be complete to preview (current status: " + run.getStatus() + ")");
         }
 
-        // Guard: idempotent — return existing session if still active.
-        // If FAILED or TIMED_OUT, remove it so the user can retry.
-        // If ANALYZING/BUILDING/STARTING/RUNNING, return as-is (no restart).
-        PreviewSession existing = active.get(runId);
-        if (existing != null) {
-            if (existing.status() == PreviewStatus.FAILED
-                    || existing.status() == PreviewStatus.TIMED_OUT) {
-                // Clean up stale failed session so retry starts fresh
-                if (existing.cloudRunServiceName() != null) {
-                    cleanupCloudRun(existing.cloudRunServiceName(), existing.imageUri());
+        // SECURITY: synchronized block ensures atomic check-count-insert to prevent
+        // race condition where two concurrent requests both pass the limit check.
+        PreviewSession session;
+        PreviewProjectType type;
+        PreviewMode mode;
+        Path workspace;
+        String projectName;
+        Duration ttl;
+        synchronized (active) {
+            // Guard: idempotent — return existing session if still active.
+            // If FAILED or TIMED_OUT, remove it so the user can retry.
+            // If ANALYZING/BUILDING/STARTING/RUNNING, return as-is (no restart).
+            PreviewSession existing = active.get(runId);
+            if (existing != null) {
+                if (existing.status() == PreviewStatus.FAILED
+                        || existing.status() == PreviewStatus.TIMED_OUT) {
+                    // Clean up stale failed session so retry starts fresh
+                    if (existing.cloudRunServiceName() != null) {
+                        cleanupCloudRun(existing.cloudRunServiceName(), existing.imageUri());
+                    } else {
+                        cleanupCompose(existing);
+                    }
+                    active.remove(runId);
+                    log.info("Cleared failed preview session for run {} — allowing retry", runId);
                 } else {
-                    cleanupCompose(existing);
+                    // ANALYZING, BUILDING, STARTING, RUNNING — return current state, don't restart
+                    return existing;
                 }
-                active.remove(runId);
-                log.info("Cleared failed preview session for run {} — allowing retry", runId);
-            } else {
-                // ANALYZING, BUILDING, STARTING, RUNNING — return current state, don't restart
-                return existing;
             }
-        }
 
-        // Guard: concurrent preview limit
-        long userPreviewCount = active.values().stream()
-                .filter(s -> stateStore.findRun(s.runId())
-                        .map(r -> user.getId().equals(r.getCreatedByUserId()))
-                        .orElse(false))
-                .count();
-        int maxConcurrent = getMaxConcurrent(user.getTier());
-        if (userPreviewCount >= maxConcurrent) {
-            throw new PreviewException("Max concurrent previews reached (" + maxConcurrent +
-                    " for " + user.getTier() + " tier). Stop an existing preview first.");
-        }
+            // Guard: concurrent preview limit
+            long userPreviewCount = active.values().stream()
+                    .filter(s -> stateStore.findRun(s.runId())
+                            .map(r -> user.getId().equals(r.getCreatedByUserId()))
+                            .orElse(false))
+                    .count();
+            int maxConcurrent = getMaxConcurrent(user.getTier());
+            if (userPreviewCount >= maxConcurrent) {
+                throw new PreviewException("Max concurrent previews reached (" + maxConcurrent +
+                        " for " + user.getTier() + " tier). Stop an existing preview first.");
+            }
 
-        // Guard: per-run preview start limit
-        int maxStarts = tierConfigRepo.findById(user.getTier())
-                .map(TierConfig::getMaxPreviewStarts)
-                .orElse(3);
-        if (maxStarts >= 0 && run.getPreviewStartCount() >= maxStarts) {
-            throw new PreviewException("Preview limit reached for this run ("
-                    + run.getPreviewStartCount() + "/" + maxStarts
-                    + "). Upgrade your plan for more.");
-        }
+            // Guard: per-run preview start limit
+            int maxStarts = tierConfigRepo.findById(user.getTier())
+                    .map(TierConfig::getMaxPreviewStarts)
+                    .orElse(3);
+            if (maxStarts >= 0 && run.getPreviewStartCount() >= maxStarts) {
+                throw new PreviewException("Preview limit reached for this run ("
+                        + run.getPreviewStartCount() + "/" + maxStarts
+                        + "). Upgrade your plan for more.");
+            }
 
-        // Increment preview start counter
-        run.setPreviewStartCount(run.getPreviewStartCount() + 1);
-        stateStore.saveRun(run);
+            // Increment preview start counter
+            run.setPreviewStartCount(run.getPreviewStartCount() + 1);
+            stateStore.saveRun(run);
 
-        // Detect project type (restore from GCS if needed)
-        Path workspace = restoreService.ensureWorkspaceAvailable(runId);
-        PreviewProjectType type = dockerfileGen.detect(workspace);
-        if (type == null) {
-            throw new PreviewException("Unsupported project type — could not detect build system.");
-        }
+            // Detect project type (restore from GCS if needed)
+            workspace = restoreService.ensureWorkspaceAvailable(runId);
+            type = dockerfileGen.detect(workspace);
+            if (type == null) {
+                throw new PreviewException("Unsupported project type — could not detect build system.");
+            }
 
-        // Detect preview mode: WEB, CLI_TERMINAL, or MCP_INSPECTOR
-        PreviewMode mode = dockerfileGen.detectMode(type, workspace);
-        log.info("Preview mode for run {}: {} (type={})", runId, mode, type);
+            // Detect preview mode: WEB, CLI_TERMINAL, or MCP_INSPECTOR
+            mode = dockerfileGen.detectMode(type, workspace);
+            log.info("Preview mode for run {}: {} (type={})", runId, mode, type);
 
-        // Create initial session
-        String projectName = composeProjectName(runId);
-        Duration ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
+            // Create initial session
+            projectName = composeProjectName(runId);
+            ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
 
-        // For Cloud Run mode, store the service name upfront so the orphan cleanup
-        // job sees it as active during the build/push/deploy cycle.
-        String crServiceName = isCloudRunMode()
-                ? "es-preview-" + (runId.length() > 8 ? runId.substring(0, 8) : runId)
-                : null;
+            // For Cloud Run mode, store the service name upfront so the orphan cleanup
+            // job sees it as active during the build/push/deploy cycle.
+            String crServiceName = isCloudRunMode()
+                    ? "es-preview-" + (runId.length() > 8 ? runId.substring(0, 8) : runId)
+                    : null;
 
-        PreviewSession session = new PreviewSession(
-                runId, projectName, type, mode, null,
-                PreviewStatus.ANALYZING, null, 0, null,
-                Instant.now(), Instant.now().plus(ttl),
-                crServiceName, null
-        );
-        active.put(runId, session);
+            session = new PreviewSession(
+                    runId, projectName, type, mode, null,
+                    PreviewStatus.ANALYZING, null, 0, null,
+                    Instant.now(), Instant.now().plus(ttl),
+                    crServiceName, null
+            );
+            active.put(runId, session);
+        } // end synchronized
 
         // Launch async build + start on a virtual thread
         Metrics.ACTIVE_PREVIEWS.incrementAndGet();
@@ -620,7 +630,13 @@ public class PreviewService {
             // Priority: Caddy proxy → Spring Boot proxy (PreviewProxyFilter) → fallback host → localhost
             String previewUrl;
             if (caddyProxy != null) {
-                caddyProxy.addRoute(runId, hostPort);
+                try {
+                    caddyProxy.addRoute(runId, hostPort);
+                } catch (PreviewException e) {
+                    log.error("Caddy route creation failed for preview {}: {}", runId, e.getMessage());
+                    fail(runId, "Proxy route creation failed: " + e.getMessage(), hostPort);
+                    return;
+                }
                 previewUrl = caddyProxy.buildUrl(runId);
             } else if (props.getProxy().isEnabled()) {
                 // Spring Boot preview proxy mode — PreviewProxyFilter handles preview-*.executespec.ai
@@ -819,6 +835,7 @@ public class PreviewService {
                 s.startedAt(), s.expiresAt(), s.cloudRunServiceName(), s.imageUri(),
                 s.buildOutput(), s.dockerfile()));
         broadcaster.emit(runId, new RunEvent("PREVIEW_FAILED", runId, null, message, Instant.now()));
+        active.remove(runId); // prevent memory leak from failed sessions
         log.warn("Preview failed for run {}: {}", runId, message);
     }
 

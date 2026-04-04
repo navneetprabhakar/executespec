@@ -137,12 +137,14 @@ public class ReviewerAgentV2 {
 
         List<ReviewIssue> issues = executeInspection(run, workspacePath, reviewPrompt, reviewModel);
 
-        // Check README hard gate
+        // Check README gate — softened for small runs (≤5 tasks → MINOR, not CRITICAL)
         boolean readmeUpdated = checkReadmeUpdated(workspacePath);
         if (!readmeUpdated) {
+            int taskCount = tasks != null ? tasks.size() : 0;
+            IssueSeverity readmeSeverity = taskCount <= 5 ? IssueSeverity.MINOR : IssueSeverity.CRITICAL;
             issues.add(ReviewIssue.builder()
                     .id("REV-README")
-                    .severity(IssueSeverity.CRITICAL)
+                    .severity(readmeSeverity)
                     .category(IssueCategory.README_INCOMPLETE)
                     .file("README.md")
                     .description("README.md was not updated to reflect the generated code")

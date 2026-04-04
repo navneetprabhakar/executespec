@@ -106,6 +106,56 @@ public class ModelResolver {
                 .build();
     }
 
+    /**
+     * Resolves a fallback provider for mid-task recovery, excluding the failed provider.
+     * Uses the failover chain but skips the specified provider name.
+     *
+     * @param agentName        agent class name for tier lookup
+     * @param userProvider     the project's selected provider
+     * @param excludeProvider  provider name to exclude (the one that failed)
+     * @return resolved model from a different provider
+     * @throws IllegalStateException if no fallback is available
+     */
+    public ResolvedModel resolveFallbackExcluding(String agentName, LlmProvider userProvider,
+                                                    String excludeProvider) {
+        AgentTier tier = matrixProps.getAgentTierMap().getOrDefault(agentName, AgentTier.WORKHORSE);
+
+        List<String> failoverList = matrixProps.getFailoverOrder()
+                .get(userProvider.name().toLowerCase());
+        if (failoverList != null) {
+            for (String fallbackName : failoverList) {
+                if (fallbackName.equalsIgnoreCase(excludeProvider)) continue;
+                LlmProvider fallback = LlmProvider.valueOf(fallbackName.toUpperCase());
+                if (healthTracker.isHealthy(fallback)) {
+                    String model = lookupModel(fallback, tier);
+                    log.info("[ModelResolver] Mid-task fallback: excluding {} → {} for agent {} (tier={})",
+                            excludeProvider, fallback, agentName, tier);
+                    return ResolvedModel.builder()
+                            .requestedProvider(userProvider)
+                            .actualProvider(fallback)
+                            .model(model)
+                            .agentTier(tier)
+                            .fallback(true)
+                            .build();
+                }
+            }
+        }
+
+        // Also try the user's own provider if it wasn't the failed one
+        if (!userProvider.name().equalsIgnoreCase(excludeProvider) && healthTracker.isHealthy(userProvider)) {
+            String model = lookupModel(userProvider, tier);
+            return ResolvedModel.builder()
+                    .requestedProvider(userProvider)
+                    .actualProvider(userProvider)
+                    .model(model)
+                    .agentTier(tier)
+                    .fallback(true)
+                    .build();
+        }
+
+        throw new IllegalStateException("No fallback provider available excluding " + excludeProvider);
+    }
+
     private String lookupModel(LlmProvider provider, AgentTier tier) {
         ModelMatrixProperties.ProviderModels models =
                 matrixProps.getProviders().get(provider.name().toLowerCase());

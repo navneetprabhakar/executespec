@@ -354,21 +354,14 @@ public class StateStore {
             ? Duration.between(task.getStartedAt(), Instant.now()).toMillis() : 0);
         taskRepo.save(task);
 
-        // Accumulate totals on run
-        runRepo.findById(task.getRunId()).ifPresent(run -> {
-            run.setTotalInputTokens(run.getTotalInputTokens() + report.getInputTokens());
-            run.setTotalOutputTokens(run.getTotalOutputTokens() + report.getOutputTokens());
-            runRepo.save(run);
-        });
+        // Accumulate totals on run (atomic SQL to avoid read-modify-write race)
+        runRepo.addTokens(task.getRunId(), report.getInputTokens(), report.getOutputTokens());
     }
 
     /** Adds raw input/output token counts to the run totals (used by Planner + Reviewer). */
+    @Transactional
     public void addTokensToRun(String runId, int inputTok, int outputTok) {
-        runRepo.findById(runId).ifPresent(run -> {
-            run.setTotalInputTokens(run.getTotalInputTokens() + inputTok);
-            run.setTotalOutputTokens(run.getTotalOutputTokens() + outputTok);
-            runRepo.save(run);
-        });
+        runRepo.addTokens(runId, inputTok, outputTok);
     }
 
     /** Stores per-agent token breakdown + actual provider/model (planner, reviewer, compiler). */

@@ -52,8 +52,7 @@ public class PlannerAgent {
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
 
-    @Value("classpath:prompts/planner_edit.txt")
-    private Resource plannerEditPrompt;
+    // planner_edit.txt merged into planner.txt — edit mode uses {{#if editMode}} block
 
     public TaskPlan plan(String userRequest, String runId, String modelOverride) {
         log.info("Planner starting for run {}", runId);
@@ -246,18 +245,20 @@ public class PlannerAgent {
      */
     public TaskPlan replanWithFeedback(String originalGoal, String existingPlanJson, String feedback, String runId) {
         log.info("Planner re-planning with feedback for run {}", runId);
-        String editPromptText;
+        String fullPromptText;
         try {
-            editPromptText = plannerEditPrompt.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            fullPromptText = plannerPrompt.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new RuntimeException("Cannot load planner_edit prompt", e);
+            throw new RuntimeException("Cannot load planner prompt", e);
         }
 
-        String systemPrompt = editPromptText
+        // Activate edit mode: keep the {{#if editMode}}...{{/if}} block, inject variables
+        String systemPrompt = fullPromptText
+            .replace("{{#if editMode}}", "")
+            .replace("{{/if}}", "")
             .replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"))
-            .replace("{goal}", originalGoal)
-            .replace("{existingPlan}", existingPlanJson)
-            .replace("{feedback}", feedback);
+            .replace("{userFeedback}", feedback)
+            .replace("{currentPlan}", existingPlanJson);
 
         // Use ModelResolver with the run's selected provider
         var aiProvider = stateStore.findRun(runId)
@@ -340,11 +341,26 @@ public class PlannerAgent {
     private String loadPrompt() {
         try {
             String raw = plannerPrompt.getContentAsString(StandardCharsets.UTF_8);
+            // Strip the edit-mode block for fresh plans (only active in replanWithFeedback)
+            raw = stripEditModeBlock(raw);
             // Substitute config-driven model name so prompt templates stay model-agnostic
             return raw.replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"));
         } catch (IOException e) {
             throw new RuntimeException("Cannot load planner prompt", e);
         }
+    }
+
+    /**
+     * Strips the {@code {{#if editMode}}...{{/if}}} block from the prompt template.
+     * Used by fresh plan generation; edit mode keeps the block and substitutes variables.
+     */
+    private String stripEditModeBlock(String prompt) {
+        int start = prompt.indexOf("{{#if editMode}}");
+        int end = prompt.indexOf("{{/if}}");
+        if (start >= 0 && end > start) {
+            return prompt.substring(0, start) + prompt.substring(end + "{{/if}}".length());
+        }
+        return prompt;
     }
 
     /**

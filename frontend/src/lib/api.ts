@@ -1560,3 +1560,9 @@ export const adminListWebhookEvents = (page = 0, size = 50, gateway?: string) =>
   if (gateway) params.set('gateway', gateway);
   return req<PagedResponse<WebhookEventEntry>>(`/admin/webhook-events?${params}`);
 };
+
+// ── SSE ────────────────────────────────────────────────────────────────────
+
+/** Fetch a short-lived scoped SSE token for a specific run. */
+export const getSseToken = (runId: string) =>
+  req<{ token: string }>(`/runs/${runId}/sse-token`);

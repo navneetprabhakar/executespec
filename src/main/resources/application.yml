@@ -83,9 +83,9 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning: gemini-3-flash  # gemini-3.1-pro-preview removed for now due to rate limiting
-      workhorse: gemini-3-flash
-      lightweight: gemini-3-flash
+      planning: gemini-2.5-flash
+      workhorse: gemini-2.5-flash
+      lightweight: gemini-2.5-flash
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4-mini
@@ -120,34 +120,16 @@ model-matrix:
         input-per-1m: 0.80
         output-per-1m: 4.00
       notes: "WORKHORSE + LIGHTWEIGHT tiers for Anthropic."
-    gemini-3.1-pro-preview:
+    "[gemini-2.5-flash]":
       provider: google
-      chain-tier: CAPABLE
-      context-limit: 200000
+      chain-tier: UTILITY
+      context-limit: 1048576
       max-output-tokens: 65536
       pricing:
-        input-per-1m: 2.00
-        output-per-1m: 12.00
-      notes: "Gemini Pro — currently unused (rate limiting), kept for future re-enable."
-    gemini-3-flash-preview:
-      provider: google
-      chain-tier: UTILITY
-      context-limit: 200000
-      max-output-tokens: 24576
-      pricing:
         input-per-1m: 0.15
         output-per-1m: 0.60
-      notes: "Gemini Flash — all Google tiers."
-    gemini-3-flash:
-      provider: google
-      chain-tier: UTILITY
-      context-limit: 200000
-      max-output-tokens: 24576
-      pricing:
-        input-per-1m: 0.15
-        output-per-1m: 0.60
-      notes: "Gemini Flash GA — current production model for Google."
-    gpt-5.4:
+      notes: "Gemini 2.5 Flash — all Google tiers (PLANNING, WORKHORSE, LIGHTWEIGHT)."
+    "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
       context-limit: 200000
@@ -156,7 +138,7 @@ model-matrix:
         input-per-1m: 2.50
         output-per-1m: 15.00
       notes: "PLANNING tier default for OpenAI."
-    gpt-5.4-mini:
+    "[gpt-5.4-mini]":
       provider: openai
       chain-tier: UTILITY
       context-limit: 200000
@@ -173,22 +155,23 @@ model-matrix:
     claude-haiku-4-5: claude-haiku-4-5-20251001
     gpt-4o: gpt-5.4
     gpt-4o-mini: gpt-5.4-mini
-    gemini-3.1-pro-preview-customtools: gemini-3.1-pro-preview
-    gemini-3.1-flash-lite-preview: gemini-3-flash-preview
+    gemini-3-flash: gemini-2.5-flash
+    gemini-3-flash-preview: gemini-2.5-flash
+    gemini-3.1-pro-preview: gemini-2.5-flash
 
   # ── Fallback chains by tier (replaces hardcoded LlmRouter chains) ─────────────
   fallback-chains:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
-      - { provider: google, model: gemini-3.1-pro-preview }
       - { provider: openai, model: gpt-5.4 }
+      - { provider: google, model: gemini-2.5-flash }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
-      - { provider: google, model: gemini-3.1-pro-preview }
       - { provider: openai, model: gpt-5.4 }
+      - { provider: google, model: gemini-2.5-flash }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
-      - { provider: google, model: gemini-3-flash }
+      - { provider: google, model: gemini-2.5-flash }
       - { provider: openai, model: gpt-5.4-mini }
 
   # ── FREE tier model lock ──────────────────────────────────────────────────────
@@ -422,7 +405,7 @@ app:
       app-name: executespec
   jwt:
     secret: executespec-local-dev-secret-key-must-be-at-least-256-bits-long-for-HS256
-    access-token-expiry-minutes: 1440
+    access-token-expiry-minutes: 60
     refresh-token-expiry-days: 7
   cors:
     allowed-origins: http://localhost:5173

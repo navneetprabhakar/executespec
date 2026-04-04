@@ -44,8 +44,9 @@ import java.util.concurrent.TimeoutException;
 @RequiredArgsConstructor
 public class GateStore {
 
-    private static final Duration GATE_TTL = Duration.ofHours(2);
-    private static final long    POLL_MS   = 500;
+    private static final Duration GATE_TTL       = Duration.ofHours(2);
+    private static final Duration MAX_GATE_WAIT  = Duration.ofHours(24);
+    private static final long    POLL_MS         = 500;
 
     private final StringRedisTemplate redis;
 
@@ -97,7 +98,8 @@ public class GateStore {
         CompletableFuture<Boolean> future = planFutures.computeIfAbsent(runId, k -> new CompletableFuture<>());
         log.debug("[GateStore] Awaiting plan gate for run {} (in-memory + Redis fallback)", runId);
 
-        while (true) {
+        long deadline = System.currentTimeMillis() + MAX_GATE_WAIT.toMillis();
+        while (System.currentTimeMillis() < deadline) {
             try {
                 // Wait on in-memory future with timeout — instant for same-instance
                 boolean approved = future.get(POLL_MS, TimeUnit.MILLISECONDS);
@@ -123,6 +125,8 @@ public class GateStore {
                 throw new InterruptedException("Plan gate interrupted for run " + runId);
             }
         }
+        planFutures.remove(runId);
+        throw new InterruptedException("Plan gate timed out after " + MAX_GATE_WAIT.toHours() + "h for run " + runId);
     }
 
     /**
@@ -134,7 +138,8 @@ public class GateStore {
         CompletableFuture<MergeDecision> future = mergeFutures.computeIfAbsent(runId, k -> new CompletableFuture<>());
         log.debug("[GateStore] Awaiting merge gate for run {} (in-memory + Redis fallback)", runId);
 
-        while (true) {
+        long deadline = System.currentTimeMillis() + MAX_GATE_WAIT.toMillis();
+        while (System.currentTimeMillis() < deadline) {
             try {
                 MergeDecision decision = future.get(POLL_MS, TimeUnit.MILLISECONDS);
                 mergeFutures.remove(runId);
@@ -158,6 +163,8 @@ public class GateStore {
                 throw new InterruptedException("Merge gate interrupted for run " + runId);
             }
         }
+        mergeFutures.remove(runId);
+        throw new InterruptedException("Merge gate timed out after " + MAX_GATE_WAIT.toHours() + "h for run " + runId);
     }
 
     // ── Fallback (gate-loss detection after server restart) ──────────────────────
@@ -202,7 +209,8 @@ public class GateStore {
         CompletableFuture<String> future = clarificationFutures.computeIfAbsent(runId, k -> new CompletableFuture<>());
         log.debug("[GateStore] Awaiting clarification gate for run {} (in-memory + Redis fallback)", runId);
 
-        while (true) {
+        long deadline = System.currentTimeMillis() + MAX_GATE_WAIT.toMillis();
+        while (System.currentTimeMillis() < deadline) {
             try {
                 String response = future.get(POLL_MS, TimeUnit.MILLISECONDS);
                 clarificationFutures.remove(runId);
@@ -225,6 +233,8 @@ public class GateStore {
                 throw new InterruptedException("Clarification gate interrupted for run " + runId);
             }
         }
+        clarificationFutures.remove(runId);
+        throw new InterruptedException("Clarification gate timed out after " + MAX_GATE_WAIT.toHours() + "h for run " + runId);
     }
 
     /** Removes the clarification gate key and in-memory future for a run (idempotent). */

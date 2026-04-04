@@ -2,7 +2,7 @@
 #
 # ExecuteSpec E2E Test Harness
 # Usage:
-#   ./scripts/e2e-test.sh <provider>   # Run 8 tests (google|anthropic|openai) — approved languages only
+#   ./scripts/e2e-test.sh <provider>   # Run 7 tests (google|anthropic|openai) — standard set
 #   ./scripts/e2e-test.sh report       # Generate consolidated report from all batches
 #
 set -euo pipefail
@@ -36,12 +36,13 @@ RESULTS_DIR="$SCRIPT_DIR"
 # ── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
-# ── Test cases (approved languages only: Java, TypeScript/React, Python, Go, Rust, HTML/CSS) ──
+# ── Test cases (standard set — same for ALL providers for comparable results) ──
 declare -a LANGUAGES=(
     "Python"
     "JavaScript"
     "Java"
     "TypeScript"
+    "Go"
     "Static HTML"
     "Cancel"
 )
@@ -51,6 +52,7 @@ declare -a REQUESTS=(
     "Create a Node.js Express API with GET /health and POST /echo endpoints. Include package.json."
     "Create a Java Maven project with a Main class that prints hello world. Include pom.xml."
     "Create a TypeScript Node.js script that validates email addresses using regex. Include tsconfig.json and package.json."
+    "Create a Go HTTP server with GET /health and POST /echo endpoints. Single main.go file with go.mod."
     "Create a static HTML page with CSS that shows a responsive portfolio layout. Single index.html file."
     "Build a complex microservices architecture with 20 services including API gateway, service mesh, event sourcing"
 )
@@ -286,7 +288,12 @@ run_test_case() {
     # 3. Get run detail
     local detail=$(get_run "$run_id")
     local tasks=$(get_task_counts "$detail")
+    local active_provider=$(echo "$detail" | jq -r '.provider // "unknown"')
     local model=$(echo "$detail" | jq -r '.workerModel // .plannerModel // "unknown"')
+    # Prefix model with provider for cross-provider analysis clarity
+    if [[ "$active_provider" != "unknown" && "$active_provider" != "null" ]]; then
+        model="${active_provider}:${model}"
+    fi
     local failure_reason=$(echo "$detail" | jq -r '.failureReason // empty')
 
     # 4. Check validation report
@@ -502,9 +509,9 @@ main() {
     if [[ -z "$command" ]]; then
         echo "Usage: $0 <google|anthropic|openai|report>"
         echo ""
-        echo "  google     Run 10 tests with Google/Gemini provider"
-        echo "  anthropic  Run 10 tests with Anthropic provider"
-        echo "  openai     Run 10 tests with OpenAI provider"
+        echo "  google     Run 7 tests with Google/Gemini provider"
+        echo "  anthropic  Run 7 tests with Anthropic provider"
+        echo "  openai     Run 7 tests with OpenAI provider"
         echo "  report     Generate consolidated report from all batches"
         exit 1
     fi
@@ -537,14 +544,39 @@ main() {
     # Auth
     auth_login
 
+    # Verify active provider matches the requested batch
+    local active_provider
+    active_provider=$(curl -s "$BASE_URL/api/models/available" \
+        -H "Authorization: Bearer $TOKEN" | jq -r '.defaultProvider // empty')
+    if [[ -n "$active_provider" && "$active_provider" != "$provider" ]]; then
+        warn "Active provider is '$active_provider' but batch is '$provider'"
+        warn "Results may be attributed to wrong provider! Verify server config."
+    else
+        ok "Provider verified: $provider"
+    fi
+
     # Init results
     init_results "$provider"
 
-    # Run all test cases (approved languages only)
+    # Warm-up: run a throwaway request to prime caches + connections
+    log "Running warm-up request..."
+    local warmup_id
+    warmup_id=$(submit_run "echo hello" "true") 2>/dev/null || true
+    if [[ "$warmup_id" != SUBMIT_FAILED* && -n "$warmup_id" ]]; then
+        sleep 15
+        cancel_run "$warmup_id" > /dev/null 2>&1 || true
+        ok "Warm-up complete"
+    else
+        warn "Warm-up request failed — proceeding anyway"
+    fi
+
+    # Run all test cases (standard set)
     local batch_start=$(date +%s)
     local total_tests=${#LANGUAGES[@]}
 
     for i in $(seq 0 $((total_tests - 1))); do
+        # Refresh token before each test to avoid stale JWT
+        auth_login 2>/dev/null
         run_test_case "$i" "$provider"
     done
 

@@ -80,7 +80,9 @@ public class DeploymentGitHubService {
                     "GitHub repo '" + name + "' already exists. Use EXISTING mode or choose a different name.");
             }
             if (response.statusCode() != 201) {
-                throw new IOException("GitHub API error " + response.statusCode() + ": " + response.body());
+                String sanitized = response.body()
+                        .replaceAll("(?i)(authorization|bearer|token|ghp_)[:\\s]*[A-Za-z0-9_\\-]+", "$1=***REDACTED***");
+                throw new IOException("GitHub API error " + response.statusCode() + ": " + sanitized);
             }
             JsonNode json = objectMapper.readTree(response.body());
             String repoUrl = json.get("html_url").asText();

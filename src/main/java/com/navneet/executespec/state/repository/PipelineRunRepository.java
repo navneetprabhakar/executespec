@@ -8,11 +8,19 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import org.springframework.data.jpa.repository.Modifying;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 public interface PipelineRunRepository extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
+
+    // ── Atomic token counter updates (avoids read-modify-write race) ─────────
+
+    @Modifying
+    @Query("UPDATE PipelineRun r SET r.totalInputTokens = r.totalInputTokens + :inp, r.totalOutputTokens = r.totalOutputTokens + :out WHERE r.runId = :runId")
+    void addTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
     List<PipelineRun> findByStatusIn(List<String> statuses);
 

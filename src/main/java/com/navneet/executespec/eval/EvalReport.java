@@ -21,7 +21,8 @@ public record EvalReport(
         long durationMs,
         List<ModelReport> modelResults,
         Map<AgentTier, Recommendation> recommendations,
-        List<Disqualification> disqualifications
+        List<Disqualification> disqualifications,
+        List<CrossRunDelta> crossRunDeltas
 ) {
 
     /**
@@ -81,11 +82,30 @@ public record EvalReport(
 
     /**
      * A model disqualified from a tier due to minimum accuracy/pass-rate requirements.
+     *
+     * @param wouldHaveScored the overall score the model would have received if not disqualified
      */
     public record Disqualification(
             String provider,
             String model,
             AgentTier tier,
-            String reason
+            String reason,
+            double wouldHaveScored
+    ) {}
+
+    /**
+     * Per-model accuracy comparison against the previous evaluation run.
+     *
+     * @param flag OK, REGRESSION (delta < -1.0), IMPROVEMENT (delta > 1.0), INFRA_RECOVERY (prev was 0/infra failure), NEW (no previous data)
+     */
+    public record CrossRunDelta(
+            String provider,
+            String model,
+            AgentTier tier,
+            double previousAccuracy,
+            double currentAccuracy,
+            double delta,
+            String flag,
+            String previousEvalId
     ) {}
 }

@@ -49,11 +49,37 @@ public class CloudRunClient {
         this.objectMapper = objectMapper;
     }
 
+    private static final int MAX_DEPLOY_RETRIES = 3;
+    private static final long[] RETRY_BACKOFF_MS = {2000, 5000, 10000};
+
+    /** Transient HTTP status codes that warrant a retry. */
+    private static boolean isTransient(String errorMsg) {
+        return errorMsg.contains("429") || errorMsg.contains("500")
+                || errorMsg.contains("502") || errorMsg.contains("503")
+                || errorMsg.contains("504") || errorMsg.contains("UNAVAILABLE")
+                || errorMsg.contains("INTERNAL");
+    }
+
     /**
-     * Deploy image to Cloud Run. Creates or updates a service.
+     * Deploy image to Cloud Run with retry for transient failures.
      * Returns the service URL and revision name.
      */
     public DeployResult deploy(String serviceName, String imageUri)
+            throws IOException, InterruptedException {
+        for (int attempt = 0; attempt < MAX_DEPLOY_RETRIES; attempt++) {
+            try {
+                return deployOnce(serviceName, imageUri);
+            } catch (IOException e) {
+                if (attempt == MAX_DEPLOY_RETRIES - 1 || !isTransient(e.getMessage())) throw e;
+                log.warn("Transient Cloud Run failure (attempt {}/{}): {}",
+                        attempt + 1, MAX_DEPLOY_RETRIES, e.getMessage());
+                Thread.sleep(RETRY_BACKOFF_MS[attempt]);
+            }
+        }
+        throw new IllegalStateException("Unreachable");
+    }
+
+    private DeployResult deployOnce(String serviceName, String imageUri)
             throws IOException, InterruptedException {
 
         List<String> cmd = new ArrayList<>(List.of(
@@ -116,6 +142,11 @@ public class CloudRunClient {
             serviceUrl = root.path("uri").asText(null);
         }
 
+        if (serviceUrl == null || serviceUrl.isBlank()) {
+            throw new IOException("Cloud Run returned no service URL for " + serviceName
+                    + ". Response: " + stdout.substring(0, Math.min(stdout.length(), 500)));
+        }
+
         log.info("Cloud Run deployed: {} → {} (revision: {})", serviceName, serviceUrl, revisionName);
         return new DeployResult(serviceUrl, revisionName);
     }
@@ -156,7 +187,9 @@ public class CloudRunClient {
             "--startup-probe",
             "httpGet.path=/,httpGet.port=" + containerPort
                     + ",initialDelaySeconds=5,periodSeconds=10,timeoutSeconds=5,failureThreshold=30",
-            "--labels", "managed-by=executespec-preview",
+            "--labels", "managed-by=executespec-preview"
+                + ",deployed-at=" + java.time.Instant.now().getEpochSecond()
+                + ",ttl-minutes=" + 30,
             "--quiet",
             "--format", "json"
         ));
@@ -301,6 +334,50 @@ public class CloudRunClient {
     }
 
     /**
+     * List preview services with their labels (JSON format) for TTL-based orphan cleanup.
+     * Returns service name → labels map.
+     */
+    public Map<String, Map<String, String>> listPreviewServicesWithLabels()
+            throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder(
+            "gcloud", "run", "services", "list",
+            "--project", props.gcpProject(),
+            "--region", props.gcpRegion(),
+            "--filter", "metadata.labels.managed-by=executespec-preview",
+            "--format", "json(metadata.name,metadata.labels)",
+            "--quiet"
+        ).redirectErrorStream(true);
+
+        Process process = pb.start();
+        String output = new String(process.getInputStream().readAllBytes()).trim();
+        boolean finished = process.waitFor(2, TimeUnit.MINUTES);
+        if (!finished) {
+            process.destroyForcibly();
+            log.warn("Listing preview services with labels timed out");
+            return Map.of();
+        }
+        if (process.exitValue() != 0 || output.isBlank() || !output.startsWith("[")) {
+            return Map.of();
+        }
+
+        Map<String, Map<String, String>> result = new java.util.LinkedHashMap<>();
+        try {
+            JsonNode arr = objectMapper.readTree(output);
+            for (JsonNode svc : arr) {
+                String name = svc.path("metadata").path("name").asText(null);
+                if (name == null) continue;
+                Map<String, String> labels = new java.util.HashMap<>();
+                JsonNode labelsNode = svc.path("metadata").path("labels");
+                labelsNode.fields().forEachRemaining(e -> labels.put(e.getKey(), e.getValue().asText()));
+                result.put(name, labels);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse preview services labels: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
      * Rollback traffic to a specific revision — instant, no rebuild.
      */
     public void rollbackToRevision(String serviceName, String revisionName)
@@ -347,6 +424,10 @@ public class CloudRunClient {
      * Retries 3 times with 5-second delay for cold-start tolerance.
      */
     public boolean healthCheck(String serviceUrl) {
+        if (serviceUrl == null || serviceUrl.isBlank()) {
+            log.error("Health check called with null/empty service URL");
+            return false;
+        }
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()

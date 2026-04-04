@@ -340,6 +340,12 @@
       <artifactId>stripe-java</artifactId>
       <version>26.1.0</version>
     </dependency>
+
+    <!-- Caffeine — high-performance in-memory cache with TTL/size eviction -->
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
   </dependencies>
 
   <build>

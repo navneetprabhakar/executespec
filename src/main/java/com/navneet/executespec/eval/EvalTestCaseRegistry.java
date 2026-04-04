@@ -91,7 +91,7 @@ public class EvalTestCaseRegistry {
                 AgentTier.PLANNING,
                 "Make a justified architecture decision for a fintech payment system with competing constraints",
                 null,
-                loadPrompt("eval/planning-complexity-classification.txt"),
+                loadPrompt("eval/planning-architecture-decision.txt"),
                 List.of(
                         Pattern.compile("\"recommendation\"\\s*:\\s*\"[ABC]\""),
                         // Must address PCI DSS for rejected options
@@ -123,7 +123,7 @@ public class EvalTestCaseRegistry {
                 AgentTier.WORKHORSE,
                 "Generate a complete WebSocket notification system with retry, rate limiting, and reconnect draining",
                 null,
-                loadPrompt("eval/workhorse-rest-controller.txt"),
+                loadPrompt("eval/workhorse-websocket-notification.txt"),
                 List.of(
                         // Must have WebSocket STOMP config
                         Pattern.compile("(?i)(@EnableWebSocketMessageBroker|StompEndpointRegistry|registerStompEndpoints)"),
@@ -309,7 +309,7 @@ public class EvalTestCaseRegistry {
                 ),
                 List.of("classification", "ambiguities", "tasks"),
                 EvalScorer.latencyCeilingMs(AgentTier.LIGHTWEIGHT),
-                0
+                4000  // ~1000 tokens — triage should be concise
         ));
 
         testCases.add(new EvalTestCase(
@@ -335,7 +335,7 @@ public class EvalTestCaseRegistry {
                 ),
                 List.of("developer_summary", "stakeholder_summary", "blocks_release"),
                 EvalScorer.latencyCeilingMs(AgentTier.LIGHTWEIGHT),
-                0
+                6000  // ~1500 tokens — dual summary can be slightly longer
         ));
 
         testCases.add(new EvalTestCase(
@@ -363,7 +363,7 @@ public class EvalTestCaseRegistry {
                 ),
                 List.of("breaking_changes", "verdict"),
                 EvalScorer.latencyCeilingMs(AgentTier.LIGHTWEIGHT),
-                0
+                4000  // ~1000 tokens — config diff analysis should be focused
         ));
 
         // ── BOSS-LEVEL: Distributed saga trilogy (PLANNING tier, very high complexity) ──
@@ -408,7 +408,8 @@ public class EvalTestCaseRegistry {
                 ),
                 List.of("diagnosis", "compensation_protocol", "saga_state_machine"),
                 60_000, // 60s ceiling — diagnosis task, not generation
-                0
+                0,
+                EvalTestCase.ValidationMode.REGEX_AND_LLM
         ));
 
         // ── Test 2: Distributed consistency + dedup design ──────────────────
@@ -445,7 +446,8 @@ public class EvalTestCaseRegistry {
                 ),
                 List.of("deduplication", "compensation_actions", "atomicity", "idempotent_handler"),
                 45_000, // 45s ceiling — narrower scope, strong model should be fast
-                0
+                0,
+                EvalTestCase.ValidationMode.REGEX_AND_LLM
         ));
 
         // ── Test 3: Regulatory compliance + audit integrity ─────────────────
@@ -478,7 +480,8 @@ public class EvalTestCaseRegistry {
                 ),
                 List.of("compliance_failures", "audit_atomicity_fix", "timestamp_requirements", "best_execution_evidence"),
                 45_000, // 45s ceiling
-                0
+                0,
+                EvalTestCase.ValidationMode.REGEX_AND_LLM
         ));
 
         log.info("[EvalTestCaseRegistry] Loaded {} test cases ({} PLANNING, {} WORKHORSE, {} LIGHTWEIGHT)",

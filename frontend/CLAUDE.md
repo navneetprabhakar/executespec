@@ -26,7 +26,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **`auth/`** — Auth-related UI components
 
 ### Hooks (`src/hooks/`)
-- `useSse.ts` — SSE event stream hook (generic handler, auto-parses all event types)
+- `useSse.ts` — SSE event stream hook (generic handler, auto-parses all event types). Fetches scoped SSE token per-runId before connecting (falls back to full JWT).
 - `useViewMode.ts` — Toggle between standard and Vibe view modes
 - `useKeyboardShortcuts.ts` — Global keyboard shortcut registration
 - `useKeyboardScroll.ts` — Keyboard-driven scroll navigation
@@ -35,7 +35,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - `useTierPermissions.ts` — Tier-based feature gating
 
 ### Lib (`src/lib/`)
-- `api.ts` — API client (axios-based, JWT auth)
+- `api.ts` — API client (axios-based, JWT auth). Includes `getSseToken(runId)` for scoped SSE tokens.
 - `billing-api.ts` — Billing/subscription API client
 - `invoice-api.ts` — Invoice API client
 - `telemetry.ts` — Client-side telemetry/analytics
