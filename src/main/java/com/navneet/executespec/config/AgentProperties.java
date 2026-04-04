@@ -1,5 +1,6 @@
 package com.navneet.executespec.config;
-import com.navneet.executespec.config.ModelConstants;
+// Model defaults below are string literals matching application.yml canonical names.
+// YAML values override these at runtime via @ConfigurationProperties binding.
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -72,6 +73,8 @@ public class AgentProperties {
     public static class Shell {
         private boolean sandboxEnabled = true;
         private int timeoutSeconds = 300;
+        /** Directories prepended to PATH in worker shell processes (e.g. "/opt/homebrew/bin:/usr/local/bin"). */
+        private String pathPrepend = "";
         private java.util.List<String> additionalAllowedCommands = new java.util.ArrayList<>();
         private java.util.List<String> additionalBlockedPatterns = new java.util.ArrayList<>();
     }
@@ -84,7 +87,7 @@ public class AgentProperties {
         private boolean enabled      = true;
         private int maxAttempts      = 3;
         private int timeoutSeconds   = 300;
-        private String model         = ModelConstants.HAIKU;
+        private String model         = "claude-haiku-4-5-20251001";
         private String provider      = "anthropic";
     }
 
@@ -94,7 +97,7 @@ public class AgentProperties {
     @Data
     public static class ApiTestSuite {
         private boolean enabled = true;
-        private String model    = ModelConstants.HAIKU;
+        private String model    = "claude-haiku-4-5-20251001";
         private String provider = "anthropic";
     }
 

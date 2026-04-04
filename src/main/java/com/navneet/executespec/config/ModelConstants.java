@@ -1,10 +1,16 @@
 package com.navneet.executespec.config;
 
 /**
- * Single source of truth for all LLM model name strings.
- * Every agent, router, and config class must reference these constants
- * instead of hardcoding model name strings.
+ * @deprecated All model name lookups are now config-driven via
+ * {@link com.navneet.executespec.router.ModelRegistry} backed by
+ * {@code model-matrix.models} in {@code application.yml}.
+ * <p>
+ * This class is retained only for backward compatibility with test code
+ * and will be removed in a future release.
+ *
+ * @see com.navneet.executespec.router.ModelRegistry
  */
+@Deprecated(forRemoval = true)
 public final class ModelConstants {
 
     private ModelConstants() {}

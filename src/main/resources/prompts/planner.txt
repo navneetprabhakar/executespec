@@ -143,7 +143,7 @@ HARD RULES — violating these causes the run to fail
      "acceptance_criteria": "File pom.xml or package.json exists at workspace root with all required dependencies listed. Main entry point file exists.",
      "depends_on": [],
      "complexity": "LOW",
-     "assigned_model": "claude-haiku-4-5-20251001"
+     "assigned_model": "{{WORKER_MODEL}}"
    }
    ALL other worker tasks MUST include "project_setup" in their depends_on list.
    If pom.xml or package.json already exists in the workspace, skip this task.
@@ -538,7 +538,7 @@ Spring Boot example:
       "acceptance_criteria": "Verifiable by checking file existence and content.",
       "depends_on": [],
       "complexity": "LOW",
-      "assigned_model": "claude-haiku-4-5-20251001",
+      "assigned_model": "{{WORKER_MODEL}}",
       "owned_files": ["src/main/java/com/x/ItemController.java"],
       "shared_files": []
     }
@@ -561,7 +561,7 @@ Full-stack Node.js example (Express + React):
       "acceptance_criteria": "package.json exists with express and react in dependencies.",
       "depends_on": [],
       "complexity": "LOW",
-      "assigned_model": "claude-haiku-4-5-20251001",
+      "assigned_model": "{{WORKER_MODEL}}",
       "owned_files": ["package.json", "vite.config.js", "tailwind.config.js"],
       "shared_files": []
     },
@@ -575,7 +575,7 @@ Full-stack Node.js example (Express + React):
       "acceptance_criteria": "File data/store.js exists with getAll, create, update, delete exports.",
       "depends_on": ["project_setup"],
       "complexity": "LOW",
-      "assigned_model": "claude-haiku-4-5-20251001",
+      "assigned_model": "{{WORKER_MODEL}}",
       "owned_files": ["data/store.js"],
       "shared_files": []
     }
@@ -652,23 +652,23 @@ EXAMPLE: COMPLEXITY ASSIGNMENT (affects execution speed)
 
 LOW — DTO with 3 fields, constructor, getters (~30 lines):
   "complexity": "LOW",
-  "assigned_model": "claude-haiku-4-5-20251001"
+  "assigned_model": "{{WORKER_MODEL}}"
 
 LOW — thin controller delegating to service, 2 endpoints (~60 lines):
   "complexity": "LOW",
-  "assigned_model": "claude-haiku-4-5-20251001"
+  "assigned_model": "{{WORKER_MODEL}}"
 
 LOW — complete static HTML page with CSS and basic JS (~200 lines total):
   "complexity": "LOW",
-  "assigned_model": "claude-haiku-4-5-20251001"
+  "assigned_model": "{{WORKER_MODEL}}"
 
 MEDIUM — service with validation logic, 3 methods, error handling (~150 lines):
   "complexity": "MEDIUM",
-  "assigned_model": "claude-haiku-4-5-20251001"
+  "assigned_model": "{{WORKER_MODEL}}"
 
 HIGH — RARE. Complex state machine or multi-step parser (~280 lines, unsplittable):
   "complexity": "HIGH",
-  "assigned_model": "claude-haiku-4-5-20251001"
+  "assigned_model": "{{WORKER_MODEL}}"
   NOTE: Before assigning HIGH, verify this cannot be two MEDIUM tasks.
 
 ═══════════════════════════════════════════════════════════

@@ -1,5 +1,5 @@
 package com.navneet.executespec.state;
-import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.router.ModelRegistry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,6 +45,7 @@ public class StateStore {
     private final PromptAuditRepository promptAuditRepo;
     private final AppUserRepository appUserRepo;
     private final PlanVersionRepository planVersionRepo;
+    private final ModelRegistry modelRegistry;
 
     // ── Run lifecycle ─────────────────────────────────────────
 
@@ -737,7 +738,7 @@ public class StateStore {
         Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
         for (AgentTask t : allTasks) {
             String key = (t.getProvider() != null ? t.getProvider() : "anthropic") + "/"
-                       + (t.getModel() != null ? t.getModel() : ModelConstants.SONNET);
+                       + (t.getModel() != null ? t.getModel() : modelRegistry.workhouseModelFor("anthropic"));
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
         }
 
@@ -779,7 +780,7 @@ public class StateStore {
         Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
         for (AgentTask t : allTasks) {
             String key = (t.getProvider() != null ? t.getProvider() : "anthropic") + "/"
-                       + (t.getModel() != null ? t.getModel() : ModelConstants.SONNET);
+                       + (t.getModel() != null ? t.getModel() : modelRegistry.workhouseModelFor("anthropic"));
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
         }
 

@@ -8,7 +8,6 @@ import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.compiler.CompileResult;
-import com.navneet.executespec.config.ModelConstants;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;

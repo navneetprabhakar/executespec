@@ -49,6 +49,18 @@ public class PreviewProxyFilter implements Filter {
             "te", "trailers", "transfer-encoding", "upgrade", "host"
     );
 
+    /**
+     * Security headers from upstream preview containers that must be stripped.
+     * The container app (e.g. a Spring Boot app inside the preview) may emit its own
+     * X-Frame-Options / CSP headers which would override our permissive policy and
+     * block the preview iframe from rendering.
+     */
+    private static final Set<String> STRIPPED_SECURITY_HEADERS = Set.of(
+            "x-frame-options", "content-security-policy", "content-security-policy-report-only",
+            "strict-transport-security", "x-content-type-options", "x-xss-protection",
+            "referrer-policy", "permissions-policy"
+    );
+
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NEVER)   // let browser handle redirects
@@ -174,9 +186,13 @@ public class PreviewProxyFilter implements Filter {
             // Copy status
             res.setStatus(upstream_res.statusCode());
 
-            // Copy response headers
+            // Copy response headers — strip hop-by-hop AND upstream security headers.
+            // Preview containers may emit their own X-Frame-Options/CSP that would block
+            // iframe embedding in the ExecuteSpec dashboard.
             upstream_res.headers().map().forEach((name, values) -> {
-                if (!HOP_BY_HOP.contains(name.toLowerCase())
+                String lower = name.toLowerCase();
+                if (!HOP_BY_HOP.contains(lower)
+                        && !STRIPPED_SECURITY_HEADERS.contains(lower)
                         && !name.equalsIgnoreCase(":status")) {
                     for (String v : values) {
                         res.addHeader(name, v);

@@ -1,5 +1,5 @@
 package com.navneet.executespec.agent;
-import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.router.ModelRegistry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -75,6 +75,7 @@ public class WorkerAgent {
     private final com.navneet.executespec.harness.UiStyleResolver uiStyleResolver;
     private final com.navneet.executespec.router.ModelResolver modelResolver;
     private final com.navneet.executespec.harness.RunBudgetTracker runBudgetTracker;
+    private final ModelRegistry modelRegistry;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -118,8 +119,11 @@ public class WorkerAgent {
 
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
-        String model = task.getAssignedModel() != null ? task.getAssignedModel() : ModelConstants.HAIKU;
-        String provider = resolveProvider(model);
+        String provider = props.getRoles().getWorker(); // default provider from config
+        String model = task.getAssignedModel() != null
+                ? task.getAssignedModel()
+                : modelRegistry.workhouseModelFor(provider);
+        provider = resolveProvider(model);
         String agentId = "worker-" + taskId;
         String complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
         String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
@@ -1706,18 +1710,11 @@ public class WorkerAgent {
         }
     }
 
-    /** Derive provider from model name; fall back to configured role provider. */
+    /** Derive provider from model name via ModelRegistry; fall back to configured role provider. */
     private String resolveProvider(String model) {
-        if (model == null)
-            return props.getRoles().getWorker();
-        String m = model.toLowerCase();
-        if (m.contains("claude"))
-            return "anthropic";
-        if (m.contains("gpt"))
-            return "openai";
-        if (m.contains("gemini"))
-            return "google";
-        return props.getRoles().getWorker();
+        if (model == null) return props.getRoles().getWorker();
+        String provider = modelRegistry.providerFor(model);
+        return provider != null ? provider : props.getRoles().getWorker();
     }
 
     /**

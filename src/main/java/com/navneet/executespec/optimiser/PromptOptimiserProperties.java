@@ -1,6 +1,4 @@
 package com.navneet.executespec.optimiser;
-import com.navneet.executespec.config.ModelConstants;
-
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -24,6 +22,6 @@ public class PromptOptimiserProperties {
     /** Minimum occurrences of a pattern before it is acted on */
     private int patternMinOccurrences = 2;
 
-    private String model = ModelConstants.SONNET;
+    private String model = "claude-sonnet-4-6";
     private String provider = "anthropic";
 }

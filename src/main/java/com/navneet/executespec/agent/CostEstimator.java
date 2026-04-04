@@ -1,5 +1,5 @@
 package com.navneet.executespec.agent;
-import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.router.ModelRegistry;
 
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
@@ -33,6 +33,7 @@ public class CostEstimator {
     private final AgentProperties props;
     private final ModelPricingRepository pricingRepo;
     private final ModelResolver modelResolver;
+    private final ModelRegistry modelRegistry;
     private final StateStore stateStore;
     private final TestPlanRepository testPlanRepository;
     private final TokenBudgetMonitor tokenBudgetMonitor;
@@ -217,7 +218,7 @@ public class CostEstimator {
             int tpIn = nvl(tp.getPlannerInputTokens()), tpOut = nvl(tp.getPlannerOutputTokens());
             if (tpIn > 0 || tpOut > 0) {
                 String prov = tp.getPlannerProvider() != null ? tp.getPlannerProvider() : "anthropic";
-                String model = tp.getPlannerModel() != null ? tp.getPlannerModel() : ModelConstants.SONNET;
+                String model = tp.getPlannerModel() != null ? tp.getPlannerModel() : modelRegistry.workhouseModelFor(prov);
                 double[] rates = dbRatesForModel(prov, model);
                 c += (tpIn / 1_000_000.0) * rates[0] + (tpOut / 1_000_000.0) * rates[1];
             }
@@ -225,7 +226,7 @@ public class CostEstimator {
             int twIn = nvl(tp.getWorkerInputTokens()), twOut = nvl(tp.getWorkerOutputTokens());
             if (twIn > 0 || twOut > 0) {
                 String prov = tp.getWorkerProvider() != null ? tp.getWorkerProvider() : "anthropic";
-                String model = tp.getWorkerModel() != null ? tp.getWorkerModel() : ModelConstants.SONNET;
+                String model = tp.getWorkerModel() != null ? tp.getWorkerModel() : modelRegistry.workhouseModelFor(prov);
                 double[] rates = dbRatesForModel(prov, model);
                 c += (twIn / 1_000_000.0) * rates[0] + (twOut / 1_000_000.0) * rates[1];
             }
@@ -233,7 +234,7 @@ public class CostEstimator {
             int trIn = nvl(tp.getReportInputTokens()), trOut = nvl(tp.getReportOutputTokens());
             if (trIn > 0 || trOut > 0) {
                 String prov = tp.getPlannerProvider() != null ? tp.getPlannerProvider() : "anthropic";
-                String model = ModelConstants.HAIKU; // fix suggestions use FAST tier
+                String model = modelRegistry.lightweightModelFor(prov); // fix suggestions use FAST tier
                 double[] rates = dbRatesForModel(prov, model);
                 c += (trIn / 1_000_000.0) * rates[0] + (trOut / 1_000_000.0) * rates[1];
             }
@@ -258,22 +259,22 @@ public class CostEstimator {
     private double[] dbRatesForModel(String provider, String model) {
         return pricingRepo.findByIdProviderAndIdModel(provider, model)
                 .map(p -> new double[]{p.getInputCostPer1m(), p.getOutputCostPer1m()})
-                .orElseGet(() -> hardcodedFallback(provider));
+                .orElseGet(() -> registryFallback(provider));
     }
 
-    private double[] hardcodedFallback(String provider) {
-        return switch (provider.toLowerCase()) {
-            case "openai"  -> new double[]{1.10, 4.40};   // gpt-5.4-mini
-            case "google"  -> new double[]{0.15, 0.60};   // gemini flash
-            default        -> new double[]{3.00, 15.00};  // anthropic sonnet (workhorse default)
-        };
+    /** Falls back to pricing from model-matrix config when DB row is missing. */
+    private double[] registryFallback(String provider) {
+        String fallbackModel = modelRegistry.workhouseModelFor(provider);
+        double[] pricing = modelRegistry.pricingFor(fallbackModel);
+        if (pricing != null && pricing.length == 2) {
+            return pricing;
+        }
+        log.warn("[CostEstimator] No pricing found for provider={}, fallback model={}", provider, fallbackModel);
+        return new double[]{3.00, 15.00}; // ultimate safety net
     }
 
     private String defaultModel(String provider) {
-        return switch (provider.toLowerCase()) {
-            case "openai"  -> ModelConstants.GPT5_4_MINI;
-            default        -> ModelConstants.HAIKU;
-        };
+        return modelRegistry.workhouseModelFor(provider);
     }
 
     private int complexityInputTokens(String complexity) {

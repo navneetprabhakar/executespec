@@ -1,7 +1,6 @@
 package com.navneet.executespec.agent;
-import com.navneet.executespec.config.ModelConstants;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.agent.model.TaskReview;
 import com.navneet.executespec.agent.model.TaskDefinition;
@@ -82,6 +81,7 @@ public class ConversationAgent {
 
     private final LlmRouter llmRouter;
     private final ModelResolver modelResolver;
+    private final ModelRegistry modelRegistry;
     private final WorkspaceFileService workspaceFileService;
     private final PreviewService previewService;
     private final ObjectMapper objectMapper;
@@ -185,7 +185,7 @@ public class ConversationAgent {
             1. Generate AT MOST %d tasks. Fewer is better — only create tasks that are necessary.
             2. Each task must be small and focused (LOW or MEDIUM complexity).
             3. Use the exact JSON format below — no extra text, just JSON.
-            4. Assign all tasks the model "claude-haiku-4-5-20251001".
+            4. Assign all tasks the model "%s".
             5. Task IDs should be short snake_case identifiers (e.g., "fix_port_config", "add_error_handling").
             6. Set depends_on to enforce ordering where needed (empty array if independent).
             7. owned_files and shared_files should list the specific file paths each task will modify.
@@ -203,7 +203,7 @@ public class ConversationAgent {
                   "acceptance_criteria": "The thing works correctly after the fix",
                   "depends_on": [],
                   "complexity": "LOW",
-                  "assigned_model": "claude-haiku-4-5-20251001",
+                  "assigned_model": "%s",
                   "owned_files": ["src/file.js"],
                   "shared_files": []
                 }
@@ -212,7 +212,9 @@ public class ConversationAgent {
             """.formatted(
                 run.getUserRequest() != null ? run.getUserRequest() : "(unknown)",
                 truncate(workspaceContext, 16_000),
-                MAX_SUGGESTION_TASKS
+                MAX_SUGGESTION_TASKS,
+                modelRegistry.workhouseModelFor(selectedProvider),
+                modelRegistry.workhouseModelFor(selectedProvider)
             );
 
         List<Message> messages = new ArrayList<>();

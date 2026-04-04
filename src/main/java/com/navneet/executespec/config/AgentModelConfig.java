@@ -1,5 +1,5 @@
 package com.navneet.executespec.config;
-import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.router.ModelRegistry;
 
 import com.google.genai.Client;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +29,7 @@ public class AgentModelConfig {
 
     private final AgentProperties props;
     private final ApplicationContext ctx;
+    private final ModelRegistry modelRegistry;
 
     /**
      * Replaces the default (no-timeout) JDK HTTP client factory with one that has an
@@ -150,11 +151,12 @@ public class AgentModelConfig {
             log.info("[AgentModelConfig] No GOOGLE_API_KEY configured — system Gemini fallback disabled");
             return null;
         }
-        log.info("[AgentModelConfig] Creating system Gemini bean ({})", ModelConstants.GEMINI_CAPABLE);
+        String geminiModel = modelRegistry.planningModelFor("google");
+        log.info("[AgentModelConfig] Creating system Gemini bean ({})", geminiModel);
         Client client = Client.builder().apiKey(apiKey).build();
         return GoogleGenAiChatModel.builder()
                 .genAiClient(client)
-                .defaultOptions(GoogleGenAiChatOptions.builder().model(ModelConstants.GEMINI_CAPABLE).temperature(0.0).build())
+                .defaultOptions(GoogleGenAiChatOptions.builder().model(geminiModel).temperature(0.0).build())
                 .build();
     }
 }

@@ -28,7 +28,7 @@ public class SecurityProperties {
                 + "connect-src 'self' wss:; "
                 + "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
                 + "worker-src 'self' blob:; "
-                + "frame-ancestors 'none'";
+                + "frame-ancestors 'self' https://*.executespec.ai https://*.run.app";
     }
 
     @Data
@@ -41,7 +41,7 @@ public class SecurityProperties {
     @Data
     public static class FrameOptions {
         private boolean enabled = true;
-        /** DENY or SAMEORIGIN */
-        private String mode = "DENY";
+        /** DENY or SAMEORIGIN — use SAMEORIGIN to allow preview iframes */
+        private String mode = "SAMEORIGIN";
     }
 }

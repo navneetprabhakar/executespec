@@ -1,5 +1,5 @@
 package com.navneet.executespec.api.controller;
-import com.navneet.executespec.config.ModelConstants;
+import com.navneet.executespec.router.ModelRegistry;
 
 import com.navneet.executespec.agent.CostEstimator;
 import com.navneet.executespec.agent.PlannerAgent;
@@ -26,6 +26,7 @@ public class FeasibilityController {
     private final PlannerAgent plannerAgent;
     private final CostEstimator costEstimator;
     private final AgentProperties props;
+    private final ModelRegistry modelRegistry;
 
     /**
      * Runs the planner in feasibility mode (no workers), estimates cost,
@@ -82,9 +83,6 @@ public class FeasibilityController {
     }
 
     private String defaultModel(String provider) {
-        return switch (provider.toLowerCase()) {
-            case "openai"  -> ModelConstants.GPT4O_MINI;
-            default        -> ModelConstants.HAIKU;
-        };
+        return modelRegistry.workhouseModelFor(provider);
     }
 }

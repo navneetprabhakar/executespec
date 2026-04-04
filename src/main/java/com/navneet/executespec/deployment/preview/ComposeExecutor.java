@@ -22,6 +22,21 @@ public class ComposeExecutor {
 
     private static final int MAX_OUTPUT_BYTES = 1_048_576; // 1 MB
 
+    /** Common tool directories that may be missing from the JVM's inherited PATH. */
+    private static final String PATH_AUGMENT = String.join(":",
+            "/opt/homebrew/bin", "/opt/homebrew/sbin",
+            "/usr/local/bin", "/usr/local/sbin");
+
+    @jakarta.annotation.PostConstruct
+    void checkDockerAvailability() {
+        if (isAvailable()) {
+            log.info("[ComposeExecutor] Docker Compose V2 is available");
+        } else {
+            log.warn("[ComposeExecutor] Docker Compose V2 NOT found on PATH — Docker previews will fail. "
+                    + "Ensure Docker Desktop is running and 'docker compose' is on PATH.");
+        }
+    }
+
     // ── Public API ───────────────────────────────────────────────────────────
 
     /**
@@ -191,6 +206,9 @@ public class ComposeExecutor {
             var pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
             pb.environment().putAll(System.getenv());
+            // Augment PATH — JVM may inherit minimal PATH missing docker/node
+            String currentPath = pb.environment().getOrDefault("PATH", "/usr/bin:/bin");
+            pb.environment().put("PATH", PATH_AUGMENT + ":" + currentPath);
             if (workDir != null) {
                 pb.directory(workDir.toFile());
             }
