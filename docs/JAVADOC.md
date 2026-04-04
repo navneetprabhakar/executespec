@@ -64,7 +64,7 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 | Runtime | Java 21 (virtual threads) |
 | Framework | Spring Boot 3.3.0 |
 | AI Framework | Spring AI 1.1.0 |
-| Database | PostgreSQL (Flyway migrations V1-V55) |
+| Database | PostgreSQL (Flyway migrations V1-V56) |
 | Cache/Gate Store | Redis (Lettuce) |
 | Git Operations | JGit 6.9.0 + shell git (worktrees) |
 | Build | Maven |
@@ -190,7 +190,7 @@ All packages are under `com.navneet.executespec`.
 
 | Package | Description |
 |---------|-------------|
-| `router/` | Model routing: ModelResolver (matrix-based tier x provider routing), AgentTier, LlmProvider, ModelSelection, ProviderHealthTracker (Redis-backed circuit breaker), AvailableProviderResolver, ModelTaskMetric, ModelMatrixProperties |
+| `router/` | Model routing: ModelResolver (matrix-based tier x provider routing), AgentTier, LlmProvider, ResolvedModel, ProviderHealthTracker (Redis-backed circuit breaker), AvailableProviderResolver, ModelTaskMetric, ModelMatrixProperties |
 | `reviewer/` | Agentic reviewer V2: ReviewerAgentV2 (two-phase inspect + fix), ReviewReportV2 |
 | `validator/` | Code validation: CodeValidator, CodeValidatorImpl, ValidationLevel, ValidationResult, ValidationVerdict, Language |
 | `validator/model/` | Validation data models |
@@ -415,7 +415,7 @@ PostMergeOrchestrator.onMergeCompleted(event)
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `execute` | `WorkerReport execute(AgentTask task, String runId)` | Main entry point. Creates a worktree, runs the agentic loop, returns a WorkerReport. |
-| `executeWithModel` | `WorkerReport executeWithModel(AgentTask task, String runId, ModelSelection model)` | Convenience wrapper that sets the model before calling execute(). |
+| `executeWithModel` | `WorkerReport executeWithModel(AgentTask task, String runId, ResolvedModel model)` | Convenience wrapper that sets the model before calling execute(). |
 | `parseXmlToolCalls` | `List<ParsedToolCall> parseXmlToolCalls(String text)` | Extracts `<tool_call>{"name":"...", "args":{...}}</tool_call>` blocks from assistant text. |
 | `dispatchTool` | `String dispatchTool(ParsedToolCall tc, String runId, String taskId)` | Routes parsed tool calls to the appropriate Java tool method. |
 | `compact` | `List<Message> compact(messages, task, ...)` | Compresses conversation history via LLM summarization when context window is filling up. |
@@ -1010,9 +1010,9 @@ The system uses a YAML-configured model matrix that maps `AgentTier x Provider -
 Resolves the model for a given agent tier and provider using the model-matrix configuration from `ModelMatrixProperties`.
 
 ```java
-ModelSelection resolve(AgentTier tier, LlmProvider provider)
+ResolvedModel resolve(AgentTier tier, LlmProvider provider)
   --> Reads model-matrix.providers.{provider}.{tier} from application.yml
-  --> Returns ModelSelection(provider, model)
+  --> Returns ResolvedModel(provider, model)
 ```
 
 ### 9.3 LlmRouter
@@ -2099,7 +2099,7 @@ EscalationService.escalate(task)
 
 ### 19.7 Worker Stall Detection
 
-The 15-minute wall-clock worker time limit includes stall detection with model escalation. WorkerAgent uses non-JSON escalation when a worker response does not start with `{` (not a completion report).
+The 25-minute wall-clock worker time limit includes stall detection with model escalation. WorkerAgent uses non-JSON escalation when a worker response does not start with `{` (not a completion report).
 
 ---
 
@@ -2365,6 +2365,7 @@ billing:
 | V53 | Run archive (pipeline_run.archived_at TIMESTAMPTZ + index) |
 | V54 | Stripe multi-currency (multi-currency pricing, org country/currency, tax IDs, gateway tracking) |
 | V55 | Payment audit expansion (gateway tracking, webhook_event_log table for idempotent webhook processing) |
+| V56 | Task completion notes (`agent_task.completion_notes` TEXT column) |
 
 ### 21.2 Entity Relationship Diagram
 
@@ -2822,7 +2823,7 @@ or create explicit depends_on relationships between tasks that share these files
 
 **Programmatic Access:**
 
-`getTopConflictedFilePaths(limit)` returns a list of file paths for programmatic use (e.g., by the ModelRouter to adjust complexity ratings for conflict-prone tasks).
+`getTopConflictedFilePaths(limit)` returns a list of file paths for programmatic use (e.g., by the ModelResolver to adjust complexity ratings for conflict-prone tasks).
 
 ---
 
