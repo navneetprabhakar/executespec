@@ -283,8 +283,10 @@ public class DevDockerfileGenerator {
     private String crViteAllowedHostsPatch() {
         return "RUN node -e \"" +
                 "const fs=require('fs');" +
+                "let found=false;" +
                 "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
                 "  if(fs.existsSync(f)){" +
+                "    found=true;" +
                 "    let c=fs.readFileSync(f,'utf8');" +
                 "    if(!c.includes('allowedHosts')){" +
                 "      c=c.replace(/server\\\\s*:\\\\s*\\\\{/,'server:{allowedHosts:true,');" +
@@ -296,7 +298,9 @@ public class DevDockerfileGenerator {
                 "    }" +
                 "    break;" +
                 "  }" +
-                "}\"\n";
+                "}" +
+                "if(!found)fs.writeFileSync('vite.config.js','import{defineConfig}from\\\\\"vite\\\\\";export default defineConfig({server:{allowedHosts:true}});');" +
+                "\"\n";
     }
 
     /** Vite proxy patch — rewrites localhost:NNNN → localhost:{port} in vite config. */
