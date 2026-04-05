@@ -367,6 +367,11 @@ public class DevDockerfileGenerator {
             // Node backend: shift 3000 → 8081
             // (Node apps typically read PORT env var, but in compound CMD it's set to 8080 for frontend)
         }
+        // Single-package full-stack on Cloud Run: inject --port 8080 into the build-time
+        // vite script patch so that vite binds to 8080 (matching Cloud Run's startup probe).
+        // The RUN node -e script patches package.json at build time, replacing vite with
+        // 'vite --host 0.0.0.0'. For Cloud Run, we extend that to also set the port.
+        dockerfile = dockerfile.replace("'vite --host 0.0.0.0'", "'vite --host 0.0.0.0 --port 8080'");
         // Full-stack: Cloud Run only supports one port — use frontend port for preview
         dockerfile = dockerfile.replaceAll("EXPOSE \\d+ \\d+", "EXPOSE 8080");
         // Ruby: Sinatra default 4567 → Cloud Run PORT
