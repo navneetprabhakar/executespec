@@ -287,30 +287,6 @@ public class PreviewAgent {
                       - PORT=8080
                     restart: unless-stopped
                 """;
-            case RUBY -> """
-                version: '3.8'
-                services:
-                  app:
-                    build: .
-                    ports:
-                      - "18080:8080"
-                    environment:
-                      - PORT=8080
-                      - RAILS_ENV=production
-                    restart: unless-stopped
-                """;
-            case PHP -> """
-                version: '3.8'
-                services:
-                  app:
-                    build: .
-                    ports:
-                      - "18080:8080"
-                    environment:
-                      - PORT=8080
-                      - APP_ENV=production
-                    restart: unless-stopped
-                """;
             case GRADLE -> """
                 version: '3.8'
                 services:

@@ -4,7 +4,7 @@
 
 ## Overview
 
-Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), permanent Cloud Run deployment for 11 languages, workspace management with GCS archiving, and GitHub integration for code push.
+Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration for code push.
 
 ### Preview Mode Architecture
 
@@ -73,8 +73,6 @@ Project type is determined in two stages:
 | PYTHON | `requirements.txt` / `pyproject.toml` | `uvicorn` or `flask` |
 | GO | `go.mod` | `go run .` |
 | RUST | `Cargo.toml` | `cargo run` |
-| RUBY | `Gemfile` | `rails server` |
-| PHP | `composer.json` | `php -S` |
 | STATIC_HTML | `index.html` without backend/frontend deps | `python -m http.server` |
 
 **Detection precedence:** `hasStaticHtml()` is checked before `hasJsOrTsFiles()` to prevent projects with only `script.js` from being misdetected as NODE.
@@ -85,7 +83,7 @@ Project type is determined in two stages:
 
 **NODE_BACKEND port handling:** The generated Dockerfile includes `ENV PORT=3000`. Generated apps use `process.env.PORT || 3001` -- without the env var, apps fall back to 3001 while Docker exposes 3000, causing health check failures.
 
-### 3. Cloud Run Deployment (11 Languages)
+### 3. Cloud Run Deployment (9 Languages)
 
 **Purpose:** Deploy completed runs to Google Cloud Run.
 
@@ -96,7 +94,7 @@ Project type is determined in two stages:
 - Deploy to Cloud Run (1 CPU, 512Mi, max 1 instance, unauthenticated)
 - 7-day TTL with cleanup job (cron)
 - Emit SSE events: DEPLOY_STARTED, DEPLOY_BUILDING, DEPLOY_PUSHING, DEPLOY_LIVE, DEPLOY_FAILED
-- Support: Spring Boot, Java, Node.js (frontend/backend/fullstack), Python, Go, Rust, Ruby, PHP, Static HTML
+- Support: Spring Boot, Java, Node.js (frontend/backend/fullstack), Python, Go, Rust, Static HTML
 - API: `POST /api/runs/{id}/deploy`, `GET /api/deployments`, `DELETE /api/deployments/{id}`
 
 ### 4. Workspace Management
@@ -198,7 +196,7 @@ See also: [Security Guardrails](security-guardrails.md) for the full container h
 | `api/controller/PreviewController.java` | Preview REST endpoints (start, stop, logs, API docs probe) |
 | `deployment/DeploymentService.java` | Cloud Run deployment |
 | `deployment/DockerfileGenerator.java` | Deploy Dockerfile generation (strategy pattern, reads `project.json`) |
-| `deployment/strategy/*.java` | 11 deployment strategies |
+| `deployment/strategy/*.java` | 9 deployment strategies |
 | `deployment/ArtifactRegistryClient.java` | Docker push to GCR (10-min timeout) |
 | `deployment/CloudRunClient.java` | Cloud Run API |
 | `deployment/WorkspaceExportService.java` | ZIP download |

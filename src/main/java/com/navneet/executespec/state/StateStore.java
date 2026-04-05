@@ -1307,8 +1307,6 @@ public class StateStore {
             new TechEntry("python",     33, new String[]{"python", "django", "fastapi", "flask", "pandas", "numpy"}, false),
             new TechEntry("go",         34, new String[]{"golang", "go lang", "gin framework", "fiber"}, false),
             new TechEntry("rust",       35, new String[]{"\\brust\\b", "cargo", "tokio", "actix", "axum"}, true),
-            new TechEntry("php",        36, new String[]{"php", "laravel", "symfony", "wordpress"}, false),
-            new TechEntry("ruby",       37, new String[]{"\\bruby\\b", "rails", "ruby on rails", "sinatra"}, true),
             new TechEntry("dotnet",     38, new String[]{".net", "dotnet", "csharp", "c#", "asp.net", "blazor"}, false),
             new TechEntry("postgres",   50, new String[]{"postgresql", "postgres", "psql"}, false),
             new TechEntry("mongodb",    51, new String[]{"mongodb", "mongoose"}, false),

@@ -144,6 +144,8 @@ public class RunController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         guard.requireAuthenticated(userDetails);
+        page = Math.max(0, page);
+        size = Math.max(1, Math.min(100, size));
         var visSpec = runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember());
 
         // scope=mine  → only the current user's runs
@@ -199,19 +201,17 @@ public class RunController {
             return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", run.getActualCostUsd()));
         }
 
-        // Check cache
-        double[] cached = costCache.get(runId);
-        boolean isTerminal = TERMINAL_STATUSES.contains(run.getStatus());
-        if (cached != null) {
-            // Terminal runs: cache never expires. In-progress: 15s TTL.
-            if (isTerminal || (System.currentTimeMillis() - cached[1]) < COST_CACHE_TTL_MS) {
-                return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", cached[0]));
+        double[] cached = costCache.compute(runId, (k, existing) -> {
+            if (existing != null) {
+                boolean isTerminal = TERMINAL_STATUSES.contains(run.getStatus());
+                if (isTerminal || (System.currentTimeMillis() - existing[1]) < COST_CACHE_TTL_MS) {
+                    return existing;
+                }
             }
-        }
-
-        double cost = costEstimator.computeCostForRun(runId);
-        costCache.put(runId, new double[]{cost, System.currentTimeMillis()});
-        return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", cost));
+            double cost = costEstimator.computeCostForRun(runId);
+            return new double[]{cost, System.currentTimeMillis()};
+        });
+        return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", cached[0]));
     }
 
     /** Approve or reject the plan-approval gate. */

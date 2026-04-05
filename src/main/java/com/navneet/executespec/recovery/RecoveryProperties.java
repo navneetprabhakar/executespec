@@ -56,8 +56,8 @@ public class RecoveryProperties {
     // ── Escalation ladder ─────────────────────────────────────────────────────
     // Defaults match YAML values; overridden at runtime via @ConfigurationProperties binding.
     private Map<String, String> capableModels = new HashMap<>(Map.of(
-        "anthropic", "claude-haiku-4-5-20251001",
-        "google",    "gemini-3-flash-preview",
+        "anthropic", "claude-sonnet-4-6",
+        "google",    "gemini-2.5-flash",
         "openai",    "gpt-5.4"
     ));
 

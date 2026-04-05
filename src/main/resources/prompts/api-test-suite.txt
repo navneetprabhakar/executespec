@@ -28,9 +28,6 @@ Framework-specific guidance:
 - Node/Express: app.get(), router.post(), etc.
 - Node/Fastify: fastify.get(), fastify.post(), etc.
 - Go: http.HandleFunc, gin.GET, echo.POST, chi.Route, fiber.Get, etc.
-- Ruby/Rails: routes.rb (resources, get/post/put/delete), controllers
-- Ruby/Sinatra: get/post/put/delete blocks
-- PHP/Laravel: Route::get, Route::post in routes/api.php, controllers
 - Rust/Actix: #[get], #[post], web::resource, etc.
 - Rust/Axum: Router::new().route(), get/post handlers
 

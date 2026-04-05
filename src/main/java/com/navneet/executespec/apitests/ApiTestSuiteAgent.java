@@ -194,8 +194,6 @@ public class ApiTestSuiteAgent {
         // File-name patterns that strongly indicate REST API route definitions
         Set<String> javaPatterns = Set.of("Controller.java", "Resource.java");
         Set<String> exactNames = Set.of(
-                "routes.rb",       // Rails
-                "api.php",         // Laravel
                 "urls.py",         // Django
                 "views.py",        // Django REST
                 "main.go"          // Go (often single-file API servers)
@@ -245,15 +243,6 @@ public class ApiTestSuiteAgent {
                     results.add(rel);
                     continue;
                 }
-                // Ruby: controllers
-                if (name.endsWith(".rb") && (name.contains("controller") || name.contains("api"))) {
-                    results.add(rel);
-                    continue;
-                }
-                // PHP: controllers
-                if (name.endsWith(".php") && (name.contains("Controller") || name.contains("controller") || name.contains("Route"))) {
-                    results.add(rel);
-                }
             }
 
             // If no files found by name, do content scan for route patterns in Python/Node entry files
@@ -275,15 +264,13 @@ public class ApiTestSuiteAgent {
                 "app.get(", "app.post(", "app.put(", "app.delete(",  // Node Express
                 "router.get(", "router.post(",                        // Node Express Router
                 "HandleFunc(", "gin.Default(", "echo.New(",           // Go
-                "#[get(", "#[post(", "web::resource",                 // Rust Actix
-                "Route::get(", "Route::post("                         // PHP Laravel
+                "#[get(", "#[post(", "web::resource"                  // Rust Actix
         );
 
         for (Path p : candidates) {
             String name = p.getFileName().toString();
             if (!(name.endsWith(".py") || name.endsWith(".js") || name.endsWith(".ts") ||
-                    name.endsWith(".go") || name.endsWith(".rs") || name.endsWith(".rb") ||
-                    name.endsWith(".php"))) continue;
+                    name.endsWith(".go") || name.endsWith(".rs"))) continue;
 
             try {
                 String content = Files.readString(p);

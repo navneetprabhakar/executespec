@@ -1,18 +1,18 @@
 # deployment/ — Preview & Deploy
 
-Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), permanent Cloud Run deployment for 11 languages, workspace management with GCS archiving, and GitHub integration.
+Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.
 
 ## Key Files
 - `preview/PreviewService.java` — Dual-mode preview lifecycle (docker/cloud-run). TTL: 5min (both modes). Preview auto-starts after COMPLETE via PipelineHarness. Idempotent: returns existing session if already running.
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first, falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`.
-- `preview/PreviewProjectType.java` — Enum: SPRING_BOOT, JAVA, NODE_FRONTEND, NODE_BACKEND, PYTHON, GO, RUST, RUBY, PHP, FULL_STACK, STATIC_HTML (11 types).
+- `preview/PreviewProjectType.java` — Enum: SPRING_BOOT, JAVA, NODE_FRONTEND, NODE_BACKEND, PYTHON, GO, RUST, FULL_STACK, STATIC_HTML (9 types).
 - `preview/ComposeFileGenerator.java` — Generates docker-compose.yml for Docker previews. Port mapping uses `PreviewProjectType.getContainerPort()`. Blocks cloud metadata endpoints via `extra_hosts` (metadata.google.internal + 169.254.169.254 → 127.0.0.1). App containers hardened with `no-new-privileges`, `cap_drop: ALL`.
-- `DeploymentService.java` — Full Cloud Run deployment. 11-language support, 7-day TTL. Tier-based deployment limits enforced via `TierConfig.maxDeployments` (FREE=0, PRO=5, ENTERPRISE=-1).
+- `DeploymentService.java` — Full Cloud Run deployment. 9-language support, 7-day TTL. Tier-based deployment limits enforced via `TierConfig.maxDeployments` (FREE=0, PRO=5, ENTERPRISE=-1).
 - `CloudRunClient.java` — GCP Cloud Run API client. All subprocess calls have timeouts.
 - `ArtifactRegistryClient.java` — Docker build + push to Artifact Registry. Build/push have timeouts.
-- `DockerfileGenerator.java` — Generates language-specific Dockerfiles (11 strategies). Also reads `.agent-context/project.json` to select correct strategy before file-based detection.
+- `DockerfileGenerator.java` — Generates language-specific Dockerfiles (9 strategies). Also reads `.agent-context/project.json` to select correct strategy before file-based detection.
 - `GcsWorkspaceStore.java` — Archives workspaces to GCS after 24h.
 - `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). Note: pipeline push flow uses `PipelineHarness.pushToGitHubIfConfigured()` → `GitTool.pushToBranch()` instead.
 

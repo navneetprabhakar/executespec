@@ -1243,7 +1243,7 @@ function FileTypeIcon({ name }: { name: string }) {
   const lower = name.toLowerCase();
   const ext = lower.includes('.') ? lower.split('.').pop()! : '';
 
-  const codeExts = new Set(['java', 'kt', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'cpp', 'c', 'cs', 'rb', 'php', 'swift', 'scala']);
+  const codeExts = new Set(['java', 'kt', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'cpp', 'c', 'cs', 'swift', 'scala']);
   const textExts = new Set(['md', 'txt', 'yaml', 'yml', 'json', 'xml', 'html', 'css', 'scss', 'sql', 'sh', 'bash', 'properties', 'env', 'conf', 'toml', 'gradle', 'gitignore', 'dockerignore']);
 
   const colorMap: Record<string, string> = {
@@ -1355,7 +1355,7 @@ const EXT_TO_LANG: Record<string, string> = {
   js: 'javascript', jsx: 'javascript',
   java: 'java', kt: 'kotlin',
   py: 'python', go: 'go', rs: 'rust',
-  rb: 'ruby', php: 'php', swift: 'swift',
+  swift: 'swift',
   cs: 'csharp', cpp: 'cpp', c: 'c', scala: 'scala',
   css: 'css', scss: 'scss',
   html: 'xml', xml: 'xml',
@@ -1397,7 +1397,7 @@ const MONACO_LANG_MAP: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript', html: 'html', css: 'css', scss: 'scss',
   json: 'json', yml: 'yaml', yaml: 'yaml', xml: 'xml', md: 'markdown',
   sql: 'sql', sh: 'shell', bash: 'shell', dockerfile: 'dockerfile', toml: 'ini',
-  rs: 'rust', go: 'go', rb: 'ruby', php: 'php', gradle: 'groovy', tf: 'hcl',
+  rs: 'rust', go: 'go', gradle: 'groovy', tf: 'hcl',
   properties: 'ini', txt: 'plaintext', cfg: 'ini', env: 'ini',
 };
 

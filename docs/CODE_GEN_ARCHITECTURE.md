@@ -310,7 +310,7 @@ The PlannerAgent uses a PLANNING-tier model to decompose the user's request into
 
 ### Project Type Detection
 
-Planner declares `project_type` (exactly one): `SPRING_BOOT`, `JAVA`, `NODE_FRONTEND`, `NODE_BACKEND`, `PYTHON`, `GO`, `RUST`, `RUBY`, `PHP`, `FULL_STACK`, `STATIC_HTML`
+Planner declares `project_type` (exactly one): `SPRING_BOOT`, `JAVA`, `NODE_FRONTEND`, `NODE_BACKEND`, `PYTHON`, `GO`, `RUST`, `FULL_STACK`, `STATIC_HTML`
 
 Written to `.agent-context/project.json` and read by preview/deploy Dockerfile generators.
 

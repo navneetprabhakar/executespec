@@ -14,7 +14,7 @@ import java.util.stream.Stream;
  * Validates that a workspace contains files from a supported language.
  *
  * <p>Supported languages: Java, TypeScript, React (TSX/JSX), Python, Go, Rust, HTML, CSS.
- * If the workspace only contains files from unsupported languages (Ruby, PHP, Swift, Kotlin, etc.),
+ * If the workspace only contains files from unsupported languages (Swift, Kotlin, etc.),
  * the validation fails with a descriptive error message.
  *
  * <p>Only applies to EXISTING repo mode — new (empty) workspaces skip validation.
@@ -42,7 +42,7 @@ public class LanguageValidator {
 
     /** File extensions that indicate an unsupported language. */
     private static final Set<String> UNSUPPORTED_EXTENSIONS = Set.of(
-        ".rb", ".php", ".swift", ".kt", ".kts",
+        ".swift", ".kt", ".kts",
         ".scala", ".clj", ".ex", ".exs",
         ".dart", ".lua", ".pl", ".pm",
         ".r", ".R", ".jl", ".zig",
@@ -148,8 +148,6 @@ public class LanguageValidator {
 
     private static String extensionToLanguageName(String ext) {
         return switch (ext) {
-            case ".rb" -> "Ruby";
-            case ".php" -> "PHP";
             case ".swift" -> "Swift";
             case ".kt", ".kts" -> "Kotlin";
             case ".scala" -> "Scala";

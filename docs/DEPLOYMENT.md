@@ -1906,7 +1906,7 @@ Preview containers and test execution containers are hardened:
 
 **DevDockerfileGenerator:**
 - Reads `.agent-context/project.json` (planner-declared type) first, falls back to file-based heuristics
-- 11 project types supported: SPRING_BOOT, JAVA, NODE_FRONTEND, NODE_BACKEND, PYTHON, GO, RUST, RUBY, PHP, FULL_STACK, STATIC_HTML
+- 9 project types supported: SPRING_BOOT, JAVA, NODE_FRONTEND, NODE_BACKEND, PYTHON, GO, RUST, FULL_STACK, STATIC_HTML
 - Full-stack Dockerfile generation uses Java string concatenation for inline Node.js scripts (avoids shell command substitution of backtick template literals)
 
 #### Pre-Production Checklist

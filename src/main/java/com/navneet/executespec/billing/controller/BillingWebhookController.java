@@ -126,7 +126,7 @@ public class BillingWebhookController {
                     .processedAt(Instant.now())
                     .build());
         } catch (Exception e) {
-            log.warn("Failed to log webhook event (non-blocking): {}", e.getMessage());
+            log.error("CRITICAL: Failed to persist webhook event gateway={} eventId={} — audit trail gap", gateway, eventId, e);
         }
     }
 

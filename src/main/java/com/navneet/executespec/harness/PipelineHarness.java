@@ -1,6 +1,8 @@
 package com.navneet.executespec.harness;
 import com.navneet.executespec.router.ModelRegistry;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.ApiKeyResolver;
@@ -51,6 +53,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -161,8 +164,11 @@ public class PipelineHarness {
      * Tracks in-flight test execution completions so the validation report can wait for test results.
      * Key = runId, completed when TestExecutionCompletedEvent fires (or test pipeline fails/skips).
      */
-    private final ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<com.navneet.executespec.testgen.model.TestExecutionSummary>>
-            testCompletionFutures = new ConcurrentHashMap<>();
+    private final Cache<String, CompletableFuture<TestExecutionSummary>> testCompletionFutures =
+            Caffeine.newBuilder()
+                    .expireAfterWrite(Duration.ofHours(24))
+                    .maximumSize(10_000)
+                    .build();
 
     /**
      * Tracks runs with active background validation (review + test gen + report).
@@ -1355,7 +1361,7 @@ public class PipelineHarness {
                         ));
                         log.info("[ApplySuggestion] Test gen pipeline started for run {}", runId);
                     } catch (Exception e) {
-                        testCompletionFutures.remove(runId);
+                        testCompletionFutures.invalidate(runId);
                         log.warn("[ApplySuggestion] Failed to start test gen for run {}: {}", runId, e.getMessage());
                     }
                 }
@@ -2223,7 +2229,7 @@ public class PipelineHarness {
                 testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
                 log.info("Run {} — test gen pipeline completed in background", runId);
             } catch (Exception e) {
-                testCompletionFutures.remove(runId);
+                testCompletionFutures.invalidate(runId);
                 log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
             }
 
@@ -3153,7 +3159,7 @@ public class PipelineHarness {
             // Test results are decoupled from validation report — tests run in
             // background and their report is generated independently when complete.
             // Clean up the future reference so it doesn't leak.
-            testCompletionFutures.remove(runId);
+            testCompletionFutures.invalidate(runId);
 
             ReportInput input = new ReportInput(run, reports, review, compileResult,
                     stateStore.getAllTasks(runId), null, List.of(), afterImprovements);
@@ -3226,7 +3232,7 @@ public class PipelineHarness {
 
     @EventListener
     public void onTestExecutionCompleted(TestExecutionCompletedEvent event) {
-        CompletableFuture<TestExecutionSummary> future = testCompletionFutures.get(event.runId());
+        CompletableFuture<TestExecutionSummary> future = testCompletionFutures.getIfPresent(event.runId());
         if (future != null) {
             future.complete(event.summary());
             log.info("Run {} — test execution completed, report generation unblocked", event.runId());

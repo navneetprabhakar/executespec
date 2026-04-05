@@ -10,8 +10,6 @@ public enum PreviewProjectType {
     JAVA(8080),
     PYTHON(8000),
     GO(8080),
-    RUBY(4567),        // Sinatra default port
-    PHP(8080),         // PHP built-in server
     RUST(8080),
     FULL_STACK(5173),  // primary preview port is the frontend
     STATIC_HTML(8080); // simple static files served via nginx/serve
