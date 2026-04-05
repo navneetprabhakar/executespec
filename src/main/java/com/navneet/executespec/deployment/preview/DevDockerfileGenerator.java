@@ -411,6 +411,11 @@ public class DevDockerfileGenerator {
 
         // Vite 5.4+ blocks requests from unrecognised hostnames (e.g. *.a.run.app).
         // Inject a build-time patch that sets server.allowedHosts in the vite config.
+        // ONLY for project types that use Vite (Node.js frontend/full-stack).
+        // Running `node -e` on non-Node images (e.g. eclipse-temurin) causes exit 127.
+        boolean usesVite = type == PreviewProjectType.NODE_FRONTEND
+                || type == PreviewProjectType.FULL_STACK;
+        if (usesVite) {
         // Patterns tried in order:
         //   1. server: {           → prepend allowedHosts:true
         //   2. export default {    → prepend server:{allowedHosts:true}
@@ -434,6 +439,7 @@ public class DevDockerfileGenerator {
                 "    break;" +
                 "  }" +
                 "}\"\n");
+        } // end usesVite
 
         return dockerfile;
     }
