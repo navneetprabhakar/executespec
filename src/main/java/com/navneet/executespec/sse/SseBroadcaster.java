@@ -46,9 +46,15 @@ public class SseBroadcaster {
             try {
                 emitter.send(SseEmitter.event().data(json));
             } catch (Throwable t) {
-                // Broken pipe / client disconnect — prune dead emitter silently
-                log.debug("SSE client disconnected for run {} ({})", runId, t.getMessage());
+                // Broken pipe / client disconnect — complete the emitter so Spring's
+                // async lifecycle is properly terminated (prevents Tomcat ERROR logs).
                 dead.add(emitter);
+                try {
+                    emitter.completeWithError(t);
+                } catch (Throwable ignored) {
+                    // Already broken — nothing more to do
+                }
+                log.debug("SSE client disconnected for run {} ({})", runId, t.getMessage());
             }
         }
         if (!dead.isEmpty()) clients.removeAll(dead);
