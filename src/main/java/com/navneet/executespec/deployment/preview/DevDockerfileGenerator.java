@@ -238,192 +238,50 @@ public class DevDockerfileGenerator {
     }
 
     /**
-     * Generate a Cloud Run-compatible Dockerfile.
-     * Ensures the container listens on $PORT (Cloud Run requirement).
-     * Replaces hardcoded ports with $PORT and adds ENV PORT=8080 default.
+     * Generate a Cloud Run-compatible Dockerfile from scratch for the given project type.
+     * Each type has its own dedicated generator — no regex post-processing.
+     *
+     * Cloud Run rules enforced by all generators:
+     * - EXPOSE 8080, ENV PORT=8080, shell-form CMD (so ${PORT:-8080} expands)
+     * - USER directive AFTER all RUN steps, BEFORE CMD
+     * - No cross-runtime scripts (e.g. no `node -e` on Java images)
+     * - --legacy-peer-deps on all npm install/ci (Node types only)
      */
     public String generateForCloudRun(PreviewProjectType type, Path workspace) {
-        String dockerfile = generate(type, workspace);
+        return switch (type) {
+            case NODE_FRONTEND -> cloudRun_NodeFrontend(workspace);
+            case NODE_BACKEND  -> cloudRun_NodeBackend(workspace);
+            case SPRING_BOOT   -> cloudRun_SpringBoot(workspace);
+            case PYTHON        -> cloudRun_Python(workspace);
+            case GO            -> cloudRun_Go(workspace);
+            case RUST          -> cloudRun_Rust(workspace);
+            case RUBY          -> cloudRun_Ruby(workspace);
+            case PHP           -> cloudRun_Php(workspace);
+            case STATIC_HTML   -> cloudRun_StaticHtml();
+            case JAVA          -> cloudRun_Java(workspace);
+            case FULL_STACK    -> cloudRun_FullStack(workspace);
+        };
+    }
 
-        // Cloud Run sets PORT env var automatically via --port flag.
-        // Ensure container reads it at runtime. Override any non-8080 PORT to 8080,
-        // or add ENV PORT=8080 if not present. Without this, a base Dockerfile with
-        // ENV PORT=3000 would ignore the ${PORT:-8080} defaults in CMD.
-        // Handles both standalone "ENV PORT=3000" and multi-value "ENV ... PORT=8000".
-        if (dockerfile.contains("ENV PORT=") && !dockerfile.contains("ENV PORT=8080")) {
-            // Standalone: ENV PORT=3000
-            dockerfile = dockerfile.replaceFirst("ENV PORT=\\d+", "ENV PORT=8080");
-        } else if (java.util.regex.Pattern.compile("(?<=\\s)PORT=\\d+").matcher(dockerfile).find()
-                && !java.util.regex.Pattern.compile("(?<=\\s)PORT=8080").matcher(dockerfile).find()) {
-            // Multi-value: ENV FLASK_RUN_HOST=0.0.0.0 FLASK_RUN_PORT=8000 ... PORT=8000
-            // Replace ALL port-related env values (FLASK_RUN_PORT, FLASK_PORT, PORT) to 8080
-            dockerfile = java.util.regex.Pattern.compile("(?<=\\s)((?:FLASK_RUN_|FLASK_)?PORT)=\\d+")
-                    .matcher(dockerfile).replaceAll("$1=8080");
-        } else if (!dockerfile.contains("ENV PORT=")
-                && !java.util.regex.Pattern.compile("(?<=\\s)PORT=\\d+").matcher(dockerfile).find()) {
-            int lastFrom = dockerfile.lastIndexOf("FROM ");
-            if (lastFrom >= 0) {
-                int endOfLine = dockerfile.indexOf('\n', lastFrom);
-                if (endOfLine >= 0) {
-                    dockerfile = dockerfile.substring(0, endOfLine + 1)
-                            + "ENV PORT=8080\n"
-                            + dockerfile.substring(endOfLine + 1);
-                }
-            }
+    // ── Cloud Run helpers ──────────────────────────────────────────────────
+
+    /** Non-root user block: RUN adduser + USER app. Alpine vs Debian syntax. */
+    private String crNonRootUser(boolean alpine) {
+        if (alpine) {
+            return "RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app\n" +
+                   "USER app\n";
         }
+        return "RUN groupadd -r app && useradd -r -g app -s /sbin/nologin app && chown -R app:app /app\n" +
+               "USER app\n";
+    }
 
-        // Replace hardcoded ports with $PORT for Cloud Run compatibility.
-        // Use shell form (not JSON exec) so $PORT expands at runtime.
-
-        // Multi-service full-stack CMD: only remap frontend (vite) port to Cloud Run's PORT.
-        // Backend stays on its native port (8080/8000/3000) since Cloud Run only exposes one port
-        // and the frontend is what users see in the preview.
-        boolean isMultiServiceCmd = dockerfile.contains("[backend]") && dockerfile.contains("[frontend]");
-        if (isMultiServiceCmd) {
-            // Only remap the vite --port inside the [frontend] section
-            dockerfile = dockerfile.replace("npx vite --host 0.0.0.0 --port 5173",
-                    "npx vite --host 0.0.0.0 --port ${PORT:-8080}");
-        }
-
-        dockerfile = dockerfile.replace("EXPOSE 5173", "EXPOSE 8080");
-        dockerfile = dockerfile.replace("EXPOSE 3000", "EXPOSE 8080");
-        dockerfile = dockerfile.replace("EXPOSE 8000", "EXPOSE 8080");
-
-        if (!isMultiServiceCmd) {
-            // Vite: --port NNNN → --port ${PORT:-8080}
-            dockerfile = dockerfile.replace("--port 5173", "--port ${PORT:-8080}");
-            dockerfile = dockerfile.replace("--port 3000", "--port ${PORT:-8080}");
-            // Python
-            dockerfile = dockerfile.replace("--port 8000", "--port ${PORT:-8080}");
-            dockerfile = dockerfile.replace("0.0.0.0:8000", "0.0.0.0:${PORT:-8080}");
-        }
-        // Vite exec form → shell form so $PORT expands at runtime
-        dockerfile = dockerfile.replace(
-                "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\"]",
-                "CMD npx vite --host 0.0.0.0 --port ${PORT:-8080}");
-        // Node serve: -l NNNN → -l ${PORT:-8080}
-        dockerfile = dockerfile.replace("\"-l\", \"5173\"", "\"-l\", \"8080\"");
-        // Convert serve exec form to shell form so PORT env var is available
-        dockerfile = dockerfile.replace(
-                "CMD [\"npx\", \"serve\", \"-s\", \".\", \"-l\", \"8080\"]",
-                "CMD npx serve -s . -l ${PORT:-8080}");
-        // Python exec-form port replacement (single-service only)
-        dockerfile = dockerfile.replace("\"--port\", \"8000\"", "\"--port\", \"8080\"");
-        // Node backend with exec form: convert to shell form so PORT is respected
-        // CMD ["npm", "start"] → CMD PORT=${PORT:-8080} npm start
-        dockerfile = dockerfile.replace("CMD [\"npm\", \"start\"]",
-                "CMD PORT=${PORT:-8080} npm start");
-        dockerfile = dockerfile.replace("CMD [\"npm\", \"run\", \"dev\"]",
-                "CMD PORT=${PORT:-8080} npm run dev");
-        // Monorepo backend-only: CMD ["npm", "run", "dev", "--prefix", "ws"] → shell form
-        dockerfile = java.util.regex.Pattern.compile(
-                "CMD \\[\"npm\", \"run\", \"dev\", \"--prefix\", \"([^\"]+)\"\\]")
-                .matcher(dockerfile)
-                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement("CMD PORT=${PORT:-8080} npm run dev --prefix ")
-                        + m.group(1));
-        // Node backend with explicit main file
-        // Use Matcher.replaceAll with quoteReplacement to avoid ${...} being interpreted as regex group ref
-        dockerfile = java.util.regex.Pattern.compile("CMD \\[\"node\", \"([^\"]+)\"\\]")
-                .matcher(dockerfile)
-                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement("CMD PORT=${PORT:-8080} node ") + m.group(1));
-        // Django: exec-form with host:port — must convert to shell form so $PORT expands
-        // CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"] → shell form
-        dockerfile = dockerfile.replace(
-                "CMD [\"python\", \"manage.py\", \"runserver\", \"0.0.0.0:${PORT:-8080}\"]",
-                "CMD python manage.py runserver 0.0.0.0:${PORT:-8080}");
-        // FastAPI/uvicorn: exec-form with --port — convert to shell form
-        dockerfile = java.util.regex.Pattern.compile(
-                "CMD \\[\"uvicorn\", \"([^\"]+)\", \"--host\", \"0\\.0\\.0\\.0\", \"--port\", \"8080\"\\]")
-                .matcher(dockerfile)
-                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement("CMD uvicorn ") + m.group(1)
-                        + java.util.regex.Matcher.quoteReplacement(" --host 0.0.0.0 --port ${PORT:-8080}"));
-        // Flask: exec-form with --port — convert to shell form
-        dockerfile = dockerfile.replace(
-                "CMD [\"flask\", \"run\", \"--host\", \"0.0.0.0\", \"--port\", \"8080\"]",
-                "CMD flask run --host 0.0.0.0 --port ${PORT:-8080}");
-        // Generic Python: exec-form — convert to shell form so PORT env var is available
-        dockerfile = dockerfile.replaceAll(
-                "CMD \\[\"python\", \"([^\"]+)\"\\]",
-                "CMD python $1");
-        // Spring Boot: pass SERVER_PORT so non-default-port projects bind correctly.
-        // (Spring Boot does NOT read PORT env var — only SERVER_PORT.)
-        dockerfile = dockerfile.replace(
-                "CMD [\"mvn\", \"spring-boot:run\", \"-DskipTests\", \"-q\"]",
-                "CMD SERVER_PORT=${PORT:-8080} mvn spring-boot:run -DskipTests -q");
-        // ttyd: replace hardcoded port with $PORT for Cloud Run
-        dockerfile = dockerfile.replace("\"ttyd\", \"--port\", \"8080\"",
-                "\"sh\", \"-c\", \"ttyd --port ${PORT:-8080}\"");
-        // MCP Inspector: replace hardcoded port with $PORT
-        dockerfile = dockerfile.replace("--port 8080 --", "--port ${PORT:-8080} --");
-        // Multi-service full-stack on Cloud Run: shift backend to non-conflicting port.
-        // Frontend (vite) gets PORT (8080, exposed to Cloud Run). Backend moves to 8081.
-        if (isMultiServiceCmd) {
-            // Spring Boot backend inside sh -c: inject SERVER_PORT=8081
-            dockerfile = dockerfile.replace("mvn spring-boot:run -DskipTests -q",
-                    "SERVER_PORT=8081 mvn spring-boot:run -DskipTests -q");
-            // Python backend: shift 8000 → 8081 (only inside the [backend] section of compound CMD)
-            dockerfile = dockerfile.replace("runserver 0.0.0.0:8000", "runserver 0.0.0.0:8081");
-            dockerfile = dockerfile.replace("--port 8000", "--port 8081");
-            // Node backend: shift 3000 → 8081
-            // (Node apps typically read PORT env var, but in compound CMD it's set to 8080 for frontend)
-        }
-        // Single-package full-stack on Cloud Run: inject --port 8080 into the build-time
-        // vite script patch so that vite binds to 8080 (matching Cloud Run's startup probe).
-        // The RUN node -e script patches package.json at build time, replacing vite with
-        // 'vite --host 0.0.0.0'. For Cloud Run, we extend that to also set the port.
-        dockerfile = dockerfile.replace("'vite --host 0.0.0.0'", "'vite --host 0.0.0.0 --port 8080'");
-        // Full-stack: Cloud Run only supports one port — use frontend port for preview
-        dockerfile = dockerfile.replaceAll("EXPOSE \\d+ \\d+", "EXPOSE 8080");
-
-        // Single-package full-stack on Cloud Run: shift backend to non-conflicting port.
-        // Vite is already hardcoded to --port 8080 (patched above). Shift ENV PORT from
-        // 8080 to 3001 so the backend (Express/Fastify/etc, which reads PORT) doesn't
-        // compete with Vite for port 8080. Cloud Run routes traffic to 8080 → reaches Vite.
-        boolean isSinglePkgFullStack = !isMultiServiceCmd
-                && dockerfile.contains("dev:all");
-        if (isSinglePkgFullStack) {
-            dockerfile = dockerfile.replace("ENV PORT=8080", "ENV PORT=3001");
-            // Patch vite proxy config to forward API requests to backend on port 3001
-            dockerfile = injectBeforeCmd(dockerfile,
-                    "RUN node -e \"" +
-                    "const fs=require('fs');" +
-                    "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
-                    "  if(fs.existsSync(f)){" +
-                    "    let c=fs.readFileSync(f,'utf8');" +
-                    "    c=c.replace(/localhost:\\\\d{4}/g,'localhost:3001');" +
-                    "    c=c.replace(/127\\\\.0\\\\.0\\\\.1:\\\\d{4}/g,'127.0.0.1:3001');" +
-                    "    fs.writeFileSync(f,c);" +
-                    "    break;" +
-                    "  }" +
-                    "}\"\n");
-        }
-        // Ruby: Sinatra default 4567 → Cloud Run PORT
-        dockerfile = dockerfile.replace("EXPOSE 4567", "EXPOSE 8080");
-        // Rackup: convert exec form to shell form so ${PORT:-8080} expands at runtime
-        dockerfile = dockerfile.replace(
-                "CMD [\"bundle\", \"exec\", \"rackup\", \"--host\", \"0.0.0.0\", \"--port\", \"4567\"]",
-                "CMD bundle exec rackup --host 0.0.0.0 --port ${PORT:-8080}");
-        dockerfile = dockerfile.replace("\"--port\", \"4567\"", "\"--port\", \"${PORT:-8080}\"");
-        // Go: already uses 8080, just ensure shell form for PORT support
-        // PHP: built-in server port
-        dockerfile = dockerfile.replace("\"php\", \"-S\", \"0.0.0.0:8080\"",
-                "\"sh\", \"-c\", \"php -S 0.0.0.0:${PORT:-8080}\"");
-
-        // Vite 5.4+ blocks requests from unrecognised hostnames (e.g. *.a.run.app).
-        // Inject a build-time patch that sets server.allowedHosts in the vite config.
-        // ONLY for project types that use Vite (Node.js frontend/full-stack).
-        // Running `node -e` on non-Node images (e.g. eclipse-temurin) causes exit 127.
-        boolean usesVite = type == PreviewProjectType.NODE_FRONTEND
-                || type == PreviewProjectType.FULL_STACK;
-        if (usesVite) {
-        // Patterns tried in order:
-        //   1. server: {           → prepend allowedHosts:true
-        //   2. export default {    → prepend server:{allowedHosts:true}
-        //   3. defineConfig({      → prepend server:{allowedHosts:true}
-        //   4. => ({               → arrow function in defineConfig (e.g. ({ mode }) => ({...}))
-        //   5. plugins:            → fallback: prepend server config before plugins array
-        dockerfile = injectBeforeCmd(dockerfile,
-                "RUN node -e \"" +
+    /**
+     * Vite 5.4+ allowedHosts patch — RUN node -e that sets server.allowedHosts:true
+     * in vite config. Handles 5 config patterns (server:{}, export default{},
+     * defineConfig({), arrow function, plugins: fallback).
+     */
+    private String crViteAllowedHostsPatch() {
+        return "RUN node -e \"" +
                 "const fs=require('fs');" +
                 "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
                 "  if(fs.existsSync(f)){" +
@@ -438,10 +296,669 @@ public class DevDockerfileGenerator {
                 "    }" +
                 "    break;" +
                 "  }" +
-                "}\"\n");
-        } // end usesVite
+                "}\"\n";
+    }
 
-        return dockerfile;
+    /** Vite proxy patch — rewrites localhost:NNNN → localhost:{port} in vite config. */
+    private String crViteProxyPatch(int port) {
+        return "RUN node -e \"" +
+                "const fs=require('fs');" +
+                "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
+                "  if(fs.existsSync(f)){" +
+                "    let c=fs.readFileSync(f,'utf8');" +
+                "    c=c.replace(/localhost:\\\\d{4}/g,'localhost:" + port + "');" +
+                "    c=c.replace(/127\\\\.0\\\\.0\\\\.1:\\\\d{4}/g,'127.0.0.1:" + port + "');" +
+                "    fs.writeFileSync(f,c);" +
+                "    break;" +
+                "  }" +
+                "}\"\n";
+    }
+
+    /**
+     * Detect missing vite/react deps and return an `npm install -D ...` suffix string.
+     * Returns empty string if all deps present.
+     */
+    private String crInstallMissingViteDeps(Path workspace) {
+        StringBuilder missing = new StringBuilder();
+        Path pkgJson = workspace.resolve("package.json");
+        if (!Files.exists(pkgJson)) return "";
+        if (!fileContainsPattern(pkgJson, "\"vite\"")) missing.append(" vite");
+        if (!fileContainsPattern(pkgJson, "\"@vitejs/plugin-react\"")) missing.append(" @vitejs/plugin-react");
+        if (!fileContainsPattern(pkgJson, "\"react\"")) missing.append(" react");
+        if (!fileContainsPattern(pkgJson, "\"react-dom\"")) missing.append(" react-dom");
+        if (!fileContainsPattern(pkgJson, "\"prop-types\"")) missing.append(" prop-types");
+        if (!fileContainsPattern(pkgJson, "\"lucide-react\"")) missing.append(" lucide-react");
+        if (!fileContainsPattern(pkgJson, "\"clsx\"")) missing.append(" clsx");
+        if (!fileContainsPattern(pkgJson, "\"tailwind-merge\"")) missing.append(" tailwind-merge");
+        if (missing.isEmpty()) return "";
+        return " && npm install -D" + missing + " --legacy-peer-deps";
+    }
+
+    /**
+     * Detect Python CMD for Cloud Run (shell form, port parameterized).
+     * Returns CMD string like "CMD python manage.py runserver 0.0.0.0:${PORT:-8080}".
+     */
+    private String crDetectPythonCmd(Path workspace, String portExpr) {
+        if (Files.exists(workspace.resolve("manage.py"))) {
+            return "CMD python manage.py runserver 0.0.0.0:" + portExpr;
+        }
+        String fastApiFile = findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(");
+        if (fastApiFile != null) {
+            String module = fastApiFile.replace(".py", "");
+            return "CMD uvicorn " + module + ":app --host 0.0.0.0 --port " + portExpr;
+        }
+        if (hasDependency(workspace, "fastapi")) {
+            return "CMD uvicorn main:app --host 0.0.0.0 --port " + portExpr;
+        }
+        String flaskFile = findPythonFileWithPattern(workspace, "from flask", "import flask", "Flask(");
+        if (flaskFile != null) {
+            return "CMD FLASK_APP=" + flaskFile + " flask run --host 0.0.0.0 --port " + portExpr;
+        }
+        if (hasDependency(workspace, "flask")) {
+            return "CMD flask run --host 0.0.0.0 --port " + portExpr;
+        }
+        // Fallback: check source files
+        String fallbackFastApi = findPythonFileWithPattern(workspace, "from fastapi", "import fastapi");
+        if (fallbackFastApi != null) {
+            String module = fallbackFastApi.replace(".py", "");
+            return "CMD uvicorn " + module + ":app --host 0.0.0.0 --port " + portExpr;
+        }
+        String fallbackFlask = findPythonFileWithPattern(workspace, "from flask", "import flask");
+        if (fallbackFlask != null) {
+            return "CMD FLASK_APP=" + fallbackFlask + " flask run --host 0.0.0.0 --port " + portExpr;
+        }
+        String entryFile = findPythonEntryPoint(workspace);
+        return "CMD python " + entryFile;
+    }
+
+    /**
+     * Single-package full-stack vite script patch: RUN node -e that injects --host 0.0.0.0
+     * into vite scripts, and creates dev:all script if both FE and BE are detected.
+     * For Cloud Run, also injects --port {vitePort} into the vite command.
+     */
+    private String crViteDevScriptPatch(int vitePort) {
+        return "RUN node -e \"" +
+                "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));" +
+                "if(p.scripts){" +
+                "  for(const[k,v]of Object.entries(p.scripts)){" +
+                "    if(typeof v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){" +
+                "      p.scripts[k]=v.replace(/\\\\bvite\\\\b/g,'vite --host 0.0.0.0 --port " + vitePort + "')" +
+                "    }" +
+                "  }" +
+                "  const hasServer=p.scripts.server||p.scripts.backend||fs.existsSync('server/server.js')||fs.existsSync('server.js');" +
+                "  const runsBoth=Object.values(p.scripts).some(v=>v.includes('concurrently')||(v.includes('vite')&&v.includes('node')));" +
+                "  if(hasServer && !runsBoth){" +
+                "    const serverCmd=p.scripts.server?'npm run server':(p.scripts.backend?'npm run backend':(fs.existsSync('server/server.js')?'node server/server.js':'node server.js'));" +
+                "    p.scripts['dev:all']='concurrently \\\"npm run dev\\\" \\\"'+serverCmd+'\\\"';" +
+                "  }" +
+                "}" +
+                "fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n";
+    }
+
+    // ── Cloud Run standalone generators ────────────────────────────────────
+
+    private String cloudRun_NodeFrontend(Path workspace) {
+        String viteInstall = crInstallMissingViteDeps(workspace);
+        boolean hasViteConfig = Files.exists(workspace.resolve("vite.config.js"))
+                || Files.exists(workspace.resolve("vite.config.ts"));
+        JsonNode pkg = parsePackageJson(workspace);
+        boolean hasDevScript = pkg != null && pkg.has("scripts")
+                && pkg.get("scripts").has("dev");
+
+        boolean usesVite = hasViteConfig || hasDevScript;
+        String cmd;
+        if (usesVite) {
+            cmd = "CMD npx vite --host 0.0.0.0 --port ${PORT:-8080}";
+        } else {
+            cmd = "CMD npx serve -s . -l ${PORT:-8080}";
+            viteInstall = " && npm install -g serve";
+        }
+
+        var sb = new StringBuilder();
+        sb.append("FROM node:20-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("COPY package*.json ./\n");
+        sb.append("RUN npm install --legacy-peer-deps").append(viteInstall).append("\n");
+        sb.append("COPY . .\n");
+        if (usesVite) {
+            sb.append(crViteAllowedHostsPatch());
+        }
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+        sb.append(cmd).append("\n");
+        return sb.toString();
+    }
+
+    private String cloudRun_NodeBackend(Path workspace) {
+        JsonNode pkg = parsePackageJson(workspace);
+        String cmd;
+        if (pkg != null && pkg.has("scripts") && pkg.get("scripts").has("start")) {
+            cmd = "CMD PORT=${PORT:-8080} npm start";
+        } else if (pkg != null && pkg.has("main")) {
+            cmd = "CMD PORT=${PORT:-8080} node " + pkg.get("main").asText("index.js");
+        } else {
+            String entryFile = findNodeEntryPoint(workspace);
+            cmd = "CMD PORT=${PORT:-8080} node " + entryFile;
+        }
+
+        var sb = new StringBuilder();
+        sb.append("FROM node:20-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV HOST=0.0.0.0\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("COPY package*.json ./\n");
+        sb.append("RUN npm install --legacy-peer-deps\n");
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+        sb.append(cmd).append("\n");
+        return sb.toString();
+    }
+
+    private String cloudRun_SpringBoot(Path workspace) {
+        boolean isGradle = Files.exists(workspace.resolve("build.gradle"))
+                || Files.exists(workspace.resolve("build.gradle.kts"));
+
+        var sb = new StringBuilder();
+        sb.append("FROM eclipse-temurin:21\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("ENV SERVER_ADDRESS=0.0.0.0\n");
+
+        if (isGradle) {
+            sb.append("COPY . .\n");
+            sb.append("RUN chmod +x gradlew 2>/dev/null || true\n");
+            sb.append("EXPOSE 8080\n");
+            sb.append(crNonRootUser(false));
+            sb.append("CMD sh -c \"SERVER_PORT=${PORT:-8080} ");
+            sb.append("$(if [ -f gradlew ]; then echo './gradlew bootRun --no-daemon'; else echo 'gradle bootRun --no-daemon'; fi)\"\n");
+        } else {
+            sb.append("RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*\n");
+            sb.append("COPY pom.xml .\n");
+            sb.append("RUN mvn dependency:go-offline -q -B || true\n");
+            sb.append("COPY . .\n");
+            sb.append("RUN mvn compile -DskipTests -q -B || true\n");
+            sb.append("EXPOSE 8080\n");
+            sb.append(crNonRootUser(false));
+            sb.append("CMD SERVER_PORT=${PORT:-8080} mvn spring-boot:run -DskipTests -q\n");
+        }
+        return sb.toString();
+    }
+
+    private String cloudRun_Python(Path workspace) {
+        String installStep;
+        if (Files.exists(workspace.resolve("requirements.txt"))) {
+            installStep = "RUN pip install --no-cache-dir -r requirements.txt";
+            // Add uvicorn if FastAPI detected but not in requirements
+            if (findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(") != null
+                    || hasDependency(workspace, "fastapi")) {
+                if (!fileContainsPattern(workspace.resolve("requirements.txt"), "uvicorn")) {
+                    installStep += " uvicorn";
+                }
+            }
+        } else if (Files.exists(workspace.resolve("pyproject.toml"))) {
+            installStep = "RUN pip install --no-cache-dir .";
+        } else {
+            installStep = "# No requirements file found";
+        }
+
+        String cmd = crDetectPythonCmd(workspace, "${PORT:-8080}");
+
+        var sb = new StringBuilder();
+        sb.append("FROM python:3.12-slim\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("ENV HOST=0.0.0.0\n");
+        sb.append("COPY requirements.txt* pyproject.toml* ./\n");
+        sb.append(installStep).append("\n");
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+        sb.append(cmd).append("\n");
+        return sb.toString();
+    }
+
+    private String cloudRun_Go(Path workspace) {
+        var sb = new StringBuilder();
+        sb.append("FROM golang:1.22-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV HOST=0.0.0.0\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("COPY go.mod go.sum* ./\n");
+        sb.append("RUN go mod download 2>/dev/null || true\n");
+        sb.append("COPY . .\n");
+        sb.append("RUN go build -o server . 2>/dev/null || true\n");
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+        sb.append("CMD sh -c \"if [ -f server ]; then ./server; else go run .; fi\"\n");
+        return sb.toString();
+    }
+
+    private String cloudRun_Rust(Path workspace) {
+        var sb = new StringBuilder();
+        sb.append("FROM rust:1.77-slim\n");
+        sb.append("RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("COPY Cargo.toml Cargo.lock* ./\n");
+        sb.append("RUN mkdir src && echo \"fn main() {}\" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src\n");
+        sb.append("COPY . .\n");
+        sb.append("RUN cargo build --release 2>/dev/null || true\n");
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+        sb.append("CMD sh -c \"bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\\"$bin\\\" ]; then exec \\\"$bin\\\"; else cargo run --release; fi\"\n");
+        return sb.toString();
+    }
+
+    private String cloudRun_Ruby(Path workspace) {
+        boolean hasBundler = Files.exists(workspace.resolve("Gemfile"));
+        String installStep = hasBundler
+                ? "RUN apk add --no-cache build-base && bundle install"
+                : "# No Gemfile found";
+        boolean hasRackup = Files.exists(workspace.resolve("config.ru"));
+
+        String cmd;
+        if (hasRackup) {
+            cmd = "CMD bundle exec rackup --host 0.0.0.0 --port ${PORT:-8080}";
+        } else {
+            String entryFile = findRubyEntryPoint(workspace);
+            cmd = "CMD ruby " + entryFile;
+        }
+
+        var sb = new StringBuilder();
+        sb.append("FROM ruby:3.2-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("COPY Gemfile* ./\n");
+        sb.append(installStep).append("\n");
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+        sb.append(cmd).append("\n");
+        return sb.toString();
+    }
+
+    private String cloudRun_Php(Path workspace) {
+        boolean hasComposer = Files.exists(workspace.resolve("composer.json"));
+        String installStep = hasComposer
+                ? "RUN curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
+                : "# No composer.json found";
+
+        var sb = new StringBuilder();
+        sb.append("FROM php:8.2-cli\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("COPY . .\n");
+        sb.append(installStep).append("\n");
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+        sb.append("CMD php -S 0.0.0.0:${PORT:-8080}\n");
+        return sb.toString();
+    }
+
+    private String cloudRun_StaticHtml() {
+        return """
+                FROM nginx:alpine
+                WORKDIR /usr/share/nginx/html
+                LABEL preview=true
+                ENV PORT=8080
+                COPY . .
+                RUN rm -f /etc/nginx/conf.d/default.conf \
+                    && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html index.htm; location / { try_files $uri $uri/ /index.html =404; } }' \
+                       > /etc/nginx/conf.d/default.conf \
+                    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx \
+                    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
+                EXPOSE 8080
+                USER nginx
+                CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+                """;
+    }
+
+    private String cloudRun_Java(Path workspace) {
+        String mainClass = "Main";
+        try (Stream<Path> stream = Files.walk(workspace, 3)) {
+            Path mainFile = stream
+                    .filter(p -> p.toString().endsWith(".java"))
+                    .filter(p -> fileContainsPattern(p, "public static void main"))
+                    .findFirst().orElse(null);
+            if (mainFile != null) {
+                String filename = mainFile.getFileName().toString();
+                mainClass = filename.substring(0, filename.length() - 5);
+            }
+        } catch (IOException e) { /* ignore */ }
+
+        var sb = new StringBuilder();
+        sb.append("FROM eclipse-temurin:21\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("COPY . .\n");
+        sb.append("RUN javac *.java 2>/dev/null || true\n");
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+        sb.append("CMD java ").append(mainClass).append("\n");
+        return sb.toString();
+    }
+
+    // ── Cloud Run full-stack generators ────────────────────────────────────
+
+    /**
+     * Full-stack dispatcher for Cloud Run. Detects sub-type and delegates.
+     */
+    private String cloudRun_FullStack(Path workspace) {
+        // 1. Check monorepo (npm workspaces)
+        JsonNode rootPkg = parsePackageJson(workspace);
+        if (rootPkg != null && isMonorepo(rootPkg, workspace)) {
+            return cloudRun_Monorepo(rootPkg, workspace);
+        }
+
+        // 2. Check directory layout (frontend/ + backend/)
+        FullStackLayout layout = detectFullStack(workspace);
+        if (layout != null && layout.hasFrontend() && layout.hasBackend()) {
+            return switch (layout.backendType()) {
+                case SPRING_BOOT -> cloudRun_FullStack_NodeSpring(workspace, layout);
+                case PYTHON      -> cloudRun_FullStack_NodePython(workspace, layout);
+                default          -> cloudRun_FullStack_NodeNode(workspace, layout);
+            };
+        }
+
+        // 3. Fallback: single-package full-stack (React + Express in same package.json)
+        return cloudRun_SinglePkgFullStack(workspace);
+    }
+
+    /** Node frontend + Node backend in separate directories — Cloud Run. */
+    private String cloudRun_FullStack_NodeNode(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+        boolean feIsRoot = ".".equals(fe);
+
+        var sb = new StringBuilder();
+        sb.append("FROM node:20-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+
+        // Install frontend deps
+        if (fe != null) {
+            if (feIsRoot) {
+                sb.append("COPY package*.json ./\n");
+                sb.append("RUN npm install --legacy-peer-deps");
+            } else {
+                sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+                sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps");
+            }
+            Path fePkg = feIsRoot ? workspace.resolve("package.json")
+                                  : workspace.resolve(fe).resolve("package.json");
+            if (Files.exists(fePkg) && !fileContainsPattern(fePkg, "\"vite\"")) {
+                sb.append(" && npm install vite --legacy-peer-deps");
+            }
+            sb.append("\n");
+        }
+        // Install backend deps
+        if (be != null) {
+            Path bePkgPath = workspace.resolve(be).resolve("package.json");
+            if (Files.exists(bePkgPath)) {
+                sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
+                sb.append("RUN cd ").append(be).append(" && npm install --legacy-peer-deps\n");
+            }
+        }
+
+        sb.append("COPY . .\n");
+
+        // Vite patches (runs as root, before USER)
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+
+        // CMD: backend on 8081, frontend (vite) on PORT (8080)
+        String feCmd = feIsRoot ? "/app" : "/app/" + fe;
+        if (fe != null && be != null) {
+            String beStartCmd;
+            Path bePkgPath = workspace.resolve(be).resolve("package.json");
+            if (Files.exists(bePkgPath)) {
+                beStartCmd = "cd /app/" + be + " && PORT=8081 npm start";
+            } else {
+                String entry = findNodeEntryPointInDir(workspace.resolve(be));
+                beStartCmd = "cd /app/" + be + " && PORT=8081 node " + entry;
+            }
+            sb.append("CMD sh -c \"(").append(beStartCmd)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd ").append(feCmd)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        } else if (fe != null) {
+            sb.append("CMD sh -c \"cd ").append(feCmd).append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080}\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node frontend + Spring Boot backend — Cloud Run. */
+    private String cloudRun_FullStack_NodeSpring(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM eclipse-temurin:21\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("RUN apt-get update && apt-get install -y maven nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+
+        // Install backend Maven deps
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/pom.xml ./").append(be).append("/\n");
+            sb.append("RUN cd ").append(be).append(" && mvn dependency:go-offline -q -B || true\n");
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
+        }
+
+        sb.append("COPY . .\n");
+
+        // Vite patches (node is available via apt)
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+
+        if (fe != null && be != null) {
+            sb.append("CMD sh -c \"(cd /app/").append(be)
+              .append(" && SERVER_PORT=8081 mvn spring-boot:run -DskipTests -q 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        } else if (be != null) {
+            sb.append("CMD sh -c \"cd /app/").append(be)
+              .append(" && SERVER_PORT=${PORT:-8080} mvn spring-boot:run -DskipTests -q\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node frontend + Python backend — Cloud Run. */
+    private String cloudRun_FullStack_NodePython(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM python:3.12-slim\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+
+        // Install backend Python deps
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            sb.append("COPY ").append(be).append("/requirements.txt* ").append(be).append("/pyproject.toml* ./").append(be).append("/\n");
+            if (Files.exists(beDir.resolve("requirements.txt"))) {
+                sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir -r requirements.txt\n");
+            } else if (Files.exists(beDir.resolve("pyproject.toml"))) {
+                sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir .\n");
+            }
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
+        }
+
+        sb.append("COPY . .\n");
+
+        // Vite patches (node is available via apt)
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+
+        sb.append("EXPOSE 8080\n");
+
+        // Detect Python backend CMD
+        String pythonCmd = "python app.py";
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            pythonCmd = crDetectPythonCmd(beDir, "8081").replace("CMD ", "");
+        }
+
+        sb.append(crNonRootUser(false));
+
+        if (fe != null && be != null) {
+            sb.append("CMD sh -c \"(cd /app/").append(be).append(" && ").append(pythonCmd)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        } else if (be != null) {
+            sb.append("CMD sh -c \"cd /app/").append(be).append(" && ").append(pythonCmd).append("\"\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Single-package full-stack: React + Express in same package.json — Cloud Run.
+     * Vite hardcoded to 8080 (Cloud Run's exposed port). Backend gets PORT=3001
+     * so Express reads 3001 and doesn't compete with Vite for 8080.
+     */
+    private String cloudRun_SinglePkgFullStack(Path workspace) {
+        String viteInstall = crInstallMissingViteDeps(workspace);
+        // Also ensure concurrently is available
+        if (!fileContainsPattern(workspace.resolve("package.json"), "\"concurrently\"")) {
+            viteInstall += (viteInstall.isEmpty() ? " && npm install -D" : "") + " concurrently --legacy-peer-deps";
+            if (viteInstall.startsWith(" concurrently")) {
+                viteInstall = " && npm install -D concurrently --legacy-peer-deps";
+            }
+        }
+
+        var sb = new StringBuilder();
+        sb.append("FROM node:20-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV HOST=0.0.0.0\n");
+        sb.append("ENV PORT=3001\n"); // Backend reads PORT=3001, Vite hardcoded to 8080
+        sb.append("COPY package*.json ./\n");
+        sb.append("RUN npm install --legacy-peer-deps").append(viteInstall).append("\n");
+        sb.append("COPY . .\n");
+
+        // Patch vite scripts to --host 0.0.0.0 --port 8080 and create dev:all
+        sb.append(crViteDevScriptPatch(8080));
+
+        // Patch vite allowedHosts
+        sb.append(crViteAllowedHostsPatch());
+
+        // Patch vite proxy to forward to backend on 3001
+        sb.append(crViteProxyPatch(3001));
+
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+
+        // CMD: try dev:all first (runs concurrently), fallback to dev
+        sb.append("CMD sh -c \"node -e \\\"var s=JSON.parse(require('fs').readFileSync('package.json')).scripts;process.exit(s['dev:all']?0:1)\\\" && npm run dev:all || npm run dev\"\n");
+        return sb.toString();
+    }
+
+    /** Monorepo (npm workspaces) — Cloud Run. */
+    private String cloudRun_Monorepo(JsonNode rootPkg, Path workspace) {
+        var sb = new StringBuilder();
+        sb.append("FROM node:20-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+
+        // Copy root package files
+        sb.append("COPY package.json package-lock.json* ./\n");
+
+        // Copy each workspace's package.json
+        for (JsonNode ws : rootPkg.get("workspaces")) {
+            String wsName = ws.asText();
+            Path wsDir = workspace.resolve(wsName);
+            if (Files.exists(wsDir.resolve("package.json"))) {
+                sb.append("COPY ").append(wsName).append("/package.json ./")
+                  .append(wsName).append("/\n");
+            }
+        }
+
+        sb.append("RUN npm install --legacy-peer-deps\n");
+        sb.append("COPY . .\n");
+
+        // Detect frontend and backend workspaces
+        String frontendWs = null;
+        String backendWs = null;
+        for (JsonNode ws : rootPkg.get("workspaces")) {
+            String wsName = ws.asText();
+            Path wsDir = workspace.resolve(wsName);
+            Path wsPkg = wsDir.resolve("package.json");
+            if (!Files.exists(wsPkg)) continue;
+
+            try {
+                JsonNode pkg = mapper.readTree(wsPkg.toFile());
+                JsonNode deps = pkg.get("dependencies");
+                JsonNode devDeps = pkg.get("devDependencies");
+                boolean isFrontend = (deps != null && (deps.has("react") || deps.has("vue") || deps.has("svelte")))
+                        || (devDeps != null && (devDeps.has("vite") || devDeps.has("@vitejs/plugin-react")));
+                boolean isBackend = false;
+                if (deps != null) {
+                    for (String backendDep : NODE_BACKEND_DEPS) {
+                        if (deps.has(backendDep)) { isBackend = true; break; }
+                    }
+                }
+                if (isFrontend && frontendWs == null) frontendWs = wsName;
+                if (isBackend && backendWs == null) backendWs = wsName;
+            } catch (IOException e) {
+                log.debug("Failed to parse workspace package.json: {}", e.getMessage());
+            }
+        }
+
+        // Vite patches
+        sb.append(crViteAllowedHostsPatch());
+        if (backendWs != null) {
+            sb.append(crViteProxyPatch(8081));
+        }
+
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+
+        if (frontendWs != null && backendWs != null) {
+            sb.append("CMD sh -c \"(PORT=8081 npm run dev --prefix ").append(backendWs)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(npx --prefix ").append(frontendWs)
+              .append(" vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        } else if (frontendWs != null) {
+            sb.append("CMD sh -c \"npx --prefix ").append(frontendWs)
+              .append(" vite --host 0.0.0.0 --port ${PORT:-8080}\"\n");
+        } else if (backendWs != null) {
+            sb.append("CMD sh -c \"PORT=${PORT:-8080} npm run dev --prefix ").append(backendWs).append("\"\n");
+        } else {
+            sb.append("CMD sh -c \"PORT=${PORT:-8080} npm run dev\"\n");
+        }
+        return sb.toString();
     }
 
     /**
