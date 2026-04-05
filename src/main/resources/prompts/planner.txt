@@ -94,8 +94,6 @@ Set "project_type" at the top level of your JSON output. Choose exactly one:
   PYTHON        — FastAPI, Flask, Django, or any Python project
   GO            — Go project (go.mod)
   RUST          — Rust project (Cargo.toml)
-  RUBY          — Ruby/Rails/Sinatra project
-  PHP           — PHP/Laravel/Symfony project
   FULL_STACK    — Both frontend AND backend in the same project (separate dirs OR single package.json with both React/Vue + Express/Fastify)
   STATIC_HTML   — Plain HTML/CSS/JS with no build tool or framework
 This is used by the preview system to generate the correct Dockerfile.
@@ -111,7 +109,7 @@ Pick the style that BEST matches the user's request:
   - If the user names a company/product (e.g., "like Stripe", "Notion-inspired"), use that.
   - If the user describes a vibe (e.g., "clean dev tool"), pick the closest match (e.g., "vercel").
   - If unsure, set to null — the system will apply a default.
-For backend-only projects (SPRING_BOOT, JAVA, PYTHON, GO, RUST, RUBY, PHP, NODE_BACKEND),
+For backend-only projects (SPRING_BOOT, JAVA, PYTHON, GO, RUST, NODE_BACKEND),
 set "ui_style" to null or omit it.
 
 ═══════════════════════════════════════════════════════════
@@ -133,7 +131,7 @@ or backend configuration, you MUST instruct the worker to use these defaults:
   - BACKEND ROBUSTNESS (Node): Every backend server task MUST include instructions to implement a centralized JSON error-handling middleware `(err, req, res, next)` AND a 404 Not Found handler.
   - BACKEND ROBUSTNESS (Python): Every FastAPI/Flask backend MUST include instructions for a global exception handler (returning JSON) and a 404 handler.
   - BACKEND ROBUSTNESS (Java): Every Spring Boot backend MUST include a `@RestControllerAdvice` class for centralized JSON error handling.
-  - BACKEND ROBUSTNESS (Go/Ruby/Rust/PHP): Every backend MUST include instructions for 404 handlers and global JSON error handlers.
+  - BACKEND ROBUSTNESS (Go/Rust): Every backend MUST include instructions for 404 handlers and global JSON error handlers.
   - NETWORK BINDING: Every server (regardless of language) MUST be instructed to bind to `0.0.0.0` (not `localhost`) to be reachable in the preview.
 
 Explicitly mention: "Use host 'db', user 'preview', and database 'preview' for local configuration."
@@ -250,9 +248,9 @@ HARD RULES — violating these causes the run to fail
    should run `django-admin startapp` or manually create the app directory with __init__.py,
    apps.py, models.py, admin.py, and migrations/__init__.py. This keeps project_setup ≤5 files.
 
-   GO / RUST / RUBY / PHP — complexity LOW:
-   Create the build manifest (go.mod / Cargo.toml / Gemfile / composer.json)
-   and minimal entry point (main.go / src/main.rs / config.ru / index.php). Always LOW.
+   GO / RUST — complexity LOW:
+   Create the build manifest (go.mod / Cargo.toml)
+   and minimal entry point (main.go / src/main.rs). Always LOW.
 
    ─── FULL_STACK PROJECTS — MUST SPLIT INTO TWO PARALLEL TASKS ───
 
@@ -352,7 +350,7 @@ Every task must target exactly ONE layer. A task's owned_files must NOT mix laye
               Java/Spring: src/main/java/**, src/main/resources/**, pom.xml, build.gradle
               Node.js/Express: server.js, app.js, routes/**, middleware/**, data/**, models/**, db/**
               Python: app.py, main.py, routes/**, models/**, schemas/**
-              Go, Ruby, PHP, Rust: server-side source files
+              Go, Rust: server-side source files
   FRONTEND  — Client-side UI code rendered in the browser.
               React/Vue/Angular/Svelte: components/**, pages/**, hooks/**, lib/**, App.jsx/tsx, main.jsx/tsx
               If separate dir: frontend/**, client/**, src/main/resources/static/**

@@ -32,8 +32,6 @@ public class DockerfileGenerator {
             Map.entry("PYTHON", Deployment.DeployStrategy.PYTHON),
             Map.entry("GO", Deployment.DeployStrategy.GO),
             Map.entry("RUST", Deployment.DeployStrategy.RUST),
-            Map.entry("RUBY", Deployment.DeployStrategy.RUBY),
-            Map.entry("PHP", Deployment.DeployStrategy.PHP),
             Map.entry("FULL_STACK", Deployment.DeployStrategy.FULLSTACK),
             Map.entry("STATIC_HTML", Deployment.DeployStrategy.STATIC)
     );
@@ -67,7 +65,7 @@ public class DockerfileGenerator {
                 + "pom.xml (Spring Boot), build.gradle (Gradle/Java/Kotlin), "
                 + "package.json (Node.js/Express/Next.js/Vite), "
                 + "requirements.txt/pyproject.toml/Pipfile (Python), go.mod (Go), "
-                + "Gemfile (Ruby), composer.json (PHP), Cargo.toml (Rust), "
+                + "Cargo.toml (Rust), "
                 + "*.csproj/*.sln (.NET), index.html (static site)."));
 
         log.info("Strategy: {}", matched.detectionSummary(workspacePath));

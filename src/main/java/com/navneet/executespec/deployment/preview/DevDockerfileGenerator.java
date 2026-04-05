@@ -170,16 +170,6 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.RUST;
         }
 
-        // 3d. Ruby
-        if (Files.exists(workspace.resolve("Gemfile"))) {
-            return PreviewProjectType.RUBY;
-        }
-
-        // 3e. PHP
-        if (Files.exists(workspace.resolve("composer.json")) || hasPhpFiles(workspace)) {
-            return PreviewProjectType.PHP;
-        }
-
         // 4. Full-stack: scan subdirectories (frontend/ + backend/, client/ + server/, etc.)
         // This handles projects where frontend and backend are in separate directories
         // without npm workspaces or a root-level package.json
@@ -222,8 +212,6 @@ public class DevDockerfileGenerator {
                 case JAVA -> cliJavaDockerfile(workspace);
                 case PYTHON -> pythonDockerfile(workspace);
                 case GO -> goDockerfile(workspace);
-                case RUBY -> rubyDockerfile(workspace);
-                case PHP -> phpDockerfile(workspace);
                 case RUST -> rustDockerfile(workspace);
                 case FULL_STACK -> singlePackageFullStackDockerfile(workspace);
                 case STATIC_HTML -> staticHtmlDockerfile();
@@ -255,8 +243,6 @@ public class DevDockerfileGenerator {
             case PYTHON        -> cloudRun_Python(workspace);
             case GO            -> cloudRun_Go(workspace);
             case RUST          -> cloudRun_Rust(workspace);
-            case RUBY          -> cloudRun_Ruby(workspace);
-            case PHP           -> cloudRun_Php(workspace);
             case STATIC_HTML   -> cloudRun_StaticHtml();
             case JAVA          -> cloudRun_Java(workspace);
             case FULL_STACK    -> cloudRun_FullStack(workspace);
@@ -575,54 +561,6 @@ public class DevDockerfileGenerator {
         return sb.toString();
     }
 
-    private String cloudRun_Ruby(Path workspace) {
-        boolean hasBundler = Files.exists(workspace.resolve("Gemfile"));
-        String installStep = hasBundler
-                ? "RUN apk add --no-cache build-base && bundle install"
-                : "# No Gemfile found";
-        boolean hasRackup = Files.exists(workspace.resolve("config.ru"));
-
-        String cmd;
-        if (hasRackup) {
-            cmd = "CMD bundle exec rackup --host 0.0.0.0 --port ${PORT:-8080}";
-        } else {
-            String entryFile = findRubyEntryPoint(workspace);
-            cmd = "CMD ruby " + entryFile;
-        }
-
-        var sb = new StringBuilder();
-        sb.append("FROM ruby:3.2-alpine\n");
-        sb.append("WORKDIR /app\n");
-        sb.append("LABEL preview=true\n");
-        sb.append("ENV PORT=8080\n");
-        sb.append("COPY Gemfile* ./\n");
-        sb.append(installStep).append("\n");
-        sb.append("COPY . .\n");
-        sb.append("EXPOSE 8080\n");
-        sb.append(crNonRootUser(true));
-        sb.append(cmd).append("\n");
-        return sb.toString();
-    }
-
-    private String cloudRun_Php(Path workspace) {
-        boolean hasComposer = Files.exists(workspace.resolve("composer.json"));
-        String installStep = hasComposer
-                ? "RUN curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
-                : "# No composer.json found";
-
-        var sb = new StringBuilder();
-        sb.append("FROM php:8.2-cli\n");
-        sb.append("WORKDIR /app\n");
-        sb.append("LABEL preview=true\n");
-        sb.append("ENV PORT=8080\n");
-        sb.append("COPY . .\n");
-        sb.append(installStep).append("\n");
-        sb.append("EXPOSE 8080\n");
-        sb.append(crNonRootUser(false));
-        sb.append("CMD php -S 0.0.0.0:${PORT:-8080}\n");
-        return sb.toString();
-    }
-
     private String cloudRun_StaticHtml() {
         return """
                 FROM nginx:alpine
@@ -689,8 +627,6 @@ public class DevDockerfileGenerator {
                 case SPRING_BOOT -> cloudRun_FullStack_NodeSpring(workspace, layout);
                 case PYTHON      -> cloudRun_FullStack_NodePython(workspace, layout);
                 case GO           -> cloudRun_FullStack_NodeGo(workspace, layout);
-                case RUBY         -> cloudRun_FullStack_NodeRuby(workspace, layout);
-                case PHP          -> cloudRun_FullStack_NodePhp(workspace, layout);
                 case RUST         -> cloudRun_FullStack_NodeRust(workspace, layout);
                 case JAVA         -> cloudRun_FullStack_NodeJava(workspace, layout);
                 default           -> cloudRun_FullStack_NodeNode(workspace, layout);
@@ -910,104 +846,6 @@ public class DevDockerfileGenerator {
         return sb.toString();
     }
 
-    /** Node/Vite frontend + Ruby backend — Cloud Run. */
-    private String cloudRun_FullStack_NodeRuby(Path workspace, FullStackLayout layout) {
-        String fe = layout.frontendDir();
-        String be = layout.backendDir();
-
-        var sb = new StringBuilder();
-        sb.append("FROM ruby:3.2-alpine\n");
-        sb.append("WORKDIR /app\n");
-        sb.append("LABEL preview=true\n");
-        sb.append("ENV PORT=8080\n");
-        sb.append("RUN apk add --no-cache nodejs npm build-base\n");
-
-        // Install backend Ruby deps
-        if (be != null) {
-            sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
-            Path beDir = workspace.resolve(be);
-            if (Files.exists(beDir.resolve("Gemfile"))) {
-                sb.append("RUN cd ").append(be).append(" && bundle install\n");
-            }
-        }
-        // Install frontend Node deps
-        if (fe != null) {
-            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
-        }
-
-        sb.append("COPY . .\n");
-        sb.append(crViteAllowedHostsPatch());
-        sb.append(crViteProxyPatch(8081));
-        sb.append("EXPOSE 8080\n");
-        sb.append(crNonRootUser(true));
-
-        // Detect Ruby backend CMD
-        String rubyCmd;
-        if (be != null) {
-            Path beDir = workspace.resolve(be);
-            if (Files.exists(beDir.resolve("config.ru"))) {
-                rubyCmd = "bundle exec rackup --host 0.0.0.0 --port 8081";
-            } else {
-                String entry = findRubyEntryPoint(beDir);
-                rubyCmd = "PORT=8081 ruby " + entry;
-            }
-        } else {
-            rubyCmd = "ruby app.rb";
-        }
-
-        if (fe != null && be != null) {
-            sb.append("CMD sh -c \"(cd /app/").append(be).append(" && ").append(rubyCmd)
-              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
-              .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
-        }
-        return sb.toString();
-    }
-
-    /** Node/Vite frontend + PHP backend — Cloud Run. */
-    private String cloudRun_FullStack_NodePhp(Path workspace, FullStackLayout layout) {
-        String fe = layout.frontendDir();
-        String be = layout.backendDir();
-
-        var sb = new StringBuilder();
-        sb.append("FROM php:8.2-cli\n");
-        sb.append("WORKDIR /app\n");
-        sb.append("LABEL preview=true\n");
-        sb.append("ENV PORT=8080\n");
-        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
-
-        // Install backend PHP deps
-        if (be != null) {
-            Path beDir = workspace.resolve(be);
-            if (Files.exists(beDir.resolve("composer.json"))) {
-                sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
-                sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
-            }
-        }
-        // Install frontend Node deps
-        if (fe != null) {
-            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
-        }
-
-        sb.append("COPY . .\n");
-        sb.append(crViteAllowedHostsPatch());
-        sb.append(crViteProxyPatch(8081));
-        sb.append("EXPOSE 8080\n");
-        sb.append(crNonRootUser(false));
-
-        if (fe != null && be != null) {
-            sb.append("CMD sh -c \"(cd /app/").append(be)
-              .append(" && php -S 0.0.0.0:8081 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
-              .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
-        }
-        return sb.toString();
-    }
-
     /** Node/Vite frontend + Rust backend — Cloud Run. */
     private String cloudRun_FullStack_NodeRust(Path workspace, FullStackLayout layout) {
         String fe = layout.frontendDir();
@@ -1121,7 +959,7 @@ public class DevDockerfileGenerator {
         PreviewProjectType beType = layout.backendType();
 
         // Determine base image and whether it's Alpine-based
-        boolean alpine = (beType == PreviewProjectType.GO || beType == PreviewProjectType.RUBY
+        boolean alpine = (beType == PreviewProjectType.GO
                 || beType == PreviewProjectType.NODE_BACKEND);
 
         var sb = new StringBuilder();
@@ -1129,11 +967,9 @@ public class DevDockerfileGenerator {
         // Base image per backend type
         switch (beType) {
             case GO           -> sb.append("FROM golang:1.22-alpine\n");
-            case RUBY         -> sb.append("FROM ruby:3.2-alpine\n");
             case NODE_BACKEND -> sb.append("FROM node:20-alpine\n");
             case SPRING_BOOT  -> sb.append("FROM eclipse-temurin:21\n");
             case PYTHON       -> sb.append("FROM python:3.12-slim\n");
-            case PHP          -> sb.append("FROM php:8.2-cli\n");
             case RUST         -> sb.append("FROM rust:1.77-slim\n");
             case JAVA         -> sb.append("FROM eclipse-temurin:21\n");
             default           -> sb.append("FROM node:20-alpine\n");
@@ -1158,13 +994,6 @@ public class DevDockerfileGenerator {
                     sb.append("COPY ").append(be).append("/go.mod ").append(be).append("/go.sum* ./").append(be).append("/\n");
                     sb.append("RUN cd ").append(be).append(" && go mod download 2>/dev/null || true\n");
                 }
-                case RUBY -> {
-                    if (Files.exists(beDir.resolve("Gemfile"))) {
-                        sb.append("RUN apk add --no-cache build-base\n");
-                        sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
-                        sb.append("RUN cd ").append(be).append(" && bundle install\n");
-                    }
-                }
                 case NODE_BACKEND -> {
                     sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
                     sb.append("RUN cd ").append(be).append(" && npm install\n");
@@ -1181,12 +1010,6 @@ public class DevDockerfileGenerator {
                     } else if (Files.exists(beDir.resolve("pyproject.toml"))) {
                         sb.append("COPY ").append(be).append("/pyproject.toml ./").append(be).append("/\n");
                         sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir .\n");
-                    }
-                }
-                case PHP -> {
-                    if (Files.exists(beDir.resolve("composer.json"))) {
-                        sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
-                        sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
                     }
                 }
                 case RUST -> {
@@ -1256,14 +1079,6 @@ public class DevDockerfileGenerator {
                 yield prefix + cmd;
             }
             case GO -> prefix + "PORT=8081 go run .";
-            case RUBY -> {
-                if (Files.exists(beDir.resolve("config.ru"))) {
-                    yield prefix + "bundle exec rackup --host 0.0.0.0 --port 8081";
-                }
-                String entry = findRubyEntryPoint(beDir);
-                yield prefix + "PORT=8081 ruby " + entry;
-            }
-            case PHP -> prefix + "php -S 0.0.0.0:8081";
             case RUST -> prefix + "PORT=8081 bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\\"$bin\\\" ]; then exec \\\"$bin\\\"; else cargo run --release; fi";
             case JAVA -> {
                 String mainClass = "Main";
@@ -1883,16 +1698,6 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.RUST;
         }
 
-        // Ruby
-        if (Files.exists(dir.resolve("Gemfile")) || Files.exists(dir.resolve("config.ru"))) {
-            return PreviewProjectType.RUBY;
-        }
-
-        // PHP
-        if (Files.exists(dir.resolve("composer.json")) || hasPhpFiles(dir)) {
-            return PreviewProjectType.PHP;
-        }
-
         // Java (non-Spring) — pom.xml without spring-boot-starter, or build.gradle
         if (Files.exists(dir.resolve("pom.xml")) || Files.exists(dir.resolve("build.gradle"))
                 || Files.exists(dir.resolve("build.gradle.kts"))) {
@@ -1919,8 +1724,6 @@ public class DevDockerfileGenerator {
             case SPRING_BOOT -> fullStackNodeSpringBoot(workspace, layout);
             case PYTHON      -> fullStackNodePython(workspace, layout);
             case GO           -> fullStackNodeGo(workspace, layout);
-            case RUBY         -> fullStackNodeRuby(workspace, layout);
-            case PHP          -> fullStackNodePhp(workspace, layout);
             case RUST         -> fullStackNodeRust(workspace, layout);
             case JAVA         -> fullStackNodeJava(workspace, layout);
             default           -> fullStackNodeNode(workspace, layout);
@@ -2140,87 +1943,6 @@ public class DevDockerfileGenerator {
         return sb.toString();
     }
 
-    /** Node frontend + Ruby backend (Docker Compose). */
-    private String fullStackNodeRuby(Path workspace, FullStackLayout layout) {
-        String fe = layout.frontendDir();
-        String be = layout.backendDir();
-
-        var sb = new StringBuilder();
-        sb.append("FROM ruby:3.2-alpine\nWORKDIR /app\nLABEL preview=true\n");
-        sb.append("RUN apk add --no-cache nodejs npm build-base\n");
-
-        if (be != null) {
-            Path beDir = workspace.resolve(be);
-            if (Files.exists(beDir.resolve("Gemfile"))) {
-                sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
-                sb.append("RUN cd ").append(be).append(" && bundle install\n");
-            }
-        }
-        if (fe != null) {
-            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install\n");
-        }
-
-        sb.append("COPY . .\n");
-        sb.append("EXPOSE 5173 4567\n");
-
-        String rubyCmd;
-        if (be != null) {
-            Path beDir = workspace.resolve(be);
-            if (Files.exists(beDir.resolve("config.ru"))) {
-                rubyCmd = "bundle exec rackup --host 0.0.0.0 --port 4567";
-            } else {
-                String entry = findRubyEntryPoint(beDir);
-                rubyCmd = "ruby " + entry;
-            }
-        } else {
-            rubyCmd = "ruby app.rb";
-        }
-
-        if (fe != null && be != null) {
-            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be).append(" && ").append(rubyCmd)
-              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
-              .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
-        }
-        return sb.toString();
-    }
-
-    /** Node frontend + PHP backend (Docker Compose). */
-    private String fullStackNodePhp(Path workspace, FullStackLayout layout) {
-        String fe = layout.frontendDir();
-        String be = layout.backendDir();
-
-        var sb = new StringBuilder();
-        sb.append("FROM php:8.2-cli\nWORKDIR /app\nLABEL preview=true\n");
-        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
-
-        if (be != null) {
-            Path beDir = workspace.resolve(be);
-            if (Files.exists(beDir.resolve("composer.json"))) {
-                sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
-                sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
-            }
-        }
-        if (fe != null) {
-            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
-            sb.append("RUN cd ").append(fe).append(" && npm install\n");
-        }
-
-        sb.append("COPY . .\n");
-        sb.append("EXPOSE 5173 8080\n");
-
-        if (fe != null && be != null) {
-            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
-              .append(" && php -S 0.0.0.0:8080 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
-              .append("(cd /app/").append(fe)
-              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
-        }
-        return sb.toString();
-    }
-
     /** Node frontend + Rust backend (Docker Compose). */
     private String fullStackNodeRust(Path workspace, FullStackLayout layout) {
         String fe = layout.frontendDir();
@@ -2310,18 +2032,16 @@ public class DevDockerfileGenerator {
         boolean feIsRoot = ".".equals(fe);
         PreviewProjectType beType = layout.backendType();
 
-        boolean alpine = (beType == PreviewProjectType.GO || beType == PreviewProjectType.RUBY
+        boolean alpine = (beType == PreviewProjectType.GO
                 || beType == PreviewProjectType.NODE_BACKEND);
 
         var sb = new StringBuilder();
 
         switch (beType) {
             case GO           -> sb.append("FROM golang:1.22-alpine\n");
-            case RUBY         -> sb.append("FROM ruby:3.2-alpine\n");
             case NODE_BACKEND -> sb.append("FROM node:20-alpine\n");
             case SPRING_BOOT  -> sb.append("FROM eclipse-temurin:21\n");
             case PYTHON       -> sb.append("FROM python:3.12-slim\n");
-            case PHP          -> sb.append("FROM php:8.2-cli\n");
             case RUST         -> sb.append("FROM rust:1.77-slim\n");
             case JAVA         -> sb.append("FROM eclipse-temurin:21\n");
             default           -> sb.append("FROM node:20-alpine\n");
@@ -2343,13 +2063,6 @@ public class DevDockerfileGenerator {
                     sb.append("COPY ").append(be).append("/go.mod ").append(be).append("/go.sum* ./").append(be).append("/\n");
                     sb.append("RUN cd ").append(be).append(" && go mod download 2>/dev/null || true\n");
                 }
-                case RUBY -> {
-                    if (Files.exists(beDir.resolve("Gemfile"))) {
-                        sb.append("RUN apk add --no-cache build-base\n");
-                        sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
-                        sb.append("RUN cd ").append(be).append(" && bundle install\n");
-                    }
-                }
                 case NODE_BACKEND -> {
                     sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
                     sb.append("RUN cd ").append(be).append(" && npm install\n");
@@ -2366,12 +2079,6 @@ public class DevDockerfileGenerator {
                     } else if (Files.exists(beDir.resolve("pyproject.toml"))) {
                         sb.append("COPY ").append(be).append("/pyproject.toml ./").append(be).append("/\n");
                         sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir .\n");
-                    }
-                }
-                case PHP -> {
-                    if (Files.exists(beDir.resolve("composer.json"))) {
-                        sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
-                        sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
                     }
                 }
                 case RUST -> {
@@ -2620,32 +2327,6 @@ public class DevDockerfileGenerator {
         }
     }
 
-    private boolean hasPhpFiles(Path workspace) {
-        try (Stream<Path> files = Files.list(workspace)) {
-            return files.anyMatch(p -> p.getFileName().toString().toLowerCase().endsWith(".php"));
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    private String findRubyEntryPoint(Path workspace) {
-        // Priority order: app.rb, server.rb, main.rb, then first .rb file
-        for (String candidate : List.of("app.rb", "server.rb", "main.rb")) {
-            if (Files.exists(workspace.resolve(candidate))) {
-                return candidate;
-            }
-        }
-        try (Stream<Path> files = Files.list(workspace)) {
-            return files
-                    .filter(p -> p.getFileName().toString().endsWith(".rb"))
-                    .map(p -> p.getFileName().toString())
-                    .findFirst()
-                    .orElse("app.rb");
-        } catch (IOException e) {
-            return "app.rb";
-        }
-    }
-
     private String goDockerfile(Path workspace) {
         return """
                 FROM golang:1.22-alpine
@@ -2659,59 +2340,6 @@ public class DevDockerfileGenerator {
                 RUN go build -o server . 2>/dev/null || true
                 EXPOSE 8080
                 CMD ["sh", "-c", "if [ -f server ]; then ./server; else go run .; fi"]
-                """;
-    }
-
-    private String rubyDockerfile(Path workspace) {
-        // Detect entry file: app.rb, server.rb, main.rb, config.ru, or first .rb
-        String entryFile = findRubyEntryPoint(workspace);
-        boolean hasBundler = Files.exists(workspace.resolve("Gemfile"));
-
-        String installStep = hasBundler
-                ? "RUN apk add --no-cache build-base && bundle install"
-                : "# No Gemfile found";
-
-        // If config.ru exists, use rackup
-        if (Files.exists(workspace.resolve("config.ru"))) {
-            return """
-                    FROM ruby:3.2-alpine
-                    WORKDIR /app
-                    LABEL preview=true
-                    COPY Gemfile* ./
-                    """ + installStep + "\n" + """
-                    COPY . .
-                    EXPOSE 4567
-                    CMD ["bundle", "exec", "rackup", "--host", "0.0.0.0", "--port", "4567"]
-                    """;
-        }
-
-        return """
-                FROM ruby:3.2-alpine
-                WORKDIR /app
-                LABEL preview=true
-                ENV HOST=0.0.0.0
-                ENV PORT=4567
-                COPY Gemfile* ./
-                """ + installStep + "\n" + """
-                COPY . .
-                EXPOSE 4567
-                CMD ["ruby", \"""" + entryFile + "\"]\n";
-    }
-
-    private String phpDockerfile(Path workspace) {
-        boolean hasComposer = Files.exists(workspace.resolve("composer.json"));
-        String installStep = hasComposer
-                ? "RUN curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
-                : "# No composer.json found";
-
-        return """
-                FROM php:8.2-cli
-                WORKDIR /app
-                LABEL preview=true
-                COPY . .
-                """ + installStep + "\n" + """
-                EXPOSE 8080
-                CMD ["php", "-S", "0.0.0.0:8080"]
                 """;
     }
 
@@ -2810,21 +2438,6 @@ public class DevDockerfileGenerator {
                 }
                 yield true;
             }
-            case RUBY -> {
-                if (Files.exists(workspace.resolve("config.ru"))) yield false;
-                Path gemfile = workspace.resolve("Gemfile");
-                if (Files.exists(gemfile)) {
-                    yield !fileContainsPattern(gemfile, "sinatra", "rails", "rack", "roda", "hanami");
-                }
-                yield true;
-            }
-            case PHP -> {
-                Path composer = workspace.resolve("composer.json");
-                if (Files.exists(composer)) {
-                    yield !fileContainsPattern(composer, "laravel", "symfony", "slim/slim");
-                }
-                yield true;
-            }
             case NODE_BACKEND -> {
                 JsonNode pkg = parsePackageJson(workspace);
                 if (pkg != null) {
@@ -2888,8 +2501,6 @@ public class DevDockerfileGenerator {
             case NODE_BACKEND -> cliNodeDockerfile(workspace);
             case GO -> cliGoDockerfile();
             case RUST -> cliRustDockerfile();
-            case RUBY -> cliRubyDockerfile(workspace);
-            case PHP -> cliPhpDockerfile(workspace);
             default -> generate(type, workspace); // fallback to web
         };
     }
@@ -2991,47 +2602,6 @@ public class DevDockerfileGenerator {
                 EXPOSE 8080
                 CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec ttyd --port 8080 --writable \\"$bin\\"; else ttyd --port 8080 --writable cargo run --release; fi"]
                 """;
-    }
-
-    private String cliRubyDockerfile(Path workspace) {
-        String entryFile = findRubyEntryPoint(workspace);
-        boolean hasBundler = Files.exists(workspace.resolve("Gemfile"));
-        String installStep = hasBundler
-                ? "RUN apk add --no-cache build-base ttyd && bundle install"
-                : "RUN apk add --no-cache ttyd";
-        return """
-                FROM ruby:3.2-alpine
-                WORKDIR /app
-                LABEL preview=true
-                COPY Gemfile* ./
-                """ + installStep + "\n" + """
-                COPY . .
-                EXPOSE 8080
-                CMD ["ttyd", "--port", "8080", "--writable", "ruby", \"""" + entryFile + "\"]\n";
-    }
-
-    private String cliPhpDockerfile(Path workspace) {
-        boolean hasComposer = Files.exists(workspace.resolve("composer.json"));
-        String installStep = hasComposer
-                ? "RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* && \\\\\n" +
-                  "    wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd && \\\\\n" +
-                  "    chmod +x /usr/local/bin/ttyd && \\\\\n" +
-                  "    curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true"
-                : "RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* && \\\\\n" +
-                  "    wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd && \\\\\n" +
-                  "    chmod +x /usr/local/bin/ttyd";
-        String entryFile = "index.php";
-        for (String candidate : new String[]{"main.php", "app.php", "index.php", "cli.php"}) {
-            if (Files.exists(workspace.resolve(candidate))) { entryFile = candidate; break; }
-        }
-        return """
-                FROM php:8.2-cli
-                WORKDIR /app
-                LABEL preview=true
-                COPY . .
-                """ + installStep + "\n" +
-                "EXPOSE 8080\n" +
-                "CMD [\"ttyd\", \"--port\", \"8080\", \"--writable\", \"php\", \"" + entryFile + "\"]\n";
     }
 
     // ── MCP Dockerfiles ──────────────────────────────────────────────────────

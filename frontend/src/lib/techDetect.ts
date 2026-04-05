@@ -141,24 +141,6 @@ export const TECH_DEFS: TechDef[] = [
     priority: 35,
   },
   {
-    id: 'php',
-    label: 'PHP',
-    textCls: 'text-[#A67EDB]',
-    bgCls: 'bg-[#A67EDB]/10',
-    hex: '#A67EDB',
-    keywords: ['php', 'laravel', 'symfony', 'wordpress', 'composer'],
-    priority: 36,
-  },
-  {
-    id: 'ruby',
-    label: 'Ruby',
-    textCls: 'text-[#CC342D]',
-    bgCls: 'bg-[#CC342D]/10',
-    hex: '#CC342D',
-    keywords: ['ruby', 'rails', 'ruby on rails', 'sinatra', 'bundler'],
-    priority: 37,
-  },
-  {
     id: 'dotnet',
     label: '.NET',
     textCls: 'text-[#9A5CC6]',
@@ -252,7 +234,7 @@ export function resolveTechStack(techStack: string | null | undefined, userReque
  * Deduplication ensures each tech appears at most once.
  */
 /** Keywords that must match as whole words (not substrings) to avoid false positives. */
-const WORD_BOUNDARY_IDS = new Set(['java', 'go', 'rust', 'ruby', 'nodejs']);
+const WORD_BOUNDARY_IDS = new Set(['java', 'go', 'rust', 'nodejs']);
 
 export function detectTechStack(text: string): TechDef[] {
   if (!text) return [];

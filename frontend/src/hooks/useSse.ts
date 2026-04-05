@@ -47,11 +47,7 @@ export function useSse(runId: string | null) {
         const { token: sseToken } = await getSseToken(runId!);
         sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(sseToken)}`;
       } catch {
-        // Fallback to full JWT if SSE token endpoint fails
-        const fallbackToken = localStorage.getItem('access_token');
-        if (fallbackToken) {
-          sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(fallbackToken)}`;
-        }
+        console.warn('Failed to obtain scoped SSE token, connecting without auth');
       }
       const es = new EventSource(sseUrl);
       esRef.current = es;

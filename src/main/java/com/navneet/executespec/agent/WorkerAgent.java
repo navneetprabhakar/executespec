@@ -519,17 +519,28 @@ public class WorkerAgent {
                     if (looksLikeCompletionReport(assistantText, taskId)) {
                         // Validate: if the report claims files were created or modified but no
                         // writeFile/editFile was dispatched, the model fabricated the report.
-                        if (totalFileWrites == 0 && reportClaimsFileChanges(assistantText)) {
+                        int claimedFileCount = countClaimedFiles(assistantText);
+                        boolean isFabricated = totalFileWrites == 0 && reportClaimsFileChanges(assistantText);
+                        // Partial completion: report claims more files than were actually written.
+                        // E.g. task says "create 4 files", model writes 1 then sends completion claiming 4.
+                        boolean isPartial = !isFabricated && claimedFileCount > 0
+                                && totalFileWrites > 0 && claimedFileCount > totalFileWrites;
+                        if (isFabricated || isPartial) {
                             fabricatedCompletionCount++;
-                            log.warn("[Worker {}] REJECTED fabricated completion report ({}/{}) — claims files_created " +
-                                    "but 0 writeFile calls were dispatched. Forcing model to use tools.",
-                                    taskId, fabricatedCompletionCount, MAX_FABRICATED_COMPLETIONS);
-                            stateStore.appendTaskLog(taskId, "FABRICATED_REPORT_REJECTED (" +
-                                    fabricatedCompletionCount + "/" + MAX_FABRICATED_COMPLETIONS + ")");
+                            String reason = isFabricated
+                                    ? "claims files_created but 0 writeFile calls were dispatched"
+                                    : "claims " + claimedFileCount + " files but only " + totalFileWrites
+                                            + " writeFile calls were dispatched";
+                            log.warn("[Worker {}] REJECTED {} completion report ({}/{}) — {}. Forcing model to use tools.",
+                                    taskId, isFabricated ? "fabricated" : "partial",
+                                    fabricatedCompletionCount, MAX_FABRICATED_COMPLETIONS, reason);
+                            stateStore.appendTaskLog(taskId, (isFabricated ? "FABRICATED" : "PARTIAL")
+                                    + "_REPORT_REJECTED (" + fabricatedCompletionCount + "/"
+                                    + MAX_FABRICATED_COMPLETIONS + "): " + reason);
 
                             // After MAX_FABRICATED_COMPLETIONS retries, give up — model cannot use tools correctly
                             if (fabricatedCompletionCount >= MAX_FABRICATED_COMPLETIONS) {
-                                log.error("[Worker {}] Fabricated completion detected {} times — marking task FAILED. " +
+                                log.error("[Worker {}] Fabricated/partial completion detected {} times — marking task FAILED. " +
                                         "Model persistently claims file creation without using writeFile tool.",
                                         taskId, fabricatedCompletionCount);
                                 stateStore.appendTaskLog(taskId, "FAILED: REPEATED_FABRICATED_COMPLETION");
@@ -538,9 +549,9 @@ public class WorkerAgent {
                                 failReport.setStatus("failed");
                                 failReport.setFilesCreated(List.of());
                                 failReport.setFilesModified(List.of());
-                                failReport.setBlockers("Fabricated completion detected " +
-                                        fabricatedCompletionCount + " times — model claims files_created but " +
-                                        "never dispatched writeFile tool calls.");
+                                failReport.setBlockers("Fabricated/partial completion detected " +
+                                        fabricatedCompletionCount + " times — model claims " + claimedFileCount +
+                                        " files but only " + totalFileWrites + " writeFile calls dispatched.");
                                 return withProviderModel(failReport, provider, model,
                                         continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                             }
@@ -551,16 +562,21 @@ public class WorkerAgent {
                                 messages.remove(messages.size() - 1);
                             }
 
+                            String missingCount = claimedFileCount > totalFileWrites
+                                    ? " You still need to create " + (claimedFileCount - totalFileWrites)
+                                            + " more file(s)."
+                                    : "";
                             messages.add(new UserMessage(
                                     "CRITICAL ERROR: Your previous response was REJECTED because it contained a " +
-                                    "completion report claiming files were created, but you never called the " +
-                                    "writeFile tool. That response has been discarded.\n\n" +
+                                    "completion report claiming " + claimedFileCount + " files were created, but only " +
+                                    totalFileWrites + " writeFile calls were actually dispatched." + missingCount +
+                                    "\n\nThat response has been discarded.\n\n" +
                                     "Files are NOT created by describing them in text — you MUST call the " +
                                     "writeFile tool for each file. Example:\n" +
                                     "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"package.json\", " +
                                     "\"content\": \"{\\n  \\\"name\\\": \\\"app\\\"\\n}\"}}</tool_call>\n\n" +
                                     "Do NOT output a completion report until you have called writeFile for every " +
-                                    "file you need to create. Start now — call writeFile for your first file."));
+                                    "file you need to create. Start now — call writeFile for your next file."));
                             continue; // retry — do not accept this completion
                         }
                         return withProviderModel(
@@ -1308,10 +1324,11 @@ public class WorkerAgent {
             }
         }
 
-        // Extract first JSON object if preceded by conversational preamble
+        // Extract first JSON object if preceded by conversational preamble.
+        // Anthropic can produce verbose cache stats / explanations before JSON — allow up to 800 chars.
         if (!response.startsWith("{")) {
             int jsonStart = response.indexOf('{');
-            if (jsonStart > 0 && jsonStart < 200) {
+            if (jsonStart > 0 && jsonStart < 800) {
                 response = response.substring(jsonStart);
             }
         }
@@ -1340,6 +1357,25 @@ public class WorkerAgent {
         String after = text.substring(idx + f.length()).stripLeading();
         if (after.startsWith(":")) after = after.substring(1).stripLeading();
         return !after.startsWith("[]") && !after.startsWith("null");
+    }
+
+    /**
+     * Count total files claimed in completion report (files_created + files_modified).
+     * Uses JSON parsing for accuracy. Returns 0 if parsing fails.
+     */
+    private int countClaimedFiles(String text) {
+        try {
+            String normalized = normalizeWorkerResponse(text);
+            JsonNode json = mapper.readTree(normalized);
+            int count = 0;
+            JsonNode created = json.path("files_created");
+            if (created.isArray()) count += created.size();
+            JsonNode modified = json.path("files_modified");
+            if (modified.isArray()) count += modified.size();
+            return count;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     // ── Compaction ────────────────────────────────────────────────────────────

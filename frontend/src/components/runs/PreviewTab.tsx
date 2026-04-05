@@ -19,8 +19,6 @@ const TYPE_LABELS: Record<string, string> = {
   NODE: 'Node.js',
   PYTHON: 'Python',
   GO: 'Go',
-  RUBY: 'Ruby',
-  PHP: 'PHP',
   RUST: 'Rust',
   DOTNET: '.NET',
   STATIC: 'Static',

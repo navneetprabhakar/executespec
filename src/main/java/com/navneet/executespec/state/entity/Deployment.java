@@ -146,7 +146,7 @@ public class Deployment {
 
     // ── Enums ─────────────────────────────────────────────────────────────────
 
-    public enum DeployStrategy { FULLSTACK, SPRING_BOOT, GRADLE, NODE, PYTHON, GO, RUBY, PHP, RUST, DOTNET, STATIC }
+    public enum DeployStrategy { FULLSTACK, SPRING_BOOT, GRADLE, NODE, PYTHON, GO, RUST, DOTNET, STATIC }
 
     public enum DeployStatus {
         PENDING, BUILDING, PUSHING, DEPLOYING, LIVE,

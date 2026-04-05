@@ -46,7 +46,7 @@ public class UiStyleResolver {
     private static final Set<String> VALID_LAYOUTS = Set.of("sidebar", "top-nav", "minimal", "dashboard");
 
     private static final Set<String> BACKEND_ONLY_TYPES = Set.of(
-            "SPRING_BOOT", "JAVA", "PYTHON", "GO", "RUST", "RUBY", "PHP", "NODE_BACKEND");
+            "SPRING_BOOT", "JAVA", "PYTHON", "GO", "RUST", "NODE_BACKEND");
 
     /** Patterns to match style hints in user request text. */
     private static final Pattern STYLE_HINT_PATTERN = Pattern.compile(

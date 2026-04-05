@@ -23,6 +23,7 @@ public class WebhookSignatureVerifier {
      * X-Razorpay-Signature = HMAC-SHA256(raw_payload, webhook_secret)
      */
     public boolean verifyWebhookSignature(String rawPayload, String signature) {
+        if (signature == null || signature.isBlank()) return false;
         try {
             String expected = hmacSha256(rawPayload, config.getWebhookSecret());
             return MessageDigest.isEqual(
@@ -40,6 +41,7 @@ public class WebhookSignatureVerifier {
      * Signature = HMAC-SHA256(subscription_id + "|" + payment_id, key_secret)
      */
     public boolean verifyPaymentSignature(String subscriptionId, String paymentId, String signature) {
+        if (signature == null || signature.isBlank()) return false;
         try {
             String payload = subscriptionId + "|" + paymentId;
             String expected = hmacSha256(payload, config.getKeySecret());
@@ -58,6 +60,7 @@ public class WebhookSignatureVerifier {
      * Signature = HMAC-SHA256(order_id + "|" + payment_id, key_secret)
      */
     public boolean verifyOrderPaymentSignature(String orderId, String paymentId, String signature) {
+        if (signature == null || signature.isBlank()) return false;
         try {
             String payload = orderId + "|" + paymentId;
             String expected = hmacSha256(payload, config.getKeySecret());

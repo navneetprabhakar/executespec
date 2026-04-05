@@ -80,8 +80,6 @@ function detectLanguage(fileName: string): string {
     toml: 'toml',
     rs: 'rust',
     go: 'go',
-    rb: 'ruby',
-    php: 'php',
     gradle: 'groovy',
     tf: 'hcl',
   };

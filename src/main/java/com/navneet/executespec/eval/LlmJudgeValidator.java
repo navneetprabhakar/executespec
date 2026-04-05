@@ -3,6 +3,7 @@ package com.navneet.executespec.eval;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.router.ModelRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -28,11 +29,8 @@ public class LlmJudgeValidator {
 
     private final LlmRouter llmRouter;
     private final EvalScorer scorer;
+    private final ModelRegistry modelRegistry;
     private static final ObjectMapper mapper = new ObjectMapper();
-
-    /** Judge model — Haiku is cheap (~$0.005/call) and sufficient for binary scoring. */
-    private static final String JUDGE_PROVIDER = "anthropic";
-    private static final String JUDGE_MODEL = "claude-haiku-4-5-20251001";
 
     /**
      * Run LLM judge on a response and return the judge's accuracy score.
@@ -48,7 +46,7 @@ public class LlmJudgeValidator {
 
         try {
             Prompt prompt = new Prompt(List.of(new UserMessage(judgePrompt)));
-            LlmRouter.LlmResponse response = llmRouter.callDirect(JUDGE_PROVIDER, JUDGE_MODEL, prompt);
+            LlmRouter.LlmResponse response = llmRouter.callDirect("anthropic", modelRegistry.lightweightModelFor("anthropic"), prompt);
             String judgeResponse = response.response().getResult().getOutput().getText();
 
             return parseJudgeResponse(judgeResponse, testCase.validationPatterns().size());
