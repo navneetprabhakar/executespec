@@ -7,6 +7,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.service.MailService;
+import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.dto.*;
 import com.navneet.executespec.billing.entity.*;
 import com.navneet.executespec.billing.exception.BillingException;
@@ -65,6 +66,9 @@ public class BillingService {
 
     // Payment audit trail
     private final com.navneet.executespec.auth.service.PaymentAuditService paymentAuditService;
+
+    // Tier resolution (org tier > user tier, SUPER_ADMIN → ENTERPRISE)
+    private final TierEnforcementService tierEnforcementService;
 
     @Value("${billing.terms-version:2026-03-v1}")
     private String currentTermsVersion;
@@ -337,18 +341,25 @@ public class BillingService {
         if (sub != null) {
             plan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
         } else {
-            // No subscription — show free plan info
-            plan = planRepo.findByTierAndActiveTrue("FREE").stream().findFirst().orElse(null);
+            // No subscription — resolve effective tier (org tier > user tier, SUPER_ADMIN → ENTERPRISE)
+            String effectiveTier = tierEnforcementService.resolveUserTier(userId);
+            plan = planRepo.findByTierAndActiveTrue(effectiveTier).stream().findFirst().orElse(null);
+            if (plan == null) {
+                // Fallback to FREE if resolved tier has no billing plan configured
+                plan = planRepo.findByTierAndActiveTrue("FREE").stream().findFirst().orElse(null);
+            }
         }
 
-        // Build subscription info
+        // Build subscription info — use effective tier when no subscription exists
+        String displayTier = sub != null ? sub.getStatus()
+                : tierEnforcementService.resolveUserTier(userId);
         BillingStatusResponse.SubscriptionInfo subInfo = sub != null
                 ? new BillingStatusResponse.SubscriptionInfo(
                     sub.getId(), sub.getStatus(), sub.getPaymentGateway(),
                     sub.getCurrentPeriodEnd(), sub.getTotalSeats(), sub.getExtraSeats(),
                     sub.isCancelAtPeriodEnd(), sub.isFounderPricing(), sub.getTermsVersion())
                 : new BillingStatusResponse.SubscriptionInfo(
-                    null, "FREE", "NONE", null, 1, 0, false, false, null);
+                    null, displayTier, "NONE", null, 1, 0, false, false, null);
 
         // Build usage info
         List<BillingUsage> usageList = usageService.getCurrentUsage(userId);

@@ -193,6 +193,23 @@ public class MailService {
     }
 
     @Async
+    public void sendSuspensionEmail(String toEmail, String firstName) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, "Your executespec account has been suspended", "email/account-suspended", ctx);
+    }
+
+    @Async
+    public void sendBonusRunsEmail(String toEmail, String firstName, int quantity) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("quantity", quantity);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, quantity + " bonus runs added to your executespec account", "email/bonus-runs", ctx);
+    }
+
+    @Async
     public void sendInvoiceEmail(String toEmail, String firstName, String invoiceNumber,
                                   long totalAmountPaise, byte[] pdfBytes, String pdfFilename) {
         Context ctx = new Context();

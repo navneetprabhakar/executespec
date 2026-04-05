@@ -8,8 +8,9 @@ import type { DeploymentSummary } from '@/lib/api';
 import { Skeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
+import RoleGuard from '@/components/auth/RoleGuard';
 
-export default function DeploymentsPage() {
+function DeploymentsPageInner() {
   const [deployments, setDeployments] = useState<DeploymentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
@@ -75,7 +76,10 @@ export default function DeploymentsPage() {
     <div className="h-full overflow-y-auto p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-primary">Deployments</h1>
+          <h1 className="text-lg font-semibold text-primary flex items-center gap-2">
+            Deployments
+            <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-accent-blue/15 text-accent-blue border border-accent-blue/25">Beta</span>
+          </h1>
           <p className="text-xs text-muted mt-0.5">Deploy completed runs to your GCP Cloud Run</p>
         </div>
         <button
@@ -111,5 +115,13 @@ export default function DeploymentsPage() {
 
       {showWizard && <DeployWizardModal onClose={() => setShowWizard(false)} onRefresh={load} />}
     </div>
+  );
+}
+
+export default function DeploymentsPage() {
+  return (
+    <RoleGuard requireSuperAdmin>
+      <DeploymentsPageInner />
+    </RoleGuard>
   );
 }

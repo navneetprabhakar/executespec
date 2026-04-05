@@ -10,7 +10,8 @@ import GrantRunsModal from './GrantRunsModal';
 
 type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages' | 'reports' | 'audit' | 'webhooks';
 
-const TIER_LABEL: Record<string, string> = { FREE: 'Free', PRO: 'Team', ENTERPRISE: 'Enterprise' };
+const TIER_LABEL_FALLBACK: Record<string, string> = { FREE: 'Free', PRO: 'Pro', ENTERPRISE: 'Enterprise' };
+const ROLE_LABEL: Record<string, string> = { USER: 'User', SUPER_ADMIN: 'Super Admin', FINANCE: 'Finance' };
 const STATUS_COLOR: Record<string, string> = {
   ACTIVE: 'text-accent-green bg-accent-green/10',
   SUSPENDED: 'text-accent-amber bg-accent-amber/10',
@@ -98,6 +99,12 @@ function AdminPageInner() {
 
   useEffect(() => { loadUsers(); loadOrgs(); loadTierConfigs(); loadEscalations(); loadPackages(); }, []);
 
+  // Build tier label map from DB config, with fallback
+  const tierLabel = (tier: string) => {
+    const fromDb = tierConfigs.find((tc) => tc.tier === tier);
+    return fromDb?.displayName ?? TIER_LABEL_FALLBACK[tier] ?? tier;
+  };
+
   // ── User actions ──────────────────────────────────────────────────────────
   const toggleUserStatus = async (u: api.AuthUser) => {
     const next = u.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED';
@@ -107,6 +114,11 @@ function AdminPageInner() {
 
   const changeUserTier = async (id: string, tier: string) => {
     try { await api.adminUpdateUserTier(id, tier); await loadUsers(); }
+    catch (e: any) { addToast({ type: 'error', message: e.message }); }
+  };
+
+  const changeUserRole = async (id: string, role: string) => {
+    try { await api.adminUpdateUserRole(id, role); await loadUsers(); }
     catch (e: any) { addToast({ type: 'error', message: e.message }); }
   };
 
@@ -148,7 +160,7 @@ function AdminPageInner() {
       await api.adminUpdateTierConfig(tier, limit);
       setEditingTiers((prev) => { const n = { ...prev }; delete n[tier]; return n; });
       await loadTierConfigs();
-      addToast({ type: 'success', message: `${TIER_LABEL[tier] ?? tier} limit updated` });
+      addToast({ type: 'success', message: `${tierLabel(tier)} limit updated` });
     } catch (e: any) { addToast({ type: 'error', message: e.message }); }
   };
 
@@ -312,7 +324,7 @@ function AdminPageInner() {
               <table className="w-full text-sm">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
-                    {['Name / Email', 'Status', 'Tier', 'Org Role', 'Actions'].map((h) => (
+                    {['Name / Email', 'Status', 'Tier', 'Role', 'Org Role', 'Actions'].map((h) => (
                       <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                     ))}
                   </tr>
@@ -335,7 +347,18 @@ function AdminPageInner() {
                           onChange={(e) => changeUserTier(u.id, e.target.value)}
                           className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1 text-xs text-secondary focus:outline-none"
                         >
-                          {Object.entries(TIER_LABEL).map(([v, l]) => (
+                          {(tierConfigs.length > 0 ? tierConfigs : [{ tier: 'FREE' }, { tier: 'PRO' }, { tier: 'ENTERPRISE' }]).map((tc) => (
+                            <option key={tc.tier} value={tc.tier}>{tierLabel(tc.tier)}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={u.globalRole}
+                          onChange={(e) => changeUserRole(u.id, e.target.value)}
+                          className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1 text-xs text-secondary focus:outline-none"
+                        >
+                          {Object.entries(ROLE_LABEL).map(([v, l]) => (
                             <option key={v} value={v}>{l}</option>
                           ))}
                         </select>
@@ -364,7 +387,7 @@ function AdminPageInner() {
                     </tr>
                   ))}
                   {filteredUsers.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">No users found</td></tr>
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">No users found</td></tr>
                   )}
                 </tbody>
               </table>
@@ -504,7 +527,7 @@ function AdminPageInner() {
                     return (
                       <tr key={tc.tier} className="hover:bg-[var(--gray-100)]">
                         <td className="px-4 py-3">
-                          <span className="font-medium text-primary">{TIER_LABEL[tc.tier] ?? tc.tier}</span>
+                          <span className="font-medium text-primary">{tc.displayName ?? tierLabel(tc.tier)}</span>
                           {tc.isFixed && <span className="ml-2 text-xs text-muted">(default fixed)</span>}
                         </td>
                         <td className="px-4 py-3">

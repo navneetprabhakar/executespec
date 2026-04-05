@@ -5,7 +5,6 @@ import {
   ChevronDown, ChevronRight, Key, Building2, Shield, Loader2, ArrowUpRight,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
-import ViewModeToggle from '@/components/shared/ViewModeToggle';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import type { OrgDto } from '@/lib/api';
@@ -267,19 +266,6 @@ export default function SettingsPage() {
         <p className="text-xs text-muted mt-0.5">Account configuration and system health</p>
       </div>
 
-      {/* ── Display ──────────────────────────────────────────────────────── */}
-      <GlassPanel className="px-5 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-primary">Interface Mode</p>
-            <p className="text-xs text-muted mt-0.5">
-              Vibe mode shows a simplified view. Pro mode exposes the full pipeline, task graph, cost breakdown, and validation gates.
-            </p>
-          </div>
-          <ViewModeToggle />
-        </div>
-      </GlassPanel>
-
       {/* ── Current Plan & Upgrade ───────────────────────────────────────── */}
       <GlassPanel className="px-5 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -309,7 +295,7 @@ export default function SettingsPage() {
           >
             View Billing
           </button>
-          {user?.tier !== 'ENTERPRISE' && (
+          {user?.tier === 'FREE' && (
             <button
               onClick={() => navigate('/plans')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 transition-colors"

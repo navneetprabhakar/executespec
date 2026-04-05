@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>Bonus Runs Added</title></head>
+<body style="font-family:'SFMono-Regular',ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;background:#000000;color:#ededed;padding:40px">
+  <div style="max-width:480px;margin:0 auto;background:#111111;border:1px solid #252525;border-radius:6px;padding:32px">
+    <h1 style="color:#ededed;margin:0 0 8px">executespec</h1>
+    <h2 style="margin:0 0 24px;font-size:20px">Bonus runs added!</h2>
+    <p>Hi <span th:text="${firstName}">there</span>,</p>
+    <p><strong th:text="${quantity}">10</strong> additional runs have been credited to your account.</p>
+    <p>These bonus runs are available immediately and will be used after your plan's included runs are exhausted.</p>
+    <a th:href="${baseUrl + '/billing'}" href="#"
+       style="display:inline-block;background:#ededed;color:#000000;text-decoration:none;
+              padding:12px 28px;border-radius:4px;font-weight:600;margin:16px 0">
+      View Your Usage
+    </a>
+    <hr style="border:1px solid #252525;margin:24px 0"/>
+    <p style="color:#a1a1a1;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:underline" href="#">executespec.ai</a></p>
+  </div>
+</body>
+</html>

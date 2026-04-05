@@ -1096,6 +1096,8 @@ export const adminUpdateUserStatus = (id: string, status: string) =>
   req<AuthUser>(`/admin/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
 export const adminUpdateUserTier = (id: string, tier: string) =>
   req<AuthUser>(`/admin/users/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
+export const adminUpdateUserRole = (id: string, role: string) =>
+  req<AuthUser>(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
 
 export const adminListOrgs = () => req<OrgDto[]>('/admin/orgs');
 export const adminUpdateOrgTier = (id: string, tier: string) =>
@@ -1110,7 +1112,7 @@ export const adminRejectInvite = (id: string) =>
   req<{ message: string }>(`/admin/invitations/${id}/reject`, { method: 'POST' });
 
 // Tier config
-export interface TierConfig { tier: string; monthlyRunLimit: number; isFixed: boolean; description: string; }
+export interface TierConfig { tier: string; displayName: string; monthlyRunLimit: number; isFixed: boolean; description: string; }
 export const adminGetTierConfig = () => req<TierConfig[]>('/admin/tier-config');
 export const adminUpdateTierConfig = (tier: string, monthlyRunLimit: number) =>
   req<TierConfig>(`/admin/tier-config/${tier}`, { method: 'PUT', body: JSON.stringify({ monthlyRunLimit }) });

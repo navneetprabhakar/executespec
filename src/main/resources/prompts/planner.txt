@@ -43,6 +43,17 @@ Size guidelines:
 If a task would exceed these limits, SPLIT IT into smaller tasks.
 A task that touches >5 files or writes >350 lines WILL fail. Break it up.
 
+HARD FILE CAP — MAX 6 FILES PER TASK:
+  No task's owned_files list may exceed 6 entries. This is a hard limit.
+  If you find yourself assigning 7+ files to a single task, you MUST split it.
+  Common violations and fixes:
+    - DTO/model task with 8+ small files → split into two tasks by domain group
+    - Django project_setup with __init__.py boilerplate → keep scaffold to 5 core files,
+      move app boilerplate to the first domain task
+    - Frontend setup with config + entry points → config files in project_setup,
+      index.html + main.tsx + App.tsx in app_shell task
+  SELF-CHECK: Before finalizing, scan every task's owned_files. If any has >6, split it.
+
 ═══════════════════════════════════════════════════════════
 TIERED PARALLEL EXECUTION RULES
 ═══════════════════════════════════════════════════════════
@@ -172,20 +183,118 @@ HARD RULES — violating these causes the run to fail
 ═══════════════════════════════════════════════════════════
 
 0. MANDATORY PROJECT SCAFFOLD TASK (new projects only):
-   If the workspace has no pom.xml AND no package.json, your plan MUST start with:
+   If the workspace has no pom.xml AND no package.json, your plan MUST start with
+   a scaffold task (or tasks) so every other task has a compilable base to build on.
+   If pom.xml or package.json already exists in the workspace, skip this rule.
+
+   ─── SINGLE-STACK PROJECTS (not FULL_STACK) ───
+
+   SPRING_BOOT — complexity MEDIUM (4 files, ~130 lines):
    {
      "task_id": "project_setup",
-     "title": "Create project scaffold: pom.xml / package.json + entry point",
-     "objective": "Write the project build file(s) and minimal entry point FIRST so that every other task has a compilable base to build on. Spring Boot: write pom.xml (with ALL required dependencies the other tasks will need), src/main/resources/application.yml, the @SpringBootApplication main class, AND a CORS configuration class that allows all origins (allowedOriginPatterns(\"*\")) — the app runs in Docker with dynamic ports so localhost URLs must NOT be hardcoded. Node/React: write package.json and any required config files (vite.config.ts, tsconfig.json, etc.). Full-stack: write both, ensuring the backend includes CORS middleware/config allowing all origins. CRITICAL: The frontend API client/service must use RELATIVE base URLs (e.g., baseURL: '/api' or fetch('/api/...')) — NEVER absolute URLs like 'http://localhost:8080/api'. The app runs behind a dev-server proxy that forwards /api requests to the backend; absolute URLs bypass the proxy and break in preview.",
-     "boundaries": "Only create the build file(s), main Application class, and base config. Do not implement any controllers, services, models, or UI components — those belong to the other tasks.",
-     "output_format": "pom.xml at workspace root (Spring Boot), package.json at workspace root (Node), or both.",
-     "acceptance_criteria": "File pom.xml or package.json exists at workspace root with all required dependencies listed. Main entry point file exists.",
+     "task_layer": "BACKEND",
+     "title": "Create Spring Boot project scaffold",
+     "objective": "Write the project scaffold so every other task has a compilable base. Create these files IN THIS ORDER (most critical first): 1) pom.xml with ALL dependencies the other tasks will need (spring-boot-starter-web, spring-boot-starter-data-jpa, h2/postgresql driver, lombok, etc.). 2) The @SpringBootApplication main class (e.g. src/main/java/com/example/XxxApplication.java) — this is the MANDATORY entry point, without it nothing compiles. 3) src/main/resources/application.yml with server port, datasource config (host 'db', user 'preview', database 'preview'), and JPA settings. 4) A @Configuration CORS class that allows all origins (allowedOriginPatterns(\"*\")) — the app runs in Docker with dynamic ports so localhost URLs must NOT be hardcoded.",
+     "boundaries": "Only create pom.xml, Application main class, application.yml, and CORS config. Do not implement any controllers, services, models, or UI components.",
+     "output_format": "pom.xml at workspace root, Application.java and CORS config under src/main/java/..., application.yml under src/main/resources/.",
+     "acceptance_criteria": "pom.xml exists with all dependencies. @SpringBootApplication main class exists. application.yml exists. CORS config class exists.",
+     "depends_on": [],
+     "complexity": "MEDIUM",
+     "assigned_model": "{{WORKER_MODEL}}"
+   }
+
+   JAVA (without Spring Boot) — complexity LOW:
+   {
+     "task_id": "project_setup",
+     "task_layer": "BACKEND",
+     "title": "Create Java project scaffold",
+     "objective": "Create pom.xml (or build.gradle) with required dependencies and the Main class entry point.",
+     "depends_on": [], "complexity": "LOW", "assigned_model": "{{WORKER_MODEL}}"
+   }
+
+   NODE_FRONTEND — complexity LOW:
+   {
+     "task_id": "project_setup",
+     "task_layer": "INFRA",
+     "title": "Create frontend project scaffold: config files only",
+     "objective": "Create ONLY build/tooling config files: package.json with all dependencies (react, vite, tailwind, etc.), vite.config.js/ts, tsconfig.json (if TypeScript), tailwind.config.js, postcss.config.js. Do NOT create index.html, src/main.tsx, src/App.tsx, src/index.css, or any component/entry point files — those belong in the app_shell task. CRITICAL: The frontend API client must use RELATIVE base URLs (e.g., baseURL: '/api') — NEVER absolute URLs.",
+     "depends_on": [], "complexity": "LOW", "assigned_model": "{{WORKER_MODEL}}"
+   }
+   The app_shell task (depends on project_setup) creates: index.html, src/main.tsx/jsx,
+   src/App.tsx/jsx, src/index.css, routing setup, and global style tokens. This split keeps
+   project_setup at ≤5 config-only files and app_shell at ≤5 entry point files.
+
+   NODE_BACKEND — complexity LOW:
+   {
+     "task_id": "project_setup",
+     "task_layer": "BACKEND",
+     "title": "Create Node.js backend scaffold",
+     "objective": "Create package.json with all dependencies.",
+     "depends_on": [], "complexity": "LOW", "assigned_model": "{{WORKER_MODEL}}"
+   }
+
+   PYTHON — complexity LOW (FastAPI/Flask) or MEDIUM (Django):
+   {
+     "task_id": "project_setup",
+     "task_layer": "BACKEND",
+     "title": "Create Python project scaffold",
+     "objective": "Create the project scaffold. FastAPI: create requirements.txt with all dependencies (fastapi, uvicorn, sqlalchemy, etc.), main.py with the FastAPI() app instance and CORS middleware (allow_origins=['*']), and ensure the app binds to 0.0.0.0. Flask: create requirements.txt, app.py with Flask(__name__) and CORS setup. Django: create ONLY these 5 files: 1) requirements.txt, 2) manage.py, 3) <project>/settings.py (with ALLOWED_HOSTS=['*'], CORS_ALLOW_ALL_ORIGINS=True, database config using host 'db', user 'preview', database 'preview'), 4) <project>/urls.py, 5) <project>/wsgi.py. Do NOT create Django app files (__init__.py, apps.py, admin.py, models.py, views.py, tests.py, migrations/) in this task — those belong in the first app-layer task that depends on project_setup. The entry point file (main.py / app.py / manage.py) is MANDATORY — without it the preview cannot start.",
+     "boundaries": "Only create build manifest, entry point, and base config. Do NOT create Django app directories or __init__.py / apps.py / admin.py / models.py boilerplate — those go in the first domain task.",
+     "output_format": "requirements.txt + entry point file. Django: manage.py + <project>/settings.py + <project>/urls.py + <project>/wsgi.py (5 files max).",
+     "acceptance_criteria": "requirements.txt exists with all dependencies. Entry point file exists with app instance and CORS configured.",
+     "depends_on": [],
+     "complexity": "LOW for FastAPI/Flask, MEDIUM for Django",
+     "assigned_model": "{{WORKER_MODEL}}"
+   }
+   DJANGO APP BOOTSTRAP: The first task that depends on project_setup for a Django project
+   should run `django-admin startapp` or manually create the app directory with __init__.py,
+   apps.py, models.py, admin.py, and migrations/__init__.py. This keeps project_setup ≤5 files.
+
+   GO / RUST / RUBY / PHP — complexity LOW:
+   Create the build manifest (go.mod / Cargo.toml / Gemfile / composer.json)
+   and minimal entry point (main.go / src/main.rs / config.ru / index.php). Always LOW.
+
+   ─── FULL_STACK PROJECTS — MUST SPLIT INTO TWO PARALLEL TASKS ───
+
+   FULL_STACK projects (both backend + frontend) MUST NOT use a single project_setup task.
+   A single task with 8+ files (pom.xml + application.yml + Application.java + CorsConfig +
+   package.json + vite.config.js + tailwind.config.js + index.html) WILL truncate and drop
+   critical files. Split into TWO parallel tier-0 tasks:
+
+   {
+     "task_id": "backend_setup",
+     "task_layer": "BACKEND",
+     "title": "Create backend project scaffold",
+     "objective": "Write the backend scaffold. Spring Boot — create IN THIS ORDER: 1) pom.xml with ALL dependencies. 2) The @SpringBootApplication main class — MANDATORY entry point. 3) application.yml with server port, datasource config (host 'db', user 'preview', database 'preview'). 4) CORS @Configuration class allowing all origins (allowedOriginPatterns(\"*\")). Node.js/Express — create package.json and server entry point. Python/Django — create ONLY: requirements.txt, manage.py, <project>/settings.py, <project>/urls.py, <project>/wsgi.py (5 files max). Do NOT create Django app directories (__init__.py, apps.py, admin.py, models.py, migrations/) — those go in the first domain task.",
+     "boundaries": "Backend scaffold files only. Do not create frontend files. For Django: do NOT create app boilerplate (__init__.py, apps.py, admin.py, models.py, migrations/) — max 5-6 files.",
+     "output_format": "pom.xml + Application.java + application.yml + CORS config (Spring Boot), OR package.json + server.js (Node).",
+     "acceptance_criteria": "Build manifest exists. Main entry point class/file exists. Server config exists.",
+     "depends_on": [],
+     "complexity": "MEDIUM",
+     "assigned_model": "{{WORKER_MODEL}}"
+   },
+   {
+     "task_id": "frontend_setup",
+     "task_layer": "INFRA",
+     "title": "Create frontend project scaffold: config files only",
+     "objective": "Write ONLY frontend build/tooling config files: package.json with all frontend dependencies (react, vite, tailwind, etc.), vite.config.js with /api proxy to backend port, tailwind.config.js, postcss.config.js, tsconfig.json (if TypeScript). Do NOT create index.html, src/main.tsx, src/App.tsx/vue, src/style.css, or any component files — those belong in the app_shell task. CRITICAL: frontend API calls must use RELATIVE base URLs (e.g., baseURL: '/api') — NEVER absolute URLs.",
+     "boundaries": "Config files only: package.json, vite.config, tailwind.config, postcss.config, tsconfig. Do NOT create index.html, main.tsx/jsx, App.tsx/jsx/vue, style.css, or any source files.",
+     "output_format": "package.json, vite.config.js, tailwind.config.js (max 5 config files).",
+     "acceptance_criteria": "Frontend package.json exists with all dependencies. Vite config exists with /api proxy.",
      "depends_on": [],
      "complexity": "LOW",
      "assigned_model": "{{WORKER_MODEL}}"
    }
-   ALL other worker tasks MUST include "project_setup" in their depends_on list.
-   If pom.xml or package.json already exists in the workspace, skip this task.
+
+   When using the two-task split, ALL other tasks MUST include BOTH "backend_setup" AND
+   "frontend_setup" in their depends_on list (or whichever is relevant to their layer).
+
+   ─── DEPENDS_ON RULE FOR SCAFFOLD TASKS ───
+
+   ALL other worker tasks MUST include the scaffold task(s) in their depends_on list:
+   - Single-stack: include "project_setup"
+   - FULL_STACK: include "backend_setup" for backend tasks, "frontend_setup" for frontend tasks,
+     or both if the task needs artifacts from both scaffolds.
 
 1. Respond ONLY with a valid JSON object. No preamble, no explanation, no markdown fences.
    Your entire response must be parseable by Jackson's ObjectMapper.readValue().
@@ -221,7 +330,7 @@ Do NOT split HTML, CSS, and JS for the same page across different tasks.
 3c. If two tasks MUST modify the same file, declare the file in "shared_files" for BOTH tasks
     and make one depend on the other (add to "depends_on") so they run sequentially.
 Common shared files in code projects:
-      - pom.xml / package.json / build.gradle → always assign to "project_setup" task only
+      - pom.xml / package.json / build.gradle → always assign to scaffold task only (project_setup, or backend_setup/frontend_setup for FULL_STACK)
       - application.yml / .env → create a "config_setup" task if multiple tasks need config changes
       - Router/route files → if multiple tasks add routes, create a single "routing_setup" task
     CRITICAL: If a file appears in shared_files for two tasks, one MUST depend on the other.
@@ -257,8 +366,8 @@ If a feature spans multiple layers, split into separate tasks with depends_on:
 
 Set "task_layer" on every task: "BACKEND", "FRONTEND", "DATABASE", or "INFRA".
 
-Exception: project_setup tasks for FULL_STACK projects may create both pom.xml and package.json
-(these are auto-unlocked scaffold files) — use task_layer "INFRA" for such tasks.
+Exception: For FULL_STACK projects, backend_setup uses task_layer "BACKEND" and
+frontend_setup uses task_layer "INFRA" (see Hard Rule 0 for the two-task split).
 
 FULL-STACK ORDERING:
   - Backend data layer → backend API → frontend API client → frontend UI.
@@ -277,10 +386,11 @@ but they STILL need aggressive decomposition. A full-stack JS app should be spli
 
 SPLIT STRATEGY for Express + React (single-directory or separate frontend/backend):
 
-  Tier 0 (setup):
-    project_setup              — package.json with ALL dependencies (express, cors, react,
-                                  recharts, tailwind, vite, etc.), vite.config.js,
-                                  tailwind.config.js, base entry points
+  Tier 0 (setup — parallel):
+    backend_setup              — package.json with backend deps (express, cors, etc.),
+                                  server entry point (MEDIUM if Spring Boot, LOW if Node)
+    frontend_setup             — package.json (if separate) with frontend deps (react,
+                                  vite, tailwind, etc.), vite.config.js, tailwind.config.js
 
   Tier 1 (backend core — NO frontend files):
     data_store                 — In-memory storage module or database client/models
@@ -290,7 +400,7 @@ SPLIT STRATEGY for Express + React (single-directory or separate frontend/backen
     api_routes_resource_a      — CRUD routes for one resource (e.g., /api/transactions)
     api_routes_resource_b      — CRUD routes for another resource (if applicable)
 
-  Tier 3 (frontend foundation — depends on project_setup):
+  Tier 3 (frontend foundation — depends on frontend_setup):
     app_shell                  — App.jsx/tsx: routing, layout, global styles
     api_client                 — Frontend API client (fetch/axios wrapper with relative URLs)
 
@@ -408,7 +518,7 @@ For React/Vue/Angular/Svelte projects:
     from the Styling Rules.
   - Split by component, not by concern (don't separate component JSX from its styles).
   - One task per component or small group of related components.
-  - The project_setup task must include routing setup and global style placeholders.
+  - The scaffold task (project_setup or frontend_setup) must include routing setup and global style placeholders.
 
 LAYER REMINDER: Frontend tasks must ONLY own frontend/** files (task_layer: FRONTEND).
   Backend tasks must ONLY own src/main/java/** files (task_layer: BACKEND).

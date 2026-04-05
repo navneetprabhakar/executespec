@@ -23,6 +23,10 @@ public class TierConfig {
     @Id
     private String tier;
 
+    /** Display name shown in UI (e.g. "Free", "Pro", "Enterprise"). */
+    @Column(name = "display_name", nullable = false)
+    private String displayName;
+
     /** Monthly run limit. -1 means unlimited. */
     @Column(name = "monthly_run_limit", nullable = false)
     private int monthlyRunLimit;

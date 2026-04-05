@@ -103,6 +103,12 @@ WRITE BATCHING — CRITICAL:
   truncated and lost. Write one file → wait for confirmation → write the next.
 - Small files (<30 lines each): you may batch 2-3 small writes in one response.
 
+CRITICAL — FILES ONLY EXIST WHEN YOU CALL write_file:
+  Describing file contents in prose does NOTHING. The harness ONLY creates files
+  when you call the write_file tool. If your completion report lists files_created
+  but you never called write_file, the report is REJECTED and you waste an iteration.
+  EVERY file you create MUST go through a write_file tool call.
+
 ═══════════════════════════════════════════════════════════
 FILE OWNERSHIP AND LOCKING
 ═══════════════════════════════════════════════════════════
@@ -387,6 +393,9 @@ COMPLETION REPORT FORMAT
 
 When your task is done (or you are blocked), output ONLY this JSON as your final response.
 No text before or after the JSON object.
+IMPORTANT: files_created and files_modified MUST only list files you actually wrote
+via write_file or edit_file tool calls. The harness validates this — if you list files
+you never wrote with a tool call, your report is rejected and the iteration is wasted.
 
 {
   "task_id": "the task_id from your assignment",

@@ -6,7 +6,7 @@ import { useUiStore } from '@/stores/useUiStore';
 
 interface Props { onClose: () => void; onSuccess: () => void; }
 
-const TIER_LABEL: Record<string, string> = { FREE: 'Free', PRO: 'Team', ENTERPRISE: 'Enterprise' };
+const TIER_LABEL_FALLBACK: Record<string, string> = { FREE: 'Free', PRO: 'Pro', ENTERPRISE: 'Enterprise' };
 
 export default function AdminInviteModal({ onClose, onSuccess }: Props) {
   const { addToast } = useUiStore();
@@ -20,11 +20,18 @@ export default function AdminInviteModal({ onClose, onSuccess }: Props) {
   const [newOrgName, setNewOrgName] = useState('');
   const [orgRole, setOrgRole]     = useState('DEVELOPER');
   const [orgs, setOrgs]           = useState<api.OrgDto[]>([]);
+  const [tierConfigs, setTierConfigs] = useState<api.TierConfig[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     api.adminListOrgs().then(setOrgs).catch(() => {});
+    api.adminGetTierConfig().then(setTierConfigs).catch(() => {});
   }, []);
+
+  const tierLabel = (t: string) => {
+    const fromDb = tierConfigs.find((tc) => tc.tier === t);
+    return fromDb?.displayName ?? TIER_LABEL_FALLBACK[t] ?? t;
+  };
 
   const needsOrg = tier !== 'FREE';
 
@@ -94,8 +101,8 @@ export default function AdminInviteModal({ onClose, onSuccess }: Props) {
               onChange={(e) => { setTier(e.target.value); setOrgId(''); setNewOrgName(''); }}
               className={selectCls}
             >
-              {Object.entries(TIER_LABEL).map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
+              {(tierConfigs.length > 0 ? tierConfigs : [{ tier: 'FREE' }, { tier: 'PRO' }, { tier: 'ENTERPRISE' }]).map((tc) => (
+                <option key={tc.tier} value={tc.tier}>{tierLabel(tc.tier)}</option>
               ))}
             </select>
           </Field>
