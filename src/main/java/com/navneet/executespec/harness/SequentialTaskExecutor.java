@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.WorkerAgent;
 import com.navneet.executespec.agent.model.TaskDefinition;
+import com.navneet.executespec.compiler.CompilerAgent;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.router.*;
@@ -73,6 +74,7 @@ public class SequentialTaskExecutor {
 
 
     private final RunCostBudgetService runCostBudgetService;
+    private final CompilerAgent compilerAgent;
 
     /**
      * Result of sequential execution across all tasks.
@@ -217,6 +219,15 @@ public class SequentialTaskExecutor {
 
             log.info("Tier {} complete: {}/{} tasks succeeded overall, {} failed",
                     tierIdx, completed.size(), tasks.size(), failed.size());
+
+            // Post-tier compile check: catch and auto-fix syntax errors before next tier starts (2 passes max)
+            if (!mergedTaskIds.isEmpty()) {
+                String syntaxError = compilerAgent.quickCompileAndFix(runId);
+                if (syntaxError != null) {
+                    log.warn("Post-tier {} compile still failing for run {} after auto-fix — continuing",
+                            tierIdx, runId);
+                }
+            }
 
             } finally {
                 tierObs.stop();

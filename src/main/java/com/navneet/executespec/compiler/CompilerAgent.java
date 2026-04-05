@@ -315,6 +315,60 @@ public class CompilerAgent {
         return files.size();
     }
 
+    // ── Quick syntax check (per-tier, no LLM fix) ─────────────────────────────
+
+    /**
+     * Quick compile-and-fix pass — runs up to 2 attempts with LLM fix between them.
+     * Used by SequentialTaskExecutor after each tier merges to catch and resolve
+     * syntax errors before the next tier starts.
+     *
+     * @return null if check passed or was skipped; error summary string if still failing after 2 attempts
+     */
+    public String quickCompileAndFix(String runId) {
+        if (!compilerProps.isEnabled()) return null;
+
+        String buildTool = detectBuildTool(runId);
+        if (buildTool == null) return null;
+
+        String cmd = buildCommand(buildTool);
+        int timeout = compilerProps.getTimeoutSeconds();
+
+        try {
+            // Attempt 1: compile
+            String result = shellTool.run(runId, cmd, timeout);
+            if (!result.startsWith("ERROR")) return null; // passed first try
+
+            log.warn("[TierCompile] Syntax errors after tier merge for run {} — attempting LLM fix", runId);
+            broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                    "⚠️ Syntax errors detected — auto-fixing..."));
+
+            // LLM fix
+            try {
+                applyLlmFixes(runId, result, buildTool);
+            } catch (Exception e) {
+                log.warn("[TierCompile] LLM fix failed for run {}: {}", runId, e.getMessage());
+                return result;
+            }
+
+            // Attempt 2: re-compile after fix
+            String result2 = shellTool.run(runId, cmd, timeout);
+            if (!result2.startsWith("ERROR")) {
+                log.info("[TierCompile] Syntax errors fixed on second pass for run {}", runId);
+                broadcaster.emit(runId, RunEvent.log(runId, "compiler", "✅ Syntax errors auto-fixed"));
+                return null; // fixed
+            }
+
+            log.warn("[TierCompile] Still failing after 2 passes for run {}: {}",
+                    runId, truncate(result2, 500));
+            broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                    "⚠️ Syntax errors persist after auto-fix — will retry at final compile phase"));
+            return result2;
+        } catch (Exception e) {
+            log.debug("[TierCompile] Error during quick compile for run {}: {}", runId, e.getMessage());
+            return null; // non-fatal
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     String detectBuildTool(String runId) {

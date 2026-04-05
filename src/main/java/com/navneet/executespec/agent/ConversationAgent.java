@@ -50,7 +50,7 @@ import java.util.Set;
 public class ConversationAgent {
 
     /** Maximum number of USER messages allowed per run conversation. */
-    public static final int MAX_MESSAGES = 50;
+    public static final int MAX_MESSAGES = 30;
 
     private static final int    MAX_OUTPUT_TOKENS = 4096;
     private static final int    MAX_CONTEXT_CHARS = 24_000; // ~6000 tokens of workspace context
@@ -386,6 +386,8 @@ public class ConversationAgent {
                 .map(r -> "VALIDATION REPORT:\n" + truncate(r.getReportMarkdown(), 3000) + "\n")
                 .orElse("");
 
+        String designSection = buildDesignContext(run);
+
         return """
             You are an expert software engineering assistant reviewing a completed automated coding run.
             You have deep access to the project's source code, build plan, review, and preview/Docker status.
@@ -405,6 +407,8 @@ public class ConversationAgent {
 
             PREVIEW / DOCKER STATUS:
             ─────────────────────────────
+            %s
+
             %s
 
             PROJECT FILES AND SOURCE CODE:
@@ -429,12 +433,38 @@ public class ConversationAgent {
                and how different parts of the code interact. Reference specific files and line numbers
                when relevant.
 
-            4. **Create improvement goals** — When you identify issues or the user asks for changes,
+            4. **Suggest design refinements** — If this is a frontend project and the user has not yet
+               chosen a design style, proactively suggest design options. We have a curated library of
+               premium design templates inspired by industry-leading products. Present options by their
+               visual character (e.g., "clean minimal with generous whitespace", "bold dashboard-style
+               with sidebar navigation", "developer-focused with monospace typography") — do NOT mention
+               company or product names unless the user mentions them first. If the user already has a
+               design style applied (shown in DESIGN CONTEXT above), acknowledge it and suggest
+               refinements or alternatives only if asked.
+
+            5. **Create improvement goals** — When you identify issues or the user asks for changes,
                describe them as actionable goals. The user has TWO options:
                - **"Apply to Run"** (green button) — for small, targeted fixes (≤6 tasks). This appends
                  tasks to the CURRENT run and executes them immediately. Recommend this for most improvements.
                - **"Implement as New Run"** (violet button) — for large changes that need a full pipeline
                  run from scratch. Only recommend this for major refactors or entirely new features.
+
+            DESIGN GUIDANCE:
+            ─────────────��───────────────
+            We have a curated library of premium design templates with distinct visual identities.
+            When discussing design with the user:
+            • NEVER mention company or product names (e.g., "Stripe", "Linear", "Notion") unless
+              the user mentions them first. Instead, describe the visual character.
+            • If the user has no design style yet, suggest 2-3 options by describing their aesthetics:
+              - "Clean, minimal with soft gradients and generous spacing"
+              - "Developer-focused with monospace typography and dark theme"
+              - "Bold, colorful with strong brand personality and rounded elements"
+              - "Dashboard-oriented with sidebar navigation and data-dense layouts"
+              - "Documentation-style with excellent readability and subtle accents"
+            • If the user names a specific company/product, you may use that name in your response
+              and recommend matching our template to their preference.
+            • Design changes are best applied via **"Implement as New Run"** since they affect
+              the entire UI.
 
             RESPONSE FORMAT:
             ─────────────────────────────
@@ -456,7 +486,37 @@ public class ConversationAgent {
             "Implement as New Run" for substantial rewrites.
             """.formatted(request, run.getRunId(), model, status,
                     planSection, reviewSection, failureSection, validationSection,
-                    previewContext, workspaceContext, MAX_MESSAGES);
+                    previewContext, designSection, workspaceContext, MAX_MESSAGES);
+    }
+
+    // ── Design context: current design style + available options ────────────
+
+    private String buildDesignContext(PipelineRun run) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("DESIGN CONTEXT:\n─────────────────────────────\n");
+
+        String uiStyle = run.getUiStyle();
+        if (uiStyle != null && !uiStyle.isBlank()) {
+            try {
+                var node = objectMapper.readTree(uiStyle);
+                String designName = node.has("design_name") ? node.get("design_name").asText(null) : null;
+                if (designName != null && !designName.isBlank()) {
+                    sb.append("Active design template: ").append(designName).append('\n');
+                }
+                if (node.has("theme")) sb.append("Theme: ").append(node.get("theme").asText()).append('\n');
+                if (node.has("layout")) sb.append("Layout: ").append(node.get("layout").asText()).append('\n');
+                if (node.has("design_system")) sb.append("Design system: ").append(node.get("design_system").asText()).append('\n');
+                if (node.has("dark_mode")) sb.append("Dark mode: ").append(node.get("dark_mode").asText()).append('\n');
+            } catch (Exception e) {
+                sb.append("Design style configured (details unavailable)\n");
+            }
+        } else {
+            sb.append("No design style selected for this run.\n");
+            sb.append("Available design categories: clean-minimal, developer-focused, bold-colorful, ");
+            sb.append("dashboard-oriented, documentation-style, and more.\n");
+        }
+
+        return sb.toString();
     }
 
     // ── Workspace context: file tree + key source files ─────────────────────
