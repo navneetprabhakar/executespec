@@ -615,7 +615,7 @@ public class DevDockerfileGenerator {
                 RUN rm -f /etc/nginx/conf.d/default.conf \
                     && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html index.htm; location / { try_files $uri $uri/ /index.html =404; } }' \
                        > /etc/nginx/conf.d/default.conf \
-                    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx \
+                    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d \
                     && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
                 EXPOSE 8080
                 USER nginx
