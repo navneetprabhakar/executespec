@@ -315,14 +315,19 @@ public class DevDockerfileGenerator {
     /** Vite proxy patch — rewrites localhost:NNNN → localhost:{port} in vite config. */
     private String crViteProxyPatch(int port) {
         return "RUN node -e \"" +
-                "const fs=require('fs');" +
-                "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
-                "  if(fs.existsSync(f)){" +
-                "    let c=fs.readFileSync(f,'utf8');" +
-                "    c=c.replace(/localhost:\\\\d{4}/g,'localhost:" + port + "');" +
-                "    c=c.replace(/127\\\\.0\\\\.0\\\\.1:\\\\d{4}/g,'127.0.0.1:" + port + "');" +
-                "    fs.writeFileSync(f,c);" +
-                "    break;" +
+                "const fs=require('fs'),path=require('path');" +
+                "const dirs=['.','frontend','client','src','app','web'];" +
+                "const names=['vite.config.js','vite.config.ts','vite.config.mjs'];" +
+                "for(const d of dirs){" +
+                "  for(const n of names){" +
+                "    const f=path.join(d,n);" +
+                "    if(fs.existsSync(f)){" +
+                "      let c=fs.readFileSync(f,'utf8');" +
+                "      c=c.replace(/localhost:\\\\d{4}/g,'localhost:" + port + "');" +
+                "      c=c.replace(/127\\\\.0\\\\.0\\\\.1:\\\\d{4}/g,'127.0.0.1:" + port + "');" +
+                "      fs.writeFileSync(f,c);" +
+                "      process.exit(0);" +
+                "    }" +
                 "  }" +
                 "}\"\n";
     }
