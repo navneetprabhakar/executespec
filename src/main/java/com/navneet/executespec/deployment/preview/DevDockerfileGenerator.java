@@ -374,6 +374,29 @@ public class DevDockerfileGenerator {
         dockerfile = dockerfile.replace("'vite --host 0.0.0.0'", "'vite --host 0.0.0.0 --port 8080'");
         // Full-stack: Cloud Run only supports one port — use frontend port for preview
         dockerfile = dockerfile.replaceAll("EXPOSE \\d+ \\d+", "EXPOSE 8080");
+
+        // Single-package full-stack on Cloud Run: shift backend to non-conflicting port.
+        // Vite is already hardcoded to --port 8080 (patched above). Shift ENV PORT from
+        // 8080 to 3001 so the backend (Express/Fastify/etc, which reads PORT) doesn't
+        // compete with Vite for port 8080. Cloud Run routes traffic to 8080 → reaches Vite.
+        boolean isSinglePkgFullStack = !isMultiServiceCmd
+                && dockerfile.contains("dev:all");
+        if (isSinglePkgFullStack) {
+            dockerfile = dockerfile.replace("ENV PORT=8080", "ENV PORT=3001");
+            // Patch vite proxy config to forward API requests to backend on port 3001
+            dockerfile = injectBeforeCmd(dockerfile,
+                    "RUN node -e \"" +
+                    "const fs=require('fs');" +
+                    "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
+                    "  if(fs.existsSync(f)){" +
+                    "    let c=fs.readFileSync(f,'utf8');" +
+                    "    c=c.replace(/localhost:\\\\d{4}/g,'localhost:3001');" +
+                    "    c=c.replace(/127\\\\.0\\\\.0\\\\.1:\\\\d{4}/g,'127.0.0.1:3001');" +
+                    "    fs.writeFileSync(f,c);" +
+                    "    break;" +
+                    "  }" +
+                    "}\"\n");
+        }
         // Ruby: Sinatra default 4567 → Cloud Run PORT
         dockerfile = dockerfile.replace("EXPOSE 4567", "EXPOSE 8080");
         // Rackup: convert exec form to shell form so ${PORT:-8080} expands at runtime
