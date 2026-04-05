@@ -386,6 +386,24 @@ public class DevDockerfileGenerator {
         dockerfile = dockerfile.replace("\"php\", \"-S\", \"0.0.0.0:8080\"",
                 "\"sh\", \"-c\", \"php -S 0.0.0.0:${PORT:-8080}\"");
 
+        // Vite 5.4+ blocks requests from unrecognised hostnames (e.g. *.a.run.app).
+        // Inject a build-time patch that sets server.allowedHosts in the vite config.
+        dockerfile = injectBeforeCmd(dockerfile,
+                "RUN node -e \"" +
+                "const fs=require('fs');" +
+                "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
+                "  if(fs.existsSync(f)){" +
+                "    let c=fs.readFileSync(f,'utf8');" +
+                "    if(!c.includes('allowedHosts')){" +
+                "      c=c.replace(/server\\\\s*:\\\\s*\\\\{/,'server:{allowedHosts:true,');" +
+                "      if(!c.includes('allowedHosts'))c=c.replace(/export\\\\s+default\\\\s*\\\\{/,'export default{server:{allowedHosts:true},');" +
+                "      if(!c.includes('allowedHosts'))c=c.replace(/defineConfig\\\\s*\\\\(\\\\s*\\\\{/,'defineConfig({server:{allowedHosts:true},');" +
+                "      fs.writeFileSync(f,c);" +
+                "    }" +
+                "    break;" +
+                "  }" +
+                "}\"\n");
+
         return dockerfile;
     }
 
