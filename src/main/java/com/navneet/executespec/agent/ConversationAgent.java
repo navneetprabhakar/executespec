@@ -434,14 +434,18 @@ public class ConversationAgent {
                when relevant.
 
             4. **Suggest design refinements** — If this is a frontend project and the user has not yet
-               chosen a design style, ask: "Visual style: Since this has a UI, which appeals to you most?"
-               and present these options:
-               - Minimal Light (clean, SaaS default)
-               - Minimal Dark (developer-facing)
-               - Corporate Clean (enterprise, formal)
-               - Startup Bold (vibrant, modern)
-               - Neutral Warm (editorial, content-focused)
-               Do NOT mention company or product names unless the user mentions them first.
+               chosen a design style, ask:
+               "Visual style: Since this has a UI, which appeals to you most?
+               Or name a website you like and we'll match it."
+               Then present these options:
+               1. Minimal Light — clean, SaaS default (think Notion, Linear)
+               2. Minimal Dark — developer-facing (think Vercel, GitHub)
+               3. Corporate Clean — enterprise, formal (think Salesforce, Workday)
+               4. Startup Bold — vibrant, modern (think Figma, Loom)
+               5. Neutral Warm — editorial, content-focused (think Medium, Substack)
+               6. Or tell me a website you like and I'll match it!
+               If the user names a website or product (e.g., "like Stripe", "like Airbnb"),
+               use our design library to fuzzy-match that style — we have 50+ company templates.
                If the user already has a design style applied (shown in DESIGN CONTEXT above),
                acknowledge it and suggest refinements or alternatives only if asked.
 
@@ -459,12 +463,14 @@ public class ConversationAgent {
             • NEVER mention company or product names (e.g., "Stripe", "Linear", "Notion") unless
               the user mentions them first. Instead, describe the visual character.
             • If the user has no design style yet, ask:
-              "Visual style: Since this has a UI, which appeals to you most?"
-              - Minimal Light (clean, SaaS default)
-              - Minimal Dark (developer-facing)
-              - Corporate Clean (enterprise, formal)
-              - Startup Bold (vibrant, modern)
-              - Neutral Warm (editorial, content-focused)
+              "Visual style: Since this has a UI, which appeals to you most?
+               Or name a website you like and we'll match it."
+              1. Minimal Light — clean, SaaS default (think Notion, Linear)
+              2. Minimal Dark — developer-facing (think Vercel, GitHub)
+              3. Corporate Clean — enterprise, formal (think Salesforce, Workday)
+              4. Startup Bold — vibrant, modern (think Figma, Loom)
+              5. Neutral Warm — editorial, content-focused (think Medium, Substack)
+              6. Or tell me a website you like and I'll match it!
             • If the user names a specific company/product, you may use that name in your response
               and recommend matching our template to their preference.
             • Design changes are best applied via **"Implement as New Run"** since they affect
@@ -516,7 +522,9 @@ public class ConversationAgent {
             }
         } else {
             sb.append("No design style selected for this run.\n");
-            sb.append("Available styles: Minimal Light, Minimal Dark, Corporate Clean, Startup Bold, Neutral Warm.\n");
+            sb.append("Available styles: Minimal Light (Notion/Linear), Minimal Dark (Vercel/GitHub), ");
+            sb.append("Corporate Clean (Salesforce/Workday), Startup Bold (Figma/Loom), ");
+            sb.append("Neutral Warm (Medium/Substack) — or name any website to match.\n");
         }
 
         return sb.toString();
