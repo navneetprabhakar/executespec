@@ -282,24 +282,33 @@ public class DevDockerfileGenerator {
      */
     private String crViteAllowedHostsPatch() {
         return "RUN node -e \"" +
-                "const fs=require('fs');" +
+                "const fs=require('fs'),path=require('path');" +
+                "const dirs=['.','frontend','client','src','app','web'];" +
+                "const names=['vite.config.js','vite.config.ts','vite.config.mjs'];" +
                 "let found=false;" +
-                "for(const f of['vite.config.js','vite.config.ts','vite.config.mjs']){" +
-                "  if(fs.existsSync(f)){" +
-                "    found=true;" +
-                "    let c=fs.readFileSync(f,'utf8');" +
-                "    if(!c.includes('allowedHosts')){" +
-                "      c=c.replace(/server\\\\s*:\\\\s*\\\\{/,'server:{allowedHosts:true,');" +
-                "      if(!c.includes('allowedHosts'))c=c.replace(/export\\\\s+default\\\\s*\\\\{/,'export default{server:{allowedHosts:true},');" +
-                "      if(!c.includes('allowedHosts'))c=c.replace(/defineConfig\\\\s*\\\\(\\\\s*\\\\{/,'defineConfig({server:{allowedHosts:true},');" +
-                "      if(!c.includes('allowedHosts'))c=c.replace(/=>\\\\s*\\\\(\\\\s*\\\\{/,'=>({server:{allowedHosts:true},');" +
-                "      if(!c.includes('allowedHosts'))c=c.replace(/plugins\\\\s*:/,'server:{allowedHosts:true},plugins:');" +
-                "      fs.writeFileSync(f,c);" +
+                "for(const d of dirs){" +
+                "  for(const n of names){" +
+                "    const f=path.join(d,n);" +
+                "    if(fs.existsSync(f)){" +
+                "      found=true;" +
+                "      let c=fs.readFileSync(f,'utf8');" +
+                "      if(!c.includes('allowedHosts')){" +
+                "        c=c.replace(/server\\\\s*:\\\\s*\\\\{/,'server:{allowedHosts:true,');" +
+                "        if(!c.includes('allowedHosts'))c=c.replace(/export\\\\s+default\\\\s*\\\\{/,'export default{server:{allowedHosts:true},');" +
+                "        if(!c.includes('allowedHosts'))c=c.replace(/defineConfig\\\\s*\\\\(\\\\s*\\\\{/,'defineConfig({server:{allowedHosts:true},');" +
+                "        if(!c.includes('allowedHosts'))c=c.replace(/=>\\\\s*\\\\(\\\\s*\\\\{/,'=>({server:{allowedHosts:true},');" +
+                "        if(!c.includes('allowedHosts'))c=c.replace(/plugins\\\\s*:/,'server:{allowedHosts:true},plugins:');" +
+                "        fs.writeFileSync(f,c);" +
+                "      }" +
+                "      break;" +
                 "    }" +
-                "    break;" +
                 "  }" +
+                "  if(found)break;" +
                 "}" +
-                "if(!found)fs.writeFileSync('vite.config.js','import{defineConfig}from\\\\\"vite\\\\\";export default defineConfig({server:{allowedHosts:true}});');" +
+                "if(!found){" +
+                "  const feDir=['frontend','client'].find(d=>fs.existsSync(path.join(d,'package.json')))||'.';" +
+                "  fs.writeFileSync(path.join(feDir,'vite.config.js'),'import{defineConfig}from\\\\\"vite\\\\\";export default defineConfig({server:{allowedHosts:true}});');" +
+                "}" +
                 "\"\n";
     }
 
