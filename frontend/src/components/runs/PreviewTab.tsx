@@ -100,6 +100,11 @@ export default function PreviewTab({ runId }: { runId: string }) {
   }, [sseEntries, runId, PREVIEW_EVENTS]);
 
   // Countdown timer for running previews
+  const expiredFetchedRef = useRef(false);
+  useEffect(() => {
+    expiredFetchedRef.current = false;
+  }, [status?.expiresAt]);
+
   useEffect(() => {
     if (status?.status === 'RUNNING' && status.expiresAt) {
       const updateCountdown = () => {
@@ -107,9 +112,10 @@ export default function PreviewTab({ runId }: { runId: string }) {
           (new Date(status.expiresAt!).getTime() - Date.now()) / 1000
         ));
         setCountdown(remaining);
-        if (remaining <= 0) {
-          // Refresh status — preview has expired
+        if (remaining <= 0 && !expiredFetchedRef.current) {
+          expiredFetchedRef.current = true;
           getPreviewStatus(runId).then(setStatus).catch(() => {});
+          if (countdownRef.current) clearInterval(countdownRef.current);
         }
       };
       updateCountdown();

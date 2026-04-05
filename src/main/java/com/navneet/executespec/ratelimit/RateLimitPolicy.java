@@ -49,10 +49,10 @@ public class RateLimitPolicy {
                     "DEFAULT", 60
             )),
             Map.entry("PREVIEW", Map.of(
-                    "FREE", 10,
-                    "PRO", 30,
-                    "ENTERPRISE", 100,
-                    "DEFAULT", 10
+                    "FREE", 30,
+                    "PRO", 60,
+                    "ENTERPRISE", 200,
+                    "DEFAULT", 30
             )),
             Map.entry("DEPLOY", Map.of(
                     "FREE", 5,
