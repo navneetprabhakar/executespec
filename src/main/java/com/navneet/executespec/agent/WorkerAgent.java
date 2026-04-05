@@ -190,8 +190,8 @@ public class WorkerAgent {
         int continuations = 0;  // truncation auto-continue count
         int consecutiveNonJsonOutputs = 0; // consecutive non-tool, non-JSON outputs
         int skeletonRecoveries = 0; // skeleton recovery injection count
-        int fabricatedCompletionCount = 0; // fabricated completion rejections — max 3 before FAILED
-        final int MAX_FABRICATED_COMPLETIONS = 3;
+        int fabricatedCompletionCount = 0; // fabricated completion rejections — max 2 before FAILED
+        final int MAX_FABRICATED_COMPLETIONS = 2;
         int configuredMaxOutput = budgetMonitor.maxOutputTokens(model, complexity); // for calibration tracking
         boolean midTaskRecoveryAttempted = false; // limit to 1 recovery attempt per task
 
@@ -437,10 +437,10 @@ public class WorkerAgent {
                     }
                 }
 
-                // ── PATH A: OpenAI native tool calls ─────────────────────────────────
-                // When using OpenAI with native function calling, tool calls are returned
-                // as structured objects in the response (not in text). We dispatch them
-                // manually and send results back as ToolResponseMessage (required by OpenAI API).
+                // ── PATH A: Native tool calls (OpenAI + Anthropic) ──────────────────
+                // When using native function calling, tool calls are returned as structured
+                // objects in the response (not in text). We dispatch them manually and send
+                // results back as ToolResponseMessage (required by the API).
                 if (assistantMsg.hasToolCalls() && !assistantMsg.getToolCalls().isEmpty()) {
                     log.info("[Worker {}] Iteration {} — {} native tool call(s)",
                             taskId, iteration, assistantMsg.getToolCalls().size());
@@ -556,28 +556,35 @@ public class WorkerAgent {
                                         continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                             }
 
-                            // Remove the fabricated assistant message so the model doesn't
-                            // anchor on its own prose description of files.
-                            if (!messages.isEmpty() && messages.get(messages.size() - 1) instanceof AssistantMessage) {
-                                messages.remove(messages.size() - 1);
-                            }
+                            // CONTEXT-TRIMMED RETRY: instead of keeping full bloated history
+                            // (which burns 100k+ tokens per retry), reset to task assignment +
+                            // summary of actual work done + explicit file-by-file instructions.
+                            // This cuts retry cost from ~100k tokens to ~5k tokens.
+                            int filesRemaining = Math.max(0, claimedFileCount - totalFileWrites);
+                            String writtenFilesSummary = totalFileWrites > 0
+                                    ? "You have successfully written " + totalFileWrites + " file(s) so far. "
+                                    : "You have NOT written any files yet. ";
 
-                            String missingCount = claimedFileCount > totalFileWrites
-                                    ? " You still need to create " + (claimedFileCount - totalFileWrites)
-                                            + " more file(s)."
-                                    : "";
+                            messages.clear();
+                            messages.add(new UserMessage(buildInitialUserMessage(taskDef, branchName, runId)));
                             messages.add(new UserMessage(
-                                    "CRITICAL ERROR: Your previous response was REJECTED because it contained a " +
-                                    "completion report claiming " + claimedFileCount + " files were created, but only " +
-                                    totalFileWrites + " writeFile calls were actually dispatched." + missingCount +
-                                    "\n\nThat response has been discarded.\n\n" +
-                                    "Files are NOT created by describing them in text — you MUST call the " +
-                                    "writeFile tool for each file. Example:\n" +
-                                    "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"package.json\", " +
-                                    "\"content\": \"{\\n  \\\"name\\\": \\\"app\\\"\\n}\"}}</tool_call>\n\n" +
-                                    "Do NOT output a completion report until you have called writeFile for every " +
-                                    "file you need to create. Start now — call writeFile for your next file."));
-                            continue; // retry — do not accept this completion
+                                    "CONTEXT RESET — Your previous attempt was REJECTED.\n\n" +
+                                    "REASON: You produced a completion report claiming " + claimedFileCount +
+                                    " files, but only " + totalFileWrites + " writeFile tool calls were dispatched.\n\n" +
+                                    writtenFilesSummary +
+                                    (filesRemaining > 0
+                                            ? "You still need to create " + filesRemaining + " more file(s).\n\n"
+                                            : "\n") +
+                                    "RULES (read carefully):\n" +
+                                    "1. Files are ONLY created by calling the writeFile tool — describing them in text does NOTHING.\n" +
+                                    "2. Call writeFile ONCE for EACH file you need to create.\n" +
+                                    "3. Do NOT output a completion JSON report until ALL files are written.\n" +
+                                    "4. Write ONE file at a time. After each writeFile call, write the next file.\n\n" +
+                                    "Example:\n" +
+                                    "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"src/Main.java\", " +
+                                    "\"content\": \"package com.example;\\n...\"}}</tool_call>\n\n" +
+                                    "START NOW — call writeFile for your next file."));
+                            continue; // retry with trimmed context
                         }
                         return withProviderModel(
                                 parseCompletionReport(assistantText, taskId,
@@ -1666,9 +1673,11 @@ public class WorkerAgent {
         String systemPrompt = loadPrompt(provider);
         int maxOut = budgetMonitor.maxOutputTokens(model, complexity);
         boolean isOpenAi = "openai".equalsIgnoreCase(provider);
+        boolean isAnthropic = "anthropic".equalsIgnoreCase(provider);
+        boolean useNativeTools = isOpenAi || isAnthropic;
 
         log.info("[Worker callModel] provider={} model={} complexity={} maxOut={} nativeTools={}",
-                provider, model, complexity, maxOut, isOpenAi);
+                provider, model, complexity, maxOut, useNativeTools);
 
         // Sliding window: always send the first 2 messages (task assignment + initial
         // context) and the most-recent HISTORY_WINDOW messages. This bounds input tokens
@@ -1676,8 +1685,8 @@ public class WorkerAgent {
         // the full history. The full `messages` list is preserved in memory for compact().
         final int HISTORY_WINDOW = 18;
         List<Message> windowed;
-        if (isOpenAi || messages.size() <= HISTORY_WINDOW + 2) {
-            // OpenAI native tool calling: skip sliding window entirely.
+        if (useNativeTools || messages.size() <= HISTORY_WINDOW + 2) {
+            // Native tool calling (OpenAI/Anthropic): skip sliding window entirely.
             // AssistantMessage(tool_calls) and ToolResponseMessage pairs MUST stay together;
             // the window boundary would split them causing 400 errors. Rely on compaction instead.
             windowed = messages;
@@ -1717,12 +1726,27 @@ public class WorkerAgent {
             // NO_FALLBACK: message history contains ToolResponseMessages
             // that are incompatible across providers if we failover mid-task
             fallbackMode = FallbackMode.NO_FALLBACK;
+        } else if (isAnthropic) {
+            // Anthropic: native tool calling via Spring AI tool callbacks.
+            // Models like Sonnet 4.6 strongly prefer native tool_use blocks over XML
+            // <tool_call> text format — prompt-based approach caused fabricated completions
+            // where the model described files in prose instead of invoking writeFile.
+            AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
+                    .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                    .build();
+            AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                    .temperature(0.0)
+                    .maxTokens(maxOut)
+                    .cacheOptions(cacheOpts)
+                    .toolCallbacks(callbacks)
+                    .internalToolExecutionEnabled(false) // keep outer loop in control
+                    .build();
+            prompt = new Prompt(allMessages, opts);
+            // NO_FALLBACK: message history contains ToolResponseMessages
+            // that are incompatible across providers if we failover mid-task
+            fallbackMode = FallbackMode.NO_FALLBACK;
         } else {
-            // Anthropic / Google: prompt-based tool calling (XML <tool_call> format)
-            // Spring AI 1.1.0's internalToolExecutionEnabled(false) breaks native tool_use
-            // for Anthropic — the model receives tool schemas but can't invoke them,
-            // producing text-only "Let me read..." responses in an infinite loop.
-            // Instead: rely on tool descriptions in the system prompt + XML parsing (PATH B).
+            // Google / others: prompt-based tool calling (XML <tool_call> format)
             AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                     .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                     .build();
