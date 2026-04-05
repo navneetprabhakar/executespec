@@ -211,7 +211,7 @@ export default function RunDetailTabs() {
         </Tabs.Content>
 
         <Tabs.Content value="graph" className="h-full overflow-auto p-4">
-          <TaskGraphGroups runId={activeRun.runId} />
+          <TaskGraphGroups runId={activeRun.runId} isActive={isActive} />
           {testGraph && testGraph.nodes.length > 0 && (
             <CollapsibleGraphSection title="Test Pipeline" defaultOpen>
               <div className="overflow-auto max-h-[50vh] border border-[var(--border-default)] rounded-sm">
@@ -1805,15 +1805,12 @@ function TestTaskCard({ task }: { task: TestTaskDto }) {
 
 // ── Task Graph Groups (original + copilot + review) ─────────────────────────
 
-function TaskGraphGroups({ runId }: { runId: string }) {
+function TaskGraphGroups({ runId, isActive }: { runId: string; isActive: boolean }) {
   const [groups, setGroups] = useState<{ title: string; nodes: TaskGraphNode[]; order: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+  const load = useCallback(() => {
     getTaskGraph(runId).then((allNodes) => {
-      if (cancelled) return;
       // Group nodes by source prefix in taskId: _cop{N}_ → Copilot N, _rev{N}_ → Review Fix N, else → original
       const buckets = new Map<string, { title: string; nodes: TaskGraphNode[]; order: number }>();
       buckets.set('original', { title: 'Task Graph', nodes: [], order: 0 });
@@ -1844,10 +1841,22 @@ function TaskGraphGroups({ runId }: { runId: string }) {
       setGroups(sorted);
       setLoading(false);
     }).catch(() => {
-      if (!cancelled) setLoading(false);
+      setLoading(false);
     });
-    return () => { cancelled = true; };
   }, [runId]);
+
+  // Initial load
+  useEffect(() => {
+    setLoading(true);
+    load();
+  }, [load]);
+
+  // Poll every 30s while the run is active
+  useEffect(() => {
+    if (!isActive) return;
+    const id = setInterval(() => { if (!document.hidden) load(); }, 30_000);
+    return () => clearInterval(id);
+  }, [isActive, load]);
 
   if (loading && groups.length === 0) {
     return (
