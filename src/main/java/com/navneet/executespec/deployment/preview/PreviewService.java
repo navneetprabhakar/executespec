@@ -850,7 +850,8 @@ public class PreviewService {
                 s.startedAt(), s.expiresAt(), s.cloudRunServiceName(), s.imageUri(),
                 s.buildOutput(), s.dockerfile()));
         broadcaster.emit(runId, new RunEvent("PREVIEW_FAILED", runId, null, message, Instant.now()));
-        active.remove(runId); // prevent memory leak from failed sessions
+        // Keep FAILED session in active map so clients can see error via GET /preview/status.
+        // TTL cleanup (cleanupExpired) will remove it after expiry. start() clears FAILED on retry.
         log.warn("Preview failed for run {}: {}", runId, message);
     }
 

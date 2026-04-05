@@ -682,10 +682,18 @@ public class DevDockerfileGenerator {
         // 2. Check directory layout (frontend/ + backend/)
         FullStackLayout layout = detectFullStack(workspace);
         if (layout != null && layout.hasFrontend() && layout.hasBackend()) {
+            if (layout.frontendType() == PreviewProjectType.STATIC_HTML) {
+                return cloudRun_FullStack_StaticBackend(workspace, layout);
+            }
             return switch (layout.backendType()) {
                 case SPRING_BOOT -> cloudRun_FullStack_NodeSpring(workspace, layout);
                 case PYTHON      -> cloudRun_FullStack_NodePython(workspace, layout);
-                default          -> cloudRun_FullStack_NodeNode(workspace, layout);
+                case GO           -> cloudRun_FullStack_NodeGo(workspace, layout);
+                case RUBY         -> cloudRun_FullStack_NodeRuby(workspace, layout);
+                case PHP          -> cloudRun_FullStack_NodePhp(workspace, layout);
+                case RUST         -> cloudRun_FullStack_NodeRust(workspace, layout);
+                case JAVA         -> cloudRun_FullStack_NodeJava(workspace, layout);
+                default           -> cloudRun_FullStack_NodeNode(workspace, layout);
             };
         }
 
@@ -770,7 +778,9 @@ public class DevDockerfileGenerator {
         sb.append("WORKDIR /app\n");
         sb.append("LABEL preview=true\n");
         sb.append("ENV PORT=8080\n");
-        sb.append("RUN apt-get update && apt-get install -y maven nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+        sb.append("RUN apt-get update && apt-get install -y curl maven && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
 
         // Install backend Maven deps
         if (be != null) {
@@ -814,7 +824,9 @@ public class DevDockerfileGenerator {
         sb.append("WORKDIR /app\n");
         sb.append("LABEL preview=true\n");
         sb.append("ENV PORT=8080\n");
-        sb.append("RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
 
         // Install backend Python deps
         if (be != null) {
@@ -858,6 +870,416 @@ public class DevDockerfileGenerator {
             sb.append("CMD sh -c \"cd /app/").append(be).append(" && ").append(pythonCmd).append("\"\n");
         }
         return sb.toString();
+    }
+
+    /** Node/Vite frontend + Go backend — Cloud Run. */
+    private String cloudRun_FullStack_NodeGo(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM golang:1.22-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("RUN apk add --no-cache nodejs npm\n");
+
+        // Install backend Go deps
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/go.mod ").append(be).append("/go.sum* ./").append(be).append("/\n");
+            sb.append("RUN cd ").append(be).append(" && go mod download 2>/dev/null || true\n");
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+
+        if (fe != null && be != null) {
+            sb.append("CMD sh -c \"(cd /app/").append(be)
+              .append(" && PORT=8081 go run . 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node/Vite frontend + Ruby backend — Cloud Run. */
+    private String cloudRun_FullStack_NodeRuby(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM ruby:3.2-alpine\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("RUN apk add --no-cache nodejs npm build-base\n");
+
+        // Install backend Ruby deps
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
+            Path beDir = workspace.resolve(be);
+            if (Files.exists(beDir.resolve("Gemfile"))) {
+                sb.append("RUN cd ").append(be).append(" && bundle install\n");
+            }
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(true));
+
+        // Detect Ruby backend CMD
+        String rubyCmd;
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            if (Files.exists(beDir.resolve("config.ru"))) {
+                rubyCmd = "bundle exec rackup --host 0.0.0.0 --port 8081";
+            } else {
+                String entry = findRubyEntryPoint(beDir);
+                rubyCmd = "PORT=8081 ruby " + entry;
+            }
+        } else {
+            rubyCmd = "ruby app.rb";
+        }
+
+        if (fe != null && be != null) {
+            sb.append("CMD sh -c \"(cd /app/").append(be).append(" && ").append(rubyCmd)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node/Vite frontend + PHP backend — Cloud Run. */
+    private String cloudRun_FullStack_NodePhp(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM php:8.2-cli\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+
+        // Install backend PHP deps
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            if (Files.exists(beDir.resolve("composer.json"))) {
+                sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
+                sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
+            }
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+
+        if (fe != null && be != null) {
+            sb.append("CMD sh -c \"(cd /app/").append(be)
+              .append(" && php -S 0.0.0.0:8081 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node/Vite frontend + Rust backend — Cloud Run. */
+    private String cloudRun_FullStack_NodeRust(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM rust:1.77-slim\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+
+        // Pre-build backend deps (cargo fetch)
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/Cargo.toml ").append(be).append("/Cargo.lock* ./").append(be).append("/\n");
+            sb.append("RUN cd ").append(be).append(" && mkdir src && echo \"fn main() {}\" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src\n");
+        }
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
+        }
+
+        sb.append("COPY . .\n");
+
+        // Build backend
+        if (be != null) {
+            sb.append("RUN cd ").append(be).append(" && cargo build --release 2>/dev/null || true\n");
+        }
+
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+
+        if (fe != null && be != null) {
+            sb.append("CMD sh -c \"(cd /app/").append(be)
+              .append(" && PORT=8081 bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\\"$bin\\\" ]; then exec \\\"$bin\\\"; else cargo run --release; fi")
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node/Vite frontend + Java (non-Spring) backend — Cloud Run. */
+    private String cloudRun_FullStack_NodeJava(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        // Detect Java main class
+        String mainClass = "Main";
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            try (Stream<Path> stream = Files.walk(beDir, 3)) {
+                Path mainFile = stream
+                        .filter(p -> p.toString().endsWith(".java"))
+                        .filter(p -> fileContainsPattern(p, "public static void main"))
+                        .findFirst().orElse(null);
+                if (mainFile != null) {
+                    String filename = mainFile.getFileName().toString();
+                    mainClass = filename.substring(0, filename.length() - 5);
+                }
+            } catch (IOException ignored) {}
+        }
+
+        var sb = new StringBuilder();
+        sb.append("FROM eclipse-temurin:21\n");
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+
+        // Install frontend Node deps
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install --legacy-peer-deps\n");
+        }
+
+        sb.append("COPY . .\n");
+
+        // Compile Java backend
+        if (be != null) {
+            sb.append("RUN cd ").append(be).append(" && javac *.java 2>/dev/null || true\n");
+        }
+
+        sb.append(crViteAllowedHostsPatch());
+        sb.append(crViteProxyPatch(8081));
+        sb.append("EXPOSE 8080\n");
+        sb.append(crNonRootUser(false));
+
+        if (fe != null && be != null) {
+            sb.append("CMD sh -c \"(cd /app/").append(be)
+              .append(" && PORT=8081 java ").append(mainClass)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port ${PORT:-8080} 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}') & wait\"\n");
+        }
+        return sb.toString();
+    }
+
+    /** Static HTML frontend + any backend — Cloud Run. Uses nginx for static files + reverse proxy. */
+    private String cloudRun_FullStack_StaticBackend(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+        boolean feIsRoot = ".".equals(fe);
+        PreviewProjectType beType = layout.backendType();
+
+        // Determine base image and whether it's Alpine-based
+        boolean alpine = (beType == PreviewProjectType.GO || beType == PreviewProjectType.RUBY
+                || beType == PreviewProjectType.NODE_BACKEND);
+
+        var sb = new StringBuilder();
+
+        // Base image per backend type
+        switch (beType) {
+            case GO           -> sb.append("FROM golang:1.22-alpine\n");
+            case RUBY         -> sb.append("FROM ruby:3.2-alpine\n");
+            case NODE_BACKEND -> sb.append("FROM node:20-alpine\n");
+            case SPRING_BOOT  -> sb.append("FROM eclipse-temurin:21\n");
+            case PYTHON       -> sb.append("FROM python:3.12-slim\n");
+            case PHP          -> sb.append("FROM php:8.2-cli\n");
+            case RUST         -> sb.append("FROM rust:1.77-slim\n");
+            case JAVA         -> sb.append("FROM eclipse-temurin:21\n");
+            default           -> sb.append("FROM node:20-alpine\n");
+        }
+
+        sb.append("WORKDIR /app\n");
+        sb.append("LABEL preview=true\n");
+        sb.append("ENV PORT=8080\n");
+
+        // Install nginx
+        if (alpine) {
+            sb.append("RUN apk add --no-cache nginx\n");
+        } else {
+            sb.append("RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*\n");
+        }
+
+        // Install backend-specific deps
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            switch (beType) {
+                case GO -> {
+                    sb.append("COPY ").append(be).append("/go.mod ").append(be).append("/go.sum* ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && go mod download 2>/dev/null || true\n");
+                }
+                case RUBY -> {
+                    if (Files.exists(beDir.resolve("Gemfile"))) {
+                        sb.append("RUN apk add --no-cache build-base\n");
+                        sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && bundle install\n");
+                    }
+                }
+                case NODE_BACKEND -> {
+                    sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && npm install\n");
+                }
+                case SPRING_BOOT -> {
+                    sb.append("RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*\n");
+                    sb.append("COPY ").append(be).append("/pom.xml ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && mvn dependency:go-offline -q -B || true\n");
+                }
+                case PYTHON -> {
+                    if (Files.exists(beDir.resolve("requirements.txt"))) {
+                        sb.append("COPY ").append(be).append("/requirements.txt ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir -r requirements.txt\n");
+                    } else if (Files.exists(beDir.resolve("pyproject.toml"))) {
+                        sb.append("COPY ").append(be).append("/pyproject.toml ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir .\n");
+                    }
+                }
+                case PHP -> {
+                    if (Files.exists(beDir.resolve("composer.json"))) {
+                        sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
+                    }
+                }
+                case RUST -> {
+                    sb.append("RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*\n");
+                    sb.append("COPY ").append(be).append("/Cargo.toml ").append(be).append("/Cargo.lock* ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && mkdir src && echo \"fn main() {}\" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src\n");
+                }
+                case JAVA -> {
+                    // Plain Java — just copy & compile later
+                }
+                default -> {}
+            }
+        }
+
+        sb.append("COPY . .\n");
+
+        // Build steps (Rust cargo build, Java javac, Go build, Spring Boot compile)
+        if (be != null) {
+            switch (beType) {
+                case RUST -> sb.append("RUN cd ").append(be).append(" && cargo build --release 2>/dev/null || true\n");
+                case JAVA -> sb.append("RUN cd ").append(be).append(" && javac *.java 2>/dev/null || true\n");
+                case GO   -> sb.append("RUN cd ").append(be).append(" && go build -o server . 2>/dev/null || true\n");
+                default -> {}
+            }
+        }
+
+        // nginx config: serve static files + proxy /api to backend
+        String staticSrc = feIsRoot ? "/app" : "/app/" + fe;
+        sb.append("RUN mkdir -p /usr/share/nginx/html && cp -r ").append(staticSrc).append("/*.html ").append(staticSrc).append("/*.css* ").append(staticSrc).append("/*.js* /usr/share/nginx/html/ 2>/dev/null || true\n");
+        sb.append("RUN echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; ")
+          .append("location / { try_files \\$uri \\$uri/ /index.html =404; } ")
+          .append("location /api { proxy_pass http://127.0.0.1:8081; } }' > /etc/nginx/conf.d/default.conf\n");
+
+        // Fix nginx permissions
+        if (alpine) {
+            sb.append("RUN chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d 2>/dev/null || true && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid\n");
+        } else {
+            sb.append("RUN chown -R www-data:www-data /var/log/nginx /etc/nginx/conf.d 2>/dev/null || true\n");
+        }
+
+        sb.append("EXPOSE 8080\n");
+
+        // Detect backend start command
+        String backendCmd = crDetectStaticBackendCmd(workspace, layout);
+
+        sb.append("CMD sh -c \"(").append(backendCmd)
+          .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+          .append("nginx -g 'daemon off;'\"\n");
+
+        return sb.toString();
+    }
+
+    /** Detect the backend startup command for Static HTML + backend combos. */
+    private String crDetectStaticBackendCmd(Path workspace, FullStackLayout layout) {
+        String be = layout.backendDir();
+        Path beDir = be != null ? workspace.resolve(be) : workspace;
+        String prefix = be != null ? "cd /app/" + be + " && " : "";
+
+        return switch (layout.backendType()) {
+            case NODE_BACKEND -> {
+                String entry = findNodeEntryPointInDir(beDir);
+                yield prefix + "PORT=8081 node " + entry;
+            }
+            case SPRING_BOOT -> prefix + "SERVER_PORT=8081 mvn spring-boot:run -DskipTests -q";
+            case PYTHON -> {
+                String cmd = crDetectPythonCmd(beDir, "8081").replace("CMD ", "");
+                yield prefix + cmd;
+            }
+            case GO -> prefix + "PORT=8081 go run .";
+            case RUBY -> {
+                if (Files.exists(beDir.resolve("config.ru"))) {
+                    yield prefix + "bundle exec rackup --host 0.0.0.0 --port 8081";
+                }
+                String entry = findRubyEntryPoint(beDir);
+                yield prefix + "PORT=8081 ruby " + entry;
+            }
+            case PHP -> prefix + "php -S 0.0.0.0:8081";
+            case RUST -> prefix + "PORT=8081 bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\\"$bin\\\" ]; then exec \\\"$bin\\\"; else cargo run --release; fi";
+            case JAVA -> {
+                String mainClass = "Main";
+                try (Stream<Path> stream = Files.walk(beDir, 3)) {
+                    Path mainFile = stream.filter(p -> p.toString().endsWith(".java"))
+                            .filter(p -> fileContainsPattern(p, "public static void main"))
+                            .findFirst().orElse(null);
+                    if (mainFile != null) {
+                        String filename = mainFile.getFileName().toString();
+                        mainClass = filename.substring(0, filename.length() - 5);
+                    }
+                } catch (IOException ignored) {}
+                yield prefix + "PORT=8081 java " + mainClass;
+            }
+            default -> prefix + "PORT=8081 node server.js";
+        };
     }
 
     /**
@@ -1345,6 +1767,9 @@ public class DevDockerfileGenerator {
                     if (detected == PreviewProjectType.NODE_FRONTEND) {
                         frontendDir = dir.getFileName().toString();
                         frontendType = detected;
+                    } else if (detected == null && hasStaticHtml(dir)) {
+                        frontendDir = dir.getFileName().toString();
+                        frontendType = PreviewProjectType.STATIC_HTML;
                     }
                 }
 
@@ -1385,6 +1810,13 @@ public class DevDockerfileGenerator {
                         log.info("[Detect] Root is frontend (vite/react), backend in {}/", backendDir);
                     }
                 } catch (IOException ignored) {}
+            }
+            // Static HTML fallback: root has .html files but no package.json
+            if (frontendDir == null && !Files.exists(workspace.resolve("package.json"))
+                    && hasStaticHtml(workspace)) {
+                frontendDir = ".";
+                frontendType = PreviewProjectType.STATIC_HTML;
+                log.info("[Detect] Root is static HTML frontend, backend in {}/", backendDir);
             }
         }
 
@@ -1441,22 +1873,53 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.PYTHON;
         }
 
+        // Go
+        if (Files.exists(dir.resolve("go.mod"))) {
+            return PreviewProjectType.GO;
+        }
+
+        // Rust
+        if (Files.exists(dir.resolve("Cargo.toml"))) {
+            return PreviewProjectType.RUST;
+        }
+
+        // Ruby
+        if (Files.exists(dir.resolve("Gemfile")) || Files.exists(dir.resolve("config.ru"))) {
+            return PreviewProjectType.RUBY;
+        }
+
+        // PHP
+        if (Files.exists(dir.resolve("composer.json"))) {
+            return PreviewProjectType.PHP;
+        }
+
+        // Java (non-Spring) — pom.xml without spring-boot-starter, or build.gradle
+        if (Files.exists(dir.resolve("pom.xml")) || Files.exists(dir.resolve("build.gradle"))
+                || Files.exists(dir.resolve("build.gradle.kts"))) {
+            return PreviewProjectType.JAVA;
+        }
+
         return null;
     }
 
     /**
      * Generate a Dockerfile for full-stack projects with separate frontend/backend directories.
-     * Supports: Node+Node, Node+SpringBoot, Node+Python.
+     * Supports all frontend (Node/Vite, Static HTML) × backend combinations.
      */
     private String fullStackDockerfile(Path workspace, FullStackLayout layout) {
-        if (layout.backendType() == PreviewProjectType.SPRING_BOOT) {
-            return fullStackNodeSpringBoot(workspace, layout);
+        if (layout.frontendType() == PreviewProjectType.STATIC_HTML) {
+            return fullStackStaticBackend(workspace, layout);
         }
-        if (layout.backendType() == PreviewProjectType.PYTHON) {
-            return fullStackNodePython(workspace, layout);
-        }
-        // Default: Node + Node
-        return fullStackNodeNode(workspace, layout);
+        return switch (layout.backendType()) {
+            case SPRING_BOOT -> fullStackNodeSpringBoot(workspace, layout);
+            case PYTHON      -> fullStackNodePython(workspace, layout);
+            case GO           -> fullStackNodeGo(workspace, layout);
+            case RUBY         -> fullStackNodeRuby(workspace, layout);
+            case PHP          -> fullStackNodePhp(workspace, layout);
+            case RUST         -> fullStackNodeRust(workspace, layout);
+            case JAVA         -> fullStackNodeJava(workspace, layout);
+            default           -> fullStackNodeNode(workspace, layout);
+        };
     }
 
     /** Node frontend + Node backend in separate directories (no npm workspaces). */
@@ -1546,7 +2009,9 @@ public class DevDockerfileGenerator {
         var sb = new StringBuilder();
         // Use JDK image with Node installed
         sb.append("FROM eclipse-temurin:21\nWORKDIR /app\nLABEL preview=true\n");
-        sb.append("RUN apt-get update && apt-get install -y maven nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+        sb.append("RUN apt-get update && apt-get install -y curl maven && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
 
         // Install backend Maven deps first (slow, cached)
         if (be != null) {
@@ -1583,7 +2048,9 @@ public class DevDockerfileGenerator {
         var sb = new StringBuilder();
         // Use Python image with Node installed
         sb.append("FROM python:3.12-slim\nWORKDIR /app\nLABEL preview=true\n");
-        sb.append("RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*\n");
+        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
 
         // Install backend Python deps
         if (be != null) {
@@ -1634,6 +2101,308 @@ public class DevDockerfileGenerator {
         } else if (be != null) {
             sb.append("CMD [\"sh\", \"-c\", \"cd /app/").append(be).append(" && ").append(pythonCmd).append("\"]\n");
         }
+
+        return sb.toString();
+    }
+
+    /** Node frontend + Go backend (Docker Compose). */
+    private String fullStackNodeGo(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM golang:1.22-alpine\nWORKDIR /app\nLABEL preview=true\n");
+        sb.append("RUN apk add --no-cache nodejs npm\n");
+
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/go.mod ").append(be).append("/go.sum* ./").append(be).append("/\n");
+            sb.append("RUN cd ").append(be).append(" && go mod download 2>/dev/null || true\n");
+        }
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 5173 8080\n");
+
+        if (fe != null && be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
+              .append(" && go run . 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node frontend + Ruby backend (Docker Compose). */
+    private String fullStackNodeRuby(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM ruby:3.2-alpine\nWORKDIR /app\nLABEL preview=true\n");
+        sb.append("RUN apk add --no-cache nodejs npm build-base\n");
+
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            if (Files.exists(beDir.resolve("Gemfile"))) {
+                sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
+                sb.append("RUN cd ").append(be).append(" && bundle install\n");
+            }
+        }
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 5173 4567\n");
+
+        String rubyCmd;
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            if (Files.exists(beDir.resolve("config.ru"))) {
+                rubyCmd = "bundle exec rackup --host 0.0.0.0 --port 4567";
+            } else {
+                String entry = findRubyEntryPoint(beDir);
+                rubyCmd = "ruby " + entry;
+            }
+        } else {
+            rubyCmd = "ruby app.rb";
+        }
+
+        if (fe != null && be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be).append(" && ").append(rubyCmd)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node frontend + PHP backend (Docker Compose). */
+    private String fullStackNodePhp(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM php:8.2-cli\nWORKDIR /app\nLABEL preview=true\n");
+        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            if (Files.exists(beDir.resolve("composer.json"))) {
+                sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
+                sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
+            }
+        }
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
+        }
+
+        sb.append("COPY . .\n");
+        sb.append("EXPOSE 5173 8080\n");
+
+        if (fe != null && be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
+              .append(" && php -S 0.0.0.0:8080 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node frontend + Rust backend (Docker Compose). */
+    private String fullStackNodeRust(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        var sb = new StringBuilder();
+        sb.append("FROM rust:1.77-slim\nWORKDIR /app\nLABEL preview=true\n");
+        sb.append("RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+
+        if (be != null) {
+            sb.append("COPY ").append(be).append("/Cargo.toml ").append(be).append("/Cargo.lock* ./").append(be).append("/\n");
+            sb.append("RUN cd ").append(be).append(" && mkdir src && echo \"fn main() {}\" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src\n");
+        }
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
+        }
+
+        sb.append("COPY . .\n");
+        if (be != null) {
+            sb.append("RUN cd ").append(be).append(" && cargo build --release 2>/dev/null || true\n");
+        }
+        sb.append("EXPOSE 5173 8080\n");
+
+        if (fe != null && be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
+              .append(" && bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\\"$bin\\\" ]; then exec \\\"$bin\\\"; else cargo run --release; fi")
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        }
+        return sb.toString();
+    }
+
+    /** Node frontend + Java (non-Spring) backend (Docker Compose). */
+    private String fullStackNodeJava(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+
+        String mainClass = "Main";
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            try (Stream<Path> stream = Files.walk(beDir, 3)) {
+                Path mainFile = stream.filter(p -> p.toString().endsWith(".java"))
+                        .filter(p -> fileContainsPattern(p, "public static void main"))
+                        .findFirst().orElse(null);
+                if (mainFile != null) {
+                    String filename = mainFile.getFileName().toString();
+                    mainClass = filename.substring(0, filename.length() - 5);
+                }
+            } catch (IOException ignored) {}
+        }
+
+        var sb = new StringBuilder();
+        sb.append("FROM eclipse-temurin:21\nWORKDIR /app\nLABEL preview=true\n");
+        sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
+        sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
+        sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+
+        if (fe != null) {
+            sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
+            sb.append("RUN cd ").append(fe).append(" && npm install\n");
+        }
+
+        sb.append("COPY . .\n");
+        if (be != null) {
+            sb.append("RUN cd ").append(be).append(" && javac *.java 2>/dev/null || true\n");
+        }
+        sb.append("EXPOSE 5173 8080\n");
+
+        if (fe != null && be != null) {
+            sb.append("CMD [\"sh\", \"-c\", \"(cd /app/").append(be)
+              .append(" && java ").append(mainClass)
+              .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & ")
+              .append("(cd /app/").append(fe)
+              .append(" && npx vite --host 0.0.0.0 --port 5173 2>&1 | awk '{print \\\"[frontend] \\\" $0; fflush()}')\"]\n");
+        }
+        return sb.toString();
+    }
+
+    /** Static HTML frontend + any backend (Docker Compose). Uses nginx for static + proxy. */
+    private String fullStackStaticBackend(Path workspace, FullStackLayout layout) {
+        String fe = layout.frontendDir();
+        String be = layout.backendDir();
+        boolean feIsRoot = ".".equals(fe);
+        PreviewProjectType beType = layout.backendType();
+
+        boolean alpine = (beType == PreviewProjectType.GO || beType == PreviewProjectType.RUBY
+                || beType == PreviewProjectType.NODE_BACKEND);
+
+        var sb = new StringBuilder();
+
+        switch (beType) {
+            case GO           -> sb.append("FROM golang:1.22-alpine\n");
+            case RUBY         -> sb.append("FROM ruby:3.2-alpine\n");
+            case NODE_BACKEND -> sb.append("FROM node:20-alpine\n");
+            case SPRING_BOOT  -> sb.append("FROM eclipse-temurin:21\n");
+            case PYTHON       -> sb.append("FROM python:3.12-slim\n");
+            case PHP          -> sb.append("FROM php:8.2-cli\n");
+            case RUST         -> sb.append("FROM rust:1.77-slim\n");
+            case JAVA         -> sb.append("FROM eclipse-temurin:21\n");
+            default           -> sb.append("FROM node:20-alpine\n");
+        }
+
+        sb.append("WORKDIR /app\nLABEL preview=true\n");
+
+        if (alpine) {
+            sb.append("RUN apk add --no-cache nginx\n");
+        } else {
+            sb.append("RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*\n");
+        }
+
+        // Install backend deps (same logic as Cloud Run version)
+        if (be != null) {
+            Path beDir = workspace.resolve(be);
+            switch (beType) {
+                case GO -> {
+                    sb.append("COPY ").append(be).append("/go.mod ").append(be).append("/go.sum* ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && go mod download 2>/dev/null || true\n");
+                }
+                case RUBY -> {
+                    if (Files.exists(beDir.resolve("Gemfile"))) {
+                        sb.append("RUN apk add --no-cache build-base\n");
+                        sb.append("COPY ").append(be).append("/Gemfile* ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && bundle install\n");
+                    }
+                }
+                case NODE_BACKEND -> {
+                    sb.append("COPY ").append(be).append("/package*.json ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && npm install\n");
+                }
+                case SPRING_BOOT -> {
+                    sb.append("RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*\n");
+                    sb.append("COPY ").append(be).append("/pom.xml ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && mvn dependency:go-offline -q -B || true\n");
+                }
+                case PYTHON -> {
+                    if (Files.exists(beDir.resolve("requirements.txt"))) {
+                        sb.append("COPY ").append(be).append("/requirements.txt ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir -r requirements.txt\n");
+                    } else if (Files.exists(beDir.resolve("pyproject.toml"))) {
+                        sb.append("COPY ").append(be).append("/pyproject.toml ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && pip install --no-cache-dir .\n");
+                    }
+                }
+                case PHP -> {
+                    if (Files.exists(beDir.resolve("composer.json"))) {
+                        sb.append("COPY ").append(be).append("/composer.json ").append(be).append("/composer.lock* ./").append(be).append("/\n");
+                        sb.append("RUN cd ").append(be).append(" && curl -sS https://getcomposer.org/installer | php && php composer.phar install --no-dev 2>/dev/null || true\n");
+                    }
+                }
+                case RUST -> {
+                    sb.append("RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*\n");
+                    sb.append("COPY ").append(be).append("/Cargo.toml ").append(be).append("/Cargo.lock* ./").append(be).append("/\n");
+                    sb.append("RUN cd ").append(be).append(" && mkdir src && echo \"fn main() {}\" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src\n");
+                }
+                case JAVA -> {}
+                default -> {}
+            }
+        }
+
+        sb.append("COPY . .\n");
+
+        if (be != null) {
+            switch (beType) {
+                case RUST -> sb.append("RUN cd ").append(be).append(" && cargo build --release 2>/dev/null || true\n");
+                case JAVA -> sb.append("RUN cd ").append(be).append(" && javac *.java 2>/dev/null || true\n");
+                case GO   -> sb.append("RUN cd ").append(be).append(" && go build -o server . 2>/dev/null || true\n");
+                default -> {}
+            }
+        }
+
+        // nginx config: serve static on 8080, proxy /api to backend on 8081
+        String staticSrc = feIsRoot ? "/app" : "/app/" + fe;
+        sb.append("RUN mkdir -p /usr/share/nginx/html && cp -r ").append(staticSrc).append("/*.html ").append(staticSrc).append("/*.css* ").append(staticSrc).append("/*.js* /usr/share/nginx/html/ 2>/dev/null || true\n");
+        sb.append("RUN echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; ")
+          .append("location / { try_files \\$uri \\$uri/ /index.html =404; } ")
+          .append("location /api { proxy_pass http://127.0.0.1:8081; } }' > /etc/nginx/conf.d/default.conf\n");
+
+        int backendPort = beType.getContainerPort();
+        sb.append("EXPOSE 8080 ").append(backendPort).append("\n");
+
+        String backendCmd = crDetectStaticBackendCmd(workspace, layout);
+        sb.append("CMD [\"sh\", \"-c\", \"(").append(backendCmd)
+          .append(" 2>&1 | awk '{print \\\"[backend] \\\" $0; fflush()}') & nginx -g 'daemon off;'\"]\n");
 
         return sb.toString();
     }
@@ -2313,7 +3082,9 @@ public class DevDockerfileGenerator {
                 FROM python:3.12-slim
                 WORKDIR /app
                 LABEL preview=true
-                RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
+                RUN apt-get update && apt-get install -y curl && \
+                    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+                    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
                 RUN npm install -g @modelcontextprotocol/inspector
                 COPY requirements.txt* pyproject.toml* ./
                 """ + installStep + "\n" + """
