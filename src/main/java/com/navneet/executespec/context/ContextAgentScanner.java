@@ -4,7 +4,6 @@ import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -16,15 +15,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ContextAgentScanner {
 
-    @Value("${agent.workspace}")
-    private String workspaceRoot;
-
     public ContextAgentInput scan(
         PipelineRun run,
         List<WorkerReport> workerReports,
-        ReviewReportV2 reviewReport
+        ReviewReportV2 reviewReport,
+        Path projectPath
     ) throws IOException {
-        Path projectPath = Path.of(workspaceRoot);
         String currentDoc = readContextDoc(projectPath);
 
         return new ContextAgentInput(
