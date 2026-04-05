@@ -388,6 +388,10 @@ public class AuthService {
                 .build());
 
         log.info("Created new OAuth user: email={}, provider={}", email, provider);
+
+        // Send welcome email for new OAuth users
+        mailService.sendWelcomeEmail(user.getEmail(), user.getFirstName(), user.getTier());
+
         return user;
     }
 

@@ -25,6 +25,7 @@ public class OrgService {
     private final AppUserRepository userRepo;
     private final PaymentAuditService paymentAuditService;
     private final ActivityAuditService auditService;
+    private final MailService mailService;
 
     @Transactional
     public OrgDto createOrg(String creatorUserId, CreateOrgRequest req) {
@@ -223,6 +224,11 @@ public class OrgService {
                 .oldValue("{\"status\":\"" + oldStatus + "\"}")
                 .newValue("{\"status\":\"" + target.getStatus() + "\"}")
                 .build());
+
+        // Notify user on suspension
+        if (suspend && !"SUSPENDED".equals(oldStatus)) {
+            mailService.sendSuspensionEmail(target.getEmail(), target.getFirstName());
+        }
 
         log.info("User {} {} by {}", targetUserId, suspend ? "suspended" : "restored", performedBy);
     }

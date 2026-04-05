@@ -13,7 +13,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const canCreate = user?.tier === 'PRO' || user?.tier === 'ENTERPRISE';
+  const canCreate = user?.tier === 'ENTERPRISE' || user?.globalRole === 'SUPER_ADMIN';
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,10 +39,11 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
   if (!canCreate) {
     return (
       <div className="p-8 text-center">
-        <h2 className="text-xl font-bold text-primary mb-2">Upgrade Required</h2>
+        <h2 className="text-xl font-bold text-primary mb-2">Enterprise Feature</h2>
         <p className="text-muted mb-4">
-          Only <span className="text-[var(--text-secondary)] font-semibold">PRO</span> and{' '}
-          <span className="text-[var(--text-secondary)] font-semibold">ENTERPRISE</span> users can create an organization.
+          Organization management is available on the{' '}
+          <span className="text-[var(--text-secondary)] font-semibold">Enterprise</span> plan.
+          Contact us to learn more.
         </p>
         <p className="text-muted text-sm">
           Your current plan: <span className="text-primary font-semibold">{user?.tier ?? 'FREE'}</span>

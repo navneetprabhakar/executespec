@@ -545,11 +545,18 @@ public class WorkerAgent {
                                         continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                             }
 
+                            // Remove the fabricated assistant message so the model doesn't
+                            // anchor on its own prose description of files.
+                            if (!messages.isEmpty() && messages.get(messages.size() - 1) instanceof AssistantMessage) {
+                                messages.remove(messages.size() - 1);
+                            }
+
                             messages.add(new UserMessage(
-                                    "CRITICAL ERROR: Your completion report claims files were created, but you " +
-                                    "never called the writeFile tool. Files are NOT created by describing them " +
-                                    "in text — you MUST call the writeFile tool for each file.\n\n" +
-                                    "Example:\n" +
+                                    "CRITICAL ERROR: Your previous response was REJECTED because it contained a " +
+                                    "completion report claiming files were created, but you never called the " +
+                                    "writeFile tool. That response has been discarded.\n\n" +
+                                    "Files are NOT created by describing them in text — you MUST call the " +
+                                    "writeFile tool for each file. Example:\n" +
                                     "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"package.json\", " +
                                     "\"content\": \"{\\n  \\\"name\\\": \\\"app\\\"\\n}\"}}</tool_call>\n\n" +
                                     "Do NOT output a completion report until you have called writeFile for every " +

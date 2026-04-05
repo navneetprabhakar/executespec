@@ -33,6 +33,7 @@ export const NAV_ITEMS: {
   label: string;
   icon: string;
   adminOnly: boolean;
+  superAdminOnly?: boolean;
   requiredPermission?: string;
 }[] = [
   { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
@@ -42,7 +43,7 @@ export const NAV_ITEMS: {
   { path: '/invoices',     label: 'Invoices',     icon: 'Receipt',        adminOnly: false, requiredPermission: 'canViewInvoices' },
   { path: '/accounting',   label: 'Accounting',   icon: 'Calculator',     adminOnly: false, requiredPermission: 'canViewAccounting' },
   { path: '/audit',        label: 'Audit',        icon: 'ClipboardList',  adminOnly: false, requiredPermission: 'canViewAudit' },
-  { path: '/deployments', label: 'Deploy',       icon: 'Rocket',         adminOnly: false },
+  { path: '/deployments', label: 'Deploy',       icon: 'Rocket',         adminOnly: false, superAdminOnly: true },
   { path: '/admin/analytics', label: 'Analytics',  icon: 'BarChart3',      adminOnly: true  },
   { path: '/settings',     label: 'Settings',     icon: 'Settings',       adminOnly: false },
 ];

@@ -98,7 +98,8 @@ public class SuperAdminController {
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
         String oldStatus = user.getStatus();
-        user.setStatus(body.get("status"));
+        String newStatus = body.get("status");
+        user.setStatus(newStatus);
         user.setUpdatedAt(Instant.now());
         userRepo.save(user);
 
@@ -107,8 +108,13 @@ public class SuperAdminController {
                 .entityType("USER").entityId(id)
                 .actorId(adminDetails.getUser().getId())
                 .oldValue("{\"status\":\"" + oldStatus + "\"}")
-                .newValue("{\"status\":\"" + body.get("status") + "\"}")
+                .newValue("{\"status\":\"" + newStatus + "\"}")
                 .build());
+
+        // Notify user on suspension
+        if ("SUSPENDED".equals(newStatus) && !"SUSPENDED".equals(oldStatus)) {
+            mailService.sendSuspensionEmail(user.getEmail(), user.getFirstName());
+        }
 
         return ResponseEntity.ok(UserDto.from(user, null));
     }
@@ -121,10 +127,11 @@ public class SuperAdminController {
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
         String oldTier = user.getTier();
-        user.setTier(body.get("tier"));
+        String newTier = body.get("tier");
+        user.setTier(newTier);
         user.setUpdatedAt(Instant.now());
         userRepo.save(user);
-        paymentAuditService.record("USER", id, "PLAN_UPGRADED", oldTier, body.get("tier"),
+        paymentAuditService.record("USER", id, "PLAN_UPGRADED", oldTier, newTier,
                 adminDetails.getUser().getId(), null);
 
         auditService.record(ActivityAudit.builder()
@@ -132,8 +139,13 @@ public class SuperAdminController {
                 .entityType("USER").entityId(id)
                 .actorId(adminDetails.getUser().getId())
                 .oldValue("{\"tier\":\"" + oldTier + "\"}")
-                .newValue("{\"tier\":\"" + body.get("tier") + "\"}")
+                .newValue("{\"tier\":\"" + newTier + "\"}")
                 .build());
+
+        // Notify user of tier upgrade
+        if (!oldTier.equals(newTier)) {
+            mailService.sendTierUpgradeEmail(user.getEmail(), user.getFirstName(), newTier, newTier);
+        }
 
         return ResponseEntity.ok(UserDto.from(user, null));
     }
@@ -326,6 +338,13 @@ public class SuperAdminController {
 
         RunTopup topup = runTopupService.grantBonusRuns(
                 id, null, quantity, expiryDays, reason, adminDetails.getUser().getId());
+
+        // Notify user of bonus runs
+        AppUser grantedUser = userRepo.findById(id).orElse(null);
+        if (grantedUser != null) {
+            mailService.sendBonusRunsEmail(grantedUser.getEmail(), grantedUser.getFirstName(), quantity);
+        }
+
         return ResponseEntity.ok(topup);
     }
 

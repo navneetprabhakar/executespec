@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
-import { useAuthStore, selectIsOrgAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
+import { useAuthStore, selectIsOrgAdmin, selectIsOrgMember, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import { UsageBadge } from '@/components/billing/UsageBadge';
 import { useRunStore } from '@/stores/useRunStore';
@@ -31,6 +31,7 @@ export default function Sidebar() {
 
   const isAdmin = useAuthStore(selectIsOrgAdmin);
   const isOrgMember = useAuthStore(selectIsOrgMember);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const permissions = useTierPermissions();
   const navigate = useNavigate();
 
@@ -64,6 +65,7 @@ export default function Sidebar() {
 
   const visibleItems = useMemo(
     () => NAV_ITEMS.filter((item) => {
+      if (item.superAdminOnly && !isSuperAdmin) return false;
       if (item.adminOnly && !isAdmin) return false;
       if (item.requiredPermission && permissions) {
         return !!permissions[item.requiredPermission as keyof typeof permissions];
@@ -71,7 +73,7 @@ export default function Sidebar() {
       if (item.requiredPermission && !permissions) return false;
       return true;
     }),
-    [isAdmin, permissions],
+    [isAdmin, isSuperAdmin, permissions],
   );
 
   const handleProjectClick = (projectId: string) => {
@@ -147,8 +149,11 @@ export default function Sidebar() {
                     )}
                   />
                   {expanded && (
-                    <span className="text-sm whitespace-nowrap overflow-hidden">
+                    <span className="text-sm whitespace-nowrap overflow-hidden flex items-center gap-1.5">
                       {item.label}
+                      {item.superAdminOnly && (
+                        <span className="px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wider rounded bg-accent-blue/15 text-accent-blue border border-accent-blue/25 leading-none">Beta</span>
+                      )}
                     </span>
                   )}
                 </>
