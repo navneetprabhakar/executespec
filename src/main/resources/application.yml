@@ -80,7 +80,7 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-haiku-4-5-20251001
+      workhorse: claude-sonnet-4-6
       lightweight: claude-haiku-4-5-20251001
     google:
       planning: gemini-2.5-flash
@@ -110,7 +110,7 @@ model-matrix:
       pricing:
         input-per-1m: 3.00
         output-per-1m: 15.00
-      notes: "PLANNING tier default. Prompt caching: writes 1.25x, reads 0.10x."
+      notes: "PLANNING + WORKHORSE tiers for Anthropic. Prompt caching: writes 1.25x, reads 0.10x."
     claude-haiku-4-5-20251001:
       provider: anthropic
       chain-tier: UTILITY
@@ -119,7 +119,7 @@ model-matrix:
       pricing:
         input-per-1m: 0.80
         output-per-1m: 4.00
-      notes: "WORKHORSE + LIGHTWEIGHT tiers for Anthropic."
+      notes: "LIGHTWEIGHT tier for Anthropic."
     "[gemini-2.5-flash]":
       provider: google
       chain-tier: UTILITY

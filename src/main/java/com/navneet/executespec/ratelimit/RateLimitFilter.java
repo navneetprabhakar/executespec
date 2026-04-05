@@ -1,11 +1,12 @@
 package com.navneet.executespec.ratelimit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.TierEnforcementService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -35,7 +36,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>Uses Redis INCR with 60-second TTL per sliding window bucket.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 @EnableConfigurationProperties(RateLimitProperties.class)
 public class RateLimitFilter extends OncePerRequestFilter {
@@ -44,10 +44,24 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final RateLimitPolicy policy;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final TierEnforcementService tierEnforcementService;
+
+    private static final String TIER_CACHE_PREFIX = "rl:tier:";
+    private static final Duration TIER_CACHE_TTL = Duration.ofMinutes(2);
 
     /** In-memory fallback counters keyed by "identifier:group:minuteBucket". Cleared every 60s by bucket rotation. */
     private final ConcurrentHashMap<String, AtomicInteger> localCounters = new ConcurrentHashMap<>();
     private volatile long lastCleanupBucket = 0;
+
+    public RateLimitFilter(RateLimitProperties properties, RateLimitPolicy policy,
+                           StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
+                           TierEnforcementService tierEnforcementService) {
+        this.properties = properties;
+        this.policy = policy;
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
+        this.tierEnforcementService = tierEnforcementService;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -96,8 +110,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
             if (count != null && count > limit) {
                 // Rate limited
-                log.info("[RateLimit] Blocked {}: {} {} (group={}, count={}/{})",
-                        identifier, method, path, group, count, limit);
+                log.info("[RateLimit] Blocked {}: {} {} (group={}, tier={}, count={}/{})",
+                        identifier, method, path, group, tier, count, limit);
 
                 response.setStatus(429);
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -147,8 +161,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof String userId) {
-            return userId;
+        if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof AppUserDetails details) {
+            return details.getUser().getId().toString();
         }
 
         // Fallback to IP for unauthenticated requests
@@ -156,9 +170,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Resolve the tier key for rate limit lookup.
-     * AUTH group: sub-type (login, register, forgot).
-     * Other groups: user tier (FREE, PRO, ENTERPRISE).
+     * Resolve the effective tier for rate limit lookup.
+     * Uses TierEnforcementService.resolveUserTier() (org tier > user tier) with a 2-min Caffeine cache.
      */
     private String resolveTier(HttpServletRequest request, String group) {
         if ("AUTH".equals(group)) {
@@ -169,16 +182,31 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getAuthorities() != null) {
-            // Check if tier is stored in authorities or details
-            for (var authority : auth.getAuthorities()) {
-                String a = authority.getAuthority();
-                if ("ROLE_ENTERPRISE".equals(a) || "TIER_ENTERPRISE".equals(a)) return "ENTERPRISE";
-                if ("ROLE_PRO".equals(a) || "TIER_PRO".equals(a)) return "PRO";
-            }
+        if (auth != null && auth.getPrincipal() instanceof AppUserDetails details) {
+            String userId = details.getUser().getId().toString();
+            return resolveAndCacheTier(userId);
         }
 
-        return "FREE"; // Default
+        return "FREE"; // Default for unauthenticated
+    }
+
+    /**
+     * Resolve tier via Redis cache (2-min TTL), falling back to DB via TierEnforcementService.
+     */
+    private String resolveAndCacheTier(String userId) {
+        try {
+            String cacheKey = TIER_CACHE_PREFIX + userId;
+            String cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                return cached;
+            }
+            String tier = tierEnforcementService.resolveUserTier(userId);
+            redisTemplate.opsForValue().set(cacheKey, tier, TIER_CACHE_TTL);
+            return tier;
+        } catch (Exception e) {
+            log.debug("[RateLimit] Tier cache error for {}: {}", userId, e.getMessage());
+            return "FREE";
+        }
     }
 
     /**
