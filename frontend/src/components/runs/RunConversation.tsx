@@ -6,6 +6,7 @@ import type { RunChatMessage, ChatResponse, ValidationReportData, ReportIssue } 
 import { cn } from '@/lib/utils';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
+import { useSseStore } from '@/stores/useSseStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 
@@ -92,11 +93,12 @@ export default function RunConversation({ runId }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Fetch validation report when run is terminal — provides context for "Fix Issues" actions
+  // Fetch validation report when run is terminal AND report is ready — avoids 404 noise
+  const reportReady = useSseStore((s) => s.entries).some(e => e.type === 'VALIDATION_REPORT_READY');
   useEffect(() => {
     if (!activeRun) return;
     const isTerminal = ['COMPLETE', 'PARTIAL', 'FAILED'].includes(activeRun.status);
-    if (!isTerminal) return;
+    if (!isTerminal || !reportReady) return;
     getValidationReport(activeRun.runId).then((report) => {
       if (!report) return;
       setValidationReport(report);
@@ -105,7 +107,7 @@ export default function RunConversation({ runId }: Props) {
         setUnresolvedIssues(report.issues.filter((issue) => !!issue.fix));
       }
     });
-  }, [activeRun?.runId, activeRun?.status]);
+  }, [activeRun?.runId, activeRun?.status, reportReady]);
 
   const limitReached = userCount >= MAX_MESSAGES;
   const hasConversation = messages.length > 0;

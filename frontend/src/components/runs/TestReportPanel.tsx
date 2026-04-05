@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { getTestReport, markTestInvalid, applyTestFixes } from '@/lib/api';
 import type { TestReportData, TestResultDetail, FailureSuggestion, RootCauseGroup } from '@/lib/api';
 import { useUiStore } from '@/stores/useUiStore';
+import { useSseStore } from '@/stores/useSseStore';
 import { TestTube2, ChevronDown, ChevronRight, Check, X, AlertTriangle, SkipForward, Wrench, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -28,11 +29,11 @@ export default function TestReportPanel({ runId, status }: Props) {
     if (data && data.totalTests > 0) setReport(data);
   }, [runId]);
 
+  const testReportReady = useSseStore((s) => s.entries).some(e => e.type === 'TEST_REPORT_READY');
   useEffect(() => {
-    if (['COMPLETE', 'PARTIAL', 'FAILED'].includes(status)) {
-      fetchReport();
-    }
-  }, [status, fetchReport]);
+    if (!['COMPLETE', 'PARTIAL', 'FAILED'].includes(status) || !testReportReady) return;
+    fetchReport();
+  }, [status, fetchReport, testReportReady]);
 
   if (!report) return null;
 
