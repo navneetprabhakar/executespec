@@ -77,19 +77,21 @@ export default function RunDetailTabs() {
     if (!activeRun) return;
     loadFiles(activeRun.runId);
   }, [activeRun?.runId, filesTick, loadFiles]);
-  // Test generation tasks
+  // Test generation tasks — only fetch after test gen has started (avoids 404 noise)
   const [testTasks, setTestTasks] = useState<TestTaskDto[]>([]);
   const [testGraph, setTestGraph] = useState<TestGraphData | null>(null);
+  const sseEntries = useSseStore((s) => s.entries);
+  const testGenStarted = sseEntries.some(e => e.type === 'TEST_GEN_STARTED' || e.type === 'TEST_REPORT_READY');
 
   useEffect(() => {
-    if (!activeRun) return;
+    if (!activeRun || !testGenStarted) return;
     getTestPlan(activeRun.runId).then((plan) => {
       if (plan) setTestTasks(plan.tasks);
     }).catch(() => {});
     getTestGraph(activeRun.runId).then((graph) => {
       if (graph) setTestGraph(graph);
     }).catch(() => {});
-  }, [activeRun?.runId, filesTick]);
+  }, [activeRun?.runId, filesTick, testGenStarted]);
 
   // Note: live task updates are driven entirely by SSE (taskStatus events → fetchRun).
   // useSse also re-fetches on reconnect to catch any events missed during a gap.

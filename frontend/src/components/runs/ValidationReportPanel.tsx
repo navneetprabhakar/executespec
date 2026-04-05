@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Share2, Check, Shield, AlertTriangle, FileCo
 import { getValidationReport, shareValidationReport, downloadValidationReportPdf, type ValidationReportData, type ReportIssue } from '@/lib/api';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { useUiStore } from '@/stores/useUiStore';
+import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
 
 interface ValidationReportPanelProps {
@@ -27,10 +28,11 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
   const [downloading, setDownloading] = useState(false);
   const addToast = useUiStore(s => s.addToast);
 
+  const reportReady = useSseStore((s) => s.entries).some(e => e.type === 'VALIDATION_REPORT_READY');
   useEffect(() => {
-    if (!FETCH_STATUSES.has(status)) return;
+    if (!FETCH_STATUSES.has(status) || !reportReady) return;
     getValidationReport(runId).then(setReport);
-  }, [runId, status]);
+  }, [runId, status, reportReady]);
 
   if (!report) return null;
 
