@@ -7,6 +7,7 @@ import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.tool.GitTool;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -32,21 +33,20 @@ public class ContextAgent {
     private final ModelResolver modelResolver;
     private final ContextAgentProperties props;
     private final StateStore stateStore;
-
-    @Value("${agent.workspace}")
-    private String workspaceRoot;
+    private final GitTool gitTool;
 
     @Value("classpath:prompts/context-agent.txt")
     private Resource promptTemplate;
 
     public ContextAgent(ContextAgentScanner scanner, LlmRouter llmRouter,
                         ModelResolver modelResolver, ContextAgentProperties props,
-                        StateStore stateStore) {
+                        StateStore stateStore, GitTool gitTool) {
         this.scanner = scanner;
         this.llmRouter = llmRouter;
         this.modelResolver = modelResolver;
         this.props = props;
         this.stateStore = stateStore;
+        this.gitTool = gitTool;
     }
 
     public void runAsync(PipelineRun run, List<WorkerReport> workerReports,
@@ -62,7 +62,8 @@ public class ContextAgent {
         log.info("Context Agent starting for run {}", run.getRunId());
 
         try {
-            ContextAgentInput input = scanner.scan(run, workerReports, reviewReport);
+            Path projectPath = gitTool.getWorkspacePath(run.getRunId());
+            ContextAgentInput input = scanner.scan(run, workerReports, reviewReport, projectPath);
 
             if (!hasAnythingChanged(input)) {
                 log.info("Context Agent: nothing changed in run {} — skipping", run.getRunId());
@@ -74,8 +75,6 @@ public class ContextAgent {
                 log.warn("Context Agent: empty LLM response for run {}", run.getRunId());
                 return;
             }
-
-            Path projectPath = Path.of(workspaceRoot);
 
             writeContextDoc(projectPath, updatedDoc);
             appendDecisionsEntry(projectPath, input, run);

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getPreviewStatus, startPreview, stopPreview, getPreviewLogs, getOpenApiSpec,
   analyzePreview, probeApiDocs,
 } from '@/lib/api';
 import type { LocalPreviewStatus, PreviewAnalysis, ApiDocsProbeResult } from '@/lib/api';
+import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
 import {
   Play, Square, RefreshCw, ChevronDown, Terminal, ExternalLink,
@@ -64,7 +65,6 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const [showEnvDialog, setShowEnvDialog] = useState(false);
   const [analysis, setAnalysis] = useState<PreviewAnalysis | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
   const logPollRef = useRef<ReturnType<typeof setInterval>>();
   const countdownRef = useRef<ReturnType<typeof setInterval>>();
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -73,30 +73,31 @@ export default function PreviewTab({ runId }: { runId: string }) {
   useEffect(() => {
     getPreviewStatus(runId).then(setStatus).catch(() => {});
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
       if (logPollRef.current) clearInterval(logPollRef.current);
     };
   }, [runId]);
 
-  // Poll status while in any starting phase
+  // React to preview SSE events instead of polling
+  const PREVIEW_EVENTS = useMemo(() => new Set([
+    'PREVIEW_ANALYZING', 'PREVIEW_BUILDING', 'PREVIEW_STARTING',
+    'PREVIEW_READY', 'PREVIEW_FAILED', 'PREVIEW_TIMED_OUT', 'PREVIEW_STOPPED',
+  ]), []);
+  const sseEntries = useSseStore((s) => s.entries);
+  const lastHandledRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const isStartingPhase = status?.status ? STARTING_STATUSES.has(status.status) : false;
-    if (isStartingPhase) {
-      pollRef.current = setInterval(() => {
-        if (document.hidden) return;
-        getPreviewStatus(runId).then((s) => {
-          setStatus(s);
-          if (!STARTING_STATUSES.has(s.status) && pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = undefined;
-          }
-        }).catch(() => {});
-      }, 5000);
+    // Find the latest preview event we haven't handled yet
+    for (let i = sseEntries.length - 1; i >= 0; i--) {
+      const entry = sseEntries[i];
+      if (PREVIEW_EVENTS.has(entry.type)) {
+        if (entry.id === lastHandledRef.current) break; // already handled
+        lastHandledRef.current = entry.id;
+        // Refetch full status DTO to get url, expiresAt, errorMessage etc.
+        getPreviewStatus(runId).then(setStatus).catch(() => {});
+        break;
+      }
     }
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [status?.status, runId]);
+  }, [sseEntries, runId, PREVIEW_EVENTS]);
 
   // Countdown timer for running previews
   useEffect(() => {
