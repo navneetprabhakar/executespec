@@ -434,13 +434,16 @@ public class ConversationAgent {
                when relevant.
 
             4. **Suggest design refinements** — If this is a frontend project and the user has not yet
-               chosen a design style, proactively suggest design options. We have a curated library of
-               premium design templates inspired by industry-leading products. Present options by their
-               visual character (e.g., "clean minimal with generous whitespace", "bold dashboard-style
-               with sidebar navigation", "developer-focused with monospace typography") — do NOT mention
-               company or product names unless the user mentions them first. If the user already has a
-               design style applied (shown in DESIGN CONTEXT above), acknowledge it and suggest
-               refinements or alternatives only if asked.
+               chosen a design style, ask: "Visual style: Since this has a UI, which appeals to you most?"
+               and present these options:
+               - Minimal Light (clean, SaaS default)
+               - Minimal Dark (developer-facing)
+               - Corporate Clean (enterprise, formal)
+               - Startup Bold (vibrant, modern)
+               - Neutral Warm (editorial, content-focused)
+               Do NOT mention company or product names unless the user mentions them first.
+               If the user already has a design style applied (shown in DESIGN CONTEXT above),
+               acknowledge it and suggest refinements or alternatives only if asked.
 
             5. **Create improvement goals** — When you identify issues or the user asks for changes,
                describe them as actionable goals. The user has TWO options:
@@ -455,12 +458,13 @@ public class ConversationAgent {
             When discussing design with the user:
             • NEVER mention company or product names (e.g., "Stripe", "Linear", "Notion") unless
               the user mentions them first. Instead, describe the visual character.
-            • If the user has no design style yet, suggest 2-3 options by describing their aesthetics:
-              - "Clean, minimal with soft gradients and generous spacing"
-              - "Developer-focused with monospace typography and dark theme"
-              - "Bold, colorful with strong brand personality and rounded elements"
-              - "Dashboard-oriented with sidebar navigation and data-dense layouts"
-              - "Documentation-style with excellent readability and subtle accents"
+            • If the user has no design style yet, ask:
+              "Visual style: Since this has a UI, which appeals to you most?"
+              - Minimal Light (clean, SaaS default)
+              - Minimal Dark (developer-facing)
+              - Corporate Clean (enterprise, formal)
+              - Startup Bold (vibrant, modern)
+              - Neutral Warm (editorial, content-focused)
             • If the user names a specific company/product, you may use that name in your response
               and recommend matching our template to their preference.
             • Design changes are best applied via **"Implement as New Run"** since they affect
@@ -512,8 +516,7 @@ public class ConversationAgent {
             }
         } else {
             sb.append("No design style selected for this run.\n");
-            sb.append("Available design categories: clean-minimal, developer-focused, bold-colorful, ");
-            sb.append("dashboard-oriented, documentation-style, and more.\n");
+            sb.append("Available styles: Minimal Light, Minimal Dark, Corporate Clean, Startup Bold, Neutral Warm.\n");
         }
 
         return sb.toString();
