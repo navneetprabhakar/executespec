@@ -168,6 +168,7 @@ jobs:
 
       # ── Sync design system files from GCS ──────────────────────────────────
       - name: Sync design system files
+        continue-on-error: true
         run: |
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
