@@ -722,6 +722,9 @@ export const startPreview = (runId: string, envVars?: Record<string, string>) =>
 export const stopPreview = (runId: string) =>
   req<void>(`/runs/${runId}/preview/stop`, { method: 'DELETE' });
 
+export const rebuildPreview = (runId: string) =>
+  req<LocalPreviewStatus>(`/runs/${runId}/preview/rebuild`, { method: 'POST' });
+
 export const getPreviewLogs = (runId: string, lines = 0, filter: 'all' | 'backend' | 'frontend' | 'db' = 'all') =>
   req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}&filter=${filter}`);
 

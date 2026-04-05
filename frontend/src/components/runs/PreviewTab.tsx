@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  getPreviewStatus, startPreview, stopPreview, getPreviewLogs, getOpenApiSpec,
+  getPreviewStatus, startPreview, stopPreview, rebuildPreview, getPreviewLogs, getOpenApiSpec,
   analyzePreview, probeApiDocs,
 } from '@/lib/api';
 import type { LocalPreviewStatus, PreviewAnalysis, ApiDocsProbeResult } from '@/lib/api';
@@ -223,6 +223,18 @@ export default function PreviewTab({ runId }: { runId: string }) {
     if (l) setLogs(l.lines);
   }, [runId, effectiveFilter]);
 
+  const handleRebuild = useCallback(async () => {
+    setLoading(true);
+    try {
+      const s = await rebuildPreview(runId);
+      setStatus(s);
+    } catch (e: any) {
+      setStatus(prev => prev ? { ...prev, status: 'FAILED', errorMessage: e.message } : null);
+    } finally {
+      setLoading(false);
+    }
+  }, [runId]);
+
   const isIdle = !status || status.status === 'IDLE' || status.status === 'STOPPED';
   const isStartingPhase = status?.status ? STARTING_STATUSES.has(status.status) : false;
   const isRunning = status?.status === 'RUNNING';
@@ -317,6 +329,20 @@ export default function PreviewTab({ runId }: { runId: string }) {
               title="Refresh status"
             >
               <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {!isIdle && (
+            <button
+              onClick={handleRebuild}
+              disabled={loading}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
+                'bg-accent-amber/15 text-accent-amber hover:bg-accent-amber/25 disabled:opacity-40'
+              )}
+              title="Re-detect project type and rebuild from scratch"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Rebuild
             </button>
           )}
           {(isIdle || isFailed || isTimedOut) && (

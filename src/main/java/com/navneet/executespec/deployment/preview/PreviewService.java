@@ -95,6 +95,9 @@ public class PreviewService {
     /** runId → session */
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
 
+    /** runId → last-used env vars (preserved across rebuild so users don't re-enter secrets) */
+    private final ConcurrentHashMap<String, Map<String, String>> lastEnvVars = new ConcurrentHashMap<>();
+
     private static final Set<String> COMPLETE_STATUSES = Set.of("COMPLETE", "PARTIAL");
     private static final Set<String> PREVIEW_ALLOWED_STATUSES = Set.of(
             "COMPLETE", "PARTIAL", "WORKING", "REVIEWING", "AWAITING_MERGE");
@@ -263,6 +266,7 @@ public class PreviewService {
         Metrics.ACTIVE_PREVIEWS.incrementAndGet();
         Counter.builder(PREVIEW_STARTS).register(meterRegistry).increment();
         Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
+        if (!safeEnvVars.isEmpty()) lastEnvVars.put(runId, safeEnvVars);
 
         // Capture observation context so virtual threads propagate traceId/spanId
         var snapshot = ContextSnapshotFactory.builder().build().captureAll();
@@ -291,6 +295,7 @@ public class PreviewService {
     public void stop(String runId) {
         PreviewSession session = active.remove(runId);
         if (session == null) return;
+        // Note: lastEnvVars NOT removed here — rebuild() needs them after stop()
         Metrics.ACTIVE_PREVIEWS.decrementAndGet();
 
         if (session.cloudRunServiceName() != null) {
@@ -302,6 +307,16 @@ public class PreviewService {
         broadcaster.emit(runId, new RunEvent("PREVIEW_STOPPED", runId, null, null, Instant.now()));
         log.info("Preview stopped for run {} (mode={})", runId,
                 session.cloudRunServiceName() != null ? "cloud-run" : "docker");
+    }
+
+    /**
+     * Rebuild a preview: stop the current session, re-detect project type, regenerate
+     * Dockerfile, and start fresh. Preserves user-provided env vars from the last start.
+     */
+    public PreviewSession rebuild(String runId, AppUser user) {
+        Map<String, String> preserved = lastEnvVars.getOrDefault(runId, Map.of());
+        stop(runId);
+        return start(runId, user, preserved);
     }
 
     /**
@@ -912,6 +927,7 @@ public class PreviewService {
                 .forEach(runId -> {
                     log.info("Preview expired for run {}, stopping", runId);
                     stop(runId);
+                    lastEnvVars.remove(runId);
                 });
     }
 

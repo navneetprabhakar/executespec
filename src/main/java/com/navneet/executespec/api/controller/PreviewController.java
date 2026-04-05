@@ -132,6 +132,25 @@ public class PreviewController {
         }
     }
 
+    @PostMapping("/{runId}/preview/rebuild")
+    public ResponseEntity<PreviewStatusDto> rebuild(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+        log.info("POST /api/runs/{}/preview/rebuild", runId);
+
+        try {
+            PreviewSession session = previewService.rebuild(runId, userDetails.getUser());
+            return ResponseEntity.ok(toDto(runId, session));
+        } catch (PreviewException e) {
+            log.warn("Preview rebuild failed for run {}: {}", runId, e.getMessage());
+            return ResponseEntity.ok(new PreviewStatusDto(
+                    runId, "FAILED", null, null, null, e.getMessage(), null, null, null, 0, 0, 0,
+                    null, null
+            ));
+        }
+    }
+
     @DeleteMapping("/{runId}/preview/stop")
     public ResponseEntity<Void> stop(
             @PathVariable String runId,
