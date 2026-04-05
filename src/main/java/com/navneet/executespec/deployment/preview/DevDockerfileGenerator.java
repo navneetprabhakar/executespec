@@ -411,6 +411,12 @@ public class DevDockerfileGenerator {
 
         // Vite 5.4+ blocks requests from unrecognised hostnames (e.g. *.a.run.app).
         // Inject a build-time patch that sets server.allowedHosts in the vite config.
+        // Patterns tried in order:
+        //   1. server: {           → prepend allowedHosts:true
+        //   2. export default {    → prepend server:{allowedHosts:true}
+        //   3. defineConfig({      → prepend server:{allowedHosts:true}
+        //   4. => ({               → arrow function in defineConfig (e.g. ({ mode }) => ({...}))
+        //   5. plugins:            → fallback: prepend server config before plugins array
         dockerfile = injectBeforeCmd(dockerfile,
                 "RUN node -e \"" +
                 "const fs=require('fs');" +
@@ -421,6 +427,8 @@ public class DevDockerfileGenerator {
                 "      c=c.replace(/server\\\\s*:\\\\s*\\\\{/,'server:{allowedHosts:true,');" +
                 "      if(!c.includes('allowedHosts'))c=c.replace(/export\\\\s+default\\\\s*\\\\{/,'export default{server:{allowedHosts:true},');" +
                 "      if(!c.includes('allowedHosts'))c=c.replace(/defineConfig\\\\s*\\\\(\\\\s*\\\\{/,'defineConfig({server:{allowedHosts:true},');" +
+                "      if(!c.includes('allowedHosts'))c=c.replace(/=>\\\\s*\\\\(\\\\s*\\\\{/,'=>({server:{allowedHosts:true},');" +
+                "      if(!c.includes('allowedHosts'))c=c.replace(/plugins\\\\s*:/,'server:{allowedHosts:true},plugins:');" +
                 "      fs.writeFileSync(f,c);" +
                 "    }" +
                 "    break;" +
