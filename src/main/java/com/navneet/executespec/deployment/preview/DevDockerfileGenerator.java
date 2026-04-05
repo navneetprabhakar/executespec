@@ -1222,7 +1222,7 @@ public class DevDockerfileGenerator {
 
         // Fix nginx permissions
         if (alpine) {
-            sb.append("RUN chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d 2>/dev/null || true && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid\n");
+            sb.append("RUN mkdir -p /var/cache/nginx /var/log/nginx /run/nginx && chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d /run/nginx 2>/dev/null || true && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid\n");
         } else {
             sb.append("RUN chown -R www-data:www-data /var/log/nginx /etc/nginx/conf.d 2>/dev/null || true\n");
         }
@@ -1889,13 +1889,18 @@ public class DevDockerfileGenerator {
         }
 
         // PHP
-        if (Files.exists(dir.resolve("composer.json"))) {
+        if (Files.exists(dir.resolve("composer.json")) || hasPhpFiles(dir)) {
             return PreviewProjectType.PHP;
         }
 
         // Java (non-Spring) — pom.xml without spring-boot-starter, or build.gradle
         if (Files.exists(dir.resolve("pom.xml")) || Files.exists(dir.resolve("build.gradle"))
                 || Files.exists(dir.resolve("build.gradle.kts"))) {
+            return PreviewProjectType.JAVA;
+        }
+
+        // Java (plain) — .java files without any build tool (e.g., javac-only projects)
+        if (hasJavaFiles(dir)) {
             return PreviewProjectType.JAVA;
         }
 
