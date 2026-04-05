@@ -65,6 +65,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const [showEnvDialog, setShowEnvDialog] = useState(false);
   const [analysis, setAnalysis] = useState<PreviewAnalysis | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
+  const [warmupReady, setWarmupReady] = useState(false);
   const logPollRef = useRef<ReturnType<typeof setInterval>>();
   const countdownRef = useRef<ReturnType<typeof setInterval>>();
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -242,6 +243,47 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const isTimedOut = status?.status === 'TIMED_OUT';
   const projectType = status?.projectType ?? 'UNKNOWN';
   const isBackendOnly = BACKEND_ONLY.has(projectType);
+
+  // Warmup: delay iframe render to let Vite dev server finish compiling (Cloud Run cold start)
+  const VITE_TYPES = useMemo(() => new Set(['NODE_FRONTEND', 'FULL_STACK', 'FULLSTACK']), []);
+  const needsWarmup = status?.projectType ? VITE_TYPES.has(status.projectType) : true;
+  useEffect(() => {
+    if (!isRunning || !status?.url || isBackendOnly) {
+      setWarmupReady(false);
+      return;
+    }
+    if (!needsWarmup) {
+      setWarmupReady(true);
+      return;
+    }
+    setWarmupReady(false);
+    let cancelled = false;
+    let successCount = 0;
+    let attempt = 0;
+    const maxAttempts = 15; // 15 × 2s = 30s max
+
+    const poll = async () => {
+      while (!cancelled && attempt < maxAttempts) {
+        attempt++;
+        try {
+          await fetch(status.url!, { mode: 'no-cors' });
+          successCount++;
+          if (successCount >= 2) {
+            if (!cancelled) setWarmupReady(true);
+            return;
+          }
+        } catch {
+          successCount = 0;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+      if (!cancelled) setWarmupReady(true);
+    };
+
+    poll();
+    return () => { cancelled = true; };
+  }, [isRunning, status?.url, isBackendOnly, needsWarmup]);
+
   const hasLogs = isStartingPhase || isRunning || isFailed || isTimedOut;
   const showLogFilter = (isFullStack || hasDatabase) && hasLogs;
   const dbInfo = status?.databaseType ? DB_LABELS[status.databaseType] : null;
@@ -381,6 +423,14 @@ export default function PreviewTab({ runId }: { runId: string }) {
         {isRunning && status?.url ? (
           isBackendOnly ? (
             <BackendPreview runId={runId} url={status.url} openapiSpec={openapiSpec} />
+          ) : !warmupReady ? (
+            <div className="flex-1 flex items-center justify-center h-full">
+              <div className="text-center space-y-2">
+                <span className="inline-block h-6 w-6 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin" />
+                <p className="text-sm text-secondary">Warming up app...</p>
+                <p className="text-xs text-muted">This preview will automatically shut down in 5 minutes</p>
+              </div>
+            </div>
           ) : (
             <iframe
               src={status.url}
