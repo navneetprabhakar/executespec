@@ -24,6 +24,8 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
            "WHERE t.taskId = :taskId AND t.status = 'PENDING'")
     int lockIfPending(@Param("taskId") String taskId, @Param("now") Instant now);
 
+    List<AgentTask> findByParentTaskIdOrderBySubtaskIndexAsc(String parentTaskId);
+
     /** Atomic lock: PENDING → WORKING in a single UPDATE (no intermediate LOCKED state). */
     @Modifying(clearAutomatically = true)
     @Query("UPDATE AgentTask t SET t.status = 'WORKING', t.assignedModel = :model, " +

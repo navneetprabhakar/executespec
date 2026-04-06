@@ -222,6 +222,11 @@ public class DevDockerfileGenerator {
         // This is a universal fix that catches all variations of 'npm install' or 'npm ci'
         // across all Dockerfile generators (SinglePackage, FullStack, Monorepo, etc).
         dockerfile = dockerfile.replaceAll("(?m)^(\\s*RUN\\s+.*npm\\s+(?:install|ci))(\\b(?!.*--legacy-peer-deps))", "$1 --legacy-peer-deps");
+
+        // Fix CJS/ESM mismatch: if package.json has "type": "module", rename CommonJS config
+        // files (.js) to .cjs so Node doesn't choke. Affects postcss.config.js, tailwind.config.js, etc.
+        dockerfile = injectEsmConfigFixup(dockerfile, workspace);
+
         return injectNonRootUser(dockerfile, type);
     }
 
@@ -1250,6 +1255,39 @@ public class DevDockerfileGenerator {
      * Detects Alpine vs Debian base images for correct user-creation syntax.
      * STATIC_HTML (nginx) uses the built-in nginx user.
      */
+    /**
+     * If package.json declares "type": "module", CommonJS config files (.js extension
+     * using module.exports) will fail at runtime. Inject a RUN step after COPY that
+     * renames known config files (postcss, tailwind, etc.) from .js to .cjs.
+     */
+    private String injectEsmConfigFixup(String dockerfile, Path workspace) {
+        // Only relevant for Node.js projects
+        Path pkgJson = workspace.resolve("package.json");
+        if (!Files.exists(pkgJson)) return dockerfile;
+        try {
+            String pkgContent = Files.readString(pkgJson);
+            if (!pkgContent.contains("\"type\"") || !pkgContent.contains("\"module\"")) return dockerfile;
+            // Verify it's actually "type": "module" (not just a field containing the word)
+            JsonNode pkg = mapper.readTree(pkgContent);
+            if (!"module".equals(pkg.path("type").asText(""))) return dockerfile;
+        } catch (Exception e) {
+            return dockerfile;
+        }
+
+        // Known config files that commonly use module.exports (CJS syntax)
+        String fixupCmd = "RUN for f in postcss.config.js tailwind.config.js babel.config.js " +
+                "jest.config.js prettier.config.js commitlint.config.js lint-staged.config.js; do " +
+                "if [ -f \"$f\" ] && grep -q 'module\\.exports' \"$f\" 2>/dev/null; then " +
+                "mv \"$f\" \"${f%.js}.cjs\"; fi; done";
+
+        // Insert after the last COPY . . line
+        int lastCopy = dockerfile.lastIndexOf("COPY . .");
+        if (lastCopy < 0) return dockerfile;
+        int insertPoint = dockerfile.indexOf('\n', lastCopy);
+        if (insertPoint < 0) return dockerfile;
+        return dockerfile.substring(0, insertPoint + 1) + fixupCmd + "\n" + dockerfile.substring(insertPoint + 1);
+    }
+
     private String injectNonRootUser(String dockerfile, PreviewProjectType type) {
         if (dockerfile == null || dockerfile.isBlank()) return dockerfile;
         // Already has a USER directive — skip

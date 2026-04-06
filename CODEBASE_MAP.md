@@ -1,13 +1,13 @@
 # ExecuteSpec Codebase Map
 
 > Quick reference: every class → one-line purpose. Keep updated.
-> Last updated: 2026-04-03
+> Last updated: 2026-04-06
 
 ## Java (com.navneet.executespec.*)
 
 ### agent/ — LLM agents & routing
 - `PlannerAgent` — Generates task plans from specs (PLANNING tier)
-- `WorkerAgent` — Executes tasks, dispatches tools, 25-min limit, stall escalation
+- `WorkerAgent` — Executes tasks, dispatches tools, 25-min limit, stall escalation. Self-play prevention (strips fabricated `<tool_result>` blocks). XML-first parsing for PATH B (Anthropic/Google)
 - `ConversationAgent` — Chat copilot (LIGHTWEIGHT tier)
 - `LlmRouter` — Multi-provider fallback (failover order per provider, circuit breaker integration)
 - `LlmOutputParser` — Parses structured JSON from LLM responses
@@ -39,7 +39,8 @@
 
 ### harness/ — Pipeline orchestration
 - `PipelineHarness` — Main orchestrator: plan→work→compile→merge→COMPLETE→preview→background validation. Publishes MergeCompleted for integration outbound. Creates branch+PR for existing repos. Manages `backgroundValidationRuns` set and deferred cleanup
-- `SequentialTaskExecutor` — Executes tasks in tiered parallel groups (virtual threads). Validation deferred to review phase. Budget checks (LLM calls + USD cost)
+- `SequentialTaskExecutor` — Executes tasks in tiered parallel groups (virtual threads). SubtaskDecomposer splits multi-file tasks. Validation deferred to review phase. Budget checks (LLM calls + USD cost)
+- `SubtaskDecomposer` — Decomposes multi-file tasks into per-file subtasks (2+ owned files → N subtasks, each produces one writeFile). Rework tasks excluded
 - `ApprovalGate` — Plan approval gate interface
 - `GateStore` — Redis-backed gate storage (500ms poll, 2h TTL)
 - `GitMergeService` — Merges task branches, progressive merge under `mergeLock`
@@ -112,7 +113,7 @@
 - `RunTitleBackfillService` — Backfills run titles
 - `ApplySource` — Enum: COPILOT/REVIEW
 - `entity/PipelineRun` — Run JPA entity (root aggregate). Includes `githubPrUrl` (V52), `archived` (V53)
-- `entity/AgentTask` — Task JPA entity
+- `entity/AgentTask` — Task JPA entity. Subtask fields: `parentTaskId`, `subtaskIndex` (1-based), `subtaskTotal`
 - `entity/AgentMessage` — Chat message entity
 - `repository/*Repository` — JPA repositories
 
@@ -353,7 +354,7 @@
 - `RunList` — Paginated run list
 - `NewRunModal` — Create run form (execution mode, AI provider selection)
 - `TaskCard` — Task status card
-- `TaskGraph` — Task dependency DAG (Kahn's algorithm for level recomputation, accepts `nodes` prop for subgraph)
+- `TaskGraph` — Task dependency DAG (Kahn's algorithm, subtask grouping). Subtask nodes (with `parentTaskId`) render as smaller nodes (164×36) grouped under parent with dashed border, expand/collapse chevron, progress bar, aggregate status. Backward compatible
 - `TaskGraphGroups` — Groups nodes by source prefix (`_cop{N}_`, `_rev{N}_`) for copilot/review splitting
 - `RunDetailTabs` — Tabbed detail view. Overview: PR link, per-copilot token breakdown. Graph: grouped DAGs
 - `RunTimeline` — Pipeline status bar (maps COMPILING, MERGING, AWAITING_MERGE)
@@ -432,7 +433,7 @@
 - `IntegrationLogo` — Integration icon/logo
 
 ### lib/
-- `api.ts` — REST API client (~1560 lines, all endpoints)
+- `api.ts` — REST API client (~1560 lines, all endpoints). `TaskGraphNode` type includes `parentTaskId`/`subtaskIndex`/`subtaskTotal`
 - `billing-api.ts` — Billing API helpers (Razorpay + Stripe)
 - `invoice-api.ts` — Invoice endpoints
 - `utils.ts` — Formatting (USD, percentages, dates, status colors)

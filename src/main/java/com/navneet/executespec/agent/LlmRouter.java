@@ -374,6 +374,8 @@ public class LlmRouter {
         Boolean internalToolExec = null;
         Integer maxTokens = null;
         AnthropicCacheOptions cacheOpts = null;
+        AnthropicApi.ToolChoice anthropicToolChoice = null;
+        Object openAiToolChoice = null;
 
         if (prompt.getOptions() != null) {
             maxTokens = prompt.getOptions().getMaxTokens();
@@ -385,6 +387,10 @@ public class LlmRouter {
         }
         if (prompt.getOptions() instanceof AnthropicChatOptions aco) {
             cacheOpts = aco.getCacheOptions();
+            anthropicToolChoice = aco.getToolChoice();
+        }
+        if (prompt.getOptions() instanceof OpenAiChatOptions oaco) {
+            openAiToolChoice = oaco.getToolChoice();
         }
 
         // Anthropic API requires max_tokens — default from agent.token-budget.max-tokens
@@ -392,15 +398,18 @@ public class LlmRouter {
             maxTokens = agentProperties.getTokenBudget().getMaxTokens();
         }
 
-        final var callbacks       = toolCallbacks;
-        final var toolExecEnabled = internalToolExec;
-        final var maxTok          = maxTokens;
-        final var finalCacheOpts  = cacheOpts;
+        final var callbacks            = toolCallbacks;
+        final var toolExecEnabled      = internalToolExec;
+        final var maxTok               = maxTokens;
+        final var finalCacheOpts       = cacheOpts;
+        final var finalToolChoice      = anthropicToolChoice;
+        final var finalOpenAiToolChoice = openAiToolChoice;
 
-        log.info("[LlmRouter] callWithModelOptions: provider={} model={} tools={} internalExec={} cacheStrategy={} runId={}",
+        log.info("[LlmRouter] callWithModelOptions: provider={} model={} tools={} internalExec={} cacheStrategy={} toolChoice={} runId={}",
             provider, model, callbacks.size(), toolExecEnabled,
             finalCacheOpts != null && finalCacheOpts.getStrategy() != null
                 ? finalCacheOpts.getStrategy() : "NONE",
+            finalToolChoice != null ? finalToolChoice.type() : "auto",
             runId);
 
         // Resolve per-run keys (user → org → system)
@@ -412,6 +421,7 @@ public class LlmRouter {
                 if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
                 if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
                 if (finalCacheOpts != null) builder.cacheOptions(finalCacheOpts);
+                if (finalToolChoice != null) builder.toolChoice(finalToolChoice);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }
             case "openai" -> {
@@ -419,6 +429,7 @@ public class LlmRouter {
                 if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
                 if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
                 if (maxTok != null) builder.maxCompletionTokens(maxTok);
+                if (finalOpenAiToolChoice != null) builder.toolChoice(finalOpenAiToolChoice);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }
             case "google" -> {

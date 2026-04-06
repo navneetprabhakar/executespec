@@ -10,6 +10,8 @@ interface TaskCardProps {
   runId: string;
   /** Pass the parent run's status so PENDING/LOCKED tasks show retry only when the run is stuck. */
   runStatus?: string;
+  /** Subtasks belonging to this parent task (only provided for parent tasks). */
+  subtasks?: TaskSummary[];
 }
 
 /** Statuses that are always retryable (backend validates these). */
@@ -44,9 +46,11 @@ function statusLabel(status: string): string {
   return 'Task incomplete';
 }
 
-export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
+export default function TaskCard({ task, runId, runStatus, subtasks }: TaskCardProps) {
   const { retryTask } = useRunStore();
 
+  const isSubtask  = !!task.parentTaskId;
+  const hasSubtasks = subtasks && subtasks.length > 0;
   const retryable = isRetryable(task.status, runStatus);
   const hasReason  = !!task.failureReason?.trim();
 
@@ -54,18 +58,33 @@ export default function TaskCard({ task, runId, runStatus }: TaskCardProps) {
   const [open, setOpen] = useState(retryable && (hasReason || STUCK_RETRYABLE.has(task.status)));
 
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
+    <div className={cn(
+      'rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden',
+      isSubtask && 'ml-6 border-l-2 border-l-[var(--gray-400)]'
+    )}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--gray-100)]"
       >
         <GlowDot status={task.status} size="sm" className="flex-shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-primary truncate">{task.title}</p>
+          <p className={cn('text-primary truncate', isSubtask ? 'text-xs' : 'text-sm')}>{task.title}</p>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-muted font-mono">{task.taskId.slice(0, 8)}</span>
-            {task.branchName && (
+            {task.branchName && !isSubtask && (
               <span className="text-xs text-muted font-mono">{task.branchName}</span>
+            )}
+            {/* Subtask progress badge for parent tasks */}
+            {hasSubtasks && (
+              <span className="text-xs text-muted">
+                {subtasks.filter(s => s.status === 'COMPLETE').length}/{subtasks.length} files
+              </span>
+            )}
+            {/* Subtask index badge */}
+            {isSubtask && task.subtaskIndex && task.subtaskTotal && (
+              <span className="text-xs text-muted">
+                file {task.subtaskIndex}/{task.subtaskTotal}
+              </span>
             )}
           </div>
         </div>
