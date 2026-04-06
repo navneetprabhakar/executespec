@@ -356,7 +356,7 @@ Side paths:
 |------|-----------|--------|--------|
 | **LIGHTWEIGHT** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-2.5-flash` |
 | **WORKHORSE** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-2.5-flash` |
-| **PLANNING** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-2.5-flash` |
+| **PLANNING** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-flash-preview` |
 
 ### Provider Selection
 
@@ -426,7 +426,7 @@ Three fixed fallback chains:
 
 | Chain | Anthropic | Google | OpenAI |
 |-------|-----------|--------|--------|
-| PLANNING | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
 | WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 

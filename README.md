@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-**v1.2.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
+**v1.2.2** · Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
 
 **Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind · GCP
 
@@ -170,7 +170,7 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
 | WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent + 4 more | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 | LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
