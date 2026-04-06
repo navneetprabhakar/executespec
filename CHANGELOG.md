@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [1.2.1] — 2026-04-06
+
+### Fixed
+- **Gitignore** — Fixed `eval-output/` → `eval-outputs/` to match actual folder name
+
+---
+
 ## [1.2.0] — 2026-04-06
 
 ### Added
