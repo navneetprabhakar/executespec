@@ -383,7 +383,7 @@ model-matrix:
       workhorse:   claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning:    gemini-2.5-flash
+      planning:    gemini-3-flash-preview
       workhorse:   gemini-2.5-flash
       lightweight: gemini-2.5-flash
     openai:

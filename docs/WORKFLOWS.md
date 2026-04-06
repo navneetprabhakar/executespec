@@ -1155,7 +1155,7 @@ sequenceDiagram
 
 | Tier | Purpose | Agents | OpenAI | Anthropic | Google |
 |------|---------|--------|--------|-----------|--------|
-| PLANNING | Strategic reasoning, complex review | PlannerAgent, ReviewerAgentV2 | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-2.5-flash` |
+| PLANNING | Strategic reasoning, complex review | PlannerAgent, ReviewerAgentV2 | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-3-flash-preview` |
 | WORKHORSE | Code generation, compilation, testing | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `gpt-5.4-mini` | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` |
 | LIGHTWEIGHT | Conversation, context, reporting | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `gpt-5.4-mini` | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` |
 
