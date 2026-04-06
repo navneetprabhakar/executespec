@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-**v1.1.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
+**v1.1.3** · Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
 
 **Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind · GCP
 
@@ -44,7 +44,8 @@ POST /api/runs  →  RequestTriageService (single-shot fast path?)
                 Plan Approval Gate  (or auto-bypass with skipApproval)
                       ↓
                 SequentialTaskExecutor (tiered parallel groups)
-                   → WorkerAgent per task (WORKHORSE tier, 25-min limit)
+                   → SubtaskDecomposer (splits multi-file tasks into per-file subtasks)
+                   → WorkerAgent per task (WORKHORSE tier, 25-min limit, self-play prevention)
                    → Retry with model escalation on stall (WORKHORSE → PLANNING)
                    → Progressive merge to main after each task
                       ↓
@@ -69,7 +70,8 @@ POST /api/runs  →  RequestTriageService (single-shot fast path?)
 
 ## Key Features
 
-- **Tiered parallel task execution** with progressive merge and model escalation (WORKHORSE → PLANNING on stall)
+- **Tiered parallel task execution** with progressive merge, model escalation (WORKHORSE → PLANNING on stall), and subtask decomposition (multi-file → per-file)
+- **Self-play prevention** — strips fabricated `<tool_result>` blocks from LLM responses, XML-first parsing for PATH B providers
 - **Plan approval gate** — human reviews task breakdown (auto-bypass via `skipApproval`)
 - **Automatic merge** — no manual merge gate; pipeline auto-merges after compile
 - **Background validation** — review, test gen, test exec, and report run in background after COMPLETE (preview available immediately)
@@ -134,7 +136,7 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 
 ## Database Migrations
 
-56 Flyway migrations (V1–V56) run automatically on startup:
+58 Flyway migrations (V1–V58) run automatically on startup:
 
 | Version | Description |
 |---------|-------------|
@@ -160,6 +162,7 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 | V54 | Stripe multi-currency |
 | V55 | Payment audit expansion |
 | V56 | Task completion notes |
+| V58 | Subtask support (parentTaskId, subtaskIndex, subtaskTotal) |
 
 ---
 
@@ -167,9 +170,9 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent + 4 more | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4-mini` |
+| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent + 4 more | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
 Default provider: **OpenAI** (user-selected per project). Health-based failover via Redis circuit breaker.
 

@@ -152,6 +152,17 @@ When the agent reads files from a cloned repository (README.md, package.json, et
 - `agent/WorkerAgent.java` (tool result construction, `dispatchTool()`)
 - `resources/prompts/worker.txt`, `resources/prompts/worker-openai.txt`, `resources/prompts/worker-gemini.txt`
 
+### 3.4 Self-Play Prevention (LLM Response Sanitization)
+
+**Component:** `WorkerAgent.java` — `FABRICATED_TOOL_RESULT_PATTERN`
+
+**Purpose:** Prevent Anthropic models from simulating entire tool conversations in a single response. The model may output `<tool_call>` tags interleaved with fabricated `<tool_result>` tags — effectively "self-playing" by simulating tool execution results without actually calling tools. Without sanitization, only the first tool call is dispatched while subsequent writeFile/commit calls are lost.
+
+**Mitigation:**
+- `FABRICATED_TOOL_RESULT_PATTERN` regex (`<tool_result[^>]*>.*?</tool_result>`) strips all fabricated result blocks from the model's response text before tool call parsing
+- XML-first parsing for PATH B providers (Anthropic/Google): `parseXmlToolCalls()` runs first, with `parseJsonToolCalls()` as fallback — prevents JSON parser short-circuit from losing multi-tool responses
+- Applied to both the main response parsing path and the truncation salvage path
+
 ---
 
 ## Layer 4: Shell Command Sandbox

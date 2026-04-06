@@ -749,7 +749,8 @@ public class RunController {
                 .setPropertyNamingStrategy(
                         com.fasterxml.jackson.databind.PropertyNamingStrategies.SNAKE_CASE);
         record TaskMeta(String taskId, String title, String status, String complexity,
-                        String assignedModel, List<String> dependsOn) {}
+                        String assignedModel, List<String> dependsOn,
+                        String parentTaskId, Integer subtaskIndex, Integer subtaskTotal) {}
 
         List<TaskMeta> metas = tasks.stream().map(t -> {
             List<String> deps = List.of();
@@ -759,7 +760,8 @@ public class RunController {
                 if (def.getDependsOn() != null) deps = def.getDependsOn();
             } catch (Exception ignored) {}
             return new TaskMeta(t.getTaskId(), t.getTitle(), t.getStatus(),
-                    t.getComplexity(), t.getAssignedModel(), deps);
+                    t.getComplexity(), t.getAssignedModel(), deps,
+                    t.getParentTaskId(), t.getSubtaskIndex(), t.getSubtaskTotal());
         }).toList();
 
         // Compute topological levels via Kahn's-style BFS
@@ -787,7 +789,8 @@ public class RunController {
         List<TaskGraphNode> nodes = metas.stream()
                 .map(m -> new TaskGraphNode(
                         m.taskId(), m.title(), m.status(), m.complexity(),
-                        m.assignedModel(), m.dependsOn(), levels.getOrDefault(m.taskId(), 0)))
+                        m.assignedModel(), m.dependsOn(), levels.getOrDefault(m.taskId(), 0),
+                        m.parentTaskId(), m.subtaskIndex(), m.subtaskTotal()))
                 .sorted(java.util.Comparator.comparingInt(TaskGraphNode::level)
                         .thenComparing(TaskGraphNode::taskId))
                 .toList();
@@ -802,7 +805,10 @@ public class RunController {
             String complexity,
             String assignedModel,
             List<String> dependsOn,
-            int level
+            int level,
+            String parentTaskId,
+            Integer subtaskIndex,
+            Integer subtaskTotal
     ) {}
 
     public record MessageResponse(String fromAgent, String contentSummary, Instant sentAt) {}

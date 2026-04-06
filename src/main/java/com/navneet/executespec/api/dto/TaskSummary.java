@@ -24,5 +24,11 @@ public record TaskSummary(
     /** The objective/description from the planner's TaskDefinition. Shown in the UI when expanded. */
     String objective,
     /** The worker's summary of what was implemented. */
-    String completionNotes
+    String completionNotes,
+    /** Parent task ID if this is a subtask (null for top-level tasks). */
+    String parentTaskId,
+    /** 1-based index within parent's subtask list (null for top-level tasks). */
+    Integer subtaskIndex,
+    /** Total number of subtasks in the parent (null for top-level tasks). */
+    Integer subtaskTotal
 ) {}

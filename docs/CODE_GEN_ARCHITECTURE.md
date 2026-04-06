@@ -781,6 +781,12 @@ All floored to 200K for consistency across providers, even though some support l
 **OpenAI (Native):**
 Structured `AssistantMessage.ToolCall` objects via Spring AI function calling.
 
+### Self-Play Prevention (PATH B)
+
+Anthropic models may output `<tool_call>` tags interleaved with fabricated `<tool_result>` tags in a single response — effectively simulating tool execution. `FABRICATED_TOOL_RESULT_PATTERN` strips these before parsing.
+
+**Parsing order for PATH B (Anthropic/Google):** XML first (`parseXmlToolCalls()`), JSON fallback (`parseJsonToolCalls()`). This prevents JSON parser short-circuit from losing multi-tool responses.
+
 ### XML Parsing with Structural Fallback
 
 Standard path: regex `<tool_call>(.*?)</tool_call>` → JSON parse
@@ -1471,6 +1477,7 @@ Child processes have secrets removed:
 |-----------|------|
 | Pipeline orchestrator | `harness/PipelineHarness.java` |
 | Task executor | `harness/SequentialTaskExecutor.java` |
+| Subtask decomposer | `harness/SubtaskDecomposer.java` |
 | Run cost budget | `harness/RunCostBudgetService.java` |
 | Merge service | `harness/GitMergeService.java` |
 | Specialized mergers | `harness/merge/{PomXml,Yaml,PackageJson}Merger.java` |
@@ -1518,7 +1525,7 @@ Child processes have secrets removed:
 | Worker prompt (Anthropic) | `resources/prompts/worker.txt` |
 | Worker prompt (OpenAI) | `resources/prompts/worker-openai.txt` |
 | Worker prompt (Gemini) | `resources/prompts/worker-gemini.txt` |
-| DB migrations | `resources/db/migration/V*.sql` (V1-V56) |
+| DB migrations | `resources/db/migration/V*.sql` (V1-V58) |
 | App config | `resources/application.yml` |
 
 ## Appendix B: Data Flow Diagram

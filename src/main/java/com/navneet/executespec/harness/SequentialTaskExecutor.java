@@ -75,6 +75,7 @@ public class SequentialTaskExecutor {
 
     private final RunCostBudgetService runCostBudgetService;
     private final CompilerAgent compilerAgent;
+    private final SubtaskDecomposer subtaskDecomposer;
 
     /**
      * Result of sequential execution across all tasks.
@@ -301,6 +302,16 @@ public class SequentialTaskExecutor {
             sseBroadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
             failed.add(task);
             try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
+            return;
+        }
+
+        // === Subtask decomposition: split multi-file tasks into per-file subtasks ===
+        TaskDefinition taskDef = parseTaskDef(task.getTaskJson());
+        if (subtaskDecomposer.shouldDecompose(taskDef)) {
+            metricsTaskOutcome = executeDecomposedTask(task, taskDef, run, availableProviders,
+                    allReports, completed, failed, previouslyMerged, mergedTaskIds, mergeLock,
+                    branchName);
+            taskObs.lowCardinalityKeyValue("task.outcome", metricsTaskOutcome);
             return;
         }
 
@@ -689,6 +700,143 @@ public class SequentialTaskExecutor {
             case "failed"  -> "FAILED";
             default -> raw.toUpperCase();
         };
+    }
+
+    // ── Subtask decomposition ─────────────────────────────────────────────────
+
+    /**
+     * Executes a decomposed multi-file task: creates per-file subtasks in DB,
+     * then executes each subtask sequentially in the same git worktree.
+     * All subtasks share one worktree so subtask N+1 can read files from subtask N.
+     * Single git commit + merge after all subtasks complete.
+     *
+     * @return the outcome string for metrics (COMPLETE, PARTIAL, FAILED, MERGE_FAILED)
+     */
+    private String executeDecomposedTask(AgentTask parentTask, TaskDefinition taskDef,
+                                          PipelineRun run, Set<LlmProvider> availableProviders,
+                                          List<WorkerReport> allReports, List<AgentTask> completed,
+                                          List<AgentTask> failed, List<AgentTask> previouslyMerged,
+                                          Set<String> mergedTaskIds, Object mergeLock,
+                                          String branchName) {
+        String runId = run.getRunId();
+        String parentTaskId = parentTask.getTaskId();
+
+        try {
+            // 1. Decompose into per-file subtasks
+            List<TaskDefinition> subtaskDefs = subtaskDecomposer.decompose(taskDef);
+            log.info("[Decompose] Task {} → {} subtasks (files: {})",
+                    parentTaskId, subtaskDefs.size(),
+                    subtaskDefs.stream().map(d -> d.getOwnedFiles().get(0)).toList());
+
+            // 2. Create subtask DB rows
+            List<AgentTask> subtaskRows = stateStore.createSubtasks(
+                    parentTaskId, runId, subtaskDefs, parentTask.getTenantId());
+
+            // 3. Emit decomposition event
+            sseBroadcaster.emit(runId, RunEvent.taskDecomposed(runId, parentTaskId, subtaskRows.size()));
+
+            // 4. Create worktree ONCE for the parent task
+            List<String> depBranches = new ArrayList<>();
+            if (taskDef.getDependsOn() != null) {
+                taskDef.getDependsOn().forEach(depId ->
+                        depBranches.add("agent/" + runId.substring(0, 8) + "/" + depId));
+            }
+            String workDir = gitTool.createWorktree(runId, parentTaskId, branchName, depBranches);
+
+            // 5. Execute each subtask SEQUENTIALLY in the same worktree
+            ResolvedModel model = modelResolver.resolve("WorkerAgent", run.getAiProviderEnum());
+            boolean anyFailed = false;
+
+            for (AgentTask subtask : subtaskRows) {
+                if (anyFailed) {
+                    stateStore.failTask(subtask.getTaskId(), "Blocked — prior subtask failed");
+                    sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), "BLOCKED"));
+                    continue;
+                }
+
+                // Check budget before each subtask
+                if (runCostBudgetService.isOverBudget(runId)) {
+                    String tier = runCostBudgetService.getRunTier(runId);
+                    Double budget = runCostBudgetService.getBudget(runId);
+                    log.warn("[CostBudget] Run {} over budget during subtask {} — stopping",
+                            runId, subtask.getTaskId());
+                    stateStore.failTask(subtask.getTaskId(), "Run cost budget exceeded");
+                    sseBroadcaster.emit(runId, RunEvent.budgetExceeded(runId, tier, budget != null ? budget : 3.0));
+                    anyFailed = true;
+                    continue;
+                }
+
+                // Lock and execute subtask
+                subtask.setAssignedModel(model.getModel());
+                stateStore.lockTask(subtask.getTaskId(), model.getModel(), branchName);
+                sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), "WORKING"));
+                sseBroadcaster.emit(runId, RunEvent.log(runId, subtask.getTaskId(),
+                        String.format("Subtask %d/%d: %s [%s]",
+                                subtask.getSubtaskIndex(), subtask.getSubtaskTotal(),
+                                SubtaskDecomposer.extractFileName(subtaskDefs.get(subtask.getSubtaskIndex() - 1)
+                                        .getOwnedFiles().get(0)),
+                                model.getModel())));
+
+                try {
+                    Instant subtaskStart = Instant.now();
+                    WorkerReport report = workerAgent.executeInWorkDir(subtask, runId, workDir);
+                    long durationMs = java.time.Duration.between(subtaskStart, Instant.now()).toMillis();
+
+                    String status = normalizeStatus(report.getStatus());
+                    stateStore.completeTask(subtask.getTaskId(), report);
+                    trackMetric(runId, subtask, model, 1, "COMPLETE".equals(status), durationMs, report);
+                    sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), status));
+
+                    if (!"COMPLETE".equals(status) && !"PARTIAL".equals(status)) {
+                        anyFailed = true;
+                        log.warn("[Decompose] Subtask {} failed with status {}", subtask.getTaskId(), status);
+                    }
+
+                    allReports.add(report);
+                } catch (Exception e) {
+                    log.error("[Decompose] Subtask {} crashed: {}", subtask.getTaskId(), e.getMessage(), e);
+                    stateStore.failTask(subtask.getTaskId(), "Unhandled exception: " + e.getMessage());
+                    sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), "FAILED"));
+                    anyFailed = true;
+                }
+            }
+
+            // 6. Aggregate subtask results into parent
+            stateStore.completeParentFromSubtasks(parentTaskId);
+            sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, parentTaskId,
+                    anyFailed ? "PARTIAL" : "COMPLETE"));
+
+            if (!anyFailed) {
+                completed.add(parentTask);
+
+                // Commit all subtask files in one commit + progressive merge
+                commitWorktreeIfDirty(runId, parentTaskId);
+                synchronized (mergeLock) {
+                    boolean merged = tryMergeToMain(runId, parentTask, branchName, previouslyMerged);
+                    if (merged) {
+                        mergedTaskIds.add(parentTaskId);
+                        previouslyMerged.add(parentTask);
+                    } else {
+                        completed.remove(parentTask);
+                        failed.add(parentTask);
+                        return "MERGE_FAILED";
+                    }
+                }
+                return "COMPLETE";
+            } else {
+                failed.add(parentTask);
+                return "PARTIAL";
+            }
+
+        } catch (Exception e) {
+            log.error("[Decompose] Parent task {} crashed: {}", parentTaskId, e.getMessage(), e);
+            stateStore.failTask(parentTaskId, "Decomposition failed: " + e.getMessage());
+            sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, parentTaskId, "FAILED"));
+            failed.add(parentTask);
+            return "FAILED";
+        } finally {
+            try { gitTool.removeWorktree(runId, parentTaskId); } catch (Exception ex) { /* best effort */ }
+        }
     }
 
     private TaskDefinition parseTaskDef(String json) {
