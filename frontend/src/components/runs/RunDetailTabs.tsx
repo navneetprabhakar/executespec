@@ -177,9 +177,29 @@ export default function RunDetailTabs() {
             ? <p className="text-sm text-muted">No tasks yet.</p>
             : (
               <>
-                {activeRun.tasks.map((t) => (
-                  <TaskCard key={t.taskId} task={t} runId={activeRun.runId} runStatus={activeRun.status} />
-                ))}
+                {(() => {
+                  // Group: show parent tasks, nest subtasks underneath
+                  const parentTasks = activeRun.tasks.filter(t => !t.parentTaskId);
+                  const subtaskMap = new Map<string, typeof activeRun.tasks>();
+                  activeRun.tasks.filter(t => t.parentTaskId).forEach(t => {
+                    const list = subtaskMap.get(t.parentTaskId!) || [];
+                    list.push(t);
+                    subtaskMap.set(t.parentTaskId!, list);
+                  });
+                  return parentTasks.map((t) => (
+                    <div key={t.taskId}>
+                      <TaskCard
+                        task={t}
+                        runId={activeRun.runId}
+                        runStatus={activeRun.status}
+                        subtasks={subtaskMap.get(t.taskId)}
+                      />
+                      {subtaskMap.get(t.taskId)?.map((st) => (
+                        <TaskCard key={st.taskId} task={st} runId={activeRun.runId} runStatus={activeRun.status} />
+                      ))}
+                    </div>
+                  ));
+                })()}
 
                 {testTasks.length > 0 && (
                   <>

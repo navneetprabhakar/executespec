@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-04
+> Last updated: 2026-04-06
 
 ## Architecture
 
@@ -9,7 +9,8 @@
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → SequentialTaskExecutor (parallel tiers) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
+- **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → SequentialTaskExecutor (parallel tiers, with SubtaskDecomposer for multi-file tasks) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
+- **Subtask decomposition:** Tasks with 2+ owned files are decomposed into per-file subtasks at execution time by `SubtaskDecomposer`. Each subtask produces exactly one `writeFile` call, eliminating fabrication. Subtasks tracked via `parentTaskId`/`subtaskIndex`/`subtaskTotal` on `AgentTask`.
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
 - **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). Default provider: OpenAI. YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL, 24h max wait timeout. Merge is automatic (no manual gate).
@@ -29,10 +30,10 @@
 - **DTOs:** Java records where possible. Lombok `@Data`/`@Builder` for JPA entities.
 - **Dependency injection:** Constructor injection via Lombok `@RequiredArgsConstructor` (no `@Autowired` field injection)
 - **LLM prompts:** External files in `src/main/resources/prompts/*.txt` — never inline strings
-- **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling)
+- **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling). Self-play prevention: fabricated `<tool_result>` blocks stripped before parsing. XML-first parsing for PATH B (Anthropic/Google), JSON fallback.
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V56)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V58)
 
 ## Patterns: MUST Follow
 
@@ -198,6 +199,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 |---------|------|
 | Pipeline orchestrator | `harness/PipelineHarness.java` |
 | Sequential task executor | `harness/SequentialTaskExecutor.java` |
+| Subtask decomposer | `harness/SubtaskDecomposer.java` (multi-file → per-file subtask splitting) |
 | Run cost budget | `harness/RunCostBudgetService.java` |
 | Design system config | `harness/DesignSystemProperties.java` |
 | UI style resolver | `harness/UiStyleResolver.java` (design loading, fuzzy match, 3-signal resolution) |
@@ -252,7 +254,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
 | Test execution service | `testgen/TestExecutionService.java` |
 | Test result controller | `testgen/TestResultController.java` (apply-test-fixes) |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V56) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V58) |
 | LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
@@ -267,7 +269,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
 | PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 | LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
 Default provider: OpenAI (user-selected per project). Failover order: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier. See `application.yml` → `model-matrix:` for full configuration.
@@ -314,6 +316,9 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Actuator endpoint restriction (health+prometheus public, rest SUPER_ADMIN)
 - Design system integration: 54 company DESIGN.md files loaded from filesystem, 3-signal resolution (explicit hint > planner ui_style > project type heuristic), Caffeine cache (30min), token-budget truncation (2500 tokens), GCS-synced on deploy/boot
 - CSP `frame-src` directive for Cloud Run preview iframes
+- Subtask decomposition: multi-file tasks split into per-file subtasks (SubtaskDecomposer), tracked via parentTaskId/subtaskIndex/subtaskTotal
+- Self-play prevention: WorkerAgent strips fabricated `<tool_result>` blocks from LLM responses, uses XML-first parsing for PATH B providers (Anthropic/Google)
+- Task graph subtask grouping: frontend TaskGraph renders subtasks as smaller nodes grouped under parent with expand/collapse, progress bar, aggregate status
 
 ### In Progress
 - Production deployment preparation

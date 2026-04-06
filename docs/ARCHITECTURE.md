@@ -159,6 +159,7 @@ graph TB
         SB[SseBroadcaster]
         GMS[GitMergeService]
         STE[SequentialTaskExecutor]
+        STD[SubtaskDecomposer]
     end
 
     subgraph "Security Layer"
@@ -246,7 +247,8 @@ graph TB
             W_PROMPT[Task + Context<br/>+ Workspace State] --> W_LOOP
 
             subgraph "W_LOOP [25-min Time Loop, target 20 / hard 35 iterations]"
-                W_LLM[LLM Call<br/>WORKHORSE tier] --> W_PARSE[Parse XML<br/>tool_call tags]
+                W_LLM[LLM Call<br/>WORKHORSE tier] --> W_STRIP[Strip fabricated<br/>tool_result blocks<br/>Self-play prevention]
+                W_STRIP --> W_PARSE[Parse XML first<br/>JSON fallback<br/>PATH B providers]
                 W_PARSE --> W_DISPATCH[Dispatch Tool<br/>readFile/writeFile/<br/>editFile/run/etc.]
                 W_DISPATCH --> W_RESULT[Tool Result<br/>Truncated output]
                 W_RESULT --> W_CHECK{Completion?<br/>Starts with '{'}

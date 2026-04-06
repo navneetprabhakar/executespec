@@ -23,7 +23,7 @@ Post-run interactive features: conversational AI chat about generated code, run 
   - Review JSON (up to 1k chars)
 - Up to 10 user messages per run
 - Persistent conversation history in DB (chatHistoryJson on PipelineRun)
-- Model: LIGHTWEIGHT tier (claude-haiku-4-5-20251001 / gemini-3-flash-preview / gpt-5.4-mini) for cost efficiency
+- Model: LIGHTWEIGHT tier (claude-haiku-4-5-20251001 / gemini-2.5-flash / gpt-5.4-mini) for cost efficiency
 - Max output: 2048 tokens
 - Endpoints:
   - `POST /api/runs/{id}/conversation` — send message, get reply

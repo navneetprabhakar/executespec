@@ -197,6 +197,51 @@ public class WorkerToolCallbackFactory {
                           "additionalProperties": false
                         }
                         """,
+                        runId, taskId, dispatcher),
+
+                tool("taskComplete",
+                        "Signal that your task is finished. Call this ONCE when all files are written and committed. Provide a summary of what you did.",
+                        """
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "blocked"],
+                              "description": "Task outcome: complete (all done), partial (some work done), or blocked (cannot proceed)"
+                            },
+                            "files_created": {
+                              "type": "array",
+                              "items": { "type": "string" },
+                              "description": "List of file paths created"
+                            },
+                            "files_modified": {
+                              "type": "array",
+                              "items": { "type": "string" },
+                              "description": "List of file paths modified"
+                            },
+                            "files_read": {
+                              "type": "array",
+                              "items": { "type": "string" },
+                              "description": "List of file paths read"
+                            },
+                            "self_review": {
+                              "type": "string",
+                              "description": "Brief self-review of the implementation quality and correctness"
+                            },
+                            "blockers": {
+                              "type": "string",
+                              "description": "Description of blockers if status is partial or blocked, null otherwise"
+                            },
+                            "notes_for_reviewer": {
+                              "type": "string",
+                              "description": "Notes for the code reviewer about design decisions or caveats"
+                            }
+                          },
+                          "required": ["status", "files_created", "files_modified", "self_review"],
+                          "additionalProperties": false
+                        }
+                        """,
                         runId, taskId, dispatcher)
         );
     }

@@ -85,4 +85,14 @@ public class AgentTask {
     @Builder.Default
     private String tenantId = "default";
 
+    // ── Subtask decomposition ─────────────────────────────────────────────────
+    @Column(name = "parent_task_id")
+    private String parentTaskId;        // null for top-level tasks
+
+    @Column(name = "subtask_index")
+    private Integer subtaskIndex;       // 1-based index within parent
+
+    @Column(name = "subtask_total")
+    private Integer subtaskTotal;       // total subtasks in parent
+
 }

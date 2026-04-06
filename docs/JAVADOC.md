@@ -64,7 +64,7 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 | Runtime | Java 21 (virtual threads) |
 | Framework | Spring Boot 3.3.0 |
 | AI Framework | Spring AI 1.1.0 |
-| Database | PostgreSQL (Flyway migrations V1-V56) |
+| Database | PostgreSQL (Flyway migrations V1-V58) |
 | Cache/Gate Store | Redis (Lettuce) |
 | Git Operations | JGit 6.9.0 + shell git (worktrees) |
 | Build | Maven |
