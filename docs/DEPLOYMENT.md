@@ -26,9 +26,9 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1-V56).
+Flyway migrations run automatically on startup and create all tables (V1-V58).
 
-#### Migration Reference (V45-V56)
+#### Migration Reference (V45-V58)
 
 | Migration | Description |
 |-----------|-------------|
@@ -44,6 +44,7 @@ Flyway migrations run automatically on startup and create all tables (V1-V56).
 | V54 | Stripe multi-currency support (currency-gateway mapping) |
 | V55 | Payment audit trail expansion (webhook events, CSV export) |
 | V56 | Task completion notes (`agent_task.completion_notes` TEXT column) |
+| V58 | Subtask support (`parent_task_id`, `subtask_index`, `subtask_total` on `agent_task`) |
 
 ### Redis Setup
 
@@ -1855,7 +1856,7 @@ curl -s -X POST https://app.executespec.ai/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@executespec.ai","password":"REDACTED_FOR_PUBLIC_RELEASE"}' | jq .token
 
-# Flyway migrations (should show V1-V56)
+# Flyway migrations (should show V1-V58)
 gcloud compute ssh executespec-prod-vm --zone=us-east4-a --tunnel-through-iap \
   -- 'sudo journalctl -u executespec | grep -i "flyway\|migration" | tail -20'
 
@@ -1913,7 +1914,7 @@ Preview containers and test execution containers are hardened:
 
 - [ ] **Infrastructure:** Terraform apply successful, all resources provisioned
 - [ ] **DNS:** `app.executespec.ai` resolves to LB IP, SSL certificate ACTIVE
-- [ ] **Database:** Cloud SQL accessible, Flyway V1-V56 migrations complete
+- [ ] **Database:** Cloud SQL accessible, Flyway V1-V58 migrations complete
 - [ ] **Redis:** Memorystore accessible from VPC
 - [ ] **Secrets:** All API keys in GCS/Secret Manager (OpenAI, Anthropic, Google, GitHub)
 - [ ] **OAuth2:** Google and GitHub OAuth redirect URIs configured for production domain

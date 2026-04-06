@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [1.1.3] — 2026-04-06
+
+### Added
+- **Subtask decomposition** — `SubtaskDecomposer` splits multi-file tasks into per-file subtasks at execution time. Each subtask produces exactly one `writeFile` call, eliminating fabrication and reducing token waste on retries. Tracked via `parentTaskId`, `subtaskIndex`, `subtaskTotal` on `AgentTask`.
+- **Self-play prevention** — `FABRICATED_TOOL_RESULT_PATTERN` strips fabricated `<tool_result>` blocks from Anthropic model responses before tool call parsing. Prevents model from simulating entire tool conversations in a single response.
+- **XML-first parsing for PATH B** — WorkerAgent now uses `parseXmlToolCalls()` first for PATH B providers (Anthropic/Google), with `parseJsonToolCalls()` as fallback. Fixes JSON short-circuit that lost 2nd/3rd tool calls in multi-tool responses.
+- **Task graph subtask grouping** — Frontend `TaskGraph.tsx` rewritten with subtask groups: smaller nodes (164×36) grouped under parent with dashed border, expand/collapse chevron, progress bar ("N/M"), and aggregate status dot. Backward compatible with non-subtask runs.
+- **V58 migration** — `parent_task_id`, `subtask_index`, `subtask_total` columns on `agent_task`
+
+### Changed
+- **Model matrix** — Fixed CLAUDE.md and README.md model matrix tables to match actual YAML config (Anthropic WORKHORSE = `claude-haiku-4-5-20251001`, Google = `gemini-2.5-flash`)
+- **Anthropic tool calling** — Moved from native tool calling (broken in Spring AI 1.1.0) to XML prompt-based PATH B with self-play prevention
+
+### Removed
+- **LlmRouter debug logging** — Removed temporary Anthropic request/response debug logs (~30 lines)
+
+### Files Added
+- `harness/SubtaskDecomposer.java` — Multi-file task decomposition
+- `resources/db/migration/V58__subtask_support.sql` — Subtask schema
+
+### Files Modified
+- `agent/WorkerAgent.java` — Self-play prevention, XML-first parsing, truncation salvage fix
+- `agent/LlmRouter.java` — Removed debug logging
+- `api/controller/RunController.java` — TaskGraphNode includes parentTaskId/subtaskIndex/subtaskTotal
+- `frontend/src/lib/api.ts` — TaskGraphNode type updated with subtask fields
+- `frontend/src/components/runs/TaskGraph.tsx` — Full rewrite with subtask grouping
+- `state/entity/AgentTask.java` — Subtask decomposition fields
+- `harness/SequentialTaskExecutor.java` — SubtaskDecomposer integration
+
+---
+
 ## [1.1.0] — 2026-04-04
 
 ### Added
