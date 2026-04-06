@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [1.2.2] — 2026-04-06
+
+### Changed
+- **Google PLANNING model** — Upgraded from `gemini-2.5-flash` → `gemini-3-flash-preview` based on eval results (9.5 overall, 5/7 pass rate, 22s avg latency vs 9.1/4/7/51s). WORKHORSE and LIGHTWEIGHT remain `gemini-2.5-flash`.
+- **Model matrix YAML** — Added `gemini-3-flash-preview` to canonical model registry, updated legacy aliases
+
+---
+
 ## [1.2.1] — 2026-04-06
 
 ### Fixed

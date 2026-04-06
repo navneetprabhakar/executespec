@@ -83,7 +83,7 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning: gemini-2.5-flash
+      planning: gemini-3-flash-preview
       workhorse: gemini-2.5-flash
       lightweight: gemini-2.5-flash
     openai:
@@ -128,7 +128,16 @@ model-matrix:
       pricing:
         input-per-1m: 0.15
         output-per-1m: 0.60
-      notes: "Gemini 2.5 Flash — all Google tiers (PLANNING, WORKHORSE, LIGHTWEIGHT)."
+      notes: "Gemini 2.5 Flash — WORKHORSE + LIGHTWEIGHT tiers for Google."
+    "[gemini-3-flash-preview]":
+      provider: google
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 65536
+      pricing:
+        input-per-1m: 0.15
+        output-per-1m: 0.60
+      notes: "Gemini 3 Flash Preview — PLANNING tier for Google."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
@@ -156,8 +165,7 @@ model-matrix:
     gpt-4o: gpt-5.4
     gpt-4o-mini: gpt-5.4-mini
     gemini-3-flash: gemini-2.5-flash
-    gemini-3-flash-preview: gemini-2.5-flash
-    gemini-3.1-pro-preview: gemini-2.5-flash
+    gemini-3.1-pro-preview: gemini-3-flash-preview
 
   # ── Fallback chains by tier (replaces hardcoded LlmRouter chains) ─────────────
   fallback-chains:

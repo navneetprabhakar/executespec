@@ -1009,7 +1009,7 @@ The system uses a YAML-configured model matrix that maps `AgentTier x Provider -
 
 | Tier | Anthropic | Google | OpenAI |
 |------|----------|--------|--------|
-| PLANNING | `claude-sonnet-4-6` | `gemini-2.5-flash` | `gpt-5.4` |
+| PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
 | WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
 
@@ -2186,7 +2186,7 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning: gemini-2.5-flash
+      planning: gemini-3-flash-preview
       workhorse: gemini-2.5-flash
       lightweight: gemini-2.5-flash
     openai:

@@ -56,7 +56,7 @@ Multi-level API key resolution with three key source modes, per-org provider res
 - User-selected provider per project (Anthropic, Google, or OpenAI). Default: OpenAI.
 - YAML-configured model matrix maps AgentTier x Provider to Model via ModelResolver
 - Three agent tiers with provider-specific models:
-  - PLANNING: `claude-sonnet-4-6` / `gemini-2.5-flash` / `gpt-5.4`
+  - PLANNING: `claude-sonnet-4-6` / `gemini-3-flash-preview` / `gpt-5.4`
   - WORKHORSE: `claude-haiku-4-5-20251001` / `gemini-2.5-flash` / `gpt-5.4-mini`
   - LIGHTWEIGHT: `claude-haiku-4-5-20251001` / `gemini-2.5-flash` / `gpt-5.4-mini`
 - Health-based failover via ProviderHealthTracker (Redis-backed circuit breaker)
