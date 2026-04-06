@@ -918,7 +918,7 @@ SUPER_ADMIN (global -- full system access)
 
 ## 8. Database Schema
 
-### 8.1 Migrations Summary (V1-V56)
+### 8.1 Migrations Summary (V1-V58)
 
 | Range | Scope |
 |-------|-------|

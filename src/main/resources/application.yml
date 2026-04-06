@@ -80,7 +80,7 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-sonnet-4-6
+      workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
       planning: gemini-2.5-flash

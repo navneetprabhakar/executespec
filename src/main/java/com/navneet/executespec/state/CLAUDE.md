@@ -5,7 +5,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 ## Key Files
 - `StateStore.java` — Central state manager. All run/task state mutations go through here. 1500+ lines.
 - `entity/PipelineRun.java` — JPA entity for runs. Key fields: status, plan, costEstimate, actualCostUsd, failureReason, githubPrUrl.
-- `entity/AgentTask.java` — JPA entity for individual tasks within a run.
+- `entity/AgentTask.java` — JPA entity for individual tasks within a run. Includes subtask decomposition fields: `parentTaskId` (null for top-level), `subtaskIndex` (1-based), `subtaskTotal`.
 - `entity/PlanVersion.java` — JPA entity for plan version history. Columns widened in V45 (id/run_id/created_by → VARCHAR(255), source → VARCHAR(64)).
 - `repository/PipelineRunRepository.java` — JPA repository for PipelineRun. Includes `addTokens()` atomic SQL update (no read-modify-write race).
 - `InboxService.java` — User inbox/notification service.
@@ -21,6 +21,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - V51: Force logout flag
 - V52: `github_pr_url VARCHAR(512)` on `pipeline_run`
 - V53–V56: Further schema updates
+- V58: Subtask support (`parent_task_id`, `subtask_index`, `subtask_total` columns on `agent_task`)
 
 ## Patterns
 - StateStore is the single source of truth — no direct repository access from agents

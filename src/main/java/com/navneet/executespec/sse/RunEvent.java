@@ -237,6 +237,11 @@ public record RunEvent(
      * Emitted when a run's accumulated cost exceeds its per-run budget.
      * Payload format: tier|budget|message
      */
+    public static RunEvent taskDecomposed(String runId, String parentTaskId, int subtaskCount) {
+        return new RunEvent("TASK_DECOMPOSED", runId, parentTaskId,
+                String.valueOf(subtaskCount), Instant.now());
+    }
+
     public static RunEvent budgetExceeded(String runId, String tier, double budgetUsd) {
         String message = switch (tier != null ? tier.toUpperCase() : "FREE") {
             case "PRO" -> "Run stopped — $" + String.format("%.0f", budgetUsd) +

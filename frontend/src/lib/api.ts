@@ -135,6 +135,12 @@ export interface TaskSummary {
   objective?: string | null;
   /** The worker's summary of what was implemented. */
   completionNotes?: string | null;
+  /** Parent task ID if this is a subtask (null for top-level tasks). */
+  parentTaskId?: string | null;
+  /** 1-based index within parent's subtask list. */
+  subtaskIndex?: number | null;
+  /** Total number of subtasks in the parent. */
+  subtaskTotal?: number | null;
 }
 
 // ── Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue) ─────
@@ -1216,6 +1222,9 @@ export interface TaskGraphNode {
   assignedModel: string | null;
   dependsOn: string[];
   level: number;
+  parentTaskId: string | null;
+  subtaskIndex: number | null;
+  subtaskTotal: number | null;
 }
 export const getTaskGraph = (runId: string) => req<TaskGraphNode[]>(`/runs/${runId}/task-graph`);
 

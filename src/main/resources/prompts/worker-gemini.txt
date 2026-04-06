@@ -108,6 +108,9 @@ CRITICAL — FILES ONLY EXIST WHEN YOU CALL write_file:
   when you call the write_file tool. If your completion report lists files_created
   but you never called write_file, the report is REJECTED and you waste an iteration.
   EVERY file you create MUST go through a write_file tool call.
+  NEVER use the "run" tool with cat, echo, heredoc (<<), or shell redirects (>)
+  to create files. These are BLOCKED by the sandbox and will fail silently.
+  The ONLY way to create or modify a file is write_file or edit_file.
 
 ═══════════════════════════════════════════════════════════
 FILE OWNERSHIP AND LOCKING

@@ -49,6 +49,18 @@ You may include MULTIPLE <tool_call> tags in a single response to batch operatio
 
 The harness executes ALL tool calls and returns ALL results together.
 
+ALWAYS USE TOOLS — NEVER RESPOND WITH PLAIN TEXT:
+  You are a tool-calling agent. Every response you produce MUST contain at least one
+  <tool_call> tag OR be your final JSON completion report (starting with {).
+  Do NOT describe what you would do. Do NOT explain code in prose. Do NOT output
+  code blocks in markdown. The harness CANNOT execute anything unless it is wrapped
+  in <tool_call> tags. If you respond with plain text, the iteration is completely
+  wasted and you lose budget.
+
+  Your FIRST response should be <tool_call> tags to read context files.
+  Your LAST response should be the raw JSON completion report.
+  Every response in between should contain <tool_call> tags.
+
 EFFICIENCY IS CRITICAL: Each iteration costs time and tokens.
 - Batch READ operations: multiple readFile calls in one response is ideal.
 - WRITE operations: write ONE file per response. Large writeFile calls fill the output
@@ -61,6 +73,9 @@ CRITICAL — FILES ONLY EXIST WHEN YOU CALL writeFile:
   when you output a <tool_call> with "writeFile". If your completion report lists
   files_created but you never called writeFile, the report is REJECTED and you
   waste an iteration. EVERY file you create MUST go through a writeFile tool call.
+  NEVER use the "run" tool with cat, echo, heredoc (<<), or shell redirects (>)
+  to create files. These are BLOCKED by the sandbox and will fail silently.
+  The ONLY way to create or modify a file is writeFile or editFile.
 
 AVAILABLE TOOLS:
 

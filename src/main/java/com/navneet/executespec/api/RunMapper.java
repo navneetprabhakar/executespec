@@ -204,7 +204,10 @@ public class RunMapper {
             t.getCompletedAt(),
             extractFailureReason(t),
             extractObjective(t.getTaskJson()),
-            t.getCompletionNotes()
+            t.getCompletionNotes(),
+            t.getParentTaskId(),
+            t.getSubtaskIndex(),
+            t.getSubtaskTotal()
         );
     }
 

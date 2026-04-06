@@ -121,10 +121,11 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
 **Requirements:**
 - Topological sort via Kahn's algorithm
 - Skip tasks if dependency failed (mark BLOCKED)
-- Per task:
+- **Subtask decomposition:** `SubtaskDecomposer` splits multi-file tasks (2+ owned files) into per-file subtasks at execution time. Each subtask produces exactly one `writeFile` call, eliminating fabrication. Rework tasks excluded from decomposition. Tracked via `parentTaskId`/`subtaskIndex`/`subtaskTotal` on `AgentTask`.
+- Per task (or subtask):
   1. Select model via ModelResolver based on agent tier and user-selected provider
   2. Create isolated worktree
-  3. Run WorkerAgent
+  3. Run WorkerAgent (with self-play prevention: strips fabricated `<tool_result>` blocks, XML-first parsing for PATH B)
   4. On failure: retry with error feedback + model tier escalation (up to 3 attempts)
   5. On success: commit and **progressive merge to main immediately**
 - Per-task validation deferred to review phase (CompilerAgent + ReviewerAgentV2)
@@ -201,8 +202,8 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
 - Topological merge order
 - 4-tier conflict resolution cascade:
   1. SpecializedMerger (pom.xml, YAML, package.json) — deterministic
-  2. ConflictResolverAgent (Haiku) — cheap LLM
-  3. ConflictResolverAgent (Sonnet) — escalation
+  2. ConflictResolverAgent (WORKHORSE tier) — cheap LLM
+  3. ConflictResolverAgent (PLANNING tier) — escalation
   4. FAILED — human intervention
 - **Progressive merge:** each task merged to main immediately after completion (validation deferred to review phase)
 - Auto-retry transient merge failures (up to 2 times, 500ms delay)
@@ -234,6 +235,7 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
 |------|---------|
 | `harness/PipelineHarness.java` | Main orchestrator |
 | `harness/SequentialTaskExecutor.java` | Task execution with progressive merge |
+| `harness/SubtaskDecomposer.java` | Multi-file task → per-file subtask decomposition |
 | `harness/GitMergeService.java` | Merge with conflict resolution |
 | `harness/GateStore.java` | Redis-backed approval gates |
 | `agent/PlannerAgent.java` | Task decomposition |
