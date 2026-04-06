@@ -388,7 +388,13 @@ public class CompilerAgent {
         return switch (tool) {
             case "mvn" -> "mvn compile -q -T 1C 2>&1";
             case "gradle" -> "gradle compileJava -q --parallel 2>&1";
-            case "npm" -> "npm install --legacy-peer-deps 2>&1 && npm run build 2>&1";
+            // Use `npm run build` if build script exists; otherwise try `npx vite build`
+            // to catch import/syntax errors in Vite projects that lack a build script.
+            case "npm" -> "npm install --legacy-peer-deps 2>&1 && " +
+                    "if node -e \"process.exit(require('./package.json').scripts?.build ? 0 : 1)\" 2>/dev/null; " +
+                    "then npm run build 2>&1; " +
+                    "elif npx vite --version >/dev/null 2>&1; " +
+                    "then npx vite build 2>&1; fi";
             default -> throw new IllegalArgumentException("Unknown build tool: " + tool);
         };
     }

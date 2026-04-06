@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-03
+> Last updated: 2026-04-06
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
@@ -13,7 +13,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **`org/`** (2): OrgProjectsPage, OrgSettingsPage
 
 ### Components (`src/components/`)
-- **`runs/`** — RunDetail, RunDetailTabs, RunCard, RunList, RunConversation, NewRunModal, TaskCard, TaskGraph, PreviewTab, LiveLog, ValidationReportPanel, TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary
+- **`runs/`** — RunDetail, RunDetailTabs, RunCard, RunList, RunConversation, NewRunModal, TaskCard, TaskGraph (subtask grouping), PreviewTab, LiveLog, ValidationReportPanel, TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary
 - **`run/`** — FileTree, FileViewer, RunTimeline
 - **`layout/`** — AppLayout, Header, Sidebar, CommandPalette
 - **`dashboard/`** — ActivityFeed, AgentCommGraph, DateRangeFilter, MetricCard, ModelComparisonChart, TokenBubbleChart, UserRunsChart
@@ -72,6 +72,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - Toast notifications for SSE events (compaction, model escalation)
 - Pagination: run list uses `PagedResponse<RunSummary>` with page/size/totalElements
 - Task graph groups: nodes grouped by `_cop{N}_`/`_rev{N}_` prefix into separate collapsible sections
+- **Subtask graph grouping:** Subtask nodes (with `parentTaskId`) rendered as smaller nodes (164×36) grouped under parent with dashed border, aggregate status dot, progress bar ("N/M"), and expand/collapse chevron. Uses variable-height layout — groups compute height based on collapsed/expanded state. Kahn's topological sort only operates on standalone + group parent nodes. Backward compatible: no `parentTaskId` = no groups = same as before.
 - SSE refetch triggers include COMPILING and MERGING statuses (useSse.ts)
 - RunDetail API includes `githubPrUrl` field — displayed as clickable link in overview tab
 - OAuth callback handling via `AuthCallbackPage` (redirect-based flow)

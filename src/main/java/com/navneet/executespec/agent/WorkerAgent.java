@@ -26,6 +26,7 @@ import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
+// AnthropicApi import removed — Anthropic uses PATH B (XML prompt-based tool calling)
 import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -92,6 +93,9 @@ public class WorkerAgent {
     }
 
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile("<tool_call>(.*?)</tool_call>", Pattern.DOTALL);
+    /** Matches fabricated <tool_result> blocks that models may self-generate (self-play). */
+    private static final Pattern FABRICATED_TOOL_RESULT_PATTERN = Pattern.compile(
+            "<tool_result[^>]*>.*?</tool_result>", Pattern.DOTALL);
     /** Inject a progress checkpoint every this many minutes. */
     private static final int CHECKPOINT_INTERVAL_MINUTES = 5;
     /** Inject completion urgency prompt when this many minutes remain. */
@@ -143,12 +147,14 @@ public class WorkerAgent {
         // ── Workspace setup: worktree (normal) or main branch (single-shot) ──
         String workDir;
         if (SKIP_WORKTREE.get()) {
-            // Single-shot mode: operate directly on main workspace, no worktree/branch
-            workDir = props.getWorkspace() + "/" + runId;
+            // Skip worktree creation: either subtask mode (OVERRIDE_WORK_DIR) or single-shot mode
+            String overrideDir = OVERRIDE_WORK_DIR.get();
+            workDir = overrideDir != null ? overrideDir : props.getWorkspace() + "/" + runId;
             WorkspaceContext.set(runId, workDir);
             WorkspaceContext.setTaskId(taskId);
-            branchName = "main";
-            log.info("[Worker-MainBranch] Task [{}] operating on main branch in {}", taskId, workDir);
+            if (overrideDir == null) branchName = "main";
+            log.info("[Worker-{}] Task [{}] operating in {}", overrideDir != null ? "Subtask" : "MainBranch",
+                    taskId, workDir);
         } else {
             // Normal mode: create isolated git worktree with dependency branches
             List<String> depBranches = new ArrayList<>();
@@ -296,6 +302,25 @@ public class WorkerAgent {
                 // Tier 5: record activity before LLM call (for stuck detection)
                 stateStore.updateLastActivity(taskId);
 
+                // Degenerate loop breaker: after 5+ consecutive text-only responses,
+                // the model is stuck in a "I'll call X" / "NO DO IT" cycle.
+                // Trim the degenerate (text + escalation) pairs to break the pattern.
+                // tool_choice is already set to required/any, so the API will enforce
+                // tool use — but the accumulated bad history can confuse the model.
+                if (consecutiveNonJsonOutputs >= 5) {
+                    int pairsToTrim = Math.min(consecutiveNonJsonOutputs - 2, 10);
+                    int msgsToRemove = pairsToTrim * 2; // each pair = assistant text + user escalation
+                    if (msgsToRemove > 0 && messages.size() > msgsToRemove + 4) {
+                        int trimStart = messages.size() - msgsToRemove;
+                        messages.subList(trimStart, messages.size()).clear();
+                        log.info("[Worker {}] Trimmed {} degenerate message pairs ({} msgs) to break text-only loop",
+                                taskId, pairsToTrim, msgsToRemove);
+                        stateStore.appendTaskLog(taskId, "DEGENERATE_LOOP_TRIM:" + pairsToTrim + "_pairs");
+                        messages.add(new UserMessage(
+                                "Call a tool NOW. Do not respond with text."));
+                    }
+                }
+
                 LlmRouter.LlmResponse lr = callModel(messages, provider, model,
                         runId, taskId, agentId, iteration, justCompacted, complexity);
                 provider = lr.provider(); // track the provider that actually succeeded
@@ -388,8 +413,9 @@ public class WorkerAgent {
                     // Without this, the model thinks it wrote files but the harness never dispatched them.
                     int salvaged = 0;
                     if (assistantText != null && !assistantText.isBlank()) {
-                        List<ParsedToolCall> salvageCalls = parseJsonToolCalls(assistantText);
-                        if (salvageCalls.isEmpty()) salvageCalls = parseXmlToolCalls(assistantText);
+                        String salvageText = FABRICATED_TOOL_RESULT_PATTERN.matcher(assistantText).replaceAll("");
+                        List<ParsedToolCall> salvageCalls = parseXmlToolCalls(salvageText);
+                        if (salvageCalls.isEmpty()) salvageCalls = parseJsonToolCalls(salvageText);
                         for (ParsedToolCall tc : salvageCalls) {
                             try {
                                 dispatchTool(tc, runId, taskId);
@@ -444,8 +470,18 @@ public class WorkerAgent {
                 if (assistantMsg.hasToolCalls() && !assistantMsg.getToolCalls().isEmpty()) {
                     log.info("[Worker {}] Iteration {} — {} native tool call(s)",
                             taskId, iteration, assistantMsg.getToolCalls().size());
+
+                    // ── Dispatch non-taskComplete tools FIRST ──────────────────────
+                    // This ensures totalFileWrites is up-to-date before taskComplete
+                    // validation runs (fixes false "fabricated completion" when writeFile
+                    // and taskComplete arrive in the same tool-call batch).
+                    AssistantMessage.ToolCall pendingTaskComplete = null;
                     List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
                     for (AssistantMessage.ToolCall tc : assistantMsg.getToolCalls()) {
+                        if ("taskComplete".equals(tc.name())) {
+                            pendingTaskComplete = tc; // defer until after other tools
+                            continue;
+                        }
                         Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
                                 .lowCardinalityKeyValue("tool.name", tc.name())
                                 .lowCardinalityKeyValue("task.id", taskId)
@@ -460,7 +496,56 @@ public class WorkerAgent {
                         }
                     }
                     toolCallCount += assistantMsg.getToolCalls().size();
-                    messages.add(ToolResponseMessage.builder().responses(responses).build());
+
+                    // ── Now handle taskComplete with accurate totalFileWrites ────────
+                    if (pendingTaskComplete != null) {
+                        AssistantMessage.ToolCall tc = pendingTaskComplete;
+                        log.info("[Worker {}] taskComplete tool called — building completion report", taskId);
+                        stateStore.appendTaskLog(taskId, "TASK_COMPLETE_TOOL_CALLED");
+                        String completionJson = buildCompletionJsonFromToolCall(tc.arguments(), taskId);
+                        if (looksLikeCompletionReport(completionJson, taskId)) {
+                            int claimedFileCount = countClaimedFiles(completionJson);
+                            boolean isFabricated = totalFileWrites == 0 && reportClaimsFileChanges(completionJson);
+                            boolean isPartial = !isFabricated && claimedFileCount > 0
+                                    && totalFileWrites > 0 && claimedFileCount > totalFileWrites;
+                            if (isFabricated || isPartial) {
+                                fabricatedCompletionCount++;
+                                String reason = isFabricated
+                                        ? "taskComplete claims files but 0 writeFile calls dispatched"
+                                        : "taskComplete claims " + claimedFileCount + " files but only "
+                                                + totalFileWrites + " writeFile dispatched";
+                                log.warn("[Worker {}] REJECTED {} taskComplete ({}/{}) — {}",
+                                        taskId, isFabricated ? "fabricated" : "partial",
+                                        fabricatedCompletionCount, MAX_FABRICATED_COMPLETIONS, reason);
+                                stateStore.appendTaskLog(taskId, "FABRICATED_TASK_COMPLETE:" + reason);
+                                if (fabricatedCompletionCount >= MAX_FABRICATED_COMPLETIONS) {
+                                    WorkerReport failReport = new WorkerReport();
+                                    failReport.setTaskId(taskId);
+                                    failReport.setStatus("failed");
+                                    failReport.setFilesCreated(List.of());
+                                    failReport.setFilesModified(List.of());
+                                    failReport.setBlockers("Fabricated completion " + fabricatedCompletionCount + " times");
+                                    return withProviderModel(failReport, provider, model,
+                                            continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
+                                }
+                                // Send rejection back as tool response and continue
+                                responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(),
+                                        "REJECTED: " + reason + ". You must call writeFile for each file first."));
+                            } else {
+                                return withProviderModel(
+                                        parseCompletionReport(completionJson, taskId,
+                                                totalInputTokens, totalOutputTokens,
+                                                totalCacheReadTokens, totalCacheWriteTokens),
+                                        provider, model,
+                                        continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
+                            }
+                        } else {
+                            log.warn("[Worker {}] taskComplete args didn't parse as valid completion — continuing", taskId);
+                        }
+                    }
+                    if (!responses.isEmpty()) {
+                        messages.add(ToolResponseMessage.builder().responses(responses).build());
+                    }
                     if (toolCallCount >= HARD_ITERATION_LIMIT) {
                         log.warn("[Worker {}] Hit hard iteration limit ({} tool calls) — forcing partial completion",
                                 taskId, toolCallCount);
@@ -475,13 +560,20 @@ public class WorkerAgent {
 
                 // ── PATH B: Prompt-based tool calls (Anthropic/Google) ───────────────
                 if (assistantText != null && !assistantText.isBlank()) {
-                    log.debug("[Worker {}] Iteration {} — output ({} chars)",
-                            taskId, iteration, assistantText.length());
+                    // 1. Strip fabricated <tool_result> blocks (self-play prevention).
+                    //    Some models (Anthropic Sonnet) simulate entire tool conversations
+                    //    in one response — strip the fabricated results before parsing.
+                    String cleanedText = FABRICATED_TOOL_RESULT_PATTERN.matcher(assistantText).replaceAll("");
+                    int strippedResults = (assistantText.length() - cleanedText.length());
+                    if (strippedResults > 0) {
+                        log.warn("[Worker {}] Stripped {} chars of fabricated <tool_result> blocks from model response (self-play detected)",
+                                taskId, strippedResults);
+                    }
 
-                    // 1. Parse tool calls — JSON first (unified format), XML as legacy fallback
-                    List<ParsedToolCall> toolCalls = parseJsonToolCalls(assistantText);
+                    // 2. Parse tool calls — XML first for PATH B (expected format), JSON fallback
+                    List<ParsedToolCall> toolCalls = parseXmlToolCalls(cleanedText);
                     if (toolCalls.isEmpty()) {
-                        toolCalls = parseXmlToolCalls(assistantText);
+                        toolCalls = parseJsonToolCalls(cleanedText);
                     }
                     if (!toolCalls.isEmpty()) {
                         consecutiveNonJsonOutputs = 0; // reset — model is cooperating
@@ -565,8 +657,15 @@ public class WorkerAgent {
                                     ? "You have successfully written " + totalFileWrites + " file(s) so far. "
                                     : "You have NOT written any files yet. ";
 
+                            boolean nativeFabricationMode = "openai".equalsIgnoreCase(provider) || "anthropic".equalsIgnoreCase(provider);
                             messages.clear();
                             messages.add(new UserMessage(buildInitialUserMessage(taskDef, branchName, runId)));
+                            String fabricationExample = nativeFabricationMode
+                                    ? "Call the writeFile tool now for your next file."
+                                    : "Example:\n" +
+                                      "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"src/Main.java\", " +
+                                      "\"content\": \"package com.example;\\n...\"}}</tool_call>\n\n" +
+                                      "START NOW — call writeFile for your next file.";
                             messages.add(new UserMessage(
                                     "CONTEXT RESET — Your previous attempt was REJECTED.\n\n" +
                                     "REASON: You produced a completion report claiming " + claimedFileCount +
@@ -578,12 +677,9 @@ public class WorkerAgent {
                                     "RULES (read carefully):\n" +
                                     "1. Files are ONLY created by calling the writeFile tool — describing them in text does NOTHING.\n" +
                                     "2. Call writeFile ONCE for EACH file you need to create.\n" +
-                                    "3. Do NOT output a completion JSON report until ALL files are written.\n" +
+                                    "3. Do NOT call taskComplete until ALL files are written.\n" +
                                     "4. Write ONE file at a time. After each writeFile call, write the next file.\n\n" +
-                                    "Example:\n" +
-                                    "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"src/Main.java\", " +
-                                    "\"content\": \"package com.example;\\n...\"}}</tool_call>\n\n" +
-                                    "START NOW — call writeFile for your next file."));
+                                    fabricationExample));
                             continue; // retry with trimmed context
                         }
                         return withProviderModel(
@@ -604,37 +700,53 @@ public class WorkerAgent {
                 }
 
                 consecutiveNonJsonOutputs++;
+                boolean nativeToolMode = "openai".equalsIgnoreCase(provider);
                 String continuePrompt;
                 long minsLeft = Duration.between(Instant.now(), deadline).toMinutes();
                 if (minsLeft <= 3) {
-                    continuePrompt = "You have approximately " + minsLeft + " minute(s) remaining. " +
-                            "If you have finished all your work, output ONLY your completion JSON report now. " +
-                            "Otherwise, call the MOST IMPORTANT remaining tool using <tool_call> XML tags.";
+                    continuePrompt = nativeToolMode
+                            ? "You have approximately " + minsLeft + " minute(s) remaining. " +
+                              "If you have finished all your work, call the taskComplete tool now. " +
+                              "Otherwise, call the most important remaining tool."
+                            : "You have approximately " + minsLeft + " minute(s) remaining. " +
+                              "If you have finished all your work, output ONLY your completion JSON report now. " +
+                              "Otherwise, call the MOST IMPORTANT remaining tool using <tool_call> XML tags.";
                 } else if (consecutiveNonJsonOutputs >= 2) {
                     // Escalated prompt after 2+ consecutive non-JSON outputs
                     log.warn("[Worker {}] {} consecutive non-JSON outputs — injecting strict completion demand",
                             taskId, consecutiveNonJsonOutputs);
                     stateStore.appendTaskLog(taskId, "NON_JSON_ESCALATION:" + consecutiveNonJsonOutputs);
-                    continuePrompt = "STOP. You have produced " + consecutiveNonJsonOutputs +
-                            " consecutive responses that are neither tool calls nor a valid completion report. " +
-                            "This is wasting your iteration budget.\n\n" +
-                            "OUTPUT ONLY THE JSON COMPLETION REPORT NOW. No prose, no explanation, no markdown — " +
-                            "ONLY the raw JSON object starting with { and ending with }.\n\n" +
-                            "If your task is done:\n" +
-                            "{\"task_id\": \"YOUR_TASK_ID\", \"status\": \"complete\", " +
-                            "\"files_created\": [...], \"files_modified\": [...], " +
-                            "\"files_read\": [...], \"self_review\": \"...\", " +
-                            "\"blockers\": null, \"notes_for_reviewer\": \"...\"}\n\n" +
-                            "If you still need to call a tool, use EXACTLY this format:\n" +
-                            "<tool_call>{\"name\": \"TOOL_NAME\", \"args\": {\"KEY\": \"VALUE\"}}</tool_call>\n\n" +
-                            "NOTHING ELSE. Your next response must start with either { or <tool_call>.";
+                    continuePrompt = nativeToolMode
+                            ? "STOP. You have produced " + consecutiveNonJsonOutputs +
+                              " consecutive text responses without calling any tool. " +
+                              "Do NOT respond with plain text.\n\n" +
+                              "If your task is done, call the taskComplete tool with your status and file lists.\n\n" +
+                              "If you still need to do work, call writeFile, editFile, readFile, or run.\n\n" +
+                              "You MUST call a tool in your next response. No prose, no explanation."
+                            : "STOP. You have produced " + consecutiveNonJsonOutputs +
+                              " consecutive responses that are neither tool calls nor a valid completion report. " +
+                              "This is wasting your iteration budget.\n\n" +
+                              "OUTPUT ONLY THE JSON COMPLETION REPORT NOW. No prose, no explanation, no markdown — " +
+                              "ONLY the raw JSON object starting with { and ending with }.\n\n" +
+                              "If your task is done:\n" +
+                              "{\"task_id\": \"YOUR_TASK_ID\", \"status\": \"complete\", " +
+                              "\"files_created\": [...], \"files_modified\": [...], " +
+                              "\"files_read\": [...], \"self_review\": \"...\", " +
+                              "\"blockers\": null, \"notes_for_reviewer\": \"...\"}\n\n" +
+                              "If you still need to call a tool, use EXACTLY this format:\n" +
+                              "<tool_call>{\"name\": \"TOOL_NAME\", \"args\": {\"KEY\": \"VALUE\"}}</tool_call>\n\n" +
+                              "NOTHING ELSE. Your next response must start with either { or <tool_call>.";
                 } else {
-                    continuePrompt = "Your response was not recognized as a tool call. To call a tool, " +
-                            "you MUST use <tool_call> XML tags. Example:\n" +
-                            "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"file.js\", " +
-                            "\"content\": \"console.log('hello');\"}}</tool_call>\n\n" +
-                            "If you have finished all your work, output ONLY your completion JSON report. " +
-                            "Otherwise, call the next tool using <tool_call> tags now.";
+                    continuePrompt = nativeToolMode
+                            ? "Your response was text only — no tool was called. " +
+                              "You MUST call a tool. If you are done, call the taskComplete tool. " +
+                              "If you need to do more work, call writeFile, readFile, or another tool."
+                            : "Your response was not recognized as a tool call. To call a tool, " +
+                              "you MUST use <tool_call> XML tags. Example:\n" +
+                              "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"file.js\", " +
+                              "\"content\": \"console.log('hello');\"}}</tool_call>\n\n" +
+                              "If you have finished all your work, output ONLY your completion JSON report. " +
+                              "Otherwise, call the next tool using <tool_call> tags now.";
                 }
                 messages.add(new UserMessage(continuePrompt));
 
@@ -791,6 +903,37 @@ public class WorkerAgent {
         }
     }
 
+    /**
+     * Thread-local override for the workspace directory.
+     * When set, {@link #execute(AgentTask, String)} uses this directory instead
+     * of creating a new worktree. Used by subtask decomposition so all subtasks
+     * share the parent task's worktree.
+     */
+    private static final ThreadLocal<String> OVERRIDE_WORK_DIR = new ThreadLocal<>();
+
+    /**
+     * Executes a task in a pre-existing workspace directory (no worktree creation).
+     *
+     * <p>Used by subtask decomposition: the parent task's worktree is created once,
+     * and all subtasks execute sequentially in the same directory. This allows
+     * subtask N+1 to see files written by subtask N.
+     *
+     * @param task   the subtask to execute
+     * @param runId  the pipeline run ID
+     * @param workDir the existing workspace directory to operate in
+     * @return worker report for this subtask
+     */
+    public WorkerReport executeInWorkDir(AgentTask task, String runId, String workDir) {
+        SKIP_WORKTREE.set(true);
+        OVERRIDE_WORK_DIR.set(workDir);
+        try {
+            return execute(task, runId);
+        } finally {
+            SKIP_WORKTREE.remove();
+            OVERRIDE_WORK_DIR.remove();
+        }
+    }
+
     /** Stamps the final provider, model, and calibration data onto the report. */
     private static WorkerReport withProviderModel(WorkerReport report, String provider, String model,
                                                     boolean wasTruncated, int maxOutputTokens,
@@ -849,14 +992,16 @@ public class WorkerAgent {
             } catch (Exception e) {
                 // Standard JSON parsing failed — likely unescaped content in writeFile/editFile.
                 // Use structural fallback parser that handles raw file content.
-                log.debug("[Worker] Standard JSON parse failed, trying structural fallback: {}", e.getMessage());
+                log.info("[Worker] Standard JSON parse failed for tool_call ({}chars), error: {}. Trying structural fallback. Raw: {}",
+                        rawContent.length(), e.getMessage(),
+                        rawContent.length() > 1000 ? rawContent.substring(0, 1000) + "..." : rawContent);
                 ParsedToolCall fallback = parseToolCallStructural(rawContent);
                 if (fallback != null) {
                     calls.add(fallback);
                     log.info("[Worker] Structural fallback parsed tool call: {}", fallback.name());
                 } else {
-                    log.warn("[Worker] Could not parse tool_call (both JSON and structural failed): {}",
-                            rawContent.length() > 200 ? rawContent.substring(0, 200) + "..." : rawContent);
+                    log.warn("[Worker] Could not parse tool_call (both JSON and structural failed). Full raw content ({}chars): {}",
+                            rawContent.length(), rawContent);
                 }
             }
         }
@@ -1286,6 +1431,34 @@ public class WorkerAgent {
      * This prevents false positives from tool results or code snippets containing
      * similar field names.
      */
+    /**
+     * Build a completion report JSON string from taskComplete tool call arguments.
+     * The tool args have the report fields directly; we inject task_id to match
+     * the expected completion report format.
+     */
+    private String buildCompletionJsonFromToolCall(String argsJson, String taskId) {
+        try {
+            JsonNode args = mapper.readTree(argsJson);
+            var report = mapper.createObjectNode();
+            report.put("task_id", taskId);
+            report.put("status", args.path("status").asText("complete"));
+            report.set("files_created", args.has("files_created") ? args.get("files_created") : mapper.createArrayNode());
+            report.set("files_modified", args.has("files_modified") ? args.get("files_modified") : mapper.createArrayNode());
+            report.set("files_read", args.has("files_read") ? args.get("files_read") : mapper.createArrayNode());
+            report.put("self_review", args.path("self_review").asText(""));
+            if (args.has("blockers") && !args.get("blockers").isNull()) {
+                report.put("blockers", args.get("blockers").asText());
+            } else {
+                report.putNull("blockers");
+            }
+            report.put("notes_for_reviewer", args.path("notes_for_reviewer").asText(""));
+            return mapper.writeValueAsString(report);
+        } catch (Exception e) {
+            log.warn("[Worker {}] Failed to build completion from taskComplete args: {}", taskId, e.getMessage());
+            return argsJson; // fallback to raw args
+        }
+    }
+
     private boolean looksLikeCompletionReport(String text, String expectedTaskId) {
         if (text == null || text.isBlank()) return false;
         String normalized = normalizeWorkerResponse(text);
@@ -1673,8 +1846,9 @@ public class WorkerAgent {
         String systemPrompt = loadPrompt(provider);
         int maxOut = budgetMonitor.maxOutputTokens(model, complexity);
         boolean isOpenAi = "openai".equalsIgnoreCase(provider);
-        boolean isAnthropic = "anthropic".equalsIgnoreCase(provider);
-        boolean useNativeTools = isOpenAi || isAnthropic;
+        boolean useNativeTools = isOpenAi;
+        // Anthropic uses PATH B (XML prompt-based) — Spring AI 1.1.0 drops tool_use
+        // blocks from the parsed response (finishReason='tool_use' but getToolCalls()=empty).
 
         log.info("[Worker callModel] provider={} model={} complexity={} maxOut={} nativeTools={}",
                 provider, model, complexity, maxOut, useNativeTools);
@@ -1686,7 +1860,7 @@ public class WorkerAgent {
         final int HISTORY_WINDOW = 18;
         List<Message> windowed;
         if (useNativeTools || messages.size() <= HISTORY_WINDOW + 2) {
-            // Native tool calling (OpenAI/Anthropic): skip sliding window entirely.
+            // Native tool calling (OpenAI): skip sliding window entirely.
             // AssistantMessage(tool_calls) and ToolResponseMessage pairs MUST stay together;
             // the window boundary would split them causing 400 errors. Rely on compaction instead.
             windowed = messages;
@@ -1715,7 +1889,10 @@ public class WorkerAgent {
 
         FallbackMode fallbackMode;
         if (isOpenAi) {
-            // OpenAI: native function calling — tools defined as JSON schemas
+            // OpenAI: native function calling — tools defined as JSON schemas.
+            // OpenAI models reliably call tools in auto mode, so no explicit
+            // tool_choice override needed (Spring AI's extra_body serialization
+            // of toolChoice causes 400 errors on some OpenAI API versions).
             OpenAiChatOptions opts = OpenAiChatOptions.builder()
                     .temperature(0.0)
                     .maxCompletionTokens(maxOut)
@@ -1726,27 +1903,11 @@ public class WorkerAgent {
             // NO_FALLBACK: message history contains ToolResponseMessages
             // that are incompatible across providers if we failover mid-task
             fallbackMode = FallbackMode.NO_FALLBACK;
-        } else if (isAnthropic) {
-            // Anthropic: native tool calling via Spring AI tool callbacks.
-            // Models like Sonnet 4.6 strongly prefer native tool_use blocks over XML
-            // <tool_call> text format — prompt-based approach caused fabricated completions
-            // where the model described files in prose instead of invoking writeFile.
-            AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
-                    .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
-                    .build();
-            AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                    .temperature(0.0)
-                    .maxTokens(maxOut)
-                    .cacheOptions(cacheOpts)
-                    .toolCallbacks(callbacks)
-                    .internalToolExecutionEnabled(false) // keep outer loop in control
-                    .build();
-            prompt = new Prompt(allMessages, opts);
-            // NO_FALLBACK: message history contains ToolResponseMessages
-            // that are incompatible across providers if we failover mid-task
-            fallbackMode = FallbackMode.NO_FALLBACK;
         } else {
-            // Google / others: prompt-based tool calling (XML <tool_call> format)
+            // Anthropic / Google / others: prompt-based tool calling (XML <tool_call> format).
+            // No toolCallbacks — tools described in prompt, parsed as XML in PATH B.
+            // Spring AI 1.1.0 drops Anthropic tool_use blocks (finishReason='tool_use'
+            // but getToolCalls()=empty), so native tool calling is not viable.
             AnthropicCacheOptions cacheOpts = AnthropicCacheOptions.builder()
                     .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
                     .build();
@@ -1754,10 +1915,9 @@ public class WorkerAgent {
                     .temperature(0.0)
                     .maxTokens(maxOut)
                     .cacheOptions(cacheOpts)
-                    // NO toolCallbacks — tools described in prompt, parsed as XML in PATH B
                     .build();
             prompt = new Prompt(allMessages, opts);
-            // Allow provider fallback since no ToolResponseMessages in history
+            // No ToolResponseMessages in history — safe to failover across providers.
             fallbackMode = FallbackMode.IMMEDIATE;
         }
         return llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,

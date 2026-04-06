@@ -986,6 +986,120 @@ public class StateStore {
         });
     }
 
+    // ── Subtask decomposition ─────────────────────────────────────────────────
+
+    /**
+     * Creates subtask DB rows for a decomposed multi-file task.
+     * Each subtask gets its own AgentTask entry linked to the parent via parentTaskId.
+     */
+    public List<AgentTask> createSubtasks(String parentTaskId, String runId,
+                                          List<TaskDefinition> subtaskDefs, String tenantId) {
+        int total = subtaskDefs.size();
+        List<AgentTask> rows = new ArrayList<>();
+        for (int i = 0; i < total; i++) {
+            TaskDefinition def = subtaskDefs.get(i);
+            AgentTask st = AgentTask.builder()
+                    .taskId(def.getTaskId())
+                    .runId(runId)
+                    .title(def.getTitle())
+                    .complexity(def.getComplexity())
+                    .status("PENDING")
+                    .taskJson(toJson(def))
+                    .parentTaskId(parentTaskId)
+                    .subtaskIndex(i + 1)
+                    .subtaskTotal(total)
+                    .compactionCount(0)
+                    .tenantId(tenantId != null ? tenantId : "default")
+                    .build();
+            rows.add(taskRepo.save(st));
+        }
+        log.info("Created {} subtasks for parent task {}", total, parentTaskId);
+        return rows;
+    }
+
+    /**
+     * Returns subtasks for a parent task, ordered by subtask index.
+     */
+    public List<AgentTask> getSubtasks(String parentTaskId) {
+        return taskRepo.findByParentTaskIdOrderBySubtaskIndexAsc(parentTaskId);
+    }
+
+    /**
+     * Aggregates subtask results into the parent task.
+     * Sums tokens, merges file lists, picks worst status, sets duration.
+     */
+    public void completeParentFromSubtasks(String parentTaskId) {
+        AgentTask parent = taskRepo.findById(parentTaskId).orElseThrow();
+        List<AgentTask> subtasks = getSubtasks(parentTaskId);
+
+        int totalIn = 0, totalOut = 0, totalCacheRead = 0, totalCacheWrite = 0;
+        List<String> allCreated = new ArrayList<>();
+        List<String> allModified = new ArrayList<>();
+        boolean anyFailed = false;
+        String provider = null, model = null;
+
+        for (AgentTask st : subtasks) {
+            totalIn += st.getInputTokens() != null ? st.getInputTokens() : 0;
+            totalOut += st.getOutputTokens() != null ? st.getOutputTokens() : 0;
+            totalCacheRead += st.getCacheReadTokens() != null ? st.getCacheReadTokens() : 0;
+            totalCacheWrite += st.getCacheWriteTokens() != null ? st.getCacheWriteTokens() : 0;
+
+            if ("FAILED".equals(st.getStatus()) || "BLOCKED".equals(st.getStatus())) {
+                anyFailed = true;
+            }
+            if (st.getProvider() != null) provider = st.getProvider();
+            if (st.getModel() != null) model = st.getModel();
+
+            // Parse worker report to collect file lists
+            if (st.getWorkerReportJson() != null) {
+                try {
+                    WorkerReport wr = mapper.readValue(st.getWorkerReportJson(), WorkerReport.class);
+                    if (wr.getFilesCreated() != null) allCreated.addAll(wr.getFilesCreated());
+                    if (wr.getFilesModified() != null) allModified.addAll(wr.getFilesModified());
+                } catch (Exception e) {
+                    log.warn("Failed to parse subtask {} worker report: {}", st.getTaskId(), e.getMessage());
+                }
+            }
+        }
+
+        // Build composite report
+        WorkerReport compositeReport = WorkerReport.builder()
+                .taskId(parentTaskId)
+                .status(anyFailed ? "partial" : "complete")
+                .filesCreated(allCreated)
+                .filesModified(allModified)
+                .filesRead(List.of())
+                .inputTokens(totalIn)
+                .outputTokens(totalOut)
+                .cacheReadTokens(totalCacheRead)
+                .cacheWriteTokens(totalCacheWrite)
+                .provider(provider)
+                .model(model)
+                .selfReview("Decomposed into " + subtasks.size() + " subtasks: " +
+                        subtasks.stream().filter(s -> "COMPLETE".equals(s.getStatus())).count() + " complete")
+                .build();
+
+        parent.setStatus(anyFailed ? "PARTIAL" : "COMPLETE");
+        parent.setWorkerReportJson(toJson(compositeReport));
+        parent.setInputTokens(totalIn);
+        parent.setOutputTokens(totalOut);
+        parent.setCacheReadTokens(totalCacheRead);
+        parent.setCacheWriteTokens(totalCacheWrite);
+        if (provider != null) parent.setProvider(provider);
+        if (model != null) parent.setModel(model);
+        parent.setCompletedAt(Instant.now());
+        parent.setDurationMs(parent.getStartedAt() != null
+                ? Duration.between(parent.getStartedAt(), Instant.now()).toMillis() : 0);
+        parent.setCompletionNotes(compositeReport.getSelfReview());
+        taskRepo.save(parent);
+
+        // Accumulate totals on run
+        runRepo.addTokens(parent.getRunId(), totalIn, totalOut);
+
+        log.info("Parent task {} completed from {} subtasks — status={}, tokens={}/{}",
+                parentTaskId, subtasks.size(), parent.getStatus(), totalIn, totalOut);
+    }
+
     public List<AgentTask> getTasksForRun(String runId) {
         return taskRepo.findByRunId(runId);
     }

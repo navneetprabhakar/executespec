@@ -120,8 +120,8 @@ Side paths:
 | | |
 |---|---|
 | **Trigger** | Plan approved |
-| **Handler** | `SequentialTaskExecutor.execute()` -> `WorkerAgent.execute()` per task |
-| **Model** | Sonnet (WORKHORSE) / Opus (PLANNING) based on task complexity |
+| **Handler** | `SequentialTaskExecutor.execute()` → `SubtaskDecomposer` (splits multi-file tasks) → `WorkerAgent.execute()` per task |
+| **Model** | Haiku (WORKHORSE) / Sonnet (PLANNING on stall escalation) based on task complexity |
 | **State** | `WORKING` |
 | **Max task duration** | 25 minutes wall-clock per task |
 
@@ -166,7 +166,7 @@ Side paths:
 |---|---|
 | **Trigger** | All tasks merged |
 | **Handler** | `CompilerAgent.runCompileAndFix()` |
-| **Model** | Sonnet (WORKHORSE tier) |
+| **Model** | WORKHORSE tier (`claude-haiku-4-5-20251001` / `gemini-2.5-flash` / `gpt-5.4-mini`) |
 | **State** | `COMPILING` |
 
 1. **Detect build tool** — Maven / Gradle / npm from sentinel files.
@@ -227,7 +227,7 @@ Side paths:
 |---|---|
 | **Trigger** | Review complete (runs in background validation thread) |
 | **Handler** | `TestGenOrchestrator.runTestGenPipeline()` |
-| **Model** | Sonnet (WORKHORSE tier) for TestWorkerAgent, Haiku (LIGHTWEIGHT) for TestReportGenerator |
+| **Model** | WORKHORSE tier for TestWorkerAgent, LIGHTWEIGHT tier for TestReportGenerator |
 | **State** | `COMPLETE` (run already marked complete) |
 
 1. **Test planning** — `TestPlannerAgent` creates a test plan from the user spec and generated code.
@@ -310,15 +310,15 @@ Side paths:
 |-----------------|-------|-------|----------------|
 | `RunController` | 0 | -- | REST entry, tier/quota checks |
 | `PipelineHarness` | 1-11 | -- | Orchestrator, async thread, gate polling, `runBackgroundValidation()` (shared method) |
-| `PlannerAgent` | 2 | Opus | Task decomposition, project type, cost estimation |
-| `SequentialTaskExecutor` | 4 | -- | Dependency graph, tiered parallel dispatch |
-| `WorkerAgent` | 4, 7 | Sonnet/Opus | Agentic tool-use loop (25 min), code generation |
-| `CompilerAgent` | 5 | Sonnet | Build detection, LLM-guided compile fixes |
+| `PlannerAgent` | 2 | PLANNING | Task decomposition, project type, cost estimation |
+| `SequentialTaskExecutor` | 4 | -- | Dependency graph, tiered parallel dispatch, SubtaskDecomposer |
+| `WorkerAgent` | 4, 7 | WORKHORSE/PLANNING | Agentic tool-use loop (25 min), self-play prevention, code generation |
+| `CompilerAgent` | 5 | WORKHORSE | Build detection, LLM-guided compile fixes |
 | `GitMergeService` | 4, 6 | -- | Branch merging, conflict detection |
-| `ReviewerAgentV2` | 7 | Opus | Code inspection, auto-fix orchestration |
+| `ReviewerAgentV2` | 7 | PLANNING | Code inspection, auto-fix orchestration |
 | `TestGenOrchestrator` | 8 | -- | Orchestrates test gen pipeline (sequential after review) |
-| `TestPlannerAgent` | 8 | Opus | Creates test plan from user spec |
-| `TestWorkerAgent` | 8 | Sonnet | Generates test code per test task |
+| `TestPlannerAgent` | 8 | WORKHORSE | Creates test plan from user spec |
+| `TestWorkerAgent` | 8 | WORKHORSE | Generates test code per test task |
 | `TestPreviewCoordinator` | 9 | -- | Reuses or starts preview, owns preview lifecycle for test execution |
 | `TestReportGenerator` | 9 | Haiku | Generates fix suggestions for failed tests |
 | `ValidationReportService` | 10 | Haiku | Report generation & persistence |
