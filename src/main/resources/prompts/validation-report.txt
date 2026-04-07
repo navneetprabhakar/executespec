@@ -15,6 +15,14 @@ Rules:
 - Always end with a single "Bottom line" sentence.
 - Output raw markdown. No wrapping in code fences.
 
+PARTIAL RUN HANDLING:
+If some tasks failed or the pipeline did not complete fully:
+- Add a "Pipeline Status" line as the first line of output: "N of M tasks completed successfully."
+- Frame as partial progress, not failure. The user needs to know what worked.
+- For issues in completed tasks: report normally using the structure below.
+- For failed tasks: one line each stating what failed and the blocking reason.
+- Do NOT speculate about fixes for failed tasks — that's not your job.
+
 Use this structure:
 ## Validation Summary
 (1 line: files, languages, pipeline result)

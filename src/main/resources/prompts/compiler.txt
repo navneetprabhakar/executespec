@@ -21,6 +21,24 @@ RULES:
     If JS reads dataset.value but HTML has data-digit attributes, fix the JS to read
     the correct attribute (dataset.digit).
 
+DEBUGGING METHODOLOGY — fix root causes, not symptoms:
+When multiple errors exist, apply this triage BEFORE fixing:
+1. CLASSIFY: Group errors by root cause. 10 "cannot find symbol" errors in different files
+   often share ONE root cause (missing class, wrong package).
+2. FIX UPSTREAM FIRST: Fix the definition (model/DTO/entity), not every consumer.
+   Downstream "cannot find symbol" errors resolve automatically.
+3. NEVER PATCH AROUND: If a type doesn't exist, don't change consumers to use Object
+   or remove the import. Create the missing type or fix the import path.
+4. ONE FIX, RE-EVALUATE: After fixing foundational files, many downstream errors
+   may self-resolve. Don't pre-emptively fix errors that might go away.
+
+AMBIGUOUS SYMBOL RESOLUTION:
+- "cannot find symbol: class Foo" — check: Is it a missing import? A typo? A class
+  that was supposed to be created by a dependency task?
+  → If the class doesn't exist in workspace: omit from output (dependency not merged yet).
+  → If it exists but wrong package: fix the import path.
+  → If multiple candidates: prefer the one in the same module/package hierarchy.
+
 SCOPE AND ORDERING:
 13. Fix at most 10 files per invocation. If more files have errors, prioritize in this order:
     models/DTOs/entities → repositories/interfaces → services → controllers → tests.
@@ -28,9 +46,25 @@ SCOPE AND ORDERING:
 14. If an error references a class or file that does not exist in the workspace (e.g., a
     dependency task has not merged yet), you cannot fix it — omit that file from your output.
     The orchestrator will retry after dependencies merge.
+
+CASCADING FAILURE AWARENESS:
+Fixing file A may introduce NEW errors in file B (e.g., changing a method signature).
+- If your fix changes a public method signature, interface, or DTO field: also fix
+  ALL files that reference it within your 10-file budget.
+- If the cascade exceeds 10 files: fix the definition + the most critical consumers
+  (controllers, services). The harness will re-invoke you for remaining errors.
+- NEVER change a method signature to fix one caller if it breaks 5 others.
+
 15. If the same error appears in many files (e.g., missing import for a shared type),
     fix the root cause file first. If the type itself is wrong, fix the type definition —
     do not add workaround imports to every consumer.
+
+ERROR PRIORITY (fix in this order within each file):
+1. Package/class declaration mismatches (file won't compile at all)
+2. Missing imports (blocks all usage of that type)
+3. Method signature mismatches (affects all callers)
+4. Type mismatches in assignments/returns (localized fix)
+5. Syntax errors (brackets, semicolons — localized fix)
 
 Common error patterns and their fixes:
 - "cannot find symbol: class Foo" → add import or correct class name
@@ -39,6 +73,11 @@ Common error patterns and their fixes:
 - "method X is not applicable for arguments" → fix argument types or method signature
 - "reached end of file while parsing" → fix unclosed brackets or braces
 - "class X is public, should be declared in a file named X.java" → fix class name to match filename
+
+WHEN TO OUTPUT EMPTY ARRAY:
+- All errors reference classes/files not yet in workspace → dependency not merged yet
+- Errors are in test files only and the test framework isn't configured → skip (tests run later)
+- NEVER output [] if you can fix even one error. Partial progress > no progress.
 
 Output format (example):
 [

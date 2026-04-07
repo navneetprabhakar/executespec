@@ -106,6 +106,9 @@ public class WorkerAgent {
      *  Set high enough that truncation recovery (2 continues + 2 skeleton recoveries) doesn't
      *  exhaust the budget. Each recovery burns ~2-3 tool calls, so 35 gives ~10 recovery slots. */
     private static final int HARD_ITERATION_LIMIT = 35;
+    /** Reduced iteration limit for subtasks — a subtask writes ONE file and needs at most
+     *  a few reads + 1 writeFile. 10 iterations is generous for single-file tasks. */
+    private static final int SUBTASK_ITERATION_LIMIT = 10;
     /** Max auto-continue attempts when LLM response is truncated (hit maxTokens). */
     private static final int MAX_CONTINUATIONS = 2;
     /** Max skeleton recovery attempts before escalating model anyway. */
@@ -193,6 +196,8 @@ public class WorkerAgent {
         int consecutiveNullResponses = 0;
         final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
         int toolCallCount = 0;  // total tool calls dispatched — for hard iteration limit
+        boolean isSubtask = task.getParentTaskId() != null;
+        int effectiveIterationLimit = isSubtask ? SUBTASK_ITERATION_LIMIT : HARD_ITERATION_LIMIT;
         int continuations = 0;  // truncation auto-continue count
         int consecutiveNonJsonOutputs = 0; // consecutive non-tool, non-JSON outputs
         int skeletonRecoveries = 0; // skeleton recovery injection count
@@ -497,6 +502,17 @@ public class WorkerAgent {
                     }
                     toolCallCount += assistantMsg.getToolCalls().size();
 
+                    // ── Subtask write nudge: if 5+ tool calls with zero writes, force it ──
+                    if (isSubtask && totalFileWrites == 0 && toolCallCount >= 5) {
+                        String nudge = buildSubtaskWriteNudge(taskDef, toolCallCount);
+                        responses.add(new ToolResponseMessage.ToolResponse(
+                                assistantMsg.getToolCalls().getLast().id(),
+                                assistantMsg.getToolCalls().getLast().name(),
+                                nudge));
+                        log.warn("[Worker {}] Subtask write nudge injected at {} tool calls (0 writes)", taskId, toolCallCount);
+                        stateStore.appendTaskLog(taskId, "SUBTASK_WRITE_NUDGE:" + toolCallCount);
+                    }
+
                     // ── Now handle taskComplete with accurate totalFileWrites ────────
                     if (pendingTaskComplete != null) {
                         AssistantMessage.ToolCall tc = pendingTaskComplete;
@@ -546,12 +562,13 @@ public class WorkerAgent {
                     if (!responses.isEmpty()) {
                         messages.add(ToolResponseMessage.builder().responses(responses).build());
                     }
-                    if (toolCallCount >= HARD_ITERATION_LIMIT) {
-                        log.warn("[Worker {}] Hit hard iteration limit ({} tool calls) — forcing partial completion",
-                                taskId, toolCallCount);
-                        stateStore.appendTaskLog(taskId, "HARD_ITERATION_LIMIT:" + toolCallCount);
+                    if (toolCallCount >= effectiveIterationLimit) {
+                        log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing partial completion",
+                                taskId, isSubtask ? "subtask" : "hard", toolCallCount);
+                        stateStore.appendTaskLog(taskId, "ITERATION_LIMIT:" + toolCallCount +
+                                (isSubtask ? " (subtask cap=" + SUBTASK_ITERATION_LIMIT + ")" : ""));
                         return withProviderModel(WorkerReport.partial(taskId,
-                                "Terminated: exceeded " + HARD_ITERATION_LIMIT + " tool-call iterations",
+                                "Terminated: exceeded " + effectiveIterationLimit + " tool-call iterations",
                                 totalInputTokens, totalOutputTokens), provider, model,
                                 continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                     }
@@ -594,13 +611,24 @@ public class WorkerAgent {
                             }
                         }
                         toolCallCount += toolCalls.size();
-                        messages.add(new UserMessage(results.toString().trim()));
-                        if (toolCallCount >= HARD_ITERATION_LIMIT) {
-                            log.warn("[Worker {}] Hit hard iteration limit ({} tool calls) — forcing partial completion",
+
+                        // ── Subtask write nudge (PATH B): if 5+ tool calls with zero writes, force it ──
+                        if (isSubtask && totalFileWrites == 0 && toolCallCount >= 5) {
+                            String nudge = buildSubtaskWriteNudge(taskDef, toolCallCount);
+                            results.append("\n\n").append(nudge);
+                            log.warn("[Worker {}] Subtask write nudge injected at {} tool calls (0 writes) [PATH B]",
                                     taskId, toolCallCount);
-                            stateStore.appendTaskLog(taskId, "HARD_ITERATION_LIMIT:" + toolCallCount);
+                            stateStore.appendTaskLog(taskId, "SUBTASK_WRITE_NUDGE:" + toolCallCount);
+                        }
+
+                        messages.add(new UserMessage(results.toString().trim()));
+                        if (toolCallCount >= effectiveIterationLimit) {
+                            log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing partial completion",
+                                    taskId, isSubtask ? "subtask" : "hard", toolCallCount);
+                            stateStore.appendTaskLog(taskId, "ITERATION_LIMIT:" + toolCallCount +
+                                    (isSubtask ? " (subtask cap=" + SUBTASK_ITERATION_LIMIT + ")" : ""));
                             return withProviderModel(WorkerReport.partial(taskId,
-                                    "Terminated: exceeded " + HARD_ITERATION_LIMIT + " tool-call iterations",
+                                    "Terminated: exceeded " + effectiveIterationLimit + " tool-call iterations",
                                     totalInputTokens, totalOutputTokens), provider, model,
                                     continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
                         }
@@ -1803,6 +1831,28 @@ public class WorkerAgent {
                 Output your completion JSON report as your next response.
                 """.formatted(elapsedMinutes, totalMinutes, remainingMinutes,
                 task.getTaskId(), task.getAcceptanceCriteria());
+    }
+
+    /**
+     * Builds a write nudge message for subtasks that have consumed 5+ tool calls
+     * without producing any writeFile output. Injected into the conversation to
+     * break the read-loop pattern common with Gemini on simple subtasks.
+     */
+    private String buildSubtaskWriteNudge(TaskDefinition taskDef, int toolCallCount) {
+        String ownedFile = (taskDef.getOwnedFiles() != null && !taskDef.getOwnedFiles().isEmpty())
+                ? taskDef.getOwnedFiles().getFirst() : "your assigned file";
+        return """
+                ═══ SUBTASK WRITE NUDGE ═══
+
+                You are on a SUBTASK. You own exactly ONE file: %s
+                You have used %d of 10 allowed tool calls and have written ZERO files.
+
+                STOP READING. You have enough context.
+                Your NEXT tool call MUST be writeFile to create %s.
+                If you call readFile, listFiles, or searchFiles again, this task WILL be terminated.
+
+                Write the complete file NOW.
+                """.formatted(ownedFile, toolCallCount, ownedFile);
     }
 
     /**

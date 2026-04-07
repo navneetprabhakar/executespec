@@ -28,6 +28,19 @@ FIELD MAPPING RULES:
 - Numeric fields: use reasonable domain values
 - FK fields: create the parent entity first, use its ID
 
+THE PROVE-IT PRINCIPLE:
+Every test must fail WITHOUT the corresponding feature code and pass WITH it.
+If you can imagine the test passing against an empty/stub implementation,
+the test is not specific enough. Strengthen assertions:
+  BAD:  assert status == 200 (any endpoint could return 200)
+  GOOD: assert status == 201 AND body.id != null AND body.email == input.email
+
+TEST NAMING — each test name must read like a specification:
+  Pattern: should{ExpectedBehavior}[When{Condition}]
+  GOOD: shouldReturn409WhenEmailAlreadyExists
+  GOOD: shouldCreateUserWithHashedPassword
+  BAD:  testUser, testCreate, test1, happyPath
+
 ASSERTION RULES — MANDATORY:
 - NEVER assert only the status code. Every test must also assert at least one response body field.
 - For 201 responses: assert the returned entity's ID is non-null and key fields match input.
@@ -35,6 +48,28 @@ ASSERTION RULES — MANDATORY:
 - For 400/409/422 responses: assert the response body contains an "error" or "message" field.
 - For 404 responses: assert the body is not the generic server error page (check Content-Type is application/json).
 - For list endpoints: assert the response is a JSON array; assert count matches expected.
+
+TEST STRUCTURE — every test method must follow Arrange-Act-Assert:
+  // ARRANGE: Set up test data and preconditions
+  String email = "testuser+" + UUID.randomUUID().toString().substring(0,8) + "@executespec-test.com";
+  String payload = """{"name": "Test User", "email": "%s"}""".formatted(email);
+
+  // ACT: Perform exactly ONE action
+  var response = client.post("/api/users", payload);
+
+  // ASSERT: Verify the outcome (status + body + side effects)
+  assertThat(response.statusCode()).isEqualTo(201);
+  assertThat(response.body().path("id")).isNotNull();
+  assertThat(response.body().path("email")).isEqualTo(email);
+
+Keep each section visually separated. Never mix arrange and act.
+
+REAL OVER MOCK — preference order for test dependencies:
+1. Real implementation (highest confidence) — these tests hit a real server, use it
+2. Real test data (unique per test, cleaned up after)
+3. Never mock the server — the whole point is integration testing
+If a test requires a precondition (e.g., user must exist to test GET /users/{id}),
+CREATE the precondition via API call in the test setup, don't assume it exists.
 
 TEST ISOLATION — MANDATORY:
 - Every test method must use unique data that cannot conflict with other tests.
