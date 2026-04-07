@@ -52,7 +52,7 @@ export default function AccountingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 px-4 sm:px-6 py-6">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Calculator className="h-6 w-6 text-accent-blue" />
@@ -70,12 +70,12 @@ export default function AccountingPage() {
 
       {/* GST summary */}
       <div className="rounded-sm border border-surface-700 bg-surface-800 p-6">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-200">GST Summary — Q{quarter}</h3>
           {perms?.canExportGstr && (
             <a
               href={getGstr1ExportUrl(fy, quarter)}
-              className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-primary hover:bg-accent-blue"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-primary hover:bg-accent-blue"
             >
               <Download className="h-3.5 w-3.5" />
               Export GSTR-1
@@ -112,6 +112,7 @@ export default function AccountingPage() {
         {trial.length === 0 ? (
           <div className="text-sm text-muted">No entries found for this period</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-700 text-left text-xs text-muted">
@@ -137,6 +138,7 @@ export default function AccountingPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

@@ -203,6 +203,10 @@ export interface RunDetail extends RunSummary {
   applySuggestionCount?: number;
   /** URL of the pull request created for existing-repo runs. */
   githubPrUrl?: string | null;
+  /** SCM-agnostic PR URL (Bitbucket or GitHub). Falls back to githubPrUrl for backward compat. */
+  scmPrUrl?: string | null;
+  /** SCM provider that created the PR: 'GITHUB' | 'BITBUCKET'. Null for legacy runs. */
+  scmProvider?: string | null;
 }
 
 export interface MetricsResponse {
@@ -638,6 +642,12 @@ export const pushToGitHub = (runId: string, repoMode = 'NEW') =>
     `/runs/${runId}/push-github?repoMode=${repoMode}`, { method: 'POST' }
   );
 
+/** SCM-agnostic push — routes to the user's configured SCM provider (GitHub or Bitbucket). */
+export const pushToScm = (runId: string) =>
+  req<{ status: string; repoUrl: string }>(
+    `/runs/${runId}/push-scm`, { method: 'POST' }
+  );
+
 /** File content is served as text/plain — must NOT use res.json(). */
 export const getFile = (runId: string, filePath: string) =>
   reqText(`/runs/${runId}/file?path=${encodeURIComponent(filePath)}`);
@@ -826,6 +836,11 @@ export interface AuthUser {
   confluenceBaseUrl?: string | null;
   confluenceEmail?: string | null;
   hasConfluenceToken?: boolean;
+  // Bitbucket
+  bitbucketUsername?: string | null;
+  hasBitbucketAppPassword?: boolean;
+  bitbucketWorkspace?: string | null;
+  bitbucketRepoSlug?: string | null;
   // UI preference
   viewMode?: 'vibe' | 'pro';
 }
@@ -900,6 +915,20 @@ export const updateConfluenceSettings = (confluenceBaseUrl: string, confluenceEm
   req<AuthUser>('/auth/settings/confluence', {
     method: 'PUT',
     body: JSON.stringify({ confluenceBaseUrl, confluenceEmail, confluenceApiToken }),
+  });
+
+/** Saves per-user Bitbucket credentials. Pass empty strings to clear. */
+export const updateBitbucketSettings = (username: string, appPassword: string, workspace: string, repoSlug: string) =>
+  req<AuthUser>('/auth/settings/bitbucket', {
+    method: 'PUT',
+    body: JSON.stringify({ username, appPassword, workspace, repoSlug }),
+  });
+
+/** Tests Bitbucket credentials by calling the Bitbucket API. */
+export const validateBitbucket = (username: string, appPassword: string, workspace: string, repoSlug: string) =>
+  req<ValidationResult>('/auth/settings/bitbucket/validate', {
+    method: 'POST',
+    body: JSON.stringify({ username, appPassword, workspace, repoSlug }),
   });
 
 /** Updates the user's UI view mode preference ('vibe' or 'pro'). */

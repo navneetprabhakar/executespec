@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/useUiStore';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import * as api from '@/lib/api';
 import type {
   RunSummary, DeployAnalysisResult, RequiredPermission,
@@ -29,6 +30,7 @@ const GCP_REGIONS = [
 
 export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId }: Props) {
   const { addToast } = useUiStore();
+  const isMobile = useIsMobile();
 
   // Wizard state
   const [step, setStep] = useState<WizardStep>(preselectedRunId ? 'credentials' : 'select-run');
@@ -228,10 +230,15 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl max-h-[85vh] rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)]  flex flex-col overflow-hidden"
+        className={cn(
+          'bg-[var(--gray-200)] border border-[var(--border-default)] flex flex-col overflow-hidden',
+          isMobile
+            ? 'fixed inset-0 rounded-none'
+            : 'w-full max-w-2xl max-h-[85vh] rounded-sm'
+        )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-sm bg-accent-blue/20 flex items-center justify-center">
               <Rocket className="h-4 w-4 text-accent-blue" />
@@ -253,7 +260,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
         </div>
 
         {/* Step indicator */}
-        <div className="flex items-center gap-1 px-6 py-3 border-b border-[var(--border-default)] flex-shrink-0">
+        <div className="flex items-center gap-1 px-4 sm:px-6 py-3 border-b border-[var(--border-default)] flex-shrink-0 overflow-x-auto">
           {(['select-run', 'credentials', 'analyze', 'configure', 'deploying'] as WizardStep[]).map((s, i) => {
             const labels = ['Run', 'GCP Auth', 'Analyze', 'Configure', 'Deploy'];
             const isCurrent = s === step;
@@ -275,7 +282,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <AnimatePresence mode="wait">
             {/* ── Step 1: Select Run ── */}
             {step === 'select-run' && (
@@ -382,14 +389,14 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                       <CheckCircle2 className="h-4 w-4 text-accent-green" />
                       <span className="text-sm font-medium text-accent-green">Credentials configured</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                       <div>
                         <span className="text-muted">GCP Project:</span>
                         <span className="ml-1 text-secondary font-mono">{credential.gcpProjectId}</span>
                       </div>
                       <div>
                         <span className="text-muted">Service Account:</span>
-                        <span className="ml-1 text-secondary font-mono text-[10px]">{credential.serviceAccountEmail}</span>
+                        <span className="ml-1 text-secondary font-mono text-[10px] break-all">{credential.serviceAccountEmail}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 pt-1">
@@ -518,7 +525,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                     {/* Manifest summary */}
                     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3">
                       <h3 className="text-sm font-semibold text-primary">Infrastructure Analysis</h3>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <InfoRow icon={<Server className="h-3.5 w-3.5" />} label="Project Type" value={analysis.manifest.projectType} />
                         <InfoRow icon={<Globe className="h-3.5 w-3.5" />} label="Framework" value={analysis.manifest.framework || 'None detected'} />
                         <InfoRow icon={<Database className="h-3.5 w-3.5" />} label="Databases" value={analysis.manifest.databases?.length ? analysis.manifest.databases.join(', ') : 'None'} />
@@ -705,7 +712,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
         </div>
 
         {/* Footer buttons */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-[var(--border-default)] flex-shrink-0">
+        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 sm:px-6 py-4 border-t border-[var(--border-default)] flex-shrink-0">
           <div>
             {step !== 'select-run' && step !== 'deploying' && (
               <button
@@ -720,13 +727,13 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             {step === 'select-run' && (
               <button
                 onClick={() => setStep('credentials')}
                 disabled={!selectedRunId}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
+                  'w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-blue text-primary hover:bg-accent-blue/80',
                   'disabled:opacity-40 disabled:cursor-not-allowed'
                 )}
@@ -739,7 +746,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 onClick={runAnalysis}
                 disabled={!credential}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
+                  'w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-blue text-primary hover:bg-accent-blue/80',
                   'disabled:opacity-40 disabled:cursor-not-allowed'
                 )}
@@ -750,7 +757,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
             {step === 'analyze' && !analyzing && analysis && (
               <button
                 onClick={() => setStep('configure')}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-all"
+                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-all"
               >
                 Configure <ArrowRight className="h-4 w-4" />
               </button>
@@ -760,7 +767,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 onClick={startDeploy}
                 disabled={!selectedPath}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
+                  'w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-green text-primary hover:bg-accent-green/80',
                   'disabled:opacity-40 disabled:cursor-not-allowed'
                 )}
@@ -771,7 +778,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
             {step === 'deploying' && !deploying && (
               <button
                 onClick={onClose}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-[var(--gray-100)] border border-[var(--border-default)] text-secondary hover:border-[var(--border-default)] transition-all"
+                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-[var(--gray-100)] border border-[var(--border-default)] text-secondary hover:border-[var(--border-default)] transition-all"
               >
                 Close
               </button>

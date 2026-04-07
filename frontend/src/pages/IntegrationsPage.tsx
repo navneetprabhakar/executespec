@@ -16,6 +16,8 @@ import type { RunSummary, OrgDto, SlackStatus, SlackChannel, ProjectSlackChannel
 
 const INTEGRATIONS = [
   { key: 'SLACK',      name: 'Slack',      description: 'Pipeline notifications',  configurable: true  },
+  { key: 'GITHUB',     name: 'GitHub',     description: 'Push code to GitHub',     configurable: false },
+  { key: 'BITBUCKET',  name: 'Bitbucket',  description: 'Push code to Bitbucket',  configurable: true, userLevel: true },
   { key: 'JIRA',       name: 'Jira',       description: 'Issue-triggered runs',    configurable: true  },
   { key: 'CONFLUENCE', name: 'Confluence',  description: 'Page-triggered runs',     configurable: true  },
   { key: 'SERVICENOW', name: 'ServiceNow',  description: 'Incident response runs',  configurable: false },
@@ -67,6 +69,17 @@ const SETUP_GUIDES: Record<string, SetupGuide> = {
       'Required scopes: repo (full control of private repositories)',
       'Set an expiration (90 days recommended) and click "Generate token"',
       'Copy the token and paste it into Settings > GitHub > Personal Access Token',
+    ],
+  },
+  BITBUCKET: {
+    title: 'Bitbucket App Password',
+    url: 'https://bitbucket.org/account/settings/app-passwords/',
+    steps: [
+      'Go to Bitbucket > Personal settings > App passwords',
+      'Click "Create app password" and give it a label (e.g. "ExecuteSpec")',
+      'Required permissions: Repositories (Read, Write, Admin), Pull requests (Read, Write)',
+      'Copy the generated app password immediately (it won\'t be shown again)',
+      'Click Configure on the Bitbucket card below and enter your credentials',
     ],
   },
 };
@@ -303,6 +316,109 @@ function ConfluenceCredentialForm({
           Test Connection
         </button>
         {org.hasConfluenceCredentials && (
+          <button
+            type="button"
+            onClick={handleDisconnect}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
+          >
+            <Unplug className="h-3.5 w-3.5" />
+            Disconnect
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+// ── Bitbucket Credential Form (user-level) ──────────────────────────────
+
+function BitbucketCredentialForm({ onSaved }: { onSaved: () => void }) {
+  const { user } = useAuthStore();
+  const loadMe = useAuthStore((s) => s.loadMe);
+  const [username, setUsername] = useState(user?.bitbucketUsername ?? '');
+  const [appPassword, setAppPassword] = useState('');
+  const [workspace, setWorkspace] = useState(user?.bitbucketWorkspace ?? '');
+  const [repoSlug, setRepoSlug] = useState(user?.bitbucketRepoSlug ?? '');
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    setUsername(user?.bitbucketUsername ?? '');
+    setWorkspace(user?.bitbucketWorkspace ?? '');
+    setRepoSlug(user?.bitbucketRepoSlug ?? '');
+  }, [user?.bitbucketUsername, user?.bitbucketWorkspace, user?.bitbucketRepoSlug]);
+
+  const handleTest = async () => {
+    setTesting(true); setMsg(null);
+    try {
+      const result = await api.validateBitbucket(username, appPassword, workspace, repoSlug);
+      setMsg({ ok: result.valid, text: result.message });
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Validation failed.' });
+    } finally { setTesting(false); }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true); setMsg(null);
+    try {
+      await api.updateBitbucketSettings(username, appPassword, workspace, repoSlug);
+      await loadMe();
+      setAppPassword('');
+      setMsg({ ok: true, text: 'Bitbucket credentials saved.' });
+      onSaved();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to save.' });
+    } finally { setSaving(false); }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm('Remove Bitbucket credentials? This will disable Bitbucket integration.')) return;
+    setSaving(true); setMsg(null);
+    try {
+      await api.updateBitbucketSettings('', '', '', '');
+      await loadMe();
+      setUsername(''); setAppPassword(''); setWorkspace(''); setRepoSlug('');
+      setMsg({ ok: true, text: 'Bitbucket credentials removed.' });
+      onSaved();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message ?? 'Failed to clear.' });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <form onSubmit={handleSave} className="space-y-3">
+      <TextField label="Username" value={username} onChange={setUsername} placeholder="your-bitbucket-username" />
+      <SecretField
+        label="App Password"
+        subLabel={user?.hasBitbucketAppPassword ? '(leave blank to keep existing)' : undefined}
+        value={appPassword}
+        onChange={setAppPassword}
+        placeholder={user?.hasBitbucketAppPassword ? '(saved)' : 'Bitbucket app password'}
+      />
+      <TextField label="Workspace" value={workspace} onChange={setWorkspace} placeholder="your-workspace" hint="Bitbucket workspace slug" />
+      <TextField label="Repository Slug" value={repoSlug} onChange={setRepoSlug} placeholder="your-repo" hint="Target repository slug" />
+      {msg && <p className={`text-xs ${msg.ok ? 'text-accent-green' : 'text-accent-red'}`}>{msg.text}</p>}
+      <div className="flex flex-wrap gap-3 pt-1">
+        <button
+          type="submit"
+          disabled={saving || !username.trim() || !workspace.trim() || !repoSlug.trim()}
+          className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={testing || !username.trim() || !appPassword.trim() || !workspace.trim() || !repoSlug.trim()}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-[var(--border-default)] text-secondary text-sm hover:border-accent-blue/40 hover:text-primary disabled:opacity-40 transition-colors"
+        >
+          {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Test Connection
+        </button>
+        {user?.hasBitbucketAppPassword && (
           <button
             type="button"
             onClick={handleDisconnect}
@@ -571,6 +687,8 @@ export default function IntegrationsPage() {
     if (key === 'JIRA') return !!org?.hasJiraCredentials;
     if (key === 'CONFLUENCE') return !!org?.hasConfluenceCredentials;
     if (key === 'SLACK') return !!slackStatus?.connected;
+    if (key === 'GITHUB') return !!user?.hasGithubPat;
+    if (key === 'BITBUCKET') return !!user?.hasBitbucketAppPassword;
     return enabledSources.includes(key);
   };
 
@@ -635,7 +753,7 @@ export default function IntegrationsPage() {
                     }`}>
                       {configured ? 'Enabled' : 'Disabled'}
                     </span>
-                    {isAdmin && int.configurable && user?.orgId && (
+                    {int.configurable && ((int as any).userLevel || (isAdmin && user?.orgId)) && (
                       <button
                         onClick={() => setConfiguring(isExpanded ? null : int.key)}
                         className="flex items-center gap-1 text-xs text-secondary hover:text-accent-blue transition-colors px-2 py-1 rounded-sm border border-[var(--border-default)] hover:border-accent-blue/30"
@@ -655,10 +773,16 @@ export default function IntegrationsPage() {
                 {configured && int.key === 'SLACK' && slackStatus?.teamName && (
                   <p className="text-xs text-muted mt-1 truncate">Workspace: {slackStatus.teamName}</p>
                 )}
+                {configured && int.key === 'GITHUB' && user?.githubOwner && (
+                  <p className="text-xs text-muted mt-1 truncate">Owner: {user.githubOwner}</p>
+                )}
+                {configured && int.key === 'BITBUCKET' && user?.bitbucketWorkspace && (
+                  <p className="text-xs text-muted mt-1 truncate">Workspace: {user.bitbucketWorkspace}/{user.bitbucketRepoSlug}</p>
+                )}
               </div>
 
               {/* Expanded credential form */}
-              {isExpanded && (int.key === 'SLACK' ? user?.orgId : org) && (
+              {isExpanded && ((int as any).userLevel || (int.key === 'SLACK' ? user?.orgId : org)) && (
                 <div className="px-4 pb-4 pt-1 border-t border-[var(--border-default)]">
                   {int.key === 'JIRA' && org && (
                     <JiraCredentialForm org={org} onSaved={handleOrgUpdated} />
@@ -668,6 +792,9 @@ export default function IntegrationsPage() {
                   )}
                   {int.key === 'SLACK' && (
                     <SlackConfigForm slackStatus={slackStatus} onRefresh={fetchSlackStatus} />
+                  )}
+                  {int.key === 'BITBUCKET' && (
+                    <BitbucketCredentialForm onSaved={() => {}} />
                   )}
                 </div>
               )}

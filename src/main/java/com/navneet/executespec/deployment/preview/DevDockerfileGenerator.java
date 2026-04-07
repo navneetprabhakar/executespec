@@ -490,10 +490,10 @@ public class DevDockerfileGenerator {
             sb.append("COPY pom.xml .\n");
             sb.append("RUN mvn dependency:go-offline -q -B || true\n");
             sb.append("COPY . .\n");
-            sb.append("RUN mvn compile -DskipTests -q -B || true\n");
+            sb.append("RUN mvn compile -DskipTests -q -B\n");
             sb.append("EXPOSE 8080\n");
             sb.append(crNonRootUser(false));
-            sb.append("CMD SERVER_PORT=${PORT:-8080} mvn spring-boot:run -DskipTests -q\n");
+            sb.append("CMD SERVER_PORT=${PORT:-8080} mvn -Dmaven.repo.local=/app/.m2 spring-boot:run -DskipTests -q\n");
         }
         return sb.toString();
     }
@@ -1514,9 +1514,10 @@ public class DevDockerfileGenerator {
                 COPY pom.xml .
                 RUN mvn dependency:go-offline -q -B || true
                 COPY . .
-                RUN mvn compile -DskipTests -q -B || true
+                RUN mvn compile -DskipTests -q -B
+                RUN mkdir -p /root/.m2 && cp -r /root/.m2 /home/app_m2 || true
                 EXPOSE 8080
-                CMD ["mvn", "spring-boot:run", "-DskipTests", "-q"]
+                CMD ["mvn", "-Dmaven.repo.local=/app/.m2", "spring-boot:run", "-DskipTests", "-q"]
                 """;
     }
 

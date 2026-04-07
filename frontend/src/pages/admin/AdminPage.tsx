@@ -242,10 +242,12 @@ function AdminPageInner() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Page header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
-        <Shield className="h-5 w-5 text-accent-blue" />
-        <h1 className="text-lg font-semibold text-primary">Super Admin</h1>
-        <div className="ml-auto flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 sm:px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <Shield className="h-5 w-5 text-accent-blue" />
+          <h1 className="text-lg font-semibold text-primary">Super Admin</h1>
+        </div>
+        <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
           <button
             onClick={() => navigate('/admin/analytics')}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors"
@@ -271,7 +273,7 @@ function AdminPageInner() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)]">
+      <div className="flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto">
         {TABS.map(({ id, label, icon: Icon, count }) => (
           <button
             key={id}
@@ -296,12 +298,12 @@ function AdminPageInner() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-4 sm:p-6">
 
         {/* ── USERS TAB ─────────────────────────────────────────────────── */}
         {tab === 'users' && (
           <div className="space-y-4">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
               <input
                 type="text"
                 value={userSearch}
@@ -309,24 +311,30 @@ function AdminPageInner() {
                 placeholder="Search users…"
                 className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary placeholder:text-muted focus:outline-none focus:border-accent-blue/40"
               />
-              <button
-                onClick={() => setShowInviteModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors"
-              >
-                + Invite User
-              </button>
-              <button onClick={loadUsers} className="p-2 text-muted hover:text-secondary">
-                <RefreshCw className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors"
+                >
+                  + Invite User
+                </button>
+                <button onClick={loadUsers} className="p-2 text-muted hover:text-secondary">
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
-                    {['Name / Email', 'Status', 'Tier', 'Role', 'Org Role', 'Actions'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
-                    ))}
+                    <th className="px-4 py-3 text-left font-medium">Name / Email</th>
+                    <th className="px-4 py-3 text-left font-medium">Status</th>
+                    <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Tier</th>
+                    <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Role</th>
+                    <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Org Role</th>
+                    <th className="px-4 py-3 text-left font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-default)]">
@@ -341,7 +349,7 @@ function AdminPageInner() {
                           {u.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 hidden md:table-cell">
                         <select
                           value={u.tier}
                           onChange={(e) => changeUserTier(u.id, e.target.value)}
@@ -352,7 +360,7 @@ function AdminPageInner() {
                           ))}
                         </select>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 hidden md:table-cell">
                         <select
                           value={u.globalRole}
                           onChange={(e) => changeUserRole(u.id, e.target.value)}
@@ -363,7 +371,7 @@ function AdminPageInner() {
                           ))}
                         </select>
                       </td>
-                      <td className="px-4 py-3 text-secondary text-xs">{u.orgRole ?? '—'}</td>
+                      <td className="px-4 py-3 text-secondary text-xs hidden lg:table-cell">{u.orgRole ?? '—'}</td>
                       <td className="px-4 py-3 flex items-center gap-1.5">
                         <button
                           onClick={() => setGrantTarget({ type: 'user', id: u.id, name: `${u.firstName} ${u.lastName}` })}
@@ -391,6 +399,7 @@ function AdminPageInner() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -404,11 +413,12 @@ function AdminPageInner() {
               </button>
             </div>
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Org', 'Tier', 'Status', 'Run Limit', 'API Keys', 'Usage', 'Actions'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                      <th key={h} className="px-4 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -501,6 +511,7 @@ function AdminPageInner() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -626,7 +637,7 @@ function AdminPageInner() {
                 <h3 className="text-sm font-medium text-primary">
                   {editingPkg ? `Edit: ${editingPkg.name}` : 'Create New Package'}
                 </h3>
-                <div className="grid grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                   <div>
                     <label className="block text-[10px] text-muted mb-1">Name</label>
                     <input
@@ -697,11 +708,12 @@ function AdminPageInner() {
 
             {/* Packages table */}
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Name', 'Runs', 'Price (INR)', 'Price (USD)', 'Order', 'Status', 'Actions'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                      <th key={h} className="px-4 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -754,6 +766,7 @@ function AdminPageInner() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -771,7 +784,7 @@ function AdminPageInner() {
               </p>
             </div>
 
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               <button
                 onClick={() => triggerReport('WEEKLY')}
                 disabled={reportSending !== null}
@@ -835,7 +848,7 @@ function AdminPageInner() {
         {/* ── PAYMENT AUDIT TAB ──────────────────────────────────────────── */}
         {tab === 'audit' && (
           <div className="space-y-4">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
               <input
                 type="text"
                 value={auditFilter.orgId}
@@ -850,27 +863,30 @@ function AdminPageInner() {
                 placeholder="Filter by User ID…"
                 className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary placeholder:text-muted focus:outline-none focus:border-accent-blue/40"
               />
-              <button onClick={() => loadAudit(0)} className="flex items-center gap-1.5 px-3 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors">
-                Search
-              </button>
-              <button
-                onClick={() => api.adminExportPaymentAuditCsv().catch((e: any) => addToast({ type: 'error', message: e.message }))}
-                className="flex items-center gap-1.5 px-3 py-2 text-muted hover:text-secondary border border-[var(--border-default)] rounded-sm text-sm transition-colors"
-              >
-                <Download className="h-3.5 w-3.5" />
-                CSV
-              </button>
-              <button onClick={() => loadAudit(auditPage)} className="p-2 text-muted hover:text-secondary">
-                <RefreshCw className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => loadAudit(0)} className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors">
+                  Search
+                </button>
+                <button
+                  onClick={() => api.adminExportPaymentAuditCsv().catch((e: any) => addToast({ type: 'error', message: e.message }))}
+                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 text-muted hover:text-secondary border border-[var(--border-default)] rounded-sm text-sm transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  CSV
+                </button>
+                <button onClick={() => loadAudit(auditPage)} className="p-2 text-muted hover:text-secondary">
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Event', 'Entity', 'Tier Change', 'Gateway', 'Amount', 'By', 'Date'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                      <th key={h} className="px-4 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -883,25 +899,26 @@ function AdminPageInner() {
                   {auditEntries.map((a) => (
                     <tr key={a.id} className="hover:bg-[var(--gray-100)] transition-colors">
                       <td className="px-4 py-3">
-                        <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-accent-blue/10 text-accent-blue">{a.eventType}</span>
+                        <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-accent-blue/10 text-accent-blue whitespace-nowrap">{a.eventType}</span>
                       </td>
                       <td className="px-4 py-3 text-secondary">
                         <p className="text-xs">{a.entityType}</p>
                         <p className="text-muted text-[10px] font-mono truncate max-w-[120px]" title={a.entityId}>{a.entityId}</p>
                       </td>
-                      <td className="px-4 py-3 text-xs text-secondary">
+                      <td className="px-4 py-3 text-xs text-secondary whitespace-nowrap">
                         {a.oldTier || a.newTier ? <>{a.oldTier ?? '–'} → {a.newTier ?? '–'}</> : '–'}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted">{a.gatewayProvider ?? '–'}</td>
-                      <td className="px-4 py-3 text-xs text-secondary font-mono">
+                      <td className="px-4 py-3 text-xs text-secondary font-mono whitespace-nowrap">
                         {a.amountMinor != null ? `${(a.amountMinor / 100).toFixed(2)} ${a.currency ?? ''}` : '–'}
                       </td>
                       <td className="px-4 py-3 text-xs text-muted truncate max-w-[100px]" title={a.performedBy ?? undefined}>{a.performedBy ?? '–'}</td>
-                      <td className="px-4 py-3 text-xs text-muted">{new Date(a.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{new Date(a.createdAt).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
 
             {auditTotal > 50 && (
@@ -920,30 +937,33 @@ function AdminPageInner() {
         {/* ── WEBHOOK EVENTS TAB ────────────────────────────────────────────── */}
         {tab === 'webhooks' && (
           <div className="space-y-4">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
               <select
                 value={webhookGateway}
                 onChange={(e) => setWebhookGateway(e.target.value)}
-                className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none focus:border-accent-blue/40"
+                className="w-full sm:w-auto bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none focus:border-accent-blue/40"
               >
                 <option value="">All Gateways</option>
                 <option value="RAZORPAY">Razorpay</option>
                 <option value="STRIPE">Stripe</option>
               </select>
-              <button onClick={() => loadWebhooks(0)} className="flex items-center gap-1.5 px-3 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors">
-                Search
-              </button>
-              <button onClick={() => loadWebhooks(webhookPage)} className="p-2 text-muted hover:text-secondary">
-                <RefreshCw className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => loadWebhooks(0)} className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 bg-accent-blue hover:bg-accent-blue/80 text-primary text-sm font-medium rounded-sm transition-colors">
+                  Search
+                </button>
+                <button onClick={() => loadWebhooks(webhookPage)} className="p-2 text-muted hover:text-secondary">
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Gateway', 'Event ID', 'Event Type', 'Status', 'Attempts', 'Received'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                      <th key={h} className="px-4 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -972,11 +992,12 @@ function AdminPageInner() {
                         )}>{w.processingStatus}</span>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted text-center">{w.attempts}</td>
-                      <td className="px-4 py-3 text-xs text-muted">{new Date(w.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{new Date(w.createdAt).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
 
             {webhookTotal > 50 && (

@@ -30,12 +30,12 @@ export default function CommandPalette() {
           onClick={() => setCommandPaletteOpen(false)}
         >
           <div
-            className="w-full max-w-xl mx-4 rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden"
+            className="w-full max-w-xl mx-2 sm:mx-4 rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <Command className="[&_[cmdk-input]]:h-12 [&_[cmdk-input]]:px-4 [&_[cmdk-input]]:text-sm [&_[cmdk-input]]:bg-transparent [&_[cmdk-input]]:outline-none [&_[cmdk-input]]:text-[var(--text-primary)] [&_[cmdk-input]]:placeholder:text-[var(--text-muted)]">
               <Command.Input placeholder="Search commands, navigate, find runs..." />
-              <Command.List className="max-h-80 overflow-y-auto border-t border-[var(--border-default)] py-2">
+              <Command.List className="max-h-[50vh] sm:max-h-80 overflow-y-auto border-t border-[var(--border-default)] py-2">
                 <Command.Empty className="py-6 text-center text-sm text-muted">
                   No results found.
                 </Command.Empty>
@@ -94,7 +94,7 @@ function CmdItem({ icon, label, onSelect }: { icon: React.ReactNode; label: stri
   return (
     <Command.Item
       onSelect={onSelect}
-      className="flex items-center gap-3 px-4 py-2.5 text-sm text-secondary cursor-pointer data-[selected=true]:bg-[var(--gray-200)] data-[selected=true]:text-primary"
+      className="flex items-center gap-3 px-4 py-2.5 min-h-[44px] text-sm text-secondary cursor-pointer data-[selected=true]:bg-[var(--gray-200)] data-[selected=true]:text-primary"
     >
       <span className="text-muted">{icon}</span>
       {label}
