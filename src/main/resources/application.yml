@@ -386,6 +386,27 @@ preview:
     free-max: 1
     pro-max: 3
     enterprise-max: 10
+  vm:
+    enabled: false                       # set true to enable VM-based preview deployment
+    default-ttl-hours: 2
+    gateway:
+      ip: ${PREVIEW_GATEWAY_IP:}
+      internal-ip: ${PREVIEW_GW_INTERNAL_IP:}
+      user: ubuntu
+      ssh-key-path: ${PREVIEW_SSH_KEY_PATH:}
+      vm-id: preview-gw
+    vms:
+      - id: preview-gw
+        external-ip: ${PREVIEW_GATEWAY_IP:}
+        internal-ip: ${PREVIEW_GW_INTERNAL_IP:}
+        max-concurrent: 10
+        role: gateway
+      # Add worker VMs when scaling:
+      # - id: preview-worker-1
+      #   external-ip: ${PREVIEW_W1_IP:}
+      #   internal-ip: ${PREVIEW_W1_INTERNAL_IP:}
+      #   max-concurrent: 10
+      #   role: worker
 
 app:
   security:
