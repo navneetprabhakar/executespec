@@ -250,17 +250,8 @@ public class CompilerAgent {
 
         log.info("CompilerAgent: {} files with errors — scoping to {} (priority order)", allFiles.size(), maxFiles);
 
-        // Priority: model/entity/dto > repository > service > controller > config > test > other
-        java.util.Comparator<String> priority = java.util.Comparator.comparingInt(path -> {
-            String lower = ((String) path).toLowerCase();
-            if (lower.contains("/model/") || lower.contains("/entity/") || lower.contains("/dto/")) return 0;
-            if (lower.contains("/repository/") || lower.contains("/repo/")) return 1;
-            if (lower.contains("/service/")) return 2;
-            if (lower.contains("/controller/") || lower.contains("/resource/")) return 3;
-            if (lower.contains("/config/")) return 4;
-            if (lower.contains("/test/") || lower.contains("Test.")) return 5;
-            return 6;
-        });
+        java.util.Comparator<String> priority = java.util.Comparator.comparingInt(
+                CompilerAgent::filePriority);
 
         var prioritizedFiles = allFiles.stream()
                 .sorted(priority)
@@ -277,6 +268,29 @@ public class CompilerAgent {
             }
         }
         return scoped.toString();
+    }
+
+    /**
+     * Assigns a priority rank to a file path for compiler fix ordering.
+     * Lower numbers = higher priority (fixed first to resolve cascading errors).
+     *
+     * 0 = model/entity/dto (foundational types)
+     * 1 = repository/repo (data access)
+     * 2 = service (business logic)
+     * 3 = controller/resource (API layer)
+     * 4 = config (configuration)
+     * 5 = test (test files)
+     * 6 = other (everything else)
+     */
+    private static int filePriority(String path) {
+        String lower = path.toLowerCase();
+        if (lower.contains("/model/") || lower.contains("/entity/") || lower.contains("/dto/")) return 0;
+        if (lower.contains("/repository/") || lower.contains("/repo/")) return 1;
+        if (lower.contains("/service/")) return 2;
+        if (lower.contains("/controller/") || lower.contains("/resource/")) return 3;
+        if (lower.contains("/config/")) return 4;
+        if (lower.contains("/test/") || lower.contains("Test.")) return 5;
+        return 6;
     }
 
     private String extractRelevantFiles(String runId, String errors) {

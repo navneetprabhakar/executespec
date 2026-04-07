@@ -92,6 +92,48 @@ public class WorkerAgent {
     private record ParsedToolCall(String name, String argsJson) {
     }
 
+    /**
+     * Bundles the many mutable local variables tracked across iterations of the
+     * agentic loop inside {@link #execute}. Avoids a 20-parameter method signature
+     * on every extracted helper while keeping state explicit (no instance fields).
+     */
+    private static final class TaskExecutionState {
+        String provider;
+        String model;
+        String complexity;
+        String agentId;
+        String branchName;
+        String workDir;
+        int totalInputTokens;
+        int totalOutputTokens;
+        int totalCacheReadTokens;
+        int totalCacheWriteTokens;
+        int iteration;
+        int lastCallInputTokens;
+        boolean justCompacted;
+        int lastCompactedIteration = -999;
+        int fileWritesSinceCheck;
+        int totalFileWrites;
+        int consecutiveNullResponses;
+        int toolCallCount;
+        int continuations;
+        int consecutiveNonJsonOutputs;
+        int skeletonRecoveries;
+        int fabricatedCompletionCount;
+        int configuredMaxOutput;
+        boolean midTaskRecoveryAttempted;
+        boolean urgencyInjected;
+        boolean isSubtask;
+        int effectiveIterationLimit;
+        Instant deadline;
+        Instant lastCheckpointTime;
+        Instant lastStallCheckTime;
+        int taskDurationMinutes;
+    }
+
+    /** Sentinel return value from helpers that indicates the agentic loop should {@code continue}. */
+    private static final WorkerReport CONTINUE_LOOP = null;
+
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile("<tool_call>(.*?)</tool_call>", Pattern.DOTALL);
     /** Matches fabricated <tool_result> blocks that models may self-generate (self-play). */
     private static final Pattern FABRICATED_TOOL_RESULT_PATTERN = Pattern.compile(
@@ -128,224 +170,67 @@ public class WorkerAgent {
 
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
-        String provider = props.getRoles().getWorker(); // default provider from config
-        String model = task.getAssignedModel() != null
-                ? task.getAssignedModel()
-                : modelRegistry.workhouseModelFor(provider);
-        provider = resolveProvider(model);
-        String agentId = "worker-" + taskId;
-        String complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
-        String branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
-
-        int taskDurationMinutes = props.getConcurrency().getMaxTaskDurationMinutes();
-        log.info("Worker starting task [{}] on branch {} ({}:{}) complexity={} timeLimit={}min",
-                taskId, branchName, provider, model, complexity, taskDurationMinutes);
-
-        stateStore.logMessage(runId, "harness", agentId,
-                "TASK_ASSIGNMENT", "Starting: " + task.getTitle(), 0);
-
-        // Load task definition
         TaskDefinition taskDef = parseTask(task.getTaskJson());
 
-        // ── Workspace setup: worktree (normal) or main branch (single-shot) ──
-        String workDir;
-        if (SKIP_WORKTREE.get()) {
-            // Skip worktree creation: either subtask mode (OVERRIDE_WORK_DIR) or single-shot mode
-            String overrideDir = OVERRIDE_WORK_DIR.get();
-            workDir = overrideDir != null ? overrideDir : props.getWorkspace() + "/" + runId;
-            WorkspaceContext.set(runId, workDir);
-            WorkspaceContext.setTaskId(taskId);
-            if (overrideDir == null) branchName = "main";
-            log.info("[Worker-{}] Task [{}] operating in {}", overrideDir != null ? "Subtask" : "MainBranch",
-                    taskId, workDir);
-        } else {
-            // Normal mode: create isolated git worktree with dependency branches
-            List<String> depBranches = new ArrayList<>();
-            if (taskDef.getDependsOn() != null) {
-                taskDef.getDependsOn().forEach(depId ->
-                    depBranches.add("agent/" + runId.substring(0, 8) + "/" + depId));
-            }
-            workDir = gitTool.createWorktree(runId, taskId, branchName, depBranches);
-            WorkspaceContext.set(runId, workDir);
-            WorkspaceContext.setTaskId(taskId);
-        }
-
-        // Apply complexity override (last line of defense against planner over-assignment)
-        String projectType = readProjectType(workDir);
-        int ownedFilesCount = taskDef.getOwnedFiles() != null ? taskDef.getOwnedFiles().size() : 0;
-        complexity = budgetMonitor.resolveEffectiveComplexity(complexity, model, projectType, ownedFilesCount, taskId);
-
-        log.info("Worker starting task [{}] on branch {} in {} ({}:{}) complexity={}",
-                taskId, branchName, workDir, provider, model, complexity);
-
-        // Per-task conversation history (WorkerAgent is a Spring singleton — no
-        // instance fields)
+        // ── Initialize execution state ───────────────────────────────────────
+        TaskExecutionState state = initializeExecutionState(task, taskDef, runId);
         List<Message> messages = new ArrayList<>();
-        messages.add(new UserMessage(buildInitialUserMessage(taskDef, branchName, runId)));
-
-        int totalInputTokens = 0;
-        int totalOutputTokens = 0;
-        int totalCacheReadTokens = 0; // Anthropic cache_read_input_tokens (billed at 0.10x)
-        int totalCacheWriteTokens = 0; // Anthropic cache_creation_input_tokens (billed at 1.25x)
-        int iteration = 0;
-        int lastCallInputTokens = 0;
-        boolean justCompacted = false;
-        int lastCompactedIteration = -999;
-        int fileWritesSinceCheck = 0;  // tracks file writes for adaptive extension
-        int totalFileWrites = 0;      // total writeFile/editFile dispatches for completion validation
-        int consecutiveNullResponses = 0;
+        messages.add(new UserMessage(buildInitialUserMessage(taskDef, state.branchName, runId)));
         final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
-        int toolCallCount = 0;  // total tool calls dispatched — for hard iteration limit
-        boolean isSubtask = task.getParentTaskId() != null;
-        int effectiveIterationLimit = isSubtask ? SUBTASK_ITERATION_LIMIT : HARD_ITERATION_LIMIT;
-        int continuations = 0;  // truncation auto-continue count
-        int consecutiveNonJsonOutputs = 0; // consecutive non-tool, non-JSON outputs
-        int skeletonRecoveries = 0; // skeleton recovery injection count
-        int fabricatedCompletionCount = 0; // fabricated completion rejections — max 2 before FAILED
         final int MAX_FABRICATED_COMPLETIONS = 2;
-        int configuredMaxOutput = budgetMonitor.maxOutputTokens(model, complexity); // for calibration tracking
-        boolean midTaskRecoveryAttempted = false; // limit to 1 recovery attempt per task
 
         // ── AGENTIC LOOP (time-based) ────────────────────────────────────────
-        Instant deadline = Instant.now().plus(Duration.ofMinutes(taskDurationMinutes));
         int safetyIterationCap = props.getConcurrency().getSafetyIterationCap();
-        Instant lastCheckpointTime = Instant.now();
-        Instant lastStallCheckTime = Instant.now();
-        boolean urgencyInjected = false;
         try { // outer try: always clear WorkspaceContext on exit
         try {
-            while (Instant.now().isBefore(deadline) && iteration < safetyIterationCap) {
+            while (Instant.now().isBefore(state.deadline) && state.iteration < safetyIterationCap) {
 
                 Observation iterObs = Observation.createNotStarted("executespec.task.iteration", observationRegistry)
                         .lowCardinalityKeyValue("task.id", taskId)
                         .lowCardinalityKeyValue("run.id", runId)
-                        .lowCardinalityKeyValue("iteration.number", String.valueOf(iteration))
-                        .lowCardinalityKeyValue("iteration.model", model)
-                        .lowCardinalityKeyValue("iteration.provider", provider)
+                        .lowCardinalityKeyValue("iteration.number", String.valueOf(state.iteration))
+                        .lowCardinalityKeyValue("iteration.model", state.model)
+                        .lowCardinalityKeyValue("iteration.provider", state.provider)
                         .start();
                 try {
 
                 // Drain inbox at start of each iteration; inject as user turn if non-null
-                String inboxContent = inboxService.drainInbox(agentId, runId);
+                String inboxContent = inboxService.drainInbox(state.agentId, runId);
                 if (inboxContent != null) {
                     messages.add(new UserMessage(inboxContent));
                     log.debug("[Worker {}] Injected inbox messages into context", taskId);
                 }
 
-                long elapsedMinutes = Duration.between(deadline.minus(Duration.ofMinutes(taskDurationMinutes)), Instant.now()).toMinutes();
-                long remainingMinutes = Duration.between(Instant.now(), deadline).toMinutes();
+                long elapsedMinutes = Duration.between(state.deadline.minus(Duration.ofMinutes(state.taskDurationMinutes)), Instant.now()).toMinutes();
+                long remainingMinutes = Duration.between(Instant.now(), state.deadline).toMinutes();
 
-                // ── Progress checkpoint: re-inject task context every N minutes ──
-                if (iteration > 0 && Duration.between(lastCheckpointTime, Instant.now()).toMinutes() >= CHECKPOINT_INTERVAL_MINUTES) {
-                    messages.add(new UserMessage(buildProgressCheckpoint(taskDef, elapsedMinutes, taskDurationMinutes)));
-                    log.info("[Worker {}] Injected progress checkpoint at {}min elapsed (iteration {})", taskId, elapsedMinutes, iteration);
-                    lastCheckpointTime = Instant.now();
-                }
-
-                // ── Stall detection: if no file writes in N minutes, escalate model ──
-                // Truncation-aware: if recent stall is caused by truncation (continuations > 0),
-                // inject recovery instruction instead of escalating — a bigger model won't fix
-                // a token-limit problem, it just costs more.
-                if (iteration > 0 && Duration.between(lastStallCheckTime, Instant.now()).toMinutes() >= STALL_CHECK_MINUTES) {
-                    if (fileWritesSinceCheck == 0) {
-                        if (continuations > 0 && skeletonRecoveries < MAX_SKELETON_RECOVERIES) {
-                            // Stall is likely truncation-caused — try skeleton recovery before escalating
-                            skeletonRecoveries++;
-                            log.info("[Worker {}] Stalled but {} truncation(s) detected — injecting skeleton recovery " +
-                                    "({}/{}) instead of model escalation", taskId, continuations,
-                                    skeletonRecoveries, MAX_SKELETON_RECOVERIES);
-                            stateStore.appendTaskLog(taskId, "STALL_TRUNCATION_RECOVERY:" + skeletonRecoveries);
-                            messages.add(new UserMessage(SKELETON_RECOVERY_PROMPT));
-                        } else {
-                            String escalatedModel = escalateModel(model, runId);
-                            if (!escalatedModel.equals(model)) {
-                                log.warn("[Worker {}] Stalled (no file writes in {}min) — escalating {} → {}",
-                                        taskId, STALL_CHECK_MINUTES, model, escalatedModel);
-                                stateStore.logMessage(runId, agentId, "state", "MODEL_ESCALATED",
-                                        "Escalating model to " + escalatedModel + " (stalled — no file writes in " + STALL_CHECK_MINUTES + " min)", 0);
-                                model = escalatedModel;
-                                provider = resolveProvider(model);
-                            }
-                        }
-                    } else {
-                        log.info("[Worker {}] Progress check: {} file writes in last {}min", taskId, fileWritesSinceCheck, STALL_CHECK_MINUTES);
-                    }
-                    fileWritesSinceCheck = 0;
-                    lastStallCheckTime = Instant.now();
-                }
-
-                // ── Forced completion: approaching time limit ──
-                if (!urgencyInjected && remainingMinutes <= URGENCY_THRESHOLD_MINUTES) {
-                    messages.add(new UserMessage(buildCompletionUrgencyPrompt(taskDef, elapsedMinutes, taskDurationMinutes)));
-                    log.warn("[Worker {}] Injected completion urgency prompt at {}min elapsed (~{}min remaining)",
-                            taskId, elapsedMinutes, remainingMinutes);
-                    urgencyInjected = true;
-                }
+                // ── Inject time-based prompts + handle stall detection ──
+                injectCheckpointIfDue(messages, taskDef, taskId, state, elapsedMinutes);
+                handleStallDetection(messages, taskId, runId, state);
+                injectUrgencyIfNeeded(messages, taskDef, taskId, state, elapsedMinutes, remainingMinutes);
 
                 // ── Pre-call token estimation: compact early if projected to exceed threshold ──
-                if (!justCompacted && messages.size() > 30) {
-                    int estimatedTokens = estimateInputTokens(messages);
-                    int limit = budgetMonitor.contextLimitFor(model);
-                    double estimatedPct = (double) estimatedTokens / limit;
-                    double compactPct = props.getCompaction().getCompactPct()
-                            + ("HIGH".equalsIgnoreCase(complexity) ? 0.05 : 0.0);
-                    if (estimatedPct >= compactPct) {
-                        log.info("[Worker {}] Pre-call estimate {}% >= compact threshold — compacting before LLM call",
-                                taskId, (int) (estimatedPct * 100));
-                        String[] compactProvider = { provider };
-                        String[] compactModel   = { model };
-                        messages = compact(messages, taskDef, taskId, runId,
-                                compactProvider, compactModel, agentId, complexity);
-                        provider = compactProvider[0];
-                        model    = compactModel[0];
-                        lastCallInputTokens = 0;
-                        justCompacted = true;
-                        lastCompactedIteration = iteration;
-                    }
-                }
+                messages = handlePreCallCompaction(messages, taskDef, taskId, runId, state);
 
                 // Tier 5: record activity before LLM call (for stuck detection)
                 stateStore.updateLastActivity(taskId);
 
                 // Degenerate loop breaker: after 5+ consecutive text-only responses,
                 // the model is stuck in a "I'll call X" / "NO DO IT" cycle.
-                // Trim the degenerate (text + escalation) pairs to break the pattern.
-                // tool_choice is already set to required/any, so the API will enforce
-                // tool use — but the accumulated bad history can confuse the model.
-                if (consecutiveNonJsonOutputs >= 5) {
-                    int pairsToTrim = Math.min(consecutiveNonJsonOutputs - 2, 10);
-                    int msgsToRemove = pairsToTrim * 2; // each pair = assistant text + user escalation
-                    if (msgsToRemove > 0 && messages.size() > msgsToRemove + 4) {
-                        int trimStart = messages.size() - msgsToRemove;
-                        messages.subList(trimStart, messages.size()).clear();
-                        log.info("[Worker {}] Trimmed {} degenerate message pairs ({} msgs) to break text-only loop",
-                                taskId, pairsToTrim, msgsToRemove);
-                        stateStore.appendTaskLog(taskId, "DEGENERATE_LOOP_TRIM:" + pairsToTrim + "_pairs");
-                        messages.add(new UserMessage(
-                                "Call a tool NOW. Do not respond with text."));
-                    }
-                }
+                trimDegenerateLoop(messages, taskId, state);
 
-                LlmRouter.LlmResponse lr = callModel(messages, provider, model,
-                        runId, taskId, agentId, iteration, justCompacted, complexity);
-                provider = lr.provider(); // track the provider that actually succeeded
-                model    = lr.model();    // track the model that actually served the call
+                LlmRouter.LlmResponse lr = callModel(messages, state.provider, state.model,
+                        runId, taskId, state.agentId, state.iteration, state.justCompacted, state.complexity);
+                state.provider = lr.provider(); // track the provider that actually succeeded
+                state.model    = lr.model();    // track the model that actually served the call
 
                 // Record activity AFTER LLM call returns so stuck detection has accurate timing
                 stateStore.updateLastActivity(taskId);
 
-                iteration++;
+                state.iteration++;
 
                 // Mid-task cost enforcement: check every 5 LLM calls
-                if (iteration % 5 == 0 && runCostBudgetService.isOverBudget(runId)) {
-                    String tier = runCostBudgetService.getRunTier(runId);
-                    Double budget = runCostBudgetService.getBudget(runId);
-                    log.warn("[Worker {}] Mid-task cost budget exceeded — stopping (tier={}, budget=${})",
-                            taskId, tier, budget != null ? String.format("%.2f", budget) : "?");
-                    stateStore.logMessage(runId, agentId, "state", "BUDGET_EXCEEDED",
-                            "Task stopped mid-execution: run cost exceeded $" +
-                            (budget != null ? String.format("%.2f", budget) : "?") + " " + tier + " budget", 0);
-                    sseBroadcaster.emit(runId, RunEvent.budgetExceeded(runId, tier, budget != null ? budget : 3.0));
+                if (checkMidTaskBudget(taskId, runId, state)) {
                     break;
                 }
 
@@ -353,119 +238,32 @@ public class WorkerAgent {
                 // (e.g. rate-limit response, content-filter rejection) that LlmRouter
                 // passed through without throwing. Guard here so the loop can retry.
                 if (lr.response().getResult() == null) {
-                    consecutiveNullResponses++;
+                    state.consecutiveNullResponses++;
                     log.warn("[Worker {}] Null ChatResponse.getResult() on iteration {} ({}/{} consecutive nulls)",
-                            taskId, iteration, consecutiveNullResponses, MAX_CONSECUTIVE_NULL_RESPONSES);
-                    if (consecutiveNullResponses >= MAX_CONSECUTIVE_NULL_RESPONSES) {
+                            taskId, state.iteration, state.consecutiveNullResponses, MAX_CONSECUTIVE_NULL_RESPONSES);
+                    if (state.consecutiveNullResponses >= MAX_CONSECUTIVE_NULL_RESPONSES) {
                         log.error("[Worker {}] {} consecutive null responses — aborting task (provider may be down)",
-                                taskId, consecutiveNullResponses);
-                        stateStore.logMessage(runId, agentId, "state", "WORKER_ABORT",
-                                "Task aborted: " + consecutiveNullResponses + " consecutive null LLM responses", 0);
+                                taskId, state.consecutiveNullResponses);
+                        stateStore.logMessage(runId, state.agentId, "state", "WORKER_ABORT",
+                                "Task aborted: " + state.consecutiveNullResponses + " consecutive null LLM responses", 0);
                         break;
                     }
                     continue;
                 }
-                consecutiveNullResponses = 0; // reset on successful response
+                state.consecutiveNullResponses = 0; // reset on successful response
                 runBudgetTracker.recordCall(runId);
                 AssistantMessage assistantMsg = (AssistantMessage) lr.response().getResult().getOutput();
                 String assistantText = assistantMsg.getText();
                 messages.add(assistantMsg);
 
-                int inputTok = extractInputTokens(lr.response());
-                int outputTok = extractOutputTokens(lr.response());
-                int cacheReadTok = extractCacheReadTokens(lr.response());
-                int cacheWriteTok = extractCacheWriteTokens(lr.response());
-
-                lastCallInputTokens = inputTok;
-                totalInputTokens += inputTok;
-                totalOutputTokens += outputTok;
-                totalCacheReadTokens += cacheReadTok;
-                totalCacheWriteTokens += cacheWriteTok;
-                justCompacted = false;
-
-                // Record token usage on the current iteration observation
-                iterObs.highCardinalityKeyValue("input_tokens", String.valueOf(inputTok));
-                iterObs.highCardinalityKeyValue("output_tokens", String.valueOf(outputTok));
-                iterObs.highCardinalityKeyValue("cache_read_tokens", String.valueOf(cacheReadTok));
-                iterObs.highCardinalityKeyValue("cache_write_tokens", String.valueOf(cacheWriteTok));
-
-                String cacheNote = buildCacheNote(lr.response());
-                log.debug("[Worker {}] Iteration {} ({}/{} tokens){}",
-                        taskId, iteration, inputTok, outputTok, cacheNote);
-
-                // Running cache effectiveness summary every 5 iterations
-                if (iteration % 5 == 0 && totalCacheReadTokens > 0) {
-                    double cacheSavingPct = totalCacheReadTokens * 100.0
-                            / Math.max(1, totalInputTokens + totalCacheReadTokens);
-                    log.info("[Cache][{}] After {} iter — cacheRead={} tok, cacheWrite={} tok, " +
-                            "normalIn={} tok, out={} tok | ~{}% of input served from cache",
-                            taskId, iteration,
-                            totalCacheReadTokens, totalCacheWriteTokens,
-                            totalInputTokens, totalOutputTokens,
-                            String.format("%.1f", cacheSavingPct));
-                }
+                recordTokenUsage(lr.response(), iterObs, taskId, state);
 
                 // ── TRUNCATION AUTO-CONTINUE ─────────────────────────────────────────
                 // If the LLM hit maxTokens, the response is truncated mid-output.
                 // Instead of letting broken code flow to compiler, auto-continue up to
                 // MAX_CONTINUATIONS times.
-                String finishReason = null;
-                try {
-                    finishReason = lr.response().getResult().getMetadata().getFinishReason();
-                } catch (Exception ignored) { /* metadata may be null for some providers */ }
-                if (isTruncatedResponse(finishReason)) {
-                    // Salvage: dispatch any COMPLETE tool calls before the truncation point.
-                    // Without this, the model thinks it wrote files but the harness never dispatched them.
-                    int salvaged = 0;
-                    if (assistantText != null && !assistantText.isBlank()) {
-                        String salvageText = FABRICATED_TOOL_RESULT_PATTERN.matcher(assistantText).replaceAll("");
-                        List<ParsedToolCall> salvageCalls = parseXmlToolCalls(salvageText);
-                        if (salvageCalls.isEmpty()) salvageCalls = parseJsonToolCalls(salvageText);
-                        for (ParsedToolCall tc : salvageCalls) {
-                            try {
-                                dispatchTool(tc, runId, taskId);
-                                if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
-                                toolCallCount++;
-                                salvaged++;
-                            } catch (Exception salvageEx) {
-                                log.debug("[Worker {}] Salvage dispatch failed for {}: {}", taskId, tc.name(), salvageEx.getMessage());
-                            }
-                        }
-                        if (salvaged > 0) {
-                            log.info("[Worker {}] Salvaged {} complete tool call(s) from truncated response " +
-                                    "(totalFileWrites={})", taskId, salvaged, totalFileWrites);
-                        }
-                    }
-
-                    continuations++;
-                    if (continuations <= MAX_CONTINUATIONS) {
-                        log.warn("[Worker {}] Iteration {} — response truncated (finishReason={}). " +
-                                "Auto-continuing ({}/{})", taskId, iteration, finishReason,
-                                continuations, MAX_CONTINUATIONS);
-                        stateStore.appendTaskLog(taskId, "TRUNCATION_CONTINUE:" + continuations);
-                        // Critical: tell the model which tool calls executed and which didn't.
-                        String salvageNote = salvaged > 0
-                                ? salvaged + " tool call(s) from your response WERE executed. "
-                                : "NONE of your tool calls were executed — they were all cut off by truncation. ";
-                        messages.add(new UserMessage(
-                                "Your previous response was TRUNCATED (hit output token limit). " +
-                                salvageNote +
-                                "Any writeFile/editFile that was cut off mid-content was NOT executed.\n\n" +
-                                "IMPORTANT: Write ONE file per response to avoid truncation. " +
-                                "Call writeFile for the next file now."));
-                        continue; // next iteration — send continuation request
-                    } else {
-                        // Skeleton recovery: continuations exhausted, response still truncating.
-                        // Instead of letting broken concatenated output flow to compiler,
-                        // instruct the model to use a skeleton-then-fill strategy.
-                        skeletonRecoveries++;
-                        log.warn("[Worker {}] Iteration {} — truncation persists after {} continuations. " +
-                                "Injecting skeleton recovery ({}/{}).", taskId, iteration, MAX_CONTINUATIONS,
-                                skeletonRecoveries, MAX_SKELETON_RECOVERIES);
-                        stateStore.appendTaskLog(taskId, "SKELETON_RECOVERY_INJECTED:" + skeletonRecoveries);
-                        messages.add(new UserMessage(SKELETON_RECOVERY_PROMPT));
-                        continue; // next iteration — model should switch to skeleton strategy
-                    }
+                if (handleTruncationRecovery(lr.response(), assistantText, messages, taskId, runId, state)) {
+                    continue; // next iteration — send continuation or skeleton recovery request
                 }
 
                 // ── PATH A: Native tool calls (OpenAI + Anthropic) ──────────────────
@@ -473,362 +271,36 @@ public class WorkerAgent {
                 // objects in the response (not in text). We dispatch them manually and send
                 // results back as ToolResponseMessage (required by the API).
                 if (assistantMsg.hasToolCalls() && !assistantMsg.getToolCalls().isEmpty()) {
-                    log.info("[Worker {}] Iteration {} — {} native tool call(s)",
-                            taskId, iteration, assistantMsg.getToolCalls().size());
-
-                    // ── Dispatch non-taskComplete tools FIRST ──────────────────────
-                    // This ensures totalFileWrites is up-to-date before taskComplete
-                    // validation runs (fixes false "fabricated completion" when writeFile
-                    // and taskComplete arrive in the same tool-call batch).
-                    AssistantMessage.ToolCall pendingTaskComplete = null;
-                    List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
-                    for (AssistantMessage.ToolCall tc : assistantMsg.getToolCalls()) {
-                        if ("taskComplete".equals(tc.name())) {
-                            pendingTaskComplete = tc; // defer until after other tools
-                            continue;
-                        }
-                        Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
-                                .lowCardinalityKeyValue("tool.name", tc.name())
-                                .lowCardinalityKeyValue("task.id", taskId)
-                                .lowCardinalityKeyValue("run.id", runId)
-                                .start();
-                        try {
-                            String result = dispatchTool(new ParsedToolCall(tc.name(), tc.arguments()), runId, taskId);
-                            if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
-                            responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
-                        } finally {
-                            toolObs.stop();
-                        }
-                    }
-                    toolCallCount += assistantMsg.getToolCalls().size();
-
-                    // ── Subtask write nudge: if 5+ tool calls with zero writes, force it ──
-                    if (isSubtask && totalFileWrites == 0 && toolCallCount >= 5) {
-                        String nudge = buildSubtaskWriteNudge(taskDef, toolCallCount);
-                        responses.add(new ToolResponseMessage.ToolResponse(
-                                assistantMsg.getToolCalls().getLast().id(),
-                                assistantMsg.getToolCalls().getLast().name(),
-                                nudge));
-                        log.warn("[Worker {}] Subtask write nudge injected at {} tool calls (0 writes)", taskId, toolCallCount);
-                        stateStore.appendTaskLog(taskId, "SUBTASK_WRITE_NUDGE:" + toolCallCount);
-                    }
-
-                    // ── Now handle taskComplete with accurate totalFileWrites ────────
-                    if (pendingTaskComplete != null) {
-                        AssistantMessage.ToolCall tc = pendingTaskComplete;
-                        log.info("[Worker {}] taskComplete tool called — building completion report", taskId);
-                        stateStore.appendTaskLog(taskId, "TASK_COMPLETE_TOOL_CALLED");
-                        String completionJson = buildCompletionJsonFromToolCall(tc.arguments(), taskId);
-                        if (looksLikeCompletionReport(completionJson, taskId)) {
-                            int claimedFileCount = countClaimedFiles(completionJson);
-                            boolean isFabricated = totalFileWrites == 0 && reportClaimsFileChanges(completionJson);
-                            boolean isPartial = !isFabricated && claimedFileCount > 0
-                                    && totalFileWrites > 0 && claimedFileCount > totalFileWrites;
-                            if (isFabricated || isPartial) {
-                                fabricatedCompletionCount++;
-                                String reason = isFabricated
-                                        ? "taskComplete claims files but 0 writeFile calls dispatched"
-                                        : "taskComplete claims " + claimedFileCount + " files but only "
-                                                + totalFileWrites + " writeFile dispatched";
-                                log.warn("[Worker {}] REJECTED {} taskComplete ({}/{}) — {}",
-                                        taskId, isFabricated ? "fabricated" : "partial",
-                                        fabricatedCompletionCount, MAX_FABRICATED_COMPLETIONS, reason);
-                                stateStore.appendTaskLog(taskId, "FABRICATED_TASK_COMPLETE:" + reason);
-                                if (fabricatedCompletionCount >= MAX_FABRICATED_COMPLETIONS) {
-                                    WorkerReport failReport = new WorkerReport();
-                                    failReport.setTaskId(taskId);
-                                    failReport.setStatus("failed");
-                                    failReport.setFilesCreated(List.of());
-                                    failReport.setFilesModified(List.of());
-                                    failReport.setBlockers("Fabricated completion " + fabricatedCompletionCount + " times");
-                                    return withProviderModel(failReport, provider, model,
-                                            continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
-                                }
-                                // Send rejection back as tool response and continue
-                                responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(),
-                                        "REJECTED: " + reason + ". You must call writeFile for each file first."));
-                            } else {
-                                return withProviderModel(
-                                        parseCompletionReport(completionJson, taskId,
-                                                totalInputTokens, totalOutputTokens,
-                                                totalCacheReadTokens, totalCacheWriteTokens),
-                                        provider, model,
-                                        continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
-                            }
-                        } else {
-                            log.warn("[Worker {}] taskComplete args didn't parse as valid completion — continuing", taskId);
-                        }
-                    }
-                    if (!responses.isEmpty()) {
-                        messages.add(ToolResponseMessage.builder().responses(responses).build());
-                    }
-                    if (toolCallCount >= effectiveIterationLimit) {
-                        log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing partial completion",
-                                taskId, isSubtask ? "subtask" : "hard", toolCallCount);
-                        stateStore.appendTaskLog(taskId, "ITERATION_LIMIT:" + toolCallCount +
-                                (isSubtask ? " (subtask cap=" + SUBTASK_ITERATION_LIMIT + ")" : ""));
+                    WorkerReport pathAResult = handleNativeToolCalls(
+                            assistantMsg, messages, taskDef, taskId, runId, state, MAX_FABRICATED_COMPLETIONS);
+                    if (pathAResult != null) return pathAResult;
+                    if (checkIterationLimit(taskId, state)) {
                         return withProviderModel(WorkerReport.partial(taskId,
-                                "Terminated: exceeded " + effectiveIterationLimit + " tool-call iterations",
-                                totalInputTokens, totalOutputTokens), provider, model,
-                                continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
+                                "Terminated: exceeded " + state.effectiveIterationLimit + " tool-call iterations",
+                                state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
+                                state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
                     }
                     continue; // next iteration
                 }
 
                 // ── PATH B: Prompt-based tool calls (Anthropic/Google) ───────────────
                 if (assistantText != null && !assistantText.isBlank()) {
-                    // 1. Strip fabricated <tool_result> blocks (self-play prevention).
-                    //    Some models (Anthropic Sonnet) simulate entire tool conversations
-                    //    in one response — strip the fabricated results before parsing.
-                    String cleanedText = FABRICATED_TOOL_RESULT_PATTERN.matcher(assistantText).replaceAll("");
-                    int strippedResults = (assistantText.length() - cleanedText.length());
-                    if (strippedResults > 0) {
-                        log.warn("[Worker {}] Stripped {} chars of fabricated <tool_result> blocks from model response (self-play detected)",
-                                taskId, strippedResults);
+                    WorkerReport pathBResult = handlePromptBasedToolCalls(
+                            assistantText, messages, taskDef, taskId, runId, state, MAX_FABRICATED_COMPLETIONS);
+                    if (pathBResult == CONTINUE_LOOP) {
+                        // Tool calls dispatched or fabrication retry — continue to next iteration
+                        continue;
                     }
-
-                    // 2. Parse tool calls — XML first for PATH B (expected format), JSON fallback
-                    List<ParsedToolCall> toolCalls = parseXmlToolCalls(cleanedText);
-                    if (toolCalls.isEmpty()) {
-                        toolCalls = parseJsonToolCalls(cleanedText);
-                    }
-                    if (!toolCalls.isEmpty()) {
-                        consecutiveNonJsonOutputs = 0; // reset — model is cooperating
-                        StringBuilder results = new StringBuilder();
-                        for (ParsedToolCall tc : toolCalls) {
-                            Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
-                                    .lowCardinalityKeyValue("tool.name", tc.name())
-                                    .lowCardinalityKeyValue("task.id", taskId)
-                                    .lowCardinalityKeyValue("run.id", runId)
-                                    .start();
-                            try {
-                            String result = dispatchTool(tc, runId, taskId);
-                            if (isFileWriteTool(tc.name())) { fileWritesSinceCheck++; totalFileWrites++; }
-                            results.append("<tool_result tool=\"").append(tc.name()).append("\" untrusted=\"true\">\n")
-                                   .append(result).append("\n</tool_result>\n\n");
-                            } finally {
-                                toolObs.stop();
-                            }
-                        }
-                        toolCallCount += toolCalls.size();
-
-                        // ── Subtask write nudge (PATH B): if 5+ tool calls with zero writes, force it ──
-                        if (isSubtask && totalFileWrites == 0 && toolCallCount >= 5) {
-                            String nudge = buildSubtaskWriteNudge(taskDef, toolCallCount);
-                            results.append("\n\n").append(nudge);
-                            log.warn("[Worker {}] Subtask write nudge injected at {} tool calls (0 writes) [PATH B]",
-                                    taskId, toolCallCount);
-                            stateStore.appendTaskLog(taskId, "SUBTASK_WRITE_NUDGE:" + toolCallCount);
-                        }
-
-                        messages.add(new UserMessage(results.toString().trim()));
-                        if (toolCallCount >= effectiveIterationLimit) {
-                            log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing partial completion",
-                                    taskId, isSubtask ? "subtask" : "hard", toolCallCount);
-                            stateStore.appendTaskLog(taskId, "ITERATION_LIMIT:" + toolCallCount +
-                                    (isSubtask ? " (subtask cap=" + SUBTASK_ITERATION_LIMIT + ")" : ""));
-                            return withProviderModel(WorkerReport.partial(taskId,
-                                    "Terminated: exceeded " + effectiveIterationLimit + " tool-call iterations",
-                                    totalInputTokens, totalOutputTokens), provider, model,
-                                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
-                        }
-                        continue; // next iteration — do NOT add the "continue" prompt below
-                    }
-
-                    // 2. Strict completion detection: JSON must be the entire response
-                    if (looksLikeCompletionReport(assistantText, taskId)) {
-                        // Validate: if the report claims files were created or modified but no
-                        // writeFile/editFile was dispatched, the model fabricated the report.
-                        int claimedFileCount = countClaimedFiles(assistantText);
-                        boolean isFabricated = totalFileWrites == 0 && reportClaimsFileChanges(assistantText);
-                        // Partial completion: report claims more files than were actually written.
-                        // E.g. task says "create 4 files", model writes 1 then sends completion claiming 4.
-                        boolean isPartial = !isFabricated && claimedFileCount > 0
-                                && totalFileWrites > 0 && claimedFileCount > totalFileWrites;
-                        if (isFabricated || isPartial) {
-                            fabricatedCompletionCount++;
-                            String reason = isFabricated
-                                    ? "claims files_created but 0 writeFile calls were dispatched"
-                                    : "claims " + claimedFileCount + " files but only " + totalFileWrites
-                                            + " writeFile calls were dispatched";
-                            log.warn("[Worker {}] REJECTED {} completion report ({}/{}) — {}. Forcing model to use tools.",
-                                    taskId, isFabricated ? "fabricated" : "partial",
-                                    fabricatedCompletionCount, MAX_FABRICATED_COMPLETIONS, reason);
-                            stateStore.appendTaskLog(taskId, (isFabricated ? "FABRICATED" : "PARTIAL")
-                                    + "_REPORT_REJECTED (" + fabricatedCompletionCount + "/"
-                                    + MAX_FABRICATED_COMPLETIONS + "): " + reason);
-
-                            // After MAX_FABRICATED_COMPLETIONS retries, give up — model cannot use tools correctly
-                            if (fabricatedCompletionCount >= MAX_FABRICATED_COMPLETIONS) {
-                                log.error("[Worker {}] Fabricated/partial completion detected {} times — marking task FAILED. " +
-                                        "Model persistently claims file creation without using writeFile tool.",
-                                        taskId, fabricatedCompletionCount);
-                                stateStore.appendTaskLog(taskId, "FAILED: REPEATED_FABRICATED_COMPLETION");
-                                WorkerReport failReport = new WorkerReport();
-                                failReport.setTaskId(taskId);
-                                failReport.setStatus("failed");
-                                failReport.setFilesCreated(List.of());
-                                failReport.setFilesModified(List.of());
-                                failReport.setBlockers("Fabricated/partial completion detected " +
-                                        fabricatedCompletionCount + " times — model claims " + claimedFileCount +
-                                        " files but only " + totalFileWrites + " writeFile calls dispatched.");
-                                return withProviderModel(failReport, provider, model,
-                                        continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
-                            }
-
-                            // CONTEXT-TRIMMED RETRY: instead of keeping full bloated history
-                            // (which burns 100k+ tokens per retry), reset to task assignment +
-                            // summary of actual work done + explicit file-by-file instructions.
-                            // This cuts retry cost from ~100k tokens to ~5k tokens.
-                            int filesRemaining = Math.max(0, claimedFileCount - totalFileWrites);
-                            String writtenFilesSummary = totalFileWrites > 0
-                                    ? "You have successfully written " + totalFileWrites + " file(s) so far. "
-                                    : "You have NOT written any files yet. ";
-
-                            boolean nativeFabricationMode = "openai".equalsIgnoreCase(provider) || "anthropic".equalsIgnoreCase(provider);
-                            messages.clear();
-                            messages.add(new UserMessage(buildInitialUserMessage(taskDef, branchName, runId)));
-                            String fabricationExample = nativeFabricationMode
-                                    ? "Call the writeFile tool now for your next file."
-                                    : "Example:\n" +
-                                      "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"src/Main.java\", " +
-                                      "\"content\": \"package com.example;\\n...\"}}</tool_call>\n\n" +
-                                      "START NOW — call writeFile for your next file.";
-                            messages.add(new UserMessage(
-                                    "CONTEXT RESET — Your previous attempt was REJECTED.\n\n" +
-                                    "REASON: You produced a completion report claiming " + claimedFileCount +
-                                    " files, but only " + totalFileWrites + " writeFile tool calls were dispatched.\n\n" +
-                                    writtenFilesSummary +
-                                    (filesRemaining > 0
-                                            ? "You still need to create " + filesRemaining + " more file(s).\n\n"
-                                            : "\n") +
-                                    "RULES (read carefully):\n" +
-                                    "1. Files are ONLY created by calling the writeFile tool — describing them in text does NOTHING.\n" +
-                                    "2. Call writeFile ONCE for EACH file you need to create.\n" +
-                                    "3. Do NOT call taskComplete until ALL files are written.\n" +
-                                    "4. Write ONE file at a time. After each writeFile call, write the next file.\n\n" +
-                                    fabricationExample));
-                            continue; // retry with trimmed context
-                        }
-                        return withProviderModel(
-                                parseCompletionReport(assistantText, taskId,
-                                        totalInputTokens, totalOutputTokens,
-                                        totalCacheReadTokens, totalCacheWriteTokens),
-                                provider, model,
-                                continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
-                    }
+                    if (pathBResult != null) return pathBResult;
+                    // Fall through: no tool calls and no completion found in PATH B
                 }
 
                 // No tool calls and no completion report — prompt to continue
-                // Log the unparsed output for diagnostics
-                if (assistantText != null && !assistantText.isBlank()) {
-                    log.warn("[Worker {}] Iteration {} — output NOT parsed as tool call or completion ({} chars). " +
-                            "First 300 chars: {}", taskId, iteration, assistantText.length(),
-                            assistantText.length() <= 300 ? assistantText : assistantText.substring(0, 300) + "...");
-                }
-
-                consecutiveNonJsonOutputs++;
-                boolean nativeToolMode = "openai".equalsIgnoreCase(provider);
-                String continuePrompt;
-                long minsLeft = Duration.between(Instant.now(), deadline).toMinutes();
-                if (minsLeft <= 3) {
-                    continuePrompt = nativeToolMode
-                            ? "You have approximately " + minsLeft + " minute(s) remaining. " +
-                              "If you have finished all your work, call the taskComplete tool now. " +
-                              "Otherwise, call the most important remaining tool."
-                            : "You have approximately " + minsLeft + " minute(s) remaining. " +
-                              "If you have finished all your work, output ONLY your completion JSON report now. " +
-                              "Otherwise, call the MOST IMPORTANT remaining tool using <tool_call> XML tags.";
-                } else if (consecutiveNonJsonOutputs >= 2) {
-                    // Escalated prompt after 2+ consecutive non-JSON outputs
-                    log.warn("[Worker {}] {} consecutive non-JSON outputs — injecting strict completion demand",
-                            taskId, consecutiveNonJsonOutputs);
-                    stateStore.appendTaskLog(taskId, "NON_JSON_ESCALATION:" + consecutiveNonJsonOutputs);
-                    continuePrompt = nativeToolMode
-                            ? "STOP. You have produced " + consecutiveNonJsonOutputs +
-                              " consecutive text responses without calling any tool. " +
-                              "Do NOT respond with plain text.\n\n" +
-                              "If your task is done, call the taskComplete tool with your status and file lists.\n\n" +
-                              "If you still need to do work, call writeFile, editFile, readFile, or run.\n\n" +
-                              "You MUST call a tool in your next response. No prose, no explanation."
-                            : "STOP. You have produced " + consecutiveNonJsonOutputs +
-                              " consecutive responses that are neither tool calls nor a valid completion report. " +
-                              "This is wasting your iteration budget.\n\n" +
-                              "OUTPUT ONLY THE JSON COMPLETION REPORT NOW. No prose, no explanation, no markdown — " +
-                              "ONLY the raw JSON object starting with { and ending with }.\n\n" +
-                              "If your task is done:\n" +
-                              "{\"task_id\": \"YOUR_TASK_ID\", \"status\": \"complete\", " +
-                              "\"files_created\": [...], \"files_modified\": [...], " +
-                              "\"files_read\": [...], \"self_review\": \"...\", " +
-                              "\"blockers\": null, \"notes_for_reviewer\": \"...\"}\n\n" +
-                              "If you still need to call a tool, use EXACTLY this format:\n" +
-                              "<tool_call>{\"name\": \"TOOL_NAME\", \"args\": {\"KEY\": \"VALUE\"}}</tool_call>\n\n" +
-                              "NOTHING ELSE. Your next response must start with either { or <tool_call>.";
-                } else {
-                    continuePrompt = nativeToolMode
-                            ? "Your response was text only — no tool was called. " +
-                              "You MUST call a tool. If you are done, call the taskComplete tool. " +
-                              "If you need to do more work, call writeFile, readFile, or another tool."
-                            : "Your response was not recognized as a tool call. To call a tool, " +
-                              "you MUST use <tool_call> XML tags. Example:\n" +
-                              "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"file.js\", " +
-                              "\"content\": \"console.log('hello');\"}}</tool_call>\n\n" +
-                              "If you have finished all your work, output ONLY your completion JSON report. " +
-                              "Otherwise, call the next tool using <tool_call> tags now.";
-                }
-                messages.add(new UserMessage(continuePrompt));
+                messages.add(new UserMessage(buildContinuePrompt(assistantText, taskId, state)));
 
                 // Budget monitoring (compaction / hard-stop)
-                BudgetStatus budget = budgetMonitor.check(model, complexity, lastCallInputTokens);
-                switch (budget.status()) {
-                    case HARD_STOP -> {
-                        if (iteration - lastCompactedIteration > 2) {
-                            log.warn("Hard stop threshold reached for task {} ({}% context) — " +
-                                     "attempting emergency compaction", taskId,
-                                    (int) (budget.usagePct() * 100));
-                            stateStore.recordCompaction(taskId, "emergency-compact-at-hard-stop");
-                            sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
-                            String[] compactProvider = { provider };
-                            String[] compactModel   = { model };
-                            messages = compact(messages, taskDef, taskId, runId,
-                                    compactProvider, compactModel, agentId, complexity);
-                            provider = compactProvider[0];
-                            model    = compactModel[0];
-                            lastCallInputTokens = 0;
-                            justCompacted = true;
-                            lastCompactedIteration = iteration;
-                        } else {
-                            log.warn("Hard stop threshold reached for task {} ({}% context) — " +
-                                     "already compacted at iteration {}, cannot recover",
-                                    taskId, (int) (budget.usagePct() * 100), lastCompactedIteration);
-                            stateStore.recordCompaction(taskId, "hard-stop");
-                            sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
-                            return withProviderModel(WorkerReport.partial(taskId,
-                                    "Hard stopped at " + (int) (budget.usagePct() * 100)
-                                            + "% context usage after emergency compaction failed. Resume required.",
-                                    totalInputTokens, totalOutputTokens), provider, model,
-                                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
-                        }
-                    }
-                    case COMPACT -> {
-                        log.info("Compacting context for task {} at {}% usage", taskId,
-                                (int) (budget.usagePct() * 100));
-                        String[] compactProvider = { provider };
-                        String[] compactModel   = { model };
-                        messages = compact(messages, taskDef, taskId, runId,
-                                compactProvider, compactModel, agentId, complexity);
-                        provider = compactProvider[0];
-                        model    = compactModel[0];
-                        lastCallInputTokens = 0;
-                        justCompacted = true;
-                        lastCompactedIteration = iteration;
-                    }
-                    case WARN ->
-                        log.warn("Context at {}% for task {} — compaction approaching",
-                                (int) (budget.usagePct() * 100), taskId);
-                    case OK -> {
-                        /* nothing */ }
-                }
+                WorkerReport budgetResult = handleBudgetMonitoring(messages, taskDef, taskId, runId, state);
+                if (budgetResult != null) return budgetResult;
 
                 } finally {
                     iterObs.stop();
@@ -836,69 +308,806 @@ public class WorkerAgent {
             }
         } catch (MidTaskProviderFailureException e) {
             // ── Recovery via checkpoint compaction + fallback provider ────────────
-            // Compact conversation to produce provider-agnostic messages, switch to a
-            // fallback provider, and re-enter the agentic loop for one more attempt.
-            if (!midTaskRecoveryAttempted) {
-                midTaskRecoveryAttempted = true;
-                String failedProvider = provider;
-                try {
-                    var aiProvider = stateStore.findRun(runId)
-                            .map(r -> r.getAiProviderEnum())
-                            .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
-
-                    // Find a different provider via failover chain
-                    ResolvedModel fallbackResolved = modelResolver.resolveFallbackExcluding(
-                            "WorkerAgent", aiProvider, failedProvider);
-
-                    // Compact conversation — produces provider-agnostic checkpoint
-                    String[] compactProvider = { fallbackResolved.providerName() };
-                    String[] compactModel   = { fallbackResolved.getModel() };
-                    messages = compact(messages, taskDef, taskId, runId,
-                            compactProvider, compactModel, agentId, complexity);
-                    provider = compactProvider[0];
-                    model    = compactModel[0];
-                    lastCallInputTokens = 0;
-
-                    log.info("Mid-task recovery: compacted and switched {} → {} for task {}",
-                            failedProvider, provider, taskId);
-                    io.micrometer.core.instrument.Metrics.counter("executespec.worker.mid_task_recovery",
-                            "from_provider", failedProvider, "to_provider", provider).increment();
-                    sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
-                            "⚡ Provider failure — recovered via checkpoint (now using " + model + ")"));
-
-                    // Re-enter the agentic loop — goto not available in Java, so we use
-                    // a labeled continue on an outer recovery loop. Since the current code
-                    // structure doesn't have one, we return partial with enough context
-                    // for the harness retry mechanism to pick up where we left off.
-                    // The checkpoint file is already written by compact(), so a retry
-                    // will resume from the compacted state with the new provider.
-                } catch (Exception recoveryEx) {
-                    log.error("Mid-task recovery failed for task {}: {}", taskId, recoveryEx.getMessage());
-                }
-            }
+            handleMidTaskRecovery(e, messages, taskDef, taskId, runId, state);
             return withProviderModel(WorkerReport.blocked(taskId,
                     "Provider failure mid-task (" + e.getMessage() + ")",
-                    totalInputTokens, totalOutputTokens), provider, model,
-                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
+                    state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
+                    state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
         } catch (LlmRouter.ProviderUnavailableException e) {
             log.error("All providers exhausted for task {}: {}", taskId, e.getMessage());
             return withProviderModel(WorkerReport.blocked(taskId, "All providers exhausted: " + e.getMessage(),
-                    totalInputTokens, totalOutputTokens), provider, model,
-                    continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
+                    state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
+                    state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
         }
         // ── END AGENTIC LOOP ──────────────────────────────────────────────────
 
-        boolean hitTimeLimitFlag = !Instant.now().isBefore(deadline);
+        boolean hitTimeLimitFlag = !Instant.now().isBefore(state.deadline);
         String reason = hitTimeLimitFlag
-                ? "Hit " + taskDurationMinutes + "-minute time limit after " + iteration + " iterations without producing completion report."
+                ? "Hit " + state.taskDurationMinutes + "-minute time limit after " + state.iteration + " iterations without producing completion report."
                 : "Hit safety iteration cap (" + safetyIterationCap + ") without producing completion report.";
-        log.warn("Worker for task {} stopped: {} (complexity={})", taskId, reason, complexity);
+        log.warn("Worker for task {} stopped: {} (complexity={})", taskId, reason, state.complexity);
         return withProviderModel(WorkerReport.partial(taskId, reason,
-                totalInputTokens, totalOutputTokens), provider, model,
-                continuations > 0, configuredMaxOutput, totalOutputTokens, iteration);
+                state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
+                state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
         } finally {
             // Always clear the thread-local worktree context, even on exception.
             WorkspaceContext.clear();
+        }
+    }
+
+    // ── Extracted helpers for execute() ─────────────────────────────────────
+
+    /**
+     * Initializes all execution state: workspace setup, provider/model resolution,
+     * complexity override, and timing variables.
+     */
+    private TaskExecutionState initializeExecutionState(AgentTask task, TaskDefinition taskDef, String runId) {
+        TaskExecutionState s = new TaskExecutionState();
+        String taskId = task.getTaskId();
+        s.provider = props.getRoles().getWorker(); // default provider from config
+        s.model = task.getAssignedModel() != null
+                ? task.getAssignedModel()
+                : modelRegistry.workhouseModelFor(s.provider);
+        s.provider = resolveProvider(s.model);
+        s.agentId = "worker-" + taskId;
+        s.complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
+        s.branchName = "agent/" + runId.substring(0, 8) + "/" + taskId;
+
+        s.taskDurationMinutes = props.getConcurrency().getMaxTaskDurationMinutes();
+        log.info("Worker starting task [{}] on branch {} ({}:{}) complexity={} timeLimit={}min",
+                taskId, s.branchName, s.provider, s.model, s.complexity, s.taskDurationMinutes);
+
+        stateStore.logMessage(runId, "harness", s.agentId,
+                "TASK_ASSIGNMENT", "Starting: " + task.getTitle(), 0);
+
+        // ── Workspace setup: worktree (normal) or main branch (single-shot) ──
+        if (SKIP_WORKTREE.get()) {
+            // Skip worktree creation: either subtask mode (OVERRIDE_WORK_DIR) or single-shot mode
+            String overrideDir = OVERRIDE_WORK_DIR.get();
+            s.workDir = overrideDir != null ? overrideDir : props.getWorkspace() + "/" + runId;
+            WorkspaceContext.set(runId, s.workDir);
+            WorkspaceContext.setTaskId(taskId);
+            if (overrideDir == null) s.branchName = "main";
+            log.info("[Worker-{}] Task [{}] operating in {}", overrideDir != null ? "Subtask" : "MainBranch",
+                    taskId, s.workDir);
+        } else {
+            // Normal mode: create isolated git worktree with dependency branches
+            List<String> depBranches = new ArrayList<>();
+            if (taskDef.getDependsOn() != null) {
+                taskDef.getDependsOn().forEach(depId ->
+                    depBranches.add("agent/" + runId.substring(0, 8) + "/" + depId));
+            }
+            s.workDir = gitTool.createWorktree(runId, taskId, s.branchName, depBranches);
+            WorkspaceContext.set(runId, s.workDir);
+            WorkspaceContext.setTaskId(taskId);
+        }
+
+        // Apply complexity override (last line of defense against planner over-assignment)
+        String projectType = readProjectType(s.workDir);
+        int ownedFilesCount = taskDef.getOwnedFiles() != null ? taskDef.getOwnedFiles().size() : 0;
+        s.complexity = budgetMonitor.resolveEffectiveComplexity(s.complexity, s.model, projectType, ownedFilesCount, taskId);
+
+        log.info("Worker starting task [{}] on branch {} in {} ({}:{}) complexity={}",
+                taskId, s.branchName, s.workDir, s.provider, s.model, s.complexity);
+
+        // Timing and iteration state
+        s.isSubtask = task.getParentTaskId() != null;
+        s.effectiveIterationLimit = s.isSubtask ? SUBTASK_ITERATION_LIMIT : HARD_ITERATION_LIMIT;
+        s.configuredMaxOutput = budgetMonitor.maxOutputTokens(s.model, s.complexity);
+        s.deadline = Instant.now().plus(Duration.ofMinutes(s.taskDurationMinutes));
+        s.lastCheckpointTime = Instant.now();
+        s.lastStallCheckTime = Instant.now();
+
+        return s;
+    }
+
+    /** Injects a progress checkpoint into the conversation if enough time has elapsed. */
+    private void injectCheckpointIfDue(List<Message> messages, TaskDefinition taskDef,
+                                       String taskId, TaskExecutionState state, long elapsedMinutes) {
+        // ── Progress checkpoint: re-inject task context every N minutes ──
+        if (state.iteration > 0 && Duration.between(state.lastCheckpointTime, Instant.now()).toMinutes() >= CHECKPOINT_INTERVAL_MINUTES) {
+            messages.add(new UserMessage(buildProgressCheckpoint(taskDef, elapsedMinutes, state.taskDurationMinutes)));
+            log.info("[Worker {}] Injected progress checkpoint at {}min elapsed (iteration {})", taskId, elapsedMinutes, state.iteration);
+            state.lastCheckpointTime = Instant.now();
+        }
+    }
+
+    /**
+     * Detects stall conditions (no file writes in N minutes) and either injects
+     * skeleton recovery (if truncation-caused) or escalates the model.
+     */
+    private void handleStallDetection(List<Message> messages, String taskId,
+                                      String runId, TaskExecutionState state) {
+        // ── Stall detection: if no file writes in N minutes, escalate model ──
+        // Truncation-aware: if recent stall is caused by truncation (continuations > 0),
+        // inject recovery instruction instead of escalating — a bigger model won't fix
+        // a token-limit problem, it just costs more.
+        if (state.iteration > 0 && Duration.between(state.lastStallCheckTime, Instant.now()).toMinutes() >= STALL_CHECK_MINUTES) {
+            if (state.fileWritesSinceCheck == 0) {
+                if (state.continuations > 0 && state.skeletonRecoveries < MAX_SKELETON_RECOVERIES) {
+                    // Stall is likely truncation-caused — try skeleton recovery before escalating
+                    state.skeletonRecoveries++;
+                    log.info("[Worker {}] Stalled but {} truncation(s) detected — injecting skeleton recovery " +
+                            "({}/{}) instead of model escalation", taskId, state.continuations,
+                            state.skeletonRecoveries, MAX_SKELETON_RECOVERIES);
+                    stateStore.appendTaskLog(taskId, "STALL_TRUNCATION_RECOVERY:" + state.skeletonRecoveries);
+                    messages.add(new UserMessage(SKELETON_RECOVERY_PROMPT));
+                } else {
+                    String escalatedModel = escalateModel(state.model, runId);
+                    if (!escalatedModel.equals(state.model)) {
+                        log.warn("[Worker {}] Stalled (no file writes in {}min) — escalating {} → {}",
+                                taskId, STALL_CHECK_MINUTES, state.model, escalatedModel);
+                        stateStore.logMessage(runId, state.agentId, "state", "MODEL_ESCALATED",
+                                "Escalating model to " + escalatedModel + " (stalled — no file writes in " + STALL_CHECK_MINUTES + " min)", 0);
+                        state.model = escalatedModel;
+                        state.provider = resolveProvider(state.model);
+                    }
+                }
+            } else {
+                log.info("[Worker {}] Progress check: {} file writes in last {}min", taskId, state.fileWritesSinceCheck, STALL_CHECK_MINUTES);
+            }
+            state.fileWritesSinceCheck = 0;
+            state.lastStallCheckTime = Instant.now();
+        }
+    }
+
+    /** Injects the completion urgency prompt when the task is approaching its time limit. */
+    private void injectUrgencyIfNeeded(List<Message> messages, TaskDefinition taskDef,
+                                       String taskId, TaskExecutionState state,
+                                       long elapsedMinutes, long remainingMinutes) {
+        // ── Forced completion: approaching time limit ──
+        if (!state.urgencyInjected && remainingMinutes <= URGENCY_THRESHOLD_MINUTES) {
+            messages.add(new UserMessage(buildCompletionUrgencyPrompt(taskDef, elapsedMinutes, state.taskDurationMinutes)));
+            log.warn("[Worker {}] Injected completion urgency prompt at {}min elapsed (~{}min remaining)",
+                    taskId, elapsedMinutes, remainingMinutes);
+            state.urgencyInjected = true;
+        }
+    }
+
+    /**
+     * Pre-call token estimation: compacts context early if projected usage exceeds threshold.
+     * Returns the (possibly new) messages list.
+     */
+    private List<Message> handlePreCallCompaction(List<Message> messages, TaskDefinition taskDef,
+                                                   String taskId, String runId, TaskExecutionState state) {
+        if (!state.justCompacted && messages.size() > 30) {
+            int estimatedTokens = estimateInputTokens(messages);
+            int limit = budgetMonitor.contextLimitFor(state.model);
+            double estimatedPct = (double) estimatedTokens / limit;
+            double compactPct = props.getCompaction().getCompactPct()
+                    + ("HIGH".equalsIgnoreCase(state.complexity) ? 0.05 : 0.0);
+            if (estimatedPct >= compactPct) {
+                log.info("[Worker {}] Pre-call estimate {}% >= compact threshold — compacting before LLM call",
+                        taskId, (int) (estimatedPct * 100));
+                String[] compactProvider = { state.provider };
+                String[] compactModel   = { state.model };
+                messages = compact(messages, taskDef, taskId, runId,
+                        compactProvider, compactModel, state.agentId, state.complexity);
+                state.provider = compactProvider[0];
+                state.model    = compactModel[0];
+                state.lastCallInputTokens = 0;
+                state.justCompacted = true;
+                state.lastCompactedIteration = state.iteration;
+            }
+        }
+        return messages;
+    }
+
+    /**
+     * Trims degenerate (text + escalation) message pairs when the model is stuck in
+     * a "I'll call X" / "NO DO IT" cycle after 5+ consecutive text-only responses.
+     */
+    private void trimDegenerateLoop(List<Message> messages, String taskId, TaskExecutionState state) {
+        // tool_choice is already set to required/any, so the API will enforce
+        // tool use — but the accumulated bad history can confuse the model.
+        if (state.consecutiveNonJsonOutputs >= 5) {
+            int pairsToTrim = Math.min(state.consecutiveNonJsonOutputs - 2, 10);
+            int msgsToRemove = pairsToTrim * 2; // each pair = assistant text + user escalation
+            if (msgsToRemove > 0 && messages.size() > msgsToRemove + 4) {
+                int trimStart = messages.size() - msgsToRemove;
+                messages.subList(trimStart, messages.size()).clear();
+                log.info("[Worker {}] Trimmed {} degenerate message pairs ({} msgs) to break text-only loop",
+                        taskId, pairsToTrim, msgsToRemove);
+                stateStore.appendTaskLog(taskId, "DEGENERATE_LOOP_TRIM:" + pairsToTrim + "_pairs");
+                messages.add(new UserMessage(
+                        "Call a tool NOW. Do not respond with text."));
+            }
+        }
+    }
+
+    /**
+     * Mid-task cost enforcement: checks budget every 5 LLM calls.
+     * @return true if budget exceeded and loop should break
+     */
+    private boolean checkMidTaskBudget(String taskId, String runId, TaskExecutionState state) {
+        if (state.iteration % 5 == 0 && runCostBudgetService.isOverBudget(runId)) {
+            String tier = runCostBudgetService.getRunTier(runId);
+            Double budget = runCostBudgetService.getBudget(runId);
+            log.warn("[Worker {}] Mid-task cost budget exceeded — stopping (tier={}, budget=${})",
+                    taskId, tier, budget != null ? String.format("%.2f", budget) : "?");
+            stateStore.logMessage(runId, state.agentId, "state", "BUDGET_EXCEEDED",
+                    "Task stopped mid-execution: run cost exceeded $" +
+                    (budget != null ? String.format("%.2f", budget) : "?") + " " + tier + " budget", 0);
+            sseBroadcaster.emit(runId, RunEvent.budgetExceeded(runId, tier, budget != null ? budget : 3.0));
+            return true;
+        }
+        return false;
+    }
+
+    /** Records token usage from an LLM response onto the state and observation. */
+    private void recordTokenUsage(ChatResponse response, Observation iterObs,
+                                  String taskId, TaskExecutionState state) {
+        int inputTok = extractInputTokens(response);
+        int outputTok = extractOutputTokens(response);
+        int cacheReadTok = extractCacheReadTokens(response);
+        int cacheWriteTok = extractCacheWriteTokens(response);
+
+        state.lastCallInputTokens = inputTok;
+        state.totalInputTokens += inputTok;
+        state.totalOutputTokens += outputTok;
+        state.totalCacheReadTokens += cacheReadTok;
+        state.totalCacheWriteTokens += cacheWriteTok;
+        state.justCompacted = false;
+
+        // Record token usage on the current iteration observation
+        iterObs.highCardinalityKeyValue("input_tokens", String.valueOf(inputTok));
+        iterObs.highCardinalityKeyValue("output_tokens", String.valueOf(outputTok));
+        iterObs.highCardinalityKeyValue("cache_read_tokens", String.valueOf(cacheReadTok));
+        iterObs.highCardinalityKeyValue("cache_write_tokens", String.valueOf(cacheWriteTok));
+
+        String cacheNote = buildCacheNote(response);
+        log.debug("[Worker {}] Iteration {} ({}/{} tokens){}",
+                taskId, state.iteration, inputTok, outputTok, cacheNote);
+
+        // Running cache effectiveness summary every 5 iterations
+        if (state.iteration % 5 == 0 && state.totalCacheReadTokens > 0) {
+            double cacheSavingPct = state.totalCacheReadTokens * 100.0
+                    / Math.max(1, state.totalInputTokens + state.totalCacheReadTokens);
+            log.info("[Cache][{}] After {} iter — cacheRead={} tok, cacheWrite={} tok, " +
+                    "normalIn={} tok, out={} tok | ~{}% of input served from cache",
+                    taskId, state.iteration,
+                    state.totalCacheReadTokens, state.totalCacheWriteTokens,
+                    state.totalInputTokens, state.totalOutputTokens,
+                    String.format("%.1f", cacheSavingPct));
+        }
+    }
+
+    /**
+     * Handles truncation recovery: salvages complete tool calls, then either
+     * auto-continues or injects skeleton recovery.
+     * @return true if the loop should {@code continue} to the next iteration
+     */
+    private boolean handleTruncationRecovery(ChatResponse response, String assistantText,
+                                              List<Message> messages, String taskId,
+                                              String runId, TaskExecutionState state) {
+        String finishReason = null;
+        try {
+            finishReason = response.getResult().getMetadata().getFinishReason();
+        } catch (Exception ignored) { /* metadata may be null for some providers */ }
+        if (!isTruncatedResponse(finishReason)) {
+            return false;
+        }
+
+        // Salvage: dispatch any COMPLETE tool calls before the truncation point.
+        // Without this, the model thinks it wrote files but the harness never dispatched them.
+        int salvaged = 0;
+        if (assistantText != null && !assistantText.isBlank()) {
+            String salvageText = FABRICATED_TOOL_RESULT_PATTERN.matcher(assistantText).replaceAll("");
+            List<ParsedToolCall> salvageCalls = parseXmlToolCalls(salvageText);
+            if (salvageCalls.isEmpty()) salvageCalls = parseJsonToolCalls(salvageText);
+            for (ParsedToolCall tc : salvageCalls) {
+                try {
+                    dispatchTool(tc, runId, taskId);
+                    if (isFileWriteTool(tc.name())) { state.fileWritesSinceCheck++; state.totalFileWrites++; }
+                    state.toolCallCount++;
+                    salvaged++;
+                } catch (Exception salvageEx) {
+                    log.debug("[Worker {}] Salvage dispatch failed for {}: {}", taskId, tc.name(), salvageEx.getMessage());
+                }
+            }
+            if (salvaged > 0) {
+                log.info("[Worker {}] Salvaged {} complete tool call(s) from truncated response " +
+                        "(totalFileWrites={})", taskId, salvaged, state.totalFileWrites);
+            }
+        }
+
+        state.continuations++;
+        if (state.continuations <= MAX_CONTINUATIONS) {
+            log.warn("[Worker {}] Iteration {} — response truncated (finishReason={}). " +
+                    "Auto-continuing ({}/{})", taskId, state.iteration, finishReason,
+                    state.continuations, MAX_CONTINUATIONS);
+            stateStore.appendTaskLog(taskId, "TRUNCATION_CONTINUE:" + state.continuations);
+            // Critical: tell the model which tool calls executed and which didn't.
+            String salvageNote = salvaged > 0
+                    ? salvaged + " tool call(s) from your response WERE executed. "
+                    : "NONE of your tool calls were executed — they were all cut off by truncation. ";
+            messages.add(new UserMessage(
+                    "Your previous response was TRUNCATED (hit output token limit). " +
+                    salvageNote +
+                    "Any writeFile/editFile that was cut off mid-content was NOT executed.\n\n" +
+                    "IMPORTANT: Write ONE file per response to avoid truncation. " +
+                    "Call writeFile for the next file now."));
+        } else {
+            // Skeleton recovery: continuations exhausted, response still truncating.
+            // Instead of letting broken concatenated output flow to compiler,
+            // instruct the model to use a skeleton-then-fill strategy.
+            state.skeletonRecoveries++;
+            log.warn("[Worker {}] Iteration {} — truncation persists after {} continuations. " +
+                    "Injecting skeleton recovery ({}/{}).", taskId, state.iteration, MAX_CONTINUATIONS,
+                    state.skeletonRecoveries, MAX_SKELETON_RECOVERIES);
+            stateStore.appendTaskLog(taskId, "SKELETON_RECOVERY_INJECTED:" + state.skeletonRecoveries);
+            messages.add(new UserMessage(SKELETON_RECOVERY_PROMPT));
+        }
+        return true; // continue to next iteration
+    }
+
+    /**
+     * PATH A: Dispatches native tool calls (OpenAI) and handles taskComplete validation.
+     * @return a WorkerReport if the task is complete/failed, {@code null} if the loop should continue
+     */
+    private WorkerReport handleNativeToolCalls(AssistantMessage assistantMsg, List<Message> messages,
+                                                TaskDefinition taskDef, String taskId,
+                                                String runId, TaskExecutionState state,
+                                                int maxFabricatedCompletions) {
+        log.info("[Worker {}] Iteration {} — {} native tool call(s)",
+                taskId, state.iteration, assistantMsg.getToolCalls().size());
+
+        // ── Dispatch non-taskComplete tools FIRST ──────────────────────
+        // This ensures totalFileWrites is up-to-date before taskComplete
+        // validation runs (fixes false "fabricated completion" when writeFile
+        // and taskComplete arrive in the same tool-call batch).
+        AssistantMessage.ToolCall pendingTaskComplete = null;
+        List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
+        for (AssistantMessage.ToolCall tc : assistantMsg.getToolCalls()) {
+            if ("taskComplete".equals(tc.name())) {
+                pendingTaskComplete = tc; // defer until after other tools
+                continue;
+            }
+            Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
+                    .lowCardinalityKeyValue("tool.name", tc.name())
+                    .lowCardinalityKeyValue("task.id", taskId)
+                    .lowCardinalityKeyValue("run.id", runId)
+                    .start();
+            try {
+                String result = dispatchTool(new ParsedToolCall(tc.name(), tc.arguments()), runId, taskId);
+                if (isFileWriteTool(tc.name())) { state.fileWritesSinceCheck++; state.totalFileWrites++; }
+                responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
+            } finally {
+                toolObs.stop();
+            }
+        }
+        state.toolCallCount += assistantMsg.getToolCalls().size();
+
+        // ── Subtask write nudge: if 5+ tool calls with zero writes, force it ──
+        if (state.isSubtask && state.totalFileWrites == 0 && state.toolCallCount >= 5) {
+            String nudge = buildSubtaskWriteNudge(taskDef, state.toolCallCount);
+            responses.add(new ToolResponseMessage.ToolResponse(
+                    assistantMsg.getToolCalls().getLast().id(),
+                    assistantMsg.getToolCalls().getLast().name(),
+                    nudge));
+            log.warn("[Worker {}] Subtask write nudge injected at {} tool calls (0 writes)", taskId, state.toolCallCount);
+            stateStore.appendTaskLog(taskId, "SUBTASK_WRITE_NUDGE:" + state.toolCallCount);
+        }
+
+        // ── Now handle taskComplete with accurate totalFileWrites ────────
+        if (pendingTaskComplete != null) {
+            WorkerReport tcResult = handleTaskComplete(pendingTaskComplete, responses, taskId, state, maxFabricatedCompletions);
+            if (tcResult != null) return tcResult;
+        }
+        if (!responses.isEmpty()) {
+            messages.add(ToolResponseMessage.builder().responses(responses).build());
+        }
+        return null; // continue loop
+    }
+
+    /**
+     * Validates a taskComplete tool call: checks for fabricated/partial completions.
+     * @return a WorkerReport if the task is complete/failed, {@code null} to continue
+     */
+    private WorkerReport handleTaskComplete(AssistantMessage.ToolCall tc,
+                                             List<ToolResponseMessage.ToolResponse> responses,
+                                             String taskId, TaskExecutionState state,
+                                             int maxFabricatedCompletions) {
+        log.info("[Worker {}] taskComplete tool called — building completion report", taskId);
+        stateStore.appendTaskLog(taskId, "TASK_COMPLETE_TOOL_CALLED");
+        String completionJson = buildCompletionJsonFromToolCall(tc.arguments(), taskId);
+        if (looksLikeCompletionReport(completionJson, taskId)) {
+            int claimedFileCount = countClaimedFiles(completionJson);
+            boolean isFabricated = state.totalFileWrites == 0 && reportClaimsFileChanges(completionJson);
+            boolean isPartial = !isFabricated && claimedFileCount > 0
+                    && state.totalFileWrites > 0 && claimedFileCount > state.totalFileWrites;
+            if (isFabricated || isPartial) {
+                state.fabricatedCompletionCount++;
+                String reason = isFabricated
+                        ? "taskComplete claims files but 0 writeFile calls dispatched"
+                        : "taskComplete claims " + claimedFileCount + " files but only "
+                                + state.totalFileWrites + " writeFile dispatched";
+                log.warn("[Worker {}] REJECTED {} taskComplete ({}/{}) — {}",
+                        taskId, isFabricated ? "fabricated" : "partial",
+                        state.fabricatedCompletionCount, maxFabricatedCompletions, reason);
+                stateStore.appendTaskLog(taskId, "FABRICATED_TASK_COMPLETE:" + reason);
+                if (state.fabricatedCompletionCount >= maxFabricatedCompletions) {
+                    WorkerReport failReport = new WorkerReport();
+                    failReport.setTaskId(taskId);
+                    failReport.setStatus("failed");
+                    failReport.setFilesCreated(List.of());
+                    failReport.setFilesModified(List.of());
+                    failReport.setBlockers("Fabricated completion " + state.fabricatedCompletionCount + " times");
+                    return withProviderModel(failReport, state.provider, state.model,
+                            state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+                }
+                // Send rejection back as tool response and continue
+                responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(),
+                        "REJECTED: " + reason + ". You must call writeFile for each file first."));
+            } else {
+                return withProviderModel(
+                        parseCompletionReport(completionJson, taskId,
+                                state.totalInputTokens, state.totalOutputTokens,
+                                state.totalCacheReadTokens, state.totalCacheWriteTokens),
+                        state.provider, state.model,
+                        state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+            }
+        } else {
+            log.warn("[Worker {}] taskComplete args didn't parse as valid completion — continuing", taskId);
+        }
+        return null; // continue
+    }
+
+    /**
+     * PATH B: Handles prompt-based tool calls (Anthropic/Google) with self-play prevention,
+     * and strict completion detection with fabrication validation.
+     *
+     * @return {@link #CONTINUE_LOOP} if tool calls dispatched or fabrication retry (caller should continue),
+     *         a non-null WorkerReport if task is complete/failed,
+     *         or {@code null} if no tool calls and no completion found (fall through)
+     */
+    private WorkerReport handlePromptBasedToolCalls(String assistantText, List<Message> messages,
+                                                     TaskDefinition taskDef, String taskId,
+                                                     String runId, TaskExecutionState state,
+                                                     int maxFabricatedCompletions) {
+        // 1. Strip fabricated <tool_result> blocks (self-play prevention).
+        //    Some models (Anthropic Sonnet) simulate entire tool conversations
+        //    in one response — strip the fabricated results before parsing.
+        String cleanedText = FABRICATED_TOOL_RESULT_PATTERN.matcher(assistantText).replaceAll("");
+        int strippedResults = (assistantText.length() - cleanedText.length());
+        if (strippedResults > 0) {
+            log.warn("[Worker {}] Stripped {} chars of fabricated <tool_result> blocks from model response (self-play detected)",
+                    taskId, strippedResults);
+        }
+
+        // 2. Parse tool calls — XML first for PATH B (expected format), JSON fallback
+        List<ParsedToolCall> toolCalls = parseXmlToolCalls(cleanedText);
+        if (toolCalls.isEmpty()) {
+            toolCalls = parseJsonToolCalls(cleanedText);
+        }
+        if (!toolCalls.isEmpty()) {
+            state.consecutiveNonJsonOutputs = 0; // reset — model is cooperating
+            StringBuilder results = new StringBuilder();
+            for (ParsedToolCall tc : toolCalls) {
+                Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
+                        .lowCardinalityKeyValue("tool.name", tc.name())
+                        .lowCardinalityKeyValue("task.id", taskId)
+                        .lowCardinalityKeyValue("run.id", runId)
+                        .start();
+                try {
+                String result = dispatchTool(tc, runId, taskId);
+                if (isFileWriteTool(tc.name())) { state.fileWritesSinceCheck++; state.totalFileWrites++; }
+                results.append("<tool_result tool=\"").append(tc.name()).append("\" untrusted=\"true\">\n")
+                       .append(result).append("\n</tool_result>\n\n");
+                } finally {
+                    toolObs.stop();
+                }
+            }
+            state.toolCallCount += toolCalls.size();
+
+            // ── Subtask write nudge (PATH B): if 5+ tool calls with zero writes, force it ──
+            if (state.isSubtask && state.totalFileWrites == 0 && state.toolCallCount >= 5) {
+                String nudge = buildSubtaskWriteNudge(taskDef, state.toolCallCount);
+                results.append("\n\n").append(nudge);
+                log.warn("[Worker {}] Subtask write nudge injected at {} tool calls (0 writes) [PATH B]",
+                        taskId, state.toolCallCount);
+                stateStore.appendTaskLog(taskId, "SUBTASK_WRITE_NUDGE:" + state.toolCallCount);
+            }
+
+            messages.add(new UserMessage(results.toString().trim()));
+            if (checkIterationLimit(taskId, state)) {
+                return withProviderModel(WorkerReport.partial(taskId,
+                        "Terminated: exceeded " + state.effectiveIterationLimit + " tool-call iterations",
+                        state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
+                        state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+            }
+            return CONTINUE_LOOP; // next iteration — do NOT add the "continue" prompt below
+        }
+
+        // 2. Strict completion detection: JSON must be the entire response
+        if (looksLikeCompletionReport(assistantText, taskId)) {
+            return handlePathBCompletion(assistantText, messages, taskDef, taskId, runId, state, maxFabricatedCompletions);
+        }
+
+        return null; // no tool calls and no completion — fall through
+    }
+
+    /**
+     * Handles a PATH B completion report: validates against fabrication/partial claims.
+     * @return {@link #CONTINUE_LOOP} for fabrication retry, or a final WorkerReport
+     */
+    private WorkerReport handlePathBCompletion(String assistantText, List<Message> messages,
+                                                TaskDefinition taskDef, String taskId,
+                                                String runId, TaskExecutionState state,
+                                                int maxFabricatedCompletions) {
+        // Validate: if the report claims files were created or modified but no
+        // writeFile/editFile was dispatched, the model fabricated the report.
+        int claimedFileCount = countClaimedFiles(assistantText);
+        boolean isFabricated = state.totalFileWrites == 0 && reportClaimsFileChanges(assistantText);
+        // Partial completion: report claims more files than were actually written.
+        // E.g. task says "create 4 files", model writes 1 then sends completion claiming 4.
+        boolean isPartial = !isFabricated && claimedFileCount > 0
+                && state.totalFileWrites > 0 && claimedFileCount > state.totalFileWrites;
+        if (isFabricated || isPartial) {
+            state.fabricatedCompletionCount++;
+            String reason = isFabricated
+                    ? "claims files_created but 0 writeFile calls were dispatched"
+                    : "claims " + claimedFileCount + " files but only " + state.totalFileWrites
+                            + " writeFile calls were dispatched";
+            log.warn("[Worker {}] REJECTED {} completion report ({}/{}) — {}. Forcing model to use tools.",
+                    taskId, isFabricated ? "fabricated" : "partial",
+                    state.fabricatedCompletionCount, maxFabricatedCompletions, reason);
+            stateStore.appendTaskLog(taskId, (isFabricated ? "FABRICATED" : "PARTIAL")
+                    + "_REPORT_REJECTED (" + state.fabricatedCompletionCount + "/"
+                    + maxFabricatedCompletions + "): " + reason);
+
+            // After MAX_FABRICATED_COMPLETIONS retries, give up — model cannot use tools correctly
+            if (state.fabricatedCompletionCount >= maxFabricatedCompletions) {
+                log.error("[Worker {}] Fabricated/partial completion detected {} times — marking task FAILED. " +
+                        "Model persistently claims file creation without using writeFile tool.",
+                        taskId, state.fabricatedCompletionCount);
+                stateStore.appendTaskLog(taskId, "FAILED: REPEATED_FABRICATED_COMPLETION");
+                WorkerReport failReport = new WorkerReport();
+                failReport.setTaskId(taskId);
+                failReport.setStatus("failed");
+                failReport.setFilesCreated(List.of());
+                failReport.setFilesModified(List.of());
+                failReport.setBlockers("Fabricated/partial completion detected " +
+                        state.fabricatedCompletionCount + " times — model claims " + claimedFileCount +
+                        " files but only " + state.totalFileWrites + " writeFile calls dispatched.");
+                return withProviderModel(failReport, state.provider, state.model,
+                        state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+            }
+
+            // CONTEXT-TRIMMED RETRY: instead of keeping full bloated history
+            // (which burns 100k+ tokens per retry), reset to task assignment +
+            // summary of actual work done + explicit file-by-file instructions.
+            // This cuts retry cost from ~100k tokens to ~5k tokens.
+            injectFabricationRetryContext(messages, taskDef, taskId, runId, state, claimedFileCount);
+            return CONTINUE_LOOP; // retry with trimmed context
+        }
+        return withProviderModel(
+                parseCompletionReport(assistantText, taskId,
+                        state.totalInputTokens, state.totalOutputTokens,
+                        state.totalCacheReadTokens, state.totalCacheWriteTokens),
+                state.provider, state.model,
+                state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+    }
+
+    /** Resets conversation context after a fabricated completion rejection. */
+    private void injectFabricationRetryContext(List<Message> messages, TaskDefinition taskDef,
+                                               String taskId, String runId,
+                                               TaskExecutionState state, int claimedFileCount) {
+        int filesRemaining = Math.max(0, claimedFileCount - state.totalFileWrites);
+        String writtenFilesSummary = state.totalFileWrites > 0
+                ? "You have successfully written " + state.totalFileWrites + " file(s) so far. "
+                : "You have NOT written any files yet. ";
+
+        boolean nativeFabricationMode = "openai".equalsIgnoreCase(state.provider) || "anthropic".equalsIgnoreCase(state.provider);
+        messages.clear();
+        messages.add(new UserMessage(buildInitialUserMessage(taskDef, state.branchName, runId)));
+        String fabricationExample = nativeFabricationMode
+                ? "Call the writeFile tool now for your next file."
+                : "Example:\n" +
+                  "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"src/Main.java\", " +
+                  "\"content\": \"package com.example;\\n...\"}}</tool_call>\n\n" +
+                  "START NOW — call writeFile for your next file.";
+        messages.add(new UserMessage(
+                "CONTEXT RESET — Your previous attempt was REJECTED.\n\n" +
+                "REASON: You produced a completion report claiming " + claimedFileCount +
+                " files, but only " + state.totalFileWrites + " writeFile tool calls were dispatched.\n\n" +
+                writtenFilesSummary +
+                (filesRemaining > 0
+                        ? "You still need to create " + filesRemaining + " more file(s).\n\n"
+                        : "\n") +
+                "RULES (read carefully):\n" +
+                "1. Files are ONLY created by calling the writeFile tool — describing them in text does NOTHING.\n" +
+                "2. Call writeFile ONCE for EACH file you need to create.\n" +
+                "3. Do NOT call taskComplete until ALL files are written.\n" +
+                "4. Write ONE file at a time. After each writeFile call, write the next file.\n\n" +
+                fabricationExample));
+    }
+
+    /** Checks whether the tool call count has hit the iteration limit. */
+    private boolean checkIterationLimit(String taskId, TaskExecutionState state) {
+        if (state.toolCallCount >= state.effectiveIterationLimit) {
+            log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing partial completion",
+                    taskId, state.isSubtask ? "subtask" : "hard", state.toolCallCount);
+            stateStore.appendTaskLog(taskId, "ITERATION_LIMIT:" + state.toolCallCount +
+                    (state.isSubtask ? " (subtask cap=" + SUBTASK_ITERATION_LIMIT + ")" : ""));
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Builds the continue prompt when the model produces no tool calls and no completion.
+     * Escalates after consecutive non-JSON outputs.
+     */
+    private String buildContinuePrompt(String assistantText, String taskId, TaskExecutionState state) {
+        // Log the unparsed output for diagnostics
+        if (assistantText != null && !assistantText.isBlank()) {
+            log.warn("[Worker {}] Iteration {} — output NOT parsed as tool call or completion ({} chars). " +
+                    "First 300 chars: {}", taskId, state.iteration, assistantText.length(),
+                    assistantText.length() <= 300 ? assistantText : assistantText.substring(0, 300) + "...");
+        }
+
+        state.consecutiveNonJsonOutputs++;
+        boolean nativeToolMode = "openai".equalsIgnoreCase(state.provider);
+        long minsLeft = Duration.between(Instant.now(), state.deadline).toMinutes();
+        if (minsLeft <= 3) {
+            return nativeToolMode
+                    ? "You have approximately " + minsLeft + " minute(s) remaining. " +
+                      "If you have finished all your work, call the taskComplete tool now. " +
+                      "Otherwise, call the most important remaining tool."
+                    : "You have approximately " + minsLeft + " minute(s) remaining. " +
+                      "If you have finished all your work, output ONLY your completion JSON report now. " +
+                      "Otherwise, call the MOST IMPORTANT remaining tool using <tool_call> XML tags.";
+        } else if (state.consecutiveNonJsonOutputs >= 2) {
+            // Escalated prompt after 2+ consecutive non-JSON outputs
+            log.warn("[Worker {}] {} consecutive non-JSON outputs — injecting strict completion demand",
+                    taskId, state.consecutiveNonJsonOutputs);
+            stateStore.appendTaskLog(taskId, "NON_JSON_ESCALATION:" + state.consecutiveNonJsonOutputs);
+            return nativeToolMode
+                    ? "STOP. You have produced " + state.consecutiveNonJsonOutputs +
+                      " consecutive text responses without calling any tool. " +
+                      "Do NOT respond with plain text.\n\n" +
+                      "If your task is done, call the taskComplete tool with your status and file lists.\n\n" +
+                      "If you still need to do work, call writeFile, editFile, readFile, or run.\n\n" +
+                      "You MUST call a tool in your next response. No prose, no explanation."
+                    : "STOP. You have produced " + state.consecutiveNonJsonOutputs +
+                      " consecutive responses that are neither tool calls nor a valid completion report. " +
+                      "This is wasting your iteration budget.\n\n" +
+                      "OUTPUT ONLY THE JSON COMPLETION REPORT NOW. No prose, no explanation, no markdown — " +
+                      "ONLY the raw JSON object starting with { and ending with }.\n\n" +
+                      "If your task is done:\n" +
+                      "{\"task_id\": \"YOUR_TASK_ID\", \"status\": \"complete\", " +
+                      "\"files_created\": [...], \"files_modified\": [...], " +
+                      "\"files_read\": [...], \"self_review\": \"...\", " +
+                      "\"blockers\": null, \"notes_for_reviewer\": \"...\"}\n\n" +
+                      "If you still need to call a tool, use EXACTLY this format:\n" +
+                      "<tool_call>{\"name\": \"TOOL_NAME\", \"args\": {\"KEY\": \"VALUE\"}}</tool_call>\n\n" +
+                      "NOTHING ELSE. Your next response must start with either { or <tool_call>.";
+        } else {
+            return nativeToolMode
+                    ? "Your response was text only — no tool was called. " +
+                      "You MUST call a tool. If you are done, call the taskComplete tool. " +
+                      "If you need to do more work, call writeFile, readFile, or another tool."
+                    : "Your response was not recognized as a tool call. To call a tool, " +
+                      "you MUST use <tool_call> XML tags. Example:\n" +
+                      "<tool_call>{\"name\": \"writeFile\", \"args\": {\"path\": \"file.js\", " +
+                      "\"content\": \"console.log('hello');\"}}</tool_call>\n\n" +
+                      "If you have finished all your work, output ONLY your completion JSON report. " +
+                      "Otherwise, call the next tool using <tool_call> tags now.";
+        }
+    }
+
+    /**
+     * Handles budget monitoring after each iteration: compaction or hard-stop.
+     * @return a WorkerReport if hard-stopped after failed compaction, {@code null} to continue
+     */
+    private WorkerReport handleBudgetMonitoring(List<Message> messages, TaskDefinition taskDef,
+                                                 String taskId, String runId, TaskExecutionState state) {
+        BudgetStatus budget = budgetMonitor.check(state.model, state.complexity, state.lastCallInputTokens);
+        switch (budget.status()) {
+            case HARD_STOP -> {
+                if (state.iteration - state.lastCompactedIteration > 2) {
+                    log.warn("Hard stop threshold reached for task {} ({}% context) — " +
+                             "attempting emergency compaction", taskId,
+                            (int) (budget.usagePct() * 100));
+                    stateStore.recordCompaction(taskId, "emergency-compact-at-hard-stop");
+                    sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
+                    String[] compactProvider = { state.provider };
+                    String[] compactModel   = { state.model };
+                    // Note: compact() returns a new list but the caller must reassign `messages`.
+                    // Since Java passes list refs by value, we clear+addAll to mutate in place.
+                    List<Message> compacted = compact(messages, taskDef, taskId, runId,
+                            compactProvider, compactModel, state.agentId, state.complexity);
+                    messages.clear();
+                    messages.addAll(compacted);
+                    state.provider = compactProvider[0];
+                    state.model    = compactModel[0];
+                    state.lastCallInputTokens = 0;
+                    state.justCompacted = true;
+                    state.lastCompactedIteration = state.iteration;
+                } else {
+                    log.warn("Hard stop threshold reached for task {} ({}% context) — " +
+                             "already compacted at iteration {}, cannot recover",
+                            taskId, (int) (budget.usagePct() * 100), state.lastCompactedIteration);
+                    stateStore.recordCompaction(taskId, "hard-stop");
+                    sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
+                    return withProviderModel(WorkerReport.partial(taskId,
+                            "Hard stopped at " + (int) (budget.usagePct() * 100)
+                                    + "% context usage after emergency compaction failed. Resume required.",
+                            state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
+                            state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+                }
+            }
+            case COMPACT -> {
+                log.info("Compacting context for task {} at {}% usage", taskId,
+                        (int) (budget.usagePct() * 100));
+                String[] compactProvider = { state.provider };
+                String[] compactModel   = { state.model };
+                List<Message> compacted = compact(messages, taskDef, taskId, runId,
+                        compactProvider, compactModel, state.agentId, state.complexity);
+                messages.clear();
+                messages.addAll(compacted);
+                state.provider = compactProvider[0];
+                state.model    = compactModel[0];
+                state.lastCallInputTokens = 0;
+                state.justCompacted = true;
+                state.lastCompactedIteration = state.iteration;
+            }
+            case WARN ->
+                log.warn("Context at {}% for task {} — compaction approaching",
+                        (int) (budget.usagePct() * 100), taskId);
+            case OK -> {
+                /* nothing */ }
+        }
+        return null;
+    }
+
+    /**
+     * Attempts mid-task recovery after a provider failure by compacting the conversation
+     * and switching to a fallback provider.
+     */
+    private void handleMidTaskRecovery(MidTaskProviderFailureException e,
+                                       List<Message> messages, TaskDefinition taskDef,
+                                       String taskId, String runId, TaskExecutionState state) {
+        // Compact conversation to produce provider-agnostic messages, switch to a
+        // fallback provider, and re-enter the agentic loop for one more attempt.
+        if (!state.midTaskRecoveryAttempted) {
+            state.midTaskRecoveryAttempted = true;
+            String failedProvider = state.provider;
+            try {
+                var aiProvider = stateStore.findRun(runId)
+                        .map(r -> r.getAiProviderEnum())
+                        .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC);
+
+                // Find a different provider via failover chain
+                ResolvedModel fallbackResolved = modelResolver.resolveFallbackExcluding(
+                        "WorkerAgent", aiProvider, failedProvider);
+
+                // Compact conversation — produces provider-agnostic checkpoint
+                String[] compactProvider = { fallbackResolved.providerName() };
+                String[] compactModel   = { fallbackResolved.getModel() };
+                messages = compact(messages, taskDef, taskId, runId,
+                        compactProvider, compactModel, state.agentId, state.complexity);
+                state.provider = compactProvider[0];
+                state.model    = compactModel[0];
+                state.lastCallInputTokens = 0;
+
+                log.info("Mid-task recovery: compacted and switched {} → {} for task {}",
+                        failedProvider, state.provider, taskId);
+                io.micrometer.core.instrument.Metrics.counter("executespec.worker.mid_task_recovery",
+                        "from_provider", failedProvider, "to_provider", state.provider).increment();
+                sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
+                        "⚡ Provider failure — recovered via checkpoint (now using " + state.model + ")"));
+
+                // Re-enter the agentic loop — goto not available in Java, so we use
+                // a labeled continue on an outer recovery loop. Since the current code
+                // structure doesn't have one, we return partial with enough context
+                // for the harness retry mechanism to pick up where we left off.
+                // The checkpoint file is already written by compact(), so a retry
+                // will resume from the compacted state with the new provider.
+            } catch (Exception recoveryEx) {
+                log.error("Mid-task recovery failed for task {}: {}", taskId, recoveryEx.getMessage());
+            }
         }
     }
 
