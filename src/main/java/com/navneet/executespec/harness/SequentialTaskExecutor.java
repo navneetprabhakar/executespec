@@ -783,6 +783,43 @@ public class SequentialTaskExecutor {
                     long durationMs = java.time.Duration.between(subtaskStart, Instant.now()).toMillis();
 
                     String status = normalizeStatus(report.getStatus());
+
+                    // ── Fabrication escalation: retry failed subtask with PLANNING tier model ──
+                    if (!"COMPLETE".equals(status) && !"PARTIAL".equals(status)
+                            && isFabricationFailure(report)
+                            && !model.getModel().equals(getPlanningModel(run))) {
+                        String escalatedModel = getPlanningModel(run);
+                        log.warn("[Decompose] Subtask {} failed with fabrication on {} — escalating to {}",
+                                subtask.getTaskId(), model.getModel(), escalatedModel);
+                        stateStore.appendTaskLog(subtask.getTaskId(),
+                                "FABRICATION_ESCALATION:" + model.getModel() + "→" + escalatedModel);
+                        sseBroadcaster.emit(runId, RunEvent.log(runId, subtask.getTaskId(),
+                                String.format("Fabrication detected — retrying with %s", escalatedModel)));
+
+                        // Re-lock with escalated model and retry
+                        subtask.setAssignedModel(escalatedModel);
+                        stateStore.lockTask(subtask.getTaskId(), escalatedModel, branchName);
+
+                        Instant retryStart = Instant.now();
+                        report = workerAgent.executeInWorkDir(subtask, runId, workDir);
+                        durationMs = java.time.Duration.between(retryStart, Instant.now()).toMillis();
+                        status = normalizeStatus(report.getStatus());
+
+                        ResolvedModel escalatedResolved = modelResolver.resolve(
+                                "WorkerAgent", run.getAiProviderEnum(), AgentTier.PLANNING);
+                        stateStore.completeTask(subtask.getTaskId(), report);
+                        trackMetric(runId, subtask, escalatedResolved, 1, "COMPLETE".equals(status), durationMs, report);
+                        sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), status));
+
+                        if (!"COMPLETE".equals(status) && !"PARTIAL".equals(status)) {
+                            anyFailed = true;
+                            log.warn("[Decompose] Subtask {} failed even after escalation to {}",
+                                    subtask.getTaskId(), escalatedModel);
+                        }
+                        allReports.add(report);
+                        continue;
+                    }
+
                     stateStore.completeTask(subtask.getTaskId(), report);
                     trackMetric(runId, subtask, model, 1, "COMPLETE".equals(status), durationMs, report);
                     sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), status));
@@ -844,6 +881,36 @@ public class SequentialTaskExecutor {
             return mapper.readValue(json, TaskDefinition.class);
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Cannot parse task definition", e);
+        }
+    }
+
+    /**
+     * Checks if a worker report indicates a fabrication or iteration-limit failure.
+     * Fabrication: model output completion without calling writeFile.
+     * Iteration limit: subtask hit the 10-iteration cap without producing output.
+     * Both failure modes are recoverable by escalating to a smarter model.
+     */
+    private boolean isFabricationFailure(WorkerReport report) {
+        if (report == null || report.getBlockers() == null) return false;
+        String blockers = report.getBlockers().toLowerCase();
+        return blockers.contains("fabricated completion")
+                || blockers.contains("fabricated/partial completion")
+                || blockers.contains("repeated_fabricated")
+                || blockers.contains("iteration limit")
+                || blockers.contains("tool-call iterations");
+    }
+
+    /**
+     * Resolves the PLANNING tier model for the run's selected provider.
+     * Used as the escalation target when a subtask fails with fabrication.
+     */
+    private String getPlanningModel(PipelineRun run) {
+        try {
+            return modelResolver.resolve("WorkerAgent", run.getAiProviderEnum(),
+                    AgentTier.PLANNING).getModel();
+        } catch (Exception e) {
+            // Fallback — return empty so escalation is skipped
+            return "";
         }
     }
 

@@ -4,6 +4,14 @@ IMPORTANT RULES:
 - {testing_context}
 - You test behaviour described in the spec. You do NOT need to see the source code.
 - Every test must be derivable from the spec and conventions below. Do not invent requirements.
+
+IMPLICIT TEST CASES — the spec often implies tests it doesn't state explicitly:
+- If spec mentions "unique email" → test duplicate email rejection (409)
+- If spec mentions "required fields" → test each missing field individually (400)
+- If spec has related entities (User has Posts) → test FK integrity (delete user with posts)
+- If spec mentions "list" endpoint → test empty list returns [] not null, test pagination if >10 items
+- If spec mentions "authentication" → test every protected endpoint WITHOUT a token returns 401
+Generate these even if the spec doesn't spell them out — they are inherent in the requirements.
 - Each test task produces ONE test class. Keep classes focused on a single entity or concern.
 
 USER SPECIFICATION:
@@ -36,6 +44,17 @@ Example output:
   }
 ]
 
+TEST STRATEGY PRINCIPLES:
+- Test BEHAVIOR, not implementation. Tests should verify what the code does (state),
+  not how it does it (method calls). A refactored endpoint that returns the same JSON
+  should not break tests.
+- Test pyramid: prioritize integration tests that hit real endpoints over mocking.
+  These tests run against a live server — they ARE integration tests by definition.
+- The Beyonce Rule: "If you liked it, you should have put a test on it." If the spec
+  says "users can register", there MUST be a test that registers a user.
+- DAMP over DRY: Each test should tell a complete story. Duplicate setup across tests
+  is acceptable if it makes each test independently readable.
+
 RULES FOR TEST PLAN GENERATION:
 1. For EACH primary entity mentioned in the spec, generate a CRUD test class for happy-path
    operations (create, read, update, delete, list).
@@ -65,6 +84,15 @@ REQUIRED TEST METHOD TYPES (include at least one of each where applicable):
 - Validation rejection: POST with missing/invalid required field returns 400
 - Duplicate rejection: POST with duplicate unique field returns 409
 - List shape: GET collection returns array (even if empty, not null)
+
+TEST ANTI-PATTERNS — do NOT generate tests that:
+- Test only the happy path (must include error/validation paths)
+- Assert only status codes without checking response body (use assertion rules)
+- Depend on execution order (each test must be independently runnable)
+- Test framework behavior instead of application behavior (don't test that Spring
+  returns 404 for unmapped routes — test that YOUR routes return correct responses)
+- Use hardcoded IDs, timestamps, or sequence-dependent data
+- Skip cleanup (tests that create data must plan for isolation)
 
 LIMITS — CRITICAL FOR EXECUTION SPEED:
 - Maximum 6 test classes total. Keep classes focused on a single concern.

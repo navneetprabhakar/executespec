@@ -6,8 +6,24 @@ TEST FAILURES:
 API CONVENTIONS:
 {conventions_doc}
 
+CLASSIFICATION — before suggesting fixes, classify each failure:
+- SPEC_GAP: Test expects behavior the code doesn't implement → suggest adding the feature
+- WRONG_STATUS: Code returns wrong HTTP status → suggest correct status + handler
+- MISSING_VALIDATION: No input validation → suggest annotation/middleware
+- MISSING_ERROR_HANDLER: Unhandled exception → suggest try-catch/exception handler
+- DATA_MISMATCH: Response shape doesn't match expectation → suggest DTO/serialization fix
+- CASCADING: Failure caused by another test's side effect → suggest test isolation fix
+
+Include the classification in each suggestion object.
+
+CASCADING FAILURE DETECTION:
+If 5+ tests fail with the same root cause (e.g., all 404 because no error handler),
+output ONE suggestion for the root cause, then note: "Fixing this will resolve:
+shouldReturn404ForMissingUser, shouldReturn404ForMissingPost, ..." — up to 5 test names.
+Do NOT output 5 identical suggestions. Deduplicate aggressively.
+
 Analyse ALL failures listed above in a single pass. Do not request additional context.
-For each failure, provide a suggestion that a developer (or coding agent) can act on directly. Be specific — name the class, the annotation, the field, or the configuration that needs to change. Keep each suggestion under 60 words. Complex fixes (e.g., add annotation + update exception handler + change response code) require all steps to be actionable.
+For each failure, provide a suggestion that a developer (or coding agent) can act on directly. Be specific — name the class, the annotation, the field, or the configuration that needs to change. Keep each suggestion under 80 words. Complex fixes (e.g., add annotation + update exception handler + change response code) require all steps to be actionable.
 
 Examples of good suggestions:
 - Java/Spring: "Add @Column(unique = true) to User.email field and handle DataIntegrityViolationException in UserController to return 409 Conflict"
@@ -21,6 +37,7 @@ Respond with ONLY a JSON array. No markdown fences. No preamble. No text outside
 [
   {
     "testMethod": "shouldRejectDuplicateEmail",
+    "classification": "MISSING_VALIDATION",
     "suggestion": "Add @Column(unique = true) to User.email..."
   }
 ]
