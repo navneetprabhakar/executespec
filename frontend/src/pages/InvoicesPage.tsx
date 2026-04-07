@@ -72,14 +72,14 @@ export default function InvoicesPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 px-4 sm:px-6 py-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Receipt className="h-6 w-6 text-accent-blue" />
           <h1 className="text-xl font-semibold text-slate-100">Invoices</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {(['all', 'SUBSCRIPTION', 'TOPUP', 'CREDIT_NOTE'] as const).map((f) => (
             <button
               key={f}
@@ -105,7 +105,7 @@ export default function InvoicesPage() {
                 <th className="px-4 py-3">Invoice #</th>
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Description</th>
+                <th className="px-4 py-3 hidden md:table-cell">Description</th>
                 <th className="px-4 py-3 text-right">Amount</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
@@ -133,7 +133,7 @@ export default function InvoicesPage() {
                         {typeLabel(inv.invoiceType)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-secondary max-w-[200px] truncate">{inv.description}</td>
+                    <td className="px-4 py-3 text-secondary max-w-[200px] truncate hidden md:table-cell">{inv.description}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-200">{formatPaise(inv.totalAmount)}</td>
                     <td className="px-4 py-3">
                       <span className={`rounded-sm px-2 py-0.5 text-xs font-medium ${statusColor(inv.status)}`}>

@@ -293,7 +293,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
   return (
     <div className="flex flex-col h-full">
       {/* ── Control bar ── */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-xs px-2 py-0.5 rounded bg-[var(--gray-200)] text-secondary font-mono">
@@ -361,7 +361,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
           {!isStartingPhase && (
             <button
               onClick={handleRefresh}
@@ -554,7 +554,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
                   ))}
                 </div>
               )}
-              <div className="max-h-48 overflow-y-auto px-4 pb-3">
+              <div className="max-h-36 lg:max-h-48 overflow-y-auto px-4 pb-3">
                 <pre className="text-[11px] font-mono text-muted whitespace-pre-wrap break-all leading-relaxed">
                   {logs.length > 0 ? logs.join('\n') : 'No output yet...'}
                 </pre>

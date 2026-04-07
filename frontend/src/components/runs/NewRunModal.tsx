@@ -12,6 +12,7 @@ import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
 import ProviderModelSelector, { getPersistedSelection } from '@/components/runs/ProviderModelSelector';
 import { useViewMode } from '@/hooks/useViewMode';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface NewRunModalProps {
   onClose: () => void;
@@ -52,6 +53,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
   const { addToast } = useUiStore();
   const { user } = useAuthStore();
   const { isVibe, vibeRunDefaults } = useViewMode();
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
 
   // Reset state if initialConfig changes (though usually the modal is unmounted)
@@ -207,21 +209,21 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-0 lg:p-4"
       style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)' }}
       onClick={onClose}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
+        initial={{ opacity: 0, scale: isMobile ? 1 : 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.96 }}
+        exit={{ opacity: 0, scale: isMobile ? 1 : 0.96 }}
         transition={{ duration: 0.15 }}
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          'w-full rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)]  overflow-hidden flex flex-col',
-          mode === 'chat' ? 'max-w-xl' : 'max-w-xl',
+          'w-full bg-[var(--gray-200)] border border-[var(--border-default)] overflow-hidden flex flex-col',
+          isMobile ? 'fixed inset-0 rounded-none' : 'rounded-sm max-w-xl',
         )}
-        style={{ maxHeight: mode === 'chat' ? 'min(95dvh, 80vh)' : '95dvh' }}
+        style={isMobile ? undefined : { maxHeight: mode === 'chat' ? 'min(95dvh, 80vh)' : '95dvh' }}
       >
         {/* ── Header ───────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
@@ -265,11 +267,12 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               placeholder="Describe what you want to build..."
-              rows={5}
+              rows={isMobile ? 6 : 5}
               className={cn(
                 'w-full font-mono text-sm bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm',
                 'px-4 py-3 text-primary placeholder:text-muted',
                 'focus:outline-none focus:border-accent-blue/40 resize-none',
+                isMobile && 'min-h-[120px]',
               )}
             />
             <p className="text-xs text-muted -mt-2">

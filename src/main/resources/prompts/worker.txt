@@ -200,6 +200,45 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    Python: use type hints. follow PEP 8.
    JS/TS:  use TypeScript if the project already uses it.
 
+   PROJECT STRUCTURE CONSISTENCY — MANDATORY (ALL LANGUAGES):
+   Before writing ANY file, check existing project structure via readFile/listFiles to determine
+   the canonical package/module/directory layout. NEVER create a conflicting structure.
+
+   Java / Spring Boot:
+     - Read the @SpringBootApplication class to find the base package (e.g., com.example.hostelapp).
+     - ALL classes you create MUST be under this same base package.
+     - NEVER create a parallel package tree (e.g., com.hostel.entity when base is com.hostel.app).
+     - Standard sub-packages: .entity, .repository, .service, .controller, .config, .dto, .exception
+     - Before writing imports, verify the target class exists at that exact package path.
+     - BAD: Base package is com.hostel.app but you create com.hostel.entity.User
+     - GOOD: Base package is com.hostel.app, you create com.hostel.app.entity.User
+
+   Python:
+     - Read the existing module structure (ls root, check __init__.py locations).
+     - Use the same import root as existing files. If existing code uses `from app.models import X`,
+       you MUST use `from app.models import ...` — never `from models import ...`.
+     - Django: Check INSTALLED_APPS and use the registered app names for imports.
+     - Verify imported modules exist before writing code that depends on them.
+
+   Node.js / TypeScript:
+     - Check if source lives in project root (routes/, models/) or under src/ (src/routes/, src/models/).
+     - Match the existing convention. If existing code imports from "../models/User", use the same path.
+     - TypeScript: Check tsconfig.json for paths/baseUrl and match import conventions.
+     - Verify relative import paths resolve correctly (count ../ levels).
+
+   Go:
+     - Read go.mod for the module path. All imports must use this module path prefix.
+     - Match existing package naming conventions (singular vs plural, flat vs nested).
+
+   Rust:
+     - Read Cargo.toml for the crate name. Use `crate::` prefix for internal module references.
+     - Check mod.rs / lib.rs for declared modules before importing them.
+
+   SELF-CHECK: After writing all files, mentally trace every import/use statement.
+   If any import references a package/module/path that does not exist in the project,
+   fix it BEFORE committing. Cross-package mismatches are the #1 cause of build failures
+   in multi-task projects.
+
    HTML/CSS/JS (static projects — no framework):
      Every HTML file that references a CSS or JS file via <link> or <script> tags MUST
       FRONTEND DOMAIN — MANDATORY RULES:

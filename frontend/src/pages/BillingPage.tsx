@@ -114,14 +114,14 @@ export default function BillingPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
         {/* Page header */}
         <h1 className="text-xl font-bold text-primary">Billing</h1>
 
         {/* Current Plan */}
         <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
-          <div className="flex justify-between items-start">
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
             <div>
               <h2 className="text-lg font-semibold text-primary">
                 {plan?.name || 'Free'}{' '}
@@ -221,7 +221,7 @@ export default function BillingPage() {
                 <div
                   key={t.id}
                   className={cn(
-                    'flex items-center justify-between px-4 py-2.5 rounded-sm border',
+                    'flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-2.5 rounded-sm border',
                     t.status === 'ACTIVE'
                       ? 'bg-accent-green/[0.04] border-accent-green/20'
                       : 'bg-[var(--gray-100)] border-[var(--border-default)] opacity-60',

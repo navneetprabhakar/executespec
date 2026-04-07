@@ -100,14 +100,14 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-12">
+    <div className="max-w-5xl mx-auto px-4 py-8 sm:py-12">
       <div className="text-center mb-10">
-        <h1 className="text-3xl font-bold text-primary">Simple, transparent pricing</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-primary">Simple, transparent pricing</h1>
         <p className="mt-3 text-secondary">No credits. No surprises. You know exactly what you're getting.</p>
       </div>
 
       {/* Toggles */}
-      <div className="flex justify-center gap-6 mb-10">
+      <div className="flex flex-col sm:flex-row justify-center gap-4 sm:gap-6 mb-10 items-center">
         {/* Billing cycle toggle */}
         <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-sm p-1">
           <button

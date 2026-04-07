@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { getTaskGraph, TaskGraphNode } from '@/lib/api';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface Props {
   runId?: string;
@@ -72,6 +73,7 @@ function expandedGroupHeight(subtaskCount: number): number {
 
 // ── Pure renderer ────────────────────────────────────────────────────────────
 export default function TaskGraph({ runId, nodes: externalNodes }: Props) {
+  const isMobile = useIsMobile();
   const [internalNodes, setInternalNodes] = useState<TaskGraphNode[]>([]);
   const [loading, setLoading] = useState(!externalNodes);
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +158,102 @@ export default function TaskGraph({ runId, nodes: externalNodes }: Props) {
 
   // Nodes that participate in layout (standalone + group parents, NOT subtasks)
   const layoutNodes = nodes.filter(n => !subtaskIds.has(n.taskId));
+
+  // ── Mobile: vertical list view ──────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <div className="w-full rounded-sm border border-[var(--border-default)] bg-[#0a0a0f] p-3 space-y-2">
+        {/* Legend */}
+        <div className="flex flex-wrap gap-2 px-1 pb-2 text-xs border-b border-[var(--border-default)]">
+          {Object.entries(STATUS_COLOR).map(([s, c]) => (
+            <span key={s} className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: c.dot }} />
+              <span style={{ color: c.text }}>{s}</span>
+            </span>
+          ))}
+        </div>
+
+        {layoutNodes.map(n => {
+          const group = subtaskGroupMap.get(n.taskId);
+          const c = group ? statusColor(groupStatus(group.subtasks)) : statusColor(n.status);
+          const cb = n.complexity?.toUpperCase();
+          const isExpanded = expandedGroups.has(n.taskId);
+
+          return (
+            <div key={n.taskId}>
+              {/* Task card */}
+              <div
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-sm border"
+                style={{ borderColor: c.border, background: c.bg }}
+                onClick={group ? () => toggleGroup(n.taskId) : undefined}
+              >
+                {/* Status dot */}
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ background: c.dot }}
+                />
+                {/* Title */}
+                <span className="flex-1 text-sm truncate" style={{ color: c.text }}>
+                  {n.title}
+                </span>
+                {/* Complexity badge */}
+                {cb && (
+                  <span
+                    className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded-sm flex-shrink-0"
+                    style={{
+                      background: cb === 'HIGH' ? 'rgba(239,68,68,0.15)' : cb === 'MEDIUM' ? 'rgba(234,179,8,0.15)' : 'rgba(99,102,241,0.15)',
+                      color: cb === 'HIGH' ? '#fca5a5' : cb === 'MEDIUM' ? '#fde047' : '#a5b4fc',
+                    }}
+                  >
+                    {cb}
+                  </span>
+                )}
+                {/* Group chevron */}
+                {group && (
+                  <span className="text-xs flex-shrink-0" style={{ color: '#666' }}>
+                    {isExpanded ? '\u25B4' : '\u25BE'}
+                  </span>
+                )}
+                {/* Group progress */}
+                {group && (
+                  <span className="text-[10px] font-mono flex-shrink-0" style={{ color: c.text }}>
+                    {group.subtasks.filter(s => s.status === 'COMPLETE').length}/{group.subtasks.length}
+                  </span>
+                )}
+              </div>
+
+              {/* Expanded subtasks */}
+              {group && isExpanded && (
+                <div className="ml-5 mt-1 space-y-1">
+                  {group.subtasks.map(st => {
+                    const stc = statusColor(st.status);
+                    return (
+                      <div
+                        key={st.taskId}
+                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-sm border"
+                        style={{ borderColor: stc.border, background: stc.bg }}
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full flex-shrink-0"
+                          style={{ background: stc.dot }}
+                        />
+                        <span className="text-xs font-mono flex-shrink-0" style={{ color: stc.dot }}>
+                          {st.subtaskIndex ?? '?'}/{st.subtaskTotal ?? '?'}
+                        </span>
+                        <span className="text-xs font-mono truncate" style={{ color: stc.text }}>
+                          {extractFileName(st.title)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   // ── Recompute levels via Kahn's algorithm (layout nodes only) ─────────────
   const layoutNodeIds = new Set(layoutNodes.map(n => n.taskId));
