@@ -17,6 +17,7 @@ public class IntegrationProperties {
     private ConfluenceConfig confluence = new ConfluenceConfig();
     private ServiceNowConfig servicenow = new ServiceNowConfig();
     private PagerDutyConfig pagerduty = new PagerDutyConfig();
+    private BitbucketConfig bitbucket = new BitbucketConfig();
     private SlackConfig slack = new SlackConfig();
 
     @Data
@@ -73,6 +74,18 @@ public class IntegrationProperties {
         private String fromEmail;
         private List<String> triggerTypes = List.of("incident.trigger");
         private boolean autoResolve = false;
+        private String dashboardUrl = "http://localhost:8080";
+        private boolean skipApproval = false;
+    }
+
+    @Data
+    public static class BitbucketConfig {
+        private boolean enabled = false;
+        private String username;
+        private String appPassword;
+        private String workspace;
+        private String repoSlug;
+        private String webhookSecret;
         private String dashboardUrl = "http://localhost:8080";
         private boolean skipApproval = false;
     }

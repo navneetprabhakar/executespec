@@ -80,6 +80,12 @@ public class RunDetail {
     /** URL of the pull request created for existing-repo runs. Null for NEW/NONE repos. */
     String githubPrUrl;
 
+    /** Canonical PR URL — works for GitHub and Bitbucket. Null for NEW/NONE repos or legacy runs. */
+    String scmPrUrl;
+
+    /** Which SCM provider was used for this run (GITHUB, BITBUCKET, or null for legacy runs). */
+    String scmProvider;
+
     /** Timestamp when the run was archived by the user. Null for active runs. */
     Instant archivedAt;
 

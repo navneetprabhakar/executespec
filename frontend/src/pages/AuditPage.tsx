@@ -174,8 +174,8 @@ export default function AuditPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-3">
-        <Filter className="h-4 w-4 text-muted mt-5" />
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-3">
+        <Filter className="h-4 w-4 text-muted hidden sm:block mt-5" />
 
         {/* Date range */}
         <div className="space-y-1">
@@ -184,7 +184,7 @@ export default function AuditPage() {
             type="datetime-local"
             value={toDatetimeLocal(fromDate)}
             onChange={(e) => { setFromDate(fromDatetimeLocal(e.target.value)); setPage(0); }}
-            className="block w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+            className="block w-full sm:w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
           />
         </div>
         <div className="space-y-1">
@@ -193,14 +193,14 @@ export default function AuditPage() {
             type="datetime-local"
             value={toDatetimeLocal(toDate)}
             onChange={(e) => { setToDate(fromDatetimeLocal(e.target.value)); setPage(0); }}
-            className="block w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+            className="block w-full sm:w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
           />
         </div>
 
         {/* Entity type chips */}
         <div className="space-y-1">
           <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Entity</label>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {ENTITY_TYPES.map((t) => (
               <button
                 key={t}
@@ -224,7 +224,7 @@ export default function AuditPage() {
           <select
             value={eventFilter}
             onChange={(e) => { setEventFilter(e.target.value); setPage(0); }}
-            className="block w-56 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+            className="block w-full sm:w-56 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
           >
             <option value="">All Events</option>
             {Object.entries(EVENT_TYPE_LABELS).map(([key, label]) => (
@@ -250,8 +250,8 @@ export default function AuditPage() {
                 <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Time</th>
                 <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Event</th>
                 <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Entity</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Actor</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Changes</th>
+                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted hidden md:table-cell">Actor</th>
+                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted hidden lg:table-cell">Changes</th>
               </tr>
             </thead>
             <tbody>
@@ -279,10 +279,10 @@ export default function AuditPage() {
                         {entry.entityId.length > 12 ? entry.entityId.slice(0, 8) + '...' : entry.entityId}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-secondary whitespace-nowrap">
+                    <td className="px-4 py-2.5 text-xs text-secondary whitespace-nowrap hidden md:table-cell">
                       {entry.actorEmail ?? (entry.actorId ? entry.actorId.slice(0, 8) + '...' : 'SYSTEM')}
                     </td>
-                    <td className="px-4 py-2.5 text-xs max-w-xs">
+                    <td className="px-4 py-2.5 text-xs max-w-xs hidden lg:table-cell">
                       {entry.oldValue && entry.newValue ? (
                         <div className="space-y-0.5">
                           <div className="text-muted line-through">{renderJsonValue(entry.oldValue)}</div>

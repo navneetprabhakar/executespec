@@ -350,7 +350,11 @@ public class RunController {
      * Push an existing COMPLETE/PARTIAL run's workspace to GitHub.
      * If repoMode=NEW and no repoUrl, creates a new repo first.
      * This avoids re-running the pipeline just to push generated code.
+     *
+     * @deprecated Use {@code POST /api/runs/{runId}/push-scm} instead, which routes to the
+     *             correct SCM provider (GitHub or Bitbucket) based on user credentials.
      */
+    @Deprecated
     @PostMapping("/{runId}/push-github")
     public ResponseEntity<Map<String, String>> pushToGitHub(
             @AuthenticationPrincipal AppUserDetails userDetails,
@@ -376,6 +380,60 @@ public class RunController {
         return ResponseEntity.ok(Map.of(
             "status", "pushed",
             "repoUrl", run.getRepoUrl() != null ? run.getRepoUrl() : ""));
+    }
+
+    /**
+     * Push an existing COMPLETE/PARTIAL run's workspace to the appropriate SCM provider.
+     * Routes to GitHub or Bitbucket based on user credentials:
+     * - If user has Bitbucket credentials → pushes to Bitbucket, creates PR
+     * - Else if user has GitHub PAT → pushes to GitHub, creates PR
+     * - If neither → returns 400
+     */
+    @PostMapping("/{runId}/push-scm")
+    public ResponseEntity<Map<String, String>> pushToScm(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable String runId,
+            @RequestParam(required = false) String repoUrl,
+            @RequestParam(required = false, defaultValue = "EXISTING") String repoMode) {
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        log.info("POST /api/runs/{}/push-scm — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
+        if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Only COMPLETE or PARTIAL runs can be pushed to SCM (current: " + run.getStatus() + ")");
+        }
+        // Override run's repo config with request params
+        if (repoUrl != null && !repoUrl.isBlank()) run.setRepoUrl(repoUrl);
+        run.setRepoMode(repoMode);
+
+        var user = userDetails.getUser();
+
+        // Populate Bitbucket credentials from user if not on run
+        if (run.getBitbucketUsername() == null && user.getBitbucketUsername() != null) {
+            run.setBitbucketUsername(user.getBitbucketUsername());
+            run.setBitbucketAppPassword(user.getBitbucketAppPassword());
+            run.setBitbucketWorkspace(user.getBitbucketWorkspace());
+            run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
+        }
+        // Populate GitHub credentials from user if not on run
+        if ((run.getGithubPat() == null || run.getGithubPat().isBlank()) && user.getGithubPat() != null) {
+            run.setGithubPat(user.getGithubPat());
+            run.setGithubOwner(user.getGithubOwner());
+        }
+
+        stateStore.save(run);
+        harness.pushToScmManual(run);
+
+        // Reload to pick up PR URL set during push
+        PipelineRun updated = stateStore.findRun(runId).orElse(run);
+        String prUrl = updated.getScmPrUrl() != null ? updated.getScmPrUrl()
+                : (updated.getGithubPrUrl() != null ? updated.getGithubPrUrl() : "");
+        String provider = updated.getScmProvider() != null ? updated.getScmProvider() : "";
+
+        return ResponseEntity.ok(Map.of(
+            "status", "pushed",
+            "repoUrl", updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
+            "prUrl", prUrl,
+            "scmProvider", provider));
     }
 
     /** Update the project association of an existing run. Send null or empty projectId to un-assign. */

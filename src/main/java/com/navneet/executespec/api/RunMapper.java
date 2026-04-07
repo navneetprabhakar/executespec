@@ -166,6 +166,8 @@ public class RunMapper {
             .runSummary(r.getRunSummary())
             .executionMode(r.getExecutionMode())
             .githubPrUrl(r.getGithubPrUrl())
+            .scmPrUrl(r.getScmPrUrl())
+            .scmProvider(r.getScmProvider())
             .archivedAt(r.getArchivedAt())
             .build();
     }

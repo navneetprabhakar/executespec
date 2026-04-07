@@ -13,7 +13,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
-import { downloadWorkspace, editRunPlan, pushToGitHub, updateGithubSettings, archiveRun, type ReviewReport } from '@/lib/api';
+import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, type ReviewReport } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
 import VibeProgressNarrative from './VibeProgressNarrative';
@@ -104,9 +104,27 @@ export default function RunDetail() {
     }
   };
 
-  const handleGitHubPush = async () => {
+  const hasBitbucket = !!user?.hasBitbucketAppPassword;
+  const hasGitHub = !!user?.hasGithubPat;
+  const scmLabel = hasBitbucket && !hasGitHub ? 'Bitbucket' : 'GitHub';
+
+  const handleScmPush = async () => {
     if (!activeRun) return;
-    if (!user?.hasGithubPat) {
+    // If user has Bitbucket but not GitHub, use SCM-agnostic endpoint
+    if (hasBitbucket && !hasGitHub) {
+      setGhPushing(true);
+      try {
+        await pushToScm(activeRun.runId);
+        addToast({ type: 'success', message: 'Publishing to Bitbucket...' });
+      } catch (e: any) {
+        addToast({ type: 'error', message: e.message || 'Bitbucket push failed' });
+      } finally {
+        setGhPushing(false);
+      }
+      return;
+    }
+    // GitHub path
+    if (!hasGitHub) {
       setGhOwner(user?.githubOwner ?? '');
       setGhError('');
       setShowGitHubModal(true);
@@ -115,7 +133,7 @@ export default function RunDetail() {
     setGhPushing(true);
     try {
       await pushToGitHub(activeRun.runId);
-      addToast({ type: 'success', message: 'Publishing to GitHub…' });
+      addToast({ type: 'success', message: 'Publishing to GitHub...' });
     } catch (e: any) {
       addToast({ type: 'error', message: e.message || 'GitHub push failed' });
     } finally {
@@ -509,13 +527,13 @@ export default function RunDetail() {
             <div className="flex items-center gap-2 ml-auto">
               {['COMPLETE', 'PARTIAL'].includes(activeRun.status) && (
                 <button
-                  onClick={handleGitHubPush}
+                  onClick={handleScmPush}
                   disabled={ghPushing}
                   className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 whitespace-nowrap"
-                  title="Publish to GitHub"
+                  title={`Publish to ${scmLabel}`}
                 >
                   <Github className="h-3.5 w-3.5" />
-                  {ghPushing ? 'Publishing…' : 'GitHub'}
+                  {ghPushing ? 'Publishing...' : scmLabel}
                 </button>
               )}
               <button

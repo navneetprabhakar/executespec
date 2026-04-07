@@ -5,6 +5,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [1.3.0] — 2026-04-06
+
+### Added
+- **Bitbucket SCM integration** — Full Bitbucket support as a second SCM provider alongside GitHub. `BitbucketRepoService` handles clone, branch creation, and PR via Bitbucket REST API v2 with Basic auth. `BitbucketAdapter` (InboundAdapter + OutboundAdapter) under `integration/bitbucket/` for webhook ingestion and outbound PR comments on run completion. App password encrypted at rest via `EncryptedValueConverter` (AES-256-GCM).
+- **SCM-agnostic pipeline push** — `PipelineHarness.pushToScmIfConfigured()` replaces `pushToGitHubIfConfigured()` at all 4 call sites. Routes to GitHub or Bitbucket based on user credentials. New `scm_pr_url` and `scm_provider` columns on `pipeline_run` (backward compat: `github_pr_url` retained).
+- **Bitbucket API endpoints** — `PUT /api/auth/settings/bitbucket` (save credentials), `POST /api/auth/settings/bitbucket/validate` (test connection), `POST /api/runs/{runId}/push-scm` (SCM-agnostic push).
+- **Bitbucket frontend integration** — Bitbucket card on IntegrationsPage with credential form (username, app password, workspace, repo slug), test connection, and save. SCM-agnostic PR link and push button on RunDetail (dynamic label: "View on GitHub" / "View on Bitbucket").
+- **V59 migration** — `bitbucket_username`, `bitbucket_app_password`, `bitbucket_workspace`, `bitbucket_repo_slug` on `app_user` and `pipeline_run`; `scm_pr_url`, `scm_provider` on `pipeline_run`.
+- **Responsive frontend design** — Comprehensive mobile/tablet support across all pages:
+  - New shared utilities: `useBreakpoint()` hook (xs/sm/md/lg/xl), `ResponsiveModal` (full-screen on mobile), `ResponsiveTable` (cards on mobile, table on desktop)
+  - RunDetailTabs: scrollable tab bar, responsive metadata grid
+  - TaskGraph: vertical card list on mobile, SVG graph on desktop
+  - NewRunModal: full-screen sheet on mobile
+  - DeployWizardModal: full-screen on mobile, responsive step indicator
+  - AdminPage: `overflow-x-auto` tables, hidden secondary columns on mobile, responsive filters
+  - BillingPage, PlansPage, SettingsPage, AuditPage, InvoicesPage, AccountingPage, DeploymentsPage: responsive grids, stacking layouts, touch-friendly buttons
+  - CommandPalette: mobile-sized results list, 44px touch targets
+  - PreviewTab: responsive iframe height, wrapped controls
+
+### Changed
+- **Planner prompt** — Added "SINGLE-FILE COMPLEXITY TRAP" rule: complex single-file components (calendars, dashboards, form wizards with 4+ features) must be split into sequential tasks building on each other in the same file. Prevents 35-iteration exhaustion on monolithic UI tasks.
+- **GitTool** — Added `pushToBranchWithBasicAuth()` for Bitbucket URL format (`username:appPassword@bitbucket.org`)
+
+### Deprecated
+- `pushToGitHubIfConfigured()` in PipelineHarness (use `pushToScmIfConfigured()`)
+- `POST /api/runs/{runId}/push-github` endpoint (use `/push-scm`)
+- `github_pr_url` field on PipelineRun (use `scmPrUrl`)
+
+---
+
 ## [1.2.2] — 2026-04-06
 
 ### Changed

@@ -133,11 +133,11 @@ function SaveBar({
   saving: boolean; disabled?: boolean; onClear?: () => void; clearLabel?: string;
 }) {
   return (
-    <div className="flex gap-3 pt-1">
+    <div className="flex flex-wrap gap-3 pt-1">
       <button
         type="submit"
         disabled={saving || disabled}
-        className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
+        className="w-full sm:w-auto px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>
@@ -146,7 +146,7 @@ function SaveBar({
           type="button"
           onClick={onClear}
           disabled={saving}
-          className="px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
+          className="w-full sm:w-auto px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
         >
           {clearLabel ?? 'Clear'}
         </button>
@@ -267,9 +267,9 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Current Plan & Upgrade ───────────────────────────────────────── */}
-      <GlassPanel className="px-5 py-4 flex items-center justify-between">
+      <GlassPanel className="px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
             ${user?.tier === 'ENTERPRISE' ? 'bg-accent-amber/20 text-accent-amber' :
               user?.tier === 'PRO' ? 'bg-accent-blue/20 text-accent-blue' :
               'bg-[var(--gray-400)] text-secondary'}`}>
@@ -291,14 +291,14 @@ export default function SettingsPage() {
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => navigate('/billing')}
-            className="px-3 py-1.5 rounded-sm text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-[var(--border-default)] transition-colors"
+            className="w-full sm:w-auto px-3 py-1.5 rounded-sm text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-[var(--border-default)] transition-colors"
           >
             View Billing
           </button>
           {user?.tier === 'FREE' && (
             <button
               onClick={() => navigate('/plans')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 transition-colors"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 transition-colors"
             >
               Upgrade Plan
               <ArrowUpRight className="h-3 w-3" />
@@ -352,11 +352,11 @@ export default function SettingsPage() {
             hint="Your GitHub username or org name."
           />
           <SaveMessage msg={githubMsg} />
-          <div className="flex gap-3 pt-1">
+          <div className="flex flex-wrap gap-3 pt-1">
             <button
               type="submit"
               disabled={githubSaving || (!githubPat.trim() && !githubOwner.trim())}
-              className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
+              className="w-full sm:w-auto px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
             >
               {githubSaving ? 'Saving…' : 'Save'}
             </button>
@@ -364,7 +364,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleTestGitHub}
               disabled={githubTesting || !githubPat.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-sm border border-[var(--border-default)] text-secondary text-sm hover:border-accent-blue/40 hover:text-primary disabled:opacity-40 transition-colors"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm border border-[var(--border-default)] text-secondary text-sm hover:border-accent-blue/40 hover:text-primary disabled:opacity-40 transition-colors"
             >
               {githubTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Test Connection
@@ -374,7 +374,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={handleClearGitHub}
                 disabled={githubSaving}
-                className="px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
+                className="w-full sm:w-auto px-4 py-2 rounded-sm text-secondary hover:text-accent-red text-sm transition-colors disabled:opacity-50"
               >
                 Clear credentials
               </button>
@@ -450,7 +450,7 @@ export default function SettingsPage() {
       {permissions?.canViewMetrics && (
         <div>
           <h3 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">System Health</h3>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <HealthCard icon={<Server className="h-5 w-5 text-accent-blue" />} label="API" value="Healthy" color="text-accent-green" />
             <HealthCard icon={<Database className="h-5 w-5 text-secondary" />} label="Database" value="Connected" color="text-accent-green" />
             <HealthCard icon={<Cpu className="h-5 w-5 text-accent-amber" />} label="Total Runs" value={String(health?.totalRuns ?? '—')} color="text-primary" />
@@ -647,7 +647,7 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
       {/* Provider Restrictions */}
       <div className="space-y-2 pt-2 border-t border-[var(--border-default)]">
         <label className="text-xs text-secondary block">Enabled Providers</label>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           {PROVIDERS.map((p) => (
             <label key={p.id} className="flex items-center gap-2 cursor-pointer">
               <input
@@ -681,7 +681,7 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
+          className="w-full sm:w-auto px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
         >
           {saving ? 'Saving...' : 'Save'}
         </button>

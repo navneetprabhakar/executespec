@@ -200,8 +200,33 @@ public class PipelineRun {
     private String githubOwner;
 
     /** URL of the pull request created for existing-repo runs (e.g. "https://github.com/owner/repo/pull/1"). */
+    @Deprecated
     @Column(name = "github_pr_url", length = 512)
     private String githubPrUrl;
+
+    // ── SCM-agnostic fields ──────────────────────────────────────────────────
+
+    /** Canonical PR URL — replaces githubPrUrl. Works for GitHub and Bitbucket. */
+    @Column(name = "scm_pr_url", length = 1024)
+    private String scmPrUrl;
+
+    /** Which SCM provider was used for this run (GITHUB, BITBUCKET, or null for legacy runs). */
+    @Column(name = "scm_provider", length = 20)
+    private String scmProvider;
+
+    // ── Bitbucket credentials (captured from user at submission) ─────────────
+
+    @Column(name = "bitbucket_username")
+    private String bitbucketUsername;
+
+    @Column(name = "bitbucket_app_password")
+    private String bitbucketAppPassword;
+
+    @Column(name = "bitbucket_workspace")
+    private String bitbucketWorkspace;
+
+    @Column(name = "bitbucket_repo_slug")
+    private String bitbucketRepoSlug;
 
     // ── Post-run conversation ──────────────────────────────────────────────────
 
