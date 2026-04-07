@@ -13,8 +13,8 @@ domain           = "executespec.ai"
 subdomain_prefix = "dev"   # → dev.executespec.ai
 
 # ── Compute (smaller for dev) ───────────────────────────────────────────────
-machine_type      = "n2-standard-8"   # 8 vCPU, 32 GB RAM (~$284/mo)
-boot_disk_size_gb = 30
+machine_type      = "e2-standard-4"   # 4 vCPU, 16 GB RAM (~$97/mo)
+boot_disk_size_gb = 50
 boot_disk_type    = "pd-balanced"
 
 # ── Database (minimal for dev) ──────────────────────────────────────────────
@@ -39,11 +39,11 @@ labels = {
 }
 
 # ── Estimated Monthly Cost ──────────────────────────────────────────────────
-# Compute (n2-standard-8):    ~$284
+# Compute (e2-standard-4):    ~$97
 # Cloud SQL (db-g1-small):    ~$25
 # Redis (1 GB Basic):         ~$36
 # Load Balancer + forwarding: ~$18
 # Cloud NAT:                  ~$3
 # GCS (minimal):              ~$1
 # ────────────────────────────────────────────
-# Total:                      ~$416/month
+# Total:                      ~$229/month
