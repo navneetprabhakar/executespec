@@ -508,7 +508,12 @@ billing:
 logging:
   level:
     "[com.navneet.executespec]": INFO
+    "[com.navneet.executespec.agent]": INFO
+    "[com.navneet.executespec.compiler]": INFO
+    "[com.navneet.executespec.reviewer]": INFO
+    "[com.navneet.executespec.testgen]": INFO
     "[org.springframework.ai]": WARN
+    "[org.springframework.ai.chat.client]": WARN
     "[io.opentelemetry]": WARN
     "[io.micrometer.tracing]": INFO
 

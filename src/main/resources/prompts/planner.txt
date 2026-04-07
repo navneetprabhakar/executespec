@@ -334,10 +334,10 @@ HARD RULES — violating these causes the run to fail
      "task_id": "frontend_setup",
      "task_layer": "INFRA",
      "title": "Create frontend project scaffold: config files only",
-     "objective": "Write ONLY frontend build/tooling config files: package.json with all frontend dependencies (react, vite, tailwind, etc.), vite.config.js with /api proxy to backend port, tailwind.config.js, postcss.config.js, tsconfig.json (if TypeScript). Do NOT create index.html, src/main.tsx, src/App.tsx/vue, src/style.css, or any component files — those belong in the app_shell task. CRITICAL: frontend API calls must use RELATIVE base URLs (e.g., baseURL: '/api') — NEVER absolute URLs.",
-     "boundaries": "Config files only: package.json, vite.config, tailwind.config, postcss.config, tsconfig. Do NOT create index.html, main.tsx/jsx, App.tsx/jsx/vue, style.css, or any source files.",
-     "output_format": "package.json, vite.config.js, tailwind.config.js (max 5 config files).",
-     "acceptance_criteria": "Frontend package.json exists with all dependencies. Vite config exists with /api proxy.",
+     "objective": "Write ONLY frontend build/tooling config files. For compiled backends (Spring Boot, Go, Rust): ALL frontend files MUST go under frontend/ directory (e.g., frontend/package.json, frontend/vite.config.js). For Node.js backends: files can be at root. Config files: package.json with all frontend dependencies (react, vite, tailwind, etc.), vite.config.js with /api proxy to backend port, tailwind.config.js, postcss.config.js, tsconfig.json (if TypeScript). Do NOT create index.html, src/main.tsx, src/App.tsx/vue, src/style.css, or any component files — those belong in the app_shell task. CRITICAL: frontend API calls must use RELATIVE base URLs (e.g., baseURL: '/api') — NEVER absolute URLs.",
+     "boundaries": "Config files only: package.json, vite.config, tailwind.config, postcss.config, tsconfig. Do NOT create index.html, main.tsx/jsx, App.tsx/jsx/vue, style.css, or any source files. For Spring Boot/Go/Rust backends: all files under frontend/ directory.",
+     "output_format": "package.json, vite.config.js, tailwind.config.js (max 5 config files). Under frontend/ for compiled backends.",
+     "acceptance_criteria": "Frontend package.json exists with all dependencies. Vite config exists with /api proxy. For compiled backends: all files under frontend/.",
      "depends_on": [],
      "complexity": "LOW",
      "assigned_model": "{{WORKER_MODEL}}"
@@ -580,6 +580,19 @@ For React/Vue/Angular/Svelte projects:
 LAYER REMINDER: Frontend tasks must ONLY own frontend/** files (task_layer: FRONTEND).
   Backend tasks must ONLY own src/main/java/** files (task_layer: BACKEND).
   Never mix Java and React/TS files in the same task.
+
+FULL_STACK DIRECTORY STRUCTURE — MANDATORY:
+  When project_type is FULL_STACK with a compiled backend (Spring Boot, Go, Rust), the
+  frontend MUST live under a separate top-level directory to avoid colliding with the
+  backend's src/ tree:
+    - Java (Spring Boot / Maven / Gradle): frontend files go under frontend/ (e.g.,
+      frontend/package.json, frontend/src/App.jsx, frontend/src/components/Layout.jsx).
+      The frontend_setup task owns frontend/package.json, frontend/vite.config.js, etc.
+      NEVER place frontend files directly under src/ — that is Maven's source root.
+    - Go / Rust: frontend files go under frontend/ or client/.
+    - Node.js (Express + React single-repo): both can share root or use src/ — no conflict.
+  The frontend_setup scaffold task's owned_files must ALL start with "frontend/" for
+  compiled-backend projects. The vite.config.js proxy target must match the backend port.
 
 MULTI-SECTION SINGLE-PAGE RULE (prevents truncation on landing pages):
   When the spec describes a single HTML page with MULTIPLE content sections

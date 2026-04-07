@@ -13,11 +13,17 @@ const STATUS_ICONS: Record<string, React.ElementType> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  COMPLETE: 'text-accent-green',
-  FAILED:   'text-accent-red',
-  WORKING:  'text-accent-blue',
-  MERGING:  'text-secondary',
-  default:  'text-muted',
+  COMPLETE:  'text-status-success',
+  FAILED:    'text-status-error',
+  STUCK:     'text-status-error',
+  WORKING:   'text-status-executing',
+  COMPILING: 'text-status-executing',
+  MERGING:   'text-status-executing',
+  PLANNING:  'text-status-thinking',
+  REVIEWING: 'text-status-thinking',
+  PARTIAL:   'text-status-partial',
+  BLOCKED:   'text-status-blocked',
+  default:   'text-muted',
 };
 
 interface ActivityFeedProps {
