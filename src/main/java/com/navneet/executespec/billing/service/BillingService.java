@@ -152,22 +152,8 @@ public class BillingService {
                     checkout.sessionId(), null, null, null,
                     "STRIPE", checkout.url(), checkout.sessionId());
 
-            // Persist subscription with status CREATED
-            BillingSubscription sub = BillingSubscription.builder()
-                    .userId(userId)
-                    .orgId(user.getOrgId())
-                    .billingPlanId(plan.getId())
-                    .paymentGateway("STRIPE")
-                    .gatewaySubscriptionId(checkout.sessionId())
-                    .status("CREATED")
-                    .totalSeats(plan.getIncludedSeats())
-                    .extraSeats(0)
-                    .cancelAtPeriodEnd(false)
-                    .termsAcceptedAt(Instant.now())
-                    .termsVersion(currentTermsVersion)
-                    .founderPricing(isFounder)
-                    .build();
-            subRepo.save(sub);
+            persistSubscription(userId, user.getOrgId(), plan, "STRIPE",
+                    checkout.sessionId(), null, isFounder);
 
         } else {
             // Razorpay: use legacy gateway
@@ -175,23 +161,8 @@ public class BillingService {
             result = razorpayGateway.createSubscription(
                     userId, userName, user.getEmail(), user.getOrgId(), plan);
 
-            // Persist subscription with status CREATED
-            BillingSubscription sub = BillingSubscription.builder()
-                    .userId(userId)
-                    .orgId(user.getOrgId())
-                    .billingPlanId(plan.getId())
-                    .paymentGateway("RAZORPAY")
-                    .gatewaySubscriptionId(result.gatewaySubscriptionId())
-                    .gatewayCustomerId(result.gatewayCustomerId())
-                    .status("CREATED")
-                    .totalSeats(plan.getIncludedSeats())
-                    .extraSeats(0)
-                    .cancelAtPeriodEnd(false)
-                    .termsAcceptedAt(Instant.now())
-                    .termsVersion(currentTermsVersion)
-                    .founderPricing(isFounder)
-                    .build();
-            subRepo.save(sub);
+            persistSubscription(userId, user.getOrgId(), plan, "RAZORPAY",
+                    result.gatewaySubscriptionId(), result.gatewayCustomerId(), isFounder);
         }
 
         log.info("Subscription created: user={}, plan={}, gateway={}",
@@ -386,25 +357,9 @@ public class BillingService {
                 ? PlanResponse.from(plan, limits)
                 : null;
 
-        // Build bonus runs info
-        Instant now = Instant.now();
-        long userBonus = runTopupRepo.sumRemainingByUserId(userId, now);
-        // Also include org bonus if user is in an org
-        AppUser statusUser = userRepo.findById(userId).orElse(null);
-        long orgBonus = statusUser != null && statusUser.getOrgId() != null
-                ? runTopupRepo.sumRemainingByOrgId(statusUser.getOrgId(), now) : 0;
-        long totalBonus = userBonus + orgBonus;
-
-        List<RunTopup> activeTopups = runTopupRepo.findActiveByUserId(userId, now);
-        List<BillingStatusResponse.TopupInfo> topupInfos = activeTopups.stream()
-                .map(t -> new BillingStatusResponse.TopupInfo(
-                        t.getId(), t.getQuantity(), t.getRemaining(),
-                        t.getSource(), t.getStatus(), t.getExpiresAt(), t.getCreatedAt()))
-                .collect(Collectors.toList());
-
-        BillingStatusResponse.BonusRunsInfo bonusRunsInfo = totalBonus > 0 || !topupInfos.isEmpty()
-                ? new BillingStatusResponse.BonusRunsInfo(totalBonus, topupInfos)
-                : null;
+        // Build bonus runs info and adjust usage
+        BillingStatusResponse.BonusRunsInfo bonusRunsInfo = buildBonusRunsInfo(userId);
+        long totalBonus = bonusRunsInfo != null ? bonusRunsInfo.available() : 0;
 
         // Adjust RUNS usage max to include bonus
         List<BillingStatusResponse.UsageInfo> adjustedUsage = usageInfo.stream()
@@ -862,6 +817,48 @@ public class BillingService {
     // ─────────────────────────────────────────────────────────────
     // HELPERS
     // ─────────────────────────────────────────────────────────────
+
+    private void persistSubscription(String userId, String orgId, BillingPlan plan,
+                                      String paymentGateway, String gatewaySubscriptionId,
+                                      String gatewayCustomerId, boolean isFounder) {
+        BillingSubscription sub = BillingSubscription.builder()
+                .userId(userId)
+                .orgId(orgId)
+                .billingPlanId(plan.getId())
+                .paymentGateway(paymentGateway)
+                .gatewaySubscriptionId(gatewaySubscriptionId)
+                .gatewayCustomerId(gatewayCustomerId)
+                .status("CREATED")
+                .totalSeats(plan.getIncludedSeats())
+                .extraSeats(0)
+                .cancelAtPeriodEnd(false)
+                .termsAcceptedAt(Instant.now())
+                .termsVersion(currentTermsVersion)
+                .founderPricing(isFounder)
+                .build();
+        subRepo.save(sub);
+    }
+
+    private BillingStatusResponse.BonusRunsInfo buildBonusRunsInfo(String userId) {
+        Instant now = Instant.now();
+        long userBonus = runTopupRepo.sumRemainingByUserId(userId, now);
+        // Also include org bonus if user is in an org
+        AppUser statusUser = userRepo.findById(userId).orElse(null);
+        long orgBonus = statusUser != null && statusUser.getOrgId() != null
+                ? runTopupRepo.sumRemainingByOrgId(statusUser.getOrgId(), now) : 0;
+        long totalBonus = userBonus + orgBonus;
+
+        List<RunTopup> activeTopups = runTopupRepo.findActiveByUserId(userId, now);
+        List<BillingStatusResponse.TopupInfo> topupInfos = activeTopups.stream()
+                .map(t -> new BillingStatusResponse.TopupInfo(
+                        t.getId(), t.getQuantity(), t.getRemaining(),
+                        t.getSource(), t.getStatus(), t.getExpiresAt(), t.getCreatedAt()))
+                .collect(Collectors.toList());
+
+        return totalBonus > 0 || !topupInfos.isEmpty()
+                ? new BillingStatusResponse.BonusRunsInfo(totalBonus, topupInfos)
+                : null;
+    }
 
     private Instant computePeriodEnd(String period) {
         return switch (period) {

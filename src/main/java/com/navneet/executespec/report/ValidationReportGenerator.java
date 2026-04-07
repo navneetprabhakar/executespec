@@ -73,6 +73,22 @@ public class ValidationReportGenerator {
         var sb = new StringBuilder();
         sb.append("Generate a Validation Report for this pipeline run. Frame all findings as automated quality checks — never mention AI, models, or agents.\n\n");
 
+        sb.append(buildRunStatsSection(input));
+
+        List<String> checksRun = new ArrayList<>();
+        List<String> checksPassed = new ArrayList<>();
+        List<String> allIssueDescriptions = new ArrayList<>();
+
+        sb.append(buildReviewSection(input, checksRun, checksPassed, allIssueDescriptions));
+
+        sb.append(buildTestResultsSection(input, checksRun, checksPassed, allIssueDescriptions));
+
+        return sb.toString();
+    }
+
+    private String buildRunStatsSection(ReportInput input) {
+        var sb = new StringBuilder();
+
         // File stats from worker reports
         int filesCreated = 0;
         int filesModified = 0;
@@ -104,9 +120,14 @@ public class ValidationReportGenerator {
             : 0;
         sb.append("- Tasks: %d total, %d completed\n".formatted(totalTasks, completedTasks));
 
+        return sb.toString();
+    }
+
+    private String buildReviewSection(ReportInput input, List<String> checksRun,
+                                       List<String> checksPassed, List<String> allIssueDescriptions) {
+        var sb = new StringBuilder();
+
         // Compile result
-        List<String> checksRun = new ArrayList<>();
-        List<String> checksPassed = new ArrayList<>();
         CompileResult compile = input.compileResult();
         if (compile != null && !compile.skipped()) {
             checksRun.add("COMPILATION");
@@ -117,7 +138,6 @@ public class ValidationReportGenerator {
 
         // Review result (V2 flat issue list)
         ReviewReportV2 review = input.review();
-        List<String> allIssueDescriptions = new ArrayList<>();
         if (review != null) {
             checksRun.add("CODE_REVIEW");
             if (review.getIssues() != null && !review.getIssues().isEmpty()) {
@@ -177,6 +197,13 @@ public class ValidationReportGenerator {
             sb.append("Recommendation: %s\n".formatted(
                 review.getRecommendationCompat() != null ? review.getRecommendationCompat() : "N/A"));
         }
+
+        return sb.toString();
+    }
+
+    private String buildTestResultsSection(ReportInput input, List<String> checksRun,
+                                            List<String> checksPassed, List<String> allIssueDescriptions) {
+        var sb = new StringBuilder();
 
         // Integration test results
         TestExecutionSummary testSummary = input.testSummary();
