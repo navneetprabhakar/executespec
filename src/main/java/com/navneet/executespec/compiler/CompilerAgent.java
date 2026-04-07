@@ -153,6 +153,9 @@ public class CompilerAgent {
         return CompileResult.failed(maxAttempts, summary);
     }
 
+    /** Max chars of compile error output to include in LLM prompt / SSE events. */
+    private static final int MAX_ERROR_CHARS = 2000;
+
     /** Max files to include in a single compiler LLM pass. Remaining files fixed in subsequent retry passes. */
     private static final int MAX_COMPILER_FILES = 10;
 
@@ -163,7 +166,7 @@ public class CompilerAgent {
         String scopedErrors = scopeErrors(errors, MAX_COMPILER_FILES);
         String context = extractRelevantFiles(runId, scopedErrors);
         String user = "Build tool: " + buildTool
-                + "\n\nCOMPILE ERRORS:\n" + truncate(scopedErrors, 2000)
+                + "\n\nCOMPILE ERRORS:\n" + truncate(scopedErrors, MAX_ERROR_CHARS)
                 + "\n\nRELEVANT SOURCE FILES:\n" + context
                 + "\n\nOutput ONLY a JSON array: [{\"path\":\"...\",\"content\":\"...\"}]";
 

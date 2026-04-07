@@ -44,6 +44,19 @@ public class CostEstimator {
         }
     }
 
+    // Extra input tokens added for the reviewer pass to account for the full codebase context
+    // it receives beyond the base MEDIUM_IN_TOKENS estimate.
+    private static final int REVIEWER_CONTEXT_BUFFER = 20_000;
+
+    // 50% buffer on high estimate to account for retries, failover, and cache-write overhead.
+    private static final double HIGH_ESTIMATE_MULTIPLIER = 1.50;
+
+    // Anthropic prompt-cache pricing: cache writes cost 25% more than normal input.
+    private static final double CACHE_WRITE_COST_MULTIPLIER = 1.25;
+
+    // Anthropic prompt-cache pricing: cache reads cost only 10% of normal input (90% discount).
+    private static final double CACHE_READ_COST_MULTIPLIER = 0.10;
+
     // Input token estimates per iteration by complexity.
     // Based on typical context window usage at compaction thresholds (45%/60%/80% of 200K limit).
     private static final int LOW_IN_TOKENS    = 15_000;
@@ -90,12 +103,12 @@ public class CostEstimator {
         int reviewerOut = tokenBudgetMonitor.maxOutputTokens(null, "MEDIUM");
         totalLow  += costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
         totalHigh += costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
-        totalLow  += costUsd(MEDIUM_IN_TOKENS + 20_000, reviewerOut, 1, reviewerRates);
-        totalHigh += costUsd(MEDIUM_IN_TOKENS + 20_000, reviewerOut, 2, reviewerRates);
+        totalLow  += costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, reviewerOut, 1, reviewerRates);
+        totalHigh += costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, reviewerOut, 2, reviewerRates);
 
         // Apply 50% buffer to high estimate to account for retries, failover,
         // and cache-write overhead that the simple model doesn't capture.
-        totalHigh *= 1.50;
+        totalHigh *= HIGH_ESTIMATE_MULTIPLIER;
 
         log.debug("[CostEstimator] {} tasks → low=${}, high=${} (provider={})", plan.getTasks().size(),
             String.format("%.3f", totalLow), String.format("%.3f", totalHigh), provider);
@@ -122,9 +135,9 @@ public class CostEstimator {
         double[] reviewerRates = dbRates(props.getRoles().getReviewer());
 
         double min = costUsd(MEDIUM_IN_TOKENS, MEDIUM_OUT_TOKENS, 1, plannerRates)
-                   + costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 1, reviewerRates);
+                   + costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, MEDIUM_OUT_TOKENS, 1, reviewerRates);
         double max = costUsd(MEDIUM_IN_TOKENS, MEDIUM_OUT_TOKENS, 1, plannerRates)
-                   + costUsd(MEDIUM_IN_TOKENS + 20_000, MEDIUM_OUT_TOKENS, 2, reviewerRates);
+                   + costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, MEDIUM_OUT_TOKENS, 2, reviewerRates);
         return new double[]{min, max};
     }
 
@@ -165,8 +178,8 @@ public class CostEstimator {
             int out        = nvl(task.getOutputTokens());
 
             totalCost += (normalIn   / 1_000_000.0) * rates[0];         // 1.00x
-            totalCost += (cacheWrite / 1_000_000.0) * rates[0] * 1.25;  // 1.25x
-            totalCost += (cacheRead  / 1_000_000.0) * rates[0] * 0.10;  // 0.10x
+            totalCost += (cacheWrite / 1_000_000.0) * rates[0] * CACHE_WRITE_COST_MULTIPLIER;
+            totalCost += (cacheRead  / 1_000_000.0) * rates[0] * CACHE_READ_COST_MULTIPLIER;
             totalCost += (out        / 1_000_000.0) * rates[1];          // 1.00x
         }
 

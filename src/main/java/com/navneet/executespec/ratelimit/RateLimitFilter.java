@@ -46,6 +46,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final TierEnforcementService tierEnforcementService;
 
+    private static final String RATE_LIMIT_KEY_PREFIX = "rl:";
     private static final String TIER_CACHE_PREFIX = "rl:tier:";
     private static final Duration TIER_CACHE_TTL = Duration.ofMinutes(2);
 
@@ -89,9 +90,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String tier = resolveTier(request, group);
         int limit = policy.getLimit(group, tier);
 
-        // Redis key: rl:{identifier}:{group}:{minuteBucket}
         long minuteBucket = Instant.now().getEpochSecond() / 60;
-        String redisKey = "rl:" + identifier + ":" + group + ":" + minuteBucket;
+        String redisKey = buildRateLimitKey(identifier, group, minuteBucket);
 
         try {
             Long count = redisTemplate.opsForValue().increment(redisKey);
@@ -222,6 +222,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return parts[trustedIndex].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    /** Builds the Redis key for rate limiting: {prefix}{identifier}:{group}:{minuteBucket}. */
+    private String buildRateLimitKey(String identifier, String group, long minuteBucket) {
+        return RATE_LIMIT_KEY_PREFIX + identifier + ":" + group + ":" + minuteBucket;
     }
 
     /** Remove local counter entries from previous minute buckets to prevent memory growth. */

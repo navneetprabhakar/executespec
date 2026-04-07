@@ -36,6 +36,9 @@ public class ValidationReportGenerator {
     private final LlmRouter llmRouter;
     private final ModelResolver modelResolver;
 
+    /** Max issues included in the LLM prompt to stay within token budget. */
+    private static final int MAX_ISSUES_TO_REPORT = 20;
+
     @Value("classpath:prompts/validation-report.txt")
     private Resource promptTemplate;
 
@@ -178,15 +181,15 @@ public class ValidationReportGenerator {
             sb.append("No issues were found. This was a clean run. All checks passed on first attempt.\n");
         } else {
             sb.append("## Issues Found\n\n");
-            // Limit to 20 issues for LLM token budget
-            List<String> issuesToReport = allIssueDescriptions.size() > 20
-                ? allIssueDescriptions.subList(0, 20) : allIssueDescriptions;
+            // Limit to MAX_ISSUES_TO_REPORT issues for LLM token budget
+            List<String> issuesToReport = allIssueDescriptions.size() > MAX_ISSUES_TO_REPORT
+                ? allIssueDescriptions.subList(0, MAX_ISSUES_TO_REPORT) : allIssueDescriptions;
             for (int i = 0; i < issuesToReport.size(); i++) {
                 sb.append("%d. %s\n".formatted(i + 1, issuesToReport.get(i)));
             }
-            if (allIssueDescriptions.size() > 20) {
+            if (allIssueDescriptions.size() > MAX_ISSUES_TO_REPORT) {
                 sb.append("\n(%d additional issues omitted for brevity)\n".formatted(
-                    allIssueDescriptions.size() - 20));
+                    allIssueDescriptions.size() - MAX_ISSUES_TO_REPORT));
             }
         }
 
