@@ -24,9 +24,11 @@ export default function TokenBubbleChart({ metrics }: { metrics: MetricsResponse
     const svg = d3.select(svgRef.current).attr('height', H);
 
     const STATUS_HEX: Record<string, string> = {
-      COMPLETE: '#10B981', FAILED: '#F43F5E', WORKING: '#8B5CF6',
-      PLANNING: '#8B5CF6', REVIEWING: '#06B6D4', AWAITING_APPROVAL: '#F59E0B',
-      AWAITING_MERGE: '#F59E0B', CANCELLED: '#71717A',
+      COMPLETE: '#10B981', FAILED: '#EF4444', STUCK: '#EF4444',
+      WORKING: '#3B82F6', COMPILING: '#3B82F6', MERGING: '#3B82F6',
+      PLANNING: '#8B5CF6', REVIEWING: '#8B5CF6',
+      AWAITING_APPROVAL: '#F59E0B', AWAITING_MERGE: '#F59E0B', AWAITING_CLARIFICATION: '#F59E0B',
+      PARTIAL: '#F97316', BLOCKED: '#EC4899', CANCELLED: '#71717A',
     };
 
     const data = runsByStatus.map(([status, count]) => ({ status, count: count as number }));

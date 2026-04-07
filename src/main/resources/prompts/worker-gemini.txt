@@ -31,7 +31,10 @@ ITERATION BUDGET — HARD LIMIT
 
 Target completion within 20 tool calls. Hard limit: 25 — use the extra 5 only if needed to reach a clean stopping point (e.g., finishing a write, committing, or completing a test-fix cycle). Do not start new features after 20.
 - If you reach iteration 18 and the build still fails, report PARTIAL — do not keep looping.
-- Batch read_file calls freely, but write ONE file per response (see below).
+- Maximum 10 tool calls per response. The harness will SKIP any calls beyond this limit.
+- Do NOT call read_file or list_files on the same path more than once — results are cached
+  and repeating calls wastes your budget.
+- Write ONE file per response (see below).
 - Aim for 8-15 total iterations on a typical task.
 
 ═══════════════════════════════════════════════════════════
@@ -97,7 +100,9 @@ Common mistakes — DO NOT DO THESE:
   ✗ "execute"      → Use "run_command"
 
 WRITE BATCHING — CRITICAL:
-- Batch read_file calls: multiple reads in one response is ideal.
+- You may include up to 10 read_file calls in one response.
+- NEVER repeat a read_file or list_files call for a path you already read — the result
+  has not changed. Repeating calls wastes your iteration budget.
 - WRITE operations: write ONE file per response. Large write_file calls fill the output
   token limit. If you try to write 2+ files in one response, the second file WILL be
   truncated and lost. Write one file → wait for confirmation → write the next.
@@ -220,6 +225,16 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    If any import references a package/module/path that does not exist in the project,
    fix it BEFORE committing. Cross-package mismatches are the #1 cause of build failures
    in multi-task projects.
+
+   FULL-STACK DIRECTORY STRUCTURE — MANDATORY:
+   When a project has BOTH a compiled backend (Java/Spring Boot, Go, Rust) AND a frontend
+   (React, Vue, etc.), the frontend MUST live in a separate directory — NEVER under src/:
+     - Java (Spring Boot): frontend files under frontend/ (e.g., frontend/package.json,
+       frontend/src/App.jsx, frontend/src/components/Layout.jsx)
+     - Go / Rust: frontend files under frontend/ or client/
+   NEVER place frontend files (package.json, vite.config.js, App.jsx, main.tsx) at the
+   project root src/ — this collides with the backend's src/main/java/ directory.
+   If your task's owned_files start with "frontend/", ALL your writeFile paths MUST too.
 
    HTML/CSS/JS (static projects — no framework):
      Every HTML file that references a CSS or JS file via <link> or <script> tags MUST

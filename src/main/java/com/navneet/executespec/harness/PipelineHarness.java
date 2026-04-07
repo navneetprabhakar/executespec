@@ -1032,30 +1032,7 @@ public class PipelineHarness {
                 .filter(t -> !isSystemTask(t))
                 .toList();
 
-            boolean allBlocked = workerTasksNow.stream()
-                .allMatch(t -> "BLOCKED".equals(t.getStatus()) || "FAILED".equals(t.getStatus()));
-            if (allBlocked) {
-                stateStore.markFailed(runId, "All tasks blocked after resume");
-                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                broadcaster.complete(runId);
-                return;
-            }
-
-            boolean allComplete = workerTasksNow.stream()
-                .allMatch(t -> "COMPLETE".equals(t.getStatus()));
-            if (!allComplete) {
-                List<String> stillIncomplete = workerTasksNow.stream()
-                    .filter(t -> !"COMPLETE".equals(t.getStatus()))
-                    .map(t -> t.getTitle() + " [" + t.getStatus() + "]")
-                    .toList();
-                String partialReason = "Incomplete tasks: " + String.join("; ", stillIncomplete);
-                log.warn("Run {} still has incomplete tasks after resume — {}", runId, partialReason);
-                broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                    "⚠️ Some tasks still incomplete after resume:\n  • "
-                    + String.join("\n  • ", stillIncomplete)
-                    + "\n\nRun marked PARTIAL. Use 'Retry Task' on remaining incomplete tasks."));
-                stateStore.markPartial(runId, partialReason);
-                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+            if (!checkTaskCompletionEligibility(workerTasksNow, runId, "after resume")) {
                 broadcaster.complete(runId);
                 return;
             }
@@ -1522,43 +1499,8 @@ public class PipelineHarness {
 
         stateStore.saveRun(run);
 
-        if (run.getSourceRunId() != null && !run.getSourceRunId().isBlank()) {
-            try {
-                log.info("Copying workspace from source run {} to iteration run {}",
-                    run.getSourceRunId(), runId);
-                workspaceInitService.copyFromRun(run.getSourceRunId(), runId);
-            } catch (Exception copyEx) {
-                stateStore.markFailed(runId, "Failed to copy source workspace: " + copyEx.getMessage());
-                log.error("Workspace copy failed for iteration run {} (source={}): {}",
-                    runId, run.getSourceRunId(), copyEx.getMessage());
-                return;
-            }
-        } else if ("EXISTING".equals(run.getRepoMode())
-                && run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
-            try {
-                workspaceInitService.cloneFromRepo(runId, run.getRepoUrl(), run.getGithubPat());
-            } catch (Exception cloneEx) {
-                stateStore.markFailed(runId, "Failed to clone source repo: " + cloneEx.getMessage());
-                log.error("Clone failed for run {} from {}: {}", runId, run.getRepoUrl(), cloneEx.getMessage());
-                return;
-            }
-        } else {
-            workspaceInitService.ensureRunWorkspace(runId);
-        }
-
-        // ── Language validation for existing repos ──────────────────────────
-        // Detect whether the cloned workspace uses a supported language.
-        // Fail fast with a clear message if only unsupported languages are found.
-        if ("EXISTING".equals(run.getRepoMode()) || (run.getSourceRunId() != null && !run.getSourceRunId().isBlank())) {
-            Path workspace = workspaceInitService.runWorkspacePath(runId);
-            String langError = languageValidator.detectAndValidateLanguage(workspace);
-            if (langError != null) {
-                log.warn("Language validation failed for run {}: {}", runId, langError);
-                stateStore.markFailed(runId, langError);
-                broadcaster.emit(runId, RunEvent.log(runId, "harness", langError));
-                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                return;
-            }
+        if (!initializeWorkspace(runId, run)) {
+            return;
         }
 
         broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
@@ -1567,59 +1509,17 @@ public class PipelineHarness {
         // ── 0. JIRA/Confluence context extraction ─────────────────────────
         // Detect references in the user request and fetch content before planning.
         // If vague mentions found, pause and ask the user for clarification.
-        String effectiveRequest = userRequest;
+        String effectiveRequest;
         try {
-            var extraction = referenceExtractorService.extractAndEnrich(userRequest, run.getOrgId());
-
-            if (extraction.clarificationNeeded()) {
-                // Pause pipeline — ask user for clarification
-                broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_CLARIFICATION"));
-                String clarificationGateId = stateStore.recordGateOpened(runId, "CONTEXT_CLARIFICATION");
-                broadcaster.emit(runId, RunEvent.clarificationNeeded(runId, extraction.clarificationPrompt()));
-
-                log.info("[PipelineHarness] Run {} entering clarification gate", runId);
-                runSlots.release();
-                String clarificationResponse;
-                try {
-                    clarificationResponse = gateStore.awaitClarificationGate(runId);
-                } finally {
-                    try { runSlots.acquire(); }
-                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                }
-                log.info("[PipelineHarness] Run {} clarification received", runId);
-                stateStore.recordGateResolved(clarificationGateId, true);
-                broadcaster.emit(runId, RunEvent.clarificationResolved(runId));
-
-                // Re-extract with the clarification response
-                if (clarificationResponse != null && !clarificationResponse.isBlank()) {
-                    var enriched = referenceExtractorService.extractFromClarification(
-                            userRequest, clarificationResponse, run.getOrgId());
-                    effectiveRequest = enriched.enrichedRequest();
-                    if (!enriched.extractedRefs().isEmpty()) {
-                        String refSummary = enriched.extractedRefs().stream()
-                                .map(r -> r.type() + ":" + r.identifier())
-                                .reduce((a, b) -> a + ", " + b).orElse("");
-                        broadcaster.emit(runId, RunEvent.contextExtracted(runId, refSummary));
-                    }
-                }
-                broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
-
-            } else if (!extraction.extractedRefs().isEmpty()) {
-                // Concrete references found — enrich and continue
-                effectiveRequest = extraction.enrichedRequest();
-                String refSummary = extraction.extractedRefs().stream()
-                        .map(r -> r.type() + ":" + r.identifier())
-                        .reduce((a, b) -> a + ", " + b).orElse("");
-                broadcaster.emit(runId, RunEvent.contextExtracted(runId, refSummary));
-                log.info("[RefExtractor] Enriched run {} with: {}", runId, refSummary);
+            effectiveRequest = resolveContextReferences(runId, run, userRequest);
+            if (effectiveRequest == null) {
+                // Interrupted during clarification gate
+                return;
             }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             stateStore.markFailed(runId, "Interrupted during context clarification");
             return;
-        } catch (Exception e) {
-            // Non-fatal — log and continue with original request
-            log.warn("[RefExtractor] Failed to extract references for run {}: {}", runId, e.getMessage());
         }
 
         // ── Check for cancellation before proceeding ────────────────────
@@ -2652,29 +2552,7 @@ public class PipelineHarness {
                 .filter(t -> !isSystemTask(t))
                 .toList();
 
-            boolean allBlocked = workerTasksNow.stream()
-                .allMatch(t -> "BLOCKED".equals(t.getStatus()) || "FAILED".equals(t.getStatus()));
-            if (allBlocked) {
-                stateStore.markFailed(runId, "All tasks blocked after force-retry");
-                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                broadcaster.complete(runId);
-                return;
-            }
-
-            boolean allComplete = workerTasksNow.stream()
-                .allMatch(t -> "COMPLETE".equals(t.getStatus()));
-            if (!allComplete) {
-                List<String> stillIncomplete = workerTasksNow.stream()
-                    .filter(t -> !"COMPLETE".equals(t.getStatus()))
-                    .map(t -> t.getTitle() + " [" + t.getStatus() + "]")
-                    .toList();
-                String partialReason = "Incomplete tasks: " + String.join("; ", stillIncomplete);
-                log.warn("Run {} still has incomplete tasks after retry — {}", runId, partialReason);
-                broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                    "⚠️ Some tasks still incomplete:\n  • " + String.join("\n  • ", stillIncomplete)
-                    + "\n\nRun marked PARTIAL. Use 'Retry Task' on remaining incomplete tasks."));
-                stateStore.markPartial(runId, partialReason);
-                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+            if (!checkTaskCompletionEligibility(workerTasksNow, runId, "after force-retry")) {
                 broadcaster.complete(runId);
                 return;
             }
@@ -2843,6 +2721,161 @@ public class PipelineHarness {
                 "⚠️ File ownership overlap detected: " + String.join("; ", conflicts)
                 + " — tasks with shared files will run sequentially."));
         }
+    }
+
+    // ── Extracted pipeline phase helpers ─────────────────────────────────────
+
+    /**
+     * Initialises the run's isolated workspace directory. Handles three modes:
+     * iteration (copy from source), existing repo (clone), or fresh workspace.
+     * Also performs language validation for existing/iteration repos.
+     *
+     * @return {@code true} if workspace is ready; {@code false} if the run was
+     *         marked FAILED and the caller should return immediately.
+     */
+    private boolean initializeWorkspace(String runId, PipelineRun run) {
+        if (run.getSourceRunId() != null && !run.getSourceRunId().isBlank()) {
+            try {
+                log.info("Copying workspace from source run {} to iteration run {}",
+                    run.getSourceRunId(), runId);
+                workspaceInitService.copyFromRun(run.getSourceRunId(), runId);
+            } catch (Exception copyEx) {
+                stateStore.markFailed(runId, "Failed to copy source workspace: " + copyEx.getMessage());
+                log.error("Workspace copy failed for iteration run {} (source={}): {}",
+                    runId, run.getSourceRunId(), copyEx.getMessage());
+                return false;
+            }
+        } else if ("EXISTING".equals(run.getRepoMode())
+                && run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
+            try {
+                workspaceInitService.cloneFromRepo(runId, run.getRepoUrl(), run.getGithubPat());
+            } catch (Exception cloneEx) {
+                stateStore.markFailed(runId, "Failed to clone source repo: " + cloneEx.getMessage());
+                log.error("Clone failed for run {} from {}: {}", runId, run.getRepoUrl(), cloneEx.getMessage());
+                return false;
+            }
+        } else {
+            workspaceInitService.ensureRunWorkspace(runId);
+        }
+
+        // ── Language validation for existing repos ──────────────────────────
+        // Detect whether the cloned workspace uses a supported language.
+        // Fail fast with a clear message if only unsupported languages are found.
+        if ("EXISTING".equals(run.getRepoMode()) || (run.getSourceRunId() != null && !run.getSourceRunId().isBlank())) {
+            Path workspace = workspaceInitService.runWorkspacePath(runId);
+            String langError = languageValidator.detectAndValidateLanguage(workspace);
+            if (langError != null) {
+                log.warn("Language validation failed for run {}: {}", runId, langError);
+                stateStore.markFailed(runId, langError);
+                broadcaster.emit(runId, RunEvent.log(runId, "harness", langError));
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Detects JIRA/Confluence references in the user request, optionally pausing
+     * to ask for clarification. Returns the enriched request text, or {@code null}
+     * if the pipeline was interrupted during the clarification gate (caller should return).
+     *
+     * @throws InterruptedException if interrupted while waiting at the clarification gate
+     */
+    private String resolveContextReferences(String runId, PipelineRun run, String userRequest)
+            throws InterruptedException {
+        String effectiveRequest = userRequest;
+        try {
+            var extraction = referenceExtractorService.extractAndEnrich(userRequest, run.getOrgId());
+
+            if (extraction.clarificationNeeded()) {
+                // Pause pipeline — ask user for clarification
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "AWAITING_CLARIFICATION"));
+                String clarificationGateId = stateStore.recordGateOpened(runId, "CONTEXT_CLARIFICATION");
+                broadcaster.emit(runId, RunEvent.clarificationNeeded(runId, extraction.clarificationPrompt()));
+
+                log.info("[PipelineHarness] Run {} entering clarification gate", runId);
+                runSlots.release();
+                String clarificationResponse;
+                try {
+                    clarificationResponse = gateStore.awaitClarificationGate(runId);
+                } finally {
+                    try { runSlots.acquire(); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                }
+                log.info("[PipelineHarness] Run {} clarification received", runId);
+                stateStore.recordGateResolved(clarificationGateId, true);
+                broadcaster.emit(runId, RunEvent.clarificationResolved(runId));
+
+                // Re-extract with the clarification response
+                if (clarificationResponse != null && !clarificationResponse.isBlank()) {
+                    var enriched = referenceExtractorService.extractFromClarification(
+                            userRequest, clarificationResponse, run.getOrgId());
+                    effectiveRequest = enriched.enrichedRequest();
+                    if (!enriched.extractedRefs().isEmpty()) {
+                        String refSummary = enriched.extractedRefs().stream()
+                                .map(r -> r.type() + ":" + r.identifier())
+                                .reduce((a, b) -> a + ", " + b).orElse("");
+                        broadcaster.emit(runId, RunEvent.contextExtracted(runId, refSummary));
+                    }
+                }
+                broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
+
+            } else if (!extraction.extractedRefs().isEmpty()) {
+                // Concrete references found — enrich and continue
+                effectiveRequest = extraction.enrichedRequest();
+                String refSummary = extraction.extractedRefs().stream()
+                        .map(r -> r.type() + ":" + r.identifier())
+                        .reduce((a, b) -> a + ", " + b).orElse("");
+                broadcaster.emit(runId, RunEvent.contextExtracted(runId, refSummary));
+                log.info("[RefExtractor] Enriched run {} with: {}", runId, refSummary);
+            }
+        } catch (InterruptedException ie) {
+            throw ie; // propagate to caller
+        } catch (Exception e) {
+            // Non-fatal — log and continue with original request
+            log.warn("[RefExtractor] Failed to extract references for run {}: {}", runId, e.getMessage());
+        }
+        return effectiveRequest;
+    }
+
+    /**
+     * Checks whether all worker tasks have completed, marking the run FAILED or PARTIAL
+     * as appropriate. Used by {@link #runResumeAsync}, {@link #runRetryAsync}, and
+     * the main pipeline in {@link #executeRunAsync}.
+     *
+     * @param workerTasks the non-system tasks to check
+     * @param runId       the run ID
+     * @param context     a human-readable context string for log messages (e.g. "after resume", "after force-retry")
+     * @return {@code true} if all tasks are COMPLETE and execution should continue;
+     *         {@code false} if the run was marked FAILED or PARTIAL and the caller should return.
+     */
+    private boolean checkTaskCompletionEligibility(List<AgentTask> workerTasks, String runId, String context) {
+        boolean allBlocked = workerTasks.stream()
+            .allMatch(t -> "BLOCKED".equals(t.getStatus()) || "FAILED".equals(t.getStatus()));
+        if (allBlocked) {
+            stateStore.markFailed(runId, "All tasks blocked " + context);
+            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+            return false;
+        }
+
+        boolean allComplete = workerTasks.stream()
+            .allMatch(t -> "COMPLETE".equals(t.getStatus()));
+        if (!allComplete) {
+            List<String> stillIncomplete = workerTasks.stream()
+                .filter(t -> !"COMPLETE".equals(t.getStatus()))
+                .map(t -> t.getTitle() + " [" + t.getStatus() + "]")
+                .toList();
+            String partialReason = "Incomplete tasks: " + String.join("; ", stillIncomplete);
+            log.warn("Run {} still has incomplete tasks {} — {}", runId, context, partialReason);
+            broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                "⚠️ Some tasks still incomplete:\n  • " + String.join("\n  • ", stillIncomplete)
+                + "\n\nRun marked PARTIAL. Use 'Retry Task' on remaining incomplete tasks."));
+            stateStore.markPartial(runId, partialReason);
+            broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+            return false;
+        }
+        return true;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

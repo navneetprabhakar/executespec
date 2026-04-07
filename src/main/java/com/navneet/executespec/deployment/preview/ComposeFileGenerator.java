@@ -22,6 +22,10 @@ public class ComposeFileGenerator {
 
     private final PreviewProperties props;
 
+    /** Lightweight container for resolved CPU/memory limits. */
+    private record ContainerResources(String cpu, String memory) {}
+
+
     /**
      * Generate a docker-compose.yml in the workspace directory.
      *
@@ -38,12 +42,7 @@ public class ComposeFileGenerator {
         // CLI (ttyd) and MCP (Inspector) always bind to 8080; web apps use their native port
         int containerPort = (previewMode == PreviewMode.REST || previewMode == PreviewMode.FULL_STACK) ? projectType.getContainerPort() : 8080;
 
-        // Determine resource limits — CLI/MCP are lightweight
-        boolean heavyWeight = (previewMode == PreviewMode.REST || previewMode == PreviewMode.FULL_STACK)
-                && (projectType == PreviewProjectType.SPRING_BOOT
-                    || projectType == PreviewProjectType.FULL_STACK);
-        String cpu = heavyWeight ? "1.5" : "0.5";
-        String mem = heavyWeight ? "2G" : "512M";
+        ContainerResources resources = calculateContainerResources(previewMode, projectType);
 
         // Merge user-provided env vars with auto-injected DB vars
         Map<String, String> allEnvVars = new LinkedHashMap<>();
@@ -68,8 +67,8 @@ public class ComposeFileGenerator {
         sb.append("    deploy:\n");
         sb.append("      resources:\n");
         sb.append("        limits:\n");
-        sb.append("          cpus: \"").append(cpu).append("\"\n");
-        sb.append("          memory: ").append(mem).append("\n");
+        sb.append("          cpus: \"").append(resources.cpu()).append("\"\n");
+        sb.append("          memory: ").append(resources.memory()).append("\n");
 
         if (!allEnvVars.isEmpty()) {
             sb.append("    environment:\n");
@@ -102,38 +101,7 @@ public class ComposeFileGenerator {
 
         // ── Database service (optional) ──────────────────────────────────────
         if (databaseType != null) {
-            sb.append("  db:\n");
-            sb.append("    image: ").append(databaseType.getImage()).append("\n");
-
-            // Environment (credentials)
-            Map<String, String> dbEnv = buildDbServiceEnv(databaseType);
-            if (!dbEnv.isEmpty()) {
-                sb.append("    environment:\n");
-                for (var entry : dbEnv.entrySet()) {
-                    sb.append("      ").append(entry.getKey()).append(": ")
-                            .append(yamlQuote(entry.getValue())).append("\n");
-                }
-            }
-
-            // Ephemeral storage — data is lost on container stop (fresh each preview)
-            sb.append("    tmpfs:\n");
-            sb.append("      - ").append(databaseType.getDataDir()).append("\n");
-
-            // Healthcheck
-            sb.append("    healthcheck:\n");
-            sb.append("      test: [\"CMD-SHELL\", \"").append(escapeYamlString(databaseType.getHealthcheckCmd())).append("\"]\n");
-            sb.append("      interval: 2s\n");
-            sb.append("      timeout: 5s\n");
-            sb.append("      retries: 15\n");
-            sb.append("      start_period: 5s\n");
-
-            sb.append("    networks:\n");
-            sb.append("      - preview-net\n");
-            sb.append("    restart: \"no\"\n");
-            // NOTE: Do NOT add security_opt/cap_drop to DB containers — official DB images
-            // (postgres, mysql, mongo) need privileges to chown/chmod their data directories
-            // on startup. Security hardening is only applied to the app container (user code).
-            sb.append("\n");
+            sb.append(buildDatabaseConfig(databaseType));
         }
 
         // ── Network ──
@@ -153,6 +121,61 @@ public class ComposeFileGenerator {
             throw new PreviewException("Failed to write docker-compose.yml: " + e.getMessage(), e);
         }
         return composeFile;
+    }
+
+    // ── Extracted helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Determine resource limits — CLI/MCP are lightweight, heavy-weight apps get more.
+     */
+    private ContainerResources calculateContainerResources(PreviewMode previewMode, PreviewProjectType projectType) {
+        boolean heavyWeight = (previewMode == PreviewMode.REST || previewMode == PreviewMode.FULL_STACK)
+                && (projectType == PreviewProjectType.SPRING_BOOT
+                    || projectType == PreviewProjectType.FULL_STACK);
+        String cpu = heavyWeight ? "1.5" : "0.5";
+        String mem = heavyWeight ? "2G" : "512M";
+        return new ContainerResources(cpu, mem);
+    }
+
+    /**
+     * Build the YAML fragment for the database service (image, env, tmpfs, healthcheck, network).
+     */
+    private String buildDatabaseConfig(DatabaseType databaseType) {
+        var sb = new StringBuilder();
+        sb.append("  db:\n");
+        sb.append("    image: ").append(databaseType.getImage()).append("\n");
+
+        // Environment (credentials)
+        Map<String, String> dbEnv = buildDbServiceEnv(databaseType);
+        if (!dbEnv.isEmpty()) {
+            sb.append("    environment:\n");
+            for (var entry : dbEnv.entrySet()) {
+                sb.append("      ").append(entry.getKey()).append(": ")
+                        .append(yamlQuote(entry.getValue())).append("\n");
+            }
+        }
+
+        // Ephemeral storage — data is lost on container stop (fresh each preview)
+        sb.append("    tmpfs:\n");
+        sb.append("      - ").append(databaseType.getDataDir()).append("\n");
+
+        // Healthcheck
+        sb.append("    healthcheck:\n");
+        sb.append("      test: [\"CMD-SHELL\", \"").append(escapeYamlString(databaseType.getHealthcheckCmd())).append("\"]\n");
+        sb.append("      interval: 2s\n");
+        sb.append("      timeout: 5s\n");
+        sb.append("      retries: 15\n");
+        sb.append("      start_period: 5s\n");
+
+        sb.append("    networks:\n");
+        sb.append("      - preview-net\n");
+        sb.append("    restart: \"no\"\n");
+        // NOTE: Do NOT add security_opt/cap_drop to DB containers — official DB images
+        // (postgres, mysql, mongo) need privileges to chown/chmod their data directories
+        // on startup. Security hardening is only applied to the app container (user code).
+        sb.append("\n");
+
+        return sb.toString();
     }
 
     // ── DB connection string injection ───────────────────────────────────────

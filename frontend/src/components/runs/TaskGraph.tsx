@@ -7,15 +7,26 @@ interface Props {
   nodes?: TaskGraphNode[];
 }
 
-// ── Status colours — Geist design system ────────────────────────────────────
+// ── Status colours — distinct per semantic group ────────────────────────────
 const STATUS_COLOR: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  COMPLETE:  { bg: '#0a1a1a', border: '#0070F3', text: '#a1a1a1', dot: '#0070F3' },
-  WORKING:   { bg: '#1a1a1a', border: '#f5a623', text: '#a1a1a1', dot: '#f5a623' },
+  // Green — success
+  COMPLETE:  { bg: '#0a1a14', border: '#10B981', text: '#a1a1a1', dot: '#10B981' },
+  // Blue — executing
+  WORKING:   { bg: '#0a1428', border: '#3B82F6', text: '#a1a1a1', dot: '#3B82F6' },
+  COMPILING: { bg: '#0a1428', border: '#3B82F6', text: '#a1a1a1', dot: '#3B82F6' },
+  MERGING:   { bg: '#0a1428', border: '#3B82F6', text: '#a1a1a1', dot: '#3B82F6' },
+  // Purple — thinking/review
+  PLANNING:  { bg: '#14101e', border: '#8B5CF6', text: '#a1a1a1', dot: '#8B5CF6' },
+  REVIEWING: { bg: '#14101e', border: '#8B5CF6', text: '#a1a1a1', dot: '#8B5CF6' },
+  // Gray — inactive
   PENDING:   { bg: '#111111', border: '#333333', text: '#666666', dot: '#666666' },
   LOCKED:    { bg: '#111111', border: '#252525', text: '#666666', dot: '#555555' },
-  PARTIAL:   { bg: '#1a0a08', border: '#e08b1a', text: '#a1a1a1', dot: '#e08b1a' },
-  BLOCKED:   { bg: '#1a0a10', border: '#d44690', text: '#a1a1a1', dot: '#d44690' },
-  FAILED:    { bg: '#1a0a0a', border: '#e5484d', text: '#a1a1a1', dot: '#e5484d' },
+  // Orange — partial
+  PARTIAL:   { bg: '#1a0f08', border: '#F97316', text: '#a1a1a1', dot: '#F97316' },
+  // Red — failure
+  FAILED:    { bg: '#1a0a0a', border: '#EF4444', text: '#a1a1a1', dot: '#EF4444' },
+  // Pink — blocked
+  BLOCKED:   { bg: '#1a0a14', border: '#EC4899', text: '#a1a1a1', dot: '#EC4899' },
 };
 
 const DEFAULT_COLOR = { bg: '#111111', border: '#333333', text: '#666666', dot: '#555555' };

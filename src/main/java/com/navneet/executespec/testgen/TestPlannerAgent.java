@@ -42,6 +42,10 @@ public class TestPlannerAgent {
     private final TestTaskRepository testTaskRepository;
     private final ObjectMapper objectMapper;
 
+    // Caps to keep test runs lean and prevent LLM from generating excessive test surface.
+    private static final int MAX_TEST_CLASSES = 6;
+    private static final int MAX_METHODS_PER_CLASS = 8;
+
     @Value("classpath:prompts/test-planner.txt")
     private Resource promptResource;
 
@@ -111,17 +115,17 @@ public class TestPlannerAgent {
             }
         }
 
-        // Cap at 6 test classes to keep runs lean
-        if (taskPlans.size() > 6) {
-            log.info("[TestPlanner] Trimming {} test tasks to 6 for run {}", taskPlans.size(), runId);
-            taskPlans = taskPlans.subList(0, 6);
+        // Cap at MAX_TEST_CLASSES test classes to keep runs lean
+        if (taskPlans.size() > MAX_TEST_CLASSES) {
+            log.info("[TestPlanner] Trimming {} test tasks to {} for run {}", taskPlans.size(), MAX_TEST_CLASSES, runId);
+            taskPlans = taskPlans.subList(0, MAX_TEST_CLASSES);
         }
 
-        // Cap test methods per class at 8
+        // Cap test methods per class at MAX_METHODS_PER_CLASS
         for (TestTaskPlan tp : taskPlans) {
-            if (tp.getTestMethods() != null && tp.getTestMethods().size() > 8) {
-                log.info("[TestPlanner] Trimming {} methods to 8 in {} for run {}", tp.getTestMethods().size(), tp.getTaskName(), runId);
-                tp.setTestMethods(tp.getTestMethods().subList(0, 8));
+            if (tp.getTestMethods() != null && tp.getTestMethods().size() > MAX_METHODS_PER_CLASS) {
+                log.info("[TestPlanner] Trimming {} methods to {} in {} for run {}", tp.getTestMethods().size(), MAX_METHODS_PER_CLASS, tp.getTaskName(), runId);
+                tp.setTestMethods(tp.getTestMethods().subList(0, MAX_METHODS_PER_CLASS));
             }
         }
 

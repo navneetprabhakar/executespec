@@ -10,8 +10,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -26,6 +29,7 @@ public class OrgService {
     private final PaymentAuditService paymentAuditService;
     private final ActivityAuditService auditService;
     private final MailService mailService;
+    private final ObjectMapper mapper = new ObjectMapper();
 
     @Transactional
     public OrgDto createOrg(String creatorUserId, CreateOrgRequest req) {
@@ -70,12 +74,8 @@ public class OrgService {
         paymentAuditService.record("ORG", orgId, "PLAN_ASSIGNED",
                 null, org.getTier(), creatorUserId, "Org created");
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_CREATED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(creatorUserId)
-                .newValue("{\"name\":\"" + req.name() + "\",\"tier\":\"" + creator.getTier() + "\"}")
-                .build());
+        auditOrgEvent("ORG_CREATED", orgId, creatorUserId,
+                Map.of("name", req.name(), "tier", creator.getTier()));
 
         log.info("Org created: {} ({}) by {}", req.name(), orgId, creatorUserId);
         return OrgDto.from(org);
@@ -100,13 +100,9 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         OrgDto result = OrgDto.from(orgRepo.save(org));
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_UPDATED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(actorId)
-                .oldValue("{\"name\":\"" + oldName + "\",\"domains\":\"" + oldDomains + "\"}")
-                .newValue("{\"name\":\"" + org.getName() + "\",\"domains\":\"" + org.getDomainPatterns() + "\"}")
-                .build());
+        auditOrgEvent("ORG_UPDATED", "ORG", orgId, orgId, actorId,
+                Map.of("name", String.valueOf(oldName), "domains", String.valueOf(oldDomains)),
+                Map.of("name", org.getName(), "domains", org.getDomainPatterns()));
 
         return result;
     }
@@ -147,12 +143,8 @@ public class OrgService {
             userRepo.save(user);
         });
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_MEMBER_REMOVED")
-                .entityType("ORG_MEMBER").entityId(userId)
-                .orgId(orgId).actorId(performedBy)
-                .oldValue("{\"userId\":\"" + userId + "\",\"role\":\"" + removedRole + "\"}")
-                .build());
+        auditOrgEvent("ORG_MEMBER_REMOVED", "ORG_MEMBER", userId, orgId, performedBy,
+                Map.of("userId", userId, "role", removedRole), null);
 
         log.info("Removed user {} from org {} by {}", userId, orgId, performedBy);
     }
@@ -165,13 +157,8 @@ public class OrgService {
         member.setOrgRole(newRole);
         orgMemberRepo.save(member);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_MEMBER_ROLE_CHANGED")
-                .entityType("ORG_MEMBER").entityId(userId)
-                .orgId(orgId).actorId(actorId)
-                .oldValue("{\"role\":\"" + oldRole + "\"}")
-                .newValue("{\"role\":\"" + newRole + "\"}")
-                .build());
+        auditOrgEvent("ORG_MEMBER_ROLE_CHANGED", "ORG_MEMBER", userId, orgId, actorId,
+                Map.of("role", oldRole), Map.of("role", newRole));
     }
 
     public List<OrgDto> listAllOrgs() {
@@ -187,13 +174,8 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         orgRepo.save(org);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_STATUS_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(performedBy)
-                .oldValue("{\"status\":\"" + oldStatus + "\"}")
-                .newValue("{\"status\":\"" + status + "\"}")
-                .build());
+        auditOrgEvent("ORG_STATUS_CHANGED", "ORG", orgId, orgId, performedBy,
+                Map.of("status", oldStatus), Map.of("status", status));
     }
 
     /**
@@ -217,13 +199,9 @@ public class OrgService {
         target.setUpdatedAt(Instant.now());
         userRepo.save(target);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType(suspend ? "ORG_MEMBER_SUSPENDED" : "ORG_MEMBER_RESTORED")
-                .entityType("ORG_MEMBER").entityId(targetUserId)
-                .orgId(orgId).actorId(performedBy)
-                .oldValue("{\"status\":\"" + oldStatus + "\"}")
-                .newValue("{\"status\":\"" + target.getStatus() + "\"}")
-                .build());
+        auditOrgEvent(suspend ? "ORG_MEMBER_SUSPENDED" : "ORG_MEMBER_RESTORED",
+                "ORG_MEMBER", targetUserId, orgId, performedBy,
+                Map.of("status", oldStatus), Map.of("status", target.getStatus()));
 
         // Notify user on suspension
         if (suspend && !"SUSPENDED".equals(oldStatus)) {
@@ -251,12 +229,8 @@ public class OrgService {
         orgRepo.save(org);
         paymentAuditService.record("ORG", orgId, "PLAN_ASSIGNED", null, "PRO", adminUserId, "Created by super admin");
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_CREATED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(adminUserId)
-                .newValue("{\"name\":\"" + name + "\",\"tier\":\"PRO\",\"createdByAdmin\":true}")
-                .build());
+        auditOrgEvent("ORG_CREATED", orgId, adminUserId,
+                Map.of("name", name, "tier", "PRO", "createdByAdmin", true));
 
         log.info("Org '{}' ({}) created by super admin {}", name, orgId, adminUserId);
         return org;
@@ -272,13 +246,8 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         OrgDto result = OrgDto.from(orgRepo.save(org));
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_RUN_LIMIT_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(actorId)
-                .oldValue("{\"limit\":" + oldLimit + "}")
-                .newValue("{\"limit\":" + limit + "}")
-                .build());
+        auditOrgEvent("ORG_RUN_LIMIT_CHANGED", "ORG", orgId, orgId, actorId,
+                Map.of("limit", String.valueOf(oldLimit)), Map.of("limit", String.valueOf(limit)));
 
         return result;
     }
@@ -293,13 +262,8 @@ public class OrgService {
         org.setUpdatedAt(Instant.now());
         OrgDto result = OrgDto.from(orgRepo.save(org));
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_API_KEYS_FLAG_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(actorId)
-                .oldValue("{\"provided\":" + oldProvided + "}")
-                .newValue("{\"provided\":" + provided + "}")
-                .build());
+        auditOrgEvent("ORG_API_KEYS_FLAG_CHANGED", "ORG", orgId, orgId, actorId,
+                Map.of("provided", oldProvided), Map.of("provided", provided));
 
         return result;
     }
@@ -321,14 +285,10 @@ public class OrgService {
                 org.getGeminiApiKey() != null);
         OrgDto result = OrgDto.from(orgRepo.save(org));
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_AI_KEYS_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(actorId)
-                .newValue("{\"anthropic\":" + (org.getAnthropicApiKey() != null)
-                        + ",\"openai\":" + (org.getOpenAiApiKey() != null)
-                        + ",\"gemini\":" + (org.getGeminiApiKey() != null) + "}")
-                .build());
+        auditOrgEvent("ORG_AI_KEYS_CHANGED", orgId, actorId,
+                Map.of("anthropic", org.getAnthropicApiKey() != null,
+                       "openai", org.getOpenAiApiKey() != null,
+                       "gemini", org.getGeminiApiKey() != null));
 
         return result;
     }
@@ -378,12 +338,9 @@ public class OrgService {
                 orgId, org.getKeySourceMode(), org.getEnabledProviders());
         OrgDto result = OrgDto.from(orgRepo.save(org));
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_KEY_SOURCE_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(actorId)
-                .newValue("{\"mode\":\"" + org.getKeySourceMode() + "\",\"providers\":\"" + org.getEnabledProviders() + "\"}")
-                .build());
+        auditOrgEvent("ORG_KEY_SOURCE_CHANGED", orgId, actorId,
+                Map.of("mode", String.valueOf(org.getKeySourceMode()),
+                       "providers", String.valueOf(org.getEnabledProviders())));
 
         return result;
     }
@@ -402,12 +359,9 @@ public class OrgService {
                 orgId, org.getJiraBaseUrl(), org.getJiraApiToken() != null);
         OrgDto result = OrgDto.from(orgRepo.save(org));
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_JIRA_SETTINGS_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(actorId)
-                .newValue("{\"hasToken\":" + (org.getJiraApiToken() != null) + ",\"baseUrl\":\"" + org.getJiraBaseUrl() + "\"}")
-                .build());
+        auditOrgEvent("ORG_JIRA_SETTINGS_CHANGED", orgId, actorId,
+                Map.of("hasToken", org.getJiraApiToken() != null,
+                       "baseUrl", String.valueOf(org.getJiraBaseUrl())));
 
         return result;
     }
@@ -426,12 +380,9 @@ public class OrgService {
                 orgId, org.getConfluenceBaseUrl(), org.getConfluenceApiToken() != null);
         OrgDto result = OrgDto.from(orgRepo.save(org));
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_CONFLUENCE_SETTINGS_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(actorId)
-                .newValue("{\"hasToken\":" + (org.getConfluenceApiToken() != null) + ",\"baseUrl\":\"" + org.getConfluenceBaseUrl() + "\"}")
-                .build());
+        auditOrgEvent("ORG_CONFLUENCE_SETTINGS_CHANGED", orgId, actorId,
+                Map.of("hasToken", org.getConfluenceApiToken() != null,
+                       "baseUrl", String.valueOf(org.getConfluenceBaseUrl())));
 
         return result;
     }
@@ -464,6 +415,41 @@ public class OrgService {
         return (s != null && !s.isBlank()) ? s.strip() : null;
     }
 
+    private void auditOrgEvent(String eventType, String orgId, String actorId, Object newValue) {
+        String json;
+        try {
+            json = mapper.writeValueAsString(newValue);
+        } catch (Exception e) {
+            json = String.valueOf(newValue);
+        }
+        auditService.record(ActivityAudit.builder()
+                .eventType(eventType)
+                .entityType("ORG").entityId(orgId)
+                .orgId(orgId).actorId(actorId)
+                .newValue(json)
+                .build());
+    }
+
+    private void auditOrgEvent(String eventType, String entityType, String entityId,
+                               String orgId, String actorId, Object oldValue, Object newValue) {
+        String oldJson = null;
+        String newJson = null;
+        try {
+            if (oldValue != null) oldJson = mapper.writeValueAsString(oldValue);
+            if (newValue != null) newJson = mapper.writeValueAsString(newValue);
+        } catch (Exception e) {
+            if (oldValue != null) oldJson = String.valueOf(oldValue);
+            if (newValue != null) newJson = String.valueOf(newValue);
+        }
+        var builder = ActivityAudit.builder()
+                .eventType(eventType)
+                .entityType(entityType).entityId(entityId)
+                .orgId(orgId).actorId(actorId);
+        if (oldJson != null) builder.oldValue(oldJson);
+        if (newJson != null) builder.newValue(newJson);
+        auditService.record(builder.build());
+    }
+
     @Transactional
     public void changeOrgTier(String orgId, String newTier, String performedBy) {
         Org org = orgRepo.findById(orgId)
@@ -474,12 +460,7 @@ public class OrgService {
         orgRepo.save(org);
         paymentAuditService.record("ORG", orgId, "PLAN_UPGRADED", oldTier, newTier, performedBy, null);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("ORG_TIER_CHANGED")
-                .entityType("ORG").entityId(orgId)
-                .orgId(orgId).actorId(performedBy)
-                .oldValue("{\"tier\":\"" + oldTier + "\"}")
-                .newValue("{\"tier\":\"" + newTier + "\"}")
-                .build());
+        auditOrgEvent("ORG_TIER_CHANGED", "ORG", orgId, orgId, performedBy,
+                Map.of("tier", oldTier), Map.of("tier", newTier));
     }
 }
