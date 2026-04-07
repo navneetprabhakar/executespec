@@ -5,14 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
-## [1.2.8] — 2026-04-07
+## [1.4.0] — 2026-04-07
 
 ### Added
+- **Phase-based subtask decomposition** — Complex single-file tasks (MEDIUM/HIGH complexity) now decompose into method-level phase subtasks. MEDIUM → 2 phases, HIGH → 3 phases. Phase 1 creates the file skeleton; subsequent phases read and extend it. Complements existing file-based decomposition for multi-file tasks.
 - **Subtask write nudge** — WorkerAgent injects a forced write instruction when a subtask has consumed 5+ tool calls with zero `writeFile` dispatches. Breaks the read-loop pattern (Gemini reads repeatedly without writing). Nudge includes the owned file name and remaining budget.
-- **Subtask iteration limit** — New `SUBTASK_ITERATION_LIMIT = 10` for subtasks (vs 35 for normal tasks). Subtasks write ONE file — 10 iterations is generous. Saves ~70% of wasted tokens on looping subtasks.
-- **Fabrication escalation on iteration-limit failures** — `isFabricationFailure()` in `SequentialTaskExecutor` now also detects iteration-limit failures (`"tool-call iterations"`). Subtasks that hit the 10-iteration cap are retried with PLANNING tier model (e.g., `gemini-2.5-flash` → `gemini-3-flash-preview`).
+- **Subtask iteration limit** — `SUBTASK_ITERATION_LIMIT = 15` for subtasks (vs 35 for normal tasks). 15 iterations gives headroom for context reads (CODEBASE_CONTEXT, task-assignments, file-locks, listFiles) + writeFile.
+- **Fabrication escalation on iteration-limit failures** — `isFabricationFailure()` in `SequentialTaskExecutor` now also detects iteration-limit failures (`"tool-call iterations"`). Subtasks that hit the iteration cap are retried with PLANNING tier model.
+- **Per-response tool call cap** — `MAX_TOOL_CALLS_PER_RESPONSE = 15` prevents Gemini's 100+ call batches from exhausting the iteration budget in one response.
+- **Read-only tool dedup cache** — Caches results of read-only tools (readFile, listFiles, searchFiles, git_status, git_diff). Cache hits are FREE — don't count toward `toolCallCount`. Invalidated on file writes.
+- **10s polling on run details** — RunsPage polls `fetchRun()` every 10 seconds while the run is in an active status.
 
 ### Changed
+- **Status color mapping** — Distinct colors per semantic status group: Gray (inactive), Blue (executing), Purple (thinking/review), Amber (waiting), Green (success), Orange (partial), Red (failure), Pink (blocked). Updated across constants.ts, tokens.css, tailwind.config.ts, TaskGraph.tsx, TokenBubbleChart.tsx, ActivityFeed.tsx.
+- **Logging levels** — Agent/compiler/reviewer/testgen loggers set to INFO (was DEBUG). Spring AI chat client set to WARN. Removes verbose LLM input/output noise from logs.
 - **Worker prompts (all 3 variants)** — Added PROJECT STRUCTURE CONSISTENCY section to `worker-gemini.txt` and `worker-openai.txt` (was already in `worker.txt`). Language-specific rules for Java, Python, Node.js, Go, Rust to prevent cross-task package/module mismatches.
 - **Reviewer prompt** — Added 5-axis REVIEW FLAGS, dynamic tool budget, FAST EXIT GUARD, 4-tier severity rules, verification story requirement.
 - **Compiler prompt** — Added DEBUGGING METHODOLOGY, AMBIGUOUS SYMBOL RESOLUTION, CASCADING FAILURE AWARENESS, ERROR PRIORITY table.

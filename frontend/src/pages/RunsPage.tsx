@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import RunList from '@/components/runs/RunList';
 import RunDetail from '@/components/runs/RunDetail';
 import { useRunStore } from '@/stores/useRunStore';
@@ -8,14 +8,30 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { Sparkles } from 'lucide-react';
 import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
+import { ACTIVE_STATUSES, GATE_STATUSES } from '@/lib/constants';
 
 const MIN_WIDTH = 260;
 const MAX_WIDTH = 720;
+
+/** Statuses that indicate the run is still in progress and should be polled. */
+const POLL_STATUSES = new Set([...ACTIVE_STATUSES, ...GATE_STATUSES, 'REVIEWING', 'MERGING', 'QUEUED']);
+const POLL_INTERVAL_MS = 10_000;
 
 export default function RunsPage() {
   const activeRunId = useRunStore((s) => s.activeRunId);
   const activeRun = useRunStore((s) => s.activeRun);
   useSse(activeRunId);
+
+  // Poll run details every 10s while the run is active (non-terminal status)
+  const fetchRun = useRunStore((s) => s.fetchRun);
+  useEffect(() => {
+    if (!activeRunId || !activeRun) return;
+    const status = activeRun.status?.toUpperCase();
+    if (!status || !POLL_STATUSES.has(status)) return;
+
+    const interval = setInterval(() => fetchRun(activeRunId), POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [activeRunId, activeRun?.status, fetchRun]);
   const isMobile = useIsMobile();
 
   // Reset tab when run changes

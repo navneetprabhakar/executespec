@@ -8,16 +8,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Decomposes multi-file tasks into per-file subtasks at execution time.
+ * Decomposes tasks into subtasks at execution time using two strategies:
  *
- * <p>If a task declares N owned files (N &gt; 1), this component creates N
- * synthetic {@link TaskDefinition} objects — one per file — each constrained
- * to produce exactly one {@code writeFile} call. This eliminates fabrication
- * (model claiming files were written without tool calls) and drastically
- * reduces token waste on retries.
+ * <h3>1. File-based decomposition (multi-file tasks)</h3>
+ * <p>If a task declares N owned files (N &gt; 1), creates N subtask definitions —
+ * one per file — each constrained to produce exactly one {@code writeFile} call.
+ * Eliminates fabrication and reduces token waste on retries.
  *
- * <p>Rework tasks are excluded from decomposition because they target
- * specific reviewer-flagged files rather than generating from scratch.
+ * <h3>2. Phase-based decomposition (complex single-file tasks)</h3>
+ * <p>If a task has exactly 1 owned file but MEDIUM or HIGH complexity, creates
+ * 2–3 phase subtasks that build the file incrementally at the method level.
+ * Phase 1 creates the skeleton; subsequent phases read the file and extend it.
+ * This prevents iteration exhaustion on complex files that need many methods.
+ *
+ * <p>Rework tasks are excluded from both decomposition strategies because they
+ * target specific reviewer-flagged files rather than generating from scratch.
  */
 @Component
 @RequiredArgsConstructor
@@ -25,23 +30,50 @@ public class SubtaskDecomposer {
 
     /**
      * Returns {@code true} if the task should be decomposed into subtasks.
-     * Criteria: ownedFiles has 2+ entries AND task is not in rework mode.
+     * <p>Triggers on:
+     * <ul>
+     *   <li>Multi-file tasks: ownedFiles has 2+ entries</li>
+     *   <li>Complex single-file tasks: ownedFiles has 1 entry + MEDIUM or HIGH complexity</li>
+     * </ul>
+     * Excluded: rework tasks (have reworkFeedback).
      */
     public boolean shouldDecompose(TaskDefinition taskDef) {
         if (taskDef == null) return false;
         if (taskDef.getReworkFeedback() != null && !taskDef.getReworkFeedback().isBlank()) return false;
         List<String> files = taskDef.getOwnedFiles();
-        return files != null && files.size() > 1;
+        if (files == null || files.isEmpty()) return false;
+        // Multi-file: always decompose
+        if (files.size() > 1) return true;
+        // Single-file: decompose if MEDIUM or HIGH complexity
+        String complexity = taskDef.getComplexity();
+        return "MEDIUM".equalsIgnoreCase(complexity) || "HIGH".equalsIgnoreCase(complexity);
     }
+
+    /**
+     * Decomposes a task into subtasks using the appropriate strategy.
+     * <ul>
+     *   <li>Multi-file (2+ owned files) → per-file subtasks via {@link #decomposeByFiles}</li>
+     *   <li>Single-file + MEDIUM/HIGH → phase-based subtasks via {@link #decomposeByPhases}</li>
+     * </ul>
+     *
+     * @param parent the original task definition
+     * @return ordered list of subtask definitions
+     */
+    public List<TaskDefinition> decompose(TaskDefinition parent) {
+        List<String> files = parent.getOwnedFiles();
+        if (files.size() == 1) {
+            return decomposeByPhases(parent);
+        }
+        return decomposeByFiles(parent);
+    }
+
+    // ── File-based decomposition (existing logic) ─────────────────────────────
 
     /**
      * Creates N {@link TaskDefinition} objects, one per owned file.
      * Each subtask inherits the parent's context but is constrained to a single file.
-     *
-     * @param parent the original multi-file task definition
-     * @return ordered list of per-file subtask definitions
      */
-    public List<TaskDefinition> decompose(TaskDefinition parent) {
+    private List<TaskDefinition> decomposeByFiles(TaskDefinition parent) {
         List<String> files = parent.getOwnedFiles();
         int total = files.size();
         List<TaskDefinition> subtasks = new ArrayList<>(total);
@@ -53,7 +85,7 @@ public class SubtaskDecomposer {
             subtasks.add(TaskDefinition.builder()
                     .taskId(parent.getTaskId() + "_" + (i + 1))
                     .title(parent.getTitle() + " [" + (i + 1) + "/" + total + ": " + shortName + "]")
-                    .objective(buildSubtaskObjective(parent, file, i, files))
+                    .objective(buildFileSubtaskObjective(parent, file, i, files))
                     .boundaries(parent.getBoundaries())
                     .outputFormat("Create exactly ONE file: " + file)
                     .acceptanceCriteria("File " + file + " exists and is valid")
@@ -69,22 +101,17 @@ public class SubtaskDecomposer {
     }
 
     /**
-     * Builds a focused subtask objective that includes:
-     * 1. The parent task's full objective (context)
-     * 2. Which specific file to create
-     * 3. Which files were already created by prior subtasks (for imports/references)
-     * 4. Explicit single-file constraint
+     * Builds a focused subtask objective for file-based decomposition.
+     * Includes parent context, prior files created, and single-file constraint.
      */
-    private String buildSubtaskObjective(TaskDefinition parent, String targetFile,
-                                         int index, List<String> allFiles) {
+    private String buildFileSubtaskObjective(TaskDefinition parent, String targetFile,
+                                              int index, List<String> allFiles) {
         StringBuilder sb = new StringBuilder();
 
-        // Parent context
         sb.append("PARENT TASK CONTEXT:\n");
         sb.append(parent.getObjective());
         sb.append("\n\n");
 
-        // Prior files (available in workspace for reference)
         if (index > 0) {
             sb.append("FILES ALREADY CREATED (available in workspace — use readFile if you need to reference them):\n");
             for (int j = 0; j < index; j++) {
@@ -93,7 +120,6 @@ public class SubtaskDecomposer {
             sb.append("\n");
         }
 
-        // Remaining files (for awareness, not for this subtask)
         if (index < allFiles.size() - 1) {
             sb.append("FILES TO BE CREATED LATER (by subsequent subtasks — do NOT create these):\n");
             for (int j = index + 1; j < allFiles.size(); j++) {
@@ -102,10 +128,110 @@ public class SubtaskDecomposer {
             sb.append("\n");
         }
 
-        // Specific assignment
         sb.append("YOUR ASSIGNMENT: Create ONLY this file: ").append(targetFile).append("\n");
         sb.append("Call writeFile exactly ONCE with the complete contents of this file.\n");
         sb.append("Do NOT create any other files. Do NOT output a completion report until the file is written.");
+
+        return sb.toString();
+    }
+
+    // ── Phase-based decomposition (method-level for complex single-file tasks) ─
+
+    /** Phase descriptions for MEDIUM complexity (2 phases). */
+    private static final String[][] MEDIUM_PHASES = {
+            {"Create file skeleton and core methods",
+             "Write the initial structure: imports, class/component declaration, constructor/props, " +
+             "type definitions, and the first core methods.\n" +
+             "Do NOT try to write the entire implementation — the next phase will add remaining methods."},
+            {"Complete implementation",
+             "Add the remaining methods, event handlers, error handling, helper functions, " +
+             "and any missing functionality to complete the file."}
+    };
+
+    /** Phase descriptions for HIGH complexity (3 phases). */
+    private static final String[][] HIGH_PHASES = {
+            {"Create file skeleton and type definitions",
+             "Write the initial structure: imports, class/component declaration, constructor/props, " +
+             "type definitions, data models, and basic setup methods.\n" +
+             "Do NOT try to write the entire implementation — subsequent phases will add remaining methods."},
+            {"Implement core business logic",
+             "Add the core business logic methods, primary event handlers, main API calls, " +
+             "and the central functionality of this file."},
+            {"Finalize with remaining methods and error handling",
+             "Add remaining helper methods, error handling, edge cases, validation, " +
+             "cleanup logic, and any missing functionality to complete the file."}
+    };
+
+    /**
+     * Creates phase-based subtasks for a complex single-file task.
+     * MEDIUM → 2 phases, HIGH → 3 phases.
+     * Each phase builds on the previous one by reading and extending the same file.
+     */
+    private List<TaskDefinition> decomposeByPhases(TaskDefinition parent) {
+        String file = parent.getOwnedFiles().get(0);
+        String shortName = extractFileName(file);
+        String complexity = parent.getComplexity();
+
+        String[][] phases = "HIGH".equalsIgnoreCase(complexity) ? HIGH_PHASES : MEDIUM_PHASES;
+        int total = phases.length;
+        List<TaskDefinition> subtasks = new ArrayList<>(total);
+
+        for (int i = 0; i < total; i++) {
+            subtasks.add(TaskDefinition.builder()
+                    .taskId(parent.getTaskId() + "_" + (i + 1))
+                    .title(parent.getTitle() + " [Phase " + (i + 1) + "/" + total + ": " + shortName + "]")
+                    .objective(buildPhaseObjective(parent, file, i, total, phases))
+                    .boundaries(parent.getBoundaries())
+                    .outputFormat(i == 0
+                            ? "Create exactly ONE file: " + file
+                            : "Update file: " + file + " (read existing content first, then rewrite with additions)")
+                    .acceptanceCriteria("File " + file + " exists and is valid")
+                    .dependsOn(parent.getDependsOn())
+                    .complexity("LOW")
+                    .assignedModel(parent.getAssignedModel())
+                    .taskLayer(parent.getTaskLayer())
+                    .ownedFiles(List.of(file))
+                    .sharedFiles(parent.getSharedFiles())
+                    .build());
+        }
+        return subtasks;
+    }
+
+    /**
+     * Builds the objective for a phase-based subtask.
+     * Phase 1 creates the file; phases 2+ read and extend it.
+     */
+    private String buildPhaseObjective(TaskDefinition parent, String targetFile,
+                                        int phaseIndex, int totalPhases, String[][] phases) {
+        StringBuilder sb = new StringBuilder();
+
+        // Parent context
+        sb.append("PARENT TASK CONTEXT:\n");
+        sb.append(parent.getObjective());
+        sb.append("\n\n");
+
+        // Phase assignment
+        String phaseTitle = phases[phaseIndex][0];
+        String phaseGuidance = phases[phaseIndex][1];
+
+        if (phaseIndex == 0) {
+            // Phase 1: create the file
+            sb.append("YOUR ASSIGNMENT — PHASE 1/").append(totalPhases).append(": ").append(phaseTitle).append("\n");
+            sb.append("Create the file: ").append(targetFile).append("\n");
+            sb.append(phaseGuidance).append("\n");
+            sb.append("Call writeFile exactly ONCE with the initial file contents.");
+        } else {
+            // Phase 2+: read existing file and extend
+            sb.append("FILE ALREADY CREATED (read it first to see current state):\n");
+            sb.append("  - ").append(targetFile).append("\n\n");
+            sb.append("YOUR ASSIGNMENT — PHASE ").append(phaseIndex + 1).append("/")
+              .append(totalPhases).append(": ").append(phaseTitle).append("\n");
+            sb.append("Read ").append(targetFile).append(" using readFile, then rewrite it with your additions.\n");
+            sb.append(phaseGuidance).append("\n");
+            sb.append("Call writeFile exactly ONCE with the COMPLETE updated file ");
+            sb.append("(include ALL existing code + your additions).\n");
+            sb.append("Do NOT remove any existing methods — only ADD to the file.");
+        }
 
         return sb.toString();
     }

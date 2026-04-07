@@ -28,17 +28,22 @@ export default {
           blue: 'var(--accent-blue)',
           'blue-hover': 'var(--accent-blue-hover)',
           red: 'var(--status-error)',
-          amber: 'var(--status-building)',
+          amber: 'var(--status-waiting)',
           green: '#17B169',
           harness: 'var(--accent-harness)',
           planner: 'var(--accent-planner)',
         },
-        // Status colors
+        // Status colors — semantic groups
         status: {
-          success: 'var(--status-success)',
-          building: 'var(--status-building)',
-          error: 'var(--status-error)',
-          queued: 'var(--status-queued)',
+          success:   'var(--status-success)',    // green
+          executing: 'var(--status-executing)',   // blue
+          thinking:  'var(--status-thinking)',    // purple
+          waiting:   'var(--status-waiting)',     // amber
+          partial:   'var(--status-partial)',     // orange
+          error:     'var(--status-error)',       // red
+          blocked:   'var(--status-blocked)',     // pink
+          queued:    'var(--status-queued)',       // gray
+          building:  'var(--status-building)',    // legacy alias
         },
         // Border
         border: {

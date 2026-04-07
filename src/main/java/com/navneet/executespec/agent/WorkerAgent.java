@@ -50,6 +50,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -129,6 +130,9 @@ public class WorkerAgent {
         Instant lastCheckpointTime;
         Instant lastStallCheckTime;
         int taskDurationMinutes;
+        /** Cache of read-only tool call results keyed by "toolName|path".
+         *  Prevents redundant I/O when Gemini calls listFiles/readFile on the same path repeatedly. */
+        final Map<String, String> readOnlyToolCache = new LinkedHashMap<>();
     }
 
     /** Sentinel return value from helpers that indicates the agentic loop should {@code continue}. */
@@ -148,9 +152,14 @@ public class WorkerAgent {
      *  Set high enough that truncation recovery (2 continues + 2 skeleton recoveries) doesn't
      *  exhaust the budget. Each recovery burns ~2-3 tool calls, so 35 gives ~10 recovery slots. */
     private static final int HARD_ITERATION_LIMIT = 35;
-    /** Reduced iteration limit for subtasks — a subtask writes ONE file and needs at most
-     *  a few reads + 1 writeFile. 10 iterations is generous for single-file tasks. */
-    private static final int SUBTASK_ITERATION_LIMIT = 10;
+    /** Reduced iteration limit for subtasks — a subtask writes ONE file but Gemini models
+     *  typically spend 6-8 calls reading context (CODEBASE_CONTEXT, task-assignments, file-locks,
+     *  listFiles) before writing. 15 gives enough headroom for context reads + writeFile. */
+    private static final int SUBTASK_ITERATION_LIMIT = 15;
+    /** Maximum tool calls dispatched from a single LLM response. Prevents Gemini's
+     *  100+ call batches from consuming the entire iteration budget in one response.
+     *  Excess calls are dropped with a message telling the model to re-request if needed. */
+    private static final int MAX_TOOL_CALLS_PER_RESPONSE = 15;
     /** Max auto-continue attempts when LLM response is truncated (hit maxTokens). */
     private static final int MAX_CONTINUATIONS = 2;
     /** Max skeleton recovery attempts before escalating model anyway. */
@@ -275,10 +284,7 @@ public class WorkerAgent {
                             assistantMsg, messages, taskDef, taskId, runId, state, MAX_FABRICATED_COMPLETIONS);
                     if (pathAResult != null) return pathAResult;
                     if (checkIterationLimit(taskId, state)) {
-                        return withProviderModel(WorkerReport.partial(taskId,
-                                "Terminated: exceeded " + state.effectiveIterationLimit + " tool-call iterations",
-                                state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
-                                state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+                        return buildIterationLimitReport(taskId, state);
                     }
                     continue; // next iteration
                 }
@@ -326,6 +332,20 @@ public class WorkerAgent {
                 ? "Hit " + state.taskDurationMinutes + "-minute time limit after " + state.iteration + " iterations without producing completion report."
                 : "Hit safety iteration cap (" + safetyIterationCap + ") without producing completion report.";
         log.warn("Worker for task {} stopped: {} (complexity={})", taskId, reason, state.complexity);
+        // Subtask promotion: if the subtask wrote its file, treat as complete
+        if (state.isSubtask && state.totalFileWrites > 0) {
+            log.info("[Worker {}] Subtask promoted to COMPLETE despite time/iteration cap ({} file writes)",
+                    taskId, state.totalFileWrites);
+            stateStore.appendTaskLog(taskId, "SUBTASK_PROMOTED_TO_COMPLETE:" + state.totalFileWrites + " writes");
+            return withProviderModel(WorkerReport.builder()
+                    .taskId(taskId).status("complete")
+                    .filesCreated(java.util.List.of()).filesModified(java.util.List.of())
+                    .filesRead(java.util.List.of())
+                    .selfReview("Subtask completed (file written). " + reason)
+                    .inputTokens(state.totalInputTokens).outputTokens(state.totalOutputTokens)
+                    .build(), state.provider, state.model,
+                    state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+        }
         return withProviderModel(WorkerReport.partial(taskId, reason,
                 state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
                 state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
@@ -595,10 +615,43 @@ public class WorkerAgent {
             String salvageText = FABRICATED_TOOL_RESULT_PATTERN.matcher(assistantText).replaceAll("");
             List<ParsedToolCall> salvageCalls = parseXmlToolCalls(salvageText);
             if (salvageCalls.isEmpty()) salvageCalls = parseJsonToolCalls(salvageText);
+            // Cap salvage calls: use the tighter of per-response cap or remaining iteration budget
+            // (leave 1 slot for the model's next writeFile call after continuation)
+            int remainingBudget = Math.max(1, state.effectiveIterationLimit - state.toolCallCount - 1);
+            int salvageCap = Math.min(MAX_TOOL_CALLS_PER_RESPONSE, remainingBudget);
+            if (salvageCalls.size() > salvageCap) {
+                log.warn("[Worker {}] Capping salvage calls from {} to {} (cap={}, remaining budget={})",
+                        taskId, salvageCalls.size(), salvageCap, MAX_TOOL_CALLS_PER_RESPONSE, remainingBudget);
+                salvageCalls = new ArrayList<>(salvageCalls.subList(0, salvageCap));
+            }
+            int dedupHits = 0;
             for (ParsedToolCall tc : salvageCalls) {
                 try {
-                    dispatchTool(tc, runId, taskId);
-                    if (isFileWriteTool(tc.name())) { state.fileWritesSinceCheck++; state.totalFileWrites++; }
+                    // Dedup read-only calls in salvage path too
+                    String dedupKey = buildReadOnlyDedupKey(tc);
+                    if (dedupKey != null && state.readOnlyToolCache.containsKey(dedupKey)) {
+                        dedupHits++;
+                        // Dedup hits are FREE — don't increment toolCallCount
+                        salvaged++;
+                        continue; // skip dispatch, result already cached
+                    }
+                    String result = dispatchTool(tc, runId, taskId);
+                    if (isFileWriteTool(tc.name())) {
+                        state.fileWritesSinceCheck++; state.totalFileWrites++;
+                        // Invalidate dedup cache for written path
+                        String writtenPath = extractPathFromArgs(tc);
+                        if (writtenPath != null) {
+                            state.readOnlyToolCache.remove("read_file|" + writtenPath);
+                            state.readOnlyToolCache.remove("readFile|" + writtenPath);
+                            String parent = parentDir(writtenPath);
+                            if (parent != null) {
+                                state.readOnlyToolCache.remove("list_files|" + parent);
+                                state.readOnlyToolCache.remove("listFiles|" + parent);
+                            }
+                        }
+                    } else if (dedupKey != null && result != null) {
+                        state.readOnlyToolCache.put(dedupKey, result);
+                    }
                     state.toolCallCount++;
                     salvaged++;
                 } catch (Exception salvageEx) {
@@ -607,7 +660,7 @@ public class WorkerAgent {
             }
             if (salvaged > 0) {
                 log.info("[Worker {}] Salvaged {} complete tool call(s) from truncated response " +
-                        "(totalFileWrites={})", taskId, salvaged, state.totalFileWrites);
+                        "(totalFileWrites={}, dedupHits={})", taskId, salvaged, state.totalFileWrites, dedupHits);
             }
         }
 
@@ -658,9 +711,19 @@ public class WorkerAgent {
         // and taskComplete arrive in the same tool-call batch).
         AssistantMessage.ToolCall pendingTaskComplete = null;
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
+        int dispatched = 0;
+        int skipped = 0;
         for (AssistantMessage.ToolCall tc : assistantMsg.getToolCalls()) {
             if ("taskComplete".equals(tc.name())) {
                 pendingTaskComplete = tc; // defer until after other tools
+                continue;
+            }
+            // ── Per-response cap: skip excess tool calls (defensive for PATH A) ──
+            if (dispatched >= MAX_TOOL_CALLS_PER_RESPONSE) {
+                responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(),
+                        "Skipped — per-response limit of " + MAX_TOOL_CALLS_PER_RESPONSE +
+                        " reached. Re-request this call in your next response if still needed."));
+                skipped++;
                 continue;
             }
             Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
@@ -669,22 +732,55 @@ public class WorkerAgent {
                     .lowCardinalityKeyValue("run.id", runId)
                     .start();
             try {
-                String result = dispatchTool(new ParsedToolCall(tc.name(), tc.arguments()), runId, taskId);
-                if (isFileWriteTool(tc.name())) { state.fileWritesSinceCheck++; state.totalFileWrites++; }
+                ParsedToolCall parsed = new ParsedToolCall(tc.name(), tc.arguments());
+                // ── Read-only dedup: return cached result for repeated reads ──
+                String dedupKey = buildReadOnlyDedupKey(parsed);
+                String result;
+                boolean wasCached = false;
+                if (dedupKey != null && state.readOnlyToolCache.containsKey(dedupKey)) {
+                    result = state.readOnlyToolCache.get(dedupKey);
+                    wasCached = true;
+                    log.debug("[Worker {}] Dedup cache hit for {} (key={})", taskId, tc.name(), dedupKey);
+                } else {
+                    result = dispatchTool(parsed, runId, taskId);
+                    if (dedupKey != null) {
+                        state.readOnlyToolCache.put(dedupKey, result);
+                    }
+                }
+                if (isFileWriteTool(tc.name())) {
+                    state.fileWritesSinceCheck++;
+                    state.totalFileWrites++;
+                    String writtenPath = extractPathFromArgs(parsed);
+                    if (writtenPath != null) {
+                        state.readOnlyToolCache.remove("read_file|" + writtenPath);
+                        state.readOnlyToolCache.remove("list_files|" + parentDir(writtenPath));
+                    }
+                }
                 responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
+                dispatched++;
+                if (!wasCached) { state.toolCallCount++; }
             } finally {
                 toolObs.stop();
             }
         }
-        state.toolCallCount += assistantMsg.getToolCalls().size();
+        // Note: toolCallCount incremented per-call above (dedup cache hits are free)
+        state.toolCallCount += skipped; // skipped calls still count to prevent gaming
+        if (skipped > 0) {
+            log.warn("[Worker {}] Capped native tool calls: {} dispatched, {} skipped (limit {})",
+                    taskId, dispatched, skipped, MAX_TOOL_CALLS_PER_RESPONSE);
+            stateStore.appendTaskLog(taskId, "TOOL_CALLS_CAPPED:" + (dispatched + skipped) + "->" + dispatched);
+        }
 
         // ── Subtask write nudge: if 5+ tool calls with zero writes, force it ──
-        if (state.isSubtask && state.totalFileWrites == 0 && state.toolCallCount >= 5) {
+        // Append nudge to the last tool response's content rather than adding a
+        // separate ToolResponse — OpenAI requires exactly one response per tool_call
+        // ID, and a duplicate ID causes a 400 error.
+        if (state.isSubtask && state.totalFileWrites == 0 && state.toolCallCount >= 5
+                && !responses.isEmpty()) {
             String nudge = buildSubtaskWriteNudge(taskDef, state.toolCallCount);
+            ToolResponseMessage.ToolResponse last = responses.removeLast();
             responses.add(new ToolResponseMessage.ToolResponse(
-                    assistantMsg.getToolCalls().getLast().id(),
-                    assistantMsg.getToolCalls().getLast().name(),
-                    nudge));
+                    last.id(), last.name(), last.responseData() + "\n\n" + nudge));
             log.warn("[Worker {}] Subtask write nudge injected at {} tool calls (0 writes)", taskId, state.toolCallCount);
             stateStore.appendTaskLog(taskId, "SUBTASK_WRITE_NUDGE:" + state.toolCallCount);
         }
@@ -782,6 +878,16 @@ public class WorkerAgent {
         }
         if (!toolCalls.isEmpty()) {
             state.consecutiveNonJsonOutputs = 0; // reset — model is cooperating
+
+            // ── Per-response cap: prevent a single response from exhausting the budget ──
+            int skipped = 0;
+            if (toolCalls.size() > MAX_TOOL_CALLS_PER_RESPONSE) {
+                skipped = toolCalls.size() - MAX_TOOL_CALLS_PER_RESPONSE;
+                log.warn("[Worker {}] Capping tool calls from {} to {} per response ({} skipped)",
+                        taskId, toolCalls.size(), MAX_TOOL_CALLS_PER_RESPONSE, skipped);
+                toolCalls = new ArrayList<>(toolCalls.subList(0, MAX_TOOL_CALLS_PER_RESPONSE));
+            }
+
             StringBuilder results = new StringBuilder();
             for (ParsedToolCall tc : toolCalls) {
                 Observation toolObs = Observation.createNotStarted("executespec.tool.dispatch", observationRegistry)
@@ -790,15 +896,50 @@ public class WorkerAgent {
                         .lowCardinalityKeyValue("run.id", runId)
                         .start();
                 try {
-                String result = dispatchTool(tc, runId, taskId);
-                if (isFileWriteTool(tc.name())) { state.fileWritesSinceCheck++; state.totalFileWrites++; }
-                results.append("<tool_result tool=\"").append(tc.name()).append("\" untrusted=\"true\">\n")
-                       .append(result).append("\n</tool_result>\n\n");
+                    // ── Read-only dedup: return cached result for repeated reads ──
+                    String dedupKey = buildReadOnlyDedupKey(tc);
+                    String result;
+                    boolean cached = false;
+                    if (dedupKey != null && state.readOnlyToolCache.containsKey(dedupKey)) {
+                        result = state.readOnlyToolCache.get(dedupKey);
+                        cached = true;
+                        log.debug("[Worker {}] Dedup cache hit for {} (key={})", taskId, tc.name(), dedupKey);
+                    } else {
+                        result = dispatchTool(tc, runId, taskId);
+                        if (dedupKey != null) {
+                            state.readOnlyToolCache.put(dedupKey, result);
+                        }
+                    }
+                    if (isFileWriteTool(tc.name())) {
+                        state.fileWritesSinceCheck++;
+                        state.totalFileWrites++;
+                        // Invalidate read cache for written file — content has changed
+                        String writtenPath = extractPathFromArgs(tc);
+                        if (writtenPath != null) {
+                            state.readOnlyToolCache.remove("read_file|" + writtenPath);
+                            state.readOnlyToolCache.remove("list_files|" + parentDir(writtenPath));
+                        }
+                    }
+                    results.append("<tool_result tool=\"").append(tc.name()).append("\"")
+                           .append(cached ? " cached=\"true\"" : "")
+                           .append(" untrusted=\"true\">\n")
+                           .append(result).append("\n</tool_result>\n\n");
+                    if (!cached) { state.toolCallCount++; }
                 } finally {
                     toolObs.stop();
                 }
             }
-            state.toolCallCount += toolCalls.size();
+
+            // ── Notify model about skipped tool calls ──
+            if (skipped > 0) {
+                results.append("<system_note>\n")
+                       .append(skipped).append(" tool call(s) were skipped because you exceeded the per-response limit of ")
+                       .append(MAX_TOOL_CALLS_PER_RESPONSE).append(". ")
+                       .append("Re-request only the calls you still need in your next response. ")
+                       .append("Do NOT repeat calls that already returned results above.\n")
+                       .append("</system_note>\n\n");
+                stateStore.appendTaskLog(taskId, "TOOL_CALLS_CAPPED:" + (MAX_TOOL_CALLS_PER_RESPONSE + skipped) + "->" + MAX_TOOL_CALLS_PER_RESPONSE);
+            }
 
             // ── Subtask write nudge (PATH B): if 5+ tool calls with zero writes, force it ──
             if (state.isSubtask && state.totalFileWrites == 0 && state.toolCallCount >= 5) {
@@ -811,10 +952,7 @@ public class WorkerAgent {
 
             messages.add(new UserMessage(results.toString().trim()));
             if (checkIterationLimit(taskId, state)) {
-                return withProviderModel(WorkerReport.partial(taskId,
-                        "Terminated: exceeded " + state.effectiveIterationLimit + " tool-call iterations",
-                        state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
-                        state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+                return buildIterationLimitReport(taskId, state);
             }
             return CONTINUE_LOOP; // next iteration — do NOT add the "continue" prompt below
         }
@@ -926,13 +1064,40 @@ public class WorkerAgent {
     /** Checks whether the tool call count has hit the iteration limit. */
     private boolean checkIterationLimit(String taskId, TaskExecutionState state) {
         if (state.toolCallCount >= state.effectiveIterationLimit) {
-            log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing partial completion",
-                    taskId, state.isSubtask ? "subtask" : "hard", state.toolCallCount);
+            log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing {}",
+                    taskId, state.isSubtask ? "subtask" : "hard", state.toolCallCount,
+                    (state.isSubtask && state.totalFileWrites > 0) ? "completion (file written)" : "partial completion");
             stateStore.appendTaskLog(taskId, "ITERATION_LIMIT:" + state.toolCallCount +
                     (state.isSubtask ? " (subtask cap=" + SUBTASK_ITERATION_LIMIT + ")" : ""));
             return true;
         }
         return false;
+    }
+
+    /**
+     * Builds the WorkerReport for an iteration-limit exit. Subtasks that successfully
+     * wrote their file are promoted to COMPLETE — a subtask owns exactly one file,
+     * so if it wrote it, the task succeeded regardless of remaining read budget.
+     */
+    private WorkerReport buildIterationLimitReport(String taskId, TaskExecutionState state) {
+        String reason = "Terminated: exceeded " + state.effectiveIterationLimit + " tool-call iterations";
+        if (state.isSubtask && state.totalFileWrites > 0) {
+            // Subtask wrote its file — promote to complete instead of partial
+            log.info("[Worker {}] Subtask promoted to COMPLETE: {} file write(s) before iteration limit",
+                    taskId, state.totalFileWrites);
+            stateStore.appendTaskLog(taskId, "SUBTASK_PROMOTED_TO_COMPLETE:" + state.totalFileWrites + " writes");
+            return withProviderModel(WorkerReport.builder()
+                    .taskId(taskId).status("complete")
+                    .filesCreated(java.util.List.of()).filesModified(java.util.List.of())
+                    .filesRead(java.util.List.of())
+                    .selfReview("Subtask completed (file written). Hit iteration limit during post-write reads.")
+                    .inputTokens(state.totalInputTokens).outputTokens(state.totalOutputTokens)
+                    .build(), state.provider, state.model,
+                    state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+        }
+        return withProviderModel(WorkerReport.partial(taskId, reason,
+                state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
+                state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
     }
 
     /**
@@ -1031,9 +1196,23 @@ public class WorkerAgent {
                             taskId, (int) (budget.usagePct() * 100), state.lastCompactedIteration);
                     stateStore.recordCompaction(taskId, "hard-stop");
                     sseBroadcaster.emit(runId, RunEvent.compactionTriggered(runId, taskId));
+                    String hardStopReason = "Hard stopped at " + (int) (budget.usagePct() * 100)
+                            + "% context usage after emergency compaction failed.";
+                    if (state.isSubtask && state.totalFileWrites > 0) {
+                        log.info("[Worker {}] Subtask promoted to COMPLETE despite hard stop ({} writes)",
+                                taskId, state.totalFileWrites);
+                        stateStore.appendTaskLog(taskId, "SUBTASK_PROMOTED_TO_COMPLETE:" + state.totalFileWrites + " writes");
+                        return withProviderModel(WorkerReport.builder()
+                                .taskId(taskId).status("complete")
+                                .filesCreated(java.util.List.of()).filesModified(java.util.List.of())
+                                .filesRead(java.util.List.of())
+                                .selfReview("Subtask completed (file written). " + hardStopReason)
+                                .inputTokens(state.totalInputTokens).outputTokens(state.totalOutputTokens)
+                                .build(), state.provider, state.model,
+                                state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
+                    }
                     return withProviderModel(WorkerReport.partial(taskId,
-                            "Hard stopped at " + (int) (budget.usagePct() * 100)
-                                    + "% context usage after emergency compaction failed. Resume required.",
+                            hardStopReason + " Resume required.",
                             state.totalInputTokens, state.totalOutputTokens), state.provider, state.model,
                             state.continuations > 0, state.configuredMaxOutput, state.totalOutputTokens, state.iteration);
                 }
@@ -1619,6 +1798,49 @@ public class WorkerAgent {
         };
     }
 
+    /** Returns true if the tool is a read-only operation whose result can be cached within a task. */
+    private static boolean isReadOnlyTool(String toolName) {
+        return switch (toolName) {
+            case "readFile", "read_file", "listFiles", "list_files",
+                 "searchFiles", "search_files", "status", "git_status",
+                 "diff", "git_diff" -> true;
+            default -> false;
+        };
+    }
+
+    /** Builds a dedup key for read-only tool calls. Returns null for non-read-only or unparseable tools. */
+    private String buildReadOnlyDedupKey(ParsedToolCall tc) {
+        if (!isReadOnlyTool(tc.name())) return null;
+        try {
+            JsonNode args = mapper.readTree(tc.argsJson());
+            return switch (tc.name()) {
+                case "readFile", "read_file" -> "read_file|" + args.path("path").asText("");
+                case "listFiles", "list_files" -> "list_files|" + args.path("path").asText(".");
+                case "searchFiles", "search_files" -> "search_files|" + args.path("pattern").asText("") + "|" + args.path("directory").asText(".");
+                case "status", "git_status" -> "git_status";
+                case "diff", "git_diff" -> "git_diff";
+                default -> null;
+            };
+        } catch (Exception e) {
+            return null; // parse failure — don't dedup, dispatch normally
+        }
+    }
+
+    /** Extracts the "path" argument from a tool call's JSON args. */
+    private String extractPathFromArgs(ParsedToolCall tc) {
+        try {
+            return mapper.readTree(tc.argsJson()).path("path").asText(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Returns the parent directory of a file path, or "." for root-level files. */
+    private static String parentDir(String path) {
+        int lastSlash = path.lastIndexOf('/');
+        return lastSlash > 0 ? path.substring(0, lastSlash) : ".";
+    }
+
     /** Suggests the correct tool name for commonly hallucinated tool names. */
     private String suggestTool(String name) {
         if (name == null) return null;
@@ -2179,8 +2401,32 @@ public class WorkerAgent {
             // No ToolResponseMessages in history — safe to failover across providers.
             fallbackMode = FallbackMode.IMMEDIATE;
         }
-        return llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,
+        if (log.isDebugEnabled()) {
+            log.debug("[Worker callModel] ── LLM INPUT ── taskId={} iteration={} messageCount={}",
+                    taskId, iteration, allMessages.size());
+            for (int i = 0; i < allMessages.size(); i++) {
+                Message m = allMessages.get(i);
+                String role = m.getClass().getSimpleName();
+                String content = m.getText();
+                if (content != null && content.length() > 2000) {
+                    content = content.substring(0, 2000) + "... [truncated, total=" + content.length() + " chars]";
+                }
+                log.debug("[Worker callModel]   msg[{}] role={} content={}", i, role, content);
+            }
+        }
+
+        LlmRouter.LlmResponse result = llmRouter.callWithFallbackTracked(provider, model, prompt, runId, agentId,
                 fallbackMode, iteration, justCompacted);
+
+        if (log.isDebugEnabled() && result.response().getResult() != null) {
+            String output = result.response().getResult().getOutput().getText();
+            if (output != null && output.length() > 2000) {
+                output = output.substring(0, 2000) + "... [truncated, total=" + output.length() + " chars]";
+            }
+            log.debug("[Worker callModel] ── LLM OUTPUT ── provider={} model={} response={}",
+                    result.provider(), result.model(), output);
+        }
+        return result;
     }
 
     private WorkerReport parseCompletionReport(String raw, String taskId,

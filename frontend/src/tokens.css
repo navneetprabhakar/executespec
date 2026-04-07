@@ -48,11 +48,18 @@
   --accent-harness:     #8b5cf6;
   --accent-planner:     #10b981;
 
-  /* Status — color only for meaning */
-  --status-success:     #0070F3;
-  --status-building:    #f5a623;
-  --status-error:       #e5484d;
-  --status-queued:      #666666;
+  /* Status — distinct color per semantic group */
+  --status-success:     #10B981;   /* green — COMPLETE */
+  --status-executing:   #3B82F6;   /* blue — WORKING, COMPILING, MERGING */
+  --status-thinking:    #8B5CF6;   /* purple — PLANNING, REVIEWING */
+  --status-waiting:     #F59E0B;   /* amber — AWAITING_* */
+  --status-partial:     #F97316;   /* orange — PARTIAL */
+  --status-error:       #EF4444;   /* red — FAILED, STUCK */
+  --status-blocked:     #EC4899;   /* pink — BLOCKED */
+  --status-queued:      #666666;   /* gray — QUEUED, PAUSED, CANCELLED, PENDING, LOCKED */
+
+  /* Legacy aliases (deprecated — use semantic names above) */
+  --status-building:    #F59E0B;
 
   /* Radius */
   --radius-sm:          2px;

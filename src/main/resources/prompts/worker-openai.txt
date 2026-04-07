@@ -198,6 +198,16 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    fix it BEFORE committing. Cross-package mismatches are the #1 cause of build failures
    in multi-task projects.
 
+   FULL-STACK DIRECTORY STRUCTURE — MANDATORY:
+   When a project has BOTH a compiled backend (Java/Spring Boot, Go, Rust) AND a frontend
+   (React, Vue, etc.), the frontend MUST live in a separate directory — NEVER under src/:
+     - Java (Spring Boot): frontend files under frontend/ (e.g., frontend/package.json,
+       frontend/src/App.jsx, frontend/src/components/Layout.jsx)
+     - Go / Rust: frontend files under frontend/ or client/
+   NEVER place frontend files (package.json, vite.config.js, App.jsx, main.tsx) at the
+   project root src/ — this collides with the backend's src/main/java/ directory.
+   If your task's owned_files start with "frontend/", ALL your writeFile paths MUST too.
+
    HTML/CSS/JS (static projects — no framework):
      Every HTML file that references a CSS or JS file via <link> or <script> tags MUST
       FRONTEND DOMAIN — MANDATORY RULES:
