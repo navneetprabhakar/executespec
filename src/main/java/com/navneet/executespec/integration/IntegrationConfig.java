@@ -4,6 +4,8 @@ import com.navneet.executespec.integration.confluence.ConfluenceAdapter;
 import com.navneet.executespec.integration.confluence.ConfluenceClient;
 import com.navneet.executespec.integration.jira.JiraAdapter;
 import com.navneet.executespec.integration.jira.JiraClient;
+import com.navneet.executespec.integration.bitbucket.BitbucketAdapter;
+import com.navneet.executespec.integration.bitbucket.BitbucketClient;
 import com.navneet.executespec.integration.pagerduty.PagerDutyAdapter;
 import com.navneet.executespec.integration.pagerduty.PagerDutyClient;
 import com.navneet.executespec.integration.servicenow.ServiceNowAdapter;
@@ -93,6 +95,20 @@ public class IntegrationConfig {
     @ConditionalOnProperty("agent.integrations.pagerduty.enabled")
     public PagerDutyAdapter pagerDutyAdapter(PagerDutyClient pagerDutyClient, IntegrationProperties props, ObjectMapper mapper) {
         return new PagerDutyAdapter(pagerDutyClient, props.getPagerduty(), mapper);
+    }
+
+    // ── Bitbucket ──────────────────────────────────────────────────────────────
+
+    @Bean
+    @ConditionalOnProperty("agent.integrations.bitbucket.enabled")
+    public BitbucketClient bitbucketClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
+        return new BitbucketClient(integrationRestTemplate, props.getBitbucket());
+    }
+
+    @Bean
+    @ConditionalOnProperty("agent.integrations.bitbucket.enabled")
+    public BitbucketAdapter bitbucketAdapter(BitbucketClient bitbucketClient, IntegrationProperties props, ObjectMapper mapper) {
+        return new BitbucketAdapter(bitbucketClient, props.getBitbucket(), mapper);
     }
 
     // ── Slack ──────────────────────────────────────────────────────────────────

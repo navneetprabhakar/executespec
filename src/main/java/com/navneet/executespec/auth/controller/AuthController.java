@@ -38,6 +38,7 @@ public class AuthController {
     private final AppUserRepository userRepo;
     private final TierPermissionService tierPermissionService;
     private final ActivityAuditService auditService;
+    private final com.navneet.executespec.repo.BitbucketRepoService bitbucketRepoService;
 
     private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
     private final PasswordEncoder passwordEncoder;
@@ -160,6 +161,39 @@ public class AuthController {
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
 
+    // ── Bitbucket settings ─────────────────────────────────────────────────────
+
+    record BitbucketSettingsRequest(String bitbucketUsername, String bitbucketAppPassword,
+                                    String bitbucketWorkspace, String bitbucketRepoSlug) {}
+
+    /**
+     * Saves the user's Bitbucket integration credentials.
+     * Pass empty strings to clear individual fields.
+     */
+    @PutMapping("/settings/bitbucket")
+    public ResponseEntity<UserDto> updateBitbucketSettings(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody BitbucketSettingsRequest req) {
+        AppUser user = userDetails.getUser();
+        user.setBitbucketUsername(blankToNull(req.bitbucketUsername()));
+        user.setBitbucketAppPassword(blankToNull(req.bitbucketAppPassword()));
+        user.setBitbucketWorkspace(blankToNull(req.bitbucketWorkspace()));
+        user.setBitbucketRepoSlug(blankToNull(req.bitbucketRepoSlug()));
+        userRepo.save(user);
+        log.info("User {} updated Bitbucket settings — workspace={}, hasAppPassword={}",
+                user.getId(), user.getBitbucketWorkspace(), user.getBitbucketAppPassword() != null);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("USER_BITBUCKET_SETTINGS_CHANGED")
+                .entityType("USER").entityId(user.getId())
+                .actorId(user.getId())
+                .newValue("{\"hasAppPassword\":" + (user.getBitbucketAppPassword() != null)
+                        + ",\"workspace\":\"" + user.getBitbucketWorkspace() + "\"}")
+                .build());
+
+        return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    }
+
     // ── AI provider key settings ─────────────────────────────────────────────
 
     record AiKeySettingsRequest(String openAiApiKey, String anthropicApiKey, String geminiApiKey) {}
@@ -269,6 +303,7 @@ public class AuthController {
     // ── Validation endpoints ──────────────────────────────────────────────────
 
     record ValidateGitHubRequest(String pat, String owner) {}
+    record ValidateBitbucketRequest(String username, String appPassword, String workspace, String repoSlug) {}
     record ValidateJiraRequest(String baseUrl, String email, String apiToken) {}
     record ValidateConfluenceRequest(String baseUrl, String email, String apiToken) {}
     record ValidationResult(boolean valid, String message) {}
@@ -294,6 +329,26 @@ public class AuthController {
         } catch (Exception e) {
             return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
         }
+    }
+
+    @PostMapping("/settings/bitbucket/validate")
+    public ResponseEntity<ValidationResult> validateBitbucket(@RequestBody ValidateBitbucketRequest req) {
+        if (req.username() == null || req.username().isBlank()
+                || req.appPassword() == null || req.appPassword().isBlank()) {
+            return ResponseEntity.ok(new ValidationResult(false, "Username and app password are required"));
+        }
+        if (req.workspace() == null || req.workspace().isBlank()
+                || req.repoSlug() == null || req.repoSlug().isBlank()) {
+            return ResponseEntity.ok(new ValidationResult(false, "Workspace and repository slug are required"));
+        }
+        boolean valid = bitbucketRepoService.validateCredentials(
+                req.workspace().strip(), req.repoSlug().strip(),
+                req.username().strip(), req.appPassword().strip());
+        if (valid) {
+            return ResponseEntity.ok(new ValidationResult(true, "Bitbucket credentials are valid"));
+        }
+        return ResponseEntity.ok(new ValidationResult(false,
+                "Could not access Bitbucket repository — check your credentials, workspace, and repo slug"));
     }
 
     @PostMapping("/settings/jira/validate")

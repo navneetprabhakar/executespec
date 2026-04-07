@@ -31,6 +31,7 @@ import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.repo.BitbucketRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.tool.FileLockTool;
 import com.navneet.executespec.tool.FileSystemTool;
@@ -50,6 +51,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
@@ -85,6 +87,7 @@ public class PipelineHarness {
     private final FileSystemTool fsTool;
     private final GitTool gitTool;
     private final GitHubRepoService gitHubRepoService;
+    private final BitbucketRepoService bitbucketRepoService;
     private final WorkspaceInitService workspaceInitService;
     private final ObjectMapper mapper;
     private final AgentProperties props;
@@ -430,6 +433,19 @@ public class PipelineHarness {
         if (githubOwner != null && !githubOwner.isBlank()) {
             run.setGithubOwner(githubOwner);
             needsSave = true;
+        }
+
+        // Capture submitting user's Bitbucket credentials onto the run for later push
+        if (createdByUserId != null) {
+            var bbUser = appUserRepository.findById(createdByUserId).orElse(null);
+            if (bbUser != null && bbUser.getBitbucketUsername() != null && bbUser.getBitbucketAppPassword() != null) {
+                run.setBitbucketUsername(bbUser.getBitbucketUsername());
+                run.setBitbucketAppPassword(bbUser.getBitbucketAppPassword());
+                run.setBitbucketWorkspace(bbUser.getBitbucketWorkspace());
+                run.setBitbucketRepoSlug(bbUser.getBitbucketRepoSlug());
+                run.setScmProvider("BITBUCKET");
+                needsSave = true;
+            }
         }
 
         // Stamp ownership BEFORE async thread starts (critical for visibility queries)
@@ -1264,9 +1280,12 @@ public class PipelineHarness {
             log.info("Run {} complete — merged, reviewed, and validated", runId);
 
             try {
-                pushToGitHubIfConfigured(stateStore.findRun(runId).orElse(run));
+                PipelineRun scmRun = stateStore.findRun(runId).orElse(run);
+                var scmUser = scmRun.getCreatedByUserId() != null
+                        ? appUserRepository.findById(scmRun.getCreatedByUserId()).orElse(null) : null;
+                pushToScmIfConfigured(scmRun, scmUser);
             } catch (Exception pushEx) {
-                log.warn("GitHub push failed for run {} (run is COMPLETE): {}", runId, pushEx.getMessage());
+                log.warn("SCM push failed for run {} (run is COMPLETE): {}", runId, pushEx.getMessage());
             }
 
             List<WorkerReport> reports = getWorkerReports(runId);
@@ -2050,13 +2069,15 @@ public class PipelineHarness {
             broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
             autoStartPreview(runId, currentRun);
 
-            // GitHub push (non-blocking)
+            // SCM push (non-blocking)
             try {
-                pushToGitHubIfConfigured(currentRun);
+                var scmUser = currentRun.getCreatedByUserId() != null
+                        ? appUserRepository.findById(currentRun.getCreatedByUserId()).orElse(null) : null;
+                pushToScmIfConfigured(currentRun, scmUser);
             } catch (Exception pushEx) {
-                log.warn("GitHub push failed for run {} (non-fatal): {}", runId, pushEx.getMessage());
+                log.warn("SCM push failed for run {} (non-fatal): {}", runId, pushEx.getMessage());
                 broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                    "⚠️ GitHub push failed (run is COMPLETE, code was merged locally): "
+                    "⚠️ SCM push failed (run is COMPLETE, code was merged locally): "
                     + pushEx.getMessage()));
             }
 
@@ -2197,7 +2218,9 @@ public class PipelineHarness {
                 stateStore.markPartial(run.getRunId(),
                     "Merge conflict in " + conflicted.size() + " task branch(es).");
             } else {
-                pushToGitHubIfConfigured(run);
+                var scmUser = run.getCreatedByUserId() != null
+                        ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null) : null;
+                pushToScmIfConfigured(run, scmUser);
                 stateStore.markComplete(run.getRunId());
             }
         }
@@ -2342,9 +2365,78 @@ public class PipelineHarness {
      * - repoMode=EXISTING or repoUrl set → pushes to the existing remote.
      * Non-fatal: logs a warning but does not fail the run.
      */
-    /** Public entry point for manual GitHub push from RunController. */
+    /** Public entry point for manual SCM push from RunController. */
+    public void pushToScmManual(PipelineRun run) {
+        var scmUser = run.getCreatedByUserId() != null
+                ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null) : null;
+        pushToScmIfConfigured(run, scmUser);
+    }
+
+    /** @deprecated Use {@link #pushToScmManual(PipelineRun)} instead. */
+    @Deprecated
     public void pushToGitHubManual(PipelineRun run) {
+        pushToScmManual(run);
+    }
+
+    /**
+     * Route SCM push to the correct provider based on run/user credentials.
+     * Bitbucket takes precedence if credentials present on the run; falls back to GitHub.
+     */
+    private void pushToScmIfConfigured(PipelineRun run, com.navneet.executespec.auth.entity.AppUser user) {
+        // Check Bitbucket first (on run, then on user)
+        if (StringUtils.hasText(run.getBitbucketUsername()) && StringUtils.hasText(run.getBitbucketWorkspace())) {
+            pushToBitbucket(run);
+            return;
+        }
+        if (user != null && StringUtils.hasText(user.getBitbucketUsername()) && StringUtils.hasText(user.getBitbucketWorkspace())) {
+            // Capture from user to run
+            run.setBitbucketUsername(user.getBitbucketUsername());
+            run.setBitbucketAppPassword(user.getBitbucketAppPassword());
+            run.setBitbucketWorkspace(user.getBitbucketWorkspace());
+            run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
+            run.setScmProvider("BITBUCKET");
+            pushToBitbucket(run);
+            return;
+        }
+        // Fallback to GitHub
         pushToGitHubIfConfigured(run);
+    }
+
+    private void pushToBitbucket(PipelineRun run) {
+        String workspace = run.getBitbucketWorkspace();
+        String repoSlug = run.getBitbucketRepoSlug();
+        String username = run.getBitbucketUsername();
+        String appPassword = run.getBitbucketAppPassword();
+
+        if (!StringUtils.hasText(repoSlug)) {
+            log.warn("[{}] Bitbucket workspace set but repo slug missing — skipping push", run.getRunId());
+            return;
+        }
+
+        try {
+            String branchName = "executespec/" + run.getRunId().substring(0, 8);
+            String cloneUrl = "https://bitbucket.org/" + workspace + "/" + repoSlug + ".git";
+
+            // Push branch using GitTool
+            gitTool.pushToBranchBitbucket(run.getRunId(), cloneUrl, username, appPassword, branchName);
+
+            // Create PR
+            String title = StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
+            String body = StringUtils.hasText(run.getRunSummary()) ? run.getRunSummary() : run.getUserRequest();
+            String prUrl = bitbucketRepoService.createPullRequest(
+                workspace, repoSlug, branchName, title, body, username, appPassword);
+
+            if (prUrl != null) {
+                run.setScmPrUrl(prUrl);
+                run.setScmProvider("BITBUCKET");
+                stateStore.save(run);
+                log.info("[{}] Bitbucket PR created: {}", run.getRunId(), prUrl);
+                broadcaster.emit(run.getRunId(),
+                        RunEvent.log(run.getRunId(), "harness", "Bitbucket pull request created: " + prUrl));
+            }
+        } catch (Exception e) {
+            log.warn("[{}] Bitbucket push failed: {}", run.getRunId(), e.getMessage());
+        }
     }
 
     private void pushToGitHubIfConfigured(PipelineRun run) {
@@ -2411,8 +2503,12 @@ public class PipelineHarness {
                 // Store PR URL on the run
                 PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
                 freshRun.setGithubPrUrl(prUrl);
+                freshRun.setScmPrUrl(prUrl);
+                freshRun.setScmProvider("GITHUB");
                 stateStore.save(freshRun);
                 run.setGithubPrUrl(prUrl);
+                run.setScmPrUrl(prUrl);
+                run.setScmProvider("GITHUB");
                 log.info("Created PR for run {}: {}", run.getRunId(), prUrl);
                 broadcaster.emit(run.getRunId(),
                         RunEvent.log(run.getRunId(), "harness", "Pull request created: " + prUrl));

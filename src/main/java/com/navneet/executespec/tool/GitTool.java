@@ -602,6 +602,60 @@ public class GitTool {
         }
     }
 
+    /**
+     * Push workspace to a Bitbucket branch using Basic auth (username:appPassword).
+     * Mirrors {@link #pushToBranch} but uses Bitbucket credential format.
+     *
+     * @param runId       run whose workspace to push
+     * @param cloneUrl    HTTPS clone URL (e.g. https://bitbucket.org/workspace/repo.git)
+     * @param username    Bitbucket username
+     * @param appPassword Bitbucket app password
+     * @param branchName  name for the new branch (e.g. "executespec/abc123")
+     * @return ToolResult.ok on success, ToolResult.err on failure
+     */
+    public ToolResult pushToBranchBitbucket(String runId, String cloneUrl,
+                                            String username, String appPassword, String branchName) {
+        try {
+            String authUrl = cloneUrl.replace("https://", "https://" + username + ":" + appPassword + "@");
+            String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
+
+            // Create the branch from current HEAD (main)
+            ProcessBuilder createBranch = new ProcessBuilder(
+                    "git", "-C", wsPath, "checkout", "-b", branchName);
+            createBranch.redirectErrorStream(true);
+            Process p1 = createBranch.start();
+            String out1 = new String(p1.getInputStream().readAllBytes());
+            int exit1 = p1.waitFor();
+            if (exit1 != 0) {
+                log.warn("[GitTool] Bitbucket branch creation failed (exit {}): {}", exit1, out1);
+                return ToolResult.err("Branch creation failed: " + out1);
+            }
+
+            // Push the branch to remote
+            ProcessBuilder push = new ProcessBuilder(
+                    "git", "-C", wsPath, "push", authUrl, branchName, "--force");
+            push.redirectErrorStream(true);
+            Process p2 = push.start();
+            String out2 = new String(p2.getInputStream().readAllBytes());
+            int exit2 = p2.waitFor();
+
+            // Switch back to main regardless of push result
+            new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
+                    .redirectErrorStream(true).start().waitFor();
+
+            if (exit2 == 0) {
+                log.info("[GitTool] Pushed branch {} to Bitbucket: {}", branchName, cloneUrl);
+                return ToolResult.ok("Pushed branch " + branchName + " to " + cloneUrl);
+            } else {
+                log.warn("[GitTool] Bitbucket push failed (exit {}): {}", exit2, out2);
+                return ToolResult.err("Push branch failed: " + out2);
+            }
+        } catch (Exception e) {
+            log.warn("[GitTool] Bitbucket push failed: {}", e.getMessage());
+            return ToolResult.err("Push branch failed: " + e.getMessage());
+        }
+    }
+
     // ── Conflict resolution helpers ──────────────────────────────────────────
 
     /**

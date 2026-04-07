@@ -356,6 +356,12 @@ agent:
       auto-resolve: false
       dashboard-url: http://localhost:8080
       skip-approval: false
+    bitbucket:
+      enabled: false
+      # Credentials resolved from user table (per-user, configured via Integrations page)
+      webhook-secret: ""
+      dashboard-url: http://localhost:8080
+      skip-approval: false
     slack:
       enabled: false
       client-id: ""

@@ -3,7 +3,7 @@
  * Uses official brand colours; avoids external asset dependencies.
  */
 interface IntegrationLogoProps {
-  integration: string; // key: JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY, GITHUB, SLACK
+  integration: string; // key: JIRA, CONFLUENCE, SERVICENOW, PAGERDUTY, GITHUB, SLACK, BITBUCKET
   size?: number;
 }
 
@@ -81,6 +81,22 @@ export default function IntegrationLogo({ integration, size = 28 }: IntegrationL
           <path d="M22 12.4A2.4 2.4 0 0119.6 14.8a2.4 2.4 0 01-2.4-2.4v-6A2.4 2.4 0 0119.6 4 2.4 2.4 0 0122 6.4v6z" fill="#2EB67D"/>
           <path d="M19.6 23.2a2.4 2.4 0 012.4 2.4A2.4 2.4 0 0119.6 28a2.4 2.4 0 01-2.4-2.4v-2.4h2.4z" fill="#ECB22E"/>
           <path d="M19.6 22a2.4 2.4 0 01-2.4-2.4 2.4 2.4 0 012.4-2.4h6A2.4 2.4 0 0128 19.6 2.4 2.4 0 0125.6 22h-6z" fill="#ECB22E"/>
+        </svg>
+      );
+
+    case 'BITBUCKET':
+      return (
+        <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {/* Bitbucket blue shield mark */}
+          <defs>
+            <linearGradient id="bb-grad" x1="20" y1="28" x2="12" y2="13" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#0052CC"/>
+              <stop offset="1" stopColor="#2684FF"/>
+            </linearGradient>
+          </defs>
+          <path d="M2.8 4.8h26.4a.8.8 0 01.8.94l-3.8 22.4a1.2 1.2 0 01-1.18 1.01H7.16a1.6 1.6 0 01-1.58-1.34L1.99 5.74a.8.8 0 01.81-.94z" fill="#2684FF"/>
+          <path d="M22.2 13.6h-5.4l-1.4 8.4h6.8l1.4-8.4z" fill="url(#bb-grad)" fillOpacity=".4"/>
+          <path d="M27.6 4.8H4.6l-1.4 8.8h7.2l.9-5.2h9.4l-.9 5.2h7.2l1.4-8.8z" fill="#2684FF"/>
         </svg>
       );
 

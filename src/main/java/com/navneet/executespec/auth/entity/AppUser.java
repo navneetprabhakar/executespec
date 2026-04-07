@@ -88,6 +88,25 @@ public class AppUser {
     @Column(name = "github_owner")
     private String githubOwner;
 
+    // ── Bitbucket integration ─────────────────────────────────────────────────
+
+    /** Bitbucket username for API authentication (Basic auth). */
+    @Column(name = "bitbucket_username")
+    private String bitbucketUsername;
+
+    /** Bitbucket app password — encrypted at rest via AES-256-GCM. */
+    @Convert(converter = EncryptedValueConverter.class)
+    @Column(name = "bitbucket_app_password")
+    private String bitbucketAppPassword;
+
+    /** Bitbucket workspace slug (e.g. "myteam"). */
+    @Column(name = "bitbucket_workspace")
+    private String bitbucketWorkspace;
+
+    /** Bitbucket repository slug (e.g. "my-repo"). */
+    @Column(name = "bitbucket_repo_slug")
+    private String bitbucketRepoSlug;
+
     // ── AI provider keys ──────────────────────────────────────────────────────
 
     @Convert(converter = EncryptedValueConverter.class)

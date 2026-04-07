@@ -43,6 +43,22 @@ Size guidelines:
 If a task would exceed these limits, SPLIT IT into smaller tasks.
 A task that touches >5 files or writes >350 lines WILL fail. Break it up.
 
+SINGLE-FILE COMPLEXITY TRAP — SPLIT LARGE COMPONENTS:
+  A single file with 200+ lines of logic (complex UI components, full-page views with
+  multiple interactive features, data-heavy dashboards) WILL exhaust the worker context
+  even though it's only 1 file. The worker has a 35 tool-call hard limit.
+  Signs a single-file task needs splitting:
+    - Calendar/timeline/Gantt views with data fetching + grid rendering + interactions
+    - Dashboard pages with multiple chart types + filters + data transformations
+    - Form wizards with validation + multi-step state + API integration
+    - Any component described with 4+ distinct features (fetch + render + tooltip + nav + legend)
+  Fix: Split into sequential tasks that build on each other in the SAME file:
+    Task 1: Scaffold + data model + basic layout (owned_files: [Calendar.jsx])
+    Task 2: Grid rendering + date logic (owned_files: [Calendar.jsx], depends_on: [task1])
+    Task 3: Interactions + tooltips + polish (owned_files: [Calendar.jsx], depends_on: [task2])
+  Each task reads the file written by the previous task and extends it.
+  Mark these as MEDIUM complexity each — never let a single task exceed 200 lines.
+
 HARD FILE CAP — MAX 6 FILES PER TASK:
   No task's owned_files list may exceed 6 entries. This is a hard limit.
   If you find yourself assigning 7+ files to a single task, you MUST split it.
@@ -53,6 +69,49 @@ HARD FILE CAP — MAX 6 FILES PER TASK:
     - Frontend setup with config + entry points → config files in project_setup,
       index.html + main.tsx + App.tsx in app_shell task
   SELF-CHECK: Before finalizing, scan every task's owned_files. If any has >6, split it.
+
+PROJECT STRUCTURE CONSISTENCY — MANDATORY:
+  Every project MUST use ONE consistent directory and package/module structure.
+  Parallel workers do NOT see each other's code, so the PLANNER must define the
+  canonical structure in the scaffold task objective and reference it in every task.
+
+  Java / Spring Boot:
+    - Declare ONE base package in the scaffold task (e.g., "com.example.hostelapp").
+    - ALL tasks must use this SAME base package. Never mix flat (com.hostel.entity)
+      and nested (com.hostel.app.entity) structures.
+    - In every task objective, state: "Use base package com.example.hostelapp".
+    - Standard sub-packages: .entity, .repository, .service, .controller, .config, .dto, .exception
+    - BAD: Task 1 creates com.hostel.entity.User, Task 3 imports com.hostel.app.entity.User
+    - GOOD: All tasks use com.example.hostelapp.entity, com.example.hostelapp.service, etc.
+
+  Python (Django / FastAPI / Flask):
+    - Declare ONE project root module name in the scaffold task.
+    - Django: All apps must be registered in INSTALLED_APPS with consistent names.
+    - FastAPI/Flask: Use a consistent import root (e.g., "from app.models import ..." — never
+      mix "from models import ..." and "from app.models import ...").
+    - BAD: Task 1 uses `from models import User`, Task 2 uses `from app.models import User`
+    - GOOD: All tasks use `from app.models import User` consistently.
+
+  Node.js / TypeScript:
+    - Declare the directory structure convention in scaffold: flat (routes/, models/) or
+      nested (src/routes/, src/models/).
+    - All tasks must use the same import paths. Never mix "../models/user" and "../src/models/user".
+    - For TypeScript: tsconfig.json paths/baseUrl must match import conventions across all tasks.
+    - BAD: Task 1 creates `models/User.js`, Task 3 imports from `src/models/User.js`
+    - GOOD: All tasks use `src/models/User.js` consistently.
+
+  Go:
+    - Declare the module path in go.mod (e.g., "module github.com/user/project").
+    - All tasks must use this module path for imports. Never mix relative and absolute imports.
+    - Standard packages: /cmd, /internal, /pkg with consistent naming.
+
+  Rust:
+    - Declare the crate name and module structure in Cargo.toml.
+    - All tasks must use `crate::module::Type` consistently. Never mix `super::` and `crate::`.
+
+  SELF-CHECK: Before finalizing, verify that every task's objective references the SAME
+  base package / module name declared in the scaffold task. Cross-task import mismatches
+  cause compilation failures that are invisible until all tasks merge.
 
 ═══════════════════════════════════════════════════════════
 TIERED PARALLEL EXECUTION RULES

@@ -74,7 +74,7 @@ function DeploymentsPageInner() {
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-primary flex items-center gap-2">
             Deployments
@@ -84,7 +84,7 @@ function DeploymentsPageInner() {
         </div>
         <button
           onClick={() => setShowWizard(true)}
-          className="flex items-center gap-2 px-3 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
         >
           <Rocket className="h-4 w-4" /> Deploy Run
         </button>
