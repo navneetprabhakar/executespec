@@ -9,7 +9,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 - `ApprovalGate.java` — Plan approval gate interface
 - `GateStore.java` — Redis-backed gate storage (500ms poll, 2h TTL, 24h max wait timeout)
 - `GitMergeService.java` — Merges task branches into main. Progressive merge after each task.
-- `SubtaskDecomposer.java` — Decomposes multi-file tasks into per-file subtasks at execution time. If a task has 2+ owned files, creates N synthetic `TaskDefinition` objects (one per file). Each subtask produces exactly one `writeFile` call. Rework tasks excluded from decomposition.
+- `SubtaskDecomposer.java` — Decomposes tasks into subtasks at execution time. Two strategies: (1) **File-based** — multi-file tasks (2+ owned files) split into per-file subtasks, one `writeFile` per subtask. (2) **Phase-based** — complex single-file tasks (MEDIUM/HIGH complexity, 1 owned file) split into method-level phases (MEDIUM → 2 phases, HIGH → 3 phases). Phase 1 creates the file skeleton; subsequent phases `readFile` then `writeFile` to extend it with more methods. Rework tasks excluded from both strategies.
 - `LanguageValidator.java` — Blocks unsupported languages at submission
 - `UiStyleResolver.java` — Resolves UI style from user request or project defaults
 
@@ -17,7 +17,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 1. PlannerAgent generates plan (includes `project_type`)
 2. Plan approval gate (Redis-backed, user approves via UI)
 3. `initAgentContext()` writes `.agent-context/` files including `project.json`
-4. SequentialTaskExecutor runs tasks in tiered groups (SubtaskDecomposer splits multi-file tasks into per-file subtasks)
+4. SequentialTaskExecutor runs tasks in tiered groups (SubtaskDecomposer splits multi-file tasks into per-file subtasks; complex single-file tasks into method-level phases)
 5. CompilerAgent fixes compilation errors
 6. Auto-merge all task branches to main
 7. **Mark run COMPLETE** (status set, `completedAt` recorded)

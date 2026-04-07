@@ -1,23 +1,30 @@
 export const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
-  QUEUED:                 { dot: 'bg-status-queued',   text: 'text-muted' },
-  PLANNING:              { dot: 'bg-status-building',  text: 'text-status-building' },
-  AWAITING_CLARIFICATION:{ dot: 'bg-status-building',  text: 'text-status-building' },
-  AWAITING_APPROVAL:     { dot: 'bg-status-building',  text: 'text-status-building' },
-  WORKING:               { dot: 'bg-status-building',  text: 'text-status-building' },
-  REVIEWING:             { dot: 'bg-status-building',  text: 'text-status-building' },
-  AWAITING_MERGE:        { dot: 'bg-status-building',  text: 'text-status-building' },
-  COMPILING:             { dot: 'bg-status-building',  text: 'text-status-building' },
-  MERGING:               { dot: 'bg-status-building',  text: 'text-status-building' },
-  COMPLETE:              { dot: 'bg-status-success',   text: 'text-status-success' },
-  FAILED:                { dot: 'bg-status-error',     text: 'text-status-error' },
+  // Gray — inactive
+  QUEUED:                 { dot: 'bg-status-queued',    text: 'text-muted' },
   PAUSED:                { dot: 'bg-status-queued',    text: 'text-muted' },
   CANCELLED:             { dot: 'bg-status-queued',    text: 'text-muted' },
-  PARTIAL:               { dot: 'bg-status-building',  text: 'text-status-building' },
-  BLOCKED:               { dot: 'bg-status-building',  text: 'text-status-building' },
-  STUCK:                 { dot: 'bg-status-error',     text: 'text-status-error' },
-  // Task-level statuses
   PENDING:               { dot: 'bg-status-queued',    text: 'text-muted' },
   LOCKED:                { dot: 'bg-status-queued',    text: 'text-muted' },
+  // Blue — executing
+  WORKING:               { dot: 'bg-status-executing', text: 'text-status-executing' },
+  COMPILING:             { dot: 'bg-status-executing', text: 'text-status-executing' },
+  MERGING:               { dot: 'bg-status-executing', text: 'text-status-executing' },
+  // Purple — thinking/review
+  PLANNING:              { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
+  REVIEWING:             { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
+  // Amber — waiting
+  AWAITING_APPROVAL:     { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
+  AWAITING_CLARIFICATION:{ dot: 'bg-status-waiting',   text: 'text-status-waiting' },
+  AWAITING_MERGE:        { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
+  // Green — success
+  COMPLETE:              { dot: 'bg-status-success',   text: 'text-status-success' },
+  // Orange — partial
+  PARTIAL:               { dot: 'bg-status-partial',   text: 'text-status-partial' },
+  // Red — failure
+  FAILED:                { dot: 'bg-status-error',     text: 'text-status-error' },
+  STUCK:                 { dot: 'bg-status-error',     text: 'text-status-error' },
+  // Pink — blocked
+  BLOCKED:               { dot: 'bg-status-blocked',   text: 'text-status-blocked' },
 };
 
 export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'COMPILING']);

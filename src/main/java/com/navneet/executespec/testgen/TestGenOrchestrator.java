@@ -47,16 +47,9 @@ public class TestGenOrchestrator {
             emitTestEvent(runId, "TEST_GEN_STARTED", "Test generation pipeline started");
 
             // 1. Detect project type first (needed for scaffold + conventions)
-            java.nio.file.Path workspace = java.nio.file.Path.of("workspace", runId);
-            com.navneet.executespec.deployment.preview.PreviewProjectType type = dockerfileGenerator.detect(workspace);
-            boolean isCli = false;
-            boolean isStaticHtml = false;
-            if (type != null) {
-                com.navneet.executespec.deployment.preview.PreviewMode mode = dockerfileGenerator.detectMode(type, workspace);
-                isCli = (mode == com.navneet.executespec.deployment.preview.PreviewMode.CLI_TERMINAL);
-                isStaticHtml = (type == com.navneet.executespec.deployment.preview.PreviewProjectType.STATIC_HTML
-                             || type == com.navneet.executespec.deployment.preview.PreviewProjectType.NODE_FRONTEND);
-            }
+            ProjectConfig projectConfig = detectProjectConfig(runId);
+            boolean isCli = projectConfig.isCli;
+            boolean isStaticHtml = projectConfig.isStaticHtml;
 
             // 2. Scaffold test project (Playwright POM for static HTML, RestAssured for REST APIs)
             testProjectScaffold.scaffold(runId, isStaticHtml);
@@ -96,42 +89,10 @@ public class TestGenOrchestrator {
                 testPlan.setStatus(TestPlanStatus.COMPILED);
                 emitTestEvent(runId, "TEST_COMPILATION_PASSED", "All tests compiled successfully");
             } else {
-                // Mark failed tasks and try one retry per failed test
-                testCompilationGate.markFailedTasks(
-                        testPlan.getId(), compilationResult.failedClasses(), compilationResult.output());
-
-                handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest, isCli, isStaticHtml);
-
-                // Re-compile after retries
-                TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
-                if (retryResult.success()) {
-                    testPlan.setStatus(TestPlanStatus.COMPILED);
-                    emitTestEvent(runId, "TEST_COMPILATION_PASSED",
-                            "Tests compiled after retry");
-                } else {
-                    // Mark remaining failures
-                    testCompilationGate.markFailedTasks(
-                            testPlan.getId(), retryResult.failedClasses(), retryResult.output());
-
-                    // Check if any tests survived
-                    long compiledCount = testTaskRepository.findByTestPlanId(testPlan.getId()).stream()
-                            .filter(t -> t.getStatus() != TestTaskStatus.FAILED)
-                            .count();
-                    if (compiledCount > 0) {
-                        testPlan.setStatus(TestPlanStatus.COMPILED);
-                        emitTestEvent(runId, "TEST_COMPILATION_PASSED",
-                                compiledCount + " tests compiled (" +
-                                        retryResult.failedClasses().size() + " failed)");
-                    } else {
-                        testPlan.setStatus(TestPlanStatus.FAILED);
-                        emitTestEvent(runId, "TEST_COMPILATION_FAILED",
-                                "All tests failed compilation");
-                        testPlanRepository.save(testPlan);
-                        // Notify that test pipeline ended (no results)
-                        eventPublisher.publishEvent(new TestExecutionCompletedEvent(
-                                runId, testPlan.getId(), TestExecutionSummary.empty()));
-                        return;
-                    }
+                boolean survived = handleCompilationFailure(runId, testPlan, compilationResult,
+                        conventionsDoc, userRequest, isCli, isStaticHtml);
+                if (!survived) {
+                    return;
                 }
             }
 
@@ -149,6 +110,72 @@ public class TestGenOrchestrator {
             eventPublisher.publishEvent(new TestExecutionCompletedEvent(
                     runId, 0L, TestExecutionSummary.empty()));
         }
+    }
+
+    private record ProjectConfig(boolean isCli, boolean isStaticHtml) {}
+
+    private ProjectConfig detectProjectConfig(String runId) {
+        java.nio.file.Path workspace = java.nio.file.Path.of("workspace", runId);
+        com.navneet.executespec.deployment.preview.PreviewProjectType type = dockerfileGenerator.detect(workspace);
+        boolean isCli = false;
+        boolean isStaticHtml = false;
+        if (type != null) {
+            com.navneet.executespec.deployment.preview.PreviewMode mode = dockerfileGenerator.detectMode(type, workspace);
+            isCli = (mode == com.navneet.executespec.deployment.preview.PreviewMode.CLI_TERMINAL);
+            isStaticHtml = (type == com.navneet.executespec.deployment.preview.PreviewProjectType.STATIC_HTML
+                         || type == com.navneet.executespec.deployment.preview.PreviewProjectType.NODE_FRONTEND);
+        }
+        return new ProjectConfig(isCli, isStaticHtml);
+    }
+
+    /**
+     * Handle compilation failure: retry failed tasks, re-compile, and determine if any tests survived.
+     *
+     * @return true if at least some tests compiled successfully, false if all failed (pipeline should abort)
+     */
+    private boolean handleCompilationFailure(String runId, TestPlan testPlan,
+                                              TestCompilationGate.CompilationResult compilationResult,
+                                              String conventionsDoc, String userRequest,
+                                              boolean isCli, boolean isStaticHtml) {
+        // Mark failed tasks and try one retry per failed test
+        testCompilationGate.markFailedTasks(
+                testPlan.getId(), compilationResult.failedClasses(), compilationResult.output());
+
+        handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest, isCli, isStaticHtml);
+
+        // Re-compile after retries
+        TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
+        if (retryResult.success()) {
+            testPlan.setStatus(TestPlanStatus.COMPILED);
+            emitTestEvent(runId, "TEST_COMPILATION_PASSED",
+                    "Tests compiled after retry");
+            return true;
+        }
+
+        // Mark remaining failures
+        testCompilationGate.markFailedTasks(
+                testPlan.getId(), retryResult.failedClasses(), retryResult.output());
+
+        // Check if any tests survived
+        long compiledCount = testTaskRepository.findByTestPlanId(testPlan.getId()).stream()
+                .filter(t -> t.getStatus() != TestTaskStatus.FAILED)
+                .count();
+        if (compiledCount > 0) {
+            testPlan.setStatus(TestPlanStatus.COMPILED);
+            emitTestEvent(runId, "TEST_COMPILATION_PASSED",
+                    compiledCount + " tests compiled (" +
+                            retryResult.failedClasses().size() + " failed)");
+            return true;
+        }
+
+        testPlan.setStatus(TestPlanStatus.FAILED);
+        emitTestEvent(runId, "TEST_COMPILATION_FAILED",
+                "All tests failed compilation");
+        testPlanRepository.save(testPlan);
+        // Notify that test pipeline ended (no results)
+        eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                runId, testPlan.getId(), TestExecutionSummary.empty()));
+        return false;
     }
 
     private void handleCompilationRetries(String runId, TestPlan testPlan,

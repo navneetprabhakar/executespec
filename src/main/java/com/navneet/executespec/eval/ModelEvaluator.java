@@ -186,24 +186,14 @@ public class ModelEvaluator {
             long latencyMs = System.currentTimeMillis() - startMs;
             log.warn("[ModelEvaluator] TIMEOUT after {}ms: {}:{} on {} (limit={}s)",
                     latencyMs, provider, model, testCase.id(), PER_CALL_TIMEOUT.toSeconds());
-            return new EvalResult(
-                    testCase.id(), testCase.tier(), provider, model,
-                    1.0, 1.0, 5.0, scorer.overallScore(1.0, 1.0, 5.0),
-                    latencyMs, 0.0, 0, 0,
-                    false, 0, testCase.validationPatterns().size(),
-                    "TIMEOUT: exceeded " + PER_CALL_TIMEOUT.toSeconds() + "s limit", null, List.of()
-            );
+            return buildFailedResult(testCase, provider, model, latencyMs,
+                    "TIMEOUT: exceeded " + PER_CALL_TIMEOUT.toSeconds() + "s limit");
         } catch (Exception e) {
             long latencyMs = System.currentTimeMillis() - startMs;
             log.error("[ModelEvaluator] Unexpected error: {}:{} on {}: {}",
                     provider, model, testCase.id(), e.getMessage());
-            return new EvalResult(
-                    testCase.id(), testCase.tier(), provider, model,
-                    1.0, 1.0, 5.0, scorer.overallScore(1.0, 1.0, 5.0),
-                    latencyMs, 0.0, 0, 0,
-                    false, 0, testCase.validationPatterns().size(),
-                    "ERROR: " + e.getMessage(), null, List.of()
-            );
+            return buildFailedResult(testCase, provider, model, latencyMs,
+                    "ERROR: " + e.getMessage());
         } finally {
             executor.shutdownNow();
         }
@@ -297,13 +287,8 @@ public class ModelEvaluator {
             log.error("[ModelEvaluator] Error evaluating {}:{} on {}: {}",
                     provider, model, testCase.id(), e.getMessage());
 
-            return new EvalResult(
-                    testCase.id(), testCase.tier(), provider, model,
-                    1.0, 1.0, 5.0, scorer.overallScore(1.0, 1.0, 5.0),
-                    latencyMs, 0.0, 0, 0,
-                    false, 0, testCase.validationPatterns().size(),
-                    "ERROR: " + e.getMessage(), null, List.of()
-            );
+            return buildFailedResult(testCase, provider, model, latencyMs,
+                    "ERROR: " + e.getMessage());
         }
     }
 
@@ -613,6 +598,21 @@ public class ModelEvaluator {
             results.add(new EvalReport.PatternResult(label, matched));
         }
         return results;
+    }
+
+    /**
+     * Build an EvalResult for a failed test case (timeout, error, or skip).
+     * Assigns minimum accuracy/speed scores (1.0) and neutral cost (5.0).
+     */
+    private EvalResult buildFailedResult(EvalTestCase testCase, String provider, String model,
+                                         long latencyMs, String reason) {
+        return new EvalResult(
+                testCase.id(), testCase.tier(), provider, model,
+                1.0, 1.0, 5.0, scorer.overallScore(1.0, 1.0, 5.0),
+                latencyMs, 0.0, 0, 0,
+                false, 0, testCase.validationPatterns().size(),
+                reason, null, List.of()
+        );
     }
 
     private String buildReasoning(int matched, int total, long latencyMs, long ceiling,

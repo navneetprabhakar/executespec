@@ -143,20 +143,13 @@ public class AuthController {
             @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestBody GitHubSettingsRequest req) {
         AppUser user = userDetails.getUser();
-        String newPat   = (req.githubPat()   != null) ? req.githubPat().strip()   : null;
-        String newOwner = (req.githubOwner() != null) ? req.githubOwner().strip() : null;
-        // Treat empty strings as null (clear)
-        user.setGithubPat(   (newPat   != null && !newPat.isBlank())   ? newPat   : null);
-        user.setGithubOwner((newOwner != null && !newOwner.isBlank()) ? newOwner : null);
+        user.setGithubPat(blankToNull(req.githubPat()));
+        user.setGithubOwner(blankToNull(req.githubOwner()));
         userRepo.save(user);
         log.info("User {} updated GitHub settings — owner={}, hasPat={}", user.getId(), user.getGithubOwner(), user.getGithubPat() != null);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("USER_GITHUB_SETTINGS_CHANGED")
-                .entityType("USER").entityId(user.getId())
-                .actorId(user.getId())
-                .newValue("{\"hasToken\":" + (user.getGithubPat() != null) + ",\"owner\":\"" + user.getGithubOwner() + "\"}")
-                .build());
+        recordSettingsAudit(user, "USER_GITHUB_SETTINGS_CHANGED",
+                "{\"hasToken\":" + (user.getGithubPat() != null) + ",\"owner\":\"" + user.getGithubOwner() + "\"}");
 
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
@@ -183,13 +176,9 @@ public class AuthController {
         log.info("User {} updated Bitbucket settings — workspace={}, hasAppPassword={}",
                 user.getId(), user.getBitbucketWorkspace(), user.getBitbucketAppPassword() != null);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("USER_BITBUCKET_SETTINGS_CHANGED")
-                .entityType("USER").entityId(user.getId())
-                .actorId(user.getId())
-                .newValue("{\"hasAppPassword\":" + (user.getBitbucketAppPassword() != null)
-                        + ",\"workspace\":\"" + user.getBitbucketWorkspace() + "\"}")
-                .build());
+        recordSettingsAudit(user, "USER_BITBUCKET_SETTINGS_CHANGED",
+                "{\"hasAppPassword\":" + (user.getBitbucketAppPassword() != null)
+                        + ",\"workspace\":\"" + user.getBitbucketWorkspace() + "\"}");
 
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
@@ -219,14 +208,10 @@ public class AuthController {
                 user.getAnthropicApiKey() != null,
                 user.getGeminiApiKey() != null);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("USER_AI_KEYS_CHANGED")
-                .entityType("USER").entityId(user.getId())
-                .actorId(user.getId())
-                .newValue("{\"openai\":" + (user.getOpenAiApiKey() != null)
+        recordSettingsAudit(user, "USER_AI_KEYS_CHANGED",
+                "{\"openai\":" + (user.getOpenAiApiKey() != null)
                         + ",\"anthropic\":" + (user.getAnthropicApiKey() != null)
-                        + ",\"gemini\":" + (user.getGeminiApiKey() != null) + "}")
-                .build());
+                        + ",\"gemini\":" + (user.getGeminiApiKey() != null) + "}");
 
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
@@ -246,12 +231,8 @@ public class AuthController {
         userRepo.save(user);
         log.info("User {} updated JIRA settings — url={}, hasToken={}", user.getId(), user.getJiraBaseUrl(), user.getJiraApiToken() != null);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("USER_JIRA_SETTINGS_CHANGED")
-                .entityType("USER").entityId(user.getId())
-                .actorId(user.getId())
-                .newValue("{\"hasToken\":" + (user.getJiraApiToken() != null) + ",\"baseUrl\":\"" + user.getJiraBaseUrl() + "\"}")
-                .build());
+        recordSettingsAudit(user, "USER_JIRA_SETTINGS_CHANGED",
+                "{\"hasToken\":" + (user.getJiraApiToken() != null) + ",\"baseUrl\":\"" + user.getJiraBaseUrl() + "\"}");
 
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
@@ -271,12 +252,8 @@ public class AuthController {
         userRepo.save(user);
         log.info("User {} updated Confluence settings — url={}, hasToken={}", user.getId(), user.getConfluenceBaseUrl(), user.getConfluenceApiToken() != null);
 
-        auditService.record(ActivityAudit.builder()
-                .eventType("USER_CONFLUENCE_SETTINGS_CHANGED")
-                .entityType("USER").entityId(user.getId())
-                .actorId(user.getId())
-                .newValue("{\"hasToken\":" + (user.getConfluenceApiToken() != null) + ",\"baseUrl\":\"" + user.getConfluenceBaseUrl() + "\"}")
-                .build());
+        recordSettingsAudit(user, "USER_CONFLUENCE_SETTINGS_CHANGED",
+                "{\"hasToken\":" + (user.getConfluenceApiToken() != null) + ",\"baseUrl\":\"" + user.getConfluenceBaseUrl() + "\"}");
 
         return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
     }
@@ -313,22 +290,12 @@ public class AuthController {
         if (req.pat() == null || req.pat().isBlank()) {
             return ResponseEntity.ok(new ValidationResult(false, "PAT is required"));
         }
-        try {
-            HttpResponse<String> resp = HTTP_CLIENT.send(
-                HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.github.com/user"))
-                    .header("Authorization", "Bearer " + req.pat().strip())
-                    .header("Accept", "application/vnd.github+json")
-                    .timeout(Duration.ofSeconds(10))
-                    .GET().build(),
-                HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                return ResponseEntity.ok(new ValidationResult(true, "GitHub PAT is valid"));
-            }
-            return ResponseEntity.ok(new ValidationResult(false, "GitHub returned " + resp.statusCode() + " — check your PAT"));
-        } catch (Exception e) {
-            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-        }
+        return validateExternalConnection(
+                "https://api.github.com/user",
+                Map.of("Authorization", "Bearer " + req.pat().strip(),
+                       "Accept", "application/vnd.github+json"),
+                "GitHub PAT is valid",
+                "GitHub returned %d — check your PAT");
     }
 
     @PostMapping("/settings/bitbucket/validate")
@@ -356,24 +323,13 @@ public class AuthController {
         if (req.baseUrl() == null || req.email() == null || req.apiToken() == null) {
             return ResponseEntity.ok(new ValidationResult(false, "Base URL, email, and API token are all required"));
         }
-        try {
-            String auth = Base64.getEncoder().encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
-            String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
-            HttpResponse<String> resp = HTTP_CLIENT.send(
-                HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Authorization", "Basic " + auth)
-                    .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(10))
-                    .GET().build(),
-                HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                return ResponseEntity.ok(new ValidationResult(true, "JIRA credentials are valid"));
-            }
-            return ResponseEntity.ok(new ValidationResult(false, "JIRA returned " + resp.statusCode() + " — check your credentials"));
-        } catch (Exception e) {
-            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-        }
+        String auth = Base64.getEncoder().encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
+        String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
+        return validateExternalConnection(url,
+                Map.of("Authorization", "Basic " + auth,
+                       "Accept", "application/json"),
+                "JIRA credentials are valid",
+                "JIRA returned %d — check your credentials");
     }
 
     @PostMapping("/settings/confluence/validate")
@@ -381,24 +337,13 @@ public class AuthController {
         if (req.baseUrl() == null || req.email() == null || req.apiToken() == null) {
             return ResponseEntity.ok(new ValidationResult(false, "Base URL, email, and API token are all required"));
         }
-        try {
-            String auth = Base64.getEncoder().encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
-            String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
-            HttpResponse<String> resp = HTTP_CLIENT.send(
-                HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Authorization", "Basic " + auth)
-                    .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(10))
-                    .GET().build(),
-                HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                return ResponseEntity.ok(new ValidationResult(true, "Confluence credentials are valid"));
-            }
-            return ResponseEntity.ok(new ValidationResult(false, "Confluence returned " + resp.statusCode() + " — check your credentials"));
-        } catch (Exception e) {
-            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-        }
+        String auth = Base64.getEncoder().encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
+        String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
+        return validateExternalConnection(url,
+                Map.of("Authorization", "Basic " + auth,
+                       "Accept", "application/json"),
+                "Confluence credentials are valid",
+                "Confluence returned %d — check your credentials");
     }
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
@@ -409,6 +354,40 @@ public class AuthController {
 
     private static String blankToNull(String s) {
         return (s != null && !s.isBlank()) ? s.strip() : null;
+    }
+
+    private void recordSettingsAudit(AppUser user, String eventType, String newValueJson) {
+        auditService.record(ActivityAudit.builder()
+                .eventType(eventType)
+                .entityType("USER").entityId(user.getId())
+                .actorId(user.getId())
+                .newValue(newValueJson)
+                .build());
+    }
+
+    /**
+     * Sends a GET request to an external service and returns a validation result.
+     * Used by GitHub, JIRA, and Confluence validation endpoints.
+     */
+    private ResponseEntity<ValidationResult> validateExternalConnection(
+            String url, Map<String, String> headers,
+            String successMessage, String failureMessageTemplate) {
+        try {
+            HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET();
+            headers.forEach(reqBuilder::header);
+            HttpResponse<String> resp = HTTP_CLIENT.send(reqBuilder.build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return ResponseEntity.ok(new ValidationResult(true, successMessage));
+            }
+            return ResponseEntity.ok(new ValidationResult(false,
+                    String.format(failureMessageTemplate, resp.statusCode())));
+        } catch (Exception e) {
+            return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
+        }
     }
 
     private void setRefreshCookie(HttpServletResponse response, String refreshToken) {

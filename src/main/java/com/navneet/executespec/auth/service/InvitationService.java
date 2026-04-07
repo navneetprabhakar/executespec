@@ -81,13 +81,10 @@ public class InvitationService {
 
         // ── Member limit check ──────────────────────────────────────────────
         int maxMembers = resolveMaxMembers(org);
-        if (maxMembers > 0) {
-            long currentMembers = orgMemberRepo.countByOrgId(orgId);
-            if (currentMembers >= maxMembers) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        "Organization has reached its member limit (" + maxMembers + "). " +
-                        "Upgrade to ENTERPRISE for unlimited members.");
-            }
+        if (maxMembers > 0 && orgMemberRepo.countByOrgId(orgId) >= maxMembers) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Organization has reached its member limit (" + maxMembers + "). " +
+                    "Upgrade to ENTERPRISE for unlimited members.");
         }
 
         String token = UUID.randomUUID().toString().replace("-", "");

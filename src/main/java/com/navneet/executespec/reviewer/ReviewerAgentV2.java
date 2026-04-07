@@ -3,6 +3,7 @@ package com.navneet.executespec.reviewer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmOutputParser;
+import com.navneet.executespec.agent.LlmResponseCleaner;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.LlmRouter.FallbackMode;
 import com.navneet.executespec.agent.WorkerAgent;
@@ -329,63 +330,83 @@ public class ReviewerAgentV2 {
             List<ToolCallRequest> toolCalls = parseToolCalls(assistantText);
 
             if (!toolCalls.isEmpty() && toolCallCount < MAX_TOOL_CALLS) {
-                StringBuilder results = new StringBuilder();
-                for (ToolCallRequest tc : toolCalls) {
-                    if (toolCallCount >= MAX_TOOL_CALLS) {
-                        results.append("[").append(tc.name).append(" result]\n<output>\n")
-                               .append("Tool call limit reached (max ").append(MAX_TOOL_CALLS).append(")")
-                               .append("\n</output>\n\n");
-                        continue;
-                    }
-                    toolCallCount++;
-                    String result = dispatchReadOnlyTool(tc, runId);
-                    results.append("[").append(tc.name).append(" result]\n<output>\n")
-                           .append(result).append("\n</output>\n\n");
-                }
-                messages.add(new UserMessage(results.toString().trim()));
+                toolCallCount = processToolCalls(toolCalls, toolCallCount, runId, messages);
                 continue;
             }
 
             // No tool calls — try to parse JSON output
-            String trimmed = assistantText.trim();
-            // Strip markdown code fences if present
-            if (trimmed.startsWith("```")) {
-                int firstNewline = trimmed.indexOf('\n');
-                int lastFence = trimmed.lastIndexOf("```");
-                if (firstNewline > 0 && lastFence > firstNewline) {
-                    trimmed = trimmed.substring(firstNewline + 1, lastFence).trim();
-                }
-            }
-
-            if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-                try {
-                    List<ReviewIssue> issues;
-                    if (trimmed.startsWith("[")) {
-                        issues = mapper.readValue(trimmed, new TypeReference<List<ReviewIssue>>() {});
-                    } else {
-                        // Single object — wrap in list
-                        ReviewIssue single = mapper.readValue(trimmed, ReviewIssue.class);
-                        issues = new ArrayList<>();
-                        issues.add(single);
-                    }
-                    log.info("[ReviewerV2] Parsed {} issues from inspection", issues.size());
-                    return issues;
-                } catch (Exception e) {
-                    log.warn("[ReviewerV2] Failed to parse JSON on iteration {}: {}", iteration, e.getMessage());
-                    messages.add(new UserMessage(
-                            "Your response was not valid JSON. Return ONLY a JSON array of review issues."));
-                }
-            } else {
-                // Not JSON — ask model to produce JSON
-                messages.add(new UserMessage(
-                        "Please produce your final review as a JSON array of issues. " +
-                        "Each issue: { id, severity, category, file, description, fixInstruction }. " +
-                        "If no issues found, return: []"));
+            List<ReviewIssue> parsed = parseReviewResponse(assistantText, iteration, messages);
+            if (parsed != null) {
+                return parsed;
             }
         }
 
         log.warn("[ReviewerV2] Inspection loop ended without producing JSON output");
         return new ArrayList<>();
+    }
+
+    /**
+     * Process tool calls from the assistant response, dispatching each read-only tool
+     * and appending results to the message list.
+     *
+     * @return the updated tool call count
+     */
+    private int processToolCalls(List<ToolCallRequest> toolCalls, int toolCallCount,
+                                  String runId, List<Message> messages) {
+        StringBuilder results = new StringBuilder();
+        for (ToolCallRequest tc : toolCalls) {
+            if (toolCallCount >= MAX_TOOL_CALLS) {
+                results.append("[").append(tc.name).append(" result]\n<output>\n")
+                       .append("Tool call limit reached (max ").append(MAX_TOOL_CALLS).append(")")
+                       .append("\n</output>\n\n");
+                continue;
+            }
+            toolCallCount++;
+            String result = dispatchReadOnlyTool(tc, runId);
+            results.append("[").append(tc.name).append(" result]\n<output>\n")
+                   .append(result).append("\n</output>\n\n");
+        }
+        messages.add(new UserMessage(results.toString().trim()));
+        return toolCallCount;
+    }
+
+    /**
+     * Parse the assistant's response as a JSON review output.
+     * Strips markdown code fences, handles single-object and array formats,
+     * and prompts the model to retry on parse failure.
+     *
+     * @return the parsed list of issues, or null if the response was not valid JSON
+     */
+    private List<ReviewIssue> parseReviewResponse(String assistantText, int iteration,
+                                                    List<Message> messages) {
+        String trimmed = LlmResponseCleaner.stripMarkdownFences(assistantText);
+
+        if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+            try {
+                List<ReviewIssue> issues;
+                if (trimmed.startsWith("[")) {
+                    issues = mapper.readValue(trimmed, new TypeReference<List<ReviewIssue>>() {});
+                } else {
+                    // Single object — wrap in list
+                    ReviewIssue single = mapper.readValue(trimmed, ReviewIssue.class);
+                    issues = new ArrayList<>();
+                    issues.add(single);
+                }
+                log.info("[ReviewerV2] Parsed {} issues from inspection", issues.size());
+                return issues;
+            } catch (Exception e) {
+                log.warn("[ReviewerV2] Failed to parse JSON on iteration {}: {}", iteration, e.getMessage());
+                messages.add(new UserMessage(
+                        "Your response was not valid JSON. Return ONLY a JSON array of review issues."));
+            }
+        } else {
+            // Not JSON — ask model to produce JSON
+            messages.add(new UserMessage(
+                    "Please produce your final review as a JSON array of issues. " +
+                    "Each issue: { id, severity, category, file, description, fixInstruction }. " +
+                    "If no issues found, return: []"));
+        }
+        return null;
     }
 
     // ============================

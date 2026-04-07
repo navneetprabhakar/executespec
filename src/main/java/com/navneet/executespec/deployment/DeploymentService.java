@@ -15,6 +15,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -33,6 +34,7 @@ import java.util.UUID;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class DeploymentService {
 
     private final DeploymentProperties props;
@@ -50,33 +52,6 @@ public class DeploymentService {
     private final WorkspaceRestoreService workspaceRestoreService;
     private final TierEnforcementService tierEnforcementService;
     private final TierConfigRepository tierConfigRepo;
-
-    public DeploymentService(DeploymentProperties props, AgentProperties agentProps,
-                              DeploymentRepository deploymentRepo, RunRepoRepository runRepoRepo,
-                              DockerfileGenerator dockerfileGenerator,
-                              ArtifactRegistryClient artifactRegistry, CloudRunClient cloudRun,
-                              DeploymentGitHubService gitHubService, SseBroadcaster sseBroadcaster,
-                              StateStore stateStore, MeterRegistry meterRegistry,
-                              WorkspaceLockService workspaceLockService,
-                              WorkspaceRestoreService workspaceRestoreService,
-                              TierEnforcementService tierEnforcementService,
-                              TierConfigRepository tierConfigRepo) {
-        this.props = props;
-        this.agentProps = agentProps;
-        this.deploymentRepo = deploymentRepo;
-        this.runRepoRepo = runRepoRepo;
-        this.dockerfileGenerator = dockerfileGenerator;
-        this.artifactRegistry = artifactRegistry;
-        this.cloudRun = cloudRun;
-        this.gitHubService = gitHubService;
-        this.sseBroadcaster = sseBroadcaster;
-        this.stateStore = stateStore;
-        this.meterRegistry = meterRegistry;
-        this.workspaceLockService = workspaceLockService;
-        this.workspaceRestoreService = workspaceRestoreService;
-        this.tierEnforcementService = tierEnforcementService;
-        this.tierConfigRepo = tierConfigRepo;
-    }
 
     @PostConstruct
     public void validatePrerequisites() {

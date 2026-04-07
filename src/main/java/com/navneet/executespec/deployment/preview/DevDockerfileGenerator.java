@@ -18,7 +18,7 @@ public class DevDockerfileGenerator {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final long MAX_FILE_SIZE = 50 * 1024; // 50 KB
-    private static final int MAX_PYTHON_FILES = 20;
+    private static final int MAX_PYTHON_FILES = 20; // Cap Python file scanning to avoid slow detection on large workspaces
 
     private static final Set<String> NODE_BACKEND_DEPS = Set.of(
             "express", "fastify", "koa", "hono", "@nestjs/core"

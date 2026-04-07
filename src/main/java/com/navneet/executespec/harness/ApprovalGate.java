@@ -17,15 +17,17 @@ import java.util.Scanner;
 @RequiredArgsConstructor
 public class ApprovalGate {
 
+    private static final String SEPARATOR = "=".repeat(70);
+
     // Single scanner instance — multiple Scanner objects on System.in cause buffering/EOF issues
     private final Scanner scanner = new Scanner(System.in);
     private final CostEstimator costEstimator;
 
     public boolean requestApproval(TaskPlan plan, PipelineRun run) {
         log.info("");
-        log.info("{}", "=".repeat(70));
+        log.info("{}", SEPARATOR);
         log.info("PLAN READY -- {}", plan.getPlanSummary());
-        log.info("{}", "=".repeat(70));
+        log.info("{}", SEPARATOR);
         log.info("  Run ID : {}", run.getRunId());
         log.info("  Models : planner={}  worker={}  reviewer={}",
             run.getPlannerModel(), run.getWorkerModel(), run.getReviewerModel());
@@ -60,10 +62,10 @@ public class ApprovalGate {
 
     public boolean requestMerge(ReviewReportV2 review) {
         log.info("");
-        log.info("{}", "=".repeat(70));
+        log.info("{}", SEPARATOR);
         log.info("REVIEW COMPLETE -- {} (confidence: {})",
             review.getRecommendationCompat(), review.getOverallConfidence());
-        log.info("{}", "=".repeat(70));
+        log.info("{}", SEPARATOR);
         log.info("  {}", review.getSummary());
         log.info("");
 
