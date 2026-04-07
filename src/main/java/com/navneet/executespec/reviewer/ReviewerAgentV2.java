@@ -3,6 +3,7 @@ package com.navneet.executespec.reviewer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmOutputParser;
+import com.navneet.executespec.agent.LlmResponseCleaner;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.LlmRouter.FallbackMode;
 import com.navneet.executespec.agent.WorkerAgent;
@@ -378,15 +379,7 @@ public class ReviewerAgentV2 {
      */
     private List<ReviewIssue> parseReviewResponse(String assistantText, int iteration,
                                                     List<Message> messages) {
-        String trimmed = assistantText.trim();
-        // Strip markdown code fences if present
-        if (trimmed.startsWith("```")) {
-            int firstNewline = trimmed.indexOf('\n');
-            int lastFence = trimmed.lastIndexOf("```");
-            if (firstNewline > 0 && lastFence > firstNewline) {
-                trimmed = trimmed.substring(firstNewline + 1, lastFence).trim();
-            }
-        }
+        String trimmed = LlmResponseCleaner.stripMarkdownFences(assistantText);
 
         if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
             try {
