@@ -2,6 +2,7 @@ package com.navneet.executespec.compiler;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.LlmResponseCleaner;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -204,16 +205,11 @@ public class CompilerAgent {
 
     private void applyJsonFixes(String runId, String llmResponse) {
         try {
-            String cleaned = llmResponse.trim()
-                    .replaceAll("(?s)^```json\\s*", "")
-                    .replaceAll("(?s)```$", "")
-                    .trim();
-            int s = cleaned.indexOf('[');
-            int e = cleaned.lastIndexOf(']') + 1;
-            if (s < 0 || e <= s)
+            String jsonArray = LlmResponseCleaner.extractJsonArray(llmResponse);
+            if (jsonArray == null)
                 return;
 
-            JsonNode arr = mapper.readTree(cleaned.substring(s, e));
+            JsonNode arr = mapper.readTree(jsonArray);
             if (!arr.isArray())
                 return;
 

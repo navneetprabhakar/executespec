@@ -80,16 +80,17 @@ public class TierEnforcementService {
             if (limit >= 0 && org.getMonthlyRunCount() > limit) {
                 runTopupService.consumeBonusRunForOrg(org.getId());
             }
-        } else {
-            assertUserQuota(user);
-            // Increment within the same TX (lock held)
-            maybeResetUserCounter(user);
-            user.setPersonalRunCount(user.getPersonalRunCount() + 1);
-            userRepo.save(user);
-            int limit = getMonthlyLimit(user.getTier());
-            if (limit >= 0 && user.getPersonalRunCount() > limit) {
-                runTopupService.consumeBonusRun(userId);
-            }
+            return;
+        }
+
+        assertUserQuota(user);
+        // Increment within the same TX (lock held)
+        maybeResetUserCounter(user);
+        user.setPersonalRunCount(user.getPersonalRunCount() + 1);
+        userRepo.save(user);
+        int limit = getMonthlyLimit(user.getTier());
+        if (limit >= 0 && user.getPersonalRunCount() > limit) {
+            runTopupService.consumeBonusRun(userId);
         }
     }
 
