@@ -85,32 +85,16 @@ public class InputSanitizer {
         // fullwidth 'ｉｇｎｏｒｅ' → 'ignore') before pattern matching to prevent evasion.
         String normalized = Normalizer.normalize(stripped, Normalizer.Form.NFKC);
 
-        // Check prompt injection patterns
-        for (Pattern p : INJECTION_PATTERNS) {
-            if (p.matcher(normalized).find()) {
-                log.warn("INPUT BLOCKED (prompt injection): pattern={}", p.pattern());
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Request contains content that violates our security policy.");
-            }
-        }
-
-        // Check shell embedding patterns
-        for (Pattern p : SHELL_PATTERNS) {
-            if (p.matcher(normalized).find()) {
-                log.warn("INPUT BLOCKED (shell embedding): pattern={}", p.pattern());
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Request contains content that violates our security policy.");
-            }
-        }
-
-        // Check abuse patterns
-        for (Pattern p : ABUSE_PATTERNS) {
-            if (p.matcher(normalized).find()) {
-                log.warn("INPUT BLOCKED (abuse): pattern={}", p.pattern());
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Request describes software that violates our acceptable use policy.");
-            }
-        }
+        // Check prompt injection, shell embedding, and abuse patterns
+        scanPatterns(normalized, INJECTION_PATTERNS,
+                "INPUT BLOCKED (prompt injection): pattern={}",
+                "Request contains content that violates our security policy.");
+        scanPatterns(normalized, SHELL_PATTERNS,
+                "INPUT BLOCKED (shell embedding): pattern={}",
+                "Request contains content that violates our security policy.");
+        scanPatterns(normalized, ABUSE_PATTERNS,
+                "INPUT BLOCKED (abuse): pattern={}",
+                "Request describes software that violates our acceptable use policy.");
 
         // Base64 payload detection — decode and scan embedded base64 blocks
         Matcher b64Matcher = BASE64_BLOCK.matcher(normalized);
@@ -119,27 +103,15 @@ public class InputSanitizer {
                 byte[] decoded = Base64.getDecoder().decode(b64Matcher.group());
                 String decodedStr = new String(decoded);
                 // Scan decoded content against all pattern lists
-                for (Pattern p : INJECTION_PATTERNS) {
-                    if (p.matcher(decodedStr).find()) {
-                        log.warn("INPUT BLOCKED (base64 prompt injection): decoded content matched {}", p.pattern());
-                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                                "Request contains encoded content that violates our security policy.");
-                    }
-                }
-                for (Pattern p : SHELL_PATTERNS) {
-                    if (p.matcher(decodedStr).find()) {
-                        log.warn("INPUT BLOCKED (base64 shell embedding): decoded content matched {}", p.pattern());
-                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                                "Request contains encoded content that violates our security policy.");
-                    }
-                }
-                for (Pattern p : ABUSE_PATTERNS) {
-                    if (p.matcher(decodedStr).find()) {
-                        log.warn("INPUT BLOCKED (base64 abuse): decoded content matched {}", p.pattern());
-                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                                "Request contains encoded content that violates our acceptable use policy.");
-                    }
-                }
+                scanPatterns(decodedStr, INJECTION_PATTERNS,
+                        "INPUT BLOCKED (base64 prompt injection): decoded content matched {}",
+                        "Request contains encoded content that violates our security policy.");
+                scanPatterns(decodedStr, SHELL_PATTERNS,
+                        "INPUT BLOCKED (base64 shell embedding): decoded content matched {}",
+                        "Request contains encoded content that violates our security policy.");
+                scanPatterns(decodedStr, ABUSE_PATTERNS,
+                        "INPUT BLOCKED (base64 abuse): decoded content matched {}",
+                        "Request contains encoded content that violates our acceptable use policy.");
             } catch (IllegalArgumentException ignored) {
                 // Not valid base64 — skip
             }
@@ -170,6 +142,23 @@ public class InputSanitizer {
                                 "Request contains suspicious repetitive content.");
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Scans input against a list of patterns, blocking with a 400 if any match.
+     *
+     * @param input       the text to scan
+     * @param patterns    compiled patterns to match against
+     * @param logMessage  log warning template (must contain one {} placeholder for the matched pattern)
+     * @param userMessage error message returned to the client
+     */
+    private void scanPatterns(String input, List<Pattern> patterns, String logMessage, String userMessage) {
+        for (Pattern p : patterns) {
+            if (p.matcher(input).find()) {
+                log.warn(logMessage, p.pattern());
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, userMessage);
             }
         }
     }

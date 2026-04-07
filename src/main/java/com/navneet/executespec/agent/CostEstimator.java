@@ -184,64 +184,51 @@ public class CostEstimator {
     private double computeAgentCost(String runId) {
         double cost = stateStore.findRun(runId).map(run -> {
             double c = 0.0;
-            // Planner
-            int pIn = nvl(run.getPlannerInputTokens()), pOut = nvl(run.getPlannerOutputTokens());
-            if (pIn > 0 || pOut > 0) {
-                String prov = run.getPlannerProvider() != null ? run.getPlannerProvider() : props.getRoles().getPlanner();
-                String model = run.getPlannerActualModel() != null ? run.getPlannerActualModel() : defaultModel(prov);
-                double[] rates = dbRatesForModel(prov, model);
-                c += (pIn / 1_000_000.0) * rates[0] + (pOut / 1_000_000.0) * rates[1];
-            }
-            // Reviewer
-            int rIn = nvl(run.getReviewerInputTokens()), rOut = nvl(run.getReviewerOutputTokens());
-            if (rIn > 0 || rOut > 0) {
-                String prov = run.getReviewerProvider() != null ? run.getReviewerProvider() : props.getRoles().getReviewer();
-                String model = run.getReviewerActualModel() != null ? run.getReviewerActualModel() : defaultModel(prov);
-                double[] rates = dbRatesForModel(prov, model);
-                c += (rIn / 1_000_000.0) * rates[0] + (rOut / 1_000_000.0) * rates[1];
-            }
-            // Compiler
-            int cIn = nvl(run.getCompilerInputTokens()), cOut = nvl(run.getCompilerOutputTokens());
-            if (cIn > 0 || cOut > 0) {
-                String prov = run.getCompilerProvider() != null ? run.getCompilerProvider() : props.getRoles().getWorker();
-                String model = run.getCompilerActualModel() != null ? run.getCompilerActualModel() : defaultModel(prov);
-                double[] rates = dbRatesForModel(prov, model);
-                c += (cIn / 1_000_000.0) * rates[0] + (cOut / 1_000_000.0) * rates[1];
-            }
+            c += computeAgentTokenCost(run.getPlannerInputTokens(), run.getPlannerOutputTokens(),
+                    run.getPlannerProvider(), props.getRoles().getPlanner(),
+                    run.getPlannerActualModel());
+            c += computeAgentTokenCost(run.getReviewerInputTokens(), run.getReviewerOutputTokens(),
+                    run.getReviewerProvider(), props.getRoles().getReviewer(),
+                    run.getReviewerActualModel());
+            c += computeAgentTokenCost(run.getCompilerInputTokens(), run.getCompilerOutputTokens(),
+                    run.getCompilerProvider(), props.getRoles().getWorker(),
+                    run.getCompilerActualModel());
             return c;
         }).orElse(0.0);
 
         // Test gen pipeline costs (from TestPlan entity)
         cost += testPlanRepository.findByRunId(runId).map(tp -> {
             double c = 0.0;
-            // Test planner
-            int tpIn = nvl(tp.getPlannerInputTokens()), tpOut = nvl(tp.getPlannerOutputTokens());
-            if (tpIn > 0 || tpOut > 0) {
-                String prov = tp.getPlannerProvider() != null ? tp.getPlannerProvider() : "anthropic";
-                String model = tp.getPlannerModel() != null ? tp.getPlannerModel() : modelRegistry.workhouseModelFor(prov);
-                double[] rates = dbRatesForModel(prov, model);
-                c += (tpIn / 1_000_000.0) * rates[0] + (tpOut / 1_000_000.0) * rates[1];
-            }
-            // Test worker
-            int twIn = nvl(tp.getWorkerInputTokens()), twOut = nvl(tp.getWorkerOutputTokens());
-            if (twIn > 0 || twOut > 0) {
-                String prov = tp.getWorkerProvider() != null ? tp.getWorkerProvider() : "anthropic";
-                String model = tp.getWorkerModel() != null ? tp.getWorkerModel() : modelRegistry.workhouseModelFor(prov);
-                double[] rates = dbRatesForModel(prov, model);
-                c += (twIn / 1_000_000.0) * rates[0] + (twOut / 1_000_000.0) * rates[1];
-            }
-            // Test report gen (fix suggestions)
-            int trIn = nvl(tp.getReportInputTokens()), trOut = nvl(tp.getReportOutputTokens());
-            if (trIn > 0 || trOut > 0) {
-                String prov = tp.getPlannerProvider() != null ? tp.getPlannerProvider() : "anthropic";
-                String model = modelRegistry.lightweightModelFor(prov); // fix suggestions use FAST tier
-                double[] rates = dbRatesForModel(prov, model);
-                c += (trIn / 1_000_000.0) * rates[0] + (trOut / 1_000_000.0) * rates[1];
-            }
+            c += computeAgentTokenCost(tp.getPlannerInputTokens(), tp.getPlannerOutputTokens(),
+                    tp.getPlannerProvider(), "anthropic",
+                    tp.getPlannerModel());
+            c += computeAgentTokenCost(tp.getWorkerInputTokens(), tp.getWorkerOutputTokens(),
+                    tp.getWorkerProvider(), "anthropic",
+                    tp.getWorkerModel());
+            // Test report gen (fix suggestions) — uses LIGHTWEIGHT tier
+            String reportProv = tp.getPlannerProvider() != null ? tp.getPlannerProvider() : "anthropic";
+            String reportModel = modelRegistry.lightweightModelFor(reportProv);
+            c += computeAgentTokenCost(tp.getReportInputTokens(), tp.getReportOutputTokens(),
+                    reportProv, reportProv, reportModel);
             return c;
         }).orElse(0.0);
 
         return cost;
+    }
+
+    /**
+     * Computes cost for a single agent from its token counts, resolving provider/model with fallbacks.
+     */
+    private double computeAgentTokenCost(Integer inputTokens, Integer outputTokens,
+                                         String provider, String defaultProvider,
+                                         String model) {
+        int inTok = nvl(inputTokens);
+        int outTok = nvl(outputTokens);
+        if (inTok == 0 && outTok == 0) return 0.0;
+        String prov = provider != null ? provider : defaultProvider;
+        String resolvedModel = model != null ? model : defaultModel(prov);
+        double[] rates = dbRatesForModel(prov, resolvedModel);
+        return (inTok / 1_000_000.0) * rates[0] + (outTok / 1_000_000.0) * rates[1];
     }
 
     private int nvl(Integer v) { return v != null ? v : 0; }
