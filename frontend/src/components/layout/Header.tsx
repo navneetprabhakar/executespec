@@ -7,6 +7,7 @@ import { ACTIVE_STATUSES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
 import ViewModeToggle from '@/components/shared/ViewModeToggle';
+import NotificationBell from './NotificationBell';
 
 export default function Header() {
   const { setCommandPaletteOpen, mobileSidebarOpen, setMobileSidebarOpen } = useUiStore();
@@ -65,6 +66,9 @@ export default function Header() {
           <ArrowUpRight className="h-3 w-3" />
         </Link>
       )}
+
+      {/* Notifications */}
+      <NotificationBell />
 
       {/* User menu */}
       <UserMenu />

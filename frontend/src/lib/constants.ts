@@ -25,14 +25,23 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
   STUCK:                 { dot: 'bg-status-error',     text: 'text-status-error' },
   // Pink — blocked
   BLOCKED:               { dot: 'bg-status-blocked',   text: 'text-status-blocked' },
+  // Batch
+  QUEUED_BATCH:          { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
+  IN_PROGRESS_BATCH:     { dot: 'bg-status-executing', text: 'text-status-executing' },
+  BATCH_COMPLETE:        { dot: 'bg-status-success',   text: 'text-status-success' },
 };
 
-export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'COMPILING']);
+export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'COMPILING', 'QUEUED_BATCH', 'IN_PROGRESS_BATCH']);
 export const GATE_STATUSES   = new Set(['AWAITING_APPROVAL', 'AWAITING_MERGE', 'AWAITING_CLARIFICATION']);
 
 export const PIPELINE_STEPS = [
   'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'WORKING',
   'COMPILING', 'COMPLETE',
+];
+
+export const BATCH_PIPELINE_STEPS = [
+  'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'QUEUED_BATCH',
+  'IN_PROGRESS_BATCH', 'BATCH_COMPLETE', 'COMPILING', 'COMPLETE',
 ];
 
 export const NAV_ITEMS: {

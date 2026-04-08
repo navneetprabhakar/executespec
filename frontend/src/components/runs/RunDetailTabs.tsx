@@ -675,6 +675,22 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         </div>
       </div>
 
+      {/* Credits charged — visible to all users */}
+      {run.creditsCharged != null && (
+        <div className="pt-3 border-t border-[var(--border-default)]">
+          <div className="flex items-center gap-2 mb-2">
+            <Coins className="h-3.5 w-3.5 text-accent-amber/70" />
+            <span className="text-xs font-medium text-secondary uppercase tracking-wider">Credits</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm text-primary font-mono font-medium">{run.creditsCharged} credit{run.creditsCharged > 1 ? 's' : ''}</span>
+            {run.approvedExecutionMode && (
+              <span className="text-[10px] text-muted">{run.approvedExecutionMode === 'BATCH' ? 'Batch' : 'Real-time'}</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Super admin: cost breakdown */}
       {isSuperAdmin && (
         <div className="pt-3 border-t border-[var(--border-default)]">

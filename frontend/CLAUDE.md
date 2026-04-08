@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-06
+> Last updated: 2026-04-08
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
@@ -15,7 +15,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 ### Components (`src/components/`)
 - **`runs/`** — RunDetail, RunDetailTabs, RunCard, RunList, RunConversation, NewRunModal, TaskCard, TaskGraph (subtask grouping), PreviewTab, LiveLog, ValidationReportPanel, TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary
 - **`run/`** — FileTree, FileViewer, RunTimeline
-- **`layout/`** — AppLayout, Header, Sidebar, CommandPalette
+- **`layout/`** — AppLayout, Header, Sidebar, CommandPalette, NotificationBell, NotificationPanel
 - **`dashboard/`** — ActivityFeed, AgentCommGraph, DateRangeFilter, MetricCard, ModelComparisonChart, TokenBubbleChart, UserRunsChart
 - **`billing/`** — BillingProfileForm, DisclaimerModal, PlanCard, RazorpayCheckout, RazorpayOrderCheckout, UpgradeNudge, UsageBadge
 - **`deployments/`** — DeployModal, DeployWizardModal, DeploymentCard
@@ -54,7 +54,9 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - `useUiStore.ts` — UI preferences, sidebar state, modals
 
 ## Key Components
-- **RunDetail.tsx** — Main run view with Vibe View toggle. Shows gate banners, task list, review, report, cost estimate.
+- **RunDetail.tsx** — Main run view with Vibe View toggle. Shows gate banners (with credit count for multi-credit runs), task list, review, report, cost estimate. Plan approval sends `creditsConfirmed` to prevent stale approvals (409 on mismatch). Dual-option cards when `batchAvailable` (real-time vs batch with savings badge). Batch progress bar for IN_PROGRESS_BATCH/QUEUED_BATCH runs.
+- **NotificationBell.tsx** — Header notification bell with unread count badge. Polls every 30s.
+- **NotificationPanel.tsx** — Dropdown notification list. Marks read, navigates to run on click.
 - **RunDetailTabs.tsx** — Tabbed detail view. Overview tab shows GitHub PR link (`githubPrUrl`), per-copilot-run token breakdown. Graph tab uses `TaskGraphGroups` to split copilot/review nodes into separate collapsible sections.
 - **RunTimeline.tsx** — Pipeline status bar. `mapStatusToPhase()` maps all statuses including COMPILING, MERGING, AWAITING_MERGE.
 - **ProviderModelSelector.tsx** — AI provider selection (Anthropic/Google/OpenAI) for run submission.
@@ -75,6 +77,11 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **Subtask graph grouping:** Subtask nodes (with `parentTaskId`) rendered as smaller nodes (164×36) grouped under parent with dashed border, aggregate status dot, progress bar ("N/M"), and expand/collapse chevron. Uses variable-height layout — groups compute height based on collapsed/expanded state. Kahn's topological sort only operates on standalone + group parent nodes. Backward compatible: no `parentTaskId` = no groups = same as before.
 - SSE refetch triggers include COMPILING and MERGING statuses (useSse.ts)
 - RunDetail API includes `githubPrUrl` field — displayed as clickable link in overview tab
+- RunDetail API includes `creditsCharged` and `hardCapUsd` — displayed at plan approval gate for multi-credit runs
+- `approveRun()` sends `creditsConfirmed` echoing the credit count shown in UI — backend returns 409 if pricing changed since plan
+- `approveRun()` also sends `executionMode` ('REALTIME' or 'BATCH') when user selects execution path
+- Batch SSE events: BATCH_PROGRESS, BATCH_COMPLETE, BATCH_FAILED trigger `fetchRun()` refetch
+- Notification API: `getNotifications()` (paginated), `getUnreadCount()`, `markNotificationRead()`, `markAllNotificationsRead()`
 - OAuth callback handling via `AuthCallbackPage` (redirect-based flow)
 - Razorpay checkout integration for subscriptions and order payments
 - Feature flag admin via `FeatureFlagsPage` (SUPER_ADMIN only)

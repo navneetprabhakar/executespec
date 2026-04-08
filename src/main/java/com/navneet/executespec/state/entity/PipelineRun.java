@@ -74,6 +74,53 @@ public class PipelineRun {
 
     private Double actualCostUsd;       // computed post-run with cache-aware pricing (null until complete)
 
+    /** Run credits charged (proportional to estimated cost). Default 1. */
+    @Builder.Default
+    @Column(name = "credits_charged")
+    private Integer creditsCharged = 1;
+
+    /** Hard cap in USD: creditsCharged × creditMultiplier × budgetMargin. Silent safety net. */
+    @Column(name = "hard_cap_usd")
+    private Double hardCapUsd;
+
+    // ── Batch execution ──────────────────────────────────────────────────────
+    /** "REALTIME" or "BATCH" — user's choice at plan approval. */
+    @Builder.Default
+    @Column(name = "approved_execution_mode", length = 10)
+    private String approvedExecutionMode = "REALTIME";
+
+    /** Provider batch API ID (e.g. Anthropic msgbatch_xxx, OpenAI batch_xxx). */
+    @Column(name = "batch_id")
+    private String batchId;
+
+    /** Provider used for batch submission. */
+    @Column(name = "batch_provider", length = 20)
+    private String batchProvider;
+
+    /** Number of tasks completed in the batch so far. */
+    @Column(name = "batch_progress_completed")
+    private Integer batchProgressCompleted;
+
+    /** Total tasks in the batch. */
+    @Column(name = "batch_progress_total")
+    private Integer batchProgressTotal;
+
+    /** When the batch was submitted to the provider. */
+    @Column(name = "batch_submitted_at")
+    private java.time.Instant batchSubmittedAt;
+
+    /** Batch credits (with discount). Null if batch not available. */
+    @Column(name = "batch_credits")
+    private Integer batchCredits;
+
+    /** True if this run qualifies for batch execution. */
+    @Column(name = "batch_available")
+    private Boolean batchAvailable;
+
+    /** Credits saved by choosing batch over real-time. */
+    @Column(name = "credit_savings")
+    private Integer creditSavings;
+
     @Column(columnDefinition = "TEXT")
     private String failureReason;       // set on FAILED state
 

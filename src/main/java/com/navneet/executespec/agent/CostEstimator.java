@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -114,6 +115,105 @@ public class CostEstimator {
             String.format("%.3f", totalLow), String.format("%.3f", totalHigh), provider);
 
         return new CostBreakdown(totalLow, totalHigh);
+    }
+
+    /**
+     * Estimate cost with credit calculation for the plan approval gate.
+     * Uses the configurable estimation buffer (default 10%) instead of the
+     * internal 50% HIGH_ESTIMATE_MULTIPLIER.
+     */
+    public RunCostEstimate estimateWithCredits(TaskPlan plan, LlmProvider provider,
+                                                AgentProperties.Cost costConfig) {
+        return estimateWithCredits(plan, provider, costConfig, null);
+    }
+
+    /**
+     * Estimate cost with credit calculation for both real-time and batch paths.
+     * @param userTier nullable — used to determine batch availability (FREE→no, PRO→2+ credits, ENTERPRISE→always)
+     */
+    public RunCostEstimate estimateWithCredits(TaskPlan plan, LlmProvider provider,
+                                                AgentProperties.Cost costConfig, String userTier) {
+        if (plan == null || plan.getTasks() == null) {
+            return new RunCostEstimate(0, 1, costConfig.getCreditMultiplierUsd(),
+                    0, 1, costConfig.getCreditMultiplierUsd(),
+                    provider.name(), false, 0,
+                    List.of(), 0, 0, 0);
+        }
+
+        ResolvedModel workerModel   = modelResolver.resolve("WorkerAgent", provider);
+        ResolvedModel plannerModel  = modelResolver.resolve("PlannerAgent", provider);
+        ResolvedModel reviewerModel = modelResolver.resolve("ReviewerAgentV2", provider);
+
+        double[] workerRates   = dbRatesForModel(workerModel.providerName(), workerModel.getModel());
+        double[] plannerRates  = dbRatesForModel(plannerModel.providerName(), plannerModel.getModel());
+        double[] reviewerRates = dbRatesForModel(reviewerModel.providerName(), reviewerModel.getModel());
+
+        List<RunCostEstimate.TaskCostEstimate> taskEstimates = new ArrayList<>();
+        double totalWorkerCost = 0;
+
+        for (TaskDefinition task : plan.getTasks()) {
+            String complexity = task.getComplexity() != null ? task.getComplexity().toUpperCase() : "MEDIUM";
+            int inTok  = complexityInputTokens(complexity);
+            int outTok = tokenBudgetMonitor.maxOutputTokens(null, complexity);
+            int iters  = "LOW".equals(complexity) ? 2 : "HIGH".equals(complexity) ? 4 : 3;
+
+            double taskCost = costUsd(inTok, outTok, iters, workerRates);
+            totalWorkerCost += taskCost;
+
+            taskEstimates.add(new RunCostEstimate.TaskCostEstimate(
+                    task.getTaskId(), complexity, taskCost, iters));
+        }
+
+        // Planner cost (1 call)
+        int plannerOut = tokenBudgetMonitor.maxOutputTokens(null, "HIGH");
+        double planningCost = costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
+
+        // Reviewer cost (1 call per task, uses lightweight/planning tier)
+        int reviewerOut = tokenBudgetMonitor.maxOutputTokens(null, "MEDIUM");
+        double reviewCost = costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, reviewerOut,
+                plan.getTasks().size(), reviewerRates);
+
+        // Compiler cost (1 call)
+        double compilerCost = costUsd(MEDIUM_IN_TOKENS, reviewerOut, 1, reviewerRates);
+
+        double rawTotal = totalWorkerCost + planningCost + reviewCost + compilerCost;
+        double bufferedTotal = rawTotal * costConfig.getEstimationBuffer();
+
+        double multiplier = costConfig.getCreditMultiplierUsd();
+        int credits = Math.max(1, (int) Math.ceil(bufferedTotal / multiplier));
+        double hardCap = credits * multiplier;
+
+        // Batch path — universal 50% discount
+        double batchDiscount = costConfig.getBatch() != null ? costConfig.getBatch().getDiscount() : 0.50;
+        double batchBuffered = bufferedTotal * (1.0 - batchDiscount);
+        int batchCredits = Math.max(1, (int) Math.ceil(batchBuffered / multiplier));
+        double batchHardCap = batchCredits * multiplier;
+
+        // Batch availability depends on tier
+        boolean batchAvailable;
+        String tier = userTier != null ? userTier.toUpperCase() : "FREE";
+        boolean batchEnabled = costConfig.getBatch() != null && costConfig.getBatch().isEnabled();
+        if (!batchEnabled) {
+            batchAvailable = false;
+        } else {
+            batchAvailable = switch (tier) {
+                case "FREE" -> false;
+                case "PRO" -> credits >= 2;
+                case "ENTERPRISE" -> true;
+                default -> credits >= 2;
+            };
+        }
+
+        int creditSavings = batchAvailable ? credits - batchCredits : 0;
+
+        log.info("[CostEstimator] {} tasks → est=${} (buffered), credits={}, cap=${}, batch={} batchCredits={} (provider={})",
+                plan.getTasks().size(), String.format("%.2f", bufferedTotal), credits,
+                String.format("%.2f", hardCap), batchAvailable, batchCredits, provider);
+
+        return new RunCostEstimate(bufferedTotal, credits, hardCap,
+                batchBuffered, batchCredits, batchHardCap,
+                provider.name(), batchAvailable, creditSavings,
+                taskEstimates, planningCost, reviewCost, compilerCost);
     }
 
     /** Estimate cost for a single task in feasibility mode. Returns [min, max]. */
