@@ -242,6 +242,18 @@ public record RunEvent(
                 String.valueOf(subtaskCount), Instant.now());
     }
 
+    public static RunEvent budgetWarning(String runId, String tier, double budgetUsd,
+                                            int percentUsed, double currentCost) {
+        String message = "Cost warning: $" + String.format("%.2f", currentCost) + " of $" +
+                String.format("%.0f", budgetUsd) + " budget used (" + percentUsed + "%).";
+        if (percentUsed >= 90) {
+            message += " Run will stop soon if cost limit is reached.";
+        }
+        return new RunEvent("BUDGET_WARNING", runId, null,
+                tier + "|" + String.format("%.2f", budgetUsd) + "|" + percentUsed + "|" +
+                        String.format("%.2f", currentCost) + "|" + message, Instant.now());
+    }
+
     public static RunEvent budgetExceeded(String runId, String tier, double budgetUsd) {
         String message = switch (tier != null ? tier.toUpperCase() : "FREE") {
             case "PRO" -> "Run stopped — $" + String.format("%.0f", budgetUsd) +

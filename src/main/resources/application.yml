@@ -233,6 +233,7 @@ agent:
     max-runs: 50   # Temporarily increased for load testing (was 10)
     max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
     safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
+    task-max-retries: 2           # Auto-retry failed tasks/subtasks up to 2 times before marking FAILED
   github:
     pat: ""
     default-owner: ""

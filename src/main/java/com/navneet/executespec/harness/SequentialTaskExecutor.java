@@ -291,6 +291,9 @@ public class SequentialTaskExecutor {
             return;
         }
 
+        // === Progressive cost warnings (50%, 75%, 90%) ===
+        runCostBudgetService.checkBudgetWarnings(runId);
+
         // === Cost budget check (USD) before executing worker ===
         if (runCostBudgetService.isOverBudget(runId)) {
             String tier = runCostBudgetService.getRunTier(runId);
@@ -315,23 +318,49 @@ public class SequentialTaskExecutor {
             return;
         }
 
-        // === Execute worker (validation deferred to review phase) ===
-        WorkerReport report;
-        try {
-            report = executeTask(run, task, availableProviders);
-        } catch (Exception e) {
-            log.error("Task {} crashed with unhandled exception: {}", taskId, e.getMessage(), e);
-            stateStore.failTask(taskId, "Unhandled exception: " + e.getMessage());
-            sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
-            failed.add(task);
-            metricsTaskOutcome = "FAILED";
-            taskObs.lowCardinalityKeyValue("task.outcome", "FAILED");
-            try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
-            return;
+        // === Execute worker with automatic retry on failure ===
+        int maxRetries = agentProperties.getConcurrency().getTaskMaxRetries();
+        WorkerReport report = null;
+        String normalizedStatus = "FAILED";
+
+        for (int attempt = 1; attempt <= maxRetries + 1; attempt++) {
+            try {
+                report = executeTask(run, task, availableProviders);
+            } catch (Exception e) {
+                log.error("Task {} crashed on attempt {}/{}: {}", taskId, attempt, maxRetries + 1, e.getMessage(), e);
+                if (attempt <= maxRetries) {
+                    sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
+                            String.format("⚠️ Task failed (attempt %d/%d) — retrying...", attempt, maxRetries + 1)));
+                    stateStore.lockTask(taskId, task.getAssignedModel(), branchName);
+                    sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
+                    continue;
+                }
+                stateStore.failTask(taskId, "Unhandled exception after " + attempt + " attempt(s): " + e.getMessage());
+                sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
+                failed.add(task);
+                metricsTaskOutcome = "FAILED";
+                taskObs.lowCardinalityKeyValue("task.outcome", "FAILED");
+                try { gitTool.removeWorktree(runId, taskId); } catch (Exception ex) { /* best effort */ }
+                return;
+            }
+
+            normalizedStatus = normalizeStatus(report.getStatus());
+            if ("COMPLETE".equals(normalizedStatus) || "PARTIAL".equals(normalizedStatus)) {
+                break; // success
+            }
+
+            // Non-complete status — retry if attempts remain
+            if (attempt <= maxRetries) {
+                log.warn("Task {} returned {} on attempt {}/{} — retrying", taskId, normalizedStatus, attempt, maxRetries + 1);
+                sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
+                        String.format("⚠️ Task returned %s (attempt %d/%d) — retrying...", normalizedStatus, attempt, maxRetries + 1)));
+                stateStore.lockTask(taskId, task.getAssignedModel(), branchName);
+                sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
+            }
         }
+
         allReports.add(report);
 
-        String normalizedStatus = normalizeStatus(report.getStatus());
         metricsTaskOutcome = normalizedStatus;
         taskObs.lowCardinalityKeyValue("task.outcome", normalizedStatus);
         sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, normalizedStatus));
@@ -754,6 +783,9 @@ public class SequentialTaskExecutor {
                     continue;
                 }
 
+                // Progressive cost warnings before each subtask
+                runCostBudgetService.checkBudgetWarnings(runId);
+
                 // Check budget before each subtask
                 if (runCostBudgetService.isOverBudget(runId)) {
                     String tier = runCostBudgetService.getRunTier(runId);
@@ -777,56 +809,74 @@ public class SequentialTaskExecutor {
                                         .getOwnedFiles().get(0)),
                                 model.getModel())));
 
+                // ── Execute subtask with automatic retry on failure ──
+                int subtaskMaxRetries = agentProperties.getConcurrency().getTaskMaxRetries();
                 try {
-                    Instant subtaskStart = Instant.now();
-                    WorkerReport report = workerAgent.executeInWorkDir(subtask, runId, workDir);
-                    long durationMs = java.time.Duration.between(subtaskStart, Instant.now()).toMillis();
+                    WorkerReport report = null;
+                    String status = "FAILED";
+                    long durationMs = 0;
+                    ResolvedModel usedModel = model;
+                    boolean succeeded = false;
 
-                    String status = normalizeStatus(report.getStatus());
-
-                    // ── Fabrication escalation: retry failed subtask with PLANNING tier model ──
-                    if (!"COMPLETE".equals(status) && !"PARTIAL".equals(status)
-                            && isFabricationFailure(report)
-                            && !model.getModel().equals(getPlanningModel(run))) {
-                        String escalatedModel = getPlanningModel(run);
-                        log.warn("[Decompose] Subtask {} failed with fabrication on {} — escalating to {}",
-                                subtask.getTaskId(), model.getModel(), escalatedModel);
-                        stateStore.appendTaskLog(subtask.getTaskId(),
-                                "FABRICATION_ESCALATION:" + model.getModel() + "→" + escalatedModel);
-                        sseBroadcaster.emit(runId, RunEvent.log(runId, subtask.getTaskId(),
-                                String.format("Fabrication detected — retrying with %s", escalatedModel)));
-
-                        // Re-lock with escalated model and retry
-                        subtask.setAssignedModel(escalatedModel);
-                        stateStore.lockTask(subtask.getTaskId(), escalatedModel, branchName);
-
-                        Instant retryStart = Instant.now();
+                    for (int attempt = 1; attempt <= subtaskMaxRetries + 1; attempt++) {
+                        Instant subtaskStart = Instant.now();
                         report = workerAgent.executeInWorkDir(subtask, runId, workDir);
-                        durationMs = java.time.Duration.between(retryStart, Instant.now()).toMillis();
+                        durationMs = java.time.Duration.between(subtaskStart, Instant.now()).toMillis();
                         status = normalizeStatus(report.getStatus());
 
-                        ResolvedModel escalatedResolved = modelResolver.resolve(
-                                "WorkerAgent", run.getAiProviderEnum(), AgentTier.PLANNING);
-                        stateStore.completeTask(subtask.getTaskId(), report);
-                        trackMetric(runId, subtask, escalatedResolved, 1, "COMPLETE".equals(status), durationMs, report);
-                        sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), status));
-
-                        if (!"COMPLETE".equals(status) && !"PARTIAL".equals(status)) {
-                            anyFailed = true;
-                            log.warn("[Decompose] Subtask {} failed even after escalation to {}",
-                                    subtask.getTaskId(), escalatedModel);
+                        if ("COMPLETE".equals(status) || "PARTIAL".equals(status)) {
+                            succeeded = true;
+                            break;
                         }
-                        allReports.add(report);
-                        continue;
+
+                        // ── Fabrication escalation on final attempt ──
+                        if (attempt == subtaskMaxRetries + 1
+                                && isFabricationFailure(report)
+                                && !model.getModel().equals(getPlanningModel(run))) {
+                            String escalatedModel = getPlanningModel(run);
+                            log.warn("[Decompose] Subtask {} failed with fabrication on {} — escalating to {}",
+                                    subtask.getTaskId(), model.getModel(), escalatedModel);
+                            stateStore.appendTaskLog(subtask.getTaskId(),
+                                    "FABRICATION_ESCALATION:" + model.getModel() + "→" + escalatedModel);
+                            sseBroadcaster.emit(runId, RunEvent.log(runId, subtask.getTaskId(),
+                                    String.format("Fabrication detected — retrying with %s", escalatedModel)));
+
+                            subtask.setAssignedModel(escalatedModel);
+                            stateStore.lockTask(subtask.getTaskId(), escalatedModel, branchName);
+
+                            Instant retryStart = Instant.now();
+                            report = workerAgent.executeInWorkDir(subtask, runId, workDir);
+                            durationMs = java.time.Duration.between(retryStart, Instant.now()).toMillis();
+                            status = normalizeStatus(report.getStatus());
+                            usedModel = modelResolver.resolve(
+                                    "WorkerAgent", run.getAiProviderEnum(), AgentTier.PLANNING);
+
+                            if ("COMPLETE".equals(status) || "PARTIAL".equals(status)) {
+                                succeeded = true;
+                            }
+                            break;
+                        }
+
+                        // Retry with same model
+                        if (attempt <= subtaskMaxRetries) {
+                            log.warn("[Decompose] Subtask {} returned {} on attempt {}/{} — retrying",
+                                    subtask.getTaskId(), status, attempt, subtaskMaxRetries + 1);
+                            sseBroadcaster.emit(runId, RunEvent.log(runId, subtask.getTaskId(),
+                                    String.format("⚠️ Subtask failed (attempt %d/%d) — retrying...",
+                                            attempt, subtaskMaxRetries + 1)));
+                            stateStore.lockTask(subtask.getTaskId(), model.getModel(), branchName);
+                            sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), "WORKING"));
+                        }
                     }
 
                     stateStore.completeTask(subtask.getTaskId(), report);
-                    trackMetric(runId, subtask, model, 1, "COMPLETE".equals(status), durationMs, report);
+                    trackMetric(runId, subtask, usedModel, 1, succeeded, durationMs, report);
                     sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, subtask.getTaskId(), status));
 
-                    if (!"COMPLETE".equals(status) && !"PARTIAL".equals(status)) {
+                    if (!succeeded) {
                         anyFailed = true;
-                        log.warn("[Decompose] Subtask {} failed with status {}", subtask.getTaskId(), status);
+                        log.warn("[Decompose] Subtask {} failed after {} attempt(s) with status {}",
+                                subtask.getTaskId(), subtaskMaxRetries + 1, status);
                     }
 
                     allReports.add(report);

@@ -13,7 +13,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
-import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, type ReviewReport } from '@/lib/api';
+import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, retryTask, type ReviewReport } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
 import VibeProgressNarrative from './VibeProgressNarrative';
@@ -43,6 +43,7 @@ export default function RunDetail() {
   const [ghError, setGhError] = useState('');
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
   const user = useAuthStore((s) => s.user);
   const loadMe = useAuthStore((s) => s.loadMe);
@@ -63,6 +64,13 @@ export default function RunDetail() {
         const parts = ((entry.data?.payload as string) || '').split('|');
         const message = parts[2] || 'Run stopped — cost budget exceeded. Upgrade for higher limits.';
         addToast({ type: 'error', message });
+      }
+      if (entry.type === 'BUDGET_WARNING' && !budgetShownRef.current.has(entry.id)) {
+        budgetShownRef.current.add(entry.id);
+        const parts = ((entry.data?.payload as string) || '').split('|');
+        const percent = parts[2] || '?';
+        const message = parts[4] || `Cost warning: ${percent}% of budget used.`;
+        addToast({ type: parseInt(percent) >= 90 ? 'error' : 'info', message });
       }
     }
   }, [sseEntries]);
@@ -188,6 +196,29 @@ export default function RunDetail() {
       addToast({ type: 'error', message: e.message });
     } finally {
       setPausing(false);
+    }
+  };
+
+  // Retry all FAILED/PARTIAL tasks within this run
+  const failedTasks = useMemo(() => {
+    if (!activeRun?.tasks) return [];
+    return activeRun.tasks.filter((t: any) =>
+      ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status) && !t.parentTaskId
+    );
+  }, [activeRun?.tasks]);
+
+  const handleRetryFailed = async () => {
+    if (!activeRun || failedTasks.length === 0) return;
+    setRetryingFailed(true);
+    try {
+      await Promise.all(
+        failedTasks.map((t: any) => retryTask(activeRun.runId, t.taskId))
+      );
+      addToast({ type: 'success', message: `Retrying ${failedTasks.length} failed task(s)` });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message || 'Retry failed' });
+    } finally {
+      setRetryingFailed(false);
     }
   };
 
@@ -515,14 +546,27 @@ export default function RunDetail() {
               </>
             )}
             {['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL', 'PAUSED'].includes(activeRun.status) && (
-              <button
-                onClick={handleReRun}
-                disabled={reRunning}
-                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 whitespace-nowrap"
-              >
-                <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
-                {reRunning ? 'Launching…' : 'Re-run'}
-              </button>
+              <>
+                <button
+                  onClick={handleReRun}
+                  disabled={reRunning}
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
+                  {reRunning ? 'Launching…' : 'Re-run'}
+                </button>
+                {failedTasks.length > 0 && (
+                  <button
+                    onClick={handleRetryFailed}
+                    disabled={retryingFailed}
+                    className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-amber transition-colors disabled:opacity-50 whitespace-nowrap"
+                    title={`Retry ${failedTasks.length} failed task(s)`}
+                  >
+                    <Play className={cn('h-3.5 w-3.5', retryingFailed && 'animate-pulse')} />
+                    {retryingFailed ? 'Retrying…' : `Retry Failed (${failedTasks.length})`}
+                  </button>
+                )}
+              </>
             )}
             <div className="flex items-center gap-2 ml-auto">
               {['COMPLETE', 'PARTIAL'].includes(activeRun.status) && (
