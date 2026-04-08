@@ -94,6 +94,48 @@ public class TierEnforcementService {
         }
     }
 
+    /**
+     * Atomically check quota and increment by N credits.
+     * Used at plan approval when cost estimation determines multi-credit runs.
+     */
+    @Transactional
+    public void assertAndIncrementRunCount(String userId, int credits) {
+        if (credits <= 0) credits = 1;
+        AppUser user = userRepo.findByIdForUpdate(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
+
+        if (user.getOrgId() != null) {
+            Org org = orgRepo.findByIdForUpdate(user.getOrgId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Org not found"));
+            assertOrgQuota(org);
+            maybeResetOrgCounter(org);
+            org.setMonthlyRunCount(org.getMonthlyRunCount() + credits);
+            orgRepo.save(org);
+            int limit = effectiveOrgLimit(org);
+            if (limit >= 0 && org.getMonthlyRunCount() > limit) {
+                for (int i = 0; i < credits; i++) {
+                    try { runTopupService.consumeBonusRunForOrg(org.getId()); }
+                    catch (Exception e) { break; }
+                }
+            }
+            return;
+        }
+
+        assertUserQuota(user);
+        maybeResetUserCounter(user);
+        user.setPersonalRunCount(user.getPersonalRunCount() + credits);
+        userRepo.save(user);
+        int limit = getMonthlyLimit(user.getTier());
+        if (limit >= 0 && user.getPersonalRunCount() > limit) {
+            for (int i = 0; i < credits; i++) {
+                try { runTopupService.consumeBonusRun(userId); }
+                catch (Exception e) { break; }
+            }
+        }
+    }
+
     /** Assert the given user can submit another run. Throws 429 if quota exceeded. */
     public void assertCanSubmitRun(String userId) {
         AppUser user = userRepo.findById(userId)
@@ -238,22 +280,35 @@ public class TierEnforcementService {
      * Only decrements if counter is > 0 to avoid negative counts.
      */
     public void decrementRunCount(String userId) {
+        decrementRunCount(userId, 1);
+    }
+
+    /**
+     * Decrement run counter by N credits when a run fails completely (refund quota).
+     * Clamps at zero to avoid negative counts.
+     */
+    public void decrementRunCount(String userId, int credits) {
+        if (credits <= 0) return;
         AppUser user = userRepo.findById(userId).orElse(null);
         if (user == null) return;
 
         if (user.getOrgId() != null) {
             orgRepo.findById(user.getOrgId()).ifPresent(org -> {
-                if (org.getMonthlyRunCount() > 0) {
-                    org.setMonthlyRunCount(org.getMonthlyRunCount() - 1);
+                int current = org.getMonthlyRunCount();
+                int refund = Math.min(credits, current);
+                if (refund > 0) {
+                    org.setMonthlyRunCount(current - refund);
                     orgRepo.save(org);
-                    log.info("Refunded run quota for org {} (new count: {})", org.getId(), org.getMonthlyRunCount());
+                    log.info("Refunded {} credit(s) for org {} (new count: {})", refund, org.getId(), org.getMonthlyRunCount());
                 }
             });
         } else {
-            if (user.getPersonalRunCount() > 0) {
-                user.setPersonalRunCount(user.getPersonalRunCount() - 1);
+            int current = user.getPersonalRunCount();
+            int refund = Math.min(credits, current);
+            if (refund > 0) {
+                user.setPersonalRunCount(current - refund);
                 userRepo.save(user);
-                log.info("Refunded run quota for user {} (new count: {})", userId, user.getPersonalRunCount());
+                log.info("Refunded {} credit(s) for user {} (new count: {})", refund, userId, user.getPersonalRunCount());
             }
         }
     }

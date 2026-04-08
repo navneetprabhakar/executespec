@@ -5,8 +5,12 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.batch.BatchClientRouter;
+import com.navneet.executespec.batch.BatchRequest;
+import com.navneet.executespec.batch.BatchRequestBuilder;
 import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.agent.CostEstimator;
+import com.navneet.executespec.agent.RunCostEstimate;
 import com.navneet.executespec.agent.ResolvedKeys;
 import com.navneet.executespec.agent.PlannerAgent;
 import com.navneet.executespec.agent.RunKeyStore;
@@ -17,6 +21,8 @@ import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.billing.cost.RunCostLog;
+import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.recovery.RecoveryProperties;
@@ -124,6 +130,13 @@ public class PipelineHarness {
 
     // ── Tier enforcement (complexity gate) ────────────────────────────────────
     private final com.navneet.executespec.auth.service.TierEnforcementService tierEnforcementService;
+
+    // ── Cost audit log ────────────────────────────────────────────────────────
+    private final RunCostLogRepository runCostLogRepository;
+
+    // ── Batch execution ──────────────────────────────────────────────────────
+    private final BatchClientRouter batchClientRouter;
+    private final BatchRequestBuilder batchRequestBuilder;
 
     // ── JIRA/Confluence context extraction ─────────────────────────────────
     private final com.navneet.executespec.integration.context.ReferenceExtractorService referenceExtractorService;
@@ -1661,11 +1674,27 @@ public class PipelineHarness {
                     log.debug("[Run {}] Could not resolve ui_style: {}", runId, ue.getMessage());
                 }
 
-                // Compute and persist cost estimate for plan approval UI
+                // Compute and persist cost estimate + credits for plan approval UI
                 try {
                     var costBreakdown = costEstimator.estimate(plan, run.getAiProviderEnum());
                     stateStore.setCostEstimate(runId, costBreakdown.lowUsd(), costBreakdown.highUsd());
                     log.info("[Run {}] {}", runId, costBreakdown.formatted());
+
+                    // Calculate credits from buffered estimate (dual: real-time + batch)
+                    String costTier = run.getUserTier() != null ? run.getUserTier() : "FREE";
+                    RunCostEstimate creditEstimate = costEstimator.estimateWithCredits(
+                            plan, run.getAiProviderEnum(), props.getCost(), costTier);
+                    stateStore.setCreditsCharged(runId, creditEstimate.runCredits());
+                    stateStore.setHardCapUsd(runId, creditEstimate.hardCap());
+                    stateStore.setBatchCostFields(runId,
+                            creditEstimate.batchAvailable() ? creditEstimate.batchCredits() : null,
+                            creditEstimate.batchAvailable(),
+                            creditEstimate.creditSavings());
+                    log.info("[Run {}] Credits: {} (estimate=${}, hardCap=${}, batchAvail={}, batchCredits={})",
+                            runId, creditEstimate.runCredits(),
+                            String.format("%.2f", creditEstimate.totalEstimatedCost()),
+                            String.format("%.2f", creditEstimate.hardCap()),
+                            creditEstimate.batchAvailable(), creditEstimate.batchCredits());
                 } catch (Exception ce) {
                     log.debug("[Run {}] Could not compute cost estimate: {}", runId, ce.getMessage());
                 }
@@ -1704,7 +1733,12 @@ public class PipelineHarness {
             boolean planApproved;
             try (Observation.Scope gateScope = gateObs.openScope()) {
                 String planGateId = stateStore.recordGateOpened(runId, "PLAN_APPROVAL");
-                broadcaster.emit(runId, RunEvent.gateOpened(runId, "PLAN_APPROVAL"));
+                // Emit gate event with credits info if available
+                PipelineRun gateRun = stateStore.findRun(runId).orElse(run);
+                int gateCredits = gateRun.getCreditsCharged() != null ? gateRun.getCreditsCharged() : 1;
+                double gateEstimate = gateRun.getCostEstimateHigh() != null ? gateRun.getCostEstimateHigh() : 0.0;
+                broadcaster.emit(runId, RunEvent.gateOpenedWithCredits(
+                        runId, "PLAN_APPROVAL", gateCredits, gateEstimate));
 
                 // Re-fetch the run: the controller may have set skipApproval / model overrides
                 // after submitRun() returned but before we reach this point.
@@ -1758,7 +1792,85 @@ public class PipelineHarness {
                 return;
             }
 
+            // ── Charge credits at plan approval ─────────────────────────────
+            run = stateStore.findRun(runId).orElse(run);
+            boolean isBatchMode = "BATCH".equals(run.getApprovedExecutionMode());
+            int creditsToCharge;
+            if (isBatchMode && run.getBatchCredits() != null) {
+                creditsToCharge = run.getBatchCredits();
+            } else {
+                creditsToCharge = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
+            }
+            String approvalUserId = run.getCreatedByUserId();
+
+            if (approvalUserId != null) {
+                // FREE tier: block specs requiring more than maxCreditsFree
+                int maxFree = props.getCost().getMaxCreditsFree();
+                String approvalTier = run.getUserTier() != null ? run.getUserTier() : "FREE";
+                boolean hasByok = "OWN_KEYS".equals(run.getKeySource()) || "HYBRID".equals(run.getKeySource());
+                boolean isEnterprise = "ENTERPRISE".equalsIgnoreCase(approvalTier);
+
+                if ("FREE".equalsIgnoreCase(approvalTier) && !hasByok && creditsToCharge > maxFree) {
+                    String msg = "This spec requires " + creditsToCharge + " credits but free tier supports " +
+                            maxFree + "-credit specs only. Upgrade to Pro or purchase a top-up pack to run complex specifications.";
+                    stateStore.markRejected(runId, msg);
+                    broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, msg));
+                    broadcaster.complete(runId);
+                    return;
+                }
+
+                // Charge N credits (BYOK/ENTERPRISE unlimited — skip charge)
+                if (!hasByok && !isEnterprise) {
+                    try {
+                        tierEnforcementService.assertAndIncrementRunCount(approvalUserId, creditsToCharge);
+                    } catch (ResponseStatusException qex) {
+                        String msg = "This spec requires " + creditsToCharge + " credits but you have insufficient " +
+                                "remaining runs. Purchase a top-up pack or upgrade your tier to continue.";
+                        stateStore.markRejected(runId, msg);
+                        broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                        eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, msg));
+                        broadcaster.complete(runId);
+                        return;
+                    }
+                }
+            }
+
             stateStore.markApproved(runId);
+
+            // ── Batch routing: if user chose BATCH, submit to batch API and return ──
+            run = stateStore.findRun(runId).orElseThrow();
+            if ("BATCH".equals(run.getApprovedExecutionMode())
+                    && props.getCost().getBatch().isEnabled()) {
+                try {
+                    broadcaster.emit(runId, RunEvent.runStatus(runId, "QUEUED_BATCH"));
+                    stateStore.updateStatus(runId, "QUEUED_BATCH");
+
+                    List<BatchRequest> batchRequests = batchRequestBuilder.buildRequests(
+                            plan, run.getAiProviderEnum(), run.getPlanJson());
+                    String batchId = batchClientRouter.submitBatch(
+                            runId, batchRequests, run.getAiProviderEnum());
+
+                    stateStore.setBatchInfo(runId, batchId, run.getAiProviderEnum().name());
+                    stateStore.updateBatchProgress(runId, 0, batchRequests.size());
+                    stateStore.updateStatus(runId, "IN_PROGRESS_BATCH");
+                    broadcaster.emit(runId, RunEvent.runStatus(runId, "IN_PROGRESS_BATCH"));
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                            "Batch submitted to " + run.getAiProviderEnum() + " (" + batchRequests.size() + " tasks). Polling for completion..."));
+                    log.info("[Run {}] Batch submitted: batchId={}, provider={}, tasks={}",
+                            runId, batchId, run.getAiProviderEnum(), batchRequests.size());
+                    // Pipeline pauses here — BatchPollService will resume when complete
+                    return;
+                } catch (Exception batchEx) {
+                    log.error("[Run {}] Batch submission failed, falling back to real-time: {}",
+                            runId, batchEx.getMessage());
+                    stateStore.setApprovedExecutionMode(runId, "REALTIME");
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                            "Batch submission failed — falling back to real-time execution."));
+                    // Fall through to normal execution
+                }
+            }
+
             broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
 
             // ── 3. Workers ─────────────────────────────────────────────────
@@ -1793,10 +1905,19 @@ public class PipelineHarness {
                 // Initialize run-level budget tracker from task plan
                 runBudgetTracker.initBudget(runId, plan);
 
-                // Initialize per-run cost budget (USD ceiling based on tier)
+                // Initialize per-run cost budget — dynamic ceiling from credits × multiplier × margin
                 boolean hasByok = "OWN_KEYS".equals(run.getKeySource()) || "HYBRID".equals(run.getKeySource());
-                double costBudget = tierEnforcementService.resolveRunCostBudget(
-                        run.getUserTier() != null ? run.getUserTier() : "FREE", hasByok);
+                boolean isEnterprise = "ENTERPRISE".equalsIgnoreCase(
+                        run.getUserTier() != null ? run.getUserTier() : "FREE");
+                double costBudget;
+                if (hasByok || isEnterprise) {
+                    costBudget = -1; // unlimited
+                } else {
+                    int credits = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
+                    double multiplier = props.getCost().getCreditMultiplierUsd();
+                    double margin = props.getCost().getBudgetMargin();
+                    costBudget = credits * multiplier * margin;
+                }
                 runCostBudgetService.initBudget(runId, costBudget, run.getUserTier());
 
                 // === SEQUENTIAL EXECUTION WITH VALIDATION + MODEL ROUTING ===
@@ -2260,8 +2381,54 @@ public class PipelineHarness {
             double cost = costEstimator.computeCostForRun(runId);
             stateStore.setActualCost(runId, cost);
             log.info("[PipelineHarness] Actual cost for run {}: ${}", runId, String.format("%.4f", cost));
+
+            // Write cost audit log for pricing analytics
+            writeRunCostLog(runId, cost);
         } catch (Exception e) {
             log.warn("[PipelineHarness] Could not compute actual cost for run {}: {}", runId, e.getMessage());
+        }
+    }
+
+    /** Persists a RunCostLog entry for pricing analytics. Non-fatal. */
+    private void writeRunCostLog(String runId, double actualCost) {
+        try {
+            PipelineRun run = stateStore.findRun(runId).orElse(null);
+            if (run == null) return;
+
+            double estimatedCost = run.getCostEstimateHigh() != null ? run.getCostEstimateHigh() : 0.0;
+            int credits = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
+            double hardCap = run.getHardCapUsd() != null ? run.getHardCapUsd() : 0.0;
+            boolean budgetHit = hardCap > 0 && actualCost >= hardCap;
+            double margin = estimatedCost - actualCost;
+
+            // Count tasks
+            List<AgentTask> tasks = stateStore.getAllTasks(runId);
+            int taskCount = tasks.size();
+            int tasksCompleted = (int) tasks.stream()
+                    .filter(t -> "COMPLETE".equals(t.getStatus()))
+                    .count();
+
+            RunCostLog logEntry = RunCostLog.builder()
+                    .runId(runId)
+                    .userId(run.getCreatedByUserId() != null ? run.getCreatedByUserId() : "unknown")
+                    .orgId(run.getOrgId())
+                    .provider(run.getAiProvider() != null ? run.getAiProvider() : "unknown")
+                    .estimatedCost(estimatedCost)
+                    .actualCost(actualCost)
+                    .hardCap(hardCap)
+                    .creditsCharged(credits)
+                    .status(run.getStatus() != null ? run.getStatus() : "UNKNOWN")
+                    .taskCount(taskCount)
+                    .tasksCompleted(tasksCompleted)
+                    .budgetHit(budgetHit)
+                    .marginUsd(margin)
+                    .build();
+            runCostLogRepository.save(logEntry);
+            log.info("[PipelineHarness] Cost log: run={} estimated=${} actual=${} margin=${} credits={} budgetHit={}",
+                    runId, String.format("%.4f", estimatedCost), String.format("%.4f", actualCost),
+                    String.format("%.4f", margin), credits, budgetHit);
+        } catch (Exception e) {
+            log.warn("[PipelineHarness] Could not write cost log for run {}: {}", runId, e.getMessage());
         }
     }
 
@@ -3375,5 +3542,97 @@ public class PipelineHarness {
             log.info("Run {} — test execution completed, report generation unblocked", event.runId());
         }
         // Preview stays running for the user — TTL-based cleanup handles shutdown
+    }
+
+    // ── Batch completion listener — resumes pipeline from compile step ────
+
+    @EventListener
+    @org.springframework.scheduling.annotation.Async
+    public void onBatchComplete(com.navneet.executespec.batch.BatchResumeService.BatchCompleteEvent event) {
+        String runId = event.runId();
+        log.info("[Run {}] Batch complete event received — resuming pipeline", runId);
+        PipelineRun run = stateStore.findRun(runId).orElse(null);
+        if (run == null) {
+            log.error("[Run {}] Run not found for batch resume", runId);
+            return;
+        }
+
+        try {
+            // Initialize workspace + agent context if needed (batch runs may not have it set up)
+            String workspacePath = run.getWorkspacePath();
+            if (workspacePath != null) {
+                try {
+                    TaskPlan plan = mapper.readValue(run.getPlanJson(), TaskPlan.class);
+                    initAgentContext(runId, run.getPlanJson());
+                } catch (Exception e) {
+                    log.debug("[Run {}] Could not init agent context for batch resume: {}", runId, e.getMessage());
+                }
+            }
+
+            // Compile & Fix
+            broadcaster.emit(runId, RunEvent.runStatus(runId, "COMPILING"));
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Compile & fix pass (post-batch)..."));
+            CompileResult compileResult = null;
+            try {
+                compileResult = compilerAgent.runCompileAndFix(runId);
+            } catch (Exception e) {
+                log.warn("[Run {}] Post-batch compile failed: {}", runId, e.getMessage());
+            }
+
+            // Check if any tasks completed
+            List<AgentTask> allTasks = stateStore.getAllTasks(runId);
+            boolean anyComplete = allTasks.stream().anyMatch(t -> "COMPLETE".equals(t.getStatus()));
+            if (!anyComplete) {
+                stateStore.markFailed(runId, "No batch tasks completed successfully");
+                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                return;
+            }
+
+            // Auto-merge all branches
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Merging batch task branches..."));
+            try {
+                mergeService.mergeAll(runId, allTasks);
+            } catch (Exception e) {
+                log.warn("[Run {}] Post-batch merge failed: {}", runId, e.getMessage());
+            }
+
+            // Mark COMPLETE
+            stateStore.markComplete(runId);
+            broadcaster.emit(runId, RunEvent.complete(runId, "COMPLETE"));
+            eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+
+            // Background validation (review, test gen, preview) — same as real-time runs
+            final CompileResult finalCompileResult = compileResult;
+            backgroundValidationRuns.add(runId);
+            final PipelineRun bgRun = stateStore.findRun(runId).orElse(run);
+            var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
+            Thread.ofVirtual().name("bg-validation-batch-" + runId).start(
+                    bgSnapshot.wrap(() -> {
+                        try {
+                            runBackgroundValidation(runId, bgRun, List.of(),
+                                    bgRun.getPlanJson(), bgRun.getUserRequest(),
+                                    finalCompileResult, false, true);
+                        } finally {
+                            backgroundValidationRuns.remove(runId);
+                            runKeyStore.remove(runId);
+                            runBudgetTracker.remove(runId);
+                            runCostBudgetService.remove(runId);
+                            broadcaster.complete(runId);
+                        }
+                    })
+            );
+
+            // Save actual cost
+            try {
+                saveActualCost(runId);
+            } catch (Exception e) {
+                log.debug("[Run {}] Post-batch cost save failed: {}", runId, e.getMessage());
+            }
+
+        } catch (Exception e) {
+            log.error("[Run {}] Batch resume failed: {}", runId, e.getMessage(), e);
+            stateStore.markFailed(runId, "Batch resume failed: " + e.getMessage());
+            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+        }
     }
 }

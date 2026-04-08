@@ -540,10 +540,6 @@ public class WorkerAgent {
      * @return true if budget exceeded and loop should break
      */
     private boolean checkMidTaskBudget(String taskId, String runId, TaskExecutionState state) {
-        if (state.iteration % 5 == 0) {
-            // Emit progressive cost warnings at 50/75/90%
-            runCostBudgetService.checkBudgetWarnings(runId);
-        }
         if (state.iteration % 5 == 0 && runCostBudgetService.isOverBudget(runId)) {
             String tier = runCostBudgetService.getRunTier(runId);
             Double budget = runCostBudgetService.getBudget(runId);

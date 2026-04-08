@@ -26,6 +26,13 @@ public record RunEvent(
         return new RunEvent("GATE_OPENED", runId, null, gateType, Instant.now());
     }
 
+    /** Gate opened with credits info for plan approval UI. */
+    public static RunEvent gateOpenedWithCredits(String runId, String gateType,
+                                                  int creditsCharged, double totalEstimatedCost) {
+        String payload = gateType + "|" + creditsCharged + "|" + String.format("%.2f", totalEstimatedCost);
+        return new RunEvent("GATE_OPENED", runId, null, payload, Instant.now());
+    }
+
     public static RunEvent gateResolved(String runId, boolean approved, String comment) {
         return new RunEvent("GATE_RESOLVED", runId, null,
                 approved ? "APPROVED" : "REJECTED", Instant.now());
@@ -252,6 +259,19 @@ public record RunEvent(
         return new RunEvent("BUDGET_WARNING", runId, null,
                 tier + "|" + String.format("%.2f", budgetUsd) + "|" + percentUsed + "|" +
                         String.format("%.2f", currentCost) + "|" + message, Instant.now());
+    }
+
+    public static RunEvent batchProgress(String runId, int completed, int total) {
+        return new RunEvent("BATCH_PROGRESS", runId, null,
+                completed + "/" + total, Instant.now());
+    }
+
+    public static RunEvent batchComplete(String runId) {
+        return new RunEvent("BATCH_COMPLETE", runId, null, "Batch processing finished", Instant.now());
+    }
+
+    public static RunEvent batchFailed(String runId, String error) {
+        return new RunEvent("BATCH_FAILED", runId, null, error, Instant.now());
     }
 
     public static RunEvent budgetExceeded(String runId, String tier, double budgetUsd) {

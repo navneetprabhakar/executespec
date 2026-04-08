@@ -56,6 +56,12 @@ public class RunDetail {
     /** Actual cost in USD computed after run completion. Null until complete. */
     Double actualCostUsd;
 
+    /** Run credits charged (proportional to estimated cost). */
+    Integer creditsCharged;
+
+    /** Hard cap in USD (safety ceiling). */
+    Double hardCapUsd;
+
     /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). */
     String techStack;
 
@@ -88,6 +94,20 @@ public class RunDetail {
 
     /** Timestamp when the run was archived by the user. Null for active runs. */
     Instant archivedAt;
+
+    // ── Batch execution ──────────────────────────────────────────────────────
+    /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
+    String approvedExecutionMode;
+    /** Batch credits (with 50% discount). Null if batch not available. */
+    Integer batchCredits;
+    /** True if this run qualifies for batch execution. */
+    Boolean batchAvailable;
+    /** Credits saved by choosing batch over real-time. */
+    Integer creditSavings;
+    /** Batch progress: tasks completed so far. */
+    Integer batchProgressCompleted;
+    /** Batch progress: total tasks in batch. */
+    Integer batchProgressTotal;
 
     // ── Per-agent token breakdown (V19) ─────────────────────────────────────
     /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */

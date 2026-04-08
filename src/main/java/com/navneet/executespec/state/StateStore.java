@@ -410,6 +410,95 @@ public class StateStore {
         });
     }
 
+    /** Persist the number of run credits charged for this run. */
+    public void setCreditsCharged(String runId, int credits) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setCreditsCharged(credits);
+            runRepo.save(run);
+        });
+    }
+
+    /** Persist the hard-cap USD ceiling for this run. */
+    public void setHardCapUsd(String runId, double hardCap) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setHardCapUsd(hardCap);
+            runRepo.save(run);
+        });
+    }
+
+    /** Persist batch cost fields computed at plan time. */
+    public void setBatchCostFields(String runId, Integer batchCredits, boolean batchAvailable, int creditSavings) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setBatchCredits(batchCredits);
+            run.setBatchAvailable(batchAvailable);
+            run.setCreditSavings(creditSavings);
+            runRepo.save(run);
+        });
+    }
+
+    // ── Batch execution state ──────────────────────────────────────────────
+
+    public void setBatchInfo(String runId, String batchId, String batchProvider) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setBatchId(batchId);
+            run.setBatchProvider(batchProvider);
+            run.setBatchSubmittedAt(java.time.Instant.now());
+            runRepo.save(run);
+        });
+    }
+
+    public void setApprovedExecutionMode(String runId, String mode) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setApprovedExecutionMode(mode);
+            runRepo.save(run);
+        });
+    }
+
+    public void updateBatchProgress(String runId, int completed, int total) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setBatchProgressCompleted(completed);
+            run.setBatchProgressTotal(total);
+            runRepo.save(run);
+        });
+    }
+
+    public java.util.List<PipelineRun> findRunsByStatusIn(java.util.List<String> statuses) {
+        return runRepo.findByStatusIn(statuses);
+    }
+
+    // ── Batch task helpers ──────────────────────────────────────────────────
+
+    /** Mark a task as COMPLETE (batch mode — no WorkerReport). */
+    public void markTaskComplete(String taskId) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            task.setStatus("COMPLETE");
+            task.setCompletedAt(Instant.now());
+            if (task.getStartedAt() != null) {
+                task.setDurationMs(Duration.between(task.getStartedAt(), Instant.now()).toMillis());
+            }
+            taskRepo.save(task);
+        });
+    }
+
+    /** Mark a task as FAILED with a reason (batch mode). */
+    public void markTaskFailed(String taskId, String reason) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            task.setStatus("FAILED");
+            task.setLastLlmFailure(reason);
+            task.setCompletedAt(Instant.now());
+            taskRepo.save(task);
+        });
+    }
+
+    /** Update task token counts (batch mode — no WorkerReport). */
+    public void updateTaskTokens(String taskId, int inputTokens, int outputTokens) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            task.setInputTokens(inputTokens);
+            task.setOutputTokens(outputTokens);
+            taskRepo.save(task);
+        });
+    }
+
     public void setActualCost(String runId, double costUsd) {
         runRepo.findById(runId).ifPresent(run -> {
             run.setActualCostUsd(costUsd);
@@ -1472,6 +1561,13 @@ public class StateStore {
         run.setCurrentGate(null);
         run.setCompletedAt(Instant.now());
         if (reason != null) run.setFailureReason(reason);
+        runRepo.save(run);
+    }
+
+    /** Update run status without changing completedAt or failureReason. Used for batch status transitions. */
+    public void updateStatus(String runId, String status) {
+        PipelineRun run = runRepo.findById(runId).orElseThrow();
+        run.setStatus(status);
         runRepo.save(run);
     }
 

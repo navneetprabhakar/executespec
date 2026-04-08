@@ -91,8 +91,9 @@ public class RunController {
                     "Run submissions are temporarily paused for maintenance. Please try again later.");
         }
 
-        // Enforce tier quota atomically (check + increment in single TX with pessimistic lock)
-        tierEnforcementService.assertAndIncrementRunCount(userDetails.getUser().getId());
+        // Check quota availability (no increment — credits are charged at plan approval,
+        // after cost estimation determines how many credits this run requires)
+        tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
         // Enforce billing usage limits (throws 402 if limit exceeded)
         usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
         // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
@@ -221,7 +222,37 @@ public class RunController {
             @RequestBody ApprovalRequest req,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(runId, userDetails);
-        log.info("POST /api/runs/{}/approve — approved={}", runId, req.approved());
+        log.info("POST /api/runs/{}/approve — approved={}, creditsConfirmed={}, executionMode={}",
+                runId, req.approved(), req.creditsConfirmed(), req.executionMode());
+
+        // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
+        if (req.approved() && req.creditsConfirmed() != null) {
+            stateStore.findRun(runId).ifPresent(run -> {
+                int expected;
+                if ("BATCH".equalsIgnoreCase(req.executionMode()) && run.getBatchCredits() != null) {
+                    expected = run.getBatchCredits();
+                } else {
+                    expected = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
+                }
+                if (!req.creditsConfirmed().equals(expected)) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Credits mismatch: expected " + expected + " but confirmed " +
+                            req.creditsConfirmed() + ". Cost estimate may have changed — please review.");
+                }
+            });
+        }
+
+        // Validate and persist execution mode choice
+        if (req.approved() && "BATCH".equalsIgnoreCase(req.executionMode())) {
+            stateStore.findRun(runId).ifPresent(run -> {
+                if (!Boolean.TRUE.equals(run.getBatchAvailable())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Batch execution is not available for this run.");
+                }
+            });
+            stateStore.setApprovedExecutionMode(runId, "BATCH");
+        }
+
         boolean resolved = harness.resolvePlanGate(runId, req.approved(),
             req.comment() != null ? req.comment() : "");
         if (resolved) return ResponseEntity.ok().build();

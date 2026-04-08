@@ -291,10 +291,7 @@ public class SequentialTaskExecutor {
             return;
         }
 
-        // === Progressive cost warnings (50%, 75%, 90%) ===
-        runCostBudgetService.checkBudgetWarnings(runId);
-
-        // === Cost budget check (USD) before executing worker ===
+        // === Cost budget check (silent hard cap) before executing worker ===
         if (runCostBudgetService.isOverBudget(runId)) {
             String tier = runCostBudgetService.getRunTier(runId);
             Double budget = runCostBudgetService.getBudget(runId);
@@ -783,10 +780,7 @@ public class SequentialTaskExecutor {
                     continue;
                 }
 
-                // Progressive cost warnings before each subtask
-                runCostBudgetService.checkBudgetWarnings(runId);
-
-                // Check budget before each subtask
+                // Check budget (silent hard cap) before each subtask
                 if (runCostBudgetService.isOverBudget(runId)) {
                     String tier = runCostBudgetService.getRunTier(runId);
                     Double budget = runCostBudgetService.getBudget(runId);

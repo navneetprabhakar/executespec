@@ -89,7 +89,7 @@ export function useSse(runId: string | null) {
             patchRunStatus(runId!, data.payload);
             // RUN_DETAIL push handles the full refetch — only fetch here as fallback
             // for terminal states where the SSE stream may close before RUN_DETAIL arrives.
-            if (['COMPLETE', 'FAILED', 'CANCELLED'].includes(data.payload)) {
+            if (['COMPLETE', 'FAILED', 'CANCELLED', 'COMPILING', 'WORKING', 'QUEUED_BATCH', 'IN_PROGRESS_BATCH'].includes(data.payload)) {
               fetchRun(runId!);
             }
           }
@@ -99,6 +99,10 @@ export function useSse(runId: string | null) {
             fetchRun(runId!);
           }
           if (data.type === 'RUN_RESTARTED' || data.type === 'BUDGET_EXCEEDED') {
+            fetchRun(runId!);
+          }
+          // Batch progress/completion triggers refetch
+          if (data.type === 'BATCH_PROGRESS' || data.type === 'BATCH_COMPLETE' || data.type === 'BATCH_FAILED') {
             fetchRun(runId!);
           }
         } catch {}
