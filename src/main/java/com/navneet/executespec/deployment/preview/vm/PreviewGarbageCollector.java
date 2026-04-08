@@ -17,7 +17,7 @@ import java.util.List;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "preview.vm", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(name = "preview.mode", havingValue = "vm")
 public class PreviewGarbageCollector {
 
     private final PreviewDeploymentService previewService;

@@ -7,6 +7,8 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.ArtifactRegistryClient;
 import com.navneet.executespec.deployment.CloudRunClient;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.deployment.preview.vm.PreviewDeploymentService;
+import com.navneet.executespec.deployment.preview.vm.PreviewVmResult;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -91,6 +93,10 @@ public class PreviewService {
     /** Notifies the test execution pipeline that the preview is ready. */
     @Autowired(required = false)
     private com.navneet.executespec.testgen.TestPreviewCoordinator testPreviewCoordinator;
+
+    /** Optional — for VM-based preview mode. */
+    @Autowired(required = false)
+    private PreviewDeploymentService vmPreviewService;
 
     /** runId → session */
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
@@ -193,7 +199,10 @@ public class PreviewService {
                 if (existing.status() == PreviewStatus.FAILED
                         || existing.status() == PreviewStatus.TIMED_OUT) {
                     // Clean up stale failed session so retry starts fresh
-                    if (existing.cloudRunServiceName() != null) {
+                    if (isVmMode() && vmPreviewService != null && existing.composeProjectName() != null) {
+                        try { vmPreviewService.teardown(existing.composeProjectName()); }
+                        catch (Exception ignored) { /* best-effort cleanup */ }
+                    } else if (existing.cloudRunServiceName() != null) {
                         cleanupCloudRun(existing.cloudRunServiceName(), existing.imageUri());
                     } else {
                         cleanupCompose(existing);
@@ -271,7 +280,10 @@ public class PreviewService {
         // Capture observation context so virtual threads propagate traceId/spanId
         var snapshot = ContextSnapshotFactory.builder().build().captureAll();
         String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
-        if (isCloudRunMode()) {
+        if (isVmMode()) {
+            Thread.ofVirtual().name("preview-vm-" + shortId)
+                    .start(snapshot.wrap(() -> buildAndStartVm(runId, workspace, type, mode, projectName)));
+        } else if (isCloudRunMode()) {
             Thread.ofVirtual().name("preview-cr-" + shortId)
                     .start(snapshot.wrap(() -> buildAndStartCloudRun(runId, workspace, type, mode, projectName, safeEnvVars)));
         } else {
@@ -298,15 +310,25 @@ public class PreviewService {
         // Note: lastEnvVars NOT removed here — rebuild() needs them after stop()
         Metrics.ACTIVE_PREVIEWS.decrementAndGet();
 
-        if (session.cloudRunServiceName() != null) {
+        String mode;
+        if (isVmMode() && vmPreviewService != null && session.composeProjectName() != null) {
+            // VM mode: teardown via SSH on the preview VM
+            try {
+                vmPreviewService.teardown(session.composeProjectName());
+            } catch (Exception e) {
+                log.warn("VM preview teardown failed for run {}: {}", runId, e.getMessage());
+            }
+            mode = "vm";
+        } else if (session.cloudRunServiceName() != null) {
             cleanupCloudRun(session.cloudRunServiceName(), session.imageUri());
+            mode = "cloud-run";
         } else {
             cleanupCompose(session);
+            mode = "docker";
         }
 
         broadcaster.emit(runId, new RunEvent("PREVIEW_STOPPED", runId, null, null, Instant.now()));
-        log.info("Preview stopped for run {} (mode={})", runId,
-                session.cloudRunServiceName() != null ? "cloud-run" : "docker");
+        log.info("Preview stopped for run {} (mode={})", runId, mode);
     }
 
     /**
@@ -333,6 +355,11 @@ public class PreviewService {
     public String getLogs(String runId, int tailLines, String filter) {
         PreviewSession session = active.get(runId);
         if (session == null) return "";
+
+        // VM mode: logs are on the remote VM, not available locally
+        if (isVmMode()) {
+            return "Preview running on VM — check VM logs via /api/v1/previews/" + runId + "/logs";
+        }
 
         // Cloud Run mode: fetch logs via gcloud
         if (session.cloudRunServiceName() != null) {
@@ -381,6 +408,70 @@ public class PreviewService {
 
     private boolean isCloudRunMode() {
         return "cloud-run".equalsIgnoreCase(props.getMode());
+    }
+
+    private boolean isVmMode() {
+        return "vm".equalsIgnoreCase(props.getMode());
+    }
+
+    // ── Private: build and start with VM ──────────────────────────────────
+
+    private void buildAndStartVm(String runId, Path workspace, PreviewProjectType type,
+                                  PreviewMode mode, String projectName) {
+        if (vmPreviewService == null) {
+            fail(runId, "VM preview mode configured but PreviewDeploymentService is not available. " +
+                    "Ensure preview.vm.enabled=true is set.", 0);
+            return;
+        }
+
+        try {
+            // Phase 1: Detect database
+            broadcaster.emit(runId, RunEvent.log(runId, null, "Detecting project dependencies..."));
+            DatabaseType dbType = databaseDetector.detect(workspace);
+
+            // Phase 2: Generate Dockerfile + docker-compose.yml (same as Docker path)
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), type, mode, dbType,
+                    PreviewStatus.BUILDING, null, 0, null,
+                    s.startedAt(), s.expiresAt(), null, null));
+            broadcaster.emit(runId, RunEvent.log(runId, null, "Generating Dockerfile and compose config..."));
+
+            Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+            backupIfExists(workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
+            backupIfExists(workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
+            String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
+            Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+            log.info("VM preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
+
+            // Generate docker-compose.yml with port 8080 (standard container port)
+            composeFileGen.generate(workspace, type, mode, dbType, Map.of(), 8080);
+
+            // Phase 3: SCP + deploy to VM
+            broadcaster.emit(runId, RunEvent.log(runId, null, "Deploying preview to VM..."));
+            PreviewVmResult result = vmPreviewService.deploy(projectName, runId, workspace);
+
+            String previewUrl = result.getUrl();
+            log.info("VM preview deployed for run {}: {}", runId, previewUrl);
+
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), result.getPreviewId(), type, mode, null,
+                    PreviewStatus.RUNNING, previewUrl, result.getPort(), null,
+                    s.startedAt(), s.expiresAt(), null, null));
+
+            broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null, previewUrl, Instant.now()));
+
+            // Notify test execution pipeline
+            if (testPreviewCoordinator != null) {
+                try {
+                    testPreviewCoordinator.onPreviewReady(runId, previewUrl);
+                } catch (Exception e) {
+                    log.warn("Failed to notify test coordinator for run {}: {}", runId, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("VM preview deploy failed for run {}: {}", runId, e.getMessage());
+            fail(runId, "VM preview failed: " + e.getMessage(), 0);
+        }
     }
 
     // ── Private: build and start with Cloud Run ───────────────────────────
@@ -836,8 +927,9 @@ public class PreviewService {
 
         PreviewSession session = active.get(runId);
         if (session != null) {
-            // Cloud Run cleanup: delete service + image if this was a Cloud Run preview
-            if (session.cloudRunServiceName() != null) {
+            if (isVmMode()) {
+                // VM mode: no local cleanup needed, VM state is managed by PreviewDeploymentService
+            } else if (session.cloudRunServiceName() != null) {
                 cleanupCloudRun(session.cloudRunServiceName(), session.imageUri());
             } else {
                 cleanupOnFailure(runId, session.composeProjectName(), hostPort);

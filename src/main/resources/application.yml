@@ -373,7 +373,7 @@ agent:
 # ── Preview ────────────────────────────────────────────────────────────────
 preview:
   enabled: true
-  mode: docker                         # "docker" (Docker Compose, local) or "cloud-run" (GCP Cloud Run)
+  mode: ${PREVIEW_MODE:docker}           # "docker" (Docker Compose, local), "cloud-run" (GCP Cloud Run), or "vm" (GCE VM)
   total-startup-timeout-seconds: 480   # 8-minute total deadline (Spring Boot cold builds need extra time)
   preview-ttl-minutes: 5              # auto-shutdown after 5 minutes
   port-range-start: 10000              # Docker Compose host port range
@@ -392,7 +392,7 @@ preview:
     gateway:
       ip: ${PREVIEW_GATEWAY_IP:}
       internal-ip: ${PREVIEW_GW_INTERNAL_IP:}
-      user: ubuntu
+      user: ${PREVIEW_SSH_USER:ubuntu}
       ssh-key-path: ${PREVIEW_SSH_KEY_PATH:}
       vm-id: preview-gw
     vms:
