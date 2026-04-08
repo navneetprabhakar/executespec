@@ -1,0 +1,16 @@
+Build a Kanban board task manager like a simplified Trello using React and TypeScript. Include:
+
+1. **Board Management**: Users can create multiple boards with custom names. Board list shown in a sidebar with the ability to switch between boards
+2. **Columns**: Each board has default columns: "To Do", "In Progress", "Done". Users can add custom columns, rename them, and reorder columns via drag-and-drop
+3. **Cards**: Each card has:
+   - Title (required)
+   - Description (optional, supports markdown)
+   - Color label (red, orange, yellow, green, blue, purple — selectable)
+   - Due date (optional, with visual indicator when overdue)
+   - Priority (Low, Medium, High — shown as colored badge)
+4. **Drag and Drop**: Cards can be dragged between columns. Implement using HTML5 Drag and Drop API (no libraries). Show a visual drop indicator
+5. **Persistence**: Store all data in localStorage with automatic save on every change. Load on page mount
+6. **Search**: Global search bar that filters cards across all columns by title or description text
+7. **Stats**: Show a mini stats bar at the top: total cards, cards per column, overdue count
+
+Use Tailwind CSS for styling. Implement a clean, modern UI with smooth transitions for drag operations.
