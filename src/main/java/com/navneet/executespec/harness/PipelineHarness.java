@@ -1902,13 +1902,15 @@ public class PipelineHarness {
                 // Validate file ownership — detect overlap before workers start
                 validateFileOwnership(workerTasks, runId);
 
-                // Initialize run-level budget tracker from task plan
-                runBudgetTracker.initBudget(runId, plan);
-
                 // Initialize per-run cost budget — dynamic ceiling from credits × multiplier × margin
                 boolean hasByok = "OWN_KEYS".equals(run.getKeySource()) || "HYBRID".equals(run.getKeySource());
                 boolean isEnterprise = "ENTERPRISE".equalsIgnoreCase(
                         run.getUserTier() != null ? run.getUserTier() : "FREE");
+
+                // Initialize run-level call-count budget tracker
+                // ENTERPRISE/BYOK: unlimited. Multi-credit runs: ceiling scales with credits.
+                int budgetCredits = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
+                runBudgetTracker.initBudget(runId, plan, budgetCredits, hasByok || isEnterprise);
                 double costBudget;
                 if (hasByok || isEnterprise) {
                     costBudget = -1; // unlimited
