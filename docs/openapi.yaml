@@ -4,7 +4,7 @@ info:
   description: |
     Multi-agent code generation platform API.
     All endpoints under `/api` except those marked public require a JWT Bearer token.
-  version: 1.1.0
+  version: 1.5.0
   contact:
     name: ExecuteSpec
     url: https://executespec.ai
@@ -1789,6 +1789,31 @@ paths:
                     items:
                       type: object
 
+  /runs/{runId}/run-tests:
+    post:
+      tags: [Test Gen]
+      summary: Manually trigger test execution (Beta, requires preview RUNNING)
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '202':
+          description: Test execution started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId:
+                    type: string
+                  testPlanId:
+                    type: integer
+                  previewUrl:
+                    type: string
+        '404':
+          description: Run not found
+        '409':
+          description: Preview not running or no compiled test plan
+
   # ──────────────────────────────────────────────────
   # METRICS
   # ──────────────────────────────────────────────────
@@ -2847,6 +2872,10 @@ components:
           type: string
         executionMode:
           type: string
+        approvedExecutionMode:
+          type: string
+          nullable: true
+          description: "REALTIME or BATCH. Null for pre-V61 runs or runs not yet approved."
 
     RunDetail:
       type: object

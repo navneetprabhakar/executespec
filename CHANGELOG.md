@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [1.5.0] — 2026-04-09
+
+### Added
+- **Batch auto-retry** — Failed batch tasks are automatically retried in real-time after batch results are processed. `onBatchComplete()` queries for FAILED tasks, resets them to PENDING, and executes via `SequentialTaskExecutor` before compile.
+- **Manual test execution (Beta)** — New "Run Tests" button in PreviewTab allows manual test execution against a running preview for batch runs. `POST /api/runs/{runId}/run-tests` validates preview is RUNNING and test plan is COMPILED, then triggers `TestPreviewCoordinator.triggerManualExecution()`.
+- **Batch badge** — Emerald pill badge on RunCard (list view) and RunDetailTabs (detail view) indicating batch execution mode. `approvedExecutionMode` field added to `RunSummary` DTO.
+- **Batch model attribution** — `BatchResumeService` now resolves the WORKHORSE-tier model via `ModelResolver` and sets `model`/`provider` on each completed task, fixing "unknown" display in token usage.
+- **`StateStore.resetTaskForRetry()`** — JPQL update resetting task status to PENDING with cleared failure fields for batch retry flow.
+- **`StateStore.setTaskModelProvider()`** — Sets model/provider on tasks after batch resume without coupling to `markTaskComplete()`.
+
+### Changed
+- **Batch runs skip auto-preview** — `TestPreviewCoordinator.onTestsReady()` detects batch runs and publishes an empty `TestExecutionCompletedEvent` instead of starting auto-preview. Unblocks validation report generation without wasting preview resources.
+- **Batch debug logging removed** — Removed raw API response dumps from `AnthropicBatchClient`, `GoogleBatchClient`, and `OpenAiBatchClient` (status responses, result bodies, truncated previews). Removed unused `truncate()` helpers.
+
+---
+
 ## [1.4.0] — 2026-04-07
 
 ### Added

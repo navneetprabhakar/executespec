@@ -1,7 +1,7 @@
 # ExecuteSpec Codebase Map
 
 > Quick reference: every class → one-line purpose. Keep updated.
-> Last updated: 2026-04-06
+> Last updated: 2026-04-09
 
 ## Java (com.navneet.executespec.*)
 
@@ -38,7 +38,7 @@
 - `AvailableProviderResolver` — Resolves available providers per run based on API keys
 
 ### harness/ — Pipeline orchestration
-- `PipelineHarness` — Main orchestrator: plan→work→compile→merge→COMPLETE→preview→background validation. Publishes MergeCompleted for integration outbound. Creates branch+PR for existing repos. Manages `backgroundValidationRuns` set and deferred cleanup
+- `PipelineHarness` — Main orchestrator: plan→work→compile→merge→COMPLETE→preview→background validation. Publishes MergeCompleted for integration outbound. Creates branch+PR for existing repos. Manages `backgroundValidationRuns` set and deferred cleanup. Batch auto-retry: `onBatchComplete()` retries failed batch tasks in real-time via SequentialTaskExecutor before compile
 - `SequentialTaskExecutor` — Executes tasks in tiered parallel groups (virtual threads). SubtaskDecomposer splits multi-file tasks. Validation deferred to review phase. Budget checks (LLM calls + USD cost)
 - `SubtaskDecomposer` — Decomposes multi-file tasks into per-file subtasks (2+ owned files → N subtasks, each produces one writeFile). Rework tasks excluded
 - `ApprovalGate` — Plan approval gate interface
@@ -108,7 +108,7 @@
 - `RecoveryProperties` — Recovery config
 
 ### state/ — Run state persistence
-- `StateStore` — Central state manager (~1500 lines)
+- `StateStore` — Central state manager (~1500 lines). Includes `resetTaskForRetry()` (batch retry) and `setTaskModelProvider()` (batch model attribution)
 - `InboxService` — User inbox notifications
 - `RunTitleBackfillService` — Backfills run titles
 - `ApplySource` — Enum: COPILOT/REVIEW
@@ -140,7 +140,7 @@
 
 ### testgen/ — Test generation
 - `TestGenOrchestrator` — Orchestrates full pipeline: plan→generate→compile→execute (language-agnostic)
-- `TestPreviewCoordinator` — Coordinates preview readiness + test execution. Reuses existing preview if running. Owns preview lifecycle for tests
+- `TestPreviewCoordinator` — Coordinates preview readiness + test execution. Reuses existing preview if running. Owns preview lifecycle for tests. Batch runs skip auto-preview (publishes empty event). Supports `triggerManualExecution()` for manual test runs
 - `TestPlannerAgent` — Creates test plan from spec (WORKHORSE tier)
 - `TestWorkerAgent` — Generates test code per task (WORKHORSE tier)
 - `TestReportGenerator` — Generates fix suggestions for failed tests (LIGHTWEIGHT tier)
@@ -148,7 +148,7 @@
 - `TestProjectScaffold` — Maven/Gradle test project setup
 - `TestExecutionService` — Runs compiled tests
 - `TestExecutionOrchestrator` — Orchestrates test suite execution
-- `TestResultController` — REST: apply-test-fixes
+- `TestResultController` — REST: apply-test-fixes, run-tests (manual test execution)
 - `model/*` — Test plan/result/summary entities
 - `repository/*` — Test JPA repositories
 
@@ -350,7 +350,7 @@
 
 ### components/runs/
 - `RunDetail` — Main run view (gates, tasks, review, report, cost, vibe toggle)
-- `RunCard` — Run summary card
+- `RunCard` — Run summary card (includes batch badge for BATCH runs)
 - `RunList` — Paginated run list
 - `NewRunModal` — Create run form (execution mode, AI provider selection)
 - `TaskCard` — Task status card
@@ -359,7 +359,7 @@
 - `RunDetailTabs` — Tabbed detail view. Overview: PR link, per-copilot token breakdown. Graph: grouped DAGs
 - `RunTimeline` — Pipeline status bar (maps COMPILING, MERGING, AWAITING_MERGE)
 - `RunConversation` — Chat copilot interface
-- `PreviewTab` — Cloud Run/Docker preview + countdown
+- `PreviewTab` — Cloud Run/Docker preview + countdown + "Run Tests" button (Beta, visible when preview RUNNING)
 - `ValidationReportPanel` — Collapsible validation report
 - `TestReportPanel` — Test results visualization
 - `TestProgressTracker` — Test gen/exec progress display
@@ -433,7 +433,7 @@
 - `IntegrationLogo` — Integration icon/logo
 
 ### lib/
-- `api.ts` — REST API client (~1560 lines, all endpoints). `TaskGraphNode` type includes `parentTaskId`/`subtaskIndex`/`subtaskTotal`
+- `api.ts` — REST API client (~1560 lines, all endpoints). `TaskGraphNode` type includes `parentTaskId`/`subtaskIndex`/`subtaskTotal`. `RunSummary` includes `approvedExecutionMode`. `runTests()` for manual test execution
 - `billing-api.ts` — Billing API helpers (Razorpay + Stripe)
 - `invoice-api.ts` — Invoice endpoints
 - `utils.ts` — Formatting (USD, percentages, dates, status colors)

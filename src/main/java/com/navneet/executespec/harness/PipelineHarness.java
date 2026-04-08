@@ -69,6 +69,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.*;
 
 @Service
@@ -709,6 +710,18 @@ public class PipelineHarness {
 
         boolean cancelled = stateStore.cancelRun(runId);
         if (cancelled) {
+            // Cancel provider-side batch job if one is active
+            PipelineRun run = stateStore.findRun(runId).orElse(null);
+            if (run != null && run.getBatchId() != null && run.getBatchProvider() != null) {
+                try {
+                    LlmProvider provider = LlmProvider.valueOf(run.getBatchProvider());
+                    batchClientRouter.cancelBatch(run.getBatchId(), runId, provider);
+                    log.info("[Cancel] Cancelled provider batch {} for run {}", run.getBatchId(), runId);
+                } catch (Exception e) {
+                    log.warn("[Cancel] Failed to cancel provider batch for run {}: {}", runId, e.getMessage());
+                }
+            }
+
             // Interrupt the pipeline thread so it stops between phases
             Thread pipelineThread = pipelineThreads.get(runId);
             if (pipelineThread != null && pipelineThread.isAlive()) {
@@ -1840,33 +1853,56 @@ public class PipelineHarness {
 
             // ── Batch routing: if user chose BATCH, submit to batch API and return ──
             run = stateStore.findRun(runId).orElseThrow();
+            log.info("[Run {}] Post-approval execution mode: {}, batch enabled: {}",
+                    runId, run.getApprovedExecutionMode(), props.getCost().getBatch().isEnabled());
             if ("BATCH".equals(run.getApprovedExecutionMode())
                     && props.getCost().getBatch().isEnabled()) {
                 try {
                     broadcaster.emit(runId, RunEvent.runStatus(runId, "QUEUED_BATCH"));
                     stateStore.updateStatus(runId, "QUEUED_BATCH");
 
-                    List<BatchRequest> batchRequests = batchRequestBuilder.buildRequests(
+                    var batchBuildResult = batchRequestBuilder.buildRequests(
                             plan, run.getAiProviderEnum(), run.getPlanJson());
+
+                    // Create subtask DB rows for decomposed multi-file tasks
+                    String tenantId = run.getTenantId() != null ? run.getTenantId() : "default";
+                    for (var entry : batchBuildResult.decomposedTasks().entrySet()) {
+                        stateStore.createSubtasks(entry.getKey(), runId, entry.getValue(), tenantId);
+                        log.info("[Run {}] Created {} subtasks for parent task {}",
+                                runId, entry.getValue().size(), entry.getKey());
+                    }
+
                     String batchId = batchClientRouter.submitBatch(
-                            runId, batchRequests, run.getAiProviderEnum());
+                            runId, batchBuildResult.requests(), run.getAiProviderEnum());
 
                     stateStore.setBatchInfo(runId, batchId, run.getAiProviderEnum().name());
-                    stateStore.updateBatchProgress(runId, 0, batchRequests.size());
+                    stateStore.updateBatchProgress(runId, 0, batchBuildResult.requests().size());
                     stateStore.updateStatus(runId, "IN_PROGRESS_BATCH");
                     broadcaster.emit(runId, RunEvent.runStatus(runId, "IN_PROGRESS_BATCH"));
+                    int decomposed = batchBuildResult.decomposedTasks().size();
+                    String decompMsg = decomposed > 0
+                            ? " (" + decomposed + " multi-file tasks decomposed into subtasks)"
+                            : "";
                     broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                            "Batch submitted to " + run.getAiProviderEnum() + " (" + batchRequests.size() + " tasks). Polling for completion..."));
-                    log.info("[Run {}] Batch submitted: batchId={}, provider={}, tasks={}",
-                            runId, batchId, run.getAiProviderEnum(), batchRequests.size());
+                            "Batch submitted to " + run.getAiProviderEnum() + " (" +
+                            batchBuildResult.requests().size() + " requests)." + decompMsg +
+                            " Polling for completion..."));
+                    log.info("[Run {}] Batch submitted: batchId={}, provider={}, requests={}, decomposed={}",
+                            runId, batchId, run.getAiProviderEnum(),
+                            batchBuildResult.requests().size(), decomposed);
                     // Pipeline pauses here — BatchPollService will resume when complete
                     return;
                 } catch (Exception batchEx) {
                     log.error("[Run {}] Batch submission failed, falling back to real-time: {}",
-                            runId, batchEx.getMessage());
+                            runId, batchEx.getMessage(), batchEx);
                     stateStore.setApprovedExecutionMode(runId, "REALTIME");
+                    stateStore.updateStatus(runId, "WORKING");
+                    // Notify user of fallback via SSE — both batchFailed event and log message
+                    broadcaster.emit(runId, RunEvent.batchFailed(runId,
+                            "Batch submission failed: " + batchEx.getMessage() + ". Falling back to real-time execution."));
                     broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                            "Batch submission failed — falling back to real-time execution."));
+                            "⚠ Batch submission to " + run.getAiProviderEnum() + " failed — running tasks in real-time instead. " +
+                            "You will be charged at real-time rates."));
                     // Fall through to normal execution
                 }
             }
@@ -3437,7 +3473,8 @@ public class PipelineHarness {
      * Both {@link #resolvePlanGate} and {@link #resolveMergeGate} share this fix.
      */
     private void clearGateSync(String runId) {
-        stateStore.findRun(runId).ifPresent(r -> { r.setCurrentGate(null); stateStore.save(r); });
+        // Atomic JPQL update — avoids full entity save that could overwrite concurrent field changes
+        stateStore.clearCurrentGate(runId);
     }
 
     /**
@@ -3559,6 +3596,31 @@ public class PipelineHarness {
             return;
         }
 
+        // C1 fix: guard against cancel-vs-complete race — if the run reached a terminal
+        // state (e.g. user cancelled) between batch poll and this async handler, bail out
+        if (List.of("CANCELLED", "FAILED", "COMPLETE", "PAUSED").contains(run.getStatus())) {
+            log.info("[Run {}] Run already terminal ({}) — skipping batch resume", runId, run.getStatus());
+            return;
+        }
+
+        // H2 fix: acquire run semaphore so batch resume respects concurrency limits
+        boolean acquired = false;
+        try {
+            acquired = runSlots.tryAcquire();
+            if (!acquired) {
+                log.warn("[Run {}] No run slots available for batch resume — waiting", runId);
+                runSlots.acquire();
+                acquired = true;
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            log.warn("[Run {}] Interrupted while waiting for run slot — aborting batch resume", runId);
+            return;
+        }
+
+        // H3 fix: register thread so cancelRun() can interrupt batch resume operations
+        pipelineThreads.put(runId, Thread.currentThread());
+
         try {
             // Initialize workspace + agent context if needed (batch runs may not have it set up)
             String workspacePath = run.getWorkspacePath();
@@ -3568,6 +3630,36 @@ public class PipelineHarness {
                     initAgentContext(runId, run.getPlanJson());
                 } catch (Exception e) {
                     log.debug("[Run {}] Could not init agent context for batch resume: {}", runId, e.getMessage());
+                }
+            }
+
+            // Auto-retry failed batch tasks in real-time mode
+            List<AgentTask> tasksAfterBatch = stateStore.getAllTasks(runId);
+            Set<String> decomposedParentIds = tasksAfterBatch.stream()
+                    .filter(t -> t.getParentTaskId() != null)
+                    .map(AgentTask::getParentTaskId)
+                    .collect(Collectors.toSet());
+            List<AgentTask> failedTasks = tasksAfterBatch.stream()
+                    .filter(t -> "FAILED".equals(t.getStatus()))
+                    .filter(t -> !decomposedParentIds.contains(t.getTaskId()))
+                    .toList();
+
+            if (!failedTasks.isEmpty()) {
+                log.info("[Run {}] Retrying {} failed batch tasks in real-time mode", runId, failedTasks.size());
+                broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        "Retrying " + failedTasks.size() + " failed batch task(s) in real-time..."));
+                for (AgentTask ft : failedTasks) {
+                    stateStore.resetTaskForRetry(ft.getTaskId());
+                }
+                // Re-fetch tasks after reset so executor sees PENDING status
+                List<AgentTask> retryTasks = stateStore.getAllTasks(runId).stream()
+                        .filter(t -> failedTasks.stream().anyMatch(f -> f.getTaskId().equals(t.getTaskId())))
+                        .toList();
+                try {
+                    sequentialTaskExecutor.execute(run, retryTasks);
+                    log.info("[Run {}] Real-time retry completed for {} tasks", runId, retryTasks.size());
+                } catch (Exception e) {
+                    log.warn("[Run {}] Real-time retry failed: {}", runId, e.getMessage());
                 }
             }
 
@@ -3635,6 +3727,10 @@ public class PipelineHarness {
             log.error("[Run {}] Batch resume failed: {}", runId, e.getMessage(), e);
             stateStore.markFailed(runId, "Batch resume failed: " + e.getMessage());
             broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+        } finally {
+            // H2+H3 cleanup: release semaphore and unregister thread
+            pipelineThreads.remove(runId);
+            if (acquired) runSlots.release();
         }
     }
 }

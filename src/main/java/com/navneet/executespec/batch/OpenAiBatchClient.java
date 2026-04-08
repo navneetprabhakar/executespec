@@ -58,7 +58,7 @@ public class OpenAiBatchClient implements LlmBatchClient {
 
                 ObjectNode body = objectMapper.createObjectNode();
                 body.put("model", req.model());
-                body.put("max_tokens", req.maxTokens());
+                body.put("max_completion_tokens", req.maxTokens());
 
                 ArrayNode messages = objectMapper.createArrayNode();
                 if (req.systemPrompt() != null && !req.systemPrompt().isBlank()) {
@@ -147,13 +147,26 @@ public class OpenAiBatchClient implements LlmBatchClient {
             JsonNode node = objectMapper.readTree(resp.body());
 
             String status = node.path("status").asText("unknown");
+            String outputFileId = node.path("output_file_id").asText(null);
             JsonNode counts = node.path("request_counts");
             int completed = counts.path("completed").asInt(0);
             int failed = counts.path("failed").asInt(0);
             int total = counts.path("total").asInt(0);
 
+            log.info("[Batch {}] OpenAI status: {}, completed: {}/{}, output_file: {}, error_file: {}",
+                    batchId, status, completed, total, outputFileId, node.path("error_file_id").asText(null));
+
+            // OpenAI may report "completed" before output_file_id is ready —
+            // treat as IN_PROGRESS until the file is available
+            BatchStatus.State mappedState = mapOpenAiState(status);
+            if (mappedState == BatchStatus.State.COMPLETED
+                    && (outputFileId == null || outputFileId.isBlank())) {
+                log.info("[Batch {}] OpenAI reports completed but output file not ready — treating as in_progress", batchId);
+                mappedState = BatchStatus.State.IN_PROGRESS;
+            }
+
             return new BatchStatus(
-                    mapOpenAiState(status),
+                    mappedState,
                     completed + failed,
                     total,
                     failed > 0 ? failed + " request(s) failed" : null
@@ -176,11 +189,14 @@ public class OpenAiBatchClient implements LlmBatchClient {
                     .build();
 
             HttpResponse<String> statusResp = httpClient.send(statusReq, HttpResponse.BodyHandlers.ofString());
-            String outputFileId = objectMapper.readTree(statusResp.body())
-                    .path("output_file_id").asText(null);
+            JsonNode statusNode = objectMapper.readTree(statusResp.body());
+            String status = statusNode.path("status").asText("unknown");
+            String outputFileId = statusNode.path("output_file_id").asText(null);
+            log.info("[Batch {}] Status: {}, output_file_id: {}, error_file_id: {}",
+                    batchId, status, outputFileId, statusNode.path("error_file_id").asText(null));
 
             if (outputFileId == null || outputFileId.isBlank()) {
-                throw new IllegalStateException("OpenAI batch " + batchId + " has no output file yet");
+                throw new IllegalStateException("OpenAI batch " + batchId + " has no output file yet (status=" + status + ")");
             }
 
             // Download the output file
@@ -192,6 +208,8 @@ public class OpenAiBatchClient implements LlmBatchClient {
                     .build();
 
             HttpResponse<String> fileResp = httpClient.send(fileReq, HttpResponse.BodyHandlers.ofString());
+            log.info("[Batch {}] OpenAI results file downloaded: {} bytes, status {}",
+                    batchId, fileResp.body().length(), fileResp.statusCode());
             List<BatchResult> results = new ArrayList<>();
 
             // JSONL — one result per line
@@ -270,4 +288,5 @@ public class OpenAiBatchClient implements LlmBatchClient {
                content + "\r\n" +
                "--" + boundary + "--\r\n";
     }
+
 }

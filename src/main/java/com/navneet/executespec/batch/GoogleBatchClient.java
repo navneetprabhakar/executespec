@@ -140,14 +140,13 @@ public class GoogleBatchClient implements LlmBatchClient {
 
     private String submitFileBased(String runId, List<BatchRequest> requests, String model, String apiKey)
             throws Exception {
-        // Build JSONL content for file upload
+        // Build JSONL content — each line: {"key": "<customId>", "request": {generateContent body}}
         StringBuilder jsonl = new StringBuilder();
         for (BatchRequest req : requests) {
             ObjectNode line = objectMapper.createObjectNode();
-            line.put("customId", req.customId());
+            line.put("key", req.customId());
 
             ObjectNode request = objectMapper.createObjectNode();
-            request.put("model", "models/" + model);
 
             ArrayNode contents = objectMapper.createArrayNode();
             for (var msg : req.messages()) {
@@ -180,7 +179,7 @@ public class GoogleBatchClient implements LlmBatchClient {
             jsonl.append(objectMapper.writeValueAsString(line)).append("\n");
         }
 
-        // Upload file
+        // Upload JSONL file via Google File API
         String boundary = "----GoogleBatchBoundary" + System.currentTimeMillis();
         String fileBody = "--" + boundary + "\r\n" +
                 "Content-Disposition: form-data; name=\"file\"; filename=\"batch_input.jsonl\"\r\n" +
@@ -202,17 +201,20 @@ public class GoogleBatchClient implements LlmBatchClient {
                     uploadResp.statusCode());
         }
 
-        String fileUri = objectMapper.readTree(uploadResp.body()).path("file").path("uri").asText();
+        String fileName = objectMapper.readTree(uploadResp.body()).path("file").path("name").asText();
+        log.info("[Run {}] Google file uploaded: {}", runId, fileName);
 
-        // Create batch job referencing uploaded file
+        // Create async batch job via POST /v1beta/models/{model}:batchGenerateContent
         ObjectNode batchBody = objectMapper.createObjectNode();
-        batchBody.put("model", "models/" + model);
-        ObjectNode srcNode = objectMapper.createObjectNode();
-        srcNode.put("fileUri", fileUri);
-        batchBody.set("src", srcNode);
+        ObjectNode batch = objectMapper.createObjectNode();
+        batch.put("display_name", "executespec-" + runId);
+        ObjectNode inputConfig = objectMapper.createObjectNode();
+        inputConfig.put("file_name", fileName);
+        batch.set("input_config", inputConfig);
+        batchBody.set("batch", batch);
 
         HttpRequest batchReq = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/v1beta/batches?key=" + apiKey))
+                .uri(URI.create(BASE_URL + "/v1beta/models/" + model + ":batchGenerateContent?key=" + apiKey))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(batchBody)))
                 .timeout(Duration.ofSeconds(60))
@@ -247,10 +249,18 @@ public class GoogleBatchClient implements LlmBatchClient {
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             JsonNode node = objectMapper.readTree(resp.body());
 
-            String state = node.path("state").asText("JOB_STATE_UNSPECIFIED");
-            int total = node.path("totalCount").asInt(0);
-            int succeeded = node.path("succeededCount").asInt(0);
-            int failed = node.path("failedCount").asInt(0);
+            // Google uses metadata.state or top-level state
+            String state = node.path("metadata").path("state").asText(
+                    node.path("state").asText("JOB_STATE_UNSPECIFIED"));
+            int total = node.path("metadata").path("totalCount").asInt(
+                    node.path("totalCount").asInt(0));
+            int succeeded = node.path("metadata").path("succeededCount").asInt(
+                    node.path("succeededCount").asInt(0));
+            int failed = node.path("metadata").path("failedCount").asInt(
+                    node.path("failedCount").asInt(0));
+
+            log.debug("[Batch {}] Google status: state={}, total={}, succeeded={}, failed={}",
+                    batchId, state, total, succeeded, failed);
 
             return new BatchStatus(
                     mapGoogleState(state),
@@ -274,43 +284,100 @@ public class GoogleBatchClient implements LlmBatchClient {
                 return new BatchResults(batchId, List.of());
             }
 
-            HttpRequest req = HttpRequest.newBuilder()
+            // 1. Get batch status to find the response file name
+            HttpRequest statusReq = HttpRequest.newBuilder()
                     .uri(URI.create(BASE_URL + "/v1beta/" + batchId + "?key=" + apiKey))
+                    .GET()
+                    .timeout(Duration.ofSeconds(30))
+                    .build();
+
+            HttpResponse<String> statusResp = httpClient.send(statusReq, HttpResponse.BodyHandlers.ofString());
+            JsonNode statusNode = objectMapper.readTree(statusResp.body());
+
+            // Check for inlined responses first (small batches may return inline)
+            JsonNode inlinedResponses = statusNode.path("response").path("inlinedResponses");
+            if (inlinedResponses.isArray() && !inlinedResponses.isEmpty()) {
+                return parseInlinedResponses(batchId, inlinedResponses);
+            }
+
+            // 2. For file-based results, download the response file
+            String responsesFileName = statusNode.path("response").path("responsesFileName").asText(null);
+            if (responsesFileName == null || responsesFileName.isBlank()) {
+                // Fallback: check dest.file_name (alternative response format)
+                responsesFileName = statusNode.path("dest").path("file_name").asText(null);
+            }
+            if (responsesFileName == null || responsesFileName.isBlank()) {
+                log.warn("Google batch {} — no response file found in status: {}", batchId, statusResp.body());
+                return new BatchResults(batchId, List.of());
+            }
+
+            HttpRequest downloadReq = HttpRequest.newBuilder()
+                    .uri(URI.create(BASE_URL + "/download/v1beta/" + responsesFileName + ":download?alt=media&key=" + apiKey))
                     .GET()
                     .timeout(Duration.ofSeconds(120))
                     .build();
 
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            JsonNode node = objectMapper.readTree(resp.body());
-
-            List<BatchResult> results = new ArrayList<>();
-            JsonNode responses = node.path("responses");
-            if (responses.isArray()) {
-                for (JsonNode entry : responses) {
-                    String customId = entry.path("metadata").path("customId").asText(
-                            "task-" + results.size());
-
-                    JsonNode candidate = entry.path("candidates").path(0);
-                    StringBuilder content = new StringBuilder();
-                    for (JsonNode part : candidate.path("content").path("parts")) {
-                        content.append(part.path("text").asText());
-                    }
-
-                    JsonNode usage = entry.path("usageMetadata");
-                    results.add(new BatchResult(
-                            customId,
-                            content.toString(),
-                            usage.path("promptTokenCount").asInt(0),
-                            usage.path("candidatesTokenCount").asInt(0),
-                            candidate.path("finishReason").asText("STOP")
-                    ));
-                }
+            HttpResponse<String> downloadResp = httpClient.send(downloadReq, HttpResponse.BodyHandlers.ofString());
+            if (downloadResp.statusCode() < 200 || downloadResp.statusCode() >= 300) {
+                throw new BatchSubmissionException(
+                        "Google batch results download failed: " + downloadResp.statusCode() + " — " + downloadResp.body());
             }
 
+            // 3. Parse JSONL response — each line: {"key": "...", "response": {GenerateContentResponse}}
+            List<BatchResult> results = new ArrayList<>();
+            for (String line : downloadResp.body().split("\n")) {
+                if (line.isBlank()) continue;
+                JsonNode entry = objectMapper.readTree(line);
+                String customId = entry.path("key").asText("task-" + results.size());
+                JsonNode response = entry.path("response");
+
+                JsonNode candidate = response.path("candidates").path(0);
+                StringBuilder content = new StringBuilder();
+                for (JsonNode part : candidate.path("content").path("parts")) {
+                    content.append(part.path("text").asText());
+                }
+
+                JsonNode usage = response.path("usageMetadata");
+                results.add(new BatchResult(
+                        customId,
+                        content.toString(),
+                        usage.path("promptTokenCount").asInt(0),
+                        usage.path("candidatesTokenCount").asInt(0),
+                        candidate.path("finishReason").asText("STOP")
+                ));
+            }
+
+            log.info("[Batch {}] Downloaded {} results from Google", batchId, results.size());
             return new BatchResults(batchId, results);
+        } catch (BatchSubmissionException e) {
+            throw e;
         } catch (Exception e) {
             throw new BatchSubmissionException("Google batch results error: " + e.getMessage(), e);
         }
+    }
+
+    private BatchResults parseInlinedResponses(String batchId, JsonNode inlinedResponses) {
+        List<BatchResult> results = new ArrayList<>();
+        for (JsonNode entry : inlinedResponses) {
+            String customId = entry.path("key").asText("task-" + results.size());
+            JsonNode response = entry.path("response");
+
+            JsonNode candidate = response.path("candidates").path(0);
+            StringBuilder content = new StringBuilder();
+            for (JsonNode part : candidate.path("content").path("parts")) {
+                content.append(part.path("text").asText());
+            }
+
+            JsonNode usage = response.path("usageMetadata");
+            results.add(new BatchResult(
+                    customId,
+                    content.toString(),
+                    usage.path("promptTokenCount").asInt(0),
+                    usage.path("candidatesTokenCount").asInt(0),
+                    candidate.path("finishReason").asText("STOP")
+            ));
+        }
+        return new BatchResults(batchId, results);
     }
 
     @Override
@@ -319,8 +386,8 @@ public class GoogleBatchClient implements LlmBatchClient {
             if (batchId.startsWith("google-inline-")) return;
 
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(BASE_URL + "/v1beta/" + batchId + "?key=" + apiKey))
-                    .DELETE()
+                    .uri(URI.create(BASE_URL + "/v1beta/" + batchId + ":cancel?key=" + apiKey))
+                    .POST(HttpRequest.BodyPublishers.noBody())
                     .timeout(Duration.ofSeconds(30))
                     .build();
             httpClient.send(req, HttpResponse.BodyHandlers.ofString());

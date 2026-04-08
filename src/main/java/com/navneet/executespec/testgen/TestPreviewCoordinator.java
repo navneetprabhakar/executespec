@@ -71,6 +71,18 @@ public class TestPreviewCoordinator {
         state.setTestsReady(true);
         state.setTestsReadyAt(Instant.now());
 
+        // Batch runs: skip auto-preview and auto-execution — user triggers manually via "Run Tests"
+        var run = stateStore.findRun(event.runId()).orElse(null);
+        if (run != null && "BATCH".equals(run.getApprovedExecutionMode())) {
+            log.info("[TestCoord] Batch run {} — skipping auto-preview/execution (user can trigger manually)",
+                    event.runId());
+            // Publish empty summary to unblock report generation CompletableFuture
+            eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                    event.runId(), event.testPlanId(), TestExecutionSummary.empty()));
+            stateMap.remove(event.runId());
+            return;
+        }
+
         // Start preview now that tests are ready — ensures full TTL for test execution.
         // The 10-minute CompletableFuture timeout in PipelineHarness.generateValidationReport()
         // is the safety net if preview startup takes too long.
@@ -216,6 +228,21 @@ public class TestPreviewCoordinator {
             log.debug("[TestCoord] cancelIfPending called for run {} but test gen not finished — " +
                     "letting test pipeline proceed naturally", runId);
         }
+    }
+
+    /**
+     * Manually trigger test execution against a running preview.
+     * Used by the "Run Tests" button in the UI for batch runs (or any run with a manual preview).
+     */
+    public void triggerManualExecution(String runId, long testPlanId, String previewUrl) {
+        CoordinationState state = stateMap.computeIfAbsent(runId, CoordinationState::new);
+        state.setTestPlanId(testPlanId);
+        state.setTestsReady(true);
+        state.setTestsReadyAt(Instant.now());
+        state.setPreviewUrl(previewUrl);
+        state.setPreviewReady(true);
+        log.info("[TestCoord] Manual test execution triggered for run {} against {}", runId, previewUrl);
+        tryExecute(runId, state);
     }
 
     @Data

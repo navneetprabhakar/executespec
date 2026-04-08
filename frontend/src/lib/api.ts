@@ -111,6 +111,8 @@ export interface RunSummary {
   executionMode?: string | null;
   /** Timestamp when run was archived. Null for active runs. */
   archivedAt?: string | null;
+  /** "REALTIME" | "BATCH". Null for pre-V61 runs or runs not yet approved. */
+  approvedExecutionMode?: string | null;
 }
 
 export interface TaskSummary {
@@ -1490,6 +1492,9 @@ export const markTestInvalid = (testResultId: number) =>
 
 export const applyTestFixes = (runId: string, signature?: string) =>
   req<void>(`/runs/${runId}/apply-test-fixes${signature ? `?signature=${encodeURIComponent(signature)}` : ''}`, { method: 'POST' });
+
+export const runTests = (runId: string) =>
+  req<{ runId: string; testPlanId: number; previewUrl: string }>(`/runs/${runId}/run-tests`, { method: 'POST' });
 
 // ── Admin Analytics ──────────────────────────────────────────────────────────
 
