@@ -126,10 +126,9 @@ public class StateStore {
     }
 
     public void markApproved(String runId) {
-        PipelineRun run = runRepo.findById(runId).orElseThrow();
-        run.setStatus("WORKING");
-        run.setCurrentGate(null);
-        runRepo.save(run);
+        // Use direct update to avoid overwriting approvedExecutionMode set concurrently
+        // by the controller thread (race condition: findById may return stale entity)
+        runRepo.updateStatusAndClearGate(runId, "WORKING");
     }
 
     // ── Plan versioning ──────────────────────────────────────
