@@ -59,6 +59,9 @@ public class AgentProperties {
 
         /** Safety-net iteration cap to prevent infinite loops (should never trigger). */
         private int safetyIterationCap = 500;
+
+        /** Number of automatic retries on task/subtask failure (0 = no retry). */
+        private int taskMaxRetries = 2;
     }
 
     @Data

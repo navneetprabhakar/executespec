@@ -1590,9 +1590,10 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
                 autoStartPreview(runId, currentRun);
 
-                // ── Background validation (production mode only) ─────────────
-                if (execMode.isProduction()) {
+                // ── Background validation (all modes — test gen only in PRODUCTION) ──
+                {
                     final String bgUserReq = effectiveRequest;
+                    final boolean runTests = execMode.isProduction();
                     String bgPlanJson;
                     try {
                         bgPlanJson = mapper.writeValueAsString(singleShotResult.syntheticPlan());
@@ -1605,12 +1606,8 @@ public class PipelineHarness {
                     var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                     Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
                         runBackgroundValidation(runId, currentRun, currentReports,
-                                finalBgPlanJson, bgUserReq, finalCompileResult, false);
+                                finalBgPlanJson, bgUserReq, finalCompileResult, false, runTests);
                     }));
-                } else {
-                    // PROTOTYPE mode: no background validation, fire integration notifications now
-                    eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                        runId, currentRun, currentReports, null, false));
                 }
 
             } catch (Exception e) {
@@ -1982,12 +1979,13 @@ public class PipelineHarness {
             }
 
             // ══════════════════════════════════════════════════════════════════
-            // ── 6. BACKGROUND VALIDATION (Production mode only) ──────────────
+            // ── 6. BACKGROUND VALIDATION (all modes) ─────────────────────────
             // ══════════════════════════════════════════════════════════════════
-            // Review, test gen, and validation report run in background so they
-            // don't block the user from seeing the preview.
-            if (execMode.isProduction()) {
+            // Review and validation report run in background for ALL modes.
+            // Test generation/execution only runs in PRODUCTION mode.
+            {
                 final CompileResult finalPostMergeCompile = postMergeCompile != null ? postMergeCompile : mainCompileResult;
+                final boolean runTests = execMode.isProduction();
                 String bgPlanJson;
                 try {
                     bgPlanJson = mapper.writeValueAsString(plan);
@@ -2000,12 +1998,9 @@ public class PipelineHarness {
                 var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                 Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
                     runBackgroundValidation(runId, currentRun, currentReports,
-                            finalBgPlanJson, currentRun.getUserRequest(), finalPostMergeCompile, true);
+                            finalBgPlanJson, currentRun.getUserRequest(), finalPostMergeCompile,
+                            true, runTests);
                 }));
-            } else {
-                // PROTOTYPE mode: no background validation, fire integration notifications now
-                eventPublisher.publishEvent(new PipelineEvent.MergeCompleted(
-                    runId, currentRun, currentReports, null, false));
             }
 
         } catch (InterruptedException e) {
@@ -2145,15 +2140,28 @@ public class PipelineHarness {
                                          List<WorkerReport> reports, String planJson,
                                          String userRequest, CompileResult compileResult,
                                          boolean computeHadFailures) {
+        runBackgroundValidation(runId, run, reports, planJson, userRequest, compileResult,
+                computeHadFailures, true);
+    }
+
+    private void runBackgroundValidation(String runId, PipelineRun run,
+                                         List<WorkerReport> reports, String planJson,
+                                         String userRequest, CompileResult compileResult,
+                                         boolean computeHadFailures, boolean runTests) {
         try {
             // Test generation (async — fires TestsReadyEvent when done)
-            try {
-                testCompletionFutures.put(runId, new CompletableFuture<>());
-                testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
-                log.info("Run {} — test gen pipeline completed in background", runId);
-            } catch (Exception e) {
-                testCompletionFutures.invalidate(runId);
-                log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
+            // Skipped for PROTOTYPE mode to keep lightweight
+            if (runTests) {
+                try {
+                    testCompletionFutures.put(runId, new CompletableFuture<>());
+                    testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
+                    log.info("Run {} — test gen pipeline completed in background", runId);
+                } catch (Exception e) {
+                    testCompletionFutures.invalidate(runId);
+                    log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
+                }
+            } else {
+                log.info("Run {} — skipping test gen (PROTOTYPE mode)", runId);
             }
 
             // Review merged code

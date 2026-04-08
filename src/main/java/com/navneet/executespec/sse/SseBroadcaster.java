@@ -67,6 +67,32 @@ public class SseBroadcaster {
         }
     }
 
+    /**
+     * Emit an SSE event directly to clients WITHOUT republishing as a Spring event.
+     * Used by RunDetailSseService to avoid infinite loop (it listens for RunEvents).
+     */
+    public void emitDirect(String runId, RunEvent event) {
+        List<SseEmitter> clients = emitters.getOrDefault(runId, new CopyOnWriteArrayList<>());
+        if (clients.isEmpty()) return;
+        List<SseEmitter> dead = new ArrayList<>();
+        String json;
+        try {
+            json = mapper.writeValueAsString(event);
+        } catch (JsonProcessingException e) {
+            log.warn("SSE serialize failed for RUN_DETAIL on run {}: {}", runId, e.getMessage());
+            return;
+        }
+        for (SseEmitter emitter : clients) {
+            try {
+                emitter.send(SseEmitter.event().data(json));
+            } catch (Throwable t) {
+                dead.add(emitter);
+                try { emitter.completeWithError(t); } catch (Throwable ignored) {}
+            }
+        }
+        if (!dead.isEmpty()) clients.removeAll(dead);
+    }
+
     public void complete(String runId) {
         List<SseEmitter> clients = emitters.remove(runId);
         if (clients == null) return;
