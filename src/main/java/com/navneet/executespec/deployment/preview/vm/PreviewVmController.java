@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/v1/previews")
 @Slf4j
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "preview.vm", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(name = "preview.mode", havingValue = "vm")
 public class PreviewVmController {
 
     private final PreviewDeploymentService previewService;

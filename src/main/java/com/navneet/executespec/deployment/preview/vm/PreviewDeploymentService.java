@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "preview.vm", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(name = "preview.mode", havingValue = "vm")
 public class PreviewDeploymentService {
 
     private static final String PREVIEW_JSON_PREFIX = "PREVIEW_JSON:";
