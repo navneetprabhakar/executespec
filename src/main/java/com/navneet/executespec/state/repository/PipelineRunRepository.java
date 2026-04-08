@@ -22,6 +22,11 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     @Query("UPDATE PipelineRun r SET r.totalInputTokens = r.totalInputTokens + :inp, r.totalOutputTokens = r.totalOutputTokens + :out WHERE r.runId = :runId")
     void addTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
+    /** Atomic status update that only touches status + currentGate — avoids overwriting concurrent field changes. */
+    @Modifying
+    @Query("UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL WHERE r.runId = :runId")
+    void updateStatusAndClearGate(@Param("runId") String runId, @Param("status") String status);
+
     List<PipelineRun> findByStatusIn(List<String> statuses);
 
     Optional<PipelineRun> findTopByStatusInOrderByStartedAtDesc(List<String> statuses);
