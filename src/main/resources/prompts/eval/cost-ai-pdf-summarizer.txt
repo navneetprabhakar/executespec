@@ -1,0 +1,25 @@
+Build a web app where users can upload PDF documents and get AI-generated summaries. Use React, TypeScript, Node.js, and Express. Include:
+
+**Frontend:**
+1. Landing page with drag-and-drop file upload zone (accepts only .pdf, max 10MB)
+2. Upload progress bar with percentage
+3. Document list showing uploaded PDFs with name, page count, upload date, and summary status (Processing/Ready)
+4. Document view page with two panels: left shows extracted text (scrollable), right shows AI summary
+5. Chat interface below the summary: user can ask follow-up questions about the document. Chat messages displayed as bubbles with timestamps
+6. History sidebar showing all past documents and conversations
+7. Free tier indicator: "3 of 5 documents used this month" progress bar
+
+**Backend:**
+1. POST /api/documents/upload — accepts multipart PDF, extracts text (mock: return hardcoded text based on filename)
+2. POST /api/documents/:id/summarize — calls OpenAI API (mock: return a hardcoded 3-paragraph summary after 2s delay to simulate API call)
+3. POST /api/documents/:id/chat — accepts user question, returns mock AI response with 1s delay
+4. GET /api/documents — list all documents for the user
+5. GET /api/documents/:id — get document with summary and chat history
+6. Rate limiting: max 5 requests per minute per user (in-memory counter)
+7. Usage tracking: count documents per user per month, reject if over limit (5 for free tier)
+
+**Technical:**
+- File upload with multer
+- WebSocket or SSE for streaming the summary generation progress
+- Error boundaries on frontend for failed uploads
+- Responsive layout with Tailwind CSS

@@ -1,0 +1,25 @@
+Build an appointment booking system for a barbershop using React, TypeScript, Node.js, and Express. Include:
+
+**Customer-Facing (Public):**
+1. Service selection: list of services with name, duration, and price — Haircut (30min, $25), Beard Trim (20min, $15), Hair + Beard Combo (45min, $35), Hair Coloring (60min, $50), Kids Haircut (20min, $18)
+2. Barber selection: grid of barbers with photo placeholder, name, and specialties
+3. Calendar view: shows available time slots for the selected barber and service. Slots are 15-min increments from 9 AM to 6 PM, Mon-Sat. Already booked slots shown as disabled
+4. Booking confirmation form: name, phone, email, optional notes. Show selected service, barber, date, time, and price
+5. Confirmation page with booking reference number and "Add to Calendar" link (generates .ics file)
+6. Email confirmation (mock: just log to console)
+
+**Admin Panel (Protected with password "admin123"):**
+1. Dashboard: today's appointments list, upcoming count, revenue this week
+2. Calendar view: see all barbers' schedules side-by-side
+3. Manage availability: barbers can block off time slots (lunch break, day off)
+4. Appointment management: view, cancel, or reschedule appointments
+5. Barber management: add/edit barber profiles
+
+**Backend API:**
+1. GET /api/services — list all services
+2. GET /api/barbers — list barbers with availability
+3. GET /api/availability?barberId=X&date=YYYY-MM-DD — returns available slots
+4. POST /api/bookings — create booking (validates slot is available, prevents double-booking)
+5. GET /api/admin/bookings?date=YYYY-MM-DD — admin: list bookings
+6. PUT /api/admin/availability — admin: update barber availability
+7. In-memory data store. Validate no overlapping bookings for the same barber

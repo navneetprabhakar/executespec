@@ -1,0 +1,25 @@
+Build a URL shortener service with analytics using React, TypeScript, Node.js, and Express. Include:
+
+**Frontend:**
+1. Home page: input field for long URL, "Shorten" button. Show shortened URL with copy-to-clipboard button
+2. Dashboard (auth required): list of all shortened URLs with original URL, short code, creation date, total clicks, and status (active/disabled)
+3. Analytics page per URL: click count over time (last 7 days bar chart using pure CSS), top referrers list, browser breakdown (Chrome, Firefox, Safari, Other), geographic breakdown (country, mock data), device type (Desktop, Mobile, Tablet)
+4. User settings: custom domain prefix (mock), default expiration time
+5. Bulk URL shortening: paste multiple URLs (one per line), get all shortened at once
+
+**Backend:**
+1. POST /api/shorten — accepts { url, customAlias?, expiresInDays? }. Generate 6-char alphanumeric code (Base62). Validate URL format. Return short URL
+2. GET /:code — redirect to original URL. Record click with metadata (timestamp, User-Agent parsed for browser/device, referer header, IP-based country mock)
+3. GET /api/urls — list user's URLs with click counts (auth required)
+4. GET /api/urls/:code/analytics — detailed click analytics (auth required)
+5. DELETE /api/urls/:code — disable a shortened URL (auth required)
+6. POST /api/urls/bulk — accept array of URLs, return array of short URLs
+
+**Technical:**
+1. Short code generation: Base62 encoding of auto-increment counter (collision-free)
+2. URL validation: must start with http:// or https://, must be valid URL format
+3. Expiration: URLs expire after configured days (default 30). Expired URLs return 410 Gone
+4. Rate limiting: 10 URLs per hour for anonymous users, 100 for authenticated
+5. Click deduplication: same IP clicking within 5 minutes counts as 1 click
+6. In-memory store with sample data (20 pre-shortened URLs with click history)
+7. Auth: JWT-based, register + login endpoints

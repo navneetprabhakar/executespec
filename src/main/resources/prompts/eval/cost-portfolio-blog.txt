@@ -1,0 +1,12 @@
+Create a personal developer portfolio site with a dark theme using React and TypeScript. Include:
+
+1. **Navigation**: Fixed top nav with smooth-scroll links to About, Projects, Blog, Contact sections
+2. **Hero**: Full-screen hero with animated typing effect showing "Full-Stack Developer | Open Source Contributor | Cloud Architect"
+3. **About**: Bio section with a skills grid (React, TypeScript, Node.js, Python, AWS, Docker, Kubernetes, PostgreSQL) — each skill as a pill with an icon
+4. **Projects**: A responsive 3-column grid pulling from a hardcoded array of 6 projects. Each card shows: title, description, tech stack tags, GitHub link, live demo link, and a thumbnail image placeholder. Add a filter bar to filter by tech stack tag
+5. **Blog**: Markdown-rendered blog section with 3 sample posts. Each post has title, date, reading time estimate, excerpt, and a "Read More" expand/collapse
+6. **Contact**: Form with name, email, subject, message fields. Client-side validation (email format, required fields). Show a success toast on submit
+7. **Footer**: Social links (GitHub, LinkedIn, Twitter) with hover animations
+
+Dark theme: background #0F172A, card background #1E293B, accent #3B82F6, text #E2E8F0.
+Include CSS transitions on hover states and a scroll-to-top floating button.
