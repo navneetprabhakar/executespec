@@ -7,7 +7,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
+
 import java.time.Duration;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Per-run USD cost budget enforcement.
@@ -31,7 +36,13 @@ import java.time.Duration;
 @Slf4j
 public class RunCostBudgetService {
 
+    private static final int[] WARNING_THRESHOLDS = {50, 75, 90};
+
     private final CostEstimator costEstimator;
+    private final SseBroadcaster sseBroadcaster;
+
+    /** Tracks which warning thresholds have been emitted per run (e.g. "runId:50", "runId:75"). */
+    private final Set<String> emittedWarnings = ConcurrentHashMap.newKeySet();
 
     /** Per-run cost budget ceiling in USD. -1 = unlimited. TTL 6h, max 1000 entries. */
     private final Cache<String, Double> budgetCeilings = Caffeine.newBuilder()
@@ -93,9 +104,36 @@ public class RunCostBudgetService {
         return tier != null ? tier : "FREE";
     }
 
+    /**
+     * Check and emit progressive cost warnings at 50%, 75%, 90% of budget.
+     * Each threshold fires only once per run. Non-blocking — safe to call frequently.
+     */
+    public void checkBudgetWarnings(String runId) {
+        Double ceiling = budgetCeilings.getIfPresent(runId);
+        if (ceiling == null || ceiling < 0) return;
+
+        double currentCost = costEstimator.computeCostForRun(runId);
+        int percentUsed = (int) (currentCost / ceiling * 100);
+
+        for (int threshold : WARNING_THRESHOLDS) {
+            if (percentUsed >= threshold) {
+                String key = runId + ":" + threshold;
+                if (emittedWarnings.add(key)) {
+                    String tier = getRunTier(runId);
+                    log.info("[CostBudget] Run {} reached {}% of ${} budget (${} spent)",
+                            runId, threshold, String.format("%.2f", ceiling),
+                            String.format("%.2f", currentCost));
+                    sseBroadcaster.emit(runId, RunEvent.budgetWarning(
+                            runId, tier, ceiling, threshold, currentCost));
+                }
+            }
+        }
+    }
+
     /** Clean up when a run completes. */
     public void remove(String runId) {
         budgetCeilings.invalidate(runId);
         runTierCache.invalidate(runId);
+        emittedWarnings.removeIf(k -> k.startsWith(runId + ":"));
     }
 }
