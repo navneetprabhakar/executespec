@@ -77,8 +77,8 @@ class PipelineE2ETest {
 
     // ── Approval helpers ──────────────────────────────────────────────────────
 
-    static final ApprovalRequest APPROVE = new ApprovalRequest(true,  "E2E auto-approve");
-    static final ApprovalRequest REJECT  = new ApprovalRequest(false, "E2E test rejection");
+    static final ApprovalRequest APPROVE = new ApprovalRequest(true,  "E2E auto-approve", null, null);
+    static final ApprovalRequest REJECT  = new ApprovalRequest(false, "E2E test rejection", null, null);
 
     // ══════════════════════════════════════════════════════════════════════════
     // Test 1 — Happy path: full pipeline from submit to COMPLETE
