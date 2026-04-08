@@ -37,8 +37,11 @@ public class BatchPollService {
     public void pollBatchRuns() {
         if (!agentProperties.getCost().getBatch().isEnabled()) return;
 
+        // C2 fix: include BATCH_COMPLETE to recover orphaned runs where resumeFromBatch() failed
+        // after status was already set to BATCH_COMPLETE (poll won't re-fetch results for these —
+        // it will re-attempt the resume path)
         List<PipelineRun> batchRuns = stateStore.findRunsByStatusIn(
-                List.of("IN_PROGRESS_BATCH", "QUEUED_BATCH"));
+                List.of("IN_PROGRESS_BATCH", "QUEUED_BATCH", "BATCH_COMPLETE"));
 
         if (batchRuns.isEmpty()) return;
 
@@ -60,6 +63,20 @@ public class BatchPollService {
 
         if (batchId == null || providerName == null) {
             log.warn("[Run {}] Batch run missing batchId or provider — skipping", runId);
+            return;
+        }
+
+        // C2 fix: recovery path for runs stuck in BATCH_COMPLETE
+        // (results were fetched but resumeFromBatch() failed on the previous attempt)
+        if ("BATCH_COMPLETE".equals(run.getStatus())) {
+            log.info("[Run {}] Recovering orphaned BATCH_COMPLETE run — re-fetching results and resuming", runId);
+            try {
+                LlmProvider provider = LlmProvider.valueOf(providerName);
+                BatchResults results = batchClientRouter.getResults(batchId, runId, provider);
+                batchResumeService.resumeFromBatch(run, results);
+            } catch (Exception e) {
+                log.error("[Run {}] BATCH_COMPLETE recovery failed: {}", runId, e.getMessage());
+            }
             return;
         }
 
@@ -89,12 +106,16 @@ public class BatchPollService {
         switch (status.state()) {
             case COMPLETED -> {
                 log.info("[Run {}] Batch complete — retrieving results", runId);
-                broadcaster.emit(runId, RunEvent.batchComplete(runId));
-                stateStore.updateStatus(runId, "BATCH_COMPLETE");
-
-                // Retrieve results and resume pipeline
-                BatchResults results = batchClientRouter.getResults(batchId, runId, provider);
-                batchResumeService.resumeFromBatch(run, results);
+                try {
+                    BatchResults results = batchClientRouter.getResults(batchId, runId, provider);
+                    broadcaster.emit(runId, RunEvent.batchComplete(runId));
+                    stateStore.updateStatus(runId, "BATCH_COMPLETE");
+                    batchResumeService.resumeFromBatch(run, results);
+                } catch (Exception e) {
+                    // OpenAI may report completed before output_file_id is ready — retry next poll
+                    log.warn("[Run {}] Batch results not ready yet ({}), will retry next poll",
+                            runId, e.getMessage());
+                }
             }
             case FAILED -> {
                 String error = status.error() != null ? status.error() : "Batch processing failed";

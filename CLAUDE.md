@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-08
+> Last updated: 2026-04-09
 
 ## Architecture
 
@@ -10,7 +10,7 @@
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
 - **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → (Real-time: SequentialTaskExecutor | Batch: BatchClientRouter → BatchPollService → BatchResumeService) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
-- **Batch execution:** All 3 providers (Anthropic/OpenAI/Google) support batch APIs with 50% cost discount. User chooses real-time or batch at plan approval. Batch flow: QUEUED_BATCH → IN_PROGRESS_BATCH → BATCH_COMPLETE → compile → COMPLETE. `BatchPollService` polls every 30s with `@SchedulerLock` (Redis). `BatchResumeService` parses results, writes files, publishes `BatchCompleteEvent` for PipelineHarness to resume.
+- **Batch execution:** All 3 providers (Anthropic/OpenAI/Google) support batch APIs with 50% cost discount. User chooses real-time or batch at plan approval. Batch flow: QUEUED_BATCH → IN_PROGRESS_BATCH → BATCH_COMPLETE → auto-retry failed tasks in real-time → compile → COMPLETE. `BatchPollService` polls every 30s with `@SchedulerLock` (Redis). `BatchResumeService` parses results, writes files, resolves WORKHORSE model/provider for task attribution, publishes `BatchCompleteEvent`. PipelineHarness `onBatchComplete()` retries failed tasks via `SequentialTaskExecutor`, then resumes compile. Batch runs skip auto-preview; `TestPreviewCoordinator` publishes empty event to unblock validation report.
 - **Subtask decomposition:** Tasks with 2+ owned files are decomposed into per-file subtasks at execution time by `SubtaskDecomposer`. Each subtask produces exactly one `writeFile` call, eliminating fabrication. Subtasks tracked via `parentTaskId`/`subtaskIndex`/`subtaskTotal` on `AgentTask`.
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
 - **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). Default provider: OpenAI. YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
@@ -137,6 +137,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
 | GET | `/api/runs/{id}/events` | SSE event stream (scoped token) |
 | GET | `/api/runs/{id}/sse-token` | Get scoped SSE token (5-min TTL) |
+| POST | `/api/runs/{id}/run-tests` | Manually trigger test execution (Beta, requires preview RUNNING) |
 
 ### Validation Report
 | Method | Path | Description |
@@ -277,7 +278,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Test generation orchestrator | `testgen/TestGenOrchestrator.java` |
 | Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
 | Test execution service | `testgen/TestExecutionService.java` |
-| Test result controller | `testgen/TestResultController.java` (apply-test-fixes) |
+| Test result controller | `testgen/TestResultController.java` (apply-test-fixes, run-tests) |
 | DB migrations | `resources/db/migration/V*.sql` (V1–V58) |
 | LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
 | App config | `resources/application.yml` |
@@ -335,7 +336,8 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - JWT secret startup validation (prod profile, blocks dev placeholder)
 - Tier-based deployment limits (enforces `max_deployments` from tier_config)
 - Silent hard cap cost enforcement (checks budget every 5 LLM calls in worker loop; ceiling = credits × $5 × 1.5; no progressive warnings — user approved cost upfront)
-- Batch execution: dual-option plan approval (real-time vs batch with 50% discount), all 3 LLM providers (Anthropic/OpenAI/Google), @Scheduled polling with @SchedulerLock, event-driven pipeline resume
+- Batch execution: dual-option plan approval (real-time vs batch with 50% discount), all 3 LLM providers (Anthropic/OpenAI/Google), @Scheduled polling with @SchedulerLock, event-driven pipeline resume, auto-retry failed batch tasks in real-time, batch model/provider attribution, batch badge on run cards/details
+- Manual test execution (Beta): POST /runs/{runId}/run-tests endpoint, "Run Tests" button in PreviewTab (requires preview RUNNING)
 - In-app notification system: JPA entity, REST API, NotificationBell in header, run completion/failure notifications
 - Caffeine TTL caches replacing unbounded ConcurrentHashMaps (LlmRouter, RunCostBudgetService)
 - Containerized test execution (Docker with --read-only, --cap-drop ALL, memory/CPU limits)

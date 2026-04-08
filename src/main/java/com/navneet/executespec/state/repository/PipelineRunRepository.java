@@ -27,6 +27,16 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     @Query("UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL WHERE r.runId = :runId")
     void updateStatusAndClearGate(@Param("runId") String runId, @Param("status") String status);
 
+    /** Atomic execution mode update — avoids read-modify-write race with clearGateSync/markApproved. */
+    @Modifying
+    @Query("UPDATE PipelineRun r SET r.approvedExecutionMode = :mode WHERE r.runId = :runId")
+    void updateApprovedExecutionMode(@Param("runId") String runId, @Param("mode") String mode);
+
+    /** Atomic currentGate clear — avoids full entity save that could overwrite concurrent field changes. */
+    @Modifying
+    @Query("UPDATE PipelineRun r SET r.currentGate = NULL WHERE r.runId = :runId")
+    void clearCurrentGate(@Param("runId") String runId);
+
     List<PipelineRun> findByStatusIn(List<String> statuses);
 
     Optional<PipelineRun> findTopByStatusInOrderByStartedAtDesc(List<String> statuses);

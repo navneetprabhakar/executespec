@@ -2,6 +2,10 @@ package com.navneet.executespec.batch;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.harness.WorkspaceInitService;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -15,8 +19,12 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -35,13 +43,31 @@ public class BatchResumeService {
     private final SseBroadcaster broadcaster;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final WorkspaceInitService workspaceInitService;
+    private final ModelResolver modelResolver;
 
     /**
      * Process batch results and write files into the workspace.
      * Called by {@link BatchPollService} when a batch completes.
      */
+    private static final List<String> TERMINAL_STATUSES = List.of("CANCELLED", "FAILED", "COMPLETE", "PAUSED");
+
     public void resumeFromBatch(PipelineRun run, BatchResults results) {
         String runId = run.getRunId();
+
+        // C1 fix: guard against cancel-vs-complete race — if the run was cancelled
+        // between poll completion and resume invocation, do not overwrite terminal status
+        PipelineRun freshRun = stateStore.findRun(runId).orElse(null);
+        if (freshRun == null) {
+            log.warn("[Run {}] Run not found during batch resume — aborting", runId);
+            return;
+        }
+        if (TERMINAL_STATUSES.contains(freshRun.getStatus())) {
+            log.info("[Run {}] Run already in terminal state {} — skipping batch resume",
+                    runId, freshRun.getStatus());
+            return;
+        }
+
         log.info("[Run {}] Resuming from batch: {} results", runId, results.results().size());
 
         stateStore.updateStatus(runId, "WORKING");
@@ -54,12 +80,40 @@ public class BatchResumeService {
 
         // Get all tasks for this run
         List<AgentTask> tasks = stateStore.getAllTasks(runId);
-        String workspacePath = run.getWorkspacePath();
+        String workspacePath = workspaceInitService.runWorkspacePath(runId).toString();
+
+        // Collect parent task IDs that have subtasks — they won't have batch results
+        Set<String> decomposedParentIds = tasks.stream()
+                .filter(t -> t.getParentTaskId() != null)
+                .map(AgentTask::getParentTaskId)
+                .collect(Collectors.toSet());
+
+        // Resolve batch model/provider for task attribution
+        String batchModel = null;
+        String batchProviderName = null;
+        try {
+            String provStr = run.getBatchProvider();
+            if (provStr != null) {
+                LlmProvider batchProvider = LlmProvider.valueOf(provStr);
+                ResolvedModel resolved = modelResolver.resolve("WorkerAgent", batchProvider);
+                batchModel = resolved.getModel();
+                batchProviderName = batchProvider.name().toLowerCase();
+            }
+        } catch (Exception e) {
+            log.debug("[Run {}] Could not resolve batch model: {}", runId, e.getMessage());
+        }
 
         int completed = 0;
         int failed = 0;
 
         for (AgentTask task : tasks) {
+            // Skip parent tasks that were decomposed — their subtasks have the batch results
+            if (decomposedParentIds.contains(task.getTaskId())) {
+                log.debug("[Run {}] Skipping decomposed parent task {} — subtasks will be aggregated later",
+                        runId, task.getTaskId());
+                continue;
+            }
+
             String customId = "task-" + task.getTaskId();
             BatchResult result = resultMap.get(customId);
 
@@ -88,7 +142,19 @@ public class BatchResumeService {
                     stateStore.addTokensToRun(runId, result.inputTokens(), result.outputTokens());
                 }
 
+                if (filesWritten == 0) {
+                    // LLM responded but not in any parseable format — mark failed for retry
+                    stateStore.markTaskFailed(task.getTaskId(), "Batch response could not be parsed into files");
+                    broadcaster.emit(runId, RunEvent.taskStatus(runId, task.getTaskId(), "FAILED"));
+                    failed++;
+                    continue;
+                }
+
                 stateStore.markTaskComplete(task.getTaskId());
+                // Set batch model/provider for token usage attribution
+                if (batchModel != null || batchProviderName != null) {
+                    stateStore.setTaskModelProvider(task.getTaskId(), batchModel, batchProviderName);
+                }
                 broadcaster.emit(runId, RunEvent.taskStatus(runId, task.getTaskId(), "COMPLETE"));
                 broadcaster.emit(runId, RunEvent.log(runId, task.getTaskId(),
                         "Batch result processed — " + filesWritten + " file(s) written"));
@@ -112,20 +178,83 @@ public class BatchResumeService {
             return;
         }
 
+        // Aggregate subtask results back into parent tasks
+        Set<String> aggregatedParents = new HashSet<>();
+        for (AgentTask task : tasks) {
+            if (task.getParentTaskId() != null && aggregatedParents.add(task.getParentTaskId())) {
+                try {
+                    stateStore.completeParentFromSubtasks(task.getParentTaskId());
+                    log.info("[Run {}] Aggregated subtasks for parent task {}", runId, task.getParentTaskId());
+                } catch (Exception e) {
+                    log.warn("[Run {}] Failed to aggregate subtasks for parent {}: {}",
+                            runId, task.getParentTaskId(), e.getMessage());
+                }
+            }
+        }
+
         // Hand off to pipeline harness for compile → merge → review → report
         // This is published as an event so PipelineHarness can pick it up asynchronously
         eventPublisher.publishEvent(new BatchCompleteEvent(runId));
     }
 
+    private static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
+            "<tool_call>(.*?)</tool_call>", Pattern.DOTALL);
+    private static final Pattern CODE_FENCE_JSON = Pattern.compile(
+            "```(?:json)?\\s*\\n(\\{.*?\\})\\s*\\n```", Pattern.DOTALL);
+
     /**
-     * Parse the batch LLM output (structured JSON with file paths and contents)
-     * and write files to the workspace.
+     * Parse the batch LLM output and write files to the workspace.
+     * Tries multiple parsing strategies in order:
+     * 1. Direct JSON with files_written array
+     * 2. JSON extracted from markdown code fences
+     * 3. XML tool_call extraction (writeFile calls)
+     * 4. Raw output fallback
      */
     private int writeBatchOutput(String workspacePath, String content, String taskId, String runId)
             throws IOException {
-        // Try to parse as JSON first (structured output)
+
+        // Strategy 1: Direct JSON parse
+        int count = tryParseStructuredJson(workspacePath, content, taskId, runId);
+        if (count > 0) return count;
+
+        // Strategy 2: Extract JSON from markdown code fences (```json ... ```)
+        Matcher fenceMatcher = CODE_FENCE_JSON.matcher(content);
+        if (fenceMatcher.find()) {
+            count = tryParseStructuredJson(workspacePath, fenceMatcher.group(1), taskId, runId);
+            if (count > 0) {
+                log.debug("[Run {}] Task {}: parsed JSON from markdown code fence", runId, taskId);
+                return count;
+            }
+        }
+
+        // Strategy 3: Find the first { ... } JSON block in the response
+        int jsonStart = content.indexOf('{');
+        int jsonEnd = content.lastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+            String extracted = content.substring(jsonStart, jsonEnd + 1);
+            count = tryParseStructuredJson(workspacePath, extracted, taskId, runId);
+            if (count > 0) {
+                log.debug("[Run {}] Task {}: parsed JSON from extracted block", runId, taskId);
+                return count;
+            }
+        }
+
+        // Strategy 4: Extract writeFile calls from <tool_call> XML (worker-style output)
+        count = tryParseToolCalls(workspacePath, content, taskId, runId);
+        if (count > 0) return count;
+
+        // Strategy 5: Raw output fallback
+        log.warn("[Run {}] Task {}: batch response not in any expected format — storing as raw output ({} chars)",
+                runId, taskId, content.length());
+        Path outputFile = Path.of(workspacePath, ".batch-output", taskId + ".txt");
+        Files.createDirectories(outputFile.getParent());
+        Files.writeString(outputFile, content);
+        return 0;
+    }
+
+    private int tryParseStructuredJson(String workspacePath, String json, String taskId, String runId) {
         try {
-            JsonNode root = objectMapper.readTree(content);
+            JsonNode root = objectMapper.readTree(json);
             JsonNode filesArray = root.path("files_written");
             if (filesArray.isArray() && !filesArray.isEmpty()) {
                 int count = 0;
@@ -137,21 +266,42 @@ public class BatchResumeService {
                         count++;
                     }
                 }
-                log.debug("[Run {}] Task {}: wrote {} files from structured JSON", runId, taskId, count);
+                if (count > 0) {
+                    log.debug("[Run {}] Task {}: wrote {} files from structured JSON", runId, taskId, count);
+                }
                 return count;
             }
         } catch (Exception ignored) {
-            // Not valid JSON — fall through to raw content handling
+            // Not valid JSON or missing files_written
         }
-
-        // Fallback: treat the entire response as a single file
-        // (this handles cases where the LLM didn't follow the JSON format)
-        log.warn("[Run {}] Task {}: batch response not in expected JSON format — storing as raw output",
-                runId, taskId);
-        Path outputFile = Path.of(workspacePath, ".batch-output", taskId + ".txt");
-        Files.createDirectories(outputFile.getParent());
-        Files.writeString(outputFile, content);
         return 0;
+    }
+
+    private int tryParseToolCalls(String workspacePath, String content, String taskId, String runId) {
+        Matcher m = TOOL_CALL_PATTERN.matcher(content);
+        int count = 0;
+        while (m.find()) {
+            try {
+                String toolJson = m.group(1).trim();
+                JsonNode node = objectMapper.readTree(toolJson);
+                String toolName = node.path("name").asText("");
+                if ("writeFile".equals(toolName) || "write_file".equals(toolName)) {
+                    JsonNode args = node.path("args");
+                    String path = args.path("path").asText(null);
+                    String fileContent = args.path("content").asText(null);
+                    if (path != null && fileContent != null) {
+                        writeFile(workspacePath, path, fileContent);
+                        count++;
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("[Run {}] Task {}: failed to parse tool_call: {}", runId, taskId, e.getMessage());
+            }
+        }
+        if (count > 0) {
+            log.debug("[Run {}] Task {}: wrote {} files from tool_call XML", runId, taskId, count);
+        }
+        return count;
     }
 
     private void writeFile(String workspacePath, String relativePath, String content) throws IOException {

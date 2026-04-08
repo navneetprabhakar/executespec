@@ -71,6 +71,18 @@ Post-run interactive features: conversational AI chat about generated code, run 
 - Auto-pick up all other incomplete sibling tasks
 - After all tasks complete: full review -> auto-merge -> report cycle
 - Completed event triggers PostMergeOrchestrator
+- **Batch auto-retry:** After batch results processed, `PipelineHarness.onBatchComplete()` auto-retries FAILED tasks in real-time via `SequentialTaskExecutor`. Uses `StateStore.resetTaskForRetry()` to reset task state and `StateStore.setTaskModelProvider()` to attribute resolved WORKHORSE model/provider
+
+### 4a. Manual Test Execution (Beta)
+
+**Purpose:** Allow users to manually trigger test execution for batch runs after starting a preview.
+
+**Requirements:**
+- Endpoint: `POST /api/runs/{runId}/run-tests`
+- Validates: run exists, user has access, preview is RUNNING, test plan is COMPILED
+- Calls `TestPreviewCoordinator.triggerManualExecution(runId, testPlanId, previewUrl)`
+- Returns 202 Accepted with `{runId, testPlanId, previewUrl}`
+- Frontend: "Run Tests" button (Beta) in PreviewTab, visible when preview is RUNNING, disabled after click
 
 ### 5. Re-review (Legacy: Merge Gate Reopen)
 
@@ -111,11 +123,11 @@ Post-run interactive features: conversational AI chat about generated code, run 
 
 **Requirements:**
 - Run marked COMPLETE immediately after compile + merge
-- Auto-preview starts (5-min TTL) for both PROTOTYPE and PRODUCTION modes
+- Auto-preview starts (5-min TTL) for PROTOTYPE and real-time PRODUCTION modes. Batch runs skip auto-preview; `TestPreviewCoordinator` publishes empty event to unblock validation report
 - Background validation runs in a virtual thread (`bg-validation-{runId}`):
   1. ReviewerAgentV2 — inspect code, auto-fix issues
   2. TestGenOrchestrator — generate tests
-  3. TestPreviewCoordinator — reuse existing preview for test execution
+  3. TestPreviewCoordinator — reuse existing preview for test execution (batch runs: empty event, manual execution via `POST /runs/{runId}/run-tests`)
   4. ValidationReportGenerator — produce final report
 - User can chat, submit changes, and use preview while validation runs
 - SSE cleanup (`broadcaster.complete()`, `runKeyStore.remove()`, `runBudgetTracker.remove()`) deferred to background thread's `finally` block

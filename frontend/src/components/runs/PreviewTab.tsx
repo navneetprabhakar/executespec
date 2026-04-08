@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getPreviewStatus, startPreview, stopPreview, rebuildPreview, getPreviewLogs, getOpenApiSpec,
-  analyzePreview, probeApiDocs,
+  analyzePreview, probeApiDocs, runTests,
 } from '@/lib/api';
 import type { LocalPreviewStatus, PreviewAnalysis, ApiDocsProbeResult } from '@/lib/api';
 import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
 import {
   Play, Square, RefreshCw, ChevronDown, Terminal, ExternalLink,
-  Filter, AlertTriangle, Database, Eye, EyeOff, X, Shield, Clock,
+  Filter, AlertTriangle, Database, Eye, EyeOff, X, Shield, Clock, TestTube2,
 } from 'lucide-react';
 
 const BACKEND_ONLY = new Set(['SPRING_BOOT', 'GRADLE', 'NODE_BACKEND', 'PYTHON']);
@@ -64,6 +64,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const [analysis, setAnalysis] = useState<PreviewAnalysis | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
   const [warmupReady, setWarmupReady] = useState(false);
+  const [testsTriggered, setTestsTriggered] = useState(false);
   const logPollRef = useRef<ReturnType<typeof setInterval>>();
   const countdownRef = useRef<ReturnType<typeof setInterval>>();
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -97,6 +98,20 @@ export default function PreviewTab({ runId }: { runId: string }) {
       }
     }
   }, [sseEntries, runId, PREVIEW_EVENTS]);
+
+  // Listen for test execution completion to reset button state
+  const lastTestEventRef = useRef<string | null>(null);
+  useEffect(() => {
+    for (let i = sseEntries.length - 1; i >= 0; i--) {
+      const entry = sseEntries[i];
+      if (entry.type === 'TEST_EXECUTION_COMPLETED' || entry.type === 'TEST_REPORT_READY') {
+        if (entry.id === lastTestEventRef.current) break;
+        lastTestEventRef.current = entry.id;
+        setTestsTriggered(false);
+        break;
+      }
+    }
+  }, [sseEntries]);
 
   // Countdown timer for running previews
   const expiredFetchedRef = useRef(false);
@@ -231,6 +246,15 @@ export default function PreviewTab({ runId }: { runId: string }) {
       setStatus(prev => prev ? { ...prev, status: 'FAILED', errorMessage: e.message } : null);
     } finally {
       setLoading(false);
+    }
+  }, [runId]);
+
+  const handleRunTests = useCallback(async () => {
+    setTestsTriggered(true);
+    try {
+      await runTests(runId);
+    } catch {
+      setTestsTriggered(false);
     }
   }, [runId]);
 
@@ -398,6 +422,22 @@ export default function PreviewTab({ runId }: { runId: string }) {
                 ? <span className="h-3 w-3 rounded-full border-2 border-accent-green/30 border-t-accent-green animate-spin" />
                 : <Play className="h-3 w-3" />}
               {analyzing ? 'Analyzing...' : isFailed || isTimedOut ? 'Retry' : 'Start Preview'}
+            </button>
+          )}
+          {isRunning && (
+            <button
+              onClick={handleRunTests}
+              disabled={testsTriggered}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
+                'bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-40'
+              )}
+            >
+              {testsTriggered
+                ? <span className="h-3 w-3 rounded-full border-2 border-accent-blue/30 border-t-accent-blue animate-spin" />
+                : <TestTube2 className="h-3 w-3" />}
+              {testsTriggered ? 'Tests Running...' : 'Run Tests'}
+              <span className="text-[9px] font-semibold uppercase tracking-wider opacity-70">Beta</span>
             </button>
           )}
           {(isRunning || isStartingPhase) && (

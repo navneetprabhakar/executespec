@@ -52,7 +52,8 @@ public class RunMapper {
             r.getRunTitle(),
             r.getRunSummary(),
             r.getExecutionMode(),
-            r.getArchivedAt()
+            r.getArchivedAt(),
+            r.getApprovedExecutionMode()
         );
     }
 

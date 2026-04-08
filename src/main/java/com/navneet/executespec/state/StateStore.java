@@ -447,10 +447,13 @@ public class StateStore {
     }
 
     public void setApprovedExecutionMode(String runId, String mode) {
-        runRepo.findById(runId).ifPresent(run -> {
-            run.setApprovedExecutionMode(mode);
-            runRepo.save(run);
-        });
+        // Atomic JPQL update — avoids read-modify-write race with clearGateSync/markApproved
+        runRepo.updateApprovedExecutionMode(runId, mode);
+        log.info("[Run {}] Execution mode set to {} (atomic)", runId, mode);
+    }
+
+    public void clearCurrentGate(String runId) {
+        runRepo.clearCurrentGate(runId);
     }
 
     public void updateBatchProgress(String runId, int completed, int total) {
@@ -479,12 +482,32 @@ public class StateStore {
         });
     }
 
+    /** Set model and provider on a task (used by batch resume to attribute token usage). */
+    public void setTaskModelProvider(String taskId, String model, String provider) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            if (model != null) task.setModel(model);
+            if (provider != null) task.setProvider(provider);
+            taskRepo.save(task);
+        });
+    }
+
     /** Mark a task as FAILED with a reason (batch mode). */
     public void markTaskFailed(String taskId, String reason) {
         taskRepo.findById(taskId).ifPresent(task -> {
             task.setStatus("FAILED");
             task.setLastLlmFailure(reason);
             task.setCompletedAt(Instant.now());
+            taskRepo.save(task);
+        });
+    }
+
+    /** Reset a failed task for real-time retry (batch fallback). */
+    public void resetTaskForRetry(String taskId) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            task.setStatus("PENDING");
+            task.setLastLlmFailure(null);
+            task.setCompletedAt(null);
+            task.setWorkerReportJson(null);
             taskRepo.save(task);
         });
     }

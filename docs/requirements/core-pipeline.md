@@ -151,12 +151,13 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
 
 **Requirements:**
 - Run is marked **COMPLETE** immediately after compile + auto-merge
-- Auto-preview starts (5-min TTL) for both PROTOTYPE and PRODUCTION modes
+- Auto-preview starts (5-min TTL) for PROTOTYPE and real-time PRODUCTION modes. Batch runs skip auto-preview; `TestPreviewCoordinator` publishes empty `TestExecutionCompletedEvent` to unblock validation report
+- **Batch auto-retry:** After `BatchResumeService` processes batch results, `PipelineHarness.onBatchComplete()` queries for FAILED tasks, resets them via `StateStore.resetTaskForRetry()`, and retries in real-time via `SequentialTaskExecutor` before compile. `BatchResumeService` also resolves WORKHORSE model/provider via `ModelResolver` and sets on tasks via `StateStore.setTaskModelProvider()`
 - Background validation runs in a dedicated virtual thread (`bg-validation-{runId}`)
 - Validation phases (sequential):
   1. **ReviewerAgentV2:** Two-phase agentic review with tool-use inspection and auto-fix
   2. **TestGenOrchestrator:** Generate tests based on plan and code
-  3. **TestPreviewCoordinator:** Reuse existing preview for test execution
+  3. **TestPreviewCoordinator:** Reuse existing preview for test execution (batch runs: empty event, manual execution via `POST /runs/{runId}/run-tests`)
   4. **ValidationReportGenerator:** Aggregate findings into user-facing report
 - SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` deferred to background thread's `finally` block
 - `backgroundValidationRuns` ConcurrentHashSet tracks active background threads

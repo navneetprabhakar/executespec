@@ -684,8 +684,11 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-sm text-primary font-mono font-medium">{run.creditsCharged} credit{run.creditsCharged > 1 ? 's' : ''}</span>
-            {run.approvedExecutionMode && (
-              <span className="text-[10px] text-muted">{run.approvedExecutionMode === 'BATCH' ? 'Batch' : 'Real-time'}</span>
+            {run.approvedExecutionMode === 'BATCH' && (
+              <span className="text-[10px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full">Batch</span>
+            )}
+            {run.approvedExecutionMode === 'REALTIME' && (
+              <span className="text-[10px] text-muted">Real-time</span>
             )}
           </div>
         </div>

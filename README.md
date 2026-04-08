@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-**v1.3.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
+**v1.5.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into parallel coding tasks, executes them with LLM worker agents, validates, reviews, and deploys the result.
 
 **Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind · GCP
 
@@ -48,12 +48,14 @@ POST /api/runs  →  RequestTriageService (single-shot fast path?)
                    → WorkerAgent per task (WORKHORSE tier, 25-min limit, self-play prevention)
                    → Retry with model escalation on stall (WORKHORSE → PLANNING)
                    → Progressive merge to main after each task
+                   (Batch mode: BatchClientRouter → BatchPollService → BatchResumeService
+                    → auto-retry failed tasks in real-time → compile)
                       ↓
                 CompilerAgent (full project build, 3 rounds)
                       ↓
                 Auto-merge all task branches
                       ↓
-                ★ COMPLETE  →  Auto-preview (5-min TTL)
+                ★ COMPLETE  →  Auto-preview (5-min TTL, skipped for batch runs)
                       ↓ (background virtual thread)
                 ReviewerAgentV2 (inspect merged code + auto-fix)
                       ↓
@@ -74,7 +76,9 @@ POST /api/runs  →  RequestTriageService (single-shot fast path?)
 - **Self-play prevention** — strips fabricated `<tool_result>` blocks from LLM responses, XML-first parsing for PATH B providers
 - **Plan approval gate** — human reviews task breakdown (auto-bypass via `skipApproval`)
 - **Automatic merge** — no manual merge gate; pipeline auto-merges after compile
-- **Background validation** — review, test gen, test exec, and report run in background after COMPLETE (preview available immediately)
+- **Batch execution** — dual-option plan approval (real-time vs batch with 50% discount), all 3 LLM providers, auto-retry failed batch tasks in real-time, batch model/provider attribution
+- **Manual test execution (Beta)** — "Run Tests" button in PreviewTab for batch runs (preview must be running)
+- **Background validation** — review, test gen, test exec, and report run in background after COMPLETE (preview available immediately; batch runs skip auto-preview)
 - **Code validation** — language toolchains for Java, TypeScript, Python, React (syntax → type → lint → test)
 - **ReviewerAgentV2** — inspects merged code, auto-fixes CRITICAL/MINOR issues (2 attempts per issue, max 8)
 - **Test generation** — language-agnostic pipeline: plan → generate → compile → execute against live preview
@@ -136,7 +140,7 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 
 ## Database Migrations
 
-58 Flyway migrations (V1–V58) run automatically on startup:
+61 Flyway migrations (V1–V61) run automatically on startup:
 
 | Version | Description |
 |---------|-------------|
@@ -163,6 +167,9 @@ Full details: [docs/requirements/security-guardrails.md](docs/requirements/secur
 | V55 | Payment audit expansion |
 | V56 | Task completion notes |
 | V58 | Subtask support (parentTaskId, subtaskIndex, subtaskTotal) |
+| V59 | Bitbucket SCM integration |
+| V60–V60.1 | Preview registry, cost-proportional credits, run_cost_log audit |
+| V61 | Batch execution support, notification table |
 
 ---
 

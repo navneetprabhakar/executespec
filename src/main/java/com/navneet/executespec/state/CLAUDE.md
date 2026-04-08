@@ -3,7 +3,7 @@
 Persistence layer for pipeline runs, tasks, and all mutable state.
 
 ## Key Files
-- `StateStore.java` — Central state manager. All run/task state mutations go through here. 1500+ lines.
+- `StateStore.java` — Central state manager. All run/task state mutations go through here. 1500+ lines. Key batch methods: `resetTaskForRetry()` (resets task to PENDING for batch auto-retry), `setTaskModelProvider()` (sets resolved model/provider after batch resume).
 - `entity/PipelineRun.java` — JPA entity for runs. Key fields: status, plan, costEstimate, actualCostUsd, creditsCharged, hardCapUsd, failureReason, githubPrUrl, approvedExecutionMode, batchId, batchProvider, batchCredits, batchAvailable, creditSavings, batchProgressCompleted, batchProgressTotal, batchSubmittedAt.
 - `entity/AgentTask.java` — JPA entity for individual tasks within a run. Includes subtask decomposition fields: `parentTaskId` (null for top-level), `subtaskIndex` (1-based), `subtaskTotal`.
 - `entity/PlanVersion.java` — JPA entity for plan version history. Columns widened in V45 (id/run_id/created_by → VARCHAR(255), source → VARCHAR(64)).

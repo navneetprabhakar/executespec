@@ -34,5 +34,7 @@ public record RunSummary(
     /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
     String executionMode,
     /** Timestamp when the run was archived by the user. Null for active runs. */
-    Instant archivedAt
+    Instant archivedAt,
+    /** "REALTIME" | "BATCH". Null for pre-V61 runs or runs not yet approved. */
+    String approvedExecutionMode
 ) {}

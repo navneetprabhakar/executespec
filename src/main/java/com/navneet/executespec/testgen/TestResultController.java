@@ -5,6 +5,8 @@ import com.navneet.executespec.agent.ConversationAgent;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.deployment.preview.PreviewService;
+import com.navneet.executespec.deployment.preview.PreviewStatus;
 import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.state.ApplySource;
 import com.navneet.executespec.state.StateStore;
@@ -16,6 +18,8 @@ import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestResultRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -37,6 +41,11 @@ public class TestResultController {
     private final StateStore stateStore;
     private final ConversationAgent conversationAgent;
     private final PipelineHarness harness;
+    private final TestPreviewCoordinator testPreviewCoordinator;
+
+    /** Lazy to break circular dependency: PreviewService → TestPreviewCoordinator → PreviewService */
+    @Lazy @Autowired
+    private PreviewService previewService;
 
     /**
      * Get full test report for a run.
@@ -128,6 +137,45 @@ public class TestResultController {
         testResultRepository.save(result);
 
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Manually trigger test execution against a running preview.
+     * Used by the "Run Tests" button in the UI for batch runs (or any run with a manual preview).
+     */
+    @PostMapping("/runs/{runId}/run-tests")
+    public ResponseEntity<Map<String, Object>> runTests(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+
+        runAccessGuard.requireRunAccess(runId, userDetails);
+
+        PipelineRun run = stateStore.findRun(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+
+        // Check preview is running
+        var preview = previewService.getStatus(runId);
+        if (preview == null || preview.status() != PreviewStatus.RUNNING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Preview is not running — start the preview first");
+        }
+
+        // Find the latest COMPILED test plan
+        TestPlan plan = testPlanRepository.findByRunId(runId).orElse(null);
+        if (plan == null || plan.getStatus() != TestPlanStatus.COMPILED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "No compiled test plan found — tests may still be generating");
+        }
+
+        testPreviewCoordinator.triggerManualExecution(runId, plan.getId(), preview.url());
+
+        log.info("[RunTests] Manual test execution triggered for run {} against {}", runId, preview.url());
+
+        return ResponseEntity.accepted().body(Map.of(
+                "runId", runId,
+                "testPlanId", plan.getId(),
+                "previewUrl", preview.url()
+        ));
     }
 
     /**

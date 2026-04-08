@@ -3,7 +3,7 @@ package com.navneet.executespec.batch;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.config.AgentProperties;
-import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.harness.SubtaskDecomposer;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelMatrixProperties;
 import com.navneet.executespec.router.ModelResolver;
@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -31,70 +32,100 @@ public class BatchRequestBuilder {
     private final ModelResolver modelResolver;
     private final AgentProperties agentProperties;
     private final ModelMatrixProperties modelMatrixProperties;
+    private final SubtaskDecomposer subtaskDecomposer;
 
     private static final String BATCH_SYSTEM_PROMPT = """
             You are a software engineering agent executing a single task from a multi-task plan.
             You must produce all required code in this single response — there is no interactive mode.
 
-            OUTPUT FORMAT: Respond with a JSON object containing:
+            CRITICAL: Your ENTIRE response must be a single JSON object — no markdown, no explanation, no code fences.
+            Do NOT use ```json or any other formatting. Start your response with { and end with }.
+
+            The JSON object MUST have this exact structure:
             {
-              "status": "COMPLETE" | "PARTIAL" | "BLOCKED",
+              "status": "COMPLETE",
               "files_written": [
                 {
                   "path": "relative/path/to/file.ext",
                   "content": "full file content here"
                 }
               ],
-              "completion_notes": "Brief summary of what was implemented",
-              "blockers": "Only if status is BLOCKED — explain what's missing"
+              "completion_notes": "Brief summary of what was implemented"
             }
 
             RULES:
-            - Write COMPLETE file contents, not diffs or patches
-            - Include ALL imports, headers, and boilerplate
-            - Follow the project conventions described in the task
+            - Your response must be ONLY the JSON object — nothing before or after it
+            - Write COMPLETE file contents in the "content" field, not diffs or patches
+            - Include ALL imports, headers, and boilerplate in each file
+            - Escape special characters properly in JSON strings (newlines as \\n, quotes as \\", etc.)
+            - Each file in owned_files MUST appear in files_written
             - If a task depends on other tasks, assume their files exist as specified in the plan
-            - Do NOT fabricate test data or placeholder content
-            - Produce production-quality code
+            - Do NOT wrap your response in markdown code fences
+            - Do NOT include any text before or after the JSON
             """;
 
     /**
-     * Build batch requests for all tasks in the plan.
+     * Build batch requests for all tasks in the plan, decomposing multi-file tasks
+     * into per-file subtask requests for better token efficiency and parse reliability.
+     * <p>
+     * File-based decomposition: tasks with 2+ owned files are split into per-file subtasks.
+     * Phase-based decomposition is skipped in batch mode (phases are sequential, can't parallelize).
      *
      * @param plan     The execution plan from the planner
      * @param provider User-selected LLM provider
      * @param planJson Full plan JSON for context
-     * @return List of batch requests, one per task
+     * @return Build result containing requests and decomposition metadata
      */
-    public List<BatchRequest> buildRequests(TaskPlan plan, LlmProvider provider, String planJson) {
+    public BatchBuildResult buildRequests(TaskPlan plan, LlmProvider provider, String planJson) {
         double tokenMultiplier = agentProperties.getCost().getBatch().getMaxOutputTokenMultiplier();
         List<BatchRequest> requests = new ArrayList<>();
+        Map<String, List<TaskDefinition>> decomposedTasks = new HashMap<>();
 
         for (TaskDefinition task : plan.getTasks()) {
             ResolvedModel resolved = modelResolver.resolve("WorkerAgent", provider);
             String model = resolved.getModel();
-
-            // Estimate max output tokens: base on complexity, multiplied for batch generosity
-            int baseTokens = estimateOutputTokens(task);
-            int maxTokens = (int) (baseTokens * tokenMultiplier);
-
-            // Cap at model's max output
             int modelMax = getModelMaxOutput(model);
-            maxTokens = Math.min(maxTokens, modelMax);
 
-            String userMessage = buildTaskMessage(task, plan, planJson);
+            // Decompose multi-file tasks (file-based only — skip phase-based for batch)
+            List<String> files = task.getOwnedFiles();
+            boolean isMultiFile = files != null && files.size() > 1
+                    && (task.getReworkFeedback() == null || task.getReworkFeedback().isBlank());
 
-            requests.add(new BatchRequest(
-                    "task-" + task.getTaskId(),
-                    model,
-                    maxTokens,
-                    BATCH_SYSTEM_PROMPT,
-                    List.of(Map.of("role", "user", "content", userMessage))
-            ));
+            if (isMultiFile) {
+                List<TaskDefinition> subtasks = subtaskDecomposer.decompose(task);
+                decomposedTasks.put(task.getTaskId(), subtasks);
+                log.info("Decomposed task {} into {} subtasks for batch", task.getTaskId(), subtasks.size());
+
+                for (TaskDefinition subtask : subtasks) {
+                    int baseTokens = estimateOutputTokens(subtask);
+                    int maxTokens = Math.min((int) (baseTokens * tokenMultiplier), modelMax);
+
+                    requests.add(new BatchRequest(
+                            "task-" + subtask.getTaskId(),
+                            model,
+                            maxTokens,
+                            BATCH_SYSTEM_PROMPT,
+                            List.of(Map.of("role", "user", "content", buildTaskMessage(subtask, plan, planJson)))
+                    ));
+                }
+            } else {
+                // Single-file or no-file task — submit as-is
+                int baseTokens = estimateOutputTokens(task);
+                int maxTokens = Math.min((int) (baseTokens * tokenMultiplier), modelMax);
+
+                requests.add(new BatchRequest(
+                        "task-" + task.getTaskId(),
+                        model,
+                        maxTokens,
+                        BATCH_SYSTEM_PROMPT,
+                        List.of(Map.of("role", "user", "content", buildTaskMessage(task, plan, planJson)))
+                ));
+            }
         }
 
-        log.info("Built {} batch requests for provider {}", requests.size(), provider);
-        return requests;
+        log.info("Built {} batch requests for provider {} ({} tasks decomposed)",
+                requests.size(), provider, decomposedTasks.size());
+        return new BatchBuildResult(requests, decomposedTasks);
     }
 
     private String buildTaskMessage(TaskDefinition task, TaskPlan plan, String planJson) {

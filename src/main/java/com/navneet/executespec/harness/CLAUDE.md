@@ -26,7 +26,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 6. CompilerAgent fixes compilation errors
 7. Auto-merge all task branches to main
 8. **Mark run COMPLETE** (status set, `completedAt` recorded)
-9. **Auto-start preview** (5-min TTL) for both PROTOTYPE and PRODUCTION modes
+9. **Auto-start preview** (5-min TTL) for PROTOTYPE and real-time PRODUCTION modes. Batch runs skip auto-preview.
 10. **Background validation thread** (`bg-validation-{runId}` virtual thread):
    - ReviewerAgentV2 inspects + auto-fixes
    - Re-validation after auto-fix
@@ -41,7 +41,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 
 **Existing-repo GitHub push:** `pushToGitHubIfConfigured()` creates branch `executespec/{runId-short}`, pushes to branch (not main), opens PR via `GitHubRepoService.createPullRequest()`, stores PR URL in `PipelineRun.githubPrUrl`.
 
-**Batch execution flow:** At plan approval, user may choose BATCH mode (if `batchAvailable`). `approvedExecutionMode=BATCH` triggers batch submission via `BatchClientRouter` → run enters `QUEUED_BATCH` → `IN_PROGRESS_BATCH`. `BatchPollService` polls every 30s (@Scheduled + @SchedulerLock). On completion, `BatchResumeService` writes files to workspace, marks tasks, publishes `BatchCompleteEvent`. PipelineHarness `@EventListener @Async onBatchComplete()` resumes from compile step → merge → COMPLETE → validation.
+**Batch execution flow:** At plan approval, user may choose BATCH mode (if `batchAvailable`). `approvedExecutionMode=BATCH` triggers batch submission via `BatchClientRouter` → run enters `QUEUED_BATCH` → `IN_PROGRESS_BATCH`. `BatchPollService` polls every 30s (@Scheduled + @SchedulerLock). On completion, `BatchResumeService` writes files to workspace, marks tasks, resolves WORKHORSE model/provider via `ModelResolver` and sets on tasks via `StateStore.setTaskModelProvider()`, publishes `BatchCompleteEvent`. PipelineHarness `@EventListener @Async onBatchComplete()` auto-retries FAILED tasks: queries for failed tasks → `StateStore.resetTaskForRetry()` → executes in real-time via `SequentialTaskExecutor` → then resumes compile step → merge → COMPLETE → validation. Batch runs skip auto-preview; `TestPreviewCoordinator.onTestsReady()` publishes empty `TestExecutionCompletedEvent` to unblock validation report.
 
 **Key design:** User sees COMPLETE immediately after compile+merge. Preview is available while validation runs in background. SSE stream stays open until background validation finishes.
 

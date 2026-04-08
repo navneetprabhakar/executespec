@@ -81,6 +81,9 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
           <div className="flex items-center gap-2 mb-0.5">
             <span className="font-mono text-xs text-muted">{run.runId.slice(0, 12)}</span>
             <span className="text-xs text-muted">{relativeTime(run.startedAt)}</span>
+            {run.approvedExecutionMode === 'BATCH' && (
+              <span className="text-[9px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full leading-none">Batch</span>
+            )}
           </div>
           <p className="text-[11px] text-muted mb-1 line-clamp-1">
             {describeRunStatus(run.status)}
