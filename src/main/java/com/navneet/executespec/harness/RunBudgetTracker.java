@@ -35,9 +35,23 @@ public class RunBudgetTracker {
     /**
      * Initializes the budget for a run from its task plan.
      * Must be called after planning, before task execution starts.
+     *
+     * @param runId   the run ID
+     * @param plan    the task plan
+     * @param credits credits charged for this run (used to scale ceiling for multi-credit runs)
+     * @param unlimited true for ENTERPRISE/BYOK users — disables call-count ceiling
      */
-    public void initBudget(String runId, TaskPlan plan) {
+    public void initBudget(String runId, TaskPlan plan, int credits, boolean unlimited) {
         if (plan == null || plan.getTasks() == null) return;
+
+        if (unlimited) {
+            // ENTERPRISE/BYOK: no call-count ceiling
+            budgetCeilings.put(runId, Integer.MAX_VALUE);
+            actualCalls.put(runId, new AtomicInteger(0));
+            log.info("[RunBudget] Run {} — {} tasks, ceiling=unlimited (enterprise/byok)",
+                runId, plan.getTasks().size());
+            return;
+        }
 
         int estimatedTotal = 0;
         for (TaskDefinition task : plan.getTasks()) {
@@ -49,12 +63,20 @@ public class RunBudgetTracker {
             };
         }
 
-        int ceiling = estimatedTotal * MULTIPLIER;
+        // Scale ceiling with credits: multi-credit runs get proportionally more headroom
+        int creditScale = Math.max(1, credits);
+        int ceiling = estimatedTotal * MULTIPLIER * creditScale;
         budgetCeilings.put(runId, ceiling);
         actualCalls.put(runId, new AtomicInteger(0));
 
-        log.info("[RunBudget] Run {} — {} tasks, estimated {} calls, ceiling {} ({}×)",
-            runId, plan.getTasks().size(), estimatedTotal, ceiling, MULTIPLIER);
+        log.info("[RunBudget] Run {} — {} tasks, estimated {} calls, ceiling {} ({}× × {} credits)",
+            runId, plan.getTasks().size(), estimatedTotal, ceiling, MULTIPLIER, creditScale);
+    }
+
+    /** @deprecated Use {@link #initBudget(String, TaskPlan, int, boolean)} instead. */
+    @Deprecated
+    public void initBudget(String runId, TaskPlan plan) {
+        initBudget(runId, plan, 1, false);
     }
 
     /**
