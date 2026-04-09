@@ -95,6 +95,17 @@ public class RunDetail {
     /** Timestamp when the run was archived by the user. Null for active runs. */
     Instant archivedAt;
 
+    /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
+    String aiProvider;
+
+    // ── Retry tracking ──────────────────────────────────────────────────────
+    /** True if this run is a retry of a previous run. */
+    Boolean isRetry;
+    /** RunId of the original run this was retried from. Null for original runs. */
+    String sourceRunId;
+    /** Number of auto-retry attempts on this run chain (0 = original run). */
+    Integer runRetryCount;
+
     // ── Batch execution ──────────────────────────────────────────────────────
     /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
     String approvedExecutionMode;
