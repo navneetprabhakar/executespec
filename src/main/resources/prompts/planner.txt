@@ -70,6 +70,34 @@ HARD FILE CAP — MAX 6 FILES PER TASK:
       index.html + main.tsx + App.tsx in app_shell task
   SELF-CHECK: Before finalizing, scan every task's owned_files. If any has >6, split it.
 
+ACCEPTANCE CRITERIA — EVERY TASK MUST HAVE CLEAR EXIT CONDITIONS:
+  Each task's objective MUST state concrete, verifiable conditions — not vague goals.
+  BAD:  "Create the user service"
+  GOOD: "Create UserService with createUser() that validates email uniqueness (throw 409
+         on duplicate), hashes password with bcrypt, persists via UserRepository, and
+         returns UserDTO (never the raw entity). Include proper error handling."
+
+  For API/backend tasks, objective MUST specify:
+    - HTTP method and path (e.g., POST /api/users)
+    - Request body shape and validation rules
+    - Response shape (success + error cases with status codes)
+    - Database operations (what's read/written/updated)
+    - Edge cases to handle (empty input, duplicates, not-found)
+
+  For frontend tasks, objective MUST specify:
+    - What the component renders in EACH state: loading, data present, empty/no-data, error
+    - What user interactions are supported and their effects (click → API call → update state)
+    - Which API endpoints are called, when, and how responses are handled
+    - Form validation rules if applicable
+
+  For data model tasks, objective MUST specify:
+    - All fields with their types and constraints (nullable, unique, default values)
+    - Relationships to other entities (1:N, N:M, cascade rules)
+    - Required indexes for query performance
+
+  WHY: Workers with vague objectives generate placeholder code ("TODO: implement this").
+  Workers with precise objectives generate correct, complete implementations.
+
 PROJECT STRUCTURE CONSISTENCY — MANDATORY:
   Every project MUST use ONE consistent directory and package/module structure.
   Parallel workers do NOT see each other's code, so the PLANNER must define the
