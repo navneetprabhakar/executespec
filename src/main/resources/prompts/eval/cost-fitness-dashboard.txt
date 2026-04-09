@@ -1,0 +1,31 @@
+Create a fitness tracking dashboard using React, TypeScript, and a Node.js/Express backend. Include:
+
+**Workout Logging:**
+1. Log workout form: exercise type (Running, Cycling, Swimming, Weightlifting, Yoga, HIIT — dropdown), duration in minutes, calories burned (auto-estimate based on type and duration), date, optional notes
+2. Workout history list with filters: date range, exercise type. Sortable by date, duration, or calories
+3. Edit and delete existing workouts
+4. Quick-log buttons for common workouts (30min Run, 45min Cycling, etc.)
+
+**Analytics Dashboard:**
+1. Weekly activity bar chart: days of the week on x-axis, total calories on y-axis. Highlight current day. Use pure SVG (no chart library)
+2. Monthly progress line chart: 4-week rolling view. Plot total weekly calories over time as an SVG polyline
+3. Personal records card: fastest 5K time, longest workout, highest calorie burn, longest streak
+4. Streak tracking: current consecutive days with at least one workout. Show with a flame icon and day count
+5. Calendar heat map (GitHub-style): 12 weeks of data, color intensity based on total calories that day (light green to dark green). Show day-of-week labels and month labels
+
+**Goals & Progress:**
+1. Set weekly goals: target workouts per week, target calories per week
+2. Progress rings (circular SVG): percentage toward each goal
+3. Goal streak: consecutive weeks meeting all goals
+
+**Data Management:**
+1. Export data as CSV (date, exercise, duration, calories)
+2. Import from CSV
+3. All data persisted in localStorage
+
+**Backend API:**
+1. CRUD endpoints for workouts
+2. GET /api/analytics/weekly — aggregated weekly stats
+3. GET /api/analytics/records — personal bests
+4. GET /api/analytics/heatmap — last 12 weeks daily totals
+5. In-memory store seeded with 60 days of sample workout data

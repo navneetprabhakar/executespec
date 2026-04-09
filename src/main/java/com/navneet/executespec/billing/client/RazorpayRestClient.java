@@ -23,9 +23,10 @@ public class RazorpayRestClient {
      * POST /v1/customers
      */
     public JsonNode createCustomer(String name, String email, String contact) {
-        Map<String, String> body = new HashMap<>();
+        Map<String, Object> body = new HashMap<>();
         body.put("name", name);
         body.put("email", email);
+        body.put("fail_existing", 0); // return existing customer instead of 400 error
         if (contact != null && !contact.isBlank()) body.put("contact", contact);
 
         log.debug("Creating Razorpay customer: email={}", email);
@@ -96,6 +97,33 @@ public class RazorpayRestClient {
         return restClient.post()
                 .uri("/subscriptions/{id}/cancel", subscriptionId)
                 .body(Map.of("cancel_at_cycle_end", cancelAtCycleEnd ? 1 : 0))
+                .retrieve()
+                .body(JsonNode.class);
+    }
+
+    /**
+     * GET /v1/customers — fetch customers by email
+     */
+    public JsonNode fetchCustomersByEmail(String email) {
+        log.debug("Fetching Razorpay customers by email: {}", email);
+        return restClient.get()
+                .uri("/customers?email={email}", email)
+                .retrieve()
+                .body(JsonNode.class);
+    }
+
+    /**
+     * POST /v1/payments/{paymentId}/refund — partial or full refund
+     */
+    public JsonNode createRefund(String paymentId, long amountPaise, Map<String, String> notes) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("amount", amountPaise);
+        if (notes != null && !notes.isEmpty()) body.put("notes", notes);
+
+        log.info("Creating Razorpay refund: paymentId={}, amount={} paise", paymentId, amountPaise);
+        return restClient.post()
+                .uri("/payments/{id}/refund", paymentId)
+                .body(body)
                 .retrieve()
                 .body(JsonNode.class);
     }

@@ -13,6 +13,14 @@ public interface RefreshTokenBlocklistRepository extends JpaRepository<RefreshTo
     boolean existsByJti(String jti);
 
     @Modifying
+    @Query(value = "INSERT INTO refresh_token_blocklist (jti, user_id, blocked_at, expires_at) " +
+                   "VALUES (:jti, :userId, NOW(), :expiresAt) ON CONFLICT (jti) DO NOTHING",
+           nativeQuery = true)
+    void insertIfAbsent(@Param("jti") String jti,
+                        @Param("userId") String userId,
+                        @Param("expiresAt") Instant expiresAt);
+
+    @Modifying
     @Query("DELETE FROM RefreshTokenBlocklist r WHERE r.expiresAt < :now")
     void deleteExpired(@Param("now") Instant now);
 }

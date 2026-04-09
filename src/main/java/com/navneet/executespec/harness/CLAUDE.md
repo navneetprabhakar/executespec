@@ -15,14 +15,19 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 
 ## Pipeline Sequencing (PRODUCTION mode)
 1. PlannerAgent generates plan (includes `project_type`)
-2. Plan approval gate (Redis-backed, user approves via UI)
-3. `initAgentContext()` writes `.agent-context/` files including `project.json`
-4. SequentialTaskExecutor runs tasks in tiered groups (SubtaskDecomposer splits multi-file tasks into per-file subtasks; complex single-file tasks into method-level phases)
-5. CompilerAgent fixes compilation errors
-6. Auto-merge all task branches to main
-7. **Mark run COMPLETE** (status set, `completedAt` recorded)
-8. **Auto-start preview** (5-min TTL) for both PROTOTYPE and PRODUCTION modes
-9. **Background validation thread** (`bg-validation-{runId}` virtual thread):
+2. Cost estimation: `CostEstimator.estimateWithCredits()` computes credits (`max(1, ceil(estimate × 1.10 / $5.0))`), persists `creditsCharged` + `hardCapUsd` on the run
+3. Plan approval gate (Redis-backed, user approves via UI). SSE `GATE_OPENED` includes credits + estimated cost.
+   - On approval: charges N credits via `TierEnforcementService.assertAndIncrementRunCount(userId, credits)`
+   - FREE tier: blocks specs requiring >1 credit (suggests top-up or tier upgrade)
+   - Insufficient credits: auto-rejects with message to purchase top-up or upgrade tier
+   - BYOK/ENTERPRISE: skip credit charge (unlimited)
+4. `initAgentContext()` writes `.agent-context/` files including `project.json`
+5. SequentialTaskExecutor runs tasks in tiered groups (SubtaskDecomposer splits multi-file tasks into per-file subtasks; complex single-file tasks into method-level phases)
+6. CompilerAgent fixes compilation errors
+7. Auto-merge all task branches to main
+8. **Mark run COMPLETE** (status set, `completedAt` recorded)
+9. **Auto-start preview** (5-min TTL) for PROTOTYPE and real-time PRODUCTION modes. Batch runs skip auto-preview.
+10. **Background validation thread** (`bg-validation-{runId}` virtual thread):
    - ReviewerAgentV2 inspects + auto-fixes
    - Re-validation after auto-fix
    - TestGenOrchestrator generates integration tests (async)
@@ -36,11 +41,18 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 
 **Existing-repo GitHub push:** `pushToGitHubIfConfigured()` creates branch `executespec/{runId-short}`, pushes to branch (not main), opens PR via `GitHubRepoService.createPullRequest()`, stores PR URL in `PipelineRun.githubPrUrl`.
 
+**Batch execution flow:** At plan approval, user may choose BATCH mode (if `batchAvailable`). `approvedExecutionMode=BATCH` triggers batch submission via `BatchClientRouter` → run enters `QUEUED_BATCH` → `IN_PROGRESS_BATCH`. `BatchPollService` polls every 30s (@Scheduled + @SchedulerLock). On completion, `BatchResumeService` writes files to workspace, marks tasks, resolves WORKHORSE model/provider via `ModelResolver` and sets on tasks via `StateStore.setTaskModelProvider()`, publishes `BatchCompleteEvent`. PipelineHarness `@EventListener @Async onBatchComplete()` auto-retries FAILED tasks: queries for failed tasks → `StateStore.resetTaskForRetry()` → executes in real-time via `SequentialTaskExecutor` → then resumes compile step → merge → COMPLETE → validation. Batch runs skip auto-preview; `TestPreviewCoordinator.onTestsReady()` publishes empty `TestExecutionCompletedEvent` to unblock validation report.
+
 **Key design:** User sees COMPLETE immediately after compile+merge. Preview is available while validation runs in background. SSE stream stays open until background validation finishes.
 
 ## Cost Budget Enforcement
-- `RunCostBudgetService` uses Caffeine caches (6h TTL, 1000 max) instead of unbounded ConcurrentHashMaps
+- **Cost-proportional credits:** `credits = max(1, ceil(bufferedEstimate / $5.0))` where buffer = 10% retry margin
+- **Silent hard cap:** `credits × $5.0 × 1.5` — no progressive warnings. User approved cost upfront at plan gate.
+- `RunCostBudgetService` uses Caffeine caches (6h TTL, 1000 max). Only `isOverBudget()` as silent safety net.
 - Mid-task cost check: WorkerAgent checks `isOverBudget(runId)` every 5 LLM iterations; emits `budgetExceeded` SSE event and stops cleanly
+- **Refund on FAILURE:** `RunQuotaRefundListener` reads `creditsCharged` from run and refunds N credits via `TierEnforcementService.decrementRunCount(userId, credits)`
+- **Cost audit:** `RunCostLog` entity persisted after each run completion — tracks estimated, actual, margin, credits, budget-hit for pricing analytics
+- **`creditsConfirmed` validation:** Approve endpoint echoes credit count; 409 Conflict if mismatch (prevents stale approvals after repricing)
 
 ## Background Validation Lifecycle
 - `backgroundValidationRuns` (ConcurrentHashMap.newKeySet()) tracks runs with active background threads
@@ -57,5 +69,6 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 - Pipeline runs in virtual thread, MUST wrap with `ContextSnapshotFactory.captureAll()`
 - Run ownership (userId, orgId, projectId) stamped BEFORE async thread starts
 - `doReviewAndMerge()` is the centralized post-task flow for resume/retry paths (NOT updated for background pattern — runs synchronous)
-- Cost estimate computed after plan creation via CostEstimator
+- Cost estimate + credits computed after plan creation via `CostEstimator.estimateWithCredits()`, persisted to `creditsCharged` + `hardCapUsd`
+- Credits charged at plan approval, NOT at submission (`assertCanSubmitRun` at submit, `assertAndIncrementRunCount(userId, credits)` at approval)
 - `.agent-context/project.json` written from planner output — used by preview/deploy for project type detection

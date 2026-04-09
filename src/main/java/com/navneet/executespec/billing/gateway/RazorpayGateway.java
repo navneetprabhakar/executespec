@@ -2,6 +2,7 @@ package com.navneet.executespec.billing.gateway;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.billing.client.RazorpayRestClient;
+import com.navneet.executespec.billing.exception.RazorpayApiException;
 import com.navneet.executespec.billing.config.RazorpayConfig;
 import com.navneet.executespec.billing.dto.SubscriptionInitResult;
 import com.navneet.executespec.billing.dto.TopupOrderInitResult;
@@ -70,6 +71,22 @@ public class RazorpayGateway implements BillingGateway {
         log.info("Razorpay subscription cancelled at period end: {}", gatewaySubscriptionId);
     }
 
+    /** Cancel immediately (for upgrades — no period grace). */
+    public void cancelImmediately(String gatewaySubscriptionId) {
+        client.cancelSubscription(gatewaySubscriptionId, false);
+        log.info("Razorpay subscription cancelled immediately: {}", gatewaySubscriptionId);
+    }
+
+    /** Issue a partial refund against a payment. Returns the Razorpay refund ID. */
+    public String refundPartial(String paymentId, long amountPaise, String reason) {
+        var notes = java.util.Map.of("reason", reason);
+        JsonNode result = client.createRefund(paymentId, amountPaise, notes);
+        String refundId = result.has("id") ? result.get("id").asText() : null;
+        log.info("Razorpay partial refund issued: paymentId={}, amount={} paise, refundId={}",
+                paymentId, amountPaise, refundId);
+        return refundId;
+    }
+
     @Override
     public String fetchStatus(String gatewaySubscriptionId) {
         JsonNode sub = client.fetchSubscription(gatewaySubscriptionId);
@@ -102,10 +119,23 @@ public class RazorpayGateway implements BillingGateway {
     private String getOrCreateCustomer(String userId, String name, String email) {
         return subscriptionRepo.findLatestCustomerIdByUserId(userId)
                 .orElseGet(() -> {
-                    JsonNode cust = client.createCustomer(name, email, "");
-                    String custId = cust.get("id").asText();
-                    log.info("Created Razorpay customer: userId={}, custId={}", userId, custId);
-                    return custId;
+                    try {
+                        JsonNode cust = client.createCustomer(name, email, "");
+                        String custId = cust.get("id").asText();
+                        log.info("Created Razorpay customer: userId={}, custId={}", userId, custId);
+                        return custId;
+                    } catch (RazorpayApiException e) {
+                        if (e.getMessage() != null && e.getMessage().contains("Customer already exists")) {
+                            // Customer exists in Razorpay but not in our DB — fetch by email
+                            JsonNode existing = client.fetchCustomersByEmail(email);
+                            if (existing.has("items") && existing.get("items").size() > 0) {
+                                String custId = existing.get("items").get(0).get("id").asText();
+                                log.info("Found existing Razorpay customer: userId={}, custId={}", userId, custId);
+                                return custId;
+                            }
+                        }
+                        throw e;
+                    }
                 });
     }
 }

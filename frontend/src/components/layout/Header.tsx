@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Menu, Search, ArrowUpRight } from 'lucide-react';
+import { Menu, Search, ArrowUpRight, Plus } from 'lucide-react';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -7,6 +7,7 @@ import { ACTIVE_STATUSES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
 import ViewModeToggle from '@/components/shared/ViewModeToggle';
+import NotificationBell from './NotificationBell';
 
 export default function Header() {
   const { setCommandPaletteOpen, mobileSidebarOpen, setMobileSidebarOpen } = useUiStore();
@@ -56,7 +57,7 @@ export default function Header() {
       )}
 
       {/* Upgrade pill */}
-      {user?.tier === 'FREE' && (
+      {(user?.tier === 'FREE' || user?.tier === 'PRO') && (
         <Link
           to="/plans"
           className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-accent-blue/10 text-accent-blue text-xs font-medium hover:bg-accent-blue/20 transition-colors"
@@ -65,6 +66,20 @@ export default function Header() {
           <ArrowUpRight className="h-3 w-3" />
         </Link>
       )}
+
+      {/* Top-up pill (paid users only, not MAX/ENTERPRISE — unlimited runs) */}
+      {user?.tier && user.tier !== 'FREE' && user.tier !== 'MAX' && user.tier !== 'ENTERPRISE' && (
+        <Link
+          to="/billing#topup"
+          className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium hover:bg-emerald-500/20 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          Top-up
+        </Link>
+      )}
+
+      {/* Notifications */}
+      <NotificationBell />
 
       {/* User menu */}
       <UserMenu />

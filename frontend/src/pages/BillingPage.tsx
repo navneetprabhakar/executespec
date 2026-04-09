@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Gift, Package, ShoppingCart, Clock, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin } from '@/stores/useAuthStore';
@@ -19,6 +19,7 @@ import { RazorpayOrderCheckout } from '@/components/billing/RazorpayOrderCheckou
 
 export default function BillingPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
@@ -32,6 +33,7 @@ export default function BillingPage() {
 
   // Top-up state
   const [packages, setPackages] = useState<TopupPackage[]>([]);
+  const [showInr, setShowInr] = useState(true);
   const [purchasing, setPurchasing] = useState<string | null>(null); // packageId being purchased
   const [orderData, setOrderData] = useState<TopupOrderResult | null>(null);
 
@@ -47,6 +49,15 @@ export default function BillingPage() {
       fetchTopupPackages().then(setPackages).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, [loadStatus]);
+
+  // Scroll to #topup anchor after content loads
+  useEffect(() => {
+    if (!loading && location.hash === '#topup') {
+      setTimeout(() => {
+        document.getElementById('topup')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+  }, [loading, location.hash]);
 
   const handleCancel = async () => {
     if (!confirm('Are you sure? Your subscription will remain active until the end of the current billing period.')) return;
@@ -125,7 +136,7 @@ export default function BillingPage() {
             <div>
               <h2 className="text-lg font-semibold text-primary">
                 {plan?.name || 'Free'}{' '}
-                {plan?.keyMode === 'BYOK' ? '(BYOK)' : plan?.keyMode === 'PLATFORM' ? '(Platform Keys)' : ''}
+                {plan?.keyMode === 'BYOK' ? '(BYOK)' : plan?.keyMode === 'MANAGED' || plan?.keyMode === 'PLATFORM' ? '(Managed Keys)' : ''}
               </h2>
               <p className="text-sm text-secondary mt-1">
                 Status:{' '}
@@ -177,26 +188,33 @@ export default function BillingPage() {
           <div className="space-y-4">
             {usage.map((u) => {
               const isRuns = u.metric === 'RUNS';
+              const isUnlimited = u.max === -1;
               return (
                 <div key={u.metric}>
                   <div className="flex justify-between text-sm mb-1">
                     <span className="text-secondary">{formatMetric(u.metric)}</span>
                     <span className="text-muted">
-                      {u.current} / {u.max}
-                      {isRuns && bonusAvailable > 0 && (
-                        <span className="text-accent-green ml-1">(incl. {bonusAvailable} bonus)</span>
+                      {isUnlimited ? (
+                        <>{u.current} runs used<span className="ml-1 text-accent-green">(Unlimited)</span></>
+                      ) : (
+                        <>{u.current} / {u.max}
+                        {isRuns && bonusAvailable > 0 && (
+                          <span className="text-accent-green ml-1">(incl. {bonusAvailable} bonus)</span>
+                        )}</>
                       )}
                     </span>
                   </div>
-                  <div className="w-full bg-[var(--gray-200)] rounded-full h-2">
-                    <div
-                      className={cn(
-                        'h-2 rounded-full transition-all',
-                        u.pctUsed > 90 ? 'bg-accent-red' : u.pctUsed > 70 ? 'bg-accent-amber' : 'bg-accent-blue',
-                      )}
-                      style={{ width: `${Math.min(u.pctUsed, 100)}%` }}
-                    />
-                  </div>
+                  {!isUnlimited && (
+                    <div className="w-full bg-[var(--gray-200)] rounded-full h-2">
+                      <div
+                        className={cn(
+                          'h-2 rounded-full transition-all',
+                          u.pctUsed > 90 ? 'bg-accent-red' : u.pctUsed > 70 ? 'bg-accent-amber' : 'bg-accent-blue',
+                        )}
+                        style={{ width: `${Math.min(u.pctUsed, 100)}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -262,52 +280,76 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Buy Extra Runs */}
-        {packages.length > 0 && (
-          <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
-            <div className="flex items-center gap-2 mb-1">
-              <Zap className="h-4 w-4 text-accent-amber" />
-              <h2 className="text-base font-semibold text-primary">Buy Extra Runs</h2>
-            </div>
-            <p className="text-sm text-muted mb-4">
-              Need more runs? Purchase a top-up pack. Purchased runs never expire.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {packages.map((pkg) => (
-                <button
-                  key={pkg.id}
-                  onClick={() => handleBuyTopup(pkg)}
-                  disabled={purchasing !== null}
-                  className={cn(
-                    'relative group flex flex-col items-center p-5 rounded-sm border transition-all',
-                    'bg-[var(--gray-100)] border-[var(--border-default)] hover:border-accent-blue/40 hover:bg-accent-blue/[0.04]',
-                    'disabled:opacity-40 disabled:cursor-not-allowed',
-                    purchasing === pkg.id && 'border-accent-blue/60 bg-accent-blue/[0.06]',
-                  )}
-                >
-                  <Package className="h-6 w-6 text-accent-blue mb-2 group-hover:scale-110 transition-transform" />
-                  <span className="text-lg font-bold text-primary">{pkg.runCount} Runs</span>
-                  <span className="text-secondary text-sm mt-1">{pkg.name}</span>
-                  <div className="mt-3 flex items-baseline gap-1">
-                    <span className="text-xl font-bold text-accent-blue">
-                      {'\u20B9'}{(pkg.amountInr / 100).toFixed(0)}
-                    </span>
-                    {pkg.amountUsd > 0 && (
-                      <span className="text-xs text-muted ml-1">
-                        / ${(pkg.amountUsd / 100).toFixed(2)}
+        {/* Buy Extra Runs (hidden for MAX/ENTERPRISE — unlimited runs) */}
+        <div id="topup" />
+        {packages.length > 0 && user?.tier !== 'MAX' && user?.tier !== 'ENTERPRISE' && (() => {
+          const filtered = packages.filter(p =>
+            showInr ? (p.amountInr > 0 && p.amountUsd === 0) : (p.amountUsd > 0 && p.amountInr === 0),
+          );
+          if (filtered.length === 0) return null;
+          return (
+            <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-accent-amber" />
+                  <h2 className="text-base font-semibold text-primary">Buy Extra Runs</h2>
+                </div>
+                <div className="flex rounded-md bg-[var(--gray-200)] p-0.5">
+                  <button
+                    onClick={() => setShowInr(true)}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition ${
+                      showInr ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
+                    }`}
+                  >
+                    INR
+                  </button>
+                  <button
+                    onClick={() => setShowInr(false)}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition ${
+                      !showInr ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
+                    }`}
+                  >
+                    USD
+                  </button>
+                </div>
+              </div>
+              <p className="text-sm text-muted mb-4">
+                Need more runs? Purchase a top-up pack. Purchased runs never expire.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {filtered.map((pkg) => (
+                  <button
+                    key={pkg.id}
+                    onClick={() => handleBuyTopup(pkg)}
+                    disabled={purchasing !== null}
+                    className={cn(
+                      'relative group flex flex-col items-center p-5 rounded-sm border transition-all',
+                      'bg-[var(--gray-100)] border-[var(--border-default)] hover:border-accent-blue/40 hover:bg-accent-blue/[0.04]',
+                      'disabled:opacity-40 disabled:cursor-not-allowed',
+                      purchasing === pkg.id && 'border-accent-blue/60 bg-accent-blue/[0.06]',
+                    )}
+                  >
+                    <Package className="h-6 w-6 text-accent-blue mb-2 group-hover:scale-110 transition-transform" />
+                    <span className="text-lg font-bold text-primary">{pkg.runCount} Runs</span>
+                    <div className="mt-3">
+                      <span className="text-xl font-bold text-accent-blue">
+                        {showInr
+                          ? `\u20B9${(pkg.amountInr / 100).toLocaleString('en-IN')}`
+                          : `$${(pkg.amountUsd / 100).toFixed(2)}`}
+                      </span>
+                    </div>
+                    {showInr && <p className="text-xs text-muted mt-1">+ 18% GST</p>}
+                    {purchasing === pkg.id && (
+                      <span className="absolute inset-0 flex items-center justify-center rounded-sm bg-[var(--gray-200)]">
+                        <span className="h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                       </span>
                     )}
-                  </div>
-                  {purchasing === pkg.id && (
-                    <span className="absolute inset-0 flex items-center justify-center rounded-sm bg-[var(--gray-200)]">
-                      <span className="h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                    </span>
-                  )}
-                </button>
-              ))}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Cancel — admin only for org accounts */}
         {isActive && !sub.cancelAtPeriodEnd && (!isOrgUser || isAdmin) && (
@@ -336,6 +378,7 @@ export default function BillingPage() {
           onFailure={handleTopupFailure}
           userName={user ? `${user.firstName} ${user.lastName}` : undefined}
           userEmail={user?.email}
+          description={`Run Top-Up — ₹${(orderData.amountPaise / 100).toLocaleString('en-IN')} + 18% GST`}
         />
       )}
 

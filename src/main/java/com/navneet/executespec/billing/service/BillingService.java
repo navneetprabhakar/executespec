@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -54,6 +55,7 @@ public class BillingService {
 
     // Invoicing (V1.3)
     private final InvoiceService invoiceService;
+    private final InvoiceEmailService invoiceEmailService;
 
     // Email service for welcome/upgrade emails
     private final MailService mailService;
@@ -75,6 +77,14 @@ public class BillingService {
 
     @Value("${billing.founder-pricing.max-slots:100}")
     private int founderMaxSlots;
+
+    /** Tier rank for upgrade/downgrade detection. Higher = better. */
+    private static final Map<String, Integer> TIER_RANK = Map.of(
+            "FREE", 0, "STARTER", 1, "PRO", 2, "MAX", 3, "ENTERPRISE", 4);
+
+    private static int tierRank(String tier) {
+        return TIER_RANK.getOrDefault(tier, 0);
+    }
 
     // ─────────────────────────────────────────────────────────────
     // LIST PLANS (for pricing page)
@@ -116,11 +126,49 @@ public class BillingService {
             throw new BillingException("Cannot subscribe to the free plan via checkout.");
         }
 
-        // Check for existing active subscription
+        // Check for existing active subscription — allow upgrades, block same-tier/downgrade
         subRepo.findActiveByUserId(userId).ifPresent(existing -> {
-            if (!"FREE".equals(existing.getStatus())) {
-                throw new BillingException("You already have an active subscription. Cancel it first.");
+            if ("FREE".equals(existing.getStatus())) {
+                // Deactivate the FREE subscription to make room for the paid one
+                existing.setStatus("REPLACED");
+                subRepo.save(existing);
+                return;
             }
+
+            // Resolve the existing plan's tier to compare
+            BillingPlan existingPlan = planRepo.findById(existing.getBillingPlanId()).orElse(null);
+            String existingTier = existingPlan != null ? existingPlan.getTier() : "FREE";
+
+            if (tierRank(plan.getTier()) <= tierRank(existingTier)) {
+                throw new BillingException("You already have an active " + existingTier
+                        + " subscription. Cancel it first to switch plans.");
+            }
+
+            // Upgrade path: cancel existing subscription on the gateway and mark as UPGRADED
+            log.info("Upgrading subscription: user={}, {} → {}", userId, existingTier, plan.getTier());
+            try {
+                if (existing.getGatewaySubscriptionId() != null) {
+                    String gw = existing.getPaymentGateway();
+                    if ("STRIPE".equalsIgnoreCase(gw)) {
+                        gatewayRouter.stripe().cancelSubscription(existing.getGatewaySubscriptionId());
+                    } else {
+                        razorpayGateway.cancelImmediately(existing.getGatewaySubscriptionId());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to cancel old subscription on gateway (proceeding anyway): {}", e.getMessage());
+            }
+
+            // Prorated refund for unused days of current billing period
+            issueProratedRefund(existing, existingPlan, user);
+
+            existing.setStatus("UPGRADED");
+            subRepo.save(existing);
+
+            paymentAuditService.record("USER", userId, "SUBSCRIPTION_UPGRADED",
+                    existingTier, plan.getTier(), userId,
+                    "Upgrade: " + existingTier + " → " + plan.getTier(),
+                    existing.getPaymentGateway(), null, null, null, null, userId, user.getOrgId());
         });
 
         // Check founder pricing availability
@@ -197,6 +245,9 @@ public class BillingService {
         BillingPlan plan = planRepo.findById(sub.getBillingPlanId())
                 .orElseThrow(() -> new IllegalStateException("Plan not found for subscription"));
 
+        // Deactivate any lingering FREE subscription before activating paid one
+        deactivateFreeSubscription(sub.getUserId(), sub.getId());
+
         // Activate
         sub.setStatus("ACTIVE");
         sub.setCurrentPeriodStart(Instant.now());
@@ -220,9 +271,12 @@ public class BillingService {
             notificationService.sendSubscriptionActivated(activatedUser.getEmail(), plan.getName());
         }
 
-        // V1.3: Generate invoice
+        // V1.3: Generate invoice and email it
         try {
-            invoiceService.generateSubscriptionInvoice(sub, plan, request.razorpayPaymentId());
+            Invoice invoice = invoiceService.generateSubscriptionInvoice(sub, plan, request.razorpayPaymentId());
+            if (invoice != null && activatedUser != null) {
+                invoiceEmailService.sendInvoice(activatedUser.getEmail(), activatedUser.getFirstName(), invoice);
+            }
         } catch (Exception e) {
             log.warn("Invoice generation failed for subscription activation (non-blocking): {}", e.getMessage());
         }
@@ -458,11 +512,13 @@ public class BillingService {
 
         switch (eventType) {
             case "subscription.authenticated" -> {
+                deactivateFreeSubscription(sub.getUserId(), sub.getId());
                 sub.setStatus("ACTIVE");
                 subRepo.save(sub);
                 log.info("Webhook: subscription authenticated, subId={}", entityId);
             }
             case "subscription.charged" -> {
+                deactivateFreeSubscription(sub.getUserId(), sub.getId());
                 BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElseThrow();
                 sub.setCurrentPeriodStart(Instant.now());
                 sub.setCurrentPeriodEnd(computePeriodEnd(plan.getPeriod()));
@@ -475,11 +531,17 @@ public class BillingService {
                 log.info("Webhook: subscription charged and extended, user={}, periodEnd={}",
                         sub.getUserId(), sub.getCurrentPeriodEnd());
 
-                // Generate renewal invoice
+                // Generate renewal invoice and email it
                 try {
                     String renewalPaymentId = payload.path("payload").path("payment")
                             .path("entity").path("id").asText("");
-                    invoiceService.generateSubscriptionInvoice(sub, plan, renewalPaymentId);
+                    Invoice invoice = invoiceService.generateSubscriptionInvoice(sub, plan, renewalPaymentId);
+                    if (invoice != null) {
+                        AppUser renewalUser = userRepo.findById(sub.getUserId()).orElse(null);
+                        if (renewalUser != null) {
+                            invoiceEmailService.sendInvoice(renewalUser.getEmail(), renewalUser.getFirstName(), invoice);
+                        }
+                    }
                 } catch (Exception e) {
                     log.warn("Invoice generation failed for renewal (non-blocking): {}", e.getMessage());
                 }
@@ -560,9 +622,15 @@ public class BillingService {
         log.info("Top-up credited via webhook: orderId={}, quantity={}, userId={}",
                 orderId, topup.getQuantity(), topup.getUserId());
 
-        // Generate invoice
+        // Generate invoice and email it
         try {
-            invoiceService.generateTopupInvoice(topup, null, paymentId);
+            Invoice invoice = invoiceService.generateTopupInvoice(topup, null, paymentId);
+            if (invoice != null && topup.getUserId() != null) {
+                AppUser topupUser = userRepo.findById(topup.getUserId()).orElse(null);
+                if (topupUser != null) {
+                    invoiceEmailService.sendInvoice(topupUser.getEmail(), topupUser.getFirstName(), invoice);
+                }
+            }
         } catch (Exception e) {
             log.warn("Invoice generation failed for top-up webhook (non-blocking): {}", e.getMessage());
         }
@@ -701,9 +769,15 @@ public class BillingService {
         // Ensure tier is correct
         upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
 
-        // Generate invoice with Stripe references
+        // Generate invoice with Stripe references and email it
         try {
-            invoiceService.generateStripeSubscriptionInvoice(sub, plan, stripeInvoiceId, invoicePdfUrl);
+            Invoice generatedInvoice = invoiceService.generateStripeSubscriptionInvoice(sub, plan, stripeInvoiceId, invoicePdfUrl);
+            if (generatedInvoice != null) {
+                AppUser stripeUser = userRepo.findById(sub.getUserId()).orElse(null);
+                if (stripeUser != null) {
+                    invoiceEmailService.sendInvoice(stripeUser.getEmail(), stripeUser.getFirstName(), generatedInvoice);
+                }
+            }
         } catch (Exception e) {
             log.warn("Invoice generation failed for Stripe payment (non-blocking): {}", e.getMessage());
         }
@@ -757,8 +831,9 @@ public class BillingService {
         AppUser user = userRepo.findById(userId).orElseThrow();
 
         String authTier = switch (plan.getTier()) {
-            case "STARTER" -> "FREE";       // Same access as free, billing controls run limit
-            case "PRO" -> "PRO";            // Unlocks org features
+            case "STARTER" -> "FREE";       // Legacy — billing controls run limit
+            case "PRO" -> "PRO";
+            case "MAX" -> "MAX";
             case "ENTERPRISE" -> "ENTERPRISE";
             default -> "FREE";
         };
@@ -770,7 +845,7 @@ public class BillingService {
             orgRepo.findById(orgId).ifPresent(org -> {
                 String keyMode = switch (plan.getKeyMode()) {
                     case "BYOK" -> "OWN_KEYS";
-                    case "PLATFORM" -> "SYSTEM";
+                    case "MANAGED", "PLATFORM" -> "SYSTEM";
                     default -> "HYBRID";
                 };
                 org.setKeySourceMode(keyMode);
@@ -780,13 +855,116 @@ public class BillingService {
 
         log.info("Tier upgraded: user={}, authTier={}, planTier={}, keyMode={}",
                 userId, authTier, plan.getTier(), plan.getKeyMode());
+        // Note: subscription activation email sent by activateSubscription() — no duplicate here
+    }
 
-        // Send upgrade email
+    /**
+     * Calculate and issue a prorated refund for unused runs on the old subscription
+     * when upgrading to a higher tier.
+     * Refund = (unusedRuns / totalRunLimit) × amountPaid
+     */
+    private void issueProratedRefund(BillingSubscription existing, BillingPlan existingPlan, AppUser user) {
+        if (existingPlan == null || existingPlan.getRunLimit() <= 0) {
+            log.info("No prorated refund — plan has unlimited or zero run limit for sub={}", existing.getId());
+            return;
+        }
+
+        // Get current run usage for this billing period
+        var usageList = usageService.getCurrentUsage(user.getId());
+        long runsUsed = usageList.stream()
+                .filter(u -> "RUNS".equals(u.getMetric()))
+                .mapToLong(u -> u.getCurrentValue())
+                .findFirst().orElse(0L);
+
+        long runLimit = existingPlan.getRunLimit();
+        long unusedRuns = Math.max(0, runLimit - runsUsed);
+
+        if (unusedRuns <= 0) {
+            log.info("No prorated refund — all {} runs used for sub={}", runLimit, existing.getId());
+            return;
+        }
+
+        // Find the last invoice for this subscription to get the payment ID and amount
+        var latestInvoice = invoiceService.findLatestBySubscriptionId(existing.getId());
+        if (latestInvoice.isEmpty()) {
+            log.warn("No invoice found for subscription {} — cannot issue refund", existing.getId());
+            return;
+        }
+
+        Invoice invoice = latestInvoice.get();
+        String paymentId = invoice.getGatewayPaymentId();
+        if (paymentId == null || paymentId.isBlank()) {
+            log.warn("No gateway payment ID on invoice {} — cannot issue refund", invoice.getInvoiceNumber());
+            return;
+        }
+
+        long paidAmount = invoice.getTotalAmount(); // paise
+
+        // Runs-based refund: proportional to unused runs
+        long runBasedRefund = (paidAmount * unusedRuns) / runLimit;
+
+        // Time-based refund: proportional to remaining days in billing period
+        long timeBasedRefund = 0;
+        if (existing.getCurrentPeriodStart() != null && existing.getCurrentPeriodEnd() != null) {
+            long totalDays = java.time.Duration.between(existing.getCurrentPeriodStart(),
+                    existing.getCurrentPeriodEnd()).toDays();
+            long daysRemaining = java.time.Duration.between(Instant.now(),
+                    existing.getCurrentPeriodEnd()).toDays();
+            daysRemaining = Math.max(0, daysRemaining);
+            if (totalDays > 0) {
+                timeBasedRefund = (paidAmount * daysRemaining) / totalDays;
+            }
+        }
+
+        // Refund = least of runs-based and time-based (prevents gaming)
+        long refundAmount = (timeBasedRefund > 0) ? Math.min(runBasedRefund, timeBasedRefund) : runBasedRefund;
+
+        if (refundAmount <= 0) {
+            log.info("Prorated refund too small ({}), skipping for sub={}", refundAmount, existing.getId());
+            return;
+        }
+
+        String reason = String.format("Prorated refund: %s upgrade (%d/%d runs unused, %s-based)",
+                existingPlan.getName(), unusedRuns, runLimit,
+                refundAmount == runBasedRefund ? "runs" : "time");
+
         try {
-            mailService.sendTierUpgradeEmail(user.getEmail(), user.getFirstName(),
-                    plan.getName(), authTier);
+            // Issue refund on payment gateway
+            String gw = existing.getPaymentGateway();
+            if ("RAZORPAY".equalsIgnoreCase(gw) && razorpayGateway instanceof com.navneet.executespec.billing.gateway.RazorpayGateway rpGw) {
+                rpGw.refundPartial(paymentId, refundAmount, reason);
+            }
+            // Note: Stripe refunds handled via Stripe dashboard or future implementation
+
+            // Generate credit note for accounting
+            Invoice creditNote = invoiceService.generateCreditNote(invoice.getId(), refundAmount, reason);
+
+            // Send refund email with credit note
+            notificationService.sendUpgradeRefund(user.getEmail(), existingPlan.getName(),
+                    unusedRuns, runLimit, refundAmount);
+
+            // Send credit note email
+            try {
+                if (creditNote != null) {
+                    invoiceEmailService.sendInvoice(user.getEmail(), user.getFirstName(), creditNote);
+                }
+            } catch (Exception emailErr) {
+                log.warn("Failed to send credit note email (non-blocking): {}", emailErr.getMessage());
+            }
+
+            log.info("Prorated refund issued: sub={}, amount={} paise, unused={}/{} runs, paymentId={}",
+                    existing.getId(), refundAmount, unusedRuns, runLimit, paymentId);
+
+            paymentAuditService.record("USER", existing.getUserId(), "PRORATED_REFUND",
+                    existingPlan.getTier(), null,
+                    existing.getUserId(), reason,
+                    gw, null, paymentId, "INR",
+                    refundAmount,
+                    existing.getUserId(), existing.getOrgId());
+
         } catch (Exception e) {
-            log.warn("Failed to send tier upgrade email (non-blocking): {}", e.getMessage());
+            // Refund failure should not block the upgrade
+            log.error("Failed to issue prorated refund for sub={}: {}", existing.getId(), e.getMessage(), e);
         }
     }
 
@@ -817,6 +995,20 @@ public class BillingService {
     // ─────────────────────────────────────────────────────────────
     // HELPERS
     // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Deactivate any existing FREE subscription for this user so that the new paid
+     * subscription can be set to ACTIVE without violating idx_billing_sub_active_user.
+     */
+    private void deactivateFreeSubscription(String userId, UUID excludeSubId) {
+        subRepo.findActiveByUserId(userId).ifPresent(existing -> {
+            if ("FREE".equals(existing.getStatus()) && !existing.getId().equals(excludeSubId)) {
+                existing.setStatus("REPLACED");
+                subRepo.save(existing);
+                log.info("Deactivated FREE subscription {} for user {}", existing.getId(), userId);
+            }
+        });
+    }
 
     private void persistSubscription(String userId, String orgId, BillingPlan plan,
                                       String paymentGateway, String gatewaySubscriptionId,

@@ -100,6 +100,7 @@
 | `editRunPlan(runId, feedback)` | POST | `/runs/{runId}/edit-plan` | `{feedback}` | `{status, version}` |
 | `getPlanVersions(runId)` | GET | `/runs/{runId}/plan-versions` | | `any[]` |
 | `updateRunProject(runId, projectId)` | PATCH | `/runs/{runId}/project` | `{projectId}` | `RunSummary` |
+| `runTests(runId)` | POST | `/runs/{runId}/run-tests` | | `{runId, testPlanId, previewUrl}` |
 
 ### Run Content (lines 600-661)
 

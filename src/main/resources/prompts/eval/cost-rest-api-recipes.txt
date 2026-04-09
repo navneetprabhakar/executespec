@@ -1,0 +1,28 @@
+Build a REST API for a recipe sharing platform using Node.js, Express, and TypeScript. Include:
+
+**Authentication:**
+1. POST /api/auth/register — email, username, password (bcrypt, min 8 chars). Return JWT
+2. POST /api/auth/login — email + password. Return JWT access token (1h) and refresh token (7d)
+3. POST /api/auth/refresh — exchange refresh token for new access token
+4. Auth middleware that validates JWT on protected routes
+
+**Recipe CRUD:**
+1. POST /api/recipes — create recipe (auth required): title, description, ingredients (array of {name, amount, unit}), steps (array of strings), cookTimeMinutes, prepTimeMinutes, servings, cuisineType (Italian, Mexican, Asian, American, Indian, Mediterranean), difficulty (Easy, Medium, Hard), imageUrl (optional)
+2. GET /api/recipes — list recipes with pagination (page, limit), filter by cuisineType and difficulty, search by title or ingredient name (case-insensitive substring match)
+3. GET /api/recipes/:id — get single recipe with author info
+4. PUT /api/recipes/:id — update recipe (auth required, must be author)
+5. DELETE /api/recipes/:id — delete recipe (auth required, must be author)
+
+**Social Features:**
+1. POST /api/recipes/:id/favorite — toggle favorite (auth required)
+2. GET /api/users/me/favorites — list user's favorited recipes
+3. POST /api/recipes/:id/ratings — rate 1-5 stars (auth required, one rating per user per recipe, can update)
+4. GET /api/recipes/:id/ratings — get average rating and count
+
+**Technical:**
+1. Input validation with express-validator on all endpoints (validate types, required fields, enum values)
+2. Centralized error handler middleware returning consistent { error: string, details?: any } format
+3. Rate limiting: 100 requests per 15 minutes per IP (in-memory, sliding window)
+4. Request logging middleware (method, path, status code, duration)
+5. Auto-generated Swagger/OpenAPI documentation using swagger-jsdoc + swagger-ui-express. Document all endpoints with request/response schemas
+6. In-memory data store (seeded with 10 sample recipes on startup)

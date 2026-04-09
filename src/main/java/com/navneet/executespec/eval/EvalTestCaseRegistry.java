@@ -484,6 +484,295 @@ public class EvalTestCaseRegistry {
                 EvalTestCase.ValidationMode.REGEX_AND_LLM
         ));
 
+        // ── COST EVAL: WORKHORSE tier (10 real-world customer workloads) ────
+        // These test cases represent typical code generation requests that customers
+        // submit. They stress-test the cost/quality tradeoff for the WORKHORSE tier,
+        // ranging from simple landing pages to complex full-stack apps.
+
+        // Cost Eval 1: Simple landing page (low complexity)
+        testCases.add(new EvalTestCase(
+                "cost-landing-page",
+                AgentTier.WORKHORSE,
+                "Generate a landing page for a dog walking startup with hero, features, pricing, and contact form",
+                null,
+                loadPrompt("eval/cost-landing-page.txt"),
+                List.of(
+                        // Must have React component structure
+                        Pattern.compile("(?i)(export\\s+(default\\s+)?function|const\\s+\\w+\\s*[:=]\\s*\\(|React\\.FC)"),
+                        // Must have hero section with CTA
+                        Pattern.compile("(?i)(hero|Book.*Walk|Your.*Dog)"),
+                        // Must have pricing tiers
+                        Pattern.compile("(?i)(Basic|Premium|Unlimited|\\$15|\\$25|\\$199)"),
+                        // Must have form with validation
+                        Pattern.compile("(?i)(onSubmit|handleSubmit|form|validation|required)"),
+                        // Must use Tailwind classes
+                        Pattern.compile("(?i)(className.*=.*[\"'].*(?:flex|grid|p-|m-|bg-|text-))"),
+                        // Must have responsive design
+                        Pattern.compile("(?i)(md:|lg:|sm:|responsive|mobile)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 2: Portfolio with dark theme (low-medium complexity)
+        testCases.add(new EvalTestCase(
+                "cost-portfolio-blog",
+                AgentTier.WORKHORSE,
+                "Generate a developer portfolio with dark theme, typing animation, project grid, and blog section",
+                null,
+                loadPrompt("eval/cost-portfolio-blog.txt"),
+                List.of(
+                        Pattern.compile("(?i)(export\\s+(default\\s+)?function|const\\s+\\w+\\s*[:=]\\s*\\(|React\\.FC)"),
+                        // Must have typing animation effect
+                        Pattern.compile("(?i)(typing|typewriter|setInterval|charAt|substring.*animate)"),
+                        // Must have dark theme colors
+                        Pattern.compile("(?i)(#0F172A|#1E293B|#3B82F6|dark|bg-slate)"),
+                        // Must have project grid with filtering
+                        Pattern.compile("(?i)(filter|project.*card|grid.*col|tech.*stack)"),
+                        // Must have blog with expand/collapse
+                        Pattern.compile("(?i)(blog|post|markdown|expand|collapse|Read.*More)"),
+                        // Must have contact form
+                        Pattern.compile("(?i)(contact|form|email|submit)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 3: Kanban board with drag-and-drop (medium complexity)
+        testCases.add(new EvalTestCase(
+                "cost-kanban-board",
+                AgentTier.WORKHORSE,
+                "Generate a Kanban board task manager with drag-and-drop, multiple boards, and localStorage persistence",
+                null,
+                loadPrompt("eval/cost-kanban-board.txt"),
+                List.of(
+                        Pattern.compile("(?i)(export\\s+(default\\s+)?function|const\\s+\\w+\\s*[:=]\\s*\\(|React\\.FC)"),
+                        // Must implement drag and drop
+                        Pattern.compile("(?i)(onDragStart|onDragOver|onDrop|draggable|dragenter|dataTransfer)"),
+                        // Must have column management
+                        Pattern.compile("(?i)(To.*Do|In.*Progress|Done|column|addColumn)"),
+                        // Must have card with priority
+                        Pattern.compile("(?i)(priority|Low|Medium|High|label|color)"),
+                        // Must use localStorage
+                        Pattern.compile("(?i)(localStorage|setItem|getItem|JSON\\.parse|JSON\\.stringify)"),
+                        // Must have search functionality
+                        Pattern.compile("(?i)(search|filter|query|includes)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 4: E-commerce store (medium-high complexity)
+        testCases.add(new EvalTestCase(
+                "cost-ecommerce-store",
+                AgentTier.WORKHORSE,
+                "Generate a full-stack candle store with product catalog, cart, checkout flow, and Express API",
+                null,
+                loadPrompt("eval/cost-ecommerce-store.txt"),
+                List.of(
+                        // Must have Express server setup
+                        Pattern.compile("(?i)(express\\(\\)|app\\.listen|app\\.get|app\\.post|router)"),
+                        // Must have product catalog with filtering
+                        Pattern.compile("(?i)(Soy|Beeswax|Pillar|Jar|category|filter|product)"),
+                        // Must have shopping cart logic
+                        Pattern.compile("(?i)(cart|addToCart|removeFromCart|quantity|subtotal)"),
+                        // Must have checkout flow
+                        Pattern.compile("(?i)(checkout|shipping|payment|order.*confirm|place.*order)"),
+                        // Must have API endpoints
+                        Pattern.compile("(?i)(/api/products|/api/cart|/api/orders)"),
+                        // Must have input validation
+                        Pattern.compile("(?i)(express-validator|body\\(|check\\(|validat)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 5: SaaS dashboard with auth/RBAC (high complexity)
+        testCases.add(new EvalTestCase(
+                "cost-saas-dashboard",
+                AgentTier.WORKHORSE,
+                "Generate a project management SaaS with JWT auth, RBAC, Kanban, and team management",
+                null,
+                loadPrompt("eval/cost-saas-dashboard.txt"),
+                List.of(
+                        // Must have JWT authentication
+                        Pattern.compile("(?i)(jwt|jsonwebtoken|sign\\(|verify\\(|accessToken|refreshToken)"),
+                        // Must have bcrypt password hashing
+                        Pattern.compile("(?i)(bcrypt|hash|salt|compareSync|hashSync)"),
+                        // Must have role-based access control
+                        Pattern.compile("(?i)(Admin|Member|Viewer|role|permission|authorize)"),
+                        // Must have project CRUD
+                        Pattern.compile("(?i)(project|task|Backlog|In.*Progress|Review|Done|kanban)"),
+                        // Must have team management
+                        Pattern.compile("(?i)(team|invite|member|assignee)"),
+                        // Must have protected routes / middleware
+                        Pattern.compile("(?i)(middleware|authenticate|protect|req\\.user|isAuth)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 6: AI PDF summarizer (medium-high complexity)
+        testCases.add(new EvalTestCase(
+                "cost-ai-pdf-summarizer",
+                AgentTier.WORKHORSE,
+                "Generate a PDF upload + AI summary app with chat interface, usage tracking, and streaming",
+                null,
+                loadPrompt("eval/cost-ai-pdf-summarizer.txt"),
+                List.of(
+                        // Must have file upload handling
+                        Pattern.compile("(?i)(multer|upload|multipart|formData|drag.*drop|onDrop)"),
+                        // Must have document processing endpoints
+                        Pattern.compile("(?i)(/api/documents|/upload|/summarize|/chat)"),
+                        // Must have chat interface
+                        Pattern.compile("(?i)(chat|message|question|answer|bubble|conversation)"),
+                        // Must have usage/rate limiting
+                        Pattern.compile("(?i)(rate.*limit|usage|documents.*used|free.*tier|limit)"),
+                        // Must have progress indicator
+                        Pattern.compile("(?i)(progress|Processing|Ready|loading|stream|SSE)"),
+                        // Must have document listing
+                        Pattern.compile("(?i)(document.*list|history|sidebar|past.*document)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 7: Real-time chat / Discord clone (high complexity)
+        testCases.add(new EvalTestCase(
+                "cost-realtime-chat",
+                AgentTier.WORKHORSE,
+                "Generate a Discord-like chat app with WebSocket, servers, channels, typing indicators, and presence",
+                null,
+                loadPrompt("eval/cost-realtime-chat.txt"),
+                List.of(
+                        // Must have WebSocket setup
+                        Pattern.compile("(?i)(WebSocket|ws\\.Server|wss|socket\\.on|io\\(|new\\s+WebSocket)"),
+                        // Must have server/channel structure
+                        Pattern.compile("(?i)(server.*channel|channel.*list|join.*server|create.*server)"),
+                        // Must have message handling
+                        Pattern.compile("(?i)(send.*message|message.*content|timestamp|username)"),
+                        // Must have typing indicator
+                        Pattern.compile("(?i)(typing|typing.*indicator|typing.*start|typing.*stop)"),
+                        // Must have presence/online status
+                        Pattern.compile("(?i)(online|offline|presence|status|green.*dot|connect.*disconnect)"),
+                        // Must have responsive layout
+                        Pattern.compile("(?i)(sidebar|panel|mobile|responsive|flex)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 8: Appointment booking system (high complexity)
+        testCases.add(new EvalTestCase(
+                "cost-booking-system",
+                AgentTier.WORKHORSE,
+                "Generate a barbershop booking system with calendar, availability, admin panel, and .ics export",
+                null,
+                loadPrompt("eval/cost-booking-system.txt"),
+                List.of(
+                        // Must have service listing with prices
+                        Pattern.compile("(?i)(Haircut|Beard.*Trim|Combo|Coloring|Kids|\\$25|\\$15|\\$35)"),
+                        // Must have availability/calendar logic
+                        Pattern.compile("(?i)(available.*slot|time.*slot|calendar|9.*AM|6.*PM|15.*min)"),
+                        // Must prevent double booking
+                        Pattern.compile("(?i)(double.*book|overlap|conflict|already.*booked|slot.*available)"),
+                        // Must have admin panel
+                        Pattern.compile("(?i)(admin|dashboard|manage|appointment.*list|revenue)"),
+                        // Must have booking confirmation
+                        Pattern.compile("(?i)(confirm|reference.*number|booking.*ref|ics|iCalendar)"),
+                        // Must have API endpoints
+                        Pattern.compile("(?i)(/api/services|/api/barbers|/api/availability|/api/bookings)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 9: REST API for recipe platform (medium complexity, API-only)
+        testCases.add(new EvalTestCase(
+                "cost-rest-api-recipes",
+                AgentTier.WORKHORSE,
+                "Generate a recipe sharing REST API with JWT auth, ratings, favorites, Swagger docs, and validation",
+                null,
+                loadPrompt("eval/cost-rest-api-recipes.txt"),
+                List.of(
+                        // Must have JWT auth with register/login/refresh
+                        Pattern.compile("(?i)(jwt|jsonwebtoken|register|login|refresh.*token)"),
+                        // Must have recipe CRUD
+                        Pattern.compile("(?i)(/api/recipes|POST.*recipe|GET.*recipe|PUT.*recipe|DELETE.*recipe)"),
+                        // Must have social features (favorites/ratings)
+                        Pattern.compile("(?i)(favorite|rating|star|1-5|toggle.*favorite)"),
+                        // Must have input validation
+                        Pattern.compile("(?i)(express-validator|body\\(|check\\(|validat|isEmail|isLength)"),
+                        // Must have Swagger/OpenAPI
+                        Pattern.compile("(?i)(swagger|openapi|swagger-jsdoc|swagger-ui|@swagger|/api-docs)"),
+                        // Must have rate limiting
+                        Pattern.compile("(?i)(rate.*limit|sliding.*window|100.*request|15.*minute)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 10: Fitness dashboard with SVG charts (medium-high complexity)
+        testCases.add(new EvalTestCase(
+                "cost-fitness-dashboard",
+                AgentTier.WORKHORSE,
+                "Generate a fitness tracker with SVG charts, calendar heatmap, goals, streaks, and CSV import/export",
+                null,
+                loadPrompt("eval/cost-fitness-dashboard.txt"),
+                List.of(
+                        // Must have workout CRUD
+                        Pattern.compile("(?i)(workout|exercise|Running|Cycling|Swimming|duration|calories)"),
+                        // Must have SVG charts (not a library)
+                        Pattern.compile("(?i)(<svg|<rect|<polyline|<circle|viewBox|SVG)"),
+                        // Must have calendar heatmap
+                        Pattern.compile("(?i)(heatmap|heat.*map|calendar.*grid|green.*intensity|github.*style)"),
+                        // Must have streak tracking
+                        Pattern.compile("(?i)(streak|consecutive|flame|current.*streak)"),
+                        // Must have goals/progress
+                        Pattern.compile("(?i)(goal|progress.*ring|target|weekly.*goal|circular)"),
+                        // Must have CSV export/import
+                        Pattern.compile("(?i)(CSV|export|import|download|Blob|createObjectURL)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
+        // Cost Eval 11: URL shortener with analytics (medium-high complexity)
+        testCases.add(new EvalTestCase(
+                "cost-url-shortener",
+                AgentTier.WORKHORSE,
+                "Generate a URL shortener with analytics dashboard, bulk shortening, rate limiting, and JWT auth",
+                null,
+                loadPrompt("eval/cost-url-shortener.txt"),
+                List.of(
+                        // Must have URL shortening with Base62
+                        Pattern.compile("(?i)(base62|alphanumeric|short.*code|encode|shorten)"),
+                        // Must have redirect endpoint
+                        Pattern.compile("(?i)(redirect|302|301|res\\.redirect|/:code|GET.*:code)"),
+                        // Must have analytics/click tracking
+                        Pattern.compile("(?i)(click|analytics|referrer|browser|device|User-Agent)"),
+                        // Must have JWT auth
+                        Pattern.compile("(?i)(jwt|jsonwebtoken|auth|token|Bearer)"),
+                        // Must have rate limiting
+                        Pattern.compile("(?i)(rate.*limit|10.*per.*hour|100.*authenticated)"),
+                        // Must have bulk shortening
+                        Pattern.compile("(?i)(bulk|multiple.*URL|array.*url|/api/urls/bulk)")
+                ),
+                List.of(),
+                EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
+                0
+        ));
+
         log.info("[EvalTestCaseRegistry] Loaded {} test cases ({} PLANNING, {} WORKHORSE, {} LIGHTWEIGHT)",
                 testCases.size(),
                 testCases.stream().filter(t -> t.tier() == AgentTier.PLANNING).count(),

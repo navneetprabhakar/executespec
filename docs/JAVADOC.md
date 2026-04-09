@@ -768,6 +768,8 @@ Central database access layer. All run and task lifecycle operations go through 
 | `completeTask` | `void completeTask(String taskId, WorkerReport report)` | Sets status, saves report, accumulates token totals on run. |
 | `failTask` | `void failTask(String taskId, String reason)` | Marks task FAILED with failure reason. |
 | `blockTask` | `void blockTask(String taskId, String reason)` | Marks task BLOCKED (dependency failure). |
+| `resetTaskForRetry` | `void resetTaskForRetry(String taskId)` | Resets task to PENDING with cleared failure fields. Used by batch auto-retry in `onBatchComplete()`. |
+| `setTaskModelProvider` | `void setTaskModelProvider(String taskId, String model, String provider)` | Sets resolved model/provider on a task. Used by `BatchResumeService` for WORKHORSE model attribution after batch resume. |
 
 **Query Methods:**
 
@@ -1889,6 +1891,7 @@ For existing-repo runs, the pipeline automatically:
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/runs/{runId}/apply-test-fixes` | Apply test-driven fixes to run workspace |
+| `POST` | `/api/runs/{runId}/run-tests` | Manually trigger test execution (Beta). Requires preview RUNNING and compiled test plan. Calls `TestPreviewCoordinator.triggerManualExecution()`. Returns 202 Accepted. |
 
 ---
 

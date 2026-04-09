@@ -1,0 +1,21 @@
+Build a full-stack online store for selling handmade candles using React, TypeScript, Node.js, and Express. Include:
+
+**Frontend (React + TypeScript):**
+1. Product catalog page with grid layout, filtering by category (Soy, Beeswax, Pillar, Jar) and price range slider ($10-$100)
+2. Product detail page with image gallery (3 images per product), size selector (Small/Medium/Large), quantity picker, and "Add to Cart" button
+3. Shopping cart drawer (slide-in from right) showing items, quantity adjustment (+/-), remove button, subtotal per item, and cart total
+4. Checkout flow: 3 steps — Shipping Info form, Payment (mock Stripe card element), Order Review + Place Order
+5. Order confirmation page with order number and summary
+6. Responsive: mobile-first, hamburger menu on mobile
+
+**Backend (Node.js + Express):**
+1. REST API with endpoints: GET /api/products, GET /api/products/:id, POST /api/cart, PUT /api/cart/:itemId, DELETE /api/cart/:itemId, POST /api/orders
+2. In-memory data store (array of 12 products with name, price, description, category, sizes, images)
+3. Cart stored per session (express-session)
+4. Order creation validates cart is not empty and stock is available
+5. Input validation with express-validator on all endpoints
+
+**Shared:**
+- TypeScript interfaces shared between frontend and backend
+- Error handling with toast notifications on the frontend
+- Loading skeletons while data fetches

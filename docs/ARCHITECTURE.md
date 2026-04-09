@@ -216,7 +216,7 @@ graph TB
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** plan → approve → work (tiered parallel tasks, progressive merge per task) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL) → background validation thread: review → test gen → preview reuse → test exec → validation report. Merge is automatic (no manual gate).
+**Pipeline flow:** plan → approve → work (tiered parallel tasks, progressive merge per task) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL, skipped for batch runs) → background validation thread: review → test gen → preview reuse → test exec → validation report. Merge is automatic (no manual gate). **Batch mode:** BatchClientRouter → BatchPollService → BatchResumeService (resolves WORKHORSE model/provider) → auto-retry failed tasks in real-time → compile.
 
 **Background validation lifecycle:** After COMPLETE, `PipelineHarness` spawns a virtual thread (`bg-validation-{runId}`) tracked in `backgroundValidationRuns` ConcurrentHashSet. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` are deferred to the background thread's `finally` block. On failure, emits `VALIDATION_FAILED` SSE event.
 
@@ -873,4 +873,4 @@ Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GC
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-04-04.*
+*This architecture document is maintained alongside the codebase. Last updated: 2026-04-09.*

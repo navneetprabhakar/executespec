@@ -13,7 +13,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
-import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, type ReviewReport } from '@/lib/api';
+import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, retryTask, type ReviewReport } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
 import VibeProgressNarrative from './VibeProgressNarrative';
@@ -43,6 +43,7 @@ export default function RunDetail() {
   const [ghError, setGhError] = useState('');
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
   const user = useAuthStore((s) => s.user);
   const loadMe = useAuthStore((s) => s.loadMe);
@@ -63,6 +64,13 @@ export default function RunDetail() {
         const parts = ((entry.data?.payload as string) || '').split('|');
         const message = parts[2] || 'Run stopped — cost budget exceeded. Upgrade for higher limits.';
         addToast({ type: 'error', message });
+      }
+      if (entry.type === 'BUDGET_WARNING' && !budgetShownRef.current.has(entry.id)) {
+        budgetShownRef.current.add(entry.id);
+        const parts = ((entry.data?.payload as string) || '').split('|');
+        const percent = parts[2] || '?';
+        const message = parts[4] || `Cost warning: ${percent}% of budget used.`;
+        addToast({ type: parseInt(percent) >= 90 ? 'error' : 'info', message });
       }
     }
   }, [sseEntries]);
@@ -191,6 +199,29 @@ export default function RunDetail() {
     }
   };
 
+  // Retry all FAILED/PARTIAL tasks within this run
+  const failedTasks = useMemo(() => {
+    if (!activeRun?.tasks) return [];
+    return activeRun.tasks.filter((t: any) =>
+      ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status) && !t.parentTaskId
+    );
+  }, [activeRun?.tasks]);
+
+  const handleRetryFailed = async () => {
+    if (!activeRun || failedTasks.length === 0) return;
+    setRetryingFailed(true);
+    try {
+      await Promise.all(
+        failedTasks.map((t: any) => retryTask(activeRun.runId, t.taskId))
+      );
+      addToast({ type: 'success', message: `Retrying ${failedTasks.length} failed task(s)` });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message || 'Retry failed' });
+    } finally {
+      setRetryingFailed(false);
+    }
+  };
+
   const handleEditAndRestart = async () => {
     if (!activeRun || !newGoal.trim()) return;
     setRestarting(true);
@@ -292,16 +323,74 @@ export default function RunDetail() {
           {/* Gate banner */}
           {activeRun.status === 'AWAITING_APPROVAL' && (
             <div className="flex-shrink-0">
+              {/* Batch option cards — show when batch is available */}
+              {activeRun.batchAvailable && (
+                <div className="px-4 pt-3 pb-1">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => handle(
+                        () => approveRun(activeRun.runId, true, activeRun.creditsCharged ?? undefined, 'REALTIME'),
+                        'Run approved (real-time)'
+                      )}
+                      className="rounded-lg border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-left hover:border-accent-blue/50 transition-colors"
+                    >
+                      <div className="text-xs font-semibold text-primary">Real-time</div>
+                      <div className="text-xs text-muted mt-1">
+                        {activeRun.creditsCharged ?? 1} credit{(activeRun.creditsCharged ?? 1) > 1 ? 's' : ''}
+                      </div>
+                      <div className="text-[10px] text-muted mt-0.5">Results in minutes</div>
+                    </button>
+                    <button
+                      onClick={() => handle(
+                        () => approveRun(activeRun.runId, true, activeRun.batchCredits ?? undefined, 'BATCH'),
+                        'Run approved (batch)'
+                      )}
+                      className="rounded-lg border border-accent-emerald/30 bg-accent-emerald/5 p-3 text-left hover:border-accent-emerald/50 transition-colors"
+                    >
+                      <div className="text-xs font-semibold text-primary flex items-center gap-1.5">
+                        Batch
+                        <span className="text-[10px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full">
+                          Save {activeRun.creditSavings ?? 0}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted mt-1">
+                        {activeRun.batchCredits ?? 1} credit{(activeRun.batchCredits ?? 1) > 1 ? 's' : ''}
+                      </div>
+                      <div className="text-[10px] text-muted mt-0.5">Results in ~4 hours</div>
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => handle(() => approveRun(activeRun.runId, false), 'Run rejected')}
+                    className="mt-2 text-xs text-muted hover:text-red-400 w-full text-center"
+                  >
+                    Reject Plan
+                  </button>
+                </div>
+              )}
+              {/* Standard gate banner — shown when batch not available */}
+              {!activeRun.batchAvailable && (
               <GateBanner
-                message="Review the plan and approve to continue"
+                message={
+                  activeRun.creditsCharged && activeRun.creditsCharged > 1
+                    ? `This spec will use ${activeRun.creditsCharged} credits (~$${activeRun.costEstimateHigh?.toFixed(2) ?? '?'})`
+                    : 'Review the plan and approve to continue'
+                }
                 icon={<AlertTriangle className="h-4 w-4 text-accent-amber" />}
-                onApprove={() => handle(() => approveRun(activeRun.runId, true), 'Run approved')}
+                onApprove={() => handle(
+                  () => approveRun(activeRun.runId, true, activeRun.creditsCharged ?? undefined, 'REALTIME'),
+                  'Run approved'
+                )}
                 onReject={() => handle(() => approveRun(activeRun.runId, false), 'Run rejected')}
                 confirming={confirming}
                 setConfirming={setConfirming}
-                approveLabel="Approve Plan"
+                approveLabel={
+                  activeRun.creditsCharged && activeRun.creditsCharged > 1
+                    ? `Approve (${activeRun.creditsCharged} credits)`
+                    : 'Approve Plan'
+                }
                 rejectLabel="Reject"
               />
+              )}
               {/* Edit Plan feedback area */}
               <div className="px-4 pb-3">
                 {!editingPlan ? (
@@ -388,6 +477,35 @@ export default function RunDetail() {
             />
             </div>
           )}
+          {/* Batch progress indicator */}
+          {(activeRun.status === 'IN_PROGRESS_BATCH' || activeRun.status === 'QUEUED_BATCH') && (
+            <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-blue/20 bg-accent-blue/5 flex-shrink-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-primary">
+                  {activeRun.status === 'QUEUED_BATCH' ? 'Batch queued' : 'Batch in progress'}
+                </span>
+                {activeRun.batchProgressTotal != null && activeRun.batchProgressTotal > 0 && (
+                  <span className="text-[10px] text-muted">
+                    {activeRun.batchProgressCompleted ?? 0} / {activeRun.batchProgressTotal} tasks
+                  </span>
+                )}
+              </div>
+              <div className="h-1.5 rounded-full bg-[var(--gray-300)] overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-accent-blue transition-all duration-500"
+                  style={{
+                    width: activeRun.batchProgressTotal
+                      ? `${Math.round(((activeRun.batchProgressCompleted ?? 0) / activeRun.batchProgressTotal) * 100)}%`
+                      : '0%',
+                  }}
+                />
+              </div>
+              <div className="text-[10px] text-muted mt-1.5">
+                Batch runs typically complete in 1-4 hours. You'll be notified when done.
+              </div>
+            </div>
+          )}
+
           {/* Review summary shown on COMPLETE runs */}
           {activeRun.status === 'COMPLETE' && review && (
             <div className="mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs flex-shrink-0">
@@ -515,14 +633,27 @@ export default function RunDetail() {
               </>
             )}
             {['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL', 'PAUSED'].includes(activeRun.status) && (
-              <button
-                onClick={handleReRun}
-                disabled={reRunning}
-                className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 whitespace-nowrap"
-              >
-                <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
-                {reRunning ? 'Launching…' : 'Re-run'}
-              </button>
+              <>
+                <button
+                  onClick={handleReRun}
+                  disabled={reRunning}
+                  className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
+                  {reRunning ? 'Launching…' : 'Re-run'}
+                </button>
+                {failedTasks.length > 0 && (
+                  <button
+                    onClick={handleRetryFailed}
+                    disabled={retryingFailed}
+                    className="flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-amber transition-colors disabled:opacity-50 whitespace-nowrap"
+                    title={`Retry ${failedTasks.length} failed task(s)`}
+                  >
+                    <Play className={cn('h-3.5 w-3.5', retryingFailed && 'animate-pulse')} />
+                    {retryingFailed ? 'Retrying…' : `Retry Failed (${failedTasks.length})`}
+                  </button>
+                )}
+              </>
             )}
             <div className="flex items-center gap-2 ml-auto">
               {['COMPLETE', 'PARTIAL'].includes(activeRun.status) && (

@@ -1,7 +1,7 @@
 # ExecuteSpec — Run Workflow Sequence
 
 > Complete lifecycle of a user run from submission to completion.
-> Last updated: 2026-04-04
+> Last updated: 2026-04-09
 
 ---
 
@@ -11,9 +11,11 @@
 QUEUED ─(slot available)─> PLANNING
                               |
                       AWAITING_APPROVAL
-                        |           |
-                    (rejected)   (approved)
-                      FAILED      WORKING
+                        |           |           |
+                    (rejected)   (approved)   (batch approved)
+                      FAILED      WORKING     QUEUED_BATCH → IN_PROGRESS_BATCH
+                                                → BATCH_COMPLETE → auto-retry failed
+                                                → COMPILING
                                     |
                               +-----+------+
                           (all ok)    (partial)
@@ -189,7 +191,7 @@ Side paths:
 
 1. **Auto-merge all tasks** — merge is automatic (no manual gate).
 2. **Mark complete** — set status, record `completedAt` — **before review/tests**.
-3. **Auto-start preview** — `autoStartPreview()` for both PROTOTYPE and PRODUCTION modes (5-min TTL).
+3. **Auto-start preview** — `autoStartPreview()` for PROTOTYPE and real-time PRODUCTION modes (5-min TTL). Batch runs skip auto-preview; `TestPreviewCoordinator` publishes empty `TestExecutionCompletedEvent` to unblock validation report.
 4. **GitHub push** (if configured):
    - *New repos* -> push main branch.
    - *Existing repos* -> create branch `executespec/{runId-short}`, push to branch, open PR via `GitHubRepoService.createPullRequest()`, store PR URL in `PipelineRun.githubPrUrl`.
@@ -245,9 +247,11 @@ Side paths:
 | **State** | `COMPLETE` (run already marked complete) |
 
 1. **Preview reuse** — `TestPreviewCoordinator` checks for existing running preview via `previewService.getStatus(runId)`. Reuses the auto-started preview (started at COMPLETE). Only starts a new preview if none is running.
-2. **Test execution** — execute compiled tests against the running preview.
-3. **Report generation** — `TestReportGenerator` generates fix suggestions for any failed tests.
-4. **Preview stays running** — preview is NOT stopped after test execution (stays up for user's full 5-min TTL).
+2. **Batch skip** — For batch runs (`approvedExecutionMode=BATCH`), `TestPreviewCoordinator.onTestsReady()` publishes an empty `TestExecutionCompletedEvent` instead of starting preview or executing tests. This unblocks the validation report `CompletableFuture`.
+3. **Test execution** — execute compiled tests against the running preview.
+4. **Manual test execution (Beta)** — `POST /api/runs/{runId}/run-tests` allows users to manually trigger test execution for batch runs after starting a preview. Calls `TestPreviewCoordinator.triggerManualExecution()`.
+5. **Report generation** — `TestReportGenerator` generates fix suggestions for any failed tests.
+6. **Preview stays running** — preview is NOT stopped after test execution (stays up for user's full 5-min TTL).
 
 **Non-fatal** — test execution failure doesn't block completion (run is already COMPLETE).
 

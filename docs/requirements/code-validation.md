@@ -33,7 +33,7 @@ Project-level code validation with language-specific toolchains, sequential gate
 - Background validation thread runs after run is marked COMPLETE:
   - ReviewerAgentV2 (inspect + auto-fix)
   - TestGenOrchestrator (language-agnostic test generation)
-  - TestPreviewCoordinator (reuses preview for test execution)
+  - TestPreviewCoordinator (reuses preview for test execution; batch runs skip auto-preview — publishes empty `TestExecutionCompletedEvent` to unblock report)
   - ValidationReport generated at end
 - User can interact with preview and chat while background validation runs
 

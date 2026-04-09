@@ -66,6 +66,7 @@ public class ModelMatrixProperties {
     @Data
     public static class Pricing {
         private double inputPer1m;
+        private double cachedInputPer1m;
         private double outputPer1m;
     }
 

@@ -1,0 +1,10 @@
+Build a modern landing page for a dog walking startup called PawPals. Include:
+1. Hero section with headline "Your Dog's Best Day Starts Here", subtitle, and a prominent "Book a Walk" CTA button
+2. Features section with 3 cards: GPS Tracking, Certified Walkers, Real-time Updates — each with an icon and description
+3. Testimonials carousel showing 3 customer reviews with star ratings, name, and photo placeholder
+4. Pricing table with 3 tiers: Basic ($15/walk), Premium ($25/walk, includes photos), Unlimited ($199/month)
+5. Contact form with name, email, phone, and message fields with validation
+6. Responsive design using Tailwind CSS
+7. Sticky navigation header with logo and links to each section
+
+Use React with TypeScript. Warm color palette with orange (#F97316) as the primary accent color. Include smooth scroll behavior for navigation links.

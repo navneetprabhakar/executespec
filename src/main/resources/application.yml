@@ -99,9 +99,10 @@ model-matrix:
       context-limit: 200000
       max-output-tokens: 32000
       pricing:
-        input-per-1m: 15.00
-        output-per-1m: 75.00
-      notes: "Reserved for escalation. Prompt caching: writes 1.25x, reads 0.10x."
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 25.00
+      notes: "Reserved for escalation."
     claude-sonnet-4-6:
       provider: anthropic
       chain-tier: CAPABLE
@@ -109,16 +110,18 @@ model-matrix:
       max-output-tokens: 64000
       pricing:
         input-per-1m: 3.00
+        cached-input-per-1m: 0.30
         output-per-1m: 15.00
-      notes: "PLANNING + WORKHORSE tiers for Anthropic. Prompt caching: writes 1.25x, reads 0.10x."
+      notes: "PLANNING + WORKHORSE tiers for Anthropic."
     claude-haiku-4-5-20251001:
       provider: anthropic
       chain-tier: UTILITY
       context-limit: 200000
       max-output-tokens: 8192
       pricing:
-        input-per-1m: 0.80
-        output-per-1m: 4.00
+        input-per-1m: 1.00
+        cached-input-per-1m: 0.10
+        output-per-1m: 5.00
       notes: "LIGHTWEIGHT tier for Anthropic."
     "[gemini-2.5-flash]":
       provider: google
@@ -126,8 +129,9 @@ model-matrix:
       context-limit: 1048576
       max-output-tokens: 65536
       pricing:
-        input-per-1m: 0.15
-        output-per-1m: 0.60
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.03
+        output-per-1m: 2.50
       notes: "Gemini 2.5 Flash — WORKHORSE + LIGHTWEIGHT tiers for Google."
     "[gemini-3-flash-preview]":
       provider: google
@@ -135,8 +139,9 @@ model-matrix:
       context-limit: 1048576
       max-output-tokens: 65536
       pricing:
-        input-per-1m: 0.15
-        output-per-1m: 0.60
+        input-per-1m: 0.50
+        cached-input-per-1m: 0.05
+        output-per-1m: 3.00
       notes: "Gemini 3 Flash Preview — PLANNING tier for Google."
     "[gpt-5.4]":
       provider: openai
@@ -145,6 +150,7 @@ model-matrix:
       max-output-tokens: 16384
       pricing:
         input-per-1m: 2.50
+        cached-input-per-1m: 0.25
         output-per-1m: 15.00
       notes: "PLANNING tier default for OpenAI."
     "[gpt-5.4-mini]":
@@ -153,8 +159,9 @@ model-matrix:
       context-limit: 200000
       max-output-tokens: 16384
       pricing:
-        input-per-1m: 1.10
-        output-per-1m: 4.40
+        input-per-1m: 0.75
+        cached-input-per-1m: 0.075
+        output-per-1m: 4.50
       notes: "WORKHORSE + LIGHTWEIGHT tiers for OpenAI. FREE tier lock."
 
   # ── Legacy model name aliases (for in-flight runs and DB backward compat) ─────
@@ -233,6 +240,19 @@ agent:
     max-runs: 50   # Temporarily increased for load testing (was 10)
     max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
     safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
+    task-max-retries: 2           # Auto-retry failed tasks/subtasks up to 2 times before marking FAILED
+  cost:
+    credit-multiplier-usd: 5.0    # $5 of LLM compute per run credit
+    estimation-buffer: 1.10        # 10% buffer on cost estimate for retry overhead
+    budget-margin: 1.5             # Safety ceiling = credits × multiplier × margin (silent hard cap)
+    max-credits-free: 1            # FREE tier: 1-credit specs only (blocks multi-credit runs)
+    batch:
+      enabled: true
+      poll-interval-seconds: 30     # Polling interval for pending batch runs
+      max-wait-hours: 4             # Max wait before timeout
+      discount: 0.50                # Universal 50% batch discount
+      max-output-token-multiplier: 1.5  # Batch tasks get 1.5x output tokens
+      google-inline-task-limit: 10  # Google: inline <10 tasks, JSONL >=10
   github:
     pat: ""
     default-owner: ""
@@ -498,12 +518,6 @@ executespec:
     project-validation-level: FULL
     max-retries: 3
     default-timeout: 30s
-
-razorpay:
-  key-id: ""
-  key-secret: ""
-  webhook-secret: ""
-  base-url: https://api.razorpay.com/v1
 
 billing:
   terms-version: "2026-03-v1"

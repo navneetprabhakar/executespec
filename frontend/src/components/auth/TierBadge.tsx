@@ -1,11 +1,12 @@
 interface Props {
-  tier: 'FREE' | 'PRO' | 'ENTERPRISE' | string;
+  tier: 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE' | string;
   small?: boolean;
 }
 
 const TIER_STYLES: Record<string, string> = {
   FREE: 'bg-[var(--gray-400)] text-secondary',
   PRO: 'bg-purple-900/60 text-accent-blue border border-purple-700',
+  MAX: 'bg-emerald-900/60 text-emerald-300 border border-emerald-700',
   ENTERPRISE: 'bg-amber-900/60 text-amber-300 border border-amber-700',
 };
 

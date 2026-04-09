@@ -46,10 +46,17 @@ public class RunQuotaRefundListener {
         String userId = run.getCreatedByUserId();
         if (userId == null) return;
 
-        // Decrement both quota counters
-        tierEnforcementService.decrementRunCount(userId);
-        usageTrackingService.decrement(userId, "RUNS", 1);
+        // Refund the exact number of credits that were charged for this run
+        // Batch runs charged batchCredits (discounted), not creditsCharged (real-time)
+        int credits;
+        if ("BATCH".equals(run.getApprovedExecutionMode()) && run.getBatchCredits() != null) {
+            credits = run.getBatchCredits();
+        } else {
+            credits = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
+        }
+        tierEnforcementService.decrementRunCount(userId, credits);
+        usageTrackingService.decrement(userId, "RUNS", credits);
 
-        log.info("Refunded run quota for failed run {} (user={})", runId, userId);
+        log.info("Refunded {} credit(s) for failed run {} (user={})", credits, runId, userId);
     }
 }

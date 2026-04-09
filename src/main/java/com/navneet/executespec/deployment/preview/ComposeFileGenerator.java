@@ -63,7 +63,9 @@ public class ComposeFileGenerator {
         sb.append("      context: .\n");
         sb.append("      dockerfile: Dockerfile\n");
         sb.append("    ports:\n");
-        sb.append("      - \"").append(hostPort).append(":").append(containerPort).append("\"\n");
+        // Use ${APP_PORT} env var with fallback so VM deploy script can override the host port
+        // (deploy-preview.sh writes APP_PORT=<dynamic> to .env for port isolation)
+        sb.append("      - \"${APP_PORT:-").append(hostPort).append("}:").append(containerPort).append("\"\n");
         sb.append("    deploy:\n");
         sb.append("      resources:\n");
         sb.append("        limits:\n");
