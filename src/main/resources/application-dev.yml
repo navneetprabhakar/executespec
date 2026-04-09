@@ -100,7 +100,9 @@ agent:
       redirect-uri: ${SLACK_REDIRECT_URI:https://dev.executespec.ai/api/integrations/slack/oauth/callback}
       dashboard-url: ${DASHBOARD_URL:https://dev.executespec.ai}
   recovery:
-    enabled: false
+    enabled: true
+    auto-resume-on-startup: true
+    startup-resume-delay-seconds: 30
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
