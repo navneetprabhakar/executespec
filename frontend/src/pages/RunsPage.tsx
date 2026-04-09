@@ -13,16 +13,17 @@ import { ACTIVE_STATUSES, GATE_STATUSES } from '@/lib/constants';
 const MIN_WIDTH = 260;
 const MAX_WIDTH = 720;
 
-/** Statuses that indicate the run is still in progress and should be polled. */
+/** Statuses that indicate the run is still in progress — safety-net poll only. */
 const POLL_STATUSES = new Set([...ACTIVE_STATUSES, ...GATE_STATUSES, 'REVIEWING', 'MERGING', 'QUEUED']);
-const POLL_INTERVAL_MS = 10_000;
+/** Safety-net poll at 60s (primary updates come via SSE RUN_DETAIL push). */
+const POLL_INTERVAL_MS = 60_000;
 
 export default function RunsPage() {
   const activeRunId = useRunStore((s) => s.activeRunId);
   const activeRun = useRunStore((s) => s.activeRun);
   useSse(activeRunId);
 
-  // Poll run details every 10s while the run is active (non-terminal status)
+  // Safety-net poll at 60s while run is active (primary updates via SSE RUN_DETAIL events)
   const fetchRun = useRunStore((s) => s.fetchRun);
   useEffect(() => {
     if (!activeRunId || !activeRun) return;

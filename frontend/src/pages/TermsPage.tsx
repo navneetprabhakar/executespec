@@ -69,7 +69,7 @@ export default function TermsPage() {
             <h2 className="text-xl font-semibold text-primary mb-3">4. API Keys</h2>
             <p>
               ExecuteSpec allows you to provide your own third-party API keys (for Anthropic,
-              OpenAI, Google, and other providers) to power code generation. You are solely
+              OpenAI, Gemini, and other providers) to power code generation. You are solely
               responsible for safeguarding these keys and for any charges incurred through their
               use. We encrypt all stored API keys at rest and transmit them only over encrypted
               connections. We never share your API keys with other users or third parties.
@@ -93,7 +93,7 @@ export default function TermsPage() {
             <h2 className="text-xl font-semibold text-primary mb-3">6. Third-Party Services</h2>
             <p>
               Your specifications and generated code are processed by large language model
-              providers, including Anthropic (Claude), Google (Gemini), and OpenAI (GPT). Your
+              providers, including Anthropic (Claude), Gemini, and OpenAI (GPT). Your
               data is sent to whichever provider you select for your project. These providers
               have their own terms of service and privacy policies. ExecuteSpec is not
               responsible for how these providers handle data once it leaves our platform,

@@ -28,6 +28,10 @@ public class ModelPricing {
     @Column(nullable = false)
     private Double outputCostPer1m;
 
+    /** Cached/prompt-cache input cost per 1M tokens (null = not applicable). */
+    @Column(name = "cached_input_cost_per_1m")
+    private Double cachedInputCostPer1m;
+
     @Column(columnDefinition = "TEXT")
     private String notes;
 

@@ -4,10 +4,11 @@ All LLM-calling agents and the routing infrastructure.
 
 ## Key Files
 - `LlmRouter.java` — Central LLM call dispatcher. Multi-provider fallback (Anthropic → Google → OpenAI). Integrates with `ProviderHealthTracker` (Redis-backed circuit breaker) to skip unhealthy providers. Uses Caffeine caches (6h TTL, 1000 max) for per-run state. All LLM calls MUST go through this.
-- `WorkerAgent.java` — Executes individual tasks. XML `<tool_call>` format, manual tool dispatch, 25-min wall-clock limit. Mid-task cost enforcement: checks `isOverBudget()` every 5 LLM iterations. **Self-play prevention:** strips fabricated `<tool_result>` blocks via `FABRICATED_TOOL_RESULT_PATTERN` regex before parsing. **XML-first parsing** for PATH B (Anthropic/Google): `parseXmlToolCalls()` first, `parseJsonToolCalls()` fallback — prevents JSON short-circuit from losing multi-tool responses.
+- `WorkerAgent.java` — Executes individual tasks. XML `<tool_call>` format, manual tool dispatch, 25-min wall-clock limit. Silent hard cap enforcement: checks `isOverBudget()` every 5 LLM iterations (no progressive warnings — user approved cost upfront). **Self-play prevention:** strips fabricated `<tool_result>` blocks via `FABRICATED_TOOL_RESULT_PATTERN` regex before parsing. **XML-first parsing** for PATH B (Anthropic/Google): `parseXmlToolCalls()` first, `parseJsonToolCalls()` fallback — prevents JSON short-circuit from losing multi-tool responses.
 - `PlannerAgent.java` — Generates execution plans from user specs. Uses PLANNING tier (Opus). Outputs `project_type` field in plan JSON for downstream preview/deploy detection.
 - `ConversationAgent.java` — Chat copilot. Uses LIGHTWEIGHT tier via ModelResolver. Compact mode for large projects (>50 files).
-- `CostEstimator.java` — Estimates run cost from plan. Per-provider pricing lookup.
+- `CostEstimator.java` — Estimates run cost from plan. Per-provider pricing lookup (with cached input pricing from DB). `estimateWithCredits()` computes cost-proportional credits: `max(1, ceil(bufferedEstimate / $5.0))` with 10% retry buffer. Returns `RunCostEstimate` with per-task breakdown.
+- `RunCostEstimate.java` — DTO: `totalEstimatedCost`, `runCredits`, `hardCap`, per-task `TaskCostEstimate` breakdown. Dual pricing: includes `batchCredits`, `batchAvailable`, `creditSavings` for batch execution path (50% discount).
 - `ApiKeyResolver.java` — Resolves API keys: user → org → system fallback.
 - `RunKeyStore.java` — Caches resolved keys per run.
 - `LlmOutputParser.java` — Parses XML tool calls from LLM responses.

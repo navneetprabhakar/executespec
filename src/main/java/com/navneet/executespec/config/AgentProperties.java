@@ -47,8 +47,38 @@ public class AgentProperties {
         private double hardStopPct = 0.90;
     }
 
+    private Cost cost = new Cost();
     private Concurrency concurrency = new Concurrency();
     private GitHub github = new GitHub();
+
+    @Data
+    public static class Cost {
+        /** USD budget per run credit. */
+        private double creditMultiplierUsd = 5.0;
+        /** Buffer multiplier on cost estimate (1.10 = 10% for retry overhead). */
+        private double estimationBuffer = 1.10;
+        /** Safety ceiling multiplier: hard cap = credits × multiplier × margin. */
+        private double budgetMargin = 1.5;
+        /** Maximum credits a FREE-tier user can consume per run. */
+        private int maxCreditsFree = 1;
+        /** Batch execution config. */
+        private Batch batch = new Batch();
+    }
+
+    @Data
+    public static class Batch {
+        private boolean enabled = true;
+        /** Polling interval for pending batch runs (seconds). */
+        private int pollIntervalSeconds = 30;
+        /** Max hours to wait for a batch to complete before timing out. */
+        private int maxWaitHours = 4;
+        /** Universal batch discount (0.50 = 50% off). */
+        private double discount = 0.50;
+        /** Batch tasks get this multiplier on max_output_tokens. */
+        private double maxOutputTokenMultiplier = 1.5;
+        /** Google batch: use inline requests for tasks below this limit, JSONL above. */
+        private int googleInlineTaskLimit = 10;
+    }
 
     @Data
     public static class Concurrency {
@@ -59,6 +89,9 @@ public class AgentProperties {
 
         /** Safety-net iteration cap to prevent infinite loops (should never trigger). */
         private int safetyIterationCap = 500;
+
+        /** Number of automatic retries on task/subtask failure (0 = no retry). */
+        private int taskMaxRetries = 2;
     }
 
     @Data

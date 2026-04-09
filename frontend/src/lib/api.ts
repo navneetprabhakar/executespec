@@ -111,6 +111,8 @@ export interface RunSummary {
   executionMode?: string | null;
   /** Timestamp when run was archived. Null for active runs. */
   archivedAt?: string | null;
+  /** "REALTIME" | "BATCH". Null for pre-V61 runs or runs not yet approved. */
+  approvedExecutionMode?: string | null;
 }
 
 export interface TaskSummary {
@@ -197,6 +199,10 @@ export interface RunDetail extends RunSummary {
   costEstimateHigh?: number | null;
   /** Actual cost in USD. Null until run completes. */
   actualCostUsd?: number | null;
+  /** Number of credits charged for this run. */
+  creditsCharged?: number | null;
+  /** Hard cap in USD (safety net ceiling). */
+  hardCapUsd?: number | null;
   /** Per-agent (planner/reviewer/compiler) token breakdown. Empty for pre-V19 runs. */
   agentTokens?: AgentTokenEntry[];
   /** Number of apply-suggestion actions used on this run. */
@@ -207,6 +213,18 @@ export interface RunDetail extends RunSummary {
   scmPrUrl?: string | null;
   /** SCM provider that created the PR: 'GITHUB' | 'BITBUCKET'. Null for legacy runs. */
   scmProvider?: string | null;
+  /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
+  approvedExecutionMode?: string | null;
+  /** Batch credits (with 50% discount). Null if batch not available. */
+  batchCredits?: number | null;
+  /** True if this run qualifies for batch execution. */
+  batchAvailable?: boolean | null;
+  /** Credits saved by choosing batch over real-time. */
+  creditSavings?: number | null;
+  /** Batch progress: tasks completed so far. */
+  batchProgressCompleted?: number | null;
+  /** Batch progress: total tasks in batch. */
+  batchProgressTotal?: number | null;
 }
 
 export interface MetricsResponse {
@@ -383,8 +401,8 @@ export interface AvailableModelsResponse { providers: ProviderEntry[]; }
 export const getAvailableModels = () =>
   req<AvailableModelsResponse>('/models/available');
 
-export const approveRun = (id: string, approved: boolean) =>
-  req<void>(`/runs/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved }) });
+export const approveRun = (id: string, approved: boolean, creditsConfirmed?: number, executionMode?: string) =>
+  req<void>(`/runs/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved, creditsConfirmed: creditsConfirmed ?? null, executionMode: executionMode ?? null }) });
 
 export const clarifyRun = (id: string, response: string) =>
   req<void>(`/runs/${id}/clarify`, { method: 'POST', body: JSON.stringify({ response }) });
@@ -814,7 +832,7 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  tier: 'FREE' | 'PRO' | 'ENTERPRISE';
+  tier: 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;
@@ -1475,6 +1493,9 @@ export const markTestInvalid = (testResultId: number) =>
 export const applyTestFixes = (runId: string, signature?: string) =>
   req<void>(`/runs/${runId}/apply-test-fixes${signature ? `?signature=${encodeURIComponent(signature)}` : ''}`, { method: 'POST' });
 
+export const runTests = (runId: string) =>
+  req<{ runId: string; testPlanId: number; previewUrl: string }>(`/runs/${runId}/run-tests`, { method: 'POST' });
+
 // ── Admin Analytics ──────────────────────────────────────────────────────────
 
 export interface UsageMetrics {
@@ -1612,6 +1633,31 @@ export const adminListWebhookEvents = (page = 0, size = 50, gateway?: string) =>
   if (gateway) params.set('gateway', gateway);
   return req<PagedResponse<WebhookEventEntry>>(`/admin/webhook-events?${params}`);
 };
+
+// ── Notifications ─────────────────────────────────────────────────────────
+
+export interface NotificationItem {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export const getNotifications = (page = 0, size = 20) =>
+  req<PagedResponse<NotificationItem>>(`/notifications?page=${page}&size=${size}`);
+
+export const getUnreadCount = () =>
+  req<{ count: number }>('/notifications/unread-count');
+
+export const markNotificationRead = (id: string) =>
+  req<void>(`/notifications/${id}/read`, { method: 'POST' });
+
+export const markAllNotificationsRead = () =>
+  req<void>('/notifications/read-all', { method: 'POST' });
 
 // ── SSE ────────────────────────────────────────────────────────────────────
 

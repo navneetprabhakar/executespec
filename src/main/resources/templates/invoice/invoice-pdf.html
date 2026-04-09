@@ -76,22 +76,16 @@
         <td style="width:48%;vertical-align:top;padding-right:16px">
             <h4 style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">FROM (Seller)</h4>
             <p style="font-weight:bold" th:text="${invoice.sellerName}">ExecuteSpec</p>
-            <p th:text="${invoice.sellerAddress}">Address</p>
             <p th:if="${invoice.sellerGstin != null}">
                 <strong>GSTIN:</strong> <span th:text="${invoice.sellerGstin}"></span>
             </p>
-            <p><strong>State:</strong> <span th:text="${invoice.sellerStateCode}"></span></p>
         </td>
         <td style="width:48%;vertical-align:top">
             <h4 style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">TO (Buyer)</h4>
             <div th:if="${invoice.buyerName != null}">
                 <p style="font-weight:bold" th:text="${invoice.buyerName}">Customer</p>
-                <p th:text="${invoice.buyerAddress}">Address</p>
                 <p th:if="${invoice.buyerGstin != null}">
                     <strong>GSTIN:</strong> <span th:text="${invoice.buyerGstin}"></span>
-                </p>
-                <p th:if="${invoice.buyerStateCode != null}">
-                    <strong>State:</strong> <span th:text="${invoice.buyerStateCode}"></span>
                 </p>
             </div>
             <div th:if="${invoice.buyerName == null}">

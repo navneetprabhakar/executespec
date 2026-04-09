@@ -20,6 +20,11 @@ public interface BillingGateway {
 
     void cancelAtPeriodEnd(String gatewaySubscriptionId);
 
+    /** Cancel immediately (for upgrades — no period grace). Default: delegates to cancelAtPeriodEnd. */
+    default void cancelImmediately(String gatewaySubscriptionId) {
+        cancelAtPeriodEnd(gatewaySubscriptionId);
+    }
+
     String fetchStatus(String gatewaySubscriptionId);
 
     String gatewayType();

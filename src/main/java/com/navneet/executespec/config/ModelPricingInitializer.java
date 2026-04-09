@@ -69,6 +69,7 @@ public class ModelPricingInitializer {
                     .id(id)
                     .inputCostPer1m(config.getPricing().getInputPer1m())
                     .outputCostPer1m(config.getPricing().getOutputPer1m())
+                    .cachedInputCostPer1m(config.getPricing().getCachedInputPer1m())
                     .notes(config.getNotes())
                     .updatedAt(Instant.now())
                     .build());

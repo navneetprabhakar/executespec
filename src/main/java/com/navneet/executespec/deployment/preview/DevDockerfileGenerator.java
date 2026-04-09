@@ -227,6 +227,14 @@ public class DevDockerfileGenerator {
         // files (.js) to .cjs so Node doesn't choke. Affects postcss.config.js, tailwind.config.js, etc.
         dockerfile = injectEsmConfigFixup(dockerfile, workspace);
 
+        // Vite 5.4+ allowedHosts: patch vite config to allow preview subdomains.
+        // Applied centrally so ALL Dockerfile types (node-frontend, full-stack, monorepo) get it.
+        // Only injects if the Dockerfile uses a Node base image (vite is irrelevant for Go/Rust/Java).
+        if (dockerfile.contains("node:") && (type == PreviewProjectType.NODE_FRONTEND
+                || type == PreviewProjectType.FULL_STACK)) {
+            dockerfile = injectBeforeCmd(dockerfile, crViteAllowedHostsPatch());
+        }
+
         return injectNonRootUser(dockerfile, type);
     }
 

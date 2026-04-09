@@ -15,6 +15,9 @@ const DISPLAY_NAMES: Record<string, string> = {
   REVIEWING: 'Reviewing',
   FAILED: 'Error',
   CANCELLED: 'Canceled',
+  QUEUED_BATCH: 'Batch Queued',
+  IN_PROGRESS_BATCH: 'Batch Running',
+  BATCH_COMPLETE: 'Batch Done',
 };
 
 export default function StatusBadge({ status, className }: StatusBadgeProps) {

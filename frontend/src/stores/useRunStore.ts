@@ -32,7 +32,7 @@ interface RunStore {
   createRun: (req: { userRequest: string; executionMode?: 'PROTOTYPE' | 'PRODUCTION'; skipApproval?: boolean; autoMerge?: boolean; modelName?: string; projectId?: string; repoMode?: string | null; repoUrl?: string | null }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   archiveRun: (id: string) => Promise<void>;
-  approveRun: (id: string, approved: boolean) => Promise<void>;
+  approveRun: (id: string, approved: boolean, creditsConfirmed?: number, executionMode?: string) => Promise<void>;
   clarifyRun: (id: string, response: string) => Promise<void>;
   mergeRun: (id: string, merge: boolean) => Promise<void>;
   retryTask: (runId: string, taskId: string) => Promise<void>;
@@ -142,8 +142,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
     if (get().activeRunId === id) set({ activeRun: null, activeRunId: null });
   },
 
-  approveRun: async (id, approved) => {
-    await api.approveRun(id, approved);
+  approveRun: async (id, approved, creditsConfirmed?, executionMode?) => {
+    await api.approveRun(id, approved, creditsConfirmed, executionMode);
     await get().fetchRun(id);
   },
 

@@ -47,7 +47,7 @@ export default function PrivacyPage() {
             <ul className="list-disc list-inside space-y-1.5 mt-3 text-secondary">
               <li><span className="text-primary font-medium">Anthropic</span> — Claude models (Opus, Sonnet, Haiku)</li>
               <li><span className="text-primary font-medium">OpenAI</span> — GPT models</li>
-              <li><span className="text-primary font-medium">Google</span> — Gemini models</li>
+              <li><span className="text-primary font-medium">Gemini</span> — Gemini models (Flash, Pro)</li>
             </ul>
             <p className="mt-3">
               Your data is sent only to the provider you choose. All providers have committed to

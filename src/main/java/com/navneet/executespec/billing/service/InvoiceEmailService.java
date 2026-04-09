@@ -21,7 +21,8 @@ public class InvoiceEmailService {
             byte[] pdf = pdfService.generatePdf(invoice);
             String filename = invoice.getInvoiceNumber() + ".pdf";
             mailService.sendInvoiceEmail(email, firstName, invoice.getInvoiceNumber(),
-                    invoice.getTotalAmount(), pdf, filename);
+                    invoice.getSubtotal(), invoice.getTotalTax(), invoice.getTotalAmount(),
+                    pdf, filename);
         } catch (Exception e) {
             log.warn("Failed to send invoice email for {}: {}", invoice.getInvoiceNumber(), e.getMessage());
         }

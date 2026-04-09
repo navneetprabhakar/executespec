@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban, ClipboardList,
-  Receipt, Calculator, Rocket, ArrowUpCircle, X, ChevronLeft,
+  Receipt, Calculator, Rocket, ArrowUpCircle, X, ChevronLeft, Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -203,13 +203,22 @@ export default function Sidebar() {
       {/* Upgrade + Usage */}
       {expanded && (
         <div className="px-3 py-2 border-t border-[var(--border-default)] space-y-2">
-          {tier && tier !== 'ENTERPRISE' && (
+          {tier && tier !== 'ENTERPRISE' && tier !== 'MAX' && (
             <button
-              onClick={() => { navigate('/billing'); if (isMobile) closeMobileDrawer(); }}
-              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs font-medium bg-[var(--gray-200)] text-secondary hover:text-primary hover:bg-[var(--gray-300)] transition-colors"
+              onClick={() => { navigate('/plans'); if (isMobile) closeMobileDrawer(); }}
+              className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"
             >
               <ArrowUpCircle className="h-3.5 w-3.5 flex-shrink-0" />
               <span>Upgrade{tier === 'FREE' ? ' to Pro' : ''}</span>
+            </button>
+          )}
+          {tier && tier !== 'FREE' && tier !== 'MAX' && tier !== 'ENTERPRISE' && (
+            <button
+              onClick={() => { navigate('/billing#topup'); if (isMobile) closeMobileDrawer(); }}
+              className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>Top-up Runs</span>
             </button>
           )}
           <UsageBadge />

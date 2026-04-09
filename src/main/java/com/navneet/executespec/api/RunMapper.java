@@ -52,7 +52,8 @@ public class RunMapper {
             r.getRunTitle(),
             r.getRunSummary(),
             r.getExecutionMode(),
-            r.getArchivedAt()
+            r.getArchivedAt(),
+            r.getApprovedExecutionMode()
         );
     }
 
@@ -157,6 +158,8 @@ public class RunMapper {
             .actualCostUsd(r.getActualCostUsd())
             .costEstimateLow(r.getCostEstimateLow())
             .costEstimateHigh(r.getCostEstimateHigh())
+            .creditsCharged(r.getCreditsCharged())
+            .hardCapUsd(r.getHardCapUsd())
             .techStack(r.getTechStack())
             .projectName(resolveProjectName(r.getProjectId()))
             .createdByName(resolveCreatorName(r.getCreatedByUserId()))
@@ -169,6 +172,12 @@ public class RunMapper {
             .scmPrUrl(r.getScmPrUrl())
             .scmProvider(r.getScmProvider())
             .archivedAt(r.getArchivedAt())
+            .approvedExecutionMode(r.getApprovedExecutionMode())
+            .batchCredits(r.getBatchCredits())
+            .batchAvailable(r.getBatchAvailable())
+            .creditSavings(r.getCreditSavings())
+            .batchProgressCompleted(r.getBatchProgressCompleted())
+            .batchProgressTotal(r.getBatchProgressTotal())
             .build();
     }
 

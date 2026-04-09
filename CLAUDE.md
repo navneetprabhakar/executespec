@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-06
+> Last updated: 2026-04-09
 
 ## Architecture
 
@@ -9,15 +9,16 @@
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → SequentialTaskExecutor (parallel tiers, with SubtaskDecomposer for multi-file tasks) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
+- **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → (Real-time: SequentialTaskExecutor | Batch: BatchClientRouter → BatchPollService → BatchResumeService) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
+- **Batch execution:** All 3 providers (Anthropic/OpenAI/Google) support batch APIs with 50% cost discount. User chooses real-time or batch at plan approval. Batch flow: QUEUED_BATCH → IN_PROGRESS_BATCH → BATCH_COMPLETE → auto-retry failed tasks in real-time → compile → COMPLETE. `BatchPollService` polls every 30s with `@SchedulerLock` (Redis). `BatchResumeService` parses results, writes files, resolves WORKHORSE model/provider for task attribution, publishes `BatchCompleteEvent`. PipelineHarness `onBatchComplete()` retries failed tasks via `SequentialTaskExecutor`, then resumes compile. Batch runs skip auto-preview; `TestPreviewCoordinator` publishes empty event to unblock validation report.
 - **Subtask decomposition:** Tasks with 2+ owned files are decomposed into per-file subtasks at execution time by `SubtaskDecomposer`. Each subtask produces exactly one `writeFile` call, eliminating fabrication. Subtasks tracked via `parentTaskId`/`subtaskIndex`/`subtaskTotal` on `AgentTask`.
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
 - **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). Default provider: OpenAI. YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL, 24h max wait timeout. Merge is automatic (no manual gate).
 - **Progressive merge:** Each task merged to main immediately after completion (validation deferred to review phase)
 - **Auth:** JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles. Force-logout via feature flag epoch-based JWT invalidation. JWT secret validated at startup in prod (`JwtSecretValidator`).
-- **Tiers:** FREE (5 runs/month) → PRO (100/month) → ENTERPRISE (unlimited)
-- **Billing:** Multi-gateway via `PaymentGatewayRouter` (Razorpay + Stripe). Subscriptions, run top-up credits, invoicing with GST, payment audit trail.
+- **Tiers:** FREE (5 runs/month, 1-credit specs only) → PRO (100/month) → ENTERPRISE (unlimited). Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`.
+- **Billing:** Multi-gateway via `PaymentGatewayRouter` (Razorpay + Stripe). Subscriptions, run top-up credits, invoicing with GST, payment audit trail. Cost-proportional credits: charged at plan approval (not submission), refunded on FAILURE. `run_cost_log` table tracks estimated vs actual cost for pricing analytics.
 - **Security:** 8-layer defense-in-depth: request validation, input sanitization (`InputSanitizer` — NFKC normalization, zero-width strip, base64 decode+scan), LLM prompt defense, code abuse scanning (`CodeAbuseScanner` — crypto, reverse shell, PowerShell, DNS exfil, cloud metadata, obfuscation), shell sandbox, file sandbox, process isolation, container hardening (metadata endpoint blocking, env var whitelist). Configurable CSP/HSTS/X-Frame-Options via `SecurityProperties`.
 - **Feature flags:** DB-backed `FeatureFlagService` with Redis pub/sub cache invalidation + 60s scheduled reload. Admin-manageable via `FeatureFlagController`.
 - **Rate limiting:** Redis-backed per-tenant rate limiting via `RateLimitFilter`. Endpoint groups: AUTH, RUNS, WEBHOOK, READ, WRITE, PREVIEW, DEPLOY with per-tier limits.
@@ -33,7 +34,7 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling). Self-play prevention: fabricated `<tool_result>` blocks stripped before parsing. XML-first parsing for PATH B (Anthropic/Google), JSON fallback.
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V58)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V61)
 
 ## Patterns: MUST Follow
 
@@ -129,13 +130,14 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST | `/api/runs` | Submit run (202) |
 | GET | `/api/runs` | List runs (paginated, filtered by visibility + tier) |
 | GET | `/api/runs/{id}` | Run detail (includes `githubPrUrl`) |
-| POST | `/api/runs/{id}/approve` | Plan gate approval |
+| POST | `/api/runs/{id}/approve` | Plan gate approval (charges N credits; body: `{approved, creditsConfirmed?}`) |
 | POST | `/api/runs/{id}/merge` | Merge gate (legacy — merge is now automatic) |
 | DELETE | `/api/runs/{id}` | Cancel/delete run |
 | POST | `/api/runs/{id}/archive` | Archive run |
 | POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
 | GET | `/api/runs/{id}/events` | SSE event stream (scoped token) |
 | GET | `/api/runs/{id}/sse-token` | Get scoped SSE token (5-min TTL) |
+| POST | `/api/runs/{id}/run-tests` | Manually trigger test execution (Beta, requires preview RUNNING) |
 
 ### Validation Report
 | Method | Path | Description |
@@ -179,6 +181,14 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST | `/api/webhooks/razorpay` | Razorpay webhook (HMAC verified, no auth) |
 | POST | `/api/webhooks/stripe` | Stripe webhook (Stripe-Signature verified, no auth) |
 
+### Notifications
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/notifications` | List notifications (paginated) |
+| GET | `/api/notifications/unread-count` | Unread notification count |
+| POST | `/api/notifications/{id}/read` | Mark notification as read |
+| POST | `/api/notifications/read-all` | Mark all notifications as read |
+
 ### Models & Feature Flags
 | Method | Path | Description |
 |--------|------|-------------|
@@ -200,7 +210,22 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Pipeline orchestrator | `harness/PipelineHarness.java` |
 | Sequential task executor | `harness/SequentialTaskExecutor.java` |
 | Subtask decomposer | `harness/SubtaskDecomposer.java` (multi-file → per-file subtask splitting) |
-| Run cost budget | `harness/RunCostBudgetService.java` |
+| Run cost budget | `harness/RunCostBudgetService.java` (silent hard cap only, no progressive warnings) |
+| Cost estimator | `agent/CostEstimator.java` (per-run cost estimate + credit calculation) |
+| Cost estimate DTO | `agent/RunCostEstimate.java` (credits, hard cap, per-task breakdown) |
+| Cost audit log | `billing/cost/RunCostLog.java`, `billing/cost/RunCostLogRepository.java` |
+| Batch client interface | `batch/LlmBatchClient.java` (submit, poll, get results, cancel) |
+| Batch client router | `batch/BatchClientRouter.java` (routes to Anthropic/OpenAI/Google batch client) |
+| Anthropic batch client | `batch/AnthropicBatchClient.java` (POST /v1/messages/batches) |
+| OpenAI batch client | `batch/OpenAiBatchClient.java` (JSONL file upload + batch create) |
+| Google batch client | `batch/GoogleBatchClient.java` (inline + file-based modes) |
+| Batch request builder | `batch/BatchRequestBuilder.java` (builds BatchRequests from TaskPlan) |
+| Batch poll service | `batch/BatchPollService.java` (@Scheduled 30s + @SchedulerLock) |
+| Batch resume service | `batch/BatchResumeService.java` (processes results, writes files, publishes event) |
+| Notification entity | `notification/Notification.java` |
+| Notification service | `notification/InAppNotificationService.java` |
+| Notification controller | `notification/NotificationController.java` (REST: GET/POST /api/notifications) |
+| Notification listener | `notification/RunCompletionNotifier.java` (creates notifications on run complete/fail) |
 | Design system config | `harness/DesignSystemProperties.java` |
 | UI style resolver | `harness/UiStyleResolver.java` (design loading, fuzzy match, 3-signal resolution) |
 | Worker agent | `agent/WorkerAgent.java` |
@@ -253,7 +278,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Test generation orchestrator | `testgen/TestGenOrchestrator.java` |
 | Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
 | Test execution service | `testgen/TestExecutionService.java` |
-| Test result controller | `testgen/TestResultController.java` (apply-test-fixes) |
+| Test result controller | `testgen/TestResultController.java` (apply-test-fixes, run-tests) |
 | DB migrations | `resources/db/migration/V*.sql` (V1–V58) |
 | LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
 | App config | `resources/application.yml` |
@@ -283,6 +308,8 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 5-min TTL, Caddy proxy with Cloudflare Origin Certificate)
 - JWT auth + OAuth2 (Google, GitHub) with RBAC, org management, project scoping
 - Multi-gateway billing via PaymentGatewayRouter (Razorpay + Stripe): subscriptions, run top-up credits, invoicing with GST
+- Cost-proportional run credits: `credits = max(1, ceil(estimate × 1.10 / $5.0))`. Charged at plan approval, refunded on FAILURE. FREE tier limited to 1-credit specs. Insufficient credits → suggest top-up or tier upgrade.
+- `run_cost_log` audit table: tracks estimated vs actual cost, margin, budget-hit rate per run for pricing analytics
 - Payment audit trail with CSV export + webhook event log (admin)
 - Feature flag system (DB + Redis pub/sub + admin UI) for platform toggles
 - Force-logout via feature flag epoch-based JWT invalidation
@@ -299,7 +326,7 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
 - Model evaluation framework (`eval/` package)
-- Atomic quota enforcement (pessimistic locking, single-TX check+increment)
+- Atomic quota enforcement (pessimistic locking, single-TX check+increment, multi-credit support)
 - Atomic token counter updates (SQL-level increment, no read-modify-write)
 - Bounded thread pool for pipeline runs (CallerRunsPolicy backpressure)
 - Gate wait timeout (24h max, prevents indefinite thread block)
@@ -308,7 +335,10 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Scoped SSE tokens (5-min TTL, per-runId, prevents cross-run eavesdropping)
 - JWT secret startup validation (prod profile, blocks dev placeholder)
 - Tier-based deployment limits (enforces `max_deployments` from tier_config)
-- Mid-task cost enforcement (checks budget every 5 LLM calls in worker loop)
+- Silent hard cap cost enforcement (checks budget every 5 LLM calls in worker loop; ceiling = credits × $5 × 1.5; no progressive warnings — user approved cost upfront)
+- Batch execution: dual-option plan approval (real-time vs batch with 50% discount), all 3 LLM providers (Anthropic/OpenAI/Google), @Scheduled polling with @SchedulerLock, event-driven pipeline resume, auto-retry failed batch tasks in real-time, batch model/provider attribution, batch badge on run cards/details
+- Manual test execution (Beta): POST /runs/{runId}/run-tests endpoint, "Run Tests" button in PreviewTab (requires preview RUNNING)
+- In-app notification system: JPA entity, REST API, NotificationBell in header, run completion/failure notifications
 - Caffeine TTL caches replacing unbounded ConcurrentHashMaps (LlmRouter, RunCostBudgetService)
 - Containerized test execution (Docker with --read-only, --cap-drop ALL, memory/CPU limits)
 - Env var whitelist for Docker subprocess (PATH, HOME, DOCKER_HOST only — no leaked secrets)

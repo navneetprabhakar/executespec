@@ -21,4 +21,6 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID>,
     Page<Invoice> findByOrgIdOrderByInvoiceDateDesc(String orgId, Pageable pageable);
 
     Optional<Invoice> findByGatewayPaymentId(String gatewayPaymentId);
+
+    Optional<Invoice> findTopBySubscriptionIdOrderByInvoiceDateDesc(UUID subscriptionId);
 }

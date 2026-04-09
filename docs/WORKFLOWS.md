@@ -603,7 +603,8 @@ Preview supports two modes, configured via `preview.mode` in application propert
 | `cloud-run` | Dev / Prod | Artifact Registry + Cloud Run | 5 min | `https://*.run.app` (managed HTTPS) |
 
 Preview is started in two ways:
-1. **Pipeline-automated:** PipelineHarness auto-starts preview immediately after marking run COMPLETE (for both PROTOTYPE and PRODUCTION modes). Preview stays running for full 5-min TTL. TestPreviewCoordinator reuses the existing preview for test execution without stopping it.
+1. **Pipeline-automated:** PipelineHarness auto-starts preview immediately after marking run COMPLETE (for PROTOTYPE and real-time PRODUCTION modes). Batch runs skip auto-preview; `TestPreviewCoordinator` publishes empty `TestExecutionCompletedEvent` to unblock validation report. Preview stays running for full 5-min TTL. TestPreviewCoordinator reuses the existing preview for test execution without stopping it.
+   - **Manual test execution (Beta):** For batch runs, users can manually start a preview, then click "Run Tests" (calls `POST /api/runs/{runId}/run-tests`) to trigger `TestPreviewCoordinator.triggerManualExecution()`.
 2. **User-initiated:** User clicks 'Start Preview' in the UI (idempotent --- returns existing session if running).
 
 ```mermaid

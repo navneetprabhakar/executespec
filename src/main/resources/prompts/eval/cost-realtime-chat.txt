@@ -1,0 +1,23 @@
+Create a real-time chat application like a simplified Discord using React, TypeScript, Node.js, Express, and WebSocket (ws library). Include:
+
+**Frontend:**
+1. Server list sidebar (left): list of servers the user has joined, "Create Server" button, server icons with first letter
+2. Channel list (middle-left): text channels within the selected server, "Add Channel" button (admin only)
+3. Chat area (center): message list with username, avatar placeholder, timestamp, and message content. Auto-scroll to newest message. "Typing..." indicator when other users are typing
+4. Member list (right): online members (green dot) and offline members (gray dot) for the current server
+5. Message input with Enter to send, Shift+Enter for newline. Support image sharing via file picker (display inline as thumbnails)
+6. User settings modal: change display name, set status (Online, Away, Do Not Disturb, Invisible)
+
+**Backend:**
+1. WebSocket server handling: connect, disconnect, join-server, leave-server, send-message, typing-start, typing-stop events
+2. REST endpoints: POST /api/servers (create), GET /api/servers (list), POST /api/servers/:id/channels (create channel), GET /api/servers/:id/messages?channel=general&limit=50 (paginated history)
+3. In-memory data store for servers, channels, messages, and users
+4. Connection tracking: map of userId -> WebSocket connection. Broadcast presence updates on connect/disconnect
+5. Message format: { id, serverId, channelId, userId, username, content, imageUrl?, timestamp }
+6. Typing indicator: broadcast to channel, auto-clear after 3 seconds of inactivity
+
+**Features:**
+- Join server by invite code (6-char alphanumeric)
+- Unread message count badge per channel
+- Message timestamps: "Just now", "5m ago", "Yesterday", or full date
+- Responsive: on mobile, show only one panel at a time with back navigation

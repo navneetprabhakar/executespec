@@ -63,6 +63,19 @@ export function useSse(runId: string | null) {
       es.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
+
+          // ── RUN_DETAIL: backend pushes full run detail — update store directly ──
+          if (data.type === 'RUN_DETAIL' && data.payload) {
+            try {
+              const detail = JSON.parse(data.payload);
+              useRunStore.setState({ activeRun: detail });
+            } catch {
+              // Malformed payload — fall back to refetch
+              fetchRun(runId!);
+            }
+            return; // Don't add RUN_DETAIL to the log buffer
+          }
+
           const entry = {
             id: `${Date.now()}-${Math.random()}`,
             type: data.type ?? 'LOG',
@@ -74,20 +87,22 @@ export function useSse(runId: string | null) {
           // Backend emits type as SCREAMING_SNAKE_CASE; payload carries the status string.
           if (data.type === 'RUN_STATUS' && data.payload) {
             patchRunStatus(runId!, data.payload);
-            // For terminal states or transitions that add tasks, do a full refetch.
-            if (['COMPLETE', 'FAILED', 'CANCELLED', 'PAUSED', 'AWAITING_APPROVAL', 'AWAITING_MERGE', 'COMPILING', 'MERGING', 'PARTIAL'].includes(data.payload)) {
+            // RUN_DETAIL push handles the full refetch — only fetch here as fallback
+            // for terminal states where the SSE stream may close before RUN_DETAIL arrives.
+            if (['COMPLETE', 'FAILED', 'CANCELLED', 'COMPILING', 'WORKING', 'QUEUED_BATCH', 'IN_PROGRESS_BATCH'].includes(data.payload)) {
               fetchRun(runId!);
             }
           }
-          // Refresh task list whenever any task changes state
-          if (data.type === 'TASK_STATUS') {
-            fetchRun(runId!);
-          }
-          // Gate opened = plan tasks are now saved; refresh so the detail panel shows them
+          // Gate opened = plan tasks are now saved; RUN_DETAIL push covers this
+          // but keep as fallback for reliable gate display
           if (data.type === 'GATE_OPENED') {
             fetchRun(runId!);
           }
-          if (data.type === 'COMPLETE' || data.type === 'RUN_RESTARTED' || data.type === 'BUDGET_EXCEEDED') {
+          if (data.type === 'RUN_RESTARTED' || data.type === 'BUDGET_EXCEEDED') {
+            fetchRun(runId!);
+          }
+          // Batch progress/completion triggers refetch
+          if (data.type === 'BATCH_PROGRESS' || data.type === 'BATCH_COMPLETE' || data.type === 'BATCH_FAILED') {
             fetchRun(runId!);
           }
         } catch {}

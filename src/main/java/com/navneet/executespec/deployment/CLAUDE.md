@@ -41,7 +41,7 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 
 ## Patterns
 - Workspace: per-run isolated directory (workspace/{runId}/)
-- Preview auto-starts after COMPLETE via PipelineHarness (both PROTOTYPE and PRODUCTION)
+- Preview auto-starts after COMPLETE via PipelineHarness (PROTOTYPE and real-time PRODUCTION). Batch runs skip auto-preview — `TestPreviewCoordinator` publishes empty event instead
 - TestPreviewCoordinator reuses existing preview via `previewService.getStatus()` check
 - Preview NOT stopped after test execution (stays up for user's full 5-min TTL)
 - Deployment cleanup via scheduled job (DeploymentCleanupJob)

@@ -15,6 +15,12 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     setError('');
     if (pwd !== confirm) { setError('Passwords do not match'); return; }
+    if (pwd.length < 10) { setError('Password must be at least 10 characters'); return; }
+    if (!/[A-Z]/.test(pwd)) { setError('Password must contain at least one uppercase letter'); return; }
+    if (!/[a-z]/.test(pwd)) { setError('Password must contain at least one lowercase letter'); return; }
+    if (!/[0-9]/.test(pwd)) { setError('Password must contain at least one digit'); return; }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':",./<>?]/.test(pwd)) { setError('Password must contain at least one special character'); return; }
+    if (/\s/.test(pwd)) { setError('Password must not contain whitespace'); return; }
     setLoading(true);
     try {
       await api.authResetPassword(token, pwd);
@@ -37,9 +43,9 @@ export default function ResetPasswordPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="mb-1 block text-sm text-muted">New password</label>
-              <input type="password" value={pwd} onChange={e => setPwd(e.target.value)} required minLength={8}
+              <input type="password" value={pwd} onChange={e => setPwd(e.target.value)} required minLength={10}
                 className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 text-primary focus:border-accent-blue focus:outline-none" />
-              <p className="mt-1 text-xs text-muted">Min 8 chars, 1 uppercase, 1 digit, no spaces</p>
+              <p className="mt-1 text-xs text-muted">Min 10 chars, uppercase, lowercase, digit, special character, no spaces</p>
             </div>
             <div>
               <label className="mb-1 block text-sm text-muted">Confirm password</label>

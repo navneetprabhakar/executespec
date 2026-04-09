@@ -19,9 +19,12 @@ export default function RegisterPage() {
     e.preventDefault();
     setError('');
     if (form.password !== form.confirm) { setError('Passwords do not match'); return; }
-    if (form.password.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (form.password.length < 10) { setError('Password must be at least 10 characters'); return; }
     if (!/[A-Z]/.test(form.password)) { setError('Password must contain at least one uppercase letter'); return; }
+    if (!/[a-z]/.test(form.password)) { setError('Password must contain at least one lowercase letter'); return; }
     if (!/[0-9]/.test(form.password)) { setError('Password must contain at least one digit'); return; }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':",./<>?]/.test(form.password)) { setError('Password must contain at least one special character'); return; }
+    if (/\s/.test(form.password)) { setError('Password must not contain whitespace'); return; }
     setLoading(true);
     try {
       await register(form.email, form.firstName, form.lastName, form.password);
@@ -82,14 +85,14 @@ export default function RegisterPage() {
             <div>
               <label className="mb-1 block text-sm text-muted">Password</label>
               <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} value={form.password} onChange={set('password')} required minLength={8}
+                <input type={showPassword ? 'text' : 'password'} value={form.password} onChange={set('password')} required minLength={10}
                   className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] px-3 py-2 pr-10 text-primary focus:border-accent-blue focus:outline-none" />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-primary transition-colors" tabIndex={-1}>
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              <p className="mt-1 text-xs text-muted">Min 8 chars, 1 uppercase, 1 digit, no spaces</p>
+              <p className="mt-1 text-xs text-muted">Min 10 chars, uppercase, lowercase, digit, special character, no spaces</p>
             </div>
             <div>
               <label className="mb-1 block text-sm text-muted">Confirm password</label>

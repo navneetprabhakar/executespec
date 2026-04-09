@@ -1,0 +1,30 @@
+Create a project management SaaS dashboard using React, TypeScript, and a Node.js/Express backend. Include:
+
+**Authentication:**
+1. Sign up with email + password (bcrypt hashing, minimum 8 chars)
+2. Login with JWT (access token 15min, refresh token 7d stored in httpOnly cookie)
+3. Protected routes — redirect to login if not authenticated
+4. User profile page showing name, email, avatar placeholder, and "Change Password" form
+
+**Dashboard:**
+1. Sidebar navigation: Dashboard, Projects, Team, Settings
+2. Dashboard home: 4 stat cards (Total Projects, Active Tasks, Completed This Week, Team Members) with mock data
+3. Recent activity feed showing last 10 actions (created task, completed task, added comment)
+4. Project progress chart (horizontal bar chart, pure CSS — no chart library)
+
+**Projects:**
+1. Project list with search, filter by status (Active, On Hold, Completed), and sort by name/date
+2. Create project: name, description, deadline, color
+3. Project detail: Kanban view with columns (Backlog, In Progress, Review, Done)
+4. Tasks: title, description, assignee (dropdown of team members), priority (P0-P3), due date, status
+5. Task detail modal with comments thread
+
+**Team:**
+1. Team members list with role badges (Admin, Member, Viewer)
+2. Invite member by email (stores invitation with pending status)
+3. Role-based access: Admins can edit/delete anything, Members can edit their own tasks, Viewers are read-only
+
+**Backend API:**
+- RESTful endpoints for all CRUD operations
+- Middleware: auth, role check, request validation
+- In-memory store (no database, use arrays/maps)

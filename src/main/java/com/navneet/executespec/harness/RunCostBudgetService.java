@@ -10,19 +10,14 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 
 /**
- * Per-run USD cost budget enforcement.
+ * Per-run USD cost budget enforcement — silent hard cap only.
  *
- * <p>Tracks a per-run cost ceiling based on the user's subscription tier.
- * Before each worker task, {@link SequentialTaskExecutor} checks whether
- * the accumulated run cost exceeds the budget. If so, the run is cancelled
- * with an upgrade message.
+ * <p>The budget ceiling is derived from the run's charged credits:
+ * {@code credits × creditMultiplierUsd × budgetMargin}. This acts as a
+ * silent safety net — it only triggers if the cost estimate was wildly wrong.
+ * Users approved the cost upfront at plan gate; no mid-run warnings.
  *
- * <p>Budget values:
- * <ul>
- *   <li>FREE: $3.00 (lifetime 3 runs, gpt-5.4-mini only)</li>
- *   <li>PRO (no BYOK): $5.00</li>
- *   <li>PRO (BYOK) / ENTERPRISE: unlimited (-1)</li>
- * </ul>
+ * <p>BYOK / ENTERPRISE runs have unlimited budget (-1).
  *
  * <p>Thread-safe — multiple workers can query concurrently.
  */
@@ -63,6 +58,7 @@ public class RunCostBudgetService {
     /**
      * Check whether the run's accumulated cost exceeds its budget.
      * Returns false if no budget is set or budget is unlimited.
+     * This is a silent hard cap — no progressive warnings.
      */
     public boolean isOverBudget(String runId) {
         Double ceiling = budgetCeilings.getIfPresent(runId);
@@ -71,7 +67,7 @@ public class RunCostBudgetService {
         double currentCost = costEstimator.computeCostForRun(runId);
         boolean over = currentCost >= ceiling;
         if (over) {
-            log.warn("[CostBudget] Run {} over budget: ${} >= ${}", runId,
+            log.warn("[CostBudget] Run {} over budget (silent hard cap): ${} >= ${}", runId,
                     String.format("%.4f", currentCost), String.format("%.2f", ceiling));
         }
         return over;

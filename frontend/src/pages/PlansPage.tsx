@@ -12,13 +12,12 @@ export default function PlansPage() {
 
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [billingCycle, setBillingCycle] = useState<'MONTHLY' | 'ANNUAL'>('MONTHLY');
-  const [keyMode, setKeyMode] = useState<'BYOK' | 'PLATFORM'>('BYOK');
-  const [showInr, setShowInr] = useState(true); // default to INR
+  const [showInr, setShowInr] = useState(true);
 
   // Checkout flow state
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
   const [checkoutData, setCheckoutData] = useState<SubscriptionInitResult | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
@@ -29,12 +28,22 @@ export default function PlansPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Filter plans by selected cycle and key mode
-  const filteredPlans = plans.filter(p =>
-    p.tier !== 'FREE' &&
-    p.period === billingCycle &&
-    p.keyMode === keyMode
-  );
+  // Group plans by tier, pick INR or USD variant based on currency toggle
+  const displayPlans = (() => {
+    const byTier: Record<string, Record<string, BillingPlan>> = {};
+    for (const p of plans) {
+      if (p.tier === 'FREE' || !p.active) continue;
+      if (!byTier[p.tier]) byTier[p.tier] = {};
+      const currency = p.baseAmountInr > 0 ? 'INR' : 'USD';
+      byTier[p.tier][currency] = p;
+    }
+    // Return plans in tier order: PRO first, then MAX
+    const tierOrder = ['PRO', 'MAX'];
+    return tierOrder
+      .filter(t => byTier[t])
+      .map(t => byTier[t][showInr ? 'INR' : 'USD'])
+      .filter(Boolean);
+  })();
 
   // ─── Checkout Flow ───
 
@@ -47,9 +56,9 @@ export default function PlansPage() {
   const handleDisclaimerAccept = async () => {
     if (!selectedPlanId) return;
     setShowDisclaimer(false);
+    setSubscribing(true);
 
     try {
-      // Determine gateway: use Stripe for non-INR, Razorpay for INR
       const gateway = showInr ? 'RAZORPAY' : 'STRIPE';
       const result = await subscribe(
         selectedPlanId,
@@ -59,16 +68,17 @@ export default function PlansPage() {
       );
 
       if (result.gateway === 'STRIPE' && result.checkoutUrl) {
-        // Redirect to Stripe Checkout
         window.location.href = result.checkoutUrl;
         return;
       }
 
-      // Razorpay flow — open client-side SDK
+      // Razorpay flow
       setCheckoutData(result);
     } catch (err: any) {
       setCheckoutError(err?.message || 'Failed to create subscription');
       setSelectedPlanId(null);
+    } finally {
+      setSubscribing(false);
     }
   };
 
@@ -79,8 +89,8 @@ export default function PlansPage() {
         response.razorpay_payment_id,
         response.razorpay_signature
       );
-      // Success! Redirect to dashboard
-      navigate('/dashboard?billing=success');
+      // Force full page reload so auth state (tier, permissions) refreshes everywhere
+      window.location.href = '/billing?status=success';
     } catch {
       setCheckoutError('Payment verification failed. Please contact support.');
     } finally {
@@ -106,45 +116,24 @@ export default function PlansPage() {
         <p className="mt-3 text-secondary">No credits. No surprises. You know exactly what you're getting.</p>
       </div>
 
-      {/* Toggles */}
-      <div className="flex flex-col sm:flex-row justify-center gap-4 sm:gap-6 mb-10 items-center">
-        {/* Billing cycle toggle */}
+      {/* Currency toggle */}
+      <div className="flex justify-center mb-10">
         <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-sm p-1">
           <button
-            onClick={() => setBillingCycle('MONTHLY')}
+            onClick={() => setShowInr(true)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-              billingCycle === 'MONTHLY' ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
+              showInr ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
             }`}
           >
-            Monthly
+            INR
           </button>
           <button
-            onClick={() => setBillingCycle('ANNUAL')}
+            onClick={() => setShowInr(false)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-              billingCycle === 'ANNUAL' ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
+              !showInr ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
             }`}
           >
-            Annual <span className="text-accent-blue text-xs ml-1">Save 20%</span>
-          </button>
-        </div>
-
-        {/* Key mode toggle */}
-        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-sm p-1">
-          <button
-            onClick={() => setKeyMode('BYOK')}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-              keyMode === 'BYOK' ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
-            }`}
-          >
-            BYOK
-          </button>
-          <button
-            onClick={() => setKeyMode('PLATFORM')}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-              keyMode === 'PLATFORM' ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
-            }`}
-          >
-            Platform Keys
+            USD
           </button>
         </div>
       </div>
@@ -158,13 +147,14 @@ export default function PlansPage() {
 
       {/* Plan cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
-        {filteredPlans.map(plan => (
+        {displayPlans.map(plan => (
           <PlanCard
             key={plan.id}
             plan={plan}
-            isCurrentPlan={false}  // TODO: compare with user's current plan
+            isCurrentPlan={plan.tier === user?.tier}
             showInr={showInr}
             onSelect={handleSelectPlan}
+            userTier={user?.tier}
           />
         ))}
       </div>
@@ -181,9 +171,19 @@ export default function PlansPage() {
 
       {/* Key mode explainer */}
       <div className="mt-8 max-w-2xl mx-auto text-center text-sm text-muted space-y-2">
-        <p><strong>BYOK:</strong> Bring your own Anthropic/OpenAI keys. You pay LLM providers directly. More runs, lower price.</p>
-        <p><strong>Platform Keys:</strong> We handle everything. Fewer runs due to LLM costs, but zero setup required.</p>
+        <p><strong>Pro:</strong> Managed keys — we handle LLM infrastructure. Zero setup required.</p>
+        <p><strong>Max:</strong> Bring your own Anthropic/OpenAI keys. Unlimited runs, full control.</p>
       </div>
+
+      {/* Subscribing overlay */}
+      {subscribing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <span className="h-8 w-8 rounded-full border-3 border-white/20 border-t-accent-blue animate-spin" />
+            <span className="text-sm text-secondary font-medium">Preparing checkout…</span>
+          </div>
+        </div>
+      )}
 
       {/* Disclaimer Modal */}
       <DisclaimerModal
@@ -192,17 +192,22 @@ export default function PlansPage() {
         onCancel={() => { setShowDisclaimer(false); setSelectedPlanId(null); }}
       />
 
-      {/* Razorpay Checkout (renders nothing — opens modal overlay) */}
-      {checkoutData && (
-        <RazorpayCheckout
-          subscriptionId={checkoutData.gatewaySubscriptionId}
-          razorpayKeyId={checkoutData.razorpayKeyId}
-          onSuccess={handleCheckoutSuccess}
-          onFailure={handleCheckoutFailure}
-          userName={user ? `${user.firstName} ${user.lastName}` : undefined}
-          userEmail={user?.email}
-        />
-      )}
+      {/* Razorpay Checkout */}
+      {checkoutData && (() => {
+        const selectedPlan = plans.find(p => p.id === selectedPlanId);
+        return (
+          <RazorpayCheckout
+            subscriptionId={checkoutData.gatewaySubscriptionId}
+            razorpayKeyId={checkoutData.razorpayKeyId}
+            onSuccess={handleCheckoutSuccess}
+            onFailure={handleCheckoutFailure}
+            userName={user ? `${user.firstName} ${user.lastName}` : undefined}
+            userEmail={user?.email}
+            planName={selectedPlan?.name}
+            amountPaise={selectedPlan?.baseAmountInr}
+          />
+        );
+      })()}
     </div>
   );
 }

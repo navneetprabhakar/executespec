@@ -35,6 +35,16 @@ public class InvoiceService {
     @Transactional
     public Invoice generateSubscriptionInvoice(BillingSubscription sub, BillingPlan plan,
                                                 String paymentId) {
+        // Dedup: if an invoice already exists for this payment, return it (prevents double-invoice
+        // when both frontend activation and Razorpay webhook fire for the same charge)
+        if (paymentId != null && !paymentId.isBlank()) {
+            var existing = invoiceRepo.findByGatewayPaymentId(paymentId);
+            if (existing.isPresent()) {
+                log.info("Invoice already exists for paymentId={}, skipping duplicate generation", paymentId);
+                return null;
+            }
+        }
+
         SellerConfig seller = sellerRepo.getDefault();
         BillingProfile buyer = resolveBuyerProfile(sub.getUserId(), sub.getOrgId());
 
@@ -213,6 +223,10 @@ public class InvoiceService {
         log.info("Credit note generated: {} against {} for user={}",
                 cn.getInvoiceNumber(), original.getInvoiceNumber(), original.getUserId());
         return cn;
+    }
+
+    public Optional<Invoice> findLatestBySubscriptionId(UUID subscriptionId) {
+        return invoiceRepo.findTopBySubscriptionIdOrderByInvoiceDateDesc(subscriptionId);
     }
 
     public Optional<Invoice> getInvoice(UUID id) {
