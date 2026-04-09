@@ -1,29 +1,43 @@
 import type { BillingPlan } from '@/lib/billing-api';
 
+const TIER_RANK: Record<string, number> = { FREE: 0, STARTER: 1, PRO: 2, MAX: 3, ENTERPRISE: 4 };
+
 interface PlanCardProps {
   plan: BillingPlan;
   isCurrentPlan: boolean;
   showInr: boolean;
   onSelect: (planId: string) => void;
+  userTier?: string;
 }
 
-export function PlanCard({ plan, isCurrentPlan, showInr, onSelect }: PlanCardProps) {
+export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: PlanCardProps) {
+  const userRank = TIER_RANK[userTier ?? 'FREE'] ?? 0;
+  const planRank = TIER_RANK[plan.tier] ?? 0;
+  const isDowngrade = planRank < userRank;
+  const isUpgrade = planRank > userRank;
   const price = showInr
     ? `\u20B9${(plan.baseAmountInr / 100).toLocaleString('en-IN')}`
     : `$${(plan.baseAmountUsd / 100).toFixed(0)}`;
 
-  const periodLabel = plan.period === 'ANNUAL' ? '/mo (billed annually)' : '/mo';
-
   const isPopular = plan.tier === 'PRO';
+  const isMax = plan.tier === 'MAX';
+  const runsLabel = plan.runLimit === -1 ? 'Unlimited runs/month' : `${plan.runLimit} runs/month`;
+  const keyModeLabel = plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Managed Keys';
 
   return (
     <div className={`relative rounded-md border p-6 flex flex-col ${
-      isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
+      isMax ? 'border-emerald-600' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
     } ${isCurrentPlan ? 'ring-2 ring-accent-blue' : ''}`}>
 
       {isPopular && (
         <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-accent-blue text-primary text-xs font-semibold px-3 py-1 rounded-sm">
           POPULAR
+        </span>
+      )}
+
+      {isMax && !isCurrentPlan && (
+        <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-xs font-semibold px-3 py-1 rounded-sm">
+          BEST VALUE
         </span>
       )}
 
@@ -33,18 +47,19 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect }: PlanCardPro
         </span>
       )}
 
-      <h3 className="text-lg font-semibold text-primary">{plan.tier}</h3>
-      <p className="text-sm text-muted mt-1">{plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Platform Keys'}</p>
+      <h3 className="text-lg font-semibold text-primary">{plan.tier === 'MAX' ? 'Max' : 'Pro'}</h3>
+      <p className="text-sm text-muted mt-1">{keyModeLabel}</p>
 
       <div className="mt-4">
         <span className="text-3xl font-bold text-primary">{price}</span>
-        <span className="text-sm text-muted">{periodLabel}</span>
+        <span className="text-sm text-muted">/mo</span>
+        {showInr && <p className="text-xs text-muted mt-1">+ 18% GST</p>}
       </div>
 
       <ul className="mt-6 space-y-3 flex-1 text-sm text-secondary">
         <li className="flex items-center gap-2">
           <span className="text-accent-blue">&#10003;</span>
-          {plan.runLimit} runs/month
+          {runsLabel}
         </li>
         <li className="flex items-center gap-2">
           <span className="text-accent-blue">&#10003;</span>
@@ -52,7 +67,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect }: PlanCardPro
         </li>
         <li className="flex items-center gap-2">
           <span className="text-accent-blue">&#10003;</span>
-          {plan.limits?.PROJECTS || '\u221E'} projects
+          {plan.limits?.PROJECTS === -1 ? '\u221E' : plan.limits?.PROJECTS || '\u221E'} projects
         </li>
         <li className="flex items-center gap-2">
           <span className="text-accent-blue">&#10003;</span>
@@ -65,19 +80,27 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect }: PlanCardPro
           <span className="text-accent-blue">&#10003;</span>
           All products included
         </li>
-        {plan.tier === 'PRO' && (
+        {isMax && (
           <>
             <li className="flex items-center gap-2">
               <span className="text-accent-blue">&#10003;</span>
+              3 concurrent runs
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="text-accent-blue">&#10003;</span>
+              Your own API keys — full control
+            </li>
+          </>
+        )}
+        {isPopular && (
+          <>
+            <li className="flex items-center gap-2">
+              <span className="text-accent-blue">&#10003;</span>
+              2 concurrent runs
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="text-accent-blue">&#10003;</span>
               Org management & RBAC
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-accent-blue">&#10003;</span>
-              Jira/Confluence integration
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-accent-blue">&#10003;</span>
-              Slack notifications
             </li>
           </>
         )}
@@ -85,16 +108,20 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect }: PlanCardPro
 
       <button
         onClick={() => onSelect(plan.id)}
-        disabled={isCurrentPlan}
+        disabled={isCurrentPlan || isDowngrade}
         className={`mt-6 w-full py-2.5 rounded-md text-sm font-semibold transition ${
           isCurrentPlan
             ? 'bg-accent-blue/10 text-accent-blue cursor-default'
-            : isPopular
-              ? 'bg-accent-blue text-primary hover:bg-accent-blue-hover'
-              : 'bg-[var(--gray-300)] text-primary hover:bg-[var(--gray-400)]'
+            : isDowngrade
+              ? 'bg-[var(--gray-200)] text-muted cursor-not-allowed'
+              : isMax
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : isPopular
+                  ? 'bg-accent-blue text-primary hover:bg-accent-blue-hover'
+                  : 'bg-[var(--gray-300)] text-primary hover:bg-[var(--gray-400)]'
         }`}
       >
-        {isCurrentPlan ? 'Current Plan' : 'Get Started'}
+        {isCurrentPlan ? 'Current Plan' : isUpgrade ? 'Upgrade' : isDowngrade ? 'Current plan is higher' : 'Get Started'}
       </button>
     </div>
   );

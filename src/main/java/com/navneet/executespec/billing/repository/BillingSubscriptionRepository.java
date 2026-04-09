@@ -27,6 +27,10 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
 
     List<BillingSubscription> findByStatus(String status);
 
+    /** Find ACTIVE subscriptions renewing within a given window (for renewal reminders). */
+    @Query("SELECT s FROM BillingSubscription s WHERE s.status = 'ACTIVE' AND s.currentPeriodEnd > :now AND s.currentPeriodEnd < :threshold AND s.cancelAtPeriodEnd = false")
+    List<BillingSubscription> findRenewingBefore(@Param("now") Instant now, @Param("threshold") Instant threshold);
+
     /** Find cancelled subscriptions whose grace period has ended (currentPeriodEnd is in the past). */
     @Query("SELECT s FROM BillingSubscription s WHERE s.status = 'CANCELLED' AND s.currentPeriodEnd < :now")
     List<BillingSubscription> findCancelledPastPeriodEnd(@Param("now") Instant now);

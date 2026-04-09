@@ -47,6 +47,7 @@ public class TierEnforcementService {
     /** Safe fallback limits if tier_config rows are missing. */
     private static final int FALLBACK_FREE = 3;   // lifetime limit
     private static final int FALLBACK_PRO  = 50;
+    private static final int FALLBACK_MAX  = -1;  // unlimited
     private static final int FALLBACK_ENT  = 5000;
 
     /** Default per-run cost budgets (USD). */
@@ -205,7 +206,8 @@ public class TierEnforcementService {
             hasByok = false; // standalone users don't have org-level BYOK
         }
 
-        // PRO and ENTERPRISE with BYOK are always allowed
+        // MAX, PRO and ENTERPRISE with BYOK are always allowed
+        if ("MAX".equals(effectiveTier)) return;
         if ("ENTERPRISE".equals(effectiveTier) && hasByok) return;
         if ("PRO".equals(effectiveTier)) return;
 
@@ -326,7 +328,8 @@ public class TierEnforcementService {
         // (handled at the billing layer), not run quota enforcement.
         String effectiveTier = org.getTier() != null ? org.getTier() : "FREE";
 
-        // Enterprise with own keys = unlimited
+        // MAX and Enterprise with own keys = unlimited
+        if ("MAX".equals(effectiveTier)) return -1;
         if ("ENTERPRISE".equals(effectiveTier) && org.isApiKeysProvided()) return -1;
 
         // Per-org override
@@ -392,6 +395,7 @@ public class TierEnforcementService {
                 .map(TierConfig::getMonthlyRunLimit)
                 .orElseGet(() -> switch (tier.toUpperCase()) {
                     case "ENTERPRISE" -> FALLBACK_ENT;
+                    case "MAX"        -> FALLBACK_MAX;
                     case "PRO"        -> FALLBACK_PRO;
                     default           -> FALLBACK_FREE;
                 });
@@ -486,7 +490,8 @@ public class TierEnforcementService {
     public double resolveRunCostBudget(String tier, boolean hasByok) {
         final String effectiveTier = (tier != null) ? tier.toUpperCase() : "FREE";
 
-        // ENTERPRISE and BYOK users have no per-run cost limit
+        // MAX, ENTERPRISE, and PRO+BYOK users have no per-run cost limit
+        if ("MAX".equals(effectiveTier)) return -1;
         if ("ENTERPRISE".equals(effectiveTier)) return -1;
         if ("PRO".equals(effectiveTier) && hasByok) return -1;
 

@@ -519,12 +519,6 @@ executespec:
     max-retries: 3
     default-timeout: 30s
 
-razorpay:
-  key-id: ""
-  key-secret: ""
-  webhook-secret: ""
-  base-url: https://api.razorpay.com/v1
-
 billing:
   terms-version: "2026-03-v1"
   default-gateway: razorpay

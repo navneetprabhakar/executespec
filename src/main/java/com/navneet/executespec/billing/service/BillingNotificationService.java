@@ -103,6 +103,29 @@ public class BillingNotificationService {
     }
 
     @Async
+    public void sendUpgradeRefund(String email, String oldPlanName,
+                                   long unusedRuns, long totalRuns, long refundAmountPaise) {
+        String refundFormatted = String.format("\u20B9%,.2f", refundAmountPaise / 100.0);
+        send(email, "ExecuteSpec — Subscription Upgraded + Refund Issued",
+                """
+                Your %s subscription has been cancelled as part of your upgrade.
+
+                Refund details:
+                  - Unused runs: %d of %d
+                  - Refund amount: %s (prorated)
+
+                The refund will be credited to your original payment method
+                within 5–7 business days.
+
+                A credit note is attached to this email or will follow shortly.
+
+                View your new plan: %s/billing
+
+                — ExecuteSpec
+                """.formatted(oldPlanName, unusedRuns, totalRuns, refundFormatted, dashboardUrl));
+    }
+
+    @Async
     public void sendUsageWarning(String email, String metric, long current, long max) {
         send(email, "ExecuteSpec — Usage Alert",
                 """

@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 
 // Declare Razorpay global type
 declare global {
@@ -18,6 +18,8 @@ interface RazorpayCheckoutProps {
   onFailure: () => void;
   userName?: string;
   userEmail?: string;
+  planName?: string;
+  amountPaise?: number;
 }
 
 export function RazorpayCheckout({
@@ -27,7 +29,11 @@ export function RazorpayCheckout({
   onFailure,
   userName,
   userEmail,
+  planName,
+  amountPaise,
 }: RazorpayCheckoutProps) {
+
+  const openedRef = useRef(false);
 
   // Load Razorpay script dynamically
   useEffect(() => {
@@ -39,51 +45,58 @@ export function RazorpayCheckout({
     document.body.appendChild(script);
   }, []);
 
-  const openCheckout = useCallback(() => {
-    if (!window.Razorpay) {
-      console.error('Razorpay script not loaded');
-      onFailure();
-      return;
-    }
+  // Auto-open checkout once when component mounts
+  useEffect(() => {
+    if (openedRef.current) return;
 
-    const options = {
-      key: razorpayKeyId,
-      subscription_id: subscriptionId,
-      name: 'ExecuteSpec',
-      description: 'Subscription',
-      prefill: {
-        name: userName || '',
-        email: userEmail || '',
-      },
-      handler: onSuccess,
-      modal: {
-        ondismiss: onFailure,
-        confirm_close: true,
-      },
-      theme: {
-        color: '#6366f1',
-      },
+    const doOpen = () => {
+      if (openedRef.current) return;
+      openedRef.current = true;
+
+      if (!window.Razorpay) {
+        console.error('Razorpay script not loaded');
+        onFailure();
+        return;
+      }
+
+      const gstNote = amountPaise
+        ? `${planName || 'Subscription'} — ₹${(amountPaise / 100).toLocaleString('en-IN')} + 18% GST`
+        : (planName || 'Subscription');
+
+      const options = {
+        key: razorpayKeyId,
+        subscription_id: subscriptionId,
+        name: 'ExecuteSpec',
+        description: gstNote,
+        prefill: {
+          name: userName || '',
+          email: userEmail || '',
+        },
+        handler: onSuccess,
+        modal: {
+          ondismiss: onFailure,
+          confirm_close: true,
+        },
+        theme: {
+          color: '#6366f1',
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
     };
 
-    const rzp = new window.Razorpay(options);
-    rzp.open();
-  }, [subscriptionId, razorpayKeyId, onSuccess, onFailure, userName, userEmail]);
-
-  // Auto-open checkout when component mounts
-  useEffect(() => {
-    // Wait a tick for Razorpay script to be ready
     const timer = setTimeout(() => {
       if (window.Razorpay) {
-        openCheckout();
+        doOpen();
       } else {
-        // Wait for script load
         const scriptEl = document.getElementById('razorpay-script');
-        scriptEl?.addEventListener('load', openCheckout);
+        scriptEl?.addEventListener('load', doOpen);
       }
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [openCheckout]);
+  }, [subscriptionId, razorpayKeyId, onSuccess, onFailure, userName, userEmail]);
 
   return null; // Checkout is a modal overlay, no visible component
 }

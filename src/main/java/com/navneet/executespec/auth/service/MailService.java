@@ -211,13 +211,17 @@ public class MailService {
 
     @Async
     public void sendInvoiceEmail(String toEmail, String firstName, String invoiceNumber,
-                                  long totalAmountPaise, byte[] pdfBytes, String pdfFilename) {
+                                  long subtotalPaise, long gstPaise, long totalAmountPaise,
+                                  byte[] pdfBytes, String pdfFilename) {
         Context ctx = new Context();
         ctx.setVariable("firstName", firstName);
         ctx.setVariable("invoiceNumber", invoiceNumber);
-        ctx.setVariable("totalFormatted", String.format("₹%.2f", totalAmountPaise / 100.0));
+        ctx.setVariable("subtotalFormatted", String.format("\u20B9%,.2f", subtotalPaise / 100.0));
+        ctx.setVariable("gstFormatted", String.format("\u20B9%,.2f", gstPaise / 100.0));
+        ctx.setVariable("totalFormatted", String.format("\u20B9%,.2f", totalAmountPaise / 100.0));
+        ctx.setVariable("hasGst", gstPaise > 0);
         ctx.setVariable("baseUrl", baseUrl);
-        sendHtmlWithAttachment(toEmail, "Invoice " + invoiceNumber + " — executespec",
+        sendHtmlWithAttachment(toEmail, "Invoice " + invoiceNumber + " \u2014 executespec",
                 "email/invoice-issued", ctx, pdfBytes, pdfFilename, "application/pdf");
     }
 
@@ -234,6 +238,16 @@ public class MailService {
             default -> "Payment reminder — executespec";
         };
         sendHtml(toEmail, subject, "email/dunning-reminder", ctx);
+    }
+
+    @Async
+    public void sendRenewalReminder(String toEmail, String firstName, String planName, String renewalDate) {
+        Context ctx = new Context();
+        ctx.setVariable("firstName", firstName);
+        ctx.setVariable("planName", planName);
+        ctx.setVariable("renewalDate", renewalDate);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail, "Your subscription renews soon — executespec", "email/renewal-reminder", ctx);
     }
 
     // ── Usage report emails ─────────────────────────────────────────────────

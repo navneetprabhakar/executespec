@@ -94,24 +94,37 @@ public class ApiKeyResolver {
     }
 
     /**
-     * Pre-flight validation: in OWN_KEYS mode, at least one enabled provider must have a key.
+     * Pre-flight validation: in OWN_KEYS mode or MAX tier (BYOK), at least one provider must have a key.
      * Called before submitting a run so the user gets an immediate 400 instead of a runtime failure.
      *
      * @throws ResponseStatusException 400 if no keys are available for any enabled provider
      */
     public void validateKeyAvailability(String userId) {
         ResolvedKeys keys = resolve(userId);
-        if (!"OWN_KEYS".equals(keys.keySourceMode())) return;
+
+        // MAX tier is always BYOK — enforce API keys even for individual users (no org)
+        boolean isByokTier = false;
+        if (userId != null) {
+            AppUser user = userRepo.findById(userId).orElse(null);
+            if (user != null && "MAX".equalsIgnoreCase(user.getTier())) {
+                isByokTier = true;
+            }
+        }
+
+        if (!"OWN_KEYS".equals(keys.keySourceMode()) && !isByokTier) return;
 
         boolean hasAny = false;
-        if (keys.isProviderAllowed("anthropic") && keys.anthropicKey() != null) hasAny = true;
-        if (keys.isProviderAllowed("openai")    && keys.openAiKey()    != null) hasAny = true;
-        if (keys.isProviderAllowed("google")    && keys.geminiKey()    != null) hasAny = true;
+        if (keys.anthropicKey() != null) hasAny = true;
+        if (keys.openAiKey()    != null) hasAny = true;
+        if (keys.geminiKey()    != null) hasAny = true;
 
         if (!hasAny) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Your org is in OWN_KEYS mode but no API keys are configured for any enabled provider. " +
-                    "Add keys in Settings → AI Keys, or ask an admin to change the key source mode.");
+            String msg = isByokTier
+                    ? "The Max plan requires your own API keys (BYOK). " +
+                      "Add at least one API key in Settings → AI Provider Keys before running specs."
+                    : "Your org is in OWN_KEYS mode but no API keys are configured for any enabled provider. " +
+                      "Add keys in Settings → AI Keys, or ask an admin to change the key source mode.";
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, msg);
         }
     }
 
