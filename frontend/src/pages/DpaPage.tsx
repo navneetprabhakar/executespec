@@ -86,8 +86,8 @@ export default function DpaPage() {
                     <td className="px-4 py-2.5">USA</td>
                   </tr>
                   <tr className="border-t border-[var(--border-default)]">
-                    <td className="px-4 py-2.5">Google (Vertex AI)</td>
-                    <td className="px-4 py-2.5">LLM processing (Gemini)</td>
+                    <td className="px-4 py-2.5">Gemini (Google)</td>
+                    <td className="px-4 py-2.5">LLM processing (Gemini models)</td>
                     <td className="px-4 py-2.5">USA</td>
                   </tr>
                   <tr className="border-t border-[var(--border-default)]">

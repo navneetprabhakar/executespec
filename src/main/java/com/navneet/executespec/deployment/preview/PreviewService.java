@@ -1004,6 +1004,7 @@ public class PreviewService {
     private int getMaxConcurrent(String tier) {
         return switch (tier) {
             case "ENTERPRISE" -> props.getConcurrency().getEnterpriseMax();
+            case "MAX" -> props.getConcurrency().getEnterpriseMax();
             case "PRO" -> props.getConcurrency().getProMax();
             default -> props.getConcurrency().getFreeMax();
         };

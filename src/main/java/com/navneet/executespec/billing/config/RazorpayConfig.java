@@ -24,6 +24,8 @@ public class RazorpayConfig {
     private String keySecret;
     private String webhookSecret;
     private String baseUrl = "https://api.razorpay.com/v1";
+    /** Public-facing URL where Razorpay sends webhook events (e.g. https://executespec.ai/api/webhooks/razorpay) */
+    private String webhookUrl;
 
     @Bean("razorpayHttpClient")
     public RestClient razorpayHttpClient() {

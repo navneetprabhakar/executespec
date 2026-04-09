@@ -38,17 +38,25 @@ public class WebhookSignatureVerifier {
 
     /**
      * Verify Razorpay payment signature after subscription checkout.
-     * Signature = HMAC-SHA256(subscription_id + "|" + payment_id, key_secret)
+     * Signature = HMAC-SHA256(payment_id + "|" + subscription_id, key_secret)
+     * Note: Razorpay places payment_id FIRST for subscription verification.
      */
     public boolean verifyPaymentSignature(String subscriptionId, String paymentId, String signature) {
         if (signature == null || signature.isBlank()) return false;
         try {
-            String payload = subscriptionId + "|" + paymentId;
+            String payload = paymentId + "|" + subscriptionId;
             String expected = hmacSha256(payload, config.getKeySecret());
-            return MessageDigest.isEqual(
+            boolean match = MessageDigest.isEqual(
                     expected.getBytes(StandardCharsets.UTF_8),
                     signature.getBytes(StandardCharsets.UTF_8)
             );
+            if (!match) {
+                log.warn("Payment signature mismatch: subId={}, paymentId={}, expected={}, actual={}",
+                        subscriptionId, paymentId,
+                        expected.substring(0, Math.min(8, expected.length())) + "...",
+                        signature.substring(0, Math.min(8, signature.length())) + "...");
+            }
+            return match;
         } catch (Exception e) {
             log.error("Payment signature verification failed", e);
             return false;

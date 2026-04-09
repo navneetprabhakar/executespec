@@ -4,7 +4,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { updateViewMode as apiUpdateViewMode } from '../lib/api';
 
 type ViewMode = 'vibe' | 'pro';
-type Tier = 'FREE' | 'PRO' | 'ENTERPRISE';
+type Tier = 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE';
 
 export function useViewMode() {
   const uiViewMode = useUiStore((s) => s.viewMode);
@@ -60,7 +60,7 @@ export function useViewMode() {
 
     // ── Tier-gated flags ────────────────────────────────────────────────────
     canUseIntegrations: tier !== 'FREE',
-    canUseOwnKeys: tier === 'ENTERPRISE',
+    canUseOwnKeys: tier === 'ENTERPRISE' || tier === 'MAX',
     canCreateOrg: tier !== 'FREE',
 
     // ── Default run flags for Vibe mode ─────────────────────────────────────
