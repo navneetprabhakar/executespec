@@ -271,19 +271,22 @@ export default function SettingsPage() {
         <div className="flex items-center gap-3">
           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
             ${user?.tier === 'ENTERPRISE' ? 'bg-accent-amber/20 text-accent-amber' :
+              user?.tier === 'MAX' ? 'bg-emerald-500/20 text-emerald-400' :
               user?.tier === 'PRO' ? 'bg-accent-blue/20 text-accent-blue' :
               'bg-[var(--gray-400)] text-secondary'}`}>
-            {user?.tier === 'ENTERPRISE' ? 'E' : user?.tier === 'PRO' ? 'P' : 'F'}
+            {user?.tier === 'ENTERPRISE' ? 'E' : user?.tier === 'MAX' ? 'M' : user?.tier === 'PRO' ? 'P' : 'F'}
           </div>
           <div>
             <p className="text-sm font-semibold text-primary">
-              {user?.tier === 'ENTERPRISE' ? 'Enterprise' : user?.tier === 'PRO' ? 'Pro' : 'Free'} Plan
+              {user?.tier === 'ENTERPRISE' ? 'Enterprise' : user?.tier === 'MAX' ? 'Max' : user?.tier === 'PRO' ? 'Pro' : 'Free'} Plan
             </p>
             <p className="text-xs text-muted">
               {user?.tier === 'ENTERPRISE'
                 ? 'Unlimited runs, priority support, dedicated infrastructure'
+                : user?.tier === 'MAX'
+                ? 'Unlimited runs, own API keys, 3 concurrent runs'
                 : user?.tier === 'PRO'
-                ? '100 runs/month, 3 concurrent runs, advanced features'
+                ? '10 runs/month, 2 concurrent runs, managed keys'
                 : '5 runs/month, 1 concurrent run, basic features'}
             </p>
           </div>

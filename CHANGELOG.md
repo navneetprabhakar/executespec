@@ -5,6 +5,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [1.5.1] — 2026-04-09
+
+### Added
+- **Billing plan restructure** — 4 new plans (Pro Monthly INR/USD, Max Monthly INR/USD). MAX tier with BYOK, unlimited runs, 3 concurrent. Old STARTER/PRO plans soft-deactivated. PLATFORM key mode renamed to MANAGED. (V62 migration)
+- **Topup package restructure** — 6 split INR/USD packages (5/10/20 runs each). Old packages deactivated. Currency toggle on BillingPage. GST label on INR prices. (V63 migration)
+- **Prorated refund on upgrade** — When upgrading (e.g. PRO → MAX), unused runs refunded automatically. Refund = MIN(runs-based, time-based) to prevent gaming. Razorpay partial refund issued, credit note generated, refund email sent.
+- **BYOK enforcement for MAX tier** — `ApiKeyResolver.validateKeyAvailability()` blocks MAX users without API keys. Frontend: warning banner in NewRunModal, Launch button disabled, provider pills greyed out with lock icon for unconfigured providers.
+- **Top-up button** — Sidebar and Header show "Top-up Runs" for PRO users (hidden for MAX/ENTERPRISE — unlimited runs). Links to `/billing#topup` with auto-scroll.
+- **RBAC map** — Comprehensive `docs/RBAC.md` documenting all roles, tiers, endpoint authorization, permission matrix, and frontend access controls.
+- **GST in invoice email** — Invoice email body now shows subtotal, GST (18%), and total amount. Thymeleaf template updated with conditional GST row.
+
+### Changed
+- **Provider naming: Google → Gemini** — Backend `ModelController.PROVIDER_LABELS` and all frontend references (OrgProjectsPage, PrivacyPage, TermsPage, DpaPage) now display "Gemini" instead of "Google" for the AI provider.
+- **Sidebar buttons restyled** — Upgrade and Top-up buttons now use `bg-accent-blue` solid fill (matching Launch Run button) instead of muted grey/translucent styles.
+- **Unlimited runs display** — BillingPage shows "X runs used (Unlimited)" instead of "X / -1" for MAX tier. Progress bar hidden for unlimited metrics.
+- **Upgrade pill for PRO** — Header shows Upgrade pill for both FREE and PRO users.
+- **`canManageAiKeys` for solo MAX users** — `TierPermissionService.freeUserPermissions()` now grants `canManageAiKeys` for MAX/ENTERPRISE solo users (was always false).
+- **Buy Extra Runs hidden for MAX** — Top-up section on BillingPage hidden for MAX/ENTERPRISE tiers.
+- **Right-click disabled** — Context menu prevented across entire UI.
+
+### Fixed
+- **Duplicate email on upgrade** — `upgradeTier()` no longer sends `sendTierUpgradeEmail`; `activateSubscription()` already sends `sendSubscriptionActivated`. Single email per activation.
+- **Refresh token blocklist race condition** — `INSERT ... ON CONFLICT DO NOTHING` atomic upsert prevents duplicate key errors on concurrent logout.
+- **Upgrade blocked for PRO → MAX** — Tier rank comparison now allows upgrades to higher tiers. Same/lower tier blocked with "Cancel first" message.
+- **Refund policy in Terms** — DisclaimerModal item 4 updated with full prorated refund policy. New item 5 for non-refundable top-ups.
+
+---
+
 ## [1.5.0] — 2026-04-09
 
 ### Added

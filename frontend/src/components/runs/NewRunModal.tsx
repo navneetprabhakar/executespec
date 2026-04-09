@@ -437,9 +437,20 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               </>
             )}
 
+            {/* BYOK warning for MAX tier without API keys */}
+            {user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
+              <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-amber/10 border border-accent-amber/30 text-sm text-secondary">
+                <AlertCircle className="h-4 w-4 text-accent-amber flex-shrink-0 mt-0.5" />
+                <span>
+                  Max plan requires your own API keys.{' '}
+                  <a href="/settings#ai-keys" className="text-accent-blue underline">Add keys in Settings</a> before launching a run.
+                </span>
+              </div>
+            )}
+
             <button
               onClick={handleSubmit}
-              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim())}
+              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
               className={cn(
                 'w-full py-2.5 rounded-sm font-medium text-sm text-primary transition-all',
                 'bg-accent-blue hover:bg-accent-blue/80',

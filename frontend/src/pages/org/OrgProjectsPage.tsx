@@ -138,7 +138,7 @@ function AddMemberForm({
 // ── Sub-component: project card ────────────────────────────────────────────────
 const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: 'Anthropic (Claude)',
-  GOOGLE: 'Google (Gemini)',
+  GOOGLE: 'Gemini',
   OPENAI: 'OpenAI (GPT)',
 };
 
@@ -320,7 +320,7 @@ function ProjectCard({
                 className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-1.5 text-sm text-primary focus:border-accent-blue focus:outline-none disabled:opacity-50"
               >
                 <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
-                <option value="GOOGLE">Google (Gemini)</option>
+                <option value="GOOGLE">Gemini</option>
                 <option value="OPENAI">OpenAI (GPT)</option>
               </select>
               <p className="text-xs text-muted mt-1">All pipeline runs in this project will use this provider.</p>
@@ -457,7 +457,7 @@ export default function OrgProjectsPage() {
                 className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary focus:border-accent-blue focus:outline-none"
               >
                 <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
-                <option value="GOOGLE">Google (Gemini)</option>
+                <option value="GOOGLE">Gemini</option>
                 <option value="OPENAI">OpenAI (GPT)</option>
               </select>
             </div>
