@@ -113,6 +113,12 @@ export interface RunSummary {
   archivedAt?: string | null;
   /** "REALTIME" | "BATCH". Null for pre-V61 runs or runs not yet approved. */
   approvedExecutionMode?: string | null;
+  /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
+  aiProvider?: string | null;
+  /** True if this run is a retry of a previous run. */
+  isRetry?: boolean;
+  /** RunId of the original run this was retried from. Null for original runs. */
+  sourceRunId?: string | null;
 }
 
 export interface TaskSummary {
@@ -225,6 +231,8 @@ export interface RunDetail extends RunSummary {
   batchProgressCompleted?: number | null;
   /** Batch progress: total tasks in batch. */
   batchProgressTotal?: number | null;
+  /** Number of auto-retry attempts on this run chain (0 = original run). */
+  runRetryCount?: number;
 }
 
 export interface MetricsResponse {

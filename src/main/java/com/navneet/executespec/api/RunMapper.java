@@ -53,7 +53,10 @@ public class RunMapper {
             r.getRunSummary(),
             r.getExecutionMode(),
             r.getArchivedAt(),
-            r.getApprovedExecutionMode()
+            r.getApprovedExecutionMode(),
+            r.getAiProvider(),
+            r.getSourceRunId() != null,
+            r.getSourceRunId()
         );
     }
 
@@ -178,6 +181,10 @@ public class RunMapper {
             .creditSavings(r.getCreditSavings())
             .batchProgressCompleted(r.getBatchProgressCompleted())
             .batchProgressTotal(r.getBatchProgressTotal())
+            .aiProvider(r.getAiProvider())
+            .isRetry(r.getSourceRunId() != null)
+            .sourceRunId(r.getSourceRunId())
+            .runRetryCount(r.getRunRetryCount())
             .build();
     }
 

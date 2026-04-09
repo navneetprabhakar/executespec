@@ -1,5 +1,7 @@
 package com.navneet.executespec.harness;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.LlmProvider;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -166,6 +168,9 @@ public class PipelineHarness {
 
     // ── Language validation for existing repos ─────────────────────────────────
     private final LanguageValidator languageValidator;
+
+    // ── Model resolution (for label fields on provider change) ──────────────
+    private final ModelResolver modelResolver;
 
     // ── Single-shot fast path (Phase 1 simplification) ──────────────────────
     private final com.navneet.executespec.agent.RequestTriageService requestTriageService;
@@ -474,14 +479,25 @@ public class PipelineHarness {
         if (projectId != null && !projectId.isBlank()) {
             run.setProjectId(projectId);
             // Copy project's AI provider to the run (frozen at submission time)
-            projectRepository.findById(projectId).ifPresent(project ->
-                run.setAiProvider(project.getAiProvider().name()));
+            // Also resolve model labels so RunDetail shows the correct provider's models
+            projectRepository.findById(projectId).ifPresent(project -> {
+                run.setAiProvider(project.getAiProvider().name());
+                LlmProvider prov = LlmProvider.valueOf(project.getAiProvider().name());
+                run.setPlannerModel(modelResolver.resolve("PlannerAgent", prov).getModel());
+                run.setWorkerModel(modelResolver.resolve("WorkerAgent", prov).getModel());
+                run.setReviewerModel(modelResolver.resolve("ReviewerAgentV2", prov).getModel());
+            });
             needsSave = true;
         }
 
         // Explicit per-run AI provider override (takes precedence over project default)
         if (aiProvider != null && !aiProvider.isBlank()) {
             run.setAiProvider(aiProvider.toUpperCase());
+            // Update model label fields to match the selected provider
+            LlmProvider prov = LlmProvider.valueOf(aiProvider.toUpperCase());
+            run.setPlannerModel(modelResolver.resolve("PlannerAgent", prov).getModel());
+            run.setWorkerModel(modelResolver.resolve("WorkerAgent", prov).getModel());
+            run.setReviewerModel(modelResolver.resolve("ReviewerAgentV2", prov).getModel());
             needsSave = true;
         }
 
@@ -1969,6 +1985,9 @@ public class PipelineHarness {
                     if (execResult.completedTasks().isEmpty()) {
                         stateStore.markFailed(runId, "All tasks failed validation");
                         broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                        eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, "All tasks failed validation"));
+                        PipelineRun failedAllRun = stateStore.findRun(runId).orElse(null);
+                        if (failedAllRun != null) autoRetryRunIfEligible(failedAllRun);
                         return;
                     }
                 }
@@ -2045,6 +2064,9 @@ public class PipelineHarness {
                 stateStore.markPartial(runId, partialReason);
                 broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, partialReason));
+                // Attempt auto-retry before giving up
+                PipelineRun partialRun = stateStore.findRun(runId).orElse(null);
+                if (partialRun != null) autoRetryRunIfEligible(partialRun);
                 return;
             }
 
@@ -2080,6 +2102,8 @@ public class PipelineHarness {
                     broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
                     eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, conflictReason));
                     log.warn("Async run {} — partial merge: {}", runId, conflictReason);
+                    PipelineRun conflictRun = stateStore.findRun(runId).orElse(null);
+                    if (conflictRun != null) autoRetryRunIfEligible(conflictRun);
                     return;
                 }
 
@@ -2187,7 +2211,7 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
                 PipelineRun failedRunEx = stateStore.findRun(runId).orElse(null);
-                // Auto-retry disabled — runs stay at their terminal status
+                if (failedRunEx != null) autoRetryRunIfEligible(failedRunEx);
             }
         } finally {
             activeRunThreads.remove(runId);
