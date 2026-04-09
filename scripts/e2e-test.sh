@@ -17,19 +17,24 @@ PLAN_WAIT_TIMEOUT=120  # 2 minutes to wait for plan (cancel test)
 # Simple: Python CLI, Static HTML, Ruby script
 # Moderate: Java Maven, TypeScript, PHP
 # Complex: Go (compilation), Rust (cargo build), multi-file JS/Express
-declare -A LANGUAGE_TIMEOUTS=(
-    ["Python"]=300
-    ["JavaScript"]=600
-    ["Java"]=600
-    ["TypeScript"]=600
-    ["Static HTML"]=300
-    ["Cancel"]=180
-    ["Go"]=900
-    ["Rust"]=900
-    ["Ruby"]=300
-    ["PHP"]=600
-)
 RUN_TIMEOUT_DEFAULT=600  # fallback for unknown languages
+
+# Timeout lookup (bash 3.2 compatible — no associative arrays on macOS)
+get_language_timeout() {
+    case "$1" in
+        Python)       echo 300 ;;
+        JavaScript)   echo 600 ;;
+        Java)         echo 600 ;;
+        TypeScript)   echo 600 ;;
+        "Static HTML") echo 300 ;;
+        Cancel)       echo 180 ;;
+        Go)           echo 900 ;;
+        Rust)         echo 900 ;;
+        Ruby)         echo 300 ;;
+        PHP)          echo 600 ;;
+        *)            echo "$RUN_TIMEOUT_DEFAULT" ;;
+    esac
+}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR"
 
@@ -452,7 +457,7 @@ run_test_case() {
 
     # 2. Poll until terminal
     local result
-    local lang_timeout="${LANGUAGE_TIMEOUTS[$language]:-$RUN_TIMEOUT_DEFAULT}"
+    local lang_timeout=$(get_language_timeout "$language")
     result=$(poll_until_terminal "$run_id" "$lang_timeout") || true
 
     local status=$(echo "$result" | cut -d'|' -f1)
