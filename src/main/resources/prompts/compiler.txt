@@ -74,6 +74,18 @@ Common error patterns and their fixes:
 - "reached end of file while parsing" → fix unclosed brackets or braces
 - "class X is public, should be declared in a file named X.java" → fix class name to match filename
 
+IMPORT RESOLUTION PRIORITY (for "cannot find symbol" / "package does not exist"):
+  a. First: search the entire workspace for the class (it may exist in a different package)
+     → If found: fix the import path to match the actual package declaration
+  b. If not found but referenced by 3+ files: the class was supposed to be created by a
+     task that failed. Create a MINIMAL STUB to unblock compilation:
+     - Interface: declare the referenced methods with correct signatures
+     - Class: implement just enough for callers to compile (constructor, getters, stubs)
+     - Add comment: // STUB — created by compiler to unblock build. Original task failed.
+  c. If referenced by only 1 file and clearly orphaned: remove the import AND all usages
+     of that type from the file, replacing with a safe fallback (e.g., String, Object)
+  d. NEVER just delete an import while leaving usages intact — that makes MORE errors
+
 WHEN TO OUTPUT EMPTY ARRAY:
 - All errors reference classes/files not yet in workspace → dependency not merged yet
 - Errors are in test files only and the test framework isn't configured → skip (tests run later)
