@@ -26,7 +26,7 @@ public class ModelController {
 
     private static final Map<String, String> PROVIDER_LABELS = Map.of(
         "anthropic", "Anthropic",
-        "google", "Google",
+        "google", "Gemini",
         "openai", "OpenAI"
     );
 

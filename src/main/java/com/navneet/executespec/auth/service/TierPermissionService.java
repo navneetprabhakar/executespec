@@ -226,13 +226,15 @@ public class TierPermissionService {
     }
 
     private TierPermissions freeUserPermissions(AppUser user) {
+        String tier = user.getTier() != null ? user.getTier() : "FREE";
         int limit = tierEnforcementService.effectiveUserLimit(user);
         int used = user.getPersonalRunCount();
-        int maxApply = resolveMaxApplySuggestions("FREE");
-        int maxPreviews = resolveMaxPreviewStarts("FREE");
+        int maxApply = resolveMaxApplySuggestions(tier);
+        int maxPreviews = resolveMaxPreviewStarts(tier);
+        boolean isMaxOrEnterprise = "MAX".equals(tier) || "ENTERPRISE".equals(tier);
 
         return new TierPermissions(
-                false, // canManageAiKeys
+                isMaxOrEnterprise, // canManageAiKeys — MAX/ENTERPRISE need BYOK
                 false, // canViewPricing
                 false, // canManageIntegrations
                 true,  // canViewMetrics — unlocked for all tiers

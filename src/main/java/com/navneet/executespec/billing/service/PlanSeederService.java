@@ -2,14 +2,15 @@ package com.navneet.executespec.billing.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.billing.client.RazorpayRestClient;
+import com.navneet.executespec.billing.config.RazorpayConfig;
 import com.navneet.executespec.billing.entity.BillingPlan;
-import com.navneet.executespec.billing.entity.BillingPlanLimit;
-import com.navneet.executespec.billing.repository.BillingPlanLimitRepository;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -17,84 +18,65 @@ import org.springframework.transaction.annotation.Transactional;
 public class PlanSeederService {
 
     private final RazorpayRestClient razorpayClient;
+    private final RazorpayConfig razorpayConfig;
     private final BillingPlanRepository planRepo;
-    private final BillingPlanLimitRepository limitRepo;
-
-    private static final String[] ALL_PRODUCTS = {"CODE_GEN", "PIPELINE_GEN", "PILOTSRE", "IAC_GEN"};
 
     /**
-     * Seeds all 8 paid plans in Razorpay + local DB.
-     * Call via a one-time REST endpoint or @PostConstruct in dev profile.
-     * Idempotent: skips if plans already exist.
+     * Seeds Razorpay plan IDs for INR billing plans that don't have one yet.
+     * USD plans are skipped (they need Stripe price IDs set separately).
+     * Idempotent: only creates Razorpay plans for rows with null razorpay_plan_id.
      */
     @Transactional
     public void seedAllPlans() {
-        if (planRepo.findByActiveTrue().size() > 1) {
-            log.info("Plans already seeded ({} plans exist), skipping", planRepo.count());
+        // Log key mode (test vs live) for visibility
+        String keyId = razorpayConfig.getKeyId();
+        boolean isLive = keyId != null && keyId.startsWith("rzp_live_");
+        log.info("Razorpay plan seeder running in {} mode (key={}...)",
+                isLive ? "LIVE" : "TEST", keyId != null && keyId.length() > 12 ? keyId.substring(0, 12) : keyId);
+
+        List<BillingPlan> inrPlans = planRepo.findByActiveTrue().stream()
+                .filter(p -> p.getBaseAmountInr() > 0 && p.getRazorpayPlanId() == null)
+                .toList();
+
+        if (inrPlans.isEmpty()) {
+            log.info("All INR plans already have Razorpay plan IDs, skipping seed");
             return;
         }
 
-        // ── STARTER BYOK ──
-        seedPlan("Starter BYOK Monthly", "STARTER", "BYOK", "MONTHLY",
-                "monthly", 1, 149900, 1800, 1, 50, 10, 500, 0);
-        seedPlan("Starter BYOK Annual", "STARTER", "BYOK", "ANNUAL",
-                "yearly", 1, 1438800, 16800, 1, 50, 10, 500, 20);
+        for (BillingPlan plan : inrPlans) {
+            String rzpPeriod = "ANNUAL".equals(plan.getPeriod()) ? "yearly" : "monthly";
+            int rzpInterval = 1;
 
-        // ── STARTER PLATFORM ──
-        seedPlan("Starter Platform Monthly", "STARTER", "PLATFORM", "MONTHLY",
-                "monthly", 1, 299900, 3600, 1, 20, 10, 500, 0);
-        seedPlan("Starter Platform Annual", "STARTER", "PLATFORM", "ANNUAL",
-                "yearly", 1, 2878800, 34800, 1, 20, 10, 500, 20);
+            JsonNode rzpPlan = razorpayClient.createPlan(
+                    plan.getName(),
+                    (int) plan.getBaseAmountInr(),
+                    rzpPeriod,
+                    rzpInterval
+            );
+            String rzpPlanId = rzpPlan.get("id").asText();
+            plan.setRazorpayPlanId(rzpPlanId);
+            planRepo.save(plan);
 
-        // ── PRO BYOK ──
-        seedPlan("Pro BYOK Monthly", "PRO", "BYOK", "MONTHLY",
-                "monthly", 1, 999900, 11900, 5, 500, 50, 10240, 0);
-        seedPlan("Pro BYOK Annual", "PRO", "BYOK", "ANNUAL",
-                "yearly", 1, 9598800, 114000, 5, 500, 50, 10240, 20);
+            log.info("Seeded Razorpay plan: {} → razorpay_plan_id={}", plan.getName(), rzpPlanId);
+        }
 
-        // ── PRO PLATFORM ──
-        seedPlan("Pro Platform Monthly", "PRO", "PLATFORM", "MONTHLY",
-                "monthly", 1, 2499900, 29900, 5, 150, 50, 10240, 0);
-        seedPlan("Pro Platform Annual", "PRO", "PLATFORM", "ANNUAL",
-                "yearly", 1, 23998800, 286800, 5, 150, 50, 10240, 20);
+        // Remind about USD/Stripe plans
+        long usdWithoutStripe = planRepo.findByActiveTrue().stream()
+                .filter(p -> p.getBaseAmountUsd() > 0 && p.getStripePriceId() == null)
+                .count();
+        if (usdWithoutStripe > 0) {
+            log.warn("{} USD plan(s) still need stripe_price_id set (configure via Stripe Dashboard)", usdWithoutStripe);
+        }
 
-        log.info("All 8 billing plans seeded successfully");
-    }
+        // Log webhook URL reminder
+        String webhookUrl = razorpayConfig.getWebhookUrl();
+        if (webhookUrl != null && !webhookUrl.isBlank()) {
+            log.info("Razorpay webhook URL: {} — ensure this is configured in Razorpay Dashboard → Webhooks", webhookUrl);
+            log.info("Required events: subscription.charged, subscription.cancelled, subscription.halted, payment.failed");
+        } else {
+            log.warn("razorpay.webhook-url is not set — configure it and add to Razorpay Dashboard → Webhooks");
+        }
 
-    private void seedPlan(String name, String tier, String keyMode, String period,
-                          String rzpPeriod, int rzpInterval,
-                          long amountInr, long amountUsd,
-                          int seats, int runLimit, int projectLimit, int storageMb,
-                          int annualDiscountPct) {
-        // Create plan in Razorpay
-        JsonNode rzpPlan = razorpayClient.createPlan(name, (int) amountInr, rzpPeriod, rzpInterval);
-        String rzpPlanId = rzpPlan.get("id").asText();
-
-        // Save plan to DB
-        BillingPlan plan = BillingPlan.builder()
-                .name(name)
-                .tier(tier)
-                .keyMode(keyMode)
-                .productAccess(ALL_PRODUCTS)
-                .period(period)
-                .baseAmountInr(amountInr)
-                .baseAmountUsd(amountUsd)
-                .includedSeats(seats)
-                .runLimit(runLimit)
-                .annualDiscountPct(annualDiscountPct)
-                .razorpayPlanId(rzpPlanId)
-                .active(true)
-                .build();
-        plan = planRepo.save(plan);
-
-        // Save plan limits
-        limitRepo.save(BillingPlanLimit.builder()
-                .billingPlanId(plan.getId()).metric("RUNS").maxValue(runLimit).build());
-        limitRepo.save(BillingPlanLimit.builder()
-                .billingPlanId(plan.getId()).metric("PROJECTS").maxValue(projectLimit).build());
-        limitRepo.save(BillingPlanLimit.builder()
-                .billingPlanId(plan.getId()).metric("STORAGE_MB").maxValue(storageMb).build());
-
-        log.info("Seeded plan: {} → razorpay_plan_id={}", name, rzpPlanId);
+        log.info("Plan seeding complete");
     }
 }

@@ -13,6 +13,14 @@
         <td style="padding:8px 0;text-align:right;font-weight:600" th:text="${invoiceNumber}">ES-2526-0001</td>
       </tr>
       <tr>
+        <td style="padding:8px 0;color:#a1a1a1;border-top:1px solid #252525">Subtotal</td>
+        <td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #252525" th:text="${subtotalFormatted}">&#8377;0.00</td>
+      </tr>
+      <tr th:if="${hasGst}">
+        <td style="padding:8px 0;color:#a1a1a1;border-top:1px solid #252525">GST (18%)</td>
+        <td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #252525" th:text="${gstFormatted}">&#8377;0.00</td>
+      </tr>
+      <tr>
         <td style="padding:8px 0;color:#a1a1a1;border-top:1px solid #252525">Total Amount</td>
         <td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #252525" th:text="${totalFormatted}">&#8377;0.00</td>
       </tr>

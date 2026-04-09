@@ -199,7 +199,7 @@ public class CostEstimator {
             batchAvailable = switch (tier) {
                 case "FREE" -> false;
                 case "PRO" -> credits >= 2;
-                case "ENTERPRISE" -> true;
+                case "MAX", "ENTERPRISE" -> true;
                 default -> credits >= 2;
             };
         }

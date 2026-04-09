@@ -188,13 +188,7 @@ public class AuthService {
         if (refreshToken == null || !jwtUtil.isTokenValid(refreshToken)) return;
         String jti = jwtUtil.extractJti(refreshToken);
         Instant exp = jwtUtil.extractExpiry(refreshToken);
-        if (!blocklistRepo.existsByJti(jti)) {
-            blocklistRepo.save(RefreshTokenBlocklist.builder()
-                    .jti(jti)
-                    .userId(jwtUtil.extractUserId(refreshToken))
-                    .expiresAt(exp)
-                    .build());
-        }
+        blocklistRepo.insertIfAbsent(jti, jwtUtil.extractUserId(refreshToken), exp);
     }
 
     // ── Password Reset ────────────────────────────────────────────────────────
@@ -410,14 +404,23 @@ public class AuthService {
     }
 
     private void validatePasswordStrength(String password) {
-        if (password == null || password.length() < 8) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 8 characters");
+        if (password == null || password.length() < 10) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 10 characters");
+        }
+        if (password.length() > 128) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must not exceed 128 characters");
         }
         if (!password.matches(".*[A-Z].*")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must contain at least one uppercase letter");
         }
+        if (!password.matches(".*[a-z].*")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must contain at least one lowercase letter");
+        }
         if (!password.matches(".*[0-9].*")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must contain at least one digit");
+        }
+        if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\",./<>?].*")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must contain at least one special character");
         }
         if (password.contains(" ")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must not contain whitespace");
