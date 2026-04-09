@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as api from '@/lib/api';
 import { useUiStore } from '@/stores/useUiStore';
+import { refreshUsageBadge } from '@/components/billing/UsageBadge';
 
 interface RunStore {
   runs: api.RunSummary[];
@@ -145,6 +146,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
   approveRun: async (id, approved, creditsConfirmed?, executionMode?) => {
     await api.approveRun(id, approved, creditsConfirmed, executionMode);
     await get().fetchRun(id);
+    // Credits were charged — refresh sidebar usage badge
+    if (approved) refreshUsageBadge();
   },
 
   clarifyRun: async (id, response) => {
