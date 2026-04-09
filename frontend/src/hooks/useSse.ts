@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useSseStore } from '@/stores/useSseStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { getMessages, getSseToken } from '@/lib/api';
+import { refreshUsageBadge } from '@/components/billing/UsageBadge';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -91,6 +92,10 @@ export function useSse(runId: string | null) {
             // for terminal states where the SSE stream may close before RUN_DETAIL arrives.
             if (['COMPLETE', 'FAILED', 'CANCELLED', 'COMPILING', 'WORKING', 'QUEUED_BATCH', 'IN_PROGRESS_BATCH'].includes(data.payload)) {
               fetchRun(runId!);
+            }
+            // Credits charged when run transitions to WORKING — refresh sidebar usage
+            if (data.payload === 'WORKING') {
+              refreshUsageBadge();
             }
           }
           // Gate opened = plan tasks are now saved; RUN_DETAIL push covers this

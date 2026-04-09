@@ -1,17 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchBillingStatus, type BillingStatus } from '@/lib/billing-api';
+
+/** Dispatch this event anywhere to force UsageBadge to refresh. */
+export const refreshUsageBadge = () =>
+  window.dispatchEvent(new CustomEvent('usage-badge:refresh'));
 
 export function UsageBadge() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     fetchBillingStatus().then(setStatus).catch(() => {});
-    // Refresh every 5 minutes
-    const interval = setInterval(() => {
-      fetchBillingStatus().then(setStatus).catch(() => {});
-    }, 5 * 60 * 1000);
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    refresh();
+    // Refresh every 2 minutes
+    const interval = setInterval(refresh, 2 * 60 * 1000);
+    // Listen for explicit refresh events (e.g. after credits charged)
+    window.addEventListener('usage-badge:refresh', refresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('usage-badge:refresh', refresh);
+    };
+  }, [refresh]);
 
   if (!status) return null;
 
