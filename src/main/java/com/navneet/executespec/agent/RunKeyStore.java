@@ -1,10 +1,11 @@
 package com.navneet.executespec.agent;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
 
 /**
  * Holds the per-run resolved API keys for the lifetime of each pipeline run.
@@ -15,19 +16,28 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Lifecycle:
  * <pre>
- *   PipelineHarness.executeRunAsync()  → runKeyStore.put(runId, keys)
+ *   PipelineHarness.executeRunAsync()       → runKeyStore.put(runId, keys)
  *   [agents run normally]
- *   PipelineHarness finally block      → runKeyStore.remove(runId)
+ *   PipelineHarness.runBackgroundValidation finally → runKeyStore.remove(runId)
  * </pre>
  *
- * <p>Thread-safety: {@link ConcurrentHashMap} — safe for concurrent worker tasks within
+ * <p>Safety net: Caffeine cache with 30-minute access-expiry ensures leaked entries are
+ * eventually evicted even if the explicit {@code remove()} is never reached (e.g. OOM kill).
+ * Background validation typically completes in &lt;5 minutes — well within the 30-min window.
+ *
+ * <p>Thread-safety: Caffeine — safe for concurrent worker tasks within
  * the same run as well as multiple runs executing in parallel.
  */
 @Service
 @Slf4j
 public class RunKeyStore {
 
-    private final Map<String, ResolvedKeys> store = new ConcurrentHashMap<>();
+    /** Safety-net TTL: evict idle entries after 30 min (background validation completes in <5 min). */
+    private static final Duration IDLE_EVICTION_TTL = Duration.ofMinutes(30);
+
+    private final Cache<String, ResolvedKeys> store = Caffeine.newBuilder()
+            .expireAfterAccess(IDLE_EVICTION_TTL)
+            .build();
 
     /** Register resolved keys at the start of a run. */
     public void put(String runId, ResolvedKeys keys) {
@@ -45,12 +55,13 @@ public class RunKeyStore {
      * (e.g. recovery runs, test contexts, or background agents).
      */
     public ResolvedKeys get(String runId) {
-        return store.getOrDefault(runId, ResolvedKeys.SYSTEM_ONLY);
+        ResolvedKeys keys = store.getIfPresent(runId);
+        return keys != null ? keys : ResolvedKeys.SYSTEM_ONLY;
     }
 
     /** Remove the entry at the end of a run (cleanup). */
     public void remove(String runId) {
-        store.remove(runId);
+        store.invalidate(runId);
         log.debug("[RunKeyStore] Cleaned up keys for run {}", runId);
     }
 }

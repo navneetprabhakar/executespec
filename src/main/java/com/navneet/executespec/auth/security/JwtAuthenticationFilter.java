@@ -30,15 +30,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         try {
             String token = extractBearerToken(request);
-            if (token != null && jwtUtil.isTokenValid(token)) {
+            if (token != null) {
+                // Extract userId first (validates signature + expiry — throws on invalid token)
                 String userId = jwtUtil.extractUserId(token);
                 UserDetails userDetails = userDetailsService.loadUserById(userId);
 
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(
-                                userDetails, null, userDetails.getAuthorities());
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                // Per-user invalidation check: pass tokenInvalidatedAt from the loaded user
+                java.time.Instant userInvalidatedAt = null;
+                if (userDetails instanceof AppUserDetails appUser) {
+                    userInvalidatedAt = appUser.getUser().getTokenInvalidatedAt();
+                }
+
+                if (jwtUtil.isTokenValid(token, userInvalidatedAt)) {
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(
+                                    userDetails, null, userDetails.getAuthorities());
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
             }
         } catch (Exception e) {
             log.debug("JWT filter error: {}", e.getMessage());

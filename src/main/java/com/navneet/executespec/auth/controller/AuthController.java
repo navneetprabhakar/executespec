@@ -123,6 +123,23 @@ public class AuthController {
         return ResponseEntity.ok(UserDto.from(userDetails.getUser(), userDetails.getOrgMember()));
     }
 
+    /**
+     * Invalidates all existing JWTs for the current user by setting {@code token_invalidated_at}
+     * to now. Any token with {@code iat < token_invalidated_at} will be rejected by
+     * {@code JwtAuthenticationFilter}. The caller must re-login to get a fresh token.
+     */
+    @PostMapping("/invalidate-sessions")
+    public ResponseEntity<Map<String, String>> invalidateSessions(
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        String userId = userDetails.getUser().getId();
+        userRepo.findById(userId).ifPresent(user -> {
+            user.setTokenInvalidatedAt(java.time.Instant.now());
+            userRepo.save(user);
+            log.info("[Auth] Per-user session invalidation set for userId={}", userId);
+        });
+        return ResponseEntity.ok(Map.of("message", "All sessions invalidated. Please log in again."));
+    }
+
     @GetMapping("/me/permissions")
     public ResponseEntity<TierPermissionService.TierPermissions> myPermissions(
             @AuthenticationPrincipal AppUserDetails userDetails) {
