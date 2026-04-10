@@ -45,6 +45,8 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+  flyway:
+    out-of-order: true   # Safety net: v2 branch added V68 after V69-V73 were applied on some envs
   ai:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}

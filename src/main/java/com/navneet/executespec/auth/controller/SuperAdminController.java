@@ -21,6 +21,8 @@ import com.navneet.executespec.billing.entity.RunTopup;
 import com.navneet.executespec.billing.entity.TopupPackage;
 import com.navneet.executespec.billing.repository.TopupPackageRepository;
 import com.navneet.executespec.billing.service.RunTopupService;
+import com.navneet.executespec.config.PromptVersioningService;
+import com.navneet.executespec.optimiser.PromptAuditService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -52,6 +54,26 @@ public class SuperAdminController {
     private final RunTopupService runTopupService;
     private final TopupPackageRepository topupPackageRepo;
     private final com.navneet.executespec.report.UsageReportService usageReportService;
+    private final PromptVersioningService promptVersioningService;
+    private final PromptAuditService promptAuditService;
+
+    // ── Prompt Versioning ─────────────────────────────────────────────────────
+
+    @PostMapping("/prompts/{name}/rollback")
+    public ResponseEntity<Map<String, Object>> rollbackPrompt(@PathVariable String name) {
+        boolean done = promptVersioningService.rollback(name);
+        if (!done) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "No audit history found for prompt: " + name));
+        }
+        return ResponseEntity.ok(Map.of("rolledBack", name));
+    }
+
+    @GetMapping("/prompts/{name}/history")
+    public ResponseEntity<List<com.navneet.executespec.state.entity.PromptAuditEntry>> promptHistory(
+            @PathVariable String name) {
+        return ResponseEntity.ok(promptAuditService.getHistory(name));
+    }
 
     // ── Usage Reports ──────────────────────────────────────────────────────────
 

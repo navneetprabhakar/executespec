@@ -5,6 +5,79 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.0.0] — 2026-04-10
+
+### Added
+
+#### Per-Provider Run Pool (Item 0)
+- **`ProviderRunPoolManager`** — one isolated thread pool per LLM provider (ANTHROPIC, OPENAI, GOOGLE), each with its own semaphore and `PriorityBlockingQueue`. Thread names follow the pattern `provider-pool-{provider}-{n}`. Capacity per provider is configurable via `agent.provider-pools.*` properties.
+- **Priority queuing** — ENTERPRISE > PRO > FREE tier runs are submitted with corresponding priority levels; higher-tier users never wait behind free-tier runs within the same provider queue.
+- **429 rejection** — when a provider's queue is at capacity, run submission returns HTTP 429 immediately instead of blocking the request thread.
+
+#### Phase 0 — Stop the Bleeding
+- **Issue #15 SSE Emitter Bounds** — maximum 5 emitters per run, 500 global cap. Metrics `executespec.sse.emitters.active` and `executespec.sse.emitters.rejected` expose emitter pressure. Excess emitter registrations are rejected with HTTP 429 and logged at WARN.
+- **Issue #18 Workspace Secret Stripping** — `.env`, `*.pem`, `*.key`, `credentials.json`, and related secret files are stripped from ZIP workspace exports. `WorkspaceExporter` now filters these patterns before creating the archive, preventing secret exfiltration via workspace downloads.
+- **Issue #17 Inter-task Budget Enforcement** — `SequentialTaskExecutor` checks the run cost budget between each task, not just within the worker loop. Tasks that would breach the hard budget ceiling are skipped and marked FAILED rather than proceeding to consume additional budget.
+
+#### Phase 1 — Foundation
+- **Issue #1 Durable Background Validation** — background validation state is now tracked in the `background_validation` table (V64 migration). Stalled validations are auto-retried up to 3 attempts. New endpoint `POST /api/runs/{id}/retry-validation` allows manual retry. Validation stage (REVIEW, TEST_GEN, TEST_EXEC, REPORT) and attempt count are persisted, enabling recovery across server restarts.
+- **Issue #2 DB Gate Fallback** — `gate_record` table (V65 migration) mirrors all gate state from Redis. `GateStore` performs dual-write on every state change; on Redis miss, falls back to DB read. Eliminates the run auto-fail that previously occurred when Redis restarted mid-approval.
+- **Issue #6 Credential Lifecycle Extension** — `RunKeyStore` TTL is now extended to cover the full background validation phase, not just the main pipeline. Accessing a key when none is present in OWN_KEYS mode throws `KeyResolutionException` instead of silently returning null.
+- **Issue #27 Prompt Injection Defense** — `ContextSanitizer` strips `<system>` tags and common prompt injection patterns (`ignore previous instructions`, `[INST]`, etc.) from workspace context files (README, CODEBASE_CONTEXT.md) before they are injected into planner or worker prompts. Provides defense against second-order injection via repo content.
+- **Issue #8 LLM Tracing** — `executespec.llm.latency` Micrometer timer and `executespec.llm.tokens.input`/`executespec.llm.tokens.output` distribution summaries added, all tagged by `provider`, `model`, and `agent_tier`. Provides per-provider cost visibility in Grafana.
+
+#### Phase 2 — Scale & Correctness
+- **Issue #4 Circuit Breaker Tuning** — `UNHEALTHY_THRESHOLD` raised from 5 to 10 consecutive failures; `RECOVERY_WINDOW` extended from 60s to 180s. HTTP 429 responses are now excluded from the failure count — rate limits no longer open the circuit breaker, preventing unnecessary provider abandonment during traffic spikes.
+- **Issue #4 Per-Run Provider Pinning** — `RunProviderPinStore` (Redis-backed, 2h TTL) pins the first-successful provider to the run ID. Subsequent tasks in the same run reuse the pinned provider, eliminating mid-run provider switches that caused context drift and compilation failures.
+- **Issue #5 Progressive Merge Validation** — `ProgressiveMergeValidator` performs a fast syntax check (javac/tsc/python -m py_compile) immediately after each task is merged to main, before the next task begins. Merge-breaking syntax errors are caught immediately rather than accumulating until the CompilerAgent phase.
+- **Issue #3 Distributed SSE** — SSE event distribution now uses Redis Pub/Sub (`sse:channel:{runId}`) so any MIG instance can broadcast to any client, eliminating the requirement for load-balancer cookie affinity. An SSE replay log (`sse:replay:{runId}`, Redis list) stores the last 200 events per run. Clients reconnecting with `Last-Event-ID` receive missed events automatically.
+- **Issue #3 Encrypted RunKeyStore** — API keys in `RunKeyStore` are now encrypted at rest using AES-256-GCM via `KeyEncryptor`. The encryption key is derived from `app.jwt.secret`. Keys are stored in Redis with a 2h TTL that extends for background validation.
+- **Issue #7 Coherence-Aware Subtask Decomposition** — `CoherenceGroupAnalyzer` analyzes file dependency graphs before decomposition. Tightly coupled files (shared interfaces, co-located tests, same module) are kept in the same subtask rather than split, reducing cross-subtask import failures.
+- **Issue #10 Side-Effect Outbox** — `side_effect_outbox` table (V69 migration) records all external side effects (GitHub PR creation, Slack notifications, JIRA comments, Confluence child pages). Failed side effects are retried with exponential backoff. Saga compensation entries allow rollback of partially-completed multi-step operations.
+- **Issue #14 Prompt Versioning** — `PromptAssembler.assembleAndTrack()` computes a SHA-256 prefix hash of every assembled prompt and saves a row to the `prompt_audit` table (V72 migration). A rollback endpoint `POST /api/admin/prompts/{hash}/rollback` allows reverting to a previous prompt version. `agent_task.prompt_hash` column links each task to the exact prompt used.
+- **Issue #19 Data Retention + GDPR** — configurable per-tier data retention (FREE=30 days, PRO=90 days, ENTERPRISE=365 days) enforced by a nightly scheduled job. Soft-delete columns (`deleted_at`, `retention_expires_at`) on core tables (V70 migration). `DELETE /api/users/me/data` endpoint performs GDPR erasure of the requesting user's personal data and associated runs.
+- **Issue #25 Provider Degradation Queuing** — when all providers are simultaneously degraded (circuit open), incoming run submissions are queued in Redis rather than immediately rejected. Queued runs are automatically retried when any provider recovers. Queue depth is exposed as metric `executespec.provider.degradation_queue_depth`.
+
+#### Phase 3 — Polish & Resilience
+- **Issue #11 Smart Context Window** — message relevance scoring replaces the fixed sliding window. Tool failure messages score HIGH, file write confirmations score MEDIUM, status-check messages score LOW. The compaction algorithm retains the highest-scored messages within the token budget rather than blindly keeping the last N messages.
+- **Issue #12 Triage Escalation Detector** — `TriageEscalationDetector` monitors running single-shot tasks and auto-escalates to multi-task if thresholds are crossed: file count >8 + iteration count >15, or wall-clock time >8 minutes, or compiler error count >5 after initial compile. Escalation events are recorded in the `triage_outcome` table (V71 migration) for planner feedback-loop training.
+- **Issue #13 Headless Test Execution** — batch run test execution now uses Docker containers (`--read-only`, `--cap-drop ALL`, memory/CPU limits) instead of the host JVM process, matching the security posture of interactive runs.
+- **Issue #16 Git Worktree Locking** — `GitWorktreeLock` (Redis-backed `SETNX` with 5-minute TTL) prevents two subtasks in the same workspace from running concurrent git operations. Lock acquisition is retried with exponential backoff before failing the subtask.
+- **Issue #26 Global Preview Concurrency** — Redis-backed per-user preview limits: FREE=1, PRO=3, ENTERPRISE=10. Requests exceeding the limit return HTTP 429 with a message indicating the active preview count and user's limit.
+- **Issue #28 PostgreSQL Row-Level Security** — RLS policies (V67 migration) on `pipeline_run`, `agent_task`, `validation_report`, and related tables using `current_setting('app.current_org_id')`. Every DB connection sets this parameter at session start via `DataSourceOrganizationFilter`, ensuring cross-org data isolation at the database layer.
+
+#### New Flyway Migrations
+- **V64** — `background_validation` table (stage, attempt count, last-attempt timestamp)
+- **V65** — `gate_record` table (DB mirror of Redis gate state for fallback)
+- **V66** — `app_user.token_invalidated_at` column (per-user force-logout timestamp)
+- **V67** — RLS policies on core tables (`pipeline_run`, `agent_task`, `validation_report`)
+- **V68** — `event_log` table + `pipeline_run.executing_instance` / `execution_heartbeat` columns
+- **V69** — `side_effect_outbox` table (type, payload, status, attempts, compensation)
+- **V70** — Retention policy columns (`deleted_at`, `retention_expires_at`) + `data_retention_policy` table
+- **V71** — `triage_outcome` table (classification, escalation reason, outcome feedback)
+- **V72** — `prompt_audit` table + `agent_task.prompt_hash` column
+- **V73** — `plan_effectiveness` table (plan vs actual task metrics for planner feedback)
+
+### Changed
+
+- **Circuit breaker thresholds** — `UNHEALTHY_THRESHOLD` 5→10, `RECOVERY_WINDOW` 60s→180s (issue #4)
+- **`LlmRouter` rate-limit backoff** — exponential backoff sequence extended to 2s → 5s → 10s → 20s → 60s before provider fallover, reducing unnecessary provider switches during burst rate-limit periods
+- **`TriageEscalationDetector` thresholds** — file threshold configurable via `@Value("${agent.triage.file-threshold:8}")` (was hardcoded to 5); iteration threshold raised to 15
+- **`ContextAgent`** — now applies the JSON patch array (`KEEP/UPDATE/ADD/REMOVE` operations) output by `context-agent.txt` to update `CODEBASE_CONTEXT.md` and `decisions.md`, replacing the previous behavior of writing the raw LLM response verbatim
+- **`RunKeyStore`** — switched from plaintext `ConcurrentHashMap` to AES-256-GCM encrypted Redis storage; TTL extended to cover background validation phase
+- **`GateStore`** — dual-write to Redis + `gate_record` table on all state changes; Redis miss falls back to DB read
+
+### Fixed
+
+- **`KeyEncryptor` property path** — corrected to `app.jwt.secret` (was referencing the wrong property path, causing startup failure when a custom JWT secret was configured)
+- **`PromptAuditRepository` duplicate bean** — renamed to `PromptHashAuditRepository`; resolves Spring context startup failure when both `agent` and `router` packages defined a bean with the same name
+- **Flyway V71–V73 FK references** — corrected foreign key column types from `UUID` to `VARCHAR(36)` to match the `pipeline_run.id` column definition; fixes migration failures on clean-schema deployments
+- **`ContextAgent` raw response write** — `ContextAgent` now parses and applies the JSON patch array instead of writing the LLM's raw text response to `CODEBASE_CONTEXT.md`, preventing corruption of the context file on every run
+- **`failureReason` shown on COMPLETE tasks** — subtask decomposition notes are no longer surfaced as `failureReason` on successfully completed tasks; `failureReason` is now null for any task in COMPLETE status
+- **`TriageEscalationDetector` hardcoded thresholds** — file count threshold and iteration count threshold are now configurable via `@Value` annotations; previously hardcoded values required a code change to tune
+
+---
+
 ## [1.5.1] — 2026-04-09
 
 ### Added

@@ -48,13 +48,15 @@ public class SseController {
     public SseEmitter subscribe(
             @PathVariable String runId,
             @RequestParam(required = false) String token,
+            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         // Prefer scoped SSE token validation
         if (token != null && !token.isBlank()) {
             String userId = jwtUtil.validateSseToken(token, runId);
             if (userId != null) {
-                log.debug("SSE subscription for run {} via scoped token (user={})", runId, userId);
-                return broadcaster.subscribe(runId);
+                log.debug("SSE subscription for run {} via scoped token (user={}, lastEventId={})",
+                        runId, userId, lastEventId);
+                return broadcaster.subscribe(runId, lastEventId);
             }
             // Fall through to full JWT check if SSE token is invalid
         }
@@ -64,7 +66,7 @@ public class SseController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Valid SSE token or JWT required");
         }
         guard.requireRunAccess(runId, userDetails);
-        log.debug("SSE subscription for run {} via full JWT", runId);
-        return broadcaster.subscribe(runId);
+        log.debug("SSE subscription for run {} via full JWT (lastEventId={})", runId, lastEventId);
+        return broadcaster.subscribe(runId, lastEventId);
     }
 }

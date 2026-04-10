@@ -202,8 +202,18 @@ export default function RunDetail() {
   // Retry all FAILED/PARTIAL tasks within this run
   const failedTasks = useMemo(() => {
     if (!activeRun?.tasks) return [];
-    return activeRun.tasks.filter((t: any) =>
-      ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status) && !t.parentTaskId
+    const tasks = activeRun.tasks as any[];
+    // Parent IDs that have at least one FAILED/PARTIAL/BLOCKED subtask —
+    // catches the case where a subtask returned PARTIAL but the parent was
+    // incorrectly persisted as COMPLETE (subtask decomposition edge case).
+    const parentIdsWithFailedSubtasks = new Set(
+      tasks
+        .filter(t => t.parentTaskId && ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status))
+        .map(t => t.parentTaskId)
+    );
+    return tasks.filter(t =>
+      !t.parentTaskId &&
+      (['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status) || parentIdsWithFailedSubtasks.has(t.taskId))
     );
   }, [activeRun?.tasks]);
 

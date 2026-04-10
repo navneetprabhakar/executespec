@@ -357,4 +357,28 @@ public class PipelineRun {
         return archivedAt != null;
     }
 
+    // ── Instance tracking (V68) ───────────────────────────────────────────────
+
+    /** Hostname/pod of the instance currently executing this run's pipeline thread. */
+    @Column(name = "executing_instance")
+    private String executingInstance;
+
+    /** Last heartbeat from the executing instance (updated every 30s). */
+    @Column(name = "execution_heartbeat")
+    private Instant executionHeartbeat;
+
+    // ── GDPR soft-delete ─────────────────────────────────────────────────────
+
+    /**
+     * Timestamp when the user (or retention job) soft-deleted this run.
+     * Soft-deleted runs are excluded from queries and hard-deleted by the
+     * retention scheduler after the workspace GCS deletion is confirmed.
+     */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    public boolean isSoftDeleted() {
+        return deletedAt != null;
+    }
+
 }

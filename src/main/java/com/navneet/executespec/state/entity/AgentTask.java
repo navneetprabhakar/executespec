@@ -95,4 +95,8 @@ public class AgentTask {
     @Column(name = "subtask_total")
     private Integer subtaskTotal;       // total subtasks in parent
 
+    // ── Prompt tracking ──────────────────────────────────────────────────────
+    @Column(name = "prompt_hash", length = 12)
+    private String promptHash;          // 12-char SHA-256 prefix of assembled prompt
+
 }

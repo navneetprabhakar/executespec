@@ -59,6 +59,19 @@ public class TestWorkerAgent {
     public String generateTestClass(String runId, TestTask task,
                                      String conventionsDoc, String userRequest,
                                      boolean isCli, boolean isStaticHtml) {
+        return generateTestClass(runId, task, conventionsDoc, userRequest, isCli, isStaticHtml, "");
+    }
+
+    /**
+     * Generate a test class with live API probe results injected into the prompt.
+     *
+     * @param apiProbeResults markdown summary from {@link ApiProber#probe} — empty string if unavailable
+     * @return the generated Java source code
+     */
+    public String generateTestClass(String runId, TestTask task,
+                                     String conventionsDoc, String userRequest,
+                                     boolean isCli, boolean isStaticHtml,
+                                     String apiProbeResults) {
         log.info("[TestWorker] Generating test class {} for run {} (isCli={}, isStaticHtml={})",
                 task.getTaskName(), runId, isCli, isStaticHtml);
 
@@ -66,7 +79,7 @@ public class TestWorkerAgent {
         testTaskRepository.save(task);
 
         // Build prompt
-        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml);
+        String systemPrompt = buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml, apiProbeResults);
 
         // Call LLM via ModelResolver
         LlmProvider aiProvider = stateStore.findRun(runId)
@@ -130,6 +143,11 @@ public class TestWorkerAgent {
 
     private String buildPrompt(TestTask task, String conventionsDoc, String userRequest,
                                boolean isCli, boolean isStaticHtml) {
+        return buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml, "");
+    }
+
+    private String buildPrompt(TestTask task, String conventionsDoc, String userRequest,
+                               boolean isCli, boolean isStaticHtml, String apiProbeResults) {
         String testMethodsJson;
         try {
             // plan_json may contain test methods info; use task description as fallback
@@ -200,6 +218,9 @@ public class TestWorkerAgent {
                     + "Do NOT use Playwright or ProcessBuilder.";
         }
 
+        String probeSection = (apiProbeResults != null && !apiProbeResults.isBlank())
+                ? "LIVE API PROBE RESULTS:\n" + apiProbeResults
+                : "";
         return loadPrompt()
                 .replace("{testing_context}", testingContext)
                 .replace("{technical_requirements}", technicalReqs)
@@ -211,7 +232,8 @@ public class TestWorkerAgent {
                 .replace("{category}", task.getTestCategory().name())
                 .replace("{test_methods_json}", testMethodsJson)
                 .replace("{conventions_doc}", conventionsDoc != null ? conventionsDoc : "")
-                .replace("{user_request}", userRequest != null ? userRequest : "");
+                .replace("{user_request}", userRequest != null ? userRequest : "")
+                .replace("{api_probe_results}", probeSection);
     }
 
     private LlmRouter.LlmResponse callLlmTracked(String runId, ResolvedModel model, String systemPrompt) {

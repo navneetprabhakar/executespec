@@ -23,8 +23,13 @@ import java.util.List;
  * Estimates pipeline cost before plan approval.
  * Pricing is DB-backed (model_pricing table), editable via UI/REST.
  *
- * Low estimate  = 1 iteration per worker
- * High estimate = 3 iterations per worker (accounts for retries / compaction)
+ * Iteration ranges by complexity (low/high):
+ *   LOW:    5 – 15  iterations
+ *   MEDIUM: 15 – 40 iterations
+ *   HIGH:   30 – 80 iterations
+ *
+ * High estimate adds 20% escalation premium (probability that stall detection
+ * promotes a WORKHORSE task to the PLANNING-tier model mid-run).
  */
 @Component
 @Slf4j
@@ -51,6 +56,18 @@ public class CostEstimator {
 
     // 50% buffer on high estimate to account for retries, failover, and cache-write overhead.
     private static final double HIGH_ESTIMATE_MULTIPLIER = 1.50;
+
+    // Iteration count ranges per complexity (low / high scenarios).
+    private static final int LOW_ITER_LOW    = 5;
+    private static final int LOW_ITER_HIGH   = 15;
+    private static final int MEDIUM_ITER_LOW  = 15;
+    private static final int MEDIUM_ITER_HIGH = 40;
+    private static final int HIGH_ITER_LOW    = 30;
+    private static final int HIGH_ITER_HIGH   = 80;
+
+    // Probability that stall detection promotes a WORKHORSE task to PLANNING tier mid-run.
+    // Added as a premium to the high-end estimate only.
+    private static final double PLANNING_ESCALATION_PROB = 0.20;
 
     // Anthropic prompt-cache pricing: cache writes cost 25% more than normal input.
     private static final double CACHE_WRITE_COST_MULTIPLIER = 1.25;
@@ -94,9 +111,9 @@ public class CostEstimator {
             int inTok  = complexityInputTokens(complexity);
             int outTok = tokenBudgetMonitor.maxOutputTokens(null, complexity);
 
-            // Low = 1 iteration, High = 3 iterations
-            totalLow  += costUsd(inTok, outTok, 1, workerRates);
-            totalHigh += costUsd(inTok, outTok, 3, workerRates);
+            int[] range = iterRange(complexity);
+            totalLow  += costUsd(inTok, outTok, range[0], workerRates);
+            totalHigh += costUsd(inTok, outTok, range[1], workerRates);
         }
 
         // Add fixed planner and reviewer costs
@@ -134,7 +151,7 @@ public class CostEstimator {
     public RunCostEstimate estimateWithCredits(TaskPlan plan, LlmProvider provider,
                                                 AgentProperties.Cost costConfig, String userTier) {
         if (plan == null || plan.getTasks() == null) {
-            return new RunCostEstimate(0, 1, costConfig.getCreditMultiplierUsd(),
+            return new RunCostEstimate(0, 0, 0, 1, costConfig.getCreditMultiplierUsd(),
                     0, 1, costConfig.getCreditMultiplierUsd(),
                     provider.name(), false, 0,
                     List.of(), 0, 0, 0);
@@ -149,19 +166,24 @@ public class CostEstimator {
         double[] reviewerRates = dbRatesForModel(reviewerModel.providerName(), reviewerModel.getModel());
 
         List<RunCostEstimate.TaskCostEstimate> taskEstimates = new ArrayList<>();
-        double totalWorkerCost = 0;
+        double totalWorkerLow  = 0;
+        double totalWorkerHigh = 0;
 
         for (TaskDefinition task : plan.getTasks()) {
             String complexity = task.getComplexity() != null ? task.getComplexity().toUpperCase() : "MEDIUM";
             int inTok  = complexityInputTokens(complexity);
             int outTok = tokenBudgetMonitor.maxOutputTokens(null, complexity);
-            int iters  = "LOW".equals(complexity) ? 2 : "HIGH".equals(complexity) ? 4 : 3;
 
-            double taskCost = costUsd(inTok, outTok, iters, workerRates);
-            totalWorkerCost += taskCost;
+            int[] range = iterRange(complexity);
+            double taskLow  = costUsd(inTok, outTok, range[0], workerRates);
+            double taskHigh = costUsd(inTok, outTok, range[1], workerRates);
+            double taskMid  = (taskLow + taskHigh) / 2.0;
+
+            totalWorkerLow  += taskLow;
+            totalWorkerHigh += taskHigh;
 
             taskEstimates.add(new RunCostEstimate.TaskCostEstimate(
-                    task.getTaskId(), complexity, taskCost, iters));
+                    task.getTaskId(), complexity, taskMid, range[1]));
         }
 
         // Planner cost (1 call)
@@ -176,7 +198,15 @@ public class CostEstimator {
         // Compiler cost (1 call)
         double compilerCost = costUsd(MEDIUM_IN_TOKENS, reviewerOut, 1, reviewerRates);
 
-        double rawTotal = totalWorkerCost + planningCost + reviewCost + compilerCost;
+        // Low/high scenario costs
+        double overheadCost = planningCost + reviewCost + compilerCost;
+        double lowTotal  = totalWorkerLow  + overheadCost;
+        // High adds 20% escalation premium: stall detection may promote tasks to PLANNING tier
+        double highTotal = totalWorkerHigh * (1.0 + PLANNING_ESCALATION_PROB) + overheadCost;
+
+        // Credit calculation uses midpoint + estimation buffer
+        double midWorker  = (totalWorkerLow + totalWorkerHigh) / 2.0;
+        double rawTotal   = midWorker + overheadCost;
         double bufferedTotal = rawTotal * costConfig.getEstimationBuffer();
 
         double multiplier = costConfig.getCreditMultiplierUsd();
@@ -206,11 +236,13 @@ public class CostEstimator {
 
         int creditSavings = batchAvailable ? credits - batchCredits : 0;
 
-        log.info("[CostEstimator] {} tasks → est=${} (buffered), credits={}, cap=${}, batch={} batchCredits={} (provider={})",
-                plan.getTasks().size(), String.format("%.2f", bufferedTotal), credits,
+        log.info("[CostEstimator] {} tasks → low=${} mid=${} high=${} (buffered={}), credits={}, cap=${}, batch={} batchCredits={} (provider={})",
+                plan.getTasks().size(),
+                String.format("%.3f", lowTotal), String.format("%.2f", bufferedTotal), String.format("%.3f", highTotal),
+                String.format("%.2f", bufferedTotal), credits,
                 String.format("%.2f", hardCap), batchAvailable, batchCredits, provider);
 
-        return new RunCostEstimate(bufferedTotal, credits, hardCap,
+        return new RunCostEstimate(bufferedTotal, lowTotal, highTotal, credits, hardCap,
                 batchBuffered, batchCredits, batchHardCap,
                 provider.name(), batchAvailable, creditSavings,
                 taskEstimates, planningCost, reviewCost, compilerCost);
@@ -375,6 +407,15 @@ public class CostEstimator {
 
     private String defaultModel(String provider) {
         return modelRegistry.workhouseModelFor(provider);
+    }
+
+    /** Returns [lowIters, highIters] for the given complexity. */
+    private int[] iterRange(String complexity) {
+        return switch (complexity) {
+            case "LOW"  -> new int[]{LOW_ITER_LOW,    LOW_ITER_HIGH};
+            case "HIGH" -> new int[]{HIGH_ITER_LOW,   HIGH_ITER_HIGH};
+            default     -> new int[]{MEDIUM_ITER_LOW, MEDIUM_ITER_HIGH};
+        };
     }
 
     private int complexityInputTokens(String complexity) {

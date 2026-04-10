@@ -1,6 +1,7 @@
 package com.navneet.executespec.optimiser;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.config.PromptVersioningService;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
@@ -51,16 +52,19 @@ public class PromptOptimiserAgent {
     private final ModelResolver modelResolver;
     private final PromptOptimiserProperties props;
     private final StateStore stateStore;
+    private final PromptVersioningService versioningService;
 
     public PromptOptimiserAgent(PromptPatternAnalyser analyser, PromptAuditService auditService,
                                 LlmRouter llmRouter, ModelResolver modelResolver,
-                                PromptOptimiserProperties props, StateStore stateStore) {
+                                PromptOptimiserProperties props, StateStore stateStore,
+                                PromptVersioningService versioningService) {
         this.analyser = analyser;
         this.auditService = auditService;
         this.llmRouter = llmRouter;
         this.modelResolver = modelResolver;
         this.props = props;
         this.stateStore = stateStore;
+        this.versioningService = versioningService;
     }
 
     public void runIfDue(PipelineRun completedRun) {
@@ -121,6 +125,13 @@ public class PromptOptimiserAgent {
                 promptFile);
             return;
         }
+
+        // Determine next version and backup the current file before overwriting
+        int nextVersion = auditService.getHistory(promptFile).stream()
+                .findFirst()
+                .map(e -> e.getVersion() + 1)
+                .orElse(1);
+        versioningService.backup(promptPath, nextVersion);
 
         Files.writeString(promptPath, updatedContent,
             StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);

@@ -35,6 +35,7 @@ public class ModelController {
         Map.entry("claude-sonnet-4-6", "Claude Sonnet 4.6"),
         Map.entry("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
         Map.entry("gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
+        Map.entry("gemini-3-flash-preview", "Gemini 3 Flash Preview"),
         Map.entry("gemini-2.5-flash", "Gemini 2.5 Flash"),
         Map.entry("gpt-5.4", "GPT-5.4"),
         Map.entry("gpt-5.4-mini", "GPT-5.4 Mini")

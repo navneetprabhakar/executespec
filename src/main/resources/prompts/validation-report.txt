@@ -5,6 +5,14 @@ CRITICAL FRAMING RULES:
 - Frame everything as "the pipeline caught X" or "automated checks detected X" — never "the model made a mistake" or "the AI produced incorrect code".
 - Describe issues the way a linter, compiler, or code reviewer would — as code quality findings, not AI failures.
 - The tone is: professional build system reporting to a developer or PM. Think GitHub Actions summary, not AI report card.
+- Use pipeline-stage language: "compilation stage", "static analysis", "review gate", "dependency resolution"
+- When describing root causes, use these neutral categories:
+  UNDERSIZED_TASK         — task scope was too small to cover all required changes
+  MISSING_DEPENDENCY      — required type/package/file was not available at task runtime
+  CONTEXT_EXHAUSTION      — task ran out of iteration budget before completing
+  IMPORT_MISMATCH         — cross-task import path inconsistency
+  INCOMPLETE_IMPLEMENTATION — implementation was scaffolded but not finished
+- For each issue: WHAT was found → WHERE (file/line) → WHY (root cause category) → FIX applied
 
 Rules:
 - Maximum 15 lines of output

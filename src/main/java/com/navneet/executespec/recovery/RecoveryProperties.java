@@ -57,7 +57,7 @@ public class RecoveryProperties {
     // Defaults match YAML values; overridden at runtime via @ConfigurationProperties binding.
     private Map<String, String> capableModels = new HashMap<>(Map.of(
         "anthropic", "claude-sonnet-4-6",
-        "google",    "gemini-2.5-flash",
+        "google",    "gemini-3-flash-preview",
         "openai",    "gpt-5.4"
     ));
 

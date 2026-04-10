@@ -66,14 +66,14 @@ spring:
       api-key: ""                   # set via env var in profile files
       chat:
         options:
-          model: gpt-5.4-mini
-          max-tokens: 16384                  # gpt-5.4 / gpt-5.4-mini max; per-call limits applied by TokenBudgetMonitor
+          model: gpt-5.4
+          max-tokens: 16384                  # gpt-5.4 max; per-call limits applied by TokenBudgetMonitor
     google:
       genai:
         api-key: ""                 # set via env var in profile files
         chat:
           options:
-            model: gemini-2.5-flash    # default UTILITY; CAPABLE uses flash-lite, ARCHITECT uses customtools
+            model: gemini-3-flash-preview    # default; all tiers now use gemini-3-flash-preview
 
 # ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
@@ -84,11 +84,11 @@ model-matrix:
       lightweight: claude-haiku-4-5-20251001
     google:
       planning: gemini-3-flash-preview
-      workhorse: gemini-2.5-flash
-      lightweight: gemini-2.5-flash
+      workhorse: gemini-3-flash-preview
+      lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4-mini
+      workhorse: gpt-5.4
       lightweight: gpt-5.4-mini
 
   # ── Canonical model registry (single source of truth for all model metadata) ──
@@ -132,7 +132,7 @@ model-matrix:
         input-per-1m: 0.30
         cached-input-per-1m: 0.03
         output-per-1m: 2.50
-      notes: "Gemini 2.5 Flash — WORKHORSE + LIGHTWEIGHT tiers for Google."
+      notes: "Gemini 2.5 Flash — legacy, replaced by gemini-3-flash-preview for all tiers."
     "[gemini-3-flash-preview]":
       provider: google
       chain-tier: CAPABLE
@@ -142,7 +142,7 @@ model-matrix:
         input-per-1m: 0.50
         cached-input-per-1m: 0.05
         output-per-1m: 3.00
-      notes: "Gemini 3 Flash Preview — PLANNING tier for Google."
+      notes: "Gemini 3 Flash Preview — all tiers for Google (PLANNING + WORKHORSE + LIGHTWEIGHT)."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
@@ -152,7 +152,7 @@ model-matrix:
         input-per-1m: 2.50
         cached-input-per-1m: 0.25
         output-per-1m: 15.00
-      notes: "PLANNING tier default for OpenAI."
+      notes: "All tiers for OpenAI (PLANNING + WORKHORSE + LIGHTWEIGHT)."
     "[gpt-5.4-mini]":
       provider: openai
       chain-tier: UTILITY
@@ -162,7 +162,7 @@ model-matrix:
         input-per-1m: 0.75
         cached-input-per-1m: 0.075
         output-per-1m: 4.50
-      notes: "WORKHORSE + LIGHTWEIGHT tiers for OpenAI. FREE tier lock."
+      notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
 
   # ── Legacy model name aliases (for in-flight runs and DB backward compat) ─────
   legacy-aliases:
@@ -171,7 +171,7 @@ model-matrix:
     claude-haiku-4-5: claude-haiku-4-5-20251001
     gpt-4o: gpt-5.4
     gpt-4o-mini: gpt-5.4-mini
-    gemini-3-flash: gemini-2.5-flash
+    gemini-3-flash: gemini-3-flash-preview
     gemini-3.1-pro-preview: gemini-3-flash-preview
 
   # ── Fallback chains by tier (replaces hardcoded LlmRouter chains) ─────────────
@@ -179,15 +179,15 @@ model-matrix:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-2.5-flash }
+      - { provider: google, model: gemini-3-flash-preview }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-2.5-flash }
+      - { provider: google, model: gemini-3-flash-preview }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
-      - { provider: google, model: gemini-2.5-flash }
-      - { provider: openai, model: gpt-5.4-mini }
+      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: openai, model: gpt-5.4 }
 
   # ── FREE tier model lock ──────────────────────────────────────────────────────
   free-tier:
@@ -241,6 +241,19 @@ agent:
     max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
     safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
     task-max-retries: 2           # Auto-retry failed tasks/subtasks up to 2 times before marking FAILED
+  provider-pools:
+    default-concurrency: 3        # Per-provider concurrent run limit (default for any unspecified provider)
+    default-queue-capacity: 10    # Max runs waiting per provider before HTTP 429
+    providers:
+      ANTHROPIC:
+        concurrency: 3
+        queue-capacity: 15        # Slightly larger — Anthropic is primary/premium provider
+      GOOGLE:
+        concurrency: 3
+        queue-capacity: 10
+      OPENAI:
+        concurrency: 3
+        queue-capacity: 10
   cost:
     credit-multiplier-usd: 5.0    # $5 of LLM compute per run credit
     estimation-buffer: 1.10        # 10% buffer on cost estimate for retry overhead

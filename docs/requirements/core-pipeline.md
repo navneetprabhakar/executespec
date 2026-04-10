@@ -1,6 +1,6 @@
 # Core Pipeline — Requirements
 
-> Last updated: 2026-04-03
+> Last updated: 2026-04-10
 
 ## Overview
 
@@ -110,7 +110,8 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
   - `autoMerge`: legacy flag (merge is now always automatic after review)
   - Both flags stored on PipelineRun entity; set at run submission via RunRequest
 - Gates are Redis-backed (`gate:plan:{runId}`, `gate:merge:{runId}`, TTL 2h)
-- Pipeline thread polls Redis every 500ms
+- **v2: DB gate fallback** — `GateStore` dual-writes all state changes to the `gate_record` table (V65). On Redis miss during `await()`, falls back to DB read. Prevents auto-fail on Redis restart mid-approval (issue #2).
+- Pipeline thread polls Redis every 500ms (falls back to DB on Redis miss)
 - Any MIG instance can handle the approval REST call
 - Gate-loss handling: if gate missing on approve (server restart), auto-fail with message
 
@@ -123,11 +124,13 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
 - Skip tasks if dependency failed (mark BLOCKED)
 - **Subtask decomposition:** `SubtaskDecomposer` splits multi-file tasks (2+ owned files) into per-file subtasks at execution time. Each subtask produces exactly one `writeFile` call, eliminating fabrication. Rework tasks excluded from decomposition. Tracked via `parentTaskId`/`subtaskIndex`/`subtaskTotal` on `AgentTask`.
 - Per task (or subtask):
-  1. Select model via ModelResolver based on agent tier and user-selected provider
-  2. Create isolated worktree
+  1. Select model via `ProviderRunPoolManager` (per-provider priority queue) + `ModelResolver` (tier + provider → model)
+  2. Create isolated worktree; acquire `GitWorktreeLock` (Redis `SETNX`, 5-min TTL) to prevent concurrent git races (v2: issue #16)
   3. Run WorkerAgent (with self-play prevention: strips fabricated `<tool_result>` blocks, XML-first parsing for PATH B)
   4. On failure: retry with error feedback + model tier escalation (up to 3 attempts)
   5. On success: commit and **progressive merge to main immediately**
+  6. **v2: Post-merge fast syntax check** — `ProgressiveMergeValidator` runs javac/tsc/py_compile immediately after merge; syntax errors are flagged and injected as context into subsequent task prompts (issue #5)
+- **v2: Inter-task budget check** — `SequentialTaskExecutor` checks the run cost budget after each completed task; tasks that would breach the hard ceiling are skipped and marked FAILED (issue #17)
 - Per-task validation deferred to review phase (CompilerAgent + ReviewerAgentV2)
 - Track metrics per task execution (model, provider, tier, pass/fail, duration)
 - Emit SSE events: VALIDATION_STARTED, VALIDATION_PASSED, VALIDATION_FAILED, MODEL_ESCALATED
@@ -162,7 +165,8 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
 - SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` deferred to background thread's `finally` block
 - `backgroundValidationRuns` ConcurrentHashSet tracks active background threads
 - Non-blocking: user can chat, submit changes, and use preview while validation runs
-- Fire-and-forget: no retry/recovery if background thread fails silently (known tech debt)
+- **v2.0: Durable validation state** — `background_validation` table (V64) tracks stage (REVIEW / TEST_GEN / TEST_EXEC / REPORT), attempt count, and last heartbeat. Stalled validations (no heartbeat for >10 min) are auto-retried up to 3 attempts by `BackgroundValidationMonitor` (scheduled every 5 min).
+- **v2.0: Manual retry** — `POST /api/runs/{id}/retry-validation` allows operators to manually re-trigger a stalled or failed validation from the last incomplete stage.
 
 ### 8a. ReviewerAgentV2
 
@@ -251,3 +255,51 @@ PLANNING → AWAITING_APPROVAL → WORKING → COMPILING → MERGING → COMPLET
 | `integration/github/GitHubRepoService.java` | Branch, PR creation, default branch lookup |
 | `tool/GitTool.java` | Workspace git ops, pushToBranch() |
 | `harness/event/PostMergeOrchestrator.java` | Post-merge agent dispatch |
+| `harness/ProgressiveMergeValidator.java` | Fast syntax check after each task merge (v2) |
+| `harness/ProviderRunPoolManager.java` | Per-provider priority thread pools (v2) |
+| `harness/BackgroundValidationMonitor.java` | Stall detection + auto-retry for background validation (v2) |
+| `harness/CoherenceGroupAnalyzer.java` | File dependency analysis for subtask grouping (v2) |
+| `sse/SideEffectOutboxDispatcher.java` | Retry dispatcher for external side effects (v2) |
+| `state/GateStore.java` | Redis + DB dual-write gate store (v2) |
+
+---
+
+## v2.0.0 Additions
+
+### Per-Provider Run Pool
+
+**Requirements:**
+- `ProviderRunPoolManager` maintains one thread pool and one `PriorityBlockingQueue` per LLM provider (ANTHROPIC, OPENAI, GOOGLE)
+- Thread names: `provider-pool-{PROVIDER}-{n}`
+- Run priority based on user tier: ENTERPRISE=10, PRO=5, FREE=1
+- If a provider's queue is at capacity on submission, return HTTP 429 immediately
+- Pool capacity configurable via `agent.provider-pools.{provider}.max-concurrent` and `agent.provider-pools.{provider}.queue-capacity`
+
+### Coherence-Aware Subtask Decomposition
+
+**Requirements:**
+- `CoherenceGroupAnalyzer` runs before `SubtaskDecomposer` splits any task
+- Files are grouped by: shared interface/implementation pairs, co-located tests, same Java package, same Node.js module directory
+- `SubtaskDecomposer` respects coherence groups and does not split them across separate subtasks
+- Coherence analysis logged at DEBUG with group membership details
+
+### Side-Effect Outbox
+
+**Requirements:**
+- All external side effects (GitHub PR, Slack notification, JIRA comment, Confluence page) written to `side_effect_outbox` before dispatch
+- `SideEffectDispatcher` retries pending + failed entries every 30 seconds with exponential backoff: 1s, 5s, 30s, 5min, 30min
+- Maximum 10 attempts per outbox entry; entries exceeding max attempts are marked DEAD_LETTER and alerted
+- `compensation_payload` column stores undo operation; `SagaCompensator` executes on run cancellation
+- Side effect types: `GITHUB_PR_CREATE`, `SLACK_NOTIFY`, `JIRA_COMMENT`, `CONFLUENCE_PAGE`
+
+### Triage Escalation Detector
+
+**Requirements:**
+- `TriageEscalationDetector` monitors active single-shot runs every 30 seconds
+- Escalation thresholds (all configurable via `@Value`):
+  - File count > `agent.triage.file-threshold` (default 8) AND iteration count > 15
+  - Wall-clock time > `agent.triage.time-threshold-minutes` (default 8 minutes)
+  - Compiler error count > `agent.triage.error-threshold` (default 5) after initial compile
+- On escalation: current single-shot task is cancelled, run re-enters planning as MULTI_TASK
+- Escalation event recorded in `triage_outcome` table (classification, escalation reason, trigger values)
+- `triage_outcome` used as feedback signal in planner prompt via `FailurePatternService`
