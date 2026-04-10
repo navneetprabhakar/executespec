@@ -4,6 +4,7 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ProviderHealthTracker;
+import com.navneet.executespec.router.RunProviderPinStore;
 import com.navneet.executespec.state.InboxService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -86,6 +87,7 @@ public class LlmRouter {
     private final MeterRegistry meterRegistry;
     private final ProviderHealthTracker healthTracker;
     private final ModelRegistry modelRegistry;
+    private final RunProviderPinStore pinStore;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -118,6 +120,20 @@ public class LlmRouter {
 
         try {
             List<String[]> chain = resolveChain(primaryModel);
+
+            // Per-run provider pinning: if this run was previously served by a different
+            // provider, prefer that provider (shift startIndex). Pin is advisory — if pinned
+            // provider is unhealthy we fall back normally and re-pin to the new provider.
+            String pinnedProvider = pinStore.getPin(runId).orElse(null);
+            if (pinnedProvider != null && !pinnedProvider.equalsIgnoreCase(primaryProvider)) {
+                int pinnedIndex = findIndexInChain(chain, pinnedProvider);
+                if (pinnedIndex >= 0 && healthTracker.isHealthy(toLlmProvider(pinnedProvider))) {
+                    log.debug("[LlmRouter] Run {} pinned to {} — reordering chain", runId, pinnedProvider);
+                    primaryProvider = chain.get(pinnedIndex)[0];
+                    primaryModel    = chain.get(pinnedIndex)[1];
+                }
+            }
+
             int startIndex = findIndexInChain(chain, primaryProvider);
 
             // Resolve per-run keys to check provider restrictions
@@ -148,6 +164,10 @@ public class LlmRouter {
                 if (!healthTracker.isHealthy(llmProvider)) {
                     log.info("[LlmRouter] Provider {} circuit OPEN — skipping for agent {} (iteration={})",
                         provider, agentId, iteration);
+                    // If this was the pinned provider, clear the pin so next call re-pins to healthy one
+                    if (provider.equalsIgnoreCase(pinnedProvider)) {
+                        pinStore.clearPin(runId);
+                    }
                     continue;
                 }
 
@@ -157,9 +177,18 @@ public class LlmRouter {
                         "Falling back from " + fromProvider + " to " + provider));
                     Counter.builder(LLM_FALLBACK).tag("from", fromProvider).tag("to", provider)
                             .register(meterRegistry).increment();
+                    // Provider switch mid-run: clear old pin so new provider gets pinned on success
+                    if (pinnedProvider != null && !fromProvider.equalsIgnoreCase(provider)) {
+                        pinStore.clearPin(runId);
+                        Counter.builder("executespec.llm.provider_switch")
+                                .tag("from", fromProvider).tag("to", provider)
+                                .register(meterRegistry).increment();
+                        log.warn("[LlmRouter] Provider switch mid-run {} → {}: style consistency prompt will be used",
+                            fromProvider, provider);
+                    }
                     log.warn("[LlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
-                        primaryProvider, provider, agentId, iteration);
-                    inboxService.sendProviderFallback(runId, agentId, primaryProvider, provider,
+                        fromProvider, provider, agentId, iteration);
+                    inboxService.sendProviderFallback(runId, agentId, fromProvider, provider,
                         lastError != null ? lastError.getMessage() : "unknown error");
                 }
 
@@ -171,6 +200,8 @@ public class LlmRouter {
                     Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
                             .register(meterRegistry).record(callDuration);
                     healthTracker.recordSuccess(llmProvider);
+                    // Pin this run to the provider that just succeeded
+                    pinStore.pinIfAbsent(runId, provider);
                     if (j > 0) {
                         log.info("[LlmRouter] Fallback succeeded: {} for {}", provider, agentId);
                     }
@@ -179,6 +210,8 @@ public class LlmRouter {
                     return new LlmResponse(response, provider, model);
                 } catch (Exception e) {
                     if (isPerMinuteRateLimit(e)) {
+                        // 429 = transient quota event — record metric but do NOT open circuit breaker
+                        healthTracker.recordRateLimit(llmProvider);
                         LlmResponse retryResult = handleRetryAfterSleep(
                             "rate_limit", "Per-minute rate limit", 30_000,
                             provider, model, prompt, runId, agentId, iteration,
@@ -612,6 +645,7 @@ public class LlmRouter {
         if (runId != null) {
             runCallCounters.invalidate(runId);
             runUserTierCache.invalidate(runId);
+            pinStore.clearPin(runId); // clean up Redis pin
         }
     }
 

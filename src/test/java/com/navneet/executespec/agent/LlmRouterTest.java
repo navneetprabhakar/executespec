@@ -29,6 +29,7 @@ class LlmRouterTest {
     @Mock private io.micrometer.core.instrument.MeterRegistry meterRegistry;
     @Mock private com.navneet.executespec.router.ProviderHealthTracker providerHealthTracker;
     @Mock private com.navneet.executespec.router.ModelRegistry modelRegistry;
+    @Mock private com.navneet.executespec.router.RunProviderPinStore pinStore;
     @Mock private AnthropicChatModel anthropicChatModel;
     @Mock private ChatResponse chatResponse;
     @Mock private org.springframework.ai.chat.model.Generation generation;
@@ -51,7 +52,7 @@ class LlmRouterTest {
         when(generation.getOutput()).thenReturn(assistantMessage);
         when(assistantMessage.getText()).thenReturn("test response");
 
-        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties, meterRegistry, providerHealthTracker, modelRegistry);
+        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties, meterRegistry, providerHealthTracker, modelRegistry, pinStore);
     }
 
     @Nested

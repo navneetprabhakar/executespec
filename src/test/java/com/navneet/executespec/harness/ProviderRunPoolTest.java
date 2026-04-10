@@ -58,51 +58,49 @@ class ProviderRunPoolTest {
     @Test
     @DisplayName("priority ordering: ENTERPRISE runs before PRO and FREE")
     void priorityOrdering() throws InterruptedException {
-        // Saturate the pool with a long-running task to keep queue occupied
-        CountDownLatch blockGate = new CountDownLatch(1);
-        CountDownLatch slot1Taken = new CountDownLatch(1);
-        CountDownLatch slot2Taken = new CountDownLatch(1);
+        // Use a single-slot pool so dequeuing is strictly serial, making ordering deterministic
+        ProviderRunPool singleSlotPool = new ProviderRunPool(LlmProvider.ANTHROPIC, 1, 10, stateStore);
+        try {
+            // Saturate the single slot with a blocker
+            CountDownLatch blockGate = new CountDownLatch(1);
+            CountDownLatch slotTaken = new CountDownLatch(1);
 
-        // Fill both concurrency slots
-        pool.submit("blocker-1", "FREE", Instant.now(), () -> {
-            slot1Taken.countDown();
-            try { blockGate.await(5, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        });
-        pool.submit("blocker-2", "FREE", Instant.now(), () -> {
-            slot2Taken.countDown();
-            try { blockGate.await(5, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        });
-        // Wait for both slots to be taken
-        slot1Taken.await(3, TimeUnit.SECONDS);
-        slot2Taken.await(3, TimeUnit.SECONDS);
+            singleSlotPool.submit("blocker", "FREE", Instant.now(), () -> {
+                slotTaken.countDown();
+                try { blockGate.await(5, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            });
+            slotTaken.await(3, TimeUnit.SECONDS);
 
-        // Now queue tasks with different priorities
-        List<String> executionOrder = new ArrayList<>();
-        CountDownLatch allDone = new CountDownLatch(3);
+            // Queue tasks with different priorities — all land in the PriorityBlockingQueue
+            List<String> executionOrder = new ArrayList<>();
+            CountDownLatch allDone = new CountDownLatch(3);
 
-        pool.submit("free-run", "FREE", Instant.now().minusSeconds(10), () -> {
-            executionOrder.add("FREE");
-            allDone.countDown();
-        });
-        pool.submit("pro-run", "PRO", Instant.now().minusSeconds(5), () -> {
-            executionOrder.add("PRO");
-            allDone.countDown();
-        });
-        pool.submit("enterprise-run", "ENTERPRISE", Instant.now(), () -> {
-            executionOrder.add("ENTERPRISE");
-            allDone.countDown();
-        });
+            singleSlotPool.submit("free-run", "FREE", Instant.now().minusSeconds(10), () -> {
+                executionOrder.add("FREE");
+                allDone.countDown();
+            });
+            singleSlotPool.submit("pro-run", "PRO", Instant.now().minusSeconds(5), () -> {
+                executionOrder.add("PRO");
+                allDone.countDown();
+            });
+            singleSlotPool.submit("enterprise-run", "ENTERPRISE", Instant.now(), () -> {
+                executionOrder.add("ENTERPRISE");
+                allDone.countDown();
+            });
 
-        // Release slots
-        blockGate.countDown();
+            // Release the blocker — single slot means tasks execute strictly in priority order
+            blockGate.countDown();
 
-        assertThat(allDone.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(allDone.await(5, TimeUnit.SECONDS)).isTrue();
 
-        // ENTERPRISE should have run before PRO, PRO before FREE
-        assertThat(executionOrder.indexOf("ENTERPRISE"))
-                .isLessThan(executionOrder.indexOf("PRO"));
-        assertThat(executionOrder.indexOf("PRO"))
-                .isLessThan(executionOrder.indexOf("FREE"));
+            // ENTERPRISE should have run before PRO, PRO before FREE
+            assertThat(executionOrder.indexOf("ENTERPRISE"))
+                    .isLessThan(executionOrder.indexOf("PRO"));
+            assertThat(executionOrder.indexOf("PRO"))
+                    .isLessThan(executionOrder.indexOf("FREE"));
+        } finally {
+            singleSlotPool.shutdown();
+        }
     }
 
     @Test
