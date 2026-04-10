@@ -106,11 +106,13 @@ agent:
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
-  mode: docker
+  mode: ${PREVIEW_MODE:vm}
   preview-ttl-minutes: 5
   fallback-host: ${PREVIEW_FALLBACK_HOST:https://dev.executespec.ai}
   proxy:
-    enabled: false
+    enabled: ${PREVIEW_PROXY_ENABLED:true}
+  vm:
+    enabled: true
 
 # ── App (JWT, CORS, Mail) ────────────────────────────────────────────────────
 app:
