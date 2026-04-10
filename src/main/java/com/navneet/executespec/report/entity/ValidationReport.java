@@ -62,6 +62,25 @@ public class ValidationReport {
     @Builder.Default
     private boolean generatedAfterImprovements = false;
 
+    // ── Phase 3: Accuracy assessment fields (V74) ──────────────────────────────────────────────
+
+    /** Spec adherence score 0-100 from AccuracyAssessmentService. Null if assessment was skipped. */
+    @Column(name = "accuracy_score")
+    private Integer accuracyScore;
+
+    /** Letter grade: A/B/C/D/F. Null if assessment was skipped. */
+    @Column(name = "accuracy_grade", length = 2)
+    private String accuracyGrade;
+
+    /**
+     * Full AccuracyReport JSON including implemented/missing requirements, endpoint coverage,
+     * schema accuracy, test coverage level, and grading notes.
+     */
+    @Column(name = "accuracy_json", columnDefinition = "TEXT")
+    private String accuracyJson;
+
+    // ──────────────────────────────────────────────────────────────────────────────────────────
+
     @Column(name = "share_token", length = 64, unique = true)
     private String shareToken;
 

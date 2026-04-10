@@ -43,6 +43,10 @@ public class ReviewReportV2 {
     @Builder.Default
     private List<String> postMergeSuggestions = List.of();
 
+    // ── Phase 3: Accuracy assessment (populated after fix phase) ──
+    /** Structured accuracy report: spec adherence score, endpoint coverage, missing requirements. */
+    private AccuracyReport accuracyReport;
+
     /**
      * Maps V2 verdict to V1-style recommendation string for backward compatibility.
      * Used by ApprovalGate and PipelineHarness REWORK checks during migration.

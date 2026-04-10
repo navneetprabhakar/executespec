@@ -86,6 +86,8 @@ public class ValidationReportGenerator {
 
         sb.append(buildTestResultsSection(input, checksRun, checksPassed, allIssueDescriptions));
 
+        sb.append(buildAccuracySection(input));
+
         return sb.toString();
     }
 
@@ -244,6 +246,61 @@ public class ValidationReportGenerator {
                             tr.getFailureMessage() != null ? truncate(tr.getFailureMessage(), 100) : "failed"));
                 }
             }
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Build the Accuracy Assessment section for the LLM report prompt.
+     * Includes spec adherence score, grade, missing/partial requirements, and endpoint coverage.
+     */
+    private String buildAccuracySection(ReportInput input) {
+        if (input.review() == null || input.review().getAccuracyReport() == null) {
+            return "";
+        }
+
+        var sb = new StringBuilder();
+        var acc = input.review().getAccuracyReport();
+
+        sb.append("\n## Accuracy Assessment\n");
+        sb.append("- **Spec Adherence Score:** %d/100 (Grade: %s)\n".formatted(
+                acc.getSpecAdherenceScore(), acc.getOverallAccuracyGrade() != null ? acc.getOverallAccuracyGrade() : "?"));
+        if (acc.getGradingNotes() != null && !acc.getGradingNotes().isBlank()) {
+            sb.append("- **Summary:** %s\n".formatted(acc.getGradingNotes()));
+        }
+        sb.append("- **Schema Accuracy:** %s\n".formatted(acc.getSchemaAccuracy() != null ? acc.getSchemaAccuracy() : "UNKNOWN"));
+        sb.append("- **Test Coverage Level:** %s\n".formatted(acc.getTestCoverageLevel() != null ? acc.getTestCoverageLevel() : "UNKNOWN"));
+        sb.append("- **Non-Functional Coverage:** %s\n".formatted(acc.getNonFunctionalCoverage() != null ? acc.getNonFunctionalCoverage() : "UNKNOWN"));
+
+        // Endpoint coverage
+        if (acc.getEndpointCoverage() != null) {
+            var ep = acc.getEndpointCoverage();
+            sb.append("\n### Endpoint Coverage: %d%%\n".formatted(ep.getCoveragePercent()));
+            if (ep.getImplemented() != null && !ep.getImplemented().isEmpty()) {
+                sb.append("**Implemented:**\n");
+                ep.getImplemented().forEach(e -> sb.append("- ✓ %s\n".formatted(e)));
+            }
+            if (ep.getMissing() != null && !ep.getMissing().isEmpty()) {
+                sb.append("**Missing:**\n");
+                ep.getMissing().forEach(e -> sb.append("- ✗ %s\n".formatted(e)));
+            }
+            if (ep.getExtra() != null && !ep.getExtra().isEmpty()) {
+                sb.append("**Extra (not in spec):**\n");
+                ep.getExtra().forEach(e -> sb.append("- + %s\n".formatted(e)));
+            }
+        }
+
+        // Missing requirements
+        if (acc.getMissingRequirements() != null && !acc.getMissingRequirements().isEmpty()) {
+            sb.append("\n### Missing Requirements\n");
+            acc.getMissingRequirements().forEach(r -> sb.append("- %s\n".formatted(r)));
+        }
+
+        // Partial requirements
+        if (acc.getPartialRequirements() != null && !acc.getPartialRequirements().isEmpty()) {
+            sb.append("\n### Partial Requirements\n");
+            acc.getPartialRequirements().forEach(r -> sb.append("- %s\n".formatted(r)));
         }
 
         return sb.toString();
