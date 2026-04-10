@@ -186,6 +186,11 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     @Query("SELECT r FROM PipelineRun r WHERE r.deletedAt IS NOT NULL AND r.deletedAt < :cutoff")
     List<PipelineRun> findSoftDeletedOlderThan(@Param("cutoff") Instant cutoff);
 
+    /** Returns QUEUED runs that were queued due to a provider outage (for automatic retry). */
+    @Query("SELECT r FROM PipelineRun r WHERE r.status = 'QUEUED' " +
+           "AND r.failureReason LIKE '%providers unavailable%'")
+    List<PipelineRun> findOutageQueuedRuns();
+
     /** Soft-deletes all non-active runs belonging to a user (GDPR right-to-erasure). */
     @Modifying
     @Query("UPDATE PipelineRun r SET r.deletedAt = :now " +
