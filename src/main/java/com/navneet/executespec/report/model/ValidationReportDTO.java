@@ -23,5 +23,9 @@ public record ValidationReportDTO(
     int lintFailures,
     boolean isShared,
     String shareUrl,
-    boolean generatedAfterImprovements
+    boolean generatedAfterImprovements,
+    // Phase 3: Accuracy assessment fields (nullable — older runs won't have these)
+    Integer accuracyScore,     // 0-100 spec adherence score
+    String accuracyGrade,      // A/B/C/D/F
+    String accuracyJson        // full AccuracyReport JSON for frontend detail view
 ) {}
