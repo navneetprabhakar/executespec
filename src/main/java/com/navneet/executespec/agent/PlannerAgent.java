@@ -49,6 +49,7 @@ public class PlannerAgent {
     private final ModelResolver modelResolver;
     private final ModelRegistry modelRegistry;
     private final PromptAssembler promptAssembler;
+    private final FailurePatternService failurePatternService;
 
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
@@ -58,7 +59,8 @@ public class PlannerAgent {
     public TaskPlan plan(String userRequest, String runId, String modelOverride) {
         log.info("Planner starting for run {}", runId);
 
-        String systemPrompt = loadPrompt() + buildConflictHistoryContext();
+        String detectedType = detectProjectTypeFromWorkspace(runId);
+        String systemPrompt = getPlannerPrompt(detectedType) + buildConflictHistoryContext();
         String contextSummary = buildWorkspaceContext(runId);
         String model;
         String provider;
@@ -181,7 +183,7 @@ public class PlannerAgent {
     public TaskPlan planWithEstimates(String goal) {
         log.info("Planner starting feasibility mode for goal: {}", goal);
 
-        String basePrompt = loadPrompt();
+        String basePrompt = getPlannerPrompt(null);
         String feasibilityAppendix = """
 
                 ══════════════════════════════════════════════════════
@@ -247,8 +249,11 @@ public class PlannerAgent {
     public TaskPlan replanWithFeedback(String originalGoal, String existingPlanJson, String feedback, String runId) {
         log.info("Planner re-planning with feedback for run {}", runId);
         // Resolve includes; keep edit-mode block by removing its markers but not the content
-        String fullPromptText = promptAssembler.assemble("planner.txt",
-                java.util.Map.of("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic")));
+        java.util.Map<String, String> replanVars = new java.util.HashMap<>();
+        replanVars.put("SCAFFOLD_TEMPLATE", ""); // not needed for replanning
+        replanVars.put("FAILURE_PATTERNS", "");
+        replanVars.put("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic"));
+        String fullPromptText = promptAssembler.assemble("planner.txt", replanVars);
 
         // Activate edit mode: keep the {{#if editMode}}...{{/if}} block, inject variables
         String systemPrompt = fullPromptText
@@ -335,12 +340,55 @@ public class PlannerAgent {
         return dirSection + ctxSection;
     }
 
-    private String loadPrompt() {
-        // Assemble with include resolution + variable substitution
-        String raw = promptAssembler.assemble("planner.txt",
-                java.util.Map.of("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic")));
-        // Strip the edit-mode block for fresh plans (only active in replanWithFeedback)
+    /**
+     * Assembles the planner prompt with the appropriate scaffold template injected.
+     *
+     * @param detectedProjectType project type from workspace heuristic (null = unknown/new project)
+     */
+    private String getPlannerPrompt(String detectedProjectType) {
+        java.util.Map<String, String> vars = new java.util.HashMap<>();
+        String scaffoldPath = detectedProjectType != null
+                ? "scaffolds/" + detectedProjectType.toLowerCase().replace("_", "-") + ".md"
+                : "scaffolds/all.md";
+        String scaffold = promptAssembler.loadFileSafe(scaffoldPath);
+        if (scaffold == null) {
+            scaffold = promptAssembler.loadFileSafe("scaffolds/all.md");
+            if (scaffold == null) scaffold = "";
+        }
+        vars.put("SCAFFOLD_TEMPLATE", scaffold);
+        vars.put("FAILURE_PATTERNS", failurePatternService.getRecentPatterns(50));
+        vars.put("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic"));
+        String raw = promptAssembler.assemble("planner.txt", vars);
         return stripEditModeBlock(raw);
+    }
+
+    /**
+     * Heuristic detection of project type from existing workspace files.
+     * Returns null for new/empty workspaces so the full scaffold guide is injected.
+     */
+    private String detectProjectTypeFromWorkspace(String runId) {
+        if (runId == null) return null;
+        try {
+            String listing = fsTool.listFiles(runId, ".");
+            if (listing == null || listing.startsWith("ERROR")) return null;
+            boolean hasPom      = listing.contains("pom.xml");
+            boolean hasPkg      = listing.contains("package.json");
+            boolean hasReqs     = listing.contains("requirements.txt") || listing.contains("pyproject.toml");
+            boolean hasGoMod    = listing.contains("go.mod");
+            boolean hasCargo    = listing.contains("Cargo.toml");
+            boolean hasFrontend = listing.contains("frontend/") || listing.contains("src/main.tsx")
+                                  || listing.contains("App.tsx") || listing.contains("vite.config");
+            if (hasPom && hasPkg) return "FULL_STACK";
+            if (hasPom)     return "SPRING_BOOT";
+            if (hasGoMod)   return "GO";
+            if (hasCargo)   return "RUST";
+            if (hasReqs)    return "PYTHON";
+            if (hasPkg && hasFrontend) return "NODE_FRONTEND";
+            if (hasPkg)     return "NODE_BACKEND";
+        } catch (Exception e) {
+            log.debug("[Planner] Could not detect project type from workspace: {}", e.getMessage());
+        }
+        return null;
     }
 
     /**

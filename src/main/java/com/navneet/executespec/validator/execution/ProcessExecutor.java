@@ -14,12 +14,32 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
 public class ProcessExecutor {
+
+    /** Allowlist of binaries this executor is permitted to run. */
+    private static final Set<String> ALLOWED_BINARIES = Set.of(
+            // Version control
+            "git",
+            // File inspection (read-only)
+            "ls", "cat", "head", "tail", "find", "grep", "wc",
+            // Build tools
+            "mvn", "gradle", "npm", "npx", "node", "yarn",
+            "pip", "pip3", "python", "python3", "pytest",
+            "go", "cargo", "rustc",
+            // Code quality
+            "ruff", "mypy", "eslint", "tsc", "javac",
+            // Shell utilities (safe)
+            "echo", "env", "which", "date", "pwd",
+            // Docker (for test execution container)
+            "docker"
+    );
+
 
     @Data
     @Builder
@@ -69,6 +89,20 @@ public class ProcessExecutor {
     }
 
     public ProcessResult execute(ProcessCommand command) {
+        // Allowlist enforcement — reject any binary not in the permitted set
+        if (command.getArgs() != null && !command.getArgs().isEmpty()) {
+            String binary = Path.of(command.getArgs().get(0)).getFileName().toString();
+            if (!ALLOWED_BINARIES.contains(binary)) {
+                log.warn("[ProcessExecutor] Blocked disallowed binary: {}", binary);
+                return ProcessResult.builder()
+                        .exitCode(-1)
+                        .output("BLOCKED: binary '" + binary + "' is not in the allowed list")
+                        .error("Blocked by ProcessExecutor allowlist")
+                        .duration(Duration.ZERO)
+                        .build();
+            }
+        }
+
         Instant start = Instant.now();
         try {
             ProcessBuilder pb = new ProcessBuilder(command.getArgs())

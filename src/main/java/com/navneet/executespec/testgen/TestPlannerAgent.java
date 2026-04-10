@@ -24,6 +24,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -41,6 +42,7 @@ public class TestPlannerAgent {
     private final TestPlanRepository testPlanRepository;
     private final TestTaskRepository testTaskRepository;
     private final ObjectMapper objectMapper;
+    private final ApiSurfaceExtractor apiSurfaceExtractor;
 
     // Caps to keep test runs lean and prevent LLM from generating excessive test surface.
     private static final int MAX_TEST_CLASSES = 6;
@@ -80,11 +82,21 @@ public class TestPlannerAgent {
             testingContext = "You are testing against a LIVE RUNNING APPLICATION via HTTP calls. These are NOT unit tests.";
         }
 
+        // Extract actual API surface from generated workspace
+        String apiSurface = "";
+        try {
+            Path workspace = Path.of("workspace", runId);
+            apiSurface = apiSurfaceExtractor.extract(workspace);
+        } catch (Exception e) {
+            log.debug("[TestPlanner] API surface extraction skipped for run {}: {}", runId, e.getMessage());
+        }
+
         // Build prompt
         String systemPrompt = loadPrompt()
                 .replace("{testing_context}", testingContext)
                 .replace("{user_request}", userRequest != null ? userRequest : "")
-                .replace("{conventions_doc}", conventionsDoc != null ? conventionsDoc : "");
+                .replace("{conventions_doc}", conventionsDoc != null ? conventionsDoc : "")
+                .replace("{api_surface}", apiSurface);
 
         // Call LLM via ModelResolver (PLANNING tier for test planning)
         LlmProvider aiProvider = stateStore.findRun(runId)

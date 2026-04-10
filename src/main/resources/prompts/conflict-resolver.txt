@@ -47,5 +47,21 @@ RULES
 OUTPUT
 ═══════════════════════════════════════════════════════════
 
-Return ONLY the merged file content. No explanation. No markdown fences. No preamble.
+VERIFICATION CHECKLIST before outputting:
+□ All imports/requires from BOTH versions are present
+□ All methods/functions from BOTH versions are present
+□ No merge conflict markers (<<<, ===, >>>) remain
+□ File is syntactically valid for its type
+
+Return a JSON object (and ONLY a JSON object — no preamble, no markdown):
+{
+  "merged_content": "<complete merged file content>",
+  "merge_notes": "<one sentence describing what was merged or any ambiguity>",
+  "risk_level": "LOW|MEDIUM|HIGH"
+}
+
+risk_level guidance:
+  LOW    — straightforward union, no semantic overlap between tasks
+  MEDIUM — same method/function modified by both tasks; logic combined
+  HIGH   — same core logic block changed in incompatible ways; manual review recommended
 The entire response must be valid file content that can be written directly to disk.

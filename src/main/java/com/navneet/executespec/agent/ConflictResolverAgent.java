@@ -1,4 +1,6 @@
 package com.navneet.executespec.agent;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
@@ -36,6 +38,7 @@ public class ConflictResolverAgent {
     private final LlmRouter llmRouter;
     private final ModelResolver modelResolver;
     private final StateStore stateStore;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/conflict-resolver.txt")
     private Resource promptTemplate;
@@ -136,8 +139,10 @@ public class ConflictResolverAgent {
                 && response.getResult().getOutput() != null) {
                 String text = response.getResult().getOutput().getText();
                 if (text != null && !text.isBlank()) {
-                    log.info("ConflictResolverAgent resolved {} using {} for run {}", filePath, model, runId);
-                    return text.strip();
+                    String mergedContent = parseConflictResolution(text.strip(), filePath, runId);
+                    if (mergedContent != null) {
+                        return mergedContent;
+                    }
                 }
             }
             log.warn("ConflictResolverAgent returned empty response for {} (model={})", filePath, model);
@@ -145,6 +150,48 @@ public class ConflictResolverAgent {
         } catch (Exception e) {
             log.error("ConflictResolverAgent failed for {} (model={}): {}", filePath, model, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Parses the JSON response from the conflict resolver prompt.
+     * Extracts merged_content and logs merge_notes + risk_level.
+     * Falls back to returning the raw text if JSON parsing fails (legacy model behaviour).
+     */
+    private String parseConflictResolution(String text, String filePath, String runId) {
+        try {
+            // Strip markdown fences if present
+            String json = text;
+            if (json.startsWith("```")) {
+                json = json.replaceAll("```[a-z]*\\n?", "").replaceAll("```", "").trim();
+            }
+            // Find JSON object boundaries
+            int start = json.indexOf('{');
+            int end   = json.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+                json = json.substring(start, end + 1);
+            }
+            JsonNode node = objectMapper.readTree(json);
+            String mergedContent = node.path("merged_content").asText(null);
+            String mergeNotes    = node.path("merge_notes").asText("");
+            String riskLevel     = node.path("risk_level").asText("LOW").toUpperCase();
+
+            if (mergedContent == null || mergedContent.isBlank()) {
+                log.warn("[ConflictResolver] Parsed JSON but merged_content empty for {} — falling back to raw", filePath);
+                return text;
+            }
+
+            if ("HIGH".equals(riskLevel)) {
+                log.warn("[ConflictResolver] HIGH-risk merge for {} in run {} — notes: {}. Manual review recommended.",
+                        filePath, runId, mergeNotes);
+            } else {
+                log.info("[ConflictResolver] Resolved {} ({}) — {}", filePath, riskLevel, mergeNotes);
+            }
+            return mergedContent;
+        } catch (Exception e) {
+            // Response is not JSON (legacy prompt or model ignored format) — return raw
+            log.debug("[ConflictResolver] JSON parse failed for {} — using raw response: {}", filePath, e.getMessage());
+            return text;
         }
     }
 

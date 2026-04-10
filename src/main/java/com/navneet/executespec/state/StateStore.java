@@ -501,6 +501,14 @@ public class StateStore {
         });
     }
 
+    /** Store the assembled prompt hash on a task for version tracking. */
+    public void setPromptHash(String taskId, String promptHash) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            task.setPromptHash(promptHash);
+            taskRepo.save(task);
+        });
+    }
+
     /** Reset a failed task for real-time retry (batch fallback). */
     public void resetTaskForRetry(String taskId) {
         taskRepo.findById(taskId).ifPresent(task -> {

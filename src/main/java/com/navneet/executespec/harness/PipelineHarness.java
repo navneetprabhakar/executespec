@@ -1725,8 +1725,15 @@ public class PipelineHarness {
             return;
         }
 
-        // ── 0. Triage: classify request as SINGLE_SHOT or MULTI_TASK ─────
+        // ── 0. Triage: classify request as SINGLE_SHOT, MEDIUM, or MULTI_TASK ─────
         var triageResult = requestTriageService.classify(effectiveRequest, runId, run.getAiProviderEnum());
+        // MEDIUM tier: goes through planner but with a 4-task cap injected as a note
+        if (triageResult == com.navneet.executespec.agent.RequestTriageService.TriageResult.MEDIUM) {
+            log.info("[PipelineHarness] Run {} classified as MEDIUM — using simplified planner (≤4 tasks)", runId);
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Simplified plan detected — limiting to ≤4 tasks"));
+            // Inject a cap hint into the effective request so the planner respects it
+            effectiveRequest = effectiveRequest + "\n\n[SYSTEM NOTE: This is a MEDIUM-complexity request. Generate at most 4 tasks.]";
+        }
         if (triageResult == com.navneet.executespec.agent.RequestTriageService.TriageResult.SINGLE_SHOT) {
             log.info("[PipelineHarness] Run {} classified as SINGLE_SHOT — bypassing planner + approval gate", runId);
             broadcaster.emit(runId, RunEvent.log(runId, "harness", "Simple request detected — running single-shot fast path"));
