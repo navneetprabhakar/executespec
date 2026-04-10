@@ -46,6 +46,13 @@ SCOPE AND ORDERING:
 14. If an error references a class or file that does not exist in the workspace (e.g., a
     dependency task has not merged yet), you cannot fix it — omit that file from your output.
     The orchestrator will retry after dependencies merge.
+15. STUB RULE: When you must create a placeholder to resolve a "cannot find symbol" error
+    (e.g., a missing class that a dependency task hasn't created yet), stubs MUST:
+    a) Throw UnsupportedOperationException with message "STUB — not implemented":
+       throw new UnsupportedOperationException("STUB — not implemented");
+    b) Include a file header comment: // COMPILER STUB — replace with real implementation
+    c) Be listed in a JSON file at .agent-context/stubs.json (append if exists, create if not):
+       {"path": "src/main/java/.../ClassName.java", "reason": "dependency not merged yet", "created_at": "..."}
 
 CASCADING FAILURE AWARENESS:
 Fixing file A may introduce NEW errors in file B (e.g., changing a method signature).

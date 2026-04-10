@@ -39,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TestPreviewCoordinator {
 
     private final TestExecutionService testExecutionService;
+    private final HeadlessTestExecutor headlessTestExecutor;
     private final TestReportGenerator testReportGenerator;
     private final ApplicationEventPublisher eventPublisher;
     private final SseBroadcaster broadcaster;
@@ -71,15 +72,28 @@ public class TestPreviewCoordinator {
         state.setTestsReady(true);
         state.setTestsReadyAt(Instant.now());
 
-        // Batch runs: skip auto-preview and auto-execution — user triggers manually via "Run Tests"
+        // Batch runs: run unit tests headlessly (no preview required)
         var run = stateStore.findRun(event.runId()).orElse(null);
         if (run != null && "BATCH".equals(run.getApprovedExecutionMode())) {
-            log.info("[TestCoord] Batch run {} — skipping auto-preview/execution (user can trigger manually)",
+            log.info("[TestCoord] Batch run {} — running headless unit tests (no preview needed)",
                     event.runId());
-            // Publish empty summary to unblock report generation CompletableFuture
-            eventPublisher.publishEvent(new TestExecutionCompletedEvent(
-                    event.runId(), event.testPlanId(), TestExecutionSummary.empty()));
-            stateMap.remove(event.runId());
+            var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+            Thread.ofVirtual().name("headless-test-" + event.runId()).start(snapshot.wrap(() -> {
+                try {
+                    TestExecutionSummary summary = headlessTestExecutor.execute(
+                            event.runId(), event.testPlanId());
+                    testReportGenerator.generateAndEmit(event.runId(), event.testPlanId(), summary, null);
+                    eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                            event.runId(), event.testPlanId(), summary));
+                } catch (Exception e) {
+                    log.error("[TestCoord] Headless test execution failed for run {}: {}",
+                            event.runId(), e.getMessage(), e);
+                    eventPublisher.publishEvent(new TestExecutionCompletedEvent(
+                            event.runId(), event.testPlanId(), TestExecutionSummary.empty()));
+                } finally {
+                    stateMap.remove(event.runId());
+                }
+            }));
             return;
         }
 

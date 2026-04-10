@@ -821,7 +821,7 @@ class DevDockerfileGeneratorTest {
             String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
 
             assertThat(df).contains("FROM eclipse-temurin:21");
-            assertThat(df).contains("nodejs npm");
+            assertThat(df).contains("nodejs"); // npm bundled via nodesource
             assertThat(df).contains("COPY server/pom.xml ./server/");
             assertThat(df).contains("mvn dependency:go-offline");
             assertThat(df).contains("COPY client/package*.json ./client/");
@@ -844,7 +844,7 @@ class DevDockerfileGeneratorTest {
             String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
 
             assertThat(df).contains("FROM python:3.12-slim");
-            assertThat(df).contains("nodejs npm");
+            assertThat(df).contains("nodejs"); // npm bundled via nodesource
             assertThat(df).contains("COPY api/requirements.txt");
             assertThat(df).contains("pip install");
             assertThat(df).contains("COPY frontend/package*.json ./frontend/");

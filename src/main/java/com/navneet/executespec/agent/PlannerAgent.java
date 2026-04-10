@@ -48,6 +48,8 @@ public class PlannerAgent {
     private final MergeConflictAnalyser conflictAnalyser;
     private final ModelResolver modelResolver;
     private final ModelRegistry modelRegistry;
+    private final PromptAssembler promptAssembler;
+    private final FailurePatternService failurePatternService;
 
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
@@ -57,7 +59,8 @@ public class PlannerAgent {
     public TaskPlan plan(String userRequest, String runId, String modelOverride) {
         log.info("Planner starting for run {}", runId);
 
-        String systemPrompt = loadPrompt() + buildConflictHistoryContext();
+        String detectedType = detectProjectTypeFromWorkspace(runId);
+        String systemPrompt = getPlannerPrompt(detectedType) + buildConflictHistoryContext();
         String contextSummary = buildWorkspaceContext(runId);
         String model;
         String provider;
@@ -180,7 +183,7 @@ public class PlannerAgent {
     public TaskPlan planWithEstimates(String goal) {
         log.info("Planner starting feasibility mode for goal: {}", goal);
 
-        String basePrompt = loadPrompt();
+        String basePrompt = getPlannerPrompt(null);
         String feasibilityAppendix = """
 
                 ══════════════════════════════════════════════════════
@@ -245,18 +248,17 @@ public class PlannerAgent {
      */
     public TaskPlan replanWithFeedback(String originalGoal, String existingPlanJson, String feedback, String runId) {
         log.info("Planner re-planning with feedback for run {}", runId);
-        String fullPromptText;
-        try {
-            fullPromptText = plannerPrompt.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load planner prompt", e);
-        }
+        // Resolve includes; keep edit-mode block by removing its markers but not the content
+        java.util.Map<String, String> replanVars = new java.util.HashMap<>();
+        replanVars.put("SCAFFOLD_TEMPLATE", ""); // not needed for replanning
+        replanVars.put("FAILURE_PATTERNS", "");
+        replanVars.put("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic"));
+        String fullPromptText = promptAssembler.assemble("planner.txt", replanVars);
 
         // Activate edit mode: keep the {{#if editMode}}...{{/if}} block, inject variables
         String systemPrompt = fullPromptText
             .replace("{{#if editMode}}", "")
             .replace("{{/if}}", "")
-            .replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"))
             .replace("{userFeedback}", feedback)
             .replace("{currentPlan}", existingPlanJson);
 
@@ -338,16 +340,55 @@ public class PlannerAgent {
         return dirSection + ctxSection;
     }
 
-    private String loadPrompt() {
-        try {
-            String raw = plannerPrompt.getContentAsString(StandardCharsets.UTF_8);
-            // Strip the edit-mode block for fresh plans (only active in replanWithFeedback)
-            raw = stripEditModeBlock(raw);
-            // Substitute config-driven model name so prompt templates stay model-agnostic
-            return raw.replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"));
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load planner prompt", e);
+    /**
+     * Assembles the planner prompt with the appropriate scaffold template injected.
+     *
+     * @param detectedProjectType project type from workspace heuristic (null = unknown/new project)
+     */
+    private String getPlannerPrompt(String detectedProjectType) {
+        java.util.Map<String, String> vars = new java.util.HashMap<>();
+        String scaffoldPath = detectedProjectType != null
+                ? "scaffolds/" + detectedProjectType.toLowerCase().replace("_", "-") + ".md"
+                : "scaffolds/all.md";
+        String scaffold = promptAssembler.loadFileSafe(scaffoldPath);
+        if (scaffold == null) {
+            scaffold = promptAssembler.loadFileSafe("scaffolds/all.md");
+            if (scaffold == null) scaffold = "";
         }
+        vars.put("SCAFFOLD_TEMPLATE", scaffold);
+        vars.put("FAILURE_PATTERNS", failurePatternService.getRecentPatterns(50));
+        vars.put("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic"));
+        String raw = promptAssembler.assemble("planner.txt", vars);
+        return stripEditModeBlock(raw);
+    }
+
+    /**
+     * Heuristic detection of project type from existing workspace files.
+     * Returns null for new/empty workspaces so the full scaffold guide is injected.
+     */
+    private String detectProjectTypeFromWorkspace(String runId) {
+        if (runId == null) return null;
+        try {
+            String listing = fsTool.listFiles(runId, ".");
+            if (listing == null || listing.startsWith("ERROR")) return null;
+            boolean hasPom      = listing.contains("pom.xml");
+            boolean hasPkg      = listing.contains("package.json");
+            boolean hasReqs     = listing.contains("requirements.txt") || listing.contains("pyproject.toml");
+            boolean hasGoMod    = listing.contains("go.mod");
+            boolean hasCargo    = listing.contains("Cargo.toml");
+            boolean hasFrontend = listing.contains("frontend/") || listing.contains("src/main.tsx")
+                                  || listing.contains("App.tsx") || listing.contains("vite.config");
+            if (hasPom && hasPkg) return "FULL_STACK";
+            if (hasPom)     return "SPRING_BOOT";
+            if (hasGoMod)   return "GO";
+            if (hasCargo)   return "RUST";
+            if (hasReqs)    return "PYTHON";
+            if (hasPkg && hasFrontend) return "NODE_FRONTEND";
+            if (hasPkg)     return "NODE_BACKEND";
+        } catch (Exception e) {
+            log.debug("[Planner] Could not detect project type from workspace: {}", e.getMessage());
+        }
+        return null;
     }
 
     /**

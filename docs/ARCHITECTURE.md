@@ -1,8 +1,8 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 3.2
-> **Date**: 2026-04-04
-> **App Version**: v1.1.0
+> **Version**: 4.0
+> **Date**: 2026-04-10
+> **App Version**: v2.0.0
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 ---
@@ -216,7 +216,7 @@ graph TB
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** plan → approve → work (tiered parallel tasks, progressive merge per task) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL, skipped for batch runs) → background validation thread: review → test gen → preview reuse → test exec → validation report. Merge is automatic (no manual gate). **Batch mode:** BatchClientRouter → BatchPollService → BatchResumeService (resolves WORKHORSE model/provider) → auto-retry failed tasks in real-time → compile.
+**Pipeline flow:** ProviderRunPoolManager (per-provider PriorityBlockingQueue, ENTERPRISE > PRO > FREE) → plan → approve (Redis + DB fallback gate) → work (tiered parallel tasks, progressive merge per task with fast syntax check) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL, skipped for batch runs) → durable background validation (DB-tracked: review → test gen → preview reuse → test exec → validation report). Merge is automatic (no manual gate). **Batch mode:** BatchClientRouter → BatchPollService → BatchResumeService (resolves WORKHORSE model/provider) → auto-retry failed tasks in real-time → compile. **Distributed SSE:** Redis pub/sub (`sse:channel:{runId}`) with replay log (`sse:replay:{runId}`, 200-event cap) for Last-Event-ID reconnection.
 
 **Background validation lifecycle:** After COMPLETE, `PipelineHarness` spawns a virtual thread (`bg-validation-{runId}`) tracked in `backgroundValidationRuns` ConcurrentHashSet. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` are deferred to the background thread's `finally` block. On failure, emits `VALIDATION_FAILED` SSE event.
 
@@ -227,8 +227,8 @@ graph TB
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
 | PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
 Default provider: **OpenAI** (user-selected per project). Failover: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier.
 
@@ -434,6 +434,20 @@ graph TB
 | V54 | Stripe multi-currency | billing_plan, billing_subscription |
 | V55 | Payment audit expansion | payment_audit |
 | V56 | Deployment tracking | deployment |
+| V57 | Task completion notes | agent_task (completion_notes TEXT) |
+| V58 | Subtask support | agent_task (parent_task_id, subtask_index, subtask_total) |
+| V59 | Bitbucket integration | app_user, pipeline_run (scm_pr_url, scm_provider) |
+| V60-V63 | Billing plan restructure (4 plans, topup packages), prorated refund support | billing_plan, topup_package |
+| V64 | Durable background validation | background_validation (stage, attempt, status) |
+| V65 | DB gate fallback | gate_record (mirrors Redis gate state) |
+| V66 | Per-user force-logout | app_user.token_invalidated_at |
+| V67 | PostgreSQL row-level security | RLS policies on pipeline_run, agent_task, validation_report |
+| V68 | Event log + execution tracking | event_log, pipeline_run.executing_instance/execution_heartbeat |
+| V69 | Side-effect outbox | side_effect_outbox (type, payload, status, compensation_payload) |
+| V70 | Data retention + soft-delete | deleted_at, retention_expires_at on core tables; data_retention_policy |
+| V71 | Triage outcome feedback | triage_outcome (classification, escalation_reason, outcome) |
+| V72 | Prompt audit + task hash | prompt_audit, agent_task.prompt_hash |
+| V73 | Plan effectiveness metrics | plan_effectiveness (planned vs actual task counts, duration) |
 
 ---
 
@@ -834,8 +848,9 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 | Hard stop at context limit | Pre-call estimation + emergency compaction |
 | Chat has no code access | ConversationAgent injects file tree, README, context, plan, review |
 | Gate lost on server restart | `approve()` → if gate missing → auto-fail with message |
-| Background validation failure | Fire-and-forget; no retry/recovery if background thread fails silently |
+| Background validation failure | v2: `background_validation` table tracks stage + attempts; auto-retry 3x; manual retry via `POST /api/runs/{id}/retry-validation` |
 | Resume/retry path stale | `doReviewAndMerge()` not updated for background validation pattern |
+| Gate lost on server restart | v2: `GateStore` dual-writes to Redis + `gate_record` table; falls back to DB on Redis miss |
 
 ---
 
@@ -864,6 +879,154 @@ Filesystem-backed design system that injects company-specific design tokens into
 - Local: configurable via `executespec.designs.root-path`
 - Cache: Caffeine, 60 entries, 30min TTL
 - Token budget: 2500 tokens (~10K chars), truncated keeping sections 1-5 (theme, colors, typography, components, layout)
+
+---
+
+## 15. v2.0.0 Architecture Additions
+
+### 15.1 Per-Provider Run Pool
+
+`ProviderRunPoolManager` replaces the single global semaphore with three isolated thread pools — one per LLM provider. Each pool has its own `PriorityBlockingQueue` and semaphore, preventing a degraded provider from consuming thread budget allocated to healthy providers.
+
+```
+agent:
+  provider-pools:
+    anthropic:
+      max-concurrent: 10
+      queue-capacity: 50
+    openai:
+      max-concurrent: 10
+      queue-capacity: 50
+    google:
+      max-concurrent: 10
+      queue-capacity: 50
+```
+
+Priority levels: ENTERPRISE=10, PRO=5, FREE=1. Runs are enqueued as `PriorityRunRequest` records and dispatched FIFO within the same priority level. If a provider's queue is at capacity, `POST /api/runs` returns HTTP 429 immediately.
+
+Thread naming: `provider-pool-ANTHROPIC-1`, `provider-pool-OPENAI-1`, etc.
+
+### 15.2 Distributed SSE (Issue #3)
+
+SSE events are now distributed via Redis Pub/Sub channel `sse:channel:{runId}`. Any MIG instance can publish events; all instances subscribed to that channel deliver them to connected clients.
+
+**Replay log:** `sse:replay:{runId}` is a Redis list capped at 200 entries. On reconnect, clients send `Last-Event-ID`; `SseBroadcaster` replays all events with IDs greater than the provided ID.
+
+**Emitter bounds (Issue #15):** Maximum 5 emitters per run, 500 global. Excess registration attempts return HTTP 429. Metrics `executespec.sse.emitters.active` and `executespec.sse.emitters.rejected` expose pressure.
+
+This eliminates the requirement for LB cookie affinity for SSE correctness (affinity is still recommended for performance but is no longer required for correctness).
+
+### 15.3 Encrypted RunKeyStore (Issue #3)
+
+API keys are encrypted with AES-256-GCM via `KeyEncryptor` before being written to Redis. The encryption key is derived from `app.jwt.secret`. TTL is extended to cover the background validation phase (2h from run start). Accessing a key when none is present in OWN_KEYS mode throws `KeyResolutionException` instead of returning null.
+
+```
+app:
+  run-key-store:
+    ttl-minutes: 120
+```
+
+### 15.4 Durable Background Validation (Issue #1)
+
+Background validation state is persisted to the `background_validation` table (V64). Fields: `run_id`, `stage` (REVIEW / TEST_GEN / TEST_EXEC / REPORT), `attempt`, `last_attempt_at`, `status` (IN_PROGRESS / COMPLETE / FAILED).
+
+`BackgroundValidationMonitor` runs every 5 minutes and detects stalled validations (no heartbeat for >10 minutes). Stalled validations are retried up to 3 times. Manual retry: `POST /api/runs/{id}/retry-validation` (requires DEVELOPER role or higher).
+
+### 15.5 DB Gate Fallback (Issue #2)
+
+`GateStore` now performs dual-write on all state changes: Redis (primary) and `gate_record` table (V65, fallback). On a Redis cache miss during `await()`, `GateStore` falls back to a DB read before auto-failing. This eliminates run auto-failure caused by Redis restarts during long-running plan approval waits.
+
+### 15.6 Per-Run Provider Pinning (Issue #4)
+
+`RunProviderPinStore` stores `sse:provider-pin:{runId}` in Redis with a 2h TTL. After the first successful LLM call for a run, the responding provider is pinned. Subsequent tasks in the same run use the pinned provider as primary, even if the circuit breaker state changes mid-run.
+
+Provider pinning is bypassed only when:
+- The pinned provider's circuit is OPEN AND no key is available for it, OR
+- The run explicitly requests a provider switch via the retry endpoint
+
+### 15.7 Progressive Merge Validation (Issue #5)
+
+`ProgressiveMergeValidator` runs immediately after each task branch is merged to main, before the next task begins. Validates by language:
+- Java: `mvn compile -q -pl <module>`
+- TypeScript/React: `npx tsc --noEmit`
+- Python: `python3 -m py_compile <changed_files>`
+
+Merge-breaking syntax errors cause the current task to be marked PARTIAL and the remaining tasks proceed with the error flagged. The error is injected into subsequent task prompts as context.
+
+### 15.8 Coherence-Aware Subtask Decomposition (Issue #7)
+
+`CoherenceGroupAnalyzer` analyzes file relationships before `SubtaskDecomposer` splits tasks:
+- Interface + implementation pairs (e.g., `UserService.java` + `UserServiceImpl.java`) are kept together
+- Test files are kept with the file they test
+- Files in the same Java package or Node.js module are grouped
+
+Decomposition respects coherence groups, ensuring each subtask receives all files it depends on in a single `writeFile` operation chain.
+
+### 15.9 Side-Effect Outbox (Issue #10)
+
+All external side effects — GitHub PR creation, Slack notifications, JIRA comments, Confluence child pages — are written to `side_effect_outbox` (V69) before being dispatched. A `SideEffectDispatcher` scheduled every 30 seconds retries pending and failed outbox entries with exponential backoff (1s, 5s, 30s, 5m, 30m max).
+
+Saga compensation: the `compensation_payload` column stores the undo operation (e.g., delete the GitHub PR if the run is cancelled). `SagaCompensator` executes compensations on run cancellation.
+
+### 15.10 Row-Level Security (Issue #26/RLS)
+
+PostgreSQL RLS policies (V67) on `pipeline_run`, `agent_task`, `agent_message`, `validation_report`, and `test_plan` tables:
+
+```sql
+CREATE POLICY org_isolation ON pipeline_run
+    USING (org_id = current_setting('app.current_org_id')::uuid);
+```
+
+`DataSourceOrganizationFilter` (Spring `OncePerRequestFilter`) executes `SET LOCAL app.current_org_id = '{orgId}'` on every DB connection checkout from the pool. SUPER_ADMIN requests set `app.current_org_id = 'BYPASS_RLS'`, which is matched by a bypass policy.
+
+### 15.11 Data Retention & GDPR (Issue #19)
+
+Nightly scheduled job (`RetentionPolicyEnforcer`) soft-deletes runs whose `retention_expires_at` has passed. Soft-delete sets `deleted_at = NOW()` and excludes rows from all queries via `@Where(clause = "deleted_at IS NULL")` on JPA entities.
+
+Retention periods (configurable via `data-retention-policy` table):
+- FREE: 30 days
+- PRO: 90 days
+- ENTERPRISE: 365 days
+
+GDPR erasure endpoint: `DELETE /api/users/me/data` — anonymizes personal data fields on `app_user`, soft-deletes all associated runs, and removes API keys from `RunKeyStore`.
+
+### 15.12 Updated Concurrency Model
+
+```mermaid
+graph TB
+    subgraph "v2.0 Thread Model"
+        MAIN[Main Thread] --> SUBMIT[submitRun()]
+        SUBMIT --> PPM[ProviderRunPoolManager]
+        PPM --> |ANTHROPIC pool| AP[provider-pool-ANTHROPIC-n]
+        PPM --> |OPENAI pool| OP[provider-pool-OPENAI-n]
+        PPM --> |GOOGLE pool| GP[provider-pool-GOOGLE-n]
+
+        AP & OP & GP --> PIPELINE[Pipeline Thread]
+
+        PIPELINE --> VT_BG[Virtual Thread<br/>bg-validation-{runId}]
+        PIPELINE --> GATE_POLL[Gate Polling<br/>Redis + DB fallback<br/>500ms interval]
+    end
+
+    subgraph "v2.0 Shared State"
+        SS_MAP[StateStore<br/>PostgreSQL + RLS]
+        REDIS_G[Redis<br/>Gates + Feature flags<br/>+ Rate limits + SSE pub/sub<br/>+ Provider pins]
+        RKS[RunKeyStore<br/>AES-256-GCM encrypted<br/>Redis, 2h TTL]
+        BVT[background_validation<br/>table — durable stage tracking]
+        OUT[side_effect_outbox<br/>table — async dispatch]
+    end
+```
+
+### 15.13 v2.0 Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Per-provider pools instead of single semaphore | Provider degradation must not starve other providers |
+| Redis pub/sub for SSE instead of in-memory broadcaster | MIG: pipeline thread and SSE client may be on different VMs |
+| AES-256-GCM for RunKeyStore at rest | API keys should never be stored plaintext in Redis, even on private network |
+| DB gate fallback | Approval wait can be hours; Redis restart should not auto-fail the run |
+| RLS at DB level | Defense-in-depth; application-level RBAC is the primary guard, RLS is the safety net |
+| Outbox pattern for side effects | Prevents silent notification/PR-creation failures with no retry |
+| Per-run provider pinning | Mid-run provider switch causes context drift; model changes break compiled dependencies |
 
 ### GCS Sync
 

@@ -4,30 +4,30 @@
     "language": "Python",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 75,
-    "model": "openai",
+    "duration": 32,
+    "model": "ANTHROPIC:claude-haiku-4-5-20251001",
     "report": "NO_REPORT|404",
     "share": "SKIPPED",
-    "notes": " [preview:PREVIEW_FAILED] [chat:CHAT_OK] [github_new:GITHUB_NEW_OK] [github_pr:PR_RUN_FAILED] "
+    "notes": " [preview:PREVIEW_FAILED] [chat:CHAT_OK] [github_new:GITHUB_NEW_OK] [github_pr:GITHUB_PR_FAILED] "
   },
   {
     "index": 1,
     "language": "JavaScript",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 32,
-    "model": "openai",
-    "report": "HAS_REPORT",
-    "share": "SHARE_OK",
-    "notes": " [compile:PASS] [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
+    "duration": 21,
+    "model": "ANTHROPIC:claude-haiku-4-5-20251001",
+    "report": "NO_REPORT|404",
+    "share": "SKIPPED",
+    "notes": " [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
   },
   {
     "index": 2,
     "language": "Java",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 33,
-    "model": "openai",
+    "duration": 32,
+    "model": "ANTHROPIC:claude-haiku-4-5-20251001",
     "report": "HAS_REPORT",
     "share": "SHARE_OK",
     "notes": " [compile:PASS] [preview:PREVIEW_TIMEOUT] [chat:CHAT_OK] "
@@ -37,30 +37,30 @@
     "language": "TypeScript",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 55,
-    "model": "openai",
-    "report": "NO_REPORT|503",
+    "duration": 54,
+    "model": "ANTHROPIC:claude-haiku-4-5-20251001",
+    "report": "NO_REPORT|404",
     "share": "SKIPPED",
     "notes": " [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
   },
   {
     "index": 4,
     "language": "Go",
-    "status": "PARTIAL",
-    "tasks": "0/1",
-    "duration": 22,
-    "model": "openai",
+    "status": "COMPLETE",
+    "tasks": "1/1",
+    "duration": 33,
+    "model": "ANTHROPIC:claude-haiku-4-5-20251001",
     "report": "NO_REPORT|404",
     "share": "SKIPPED",
-    "notes": "Incomplete tasks: Implement request [WORKING] "
+    "notes": " [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
   },
   {
     "index": 5,
     "language": "Static HTML",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 55,
-    "model": "openai",
+    "duration": 53,
+    "model": "ANTHROPIC:claude-haiku-4-5-20251001",
     "report": "NO_REPORT|404",
     "share": "SKIPPED",
     "notes": " [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
@@ -70,10 +70,10 @@
     "language": "Cancel",
     "status": "FAIL",
     "tasks": "0/0",
-    "duration": 127,
+    "duration": 45,
     "model": "",
     "report": "NO_REPORT",
     "share": "NONE",
-    "notes": "Status: FAILED "
+    "notes": "Status: COMPLETE "
   }
 ]

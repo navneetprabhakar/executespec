@@ -25,6 +25,12 @@ public record ResolvedKeys(
         /** Enabled providers (lowercase). Null = all providers allowed. */
         Set<String> enabledProviders
 ) {
+    // Explicit @JsonCreator so Jackson always uses the canonical constructor when
+    // deserializing from Redis (avoids ambiguity with the 3-arg compat constructor).
+    @com.fasterxml.jackson.annotation.JsonCreator
+    public ResolvedKeys {
+        // compact canonical constructor — no body needed, record validates automatically
+    }
     /** Sentinel: all three providers use the system-configured singleton beans. */
     public static final ResolvedKeys SYSTEM_ONLY =
             new ResolvedKeys(null, null, null, "SYSTEM", null);

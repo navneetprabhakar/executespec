@@ -86,6 +86,18 @@ public class PipelineHarness {
      */
     private static final String OPENAPI_TASK_ID = "generate_openapi_spec";
 
+    /** Stable identifier for this JVM instance — used for instance tracking in pipeline_run. */
+    private static final String INSTANCE_ID = resolveInstanceId();
+
+    private static String resolveInstanceId() {
+        try {
+            return java.net.InetAddress.getLocalHost().getHostName()
+                    + "-" + ProcessHandle.current().pid();
+        } catch (Exception e) {
+            return "unknown-" + ProcessHandle.current().pid();
+        }
+    }
+
     private final PlannerAgent plannerAgent;
     private final WorkerPool workerPool;
     private final CostEstimator costEstimator;
@@ -175,6 +187,7 @@ public class PipelineHarness {
     // ── Single-shot fast path (Phase 1 simplification) ──────────────────────
     private final com.navneet.executespec.agent.RequestTriageService requestTriageService;
     private final SingleShotExecutor singleShotExecutor;
+    private final com.navneet.executespec.agent.TriageEscalationDetector triageEscalationDetector;
 
     // ── Test generation pipeline ─────────────────────────────────────────────
     private final com.navneet.executespec.testgen.TestGenOrchestrator testGenOrchestrator;
@@ -193,11 +206,10 @@ public class PipelineHarness {
                     .build();
 
     /**
-     * Tracks runs with active background validation (review + test gen + report).
-     * When a run is in this set, the executeRunAsync finally block defers
-     * broadcaster.complete() and runKeyStore.remove() to the background thread.
+     * DB-backed tracker for background validation lifecycle.
+     * Replaces the in-memory {@code ConcurrentHashSet} so app restarts don't lose state.
      */
-    private final Set<String> backgroundValidationRuns = ConcurrentHashMap.newKeySet();
+    private final BackgroundValidationService backgroundValidationService;
 
     /**
      * Tracks runs with an active pipeline thread (executeRunAsync or runResumeAsync).
@@ -214,6 +226,12 @@ public class PipelineHarness {
      */
     private final GateStore gateStore;
     private final ModelRegistry modelRegistry;
+
+    /** Per-provider isolated run pools with priority queuing. */
+    private final ProviderRunPoolManager providerRunPoolManager;
+
+    /** Checks combined circuit-breaker + status-page health across the failover chain. */
+    private final com.navneet.executespec.router.ProviderStatusService providerStatusService;
 
     /** Limits simultaneous active pipeline runs. */
     private Semaphore runSlots;
@@ -250,7 +268,8 @@ public class PipelineHarness {
                 },
                 new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
         );
-        log.info("PipelineHarness ready — max concurrent runs: {}", maxRuns);
+        log.info("PipelineHarness ready — max concurrent runs: {}, per-provider pools: {}",
+                maxRuns, providerRunPoolManager.totalActiveRuns());
     }
 
     // ── Auto-retry ───────────────────────────────────────────────────────────
@@ -520,14 +539,41 @@ public class PipelineHarness {
 
         String runId = run.getRunId();
 
+        // Resolve user tier for priority queuing (best-effort; FREE is safe default)
+        String runUserTier = "FREE";
+        try {
+            runUserTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for run {} — defaulting to FREE", runId);
+        }
+        final String submitUserTier = runUserTier;
+
+        // Provider outage guard — if all providers in the failover chain are unhealthy,
+        // queue the run rather than immediately failing it. StuckRunMonitor retries every 2 min.
+        {
+            var availableProviders = availableProviderResolver.resolve(runId);
+            LlmProvider primaryProvider = run.getAiProviderEnum() != null
+                    ? run.getAiProviderEnum() : LlmProvider.OPENAI;
+            if (!providerStatusService.isAnyProviderHealthy(primaryProvider, availableProviders)) {
+                run.setStatus("QUEUED");
+                run.setQueuePosition(0);
+                run.setFailureReason("LLM providers unavailable — run will retry automatically when providers recover");
+                stateStore.save(run);
+                providerStatusService.recordQueuedDueToOutage();
+                broadcaster.emit(runId, RunEvent.queued(runId, 0));
+                log.warn("[PipelineHarness] All providers unhealthy for run {} — queued for outage recovery", runId);
+                return run;
+            }
+        }
+
         if (!runSlots.tryAcquire()) {
-            // No slot available right now — queue the run
+            // No global slot available — queue in provider pool (which will acquire slot when ready)
             Metrics.QUEUED_RUNS.incrementAndGet();
             run.setStatus("QUEUED");
             run.setQueuePosition(countQueued() + 1);
             stateStore.save(run);
             broadcaster.emit(runId, RunEvent.queued(runId, run.getQueuePosition()));
-            log.info("Run {} queued at position {}", runId, run.getQueuePosition());
+            log.info("Run {} queued at position {} (provider: {})", runId, run.getQueuePosition(), run.getAiProvider());
 
             final PipelineRun queuedRun = run;
             executor.submit(() -> {
@@ -541,30 +587,62 @@ public class PipelineHarness {
                     r.setStatus("PLANNING");
                     r.setQueuePosition(0);
                     stateStore.save(r);
-                    executeRunAsync(runId, userRequest);
+                    // Route through provider pool after acquiring global slot
+                    dispatchToProviderPool(r.getAiProvider(), runId, submitUserTier, () -> {
+                        try {
+                            executeRunAsync(runId, userRequest);
+                        } finally {
+                            pipelineThreads.remove(runId);
+                            runSlots.release();
+                        }
+                    });
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     stateStore.markFailed(runId, "Interrupted while waiting for run slot");
+                } catch (ProviderRunPool.ProviderQueueFullException e) {
+                    runSlots.release();
+                    stateStore.markFailed(runId, e.getMessage());
+                    log.warn("Run {} rejected — provider pool full: {}", runId, e.getMessage());
                 } finally {
                     pipelineThreads.remove(runId);
-                    if (acquired) runSlots.release();
+                    if (acquired && !Thread.currentThread().isInterrupted()) {
+                        // Only release here on exceptional path; normal path releases inside the pool task
+                    }
                 }
             });
 
         } else {
-            // Slot available — start immediately
-            executor.submit(() -> {
-                pipelineThreads.put(runId, Thread.currentThread());
-                try {
-                    executeRunAsync(runId, userRequest);
-                } finally {
-                    pipelineThreads.remove(runId);
-                    runSlots.release();
-                }
-            });
+            // Global slot available — route directly to provider pool
+            try {
+                final PipelineRun frozenRun = run;
+                dispatchToProviderPool(run.getAiProvider(), runId, submitUserTier, () -> {
+                    pipelineThreads.put(runId, Thread.currentThread());
+                    try {
+                        executeRunAsync(runId, userRequest);
+                    } finally {
+                        pipelineThreads.remove(runId);
+                        runSlots.release();
+                    }
+                });
+            } catch (ProviderRunPool.ProviderQueueFullException e) {
+                runSlots.release();
+                stateStore.markFailed(runId, e.getMessage());
+                log.warn("Run {} rejected — provider pool full at submit: {}", runId, e.getMessage());
+            }
         }
 
         return run;
+    }
+
+    /**
+     * Routes a task into the appropriate provider pool.
+     * The task is responsible for releasing the global run slot when done.
+     */
+    private void dispatchToProviderPool(String providerName, String runId, String userTier, Runnable task) {
+        ProviderRunPool pool = providerRunPoolManager.poolFor(providerName);
+        pool.submit(runId, userTier, Instant.now(), task);
+        log.debug("Run {} dispatched to {} pool (queued={})",
+                runId, providerName, pool.queueDepth());
     }
 
     /**
@@ -849,13 +927,26 @@ public class PipelineHarness {
             "▶️ Resuming paused run — re-running incomplete tasks"));
 
         final PipelineRun frozenRun = stateStore.findRun(runId).orElse(run);
-        Thread.ofVirtual().name("resume-" + runId).start(() -> {
-            try {
-                runResumeAsync(frozenRun);
-            } finally {
-                runSlots.release();
-            }
-        });
+        String resumeUserTier = "FREE";
+        try {
+            resumeUserTier = tierEnforcementService.resolveUserTier(frozenRun.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for resume of run {} — defaulting to FREE", runId);
+        }
+        final String finalResumeTier = resumeUserTier;
+        try {
+            dispatchToProviderPool(frozenRun.getAiProvider(), runId, finalResumeTier, () -> {
+                try {
+                    runResumeAsync(frozenRun);
+                } finally {
+                    runSlots.release();
+                }
+            });
+        } catch (ProviderRunPool.ProviderQueueFullException e) {
+            runSlots.release();
+            log.warn("Run {} resume rejected — provider pool full: {}", runId, e.getMessage());
+            return false;
+        }
         return true;
     }
 
@@ -1108,6 +1199,25 @@ public class PipelineHarness {
      * are COMPLETE before submitting; throws a descriptive exception otherwise so the caller
      * can return 4xx.
      */
+    /**
+     * Re-runs background validation for a COMPLETE run whose prior validation failed.
+     * Called from the retry-validation API endpoint after {@link BackgroundValidationService#prepareRetry}
+     * has already incremented the attempt counter and reset status to PENDING.
+     */
+    public void retryBackgroundValidation(String runId) {
+        PipelineRun run = stateStore.findRun(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+        List<WorkerReport> reports = java.util.Collections.emptyList();
+        String planJson = run.getPlanJson() != null ? run.getPlanJson() : "{}";
+        CompileResult compileResult = CompileResult.skip();
+        backgroundValidationService.create(runId);
+        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+        Thread.ofVirtual().name("bg-validation-retry-" + runId).start(snapshot.wrap(() ->
+                runBackgroundValidation(runId, run, reports, planJson,
+                        run.getUserRequest(), compileResult, false, true)));
+        log.info("[PipelineHarness] Retry background validation queued for run {}", runId);
+    }
+
     public void reopenMergeGate(String runId) {
         PipelineRun run = stateStore.findRun(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -1345,10 +1455,19 @@ public class PipelineHarness {
             throw new IllegalStateException("Server at capacity — cannot apply suggestion right now. Try again shortly.");
         }
 
-        executor.submit(() -> {
-            log.info("[ApplySuggestion] Starting execution of {} tasks for run {}", taskIds.size(), runId);
-            PipelineRun run = stateStore.findRun(runId).orElseThrow();
-            String previousStatus = run.getStatus();
+        PipelineRun applyRun = stateStore.findRun(runId).orElseThrow();
+        String applyUserTier = "FREE";
+        try {
+            applyUserTier = tierEnforcementService.resolveUserTier(applyRun.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for apply-suggestion run {} — defaulting to FREE", runId);
+        }
+        final String applySuggestionTier = applyUserTier;
+        try {
+            dispatchToProviderPool(applyRun.getAiProvider(), runId, applySuggestionTier, () -> {
+                log.info("[ApplySuggestion] Starting execution of {} tasks for run {}", taskIds.size(), runId);
+                PipelineRun run = stateStore.findRun(runId).orElseThrow();
+                String previousStatus = run.getStatus();
 
             try {
                 // Ensure workspace is available (may restore from GCS after VM restart)
@@ -1443,7 +1562,12 @@ public class PipelineHarness {
             } finally {
                 runSlots.release();
             }
-        });
+            });
+        } catch (ProviderRunPool.ProviderQueueFullException e) {
+            runSlots.release();
+            log.warn("[ApplySuggestion] Run {} rejected — provider pool full: {}", runId, e.getMessage());
+            throw new IllegalStateException(e.getMessage());
+        }
     }
 
     // ── REST async path: iteration run (starts from a completed run's codebase) ──
@@ -1458,12 +1582,20 @@ public class PipelineHarness {
      */
     public void startIterationRun(String runId, String newRequest) {
         PipelineRun run = stateStore.findRun(runId).orElseThrow();
+        String iterUserTier = "FREE";
+        try {
+            iterUserTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for iteration run {} — defaulting to FREE", runId);
+        }
+        final String iterTier = iterUserTier;
+
         if (!runSlots.tryAcquire()) {
             run.setStatus("QUEUED");
             run.setQueuePosition(countQueued() + 1);
             stateStore.save(run);
             broadcaster.emit(runId, RunEvent.queued(runId, run.getQueuePosition()));
-            log.info("Iteration run {} queued at position {}", runId, run.getQueuePosition());
+            log.info("Iteration run {} queued at position {} (provider: {})", runId, run.getQueuePosition(), run.getAiProvider());
             final PipelineRun queuedRun = run;
             executor.submit(() -> {
                 boolean acquired = false;
@@ -1474,22 +1606,38 @@ public class PipelineHarness {
                     r.setStatus("PLANNING");
                     r.setQueuePosition(0);
                     stateStore.save(r);
-                    executeRunAsync(runId, newRequest);
+                    dispatchToProviderPool(r.getAiProvider(), runId, iterTier, () -> {
+                        try {
+                            executeRunAsync(runId, newRequest);
+                        } finally {
+                            runSlots.release();
+                        }
+                    });
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     stateStore.markFailed(runId, "Interrupted while waiting for run slot");
-                } finally {
+                } catch (ProviderRunPool.ProviderQueueFullException e) {
                     if (acquired) runSlots.release();
+                    stateStore.markFailed(runId, e.getMessage());
+                    log.warn("Iteration run {} rejected — provider pool full: {}", runId, e.getMessage());
+                } finally {
+                    // slot released inside dispatchToProviderPool task; catch blocks release on error
                 }
             });
         } else {
-            executor.submit(() -> {
-                try {
-                    executeRunAsync(runId, newRequest);
-                } finally {
-                    runSlots.release();
-                }
-            });
+            try {
+                dispatchToProviderPool(run.getAiProvider(), runId, iterTier, () -> {
+                    try {
+                        executeRunAsync(runId, newRequest);
+                    } finally {
+                        runSlots.release();
+                    }
+                });
+            } catch (ProviderRunPool.ProviderQueueFullException e) {
+                runSlots.release();
+                stateStore.markFailed(runId, e.getMessage());
+                log.warn("Iteration run {} rejected — provider pool full at dispatch: {}", runId, e.getMessage());
+            }
         }
     }
 
@@ -1542,6 +1690,10 @@ public class PipelineHarness {
         run.setUserTier(userTier);
         llmRouter.setRunUserTier(runId, userTier);
 
+        // Stamp executing instance + initial heartbeat for cross-instance recovery detection
+        run.setExecutingInstance(INSTANCE_ID);
+        run.setExecutionHeartbeat(Instant.now());
+
         stateStore.saveRun(run);
 
         if (!initializeWorkspace(runId, run)) {
@@ -1573,8 +1725,15 @@ public class PipelineHarness {
             return;
         }
 
-        // ── 0. Triage: classify request as SINGLE_SHOT or MULTI_TASK ─────
+        // ── 0. Triage: classify request as SINGLE_SHOT, MEDIUM, or MULTI_TASK ─────
         var triageResult = requestTriageService.classify(effectiveRequest, runId, run.getAiProviderEnum());
+        // MEDIUM tier: goes through planner but with a 4-task cap injected as a note
+        if (triageResult == com.navneet.executespec.agent.RequestTriageService.TriageResult.MEDIUM) {
+            log.info("[PipelineHarness] Run {} classified as MEDIUM — using simplified planner (≤4 tasks)", runId);
+            broadcaster.emit(runId, RunEvent.log(runId, "harness", "Simplified plan detected — limiting to ≤4 tasks"));
+            // Inject a cap hint into the effective request so the planner respects it
+            effectiveRequest = effectiveRequest + "\n\n[SYSTEM NOTE: This is a MEDIUM-complexity request. Generate at most 4 tasks.]";
+        }
         if (triageResult == com.navneet.executespec.agent.RequestTriageService.TriageResult.SINGLE_SHOT) {
             log.info("[PipelineHarness] Run {} classified as SINGLE_SHOT — bypassing planner + approval gate", runId);
             broadcaster.emit(runId, RunEvent.log(runId, "harness", "Simple request detected — running single-shot fast path"));
@@ -1595,6 +1754,7 @@ public class PipelineHarness {
                 }
 
                 // Execute single-shot: synthetic plan → auto-approve → worker on main branch
+                Instant singleShotStart = Instant.now();
                 var singleShotResult = singleShotExecutor.execute(run, effectiveRequest);
 
                 if (!singleShotResult.success()) {
@@ -1616,6 +1776,17 @@ public class PipelineHarness {
                     compileResult = compilerAgent.runCompileAndFix(runId);
                 } catch (Exception compileEx) {
                     log.warn("[SingleShot] Compile failed for run {}: {}", runId, compileEx.getMessage());
+                }
+
+                // ── Triage escalation detection (feedback loop) ─────────────
+                // Records whether thresholds (iterations/files/errors/duration) were exceeded.
+                // Does not re-execute — outcome stored in triage_outcome for analytics.
+                var escalation = triageEscalationDetector.evaluate(
+                        runId, singleShotResult.reports(), compileResult, singleShotStart, "COMPLETE");
+                if (escalation.shouldEscalate()) {
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                            "[Triage] This request exceeded single-shot thresholds (" + escalation.reason()
+                            + "). Future similar requests will be routed to multi-task."));
                 }
 
                 // ── Mark COMPLETE + auto-start preview (both modes) ─────────
@@ -1647,7 +1818,7 @@ public class PipelineHarness {
                         log.warn("[SingleShot] Could not serialize synthetic plan for run {}: {}", runId, jsonEx.getMessage());
                     }
                     final String finalBgPlanJson = bgPlanJson;
-                    backgroundValidationRuns.add(runId);
+                    backgroundValidationService.create(runId);
                     var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                     Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
                         runBackgroundValidation(runId, currentRun, currentReports,
@@ -1663,7 +1834,7 @@ public class PipelineHarness {
             } finally {
                 runSlots.release();
                 // If background validation is running, defer cleanup to that thread
-                if (!backgroundValidationRuns.contains(runId)) {
+                if (!backgroundValidationService.isActive(runId)) {
                     broadcaster.complete(runId);
                     runKeyStore.remove(runId);
                     runBudgetTracker.remove(runId);
@@ -1982,6 +2153,16 @@ public class PipelineHarness {
                     sequentialTaskExecutor.execute(run, workerTasks, execMode);
                 reports = execResult.reports();
 
+                // Budget exceeded between tiers — stop pipeline and fail the run
+                if (execResult.budgetExceeded()) {
+                    String budgetMsg = "Run stopped — cost budget exceeded. Upgrade your plan for higher limits.";
+                    log.warn("Run {} stopped due to cost budget exceeded between tasks", runId);
+                    stateStore.markFailed(runId, budgetMsg);
+                    broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, budgetMsg));
+                    return;
+                }
+
                 if (execResult.hasFailures()) {
                     log.warn("Run {} has {} failed tasks out of {}",
                         runId, execResult.failedTasks().size(), execResult.totalTasks());
@@ -2180,7 +2361,7 @@ public class PipelineHarness {
                     log.warn("Could not serialize plan for run {}: {}", runId, jsonEx.getMessage());
                 }
                 final String finalBgPlanJson = bgPlanJson;
-                backgroundValidationRuns.add(runId);
+                backgroundValidationService.create(runId);
                 var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                 Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
                     runBackgroundValidation(runId, currentRun, currentReports,
@@ -2233,7 +2414,7 @@ public class PipelineHarness {
 
             runObs.stop();
             // If background validation is running, defer cleanup to that thread
-            if (!backgroundValidationRuns.contains(runId)) {
+            if (!backgroundValidationService.isActive(runId)) {
                 broadcaster.complete(runId);
                 runKeyStore.remove(runId);  // clean up per-run API keys
                 runBudgetTracker.remove(runId);  // clean up per-run budget tracking
@@ -2334,16 +2515,21 @@ public class PipelineHarness {
                                          List<WorkerReport> reports, String planJson,
                                          String userRequest, CompileResult compileResult,
                                          boolean computeHadFailures, boolean runTests) {
+        backgroundValidationService.markRunning(runId);
+        broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background validation started"));
         try {
             // Test generation (async — fires TestsReadyEvent when done)
             // Skipped for PROTOTYPE mode to keep lightweight
             if (runTests) {
+                backgroundValidationService.setPhase(runId, "TEST_GEN");
                 try {
                     testCompletionFutures.put(runId, new CompletableFuture<>());
                     testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
+                    backgroundValidationService.recordPhaseResult(runId, "TEST_GEN", "completed");
                     log.info("Run {} — test gen pipeline completed in background", runId);
                 } catch (Exception e) {
                     testCompletionFutures.invalidate(runId);
+                    backgroundValidationService.recordPhaseResult(runId, "TEST_GEN", "failed: " + e.getMessage());
                     log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
                 }
             } else {
@@ -2351,6 +2537,7 @@ public class PipelineHarness {
             }
 
             // Review merged code
+            backgroundValidationService.setPhase(runId, "REVIEW");
             ReviewReportV2 review = null;
             Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
                 .lowCardinalityKeyValue("run.id", runId)
@@ -2362,6 +2549,8 @@ public class PipelineHarness {
                         run.getUserRequest(), compileResult != null ? compileResult : CompileResult.skip(),
                         providers);
                 stateStore.saveReviewV2(runId, review);
+                backgroundValidationService.recordPhaseResult(runId, "REVIEW",
+                        review.getVerdict() != null ? review.getVerdict().name() : "UNKNOWN");
 
                 if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
                         || review.getVerdict() == ReviewVerdict.REJECTED) {
@@ -2381,12 +2570,15 @@ public class PipelineHarness {
             }
 
             // Re-validate after auto-fix
+            backgroundValidationService.setPhase(runId, "RE_VALIDATE");
             boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
             if (fixesApplied) {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness",
                     "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
                 try {
                     CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
+                    backgroundValidationService.recordPhaseResult(runId, "RE_VALIDATE",
+                            revalidation.passed() ? "passed" : "issues");
                     if (revalidation.passed() || revalidation.skipped()) {
                         broadcaster.emit(runId, RunEvent.log(runId, "compiler",
                             "✅ Re-validation passed — all fixes confirmed"));
@@ -2395,6 +2587,7 @@ public class PipelineHarness {
                             "⚠️ Re-validation found issues: " + revalidation.errorSummary()));
                     }
                 } catch (Exception revalEx) {
+                    backgroundValidationService.recordPhaseResult(runId, "RE_VALIDATE", "failed");
                     log.warn("Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
                 }
             }
@@ -2403,9 +2596,12 @@ public class PipelineHarness {
             testPreviewCoordinator.cancelIfPending(runId);
 
             // Validation report
+            backgroundValidationService.setPhase(runId, "REPORT");
             try {
                 generateValidationReport(runId, run, reports, review, compileResult);
+                backgroundValidationService.recordPhaseResult(runId, "REPORT", "completed");
             } catch (Exception reportEx) {
+                backgroundValidationService.recordPhaseResult(runId, "REPORT", "failed");
                 log.warn("Background validation report failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
                 broadcaster.emit(runId, RunEvent.log(runId, "report",
                     "⚠️ Report generation failed"));
@@ -2421,13 +2617,14 @@ public class PipelineHarness {
             // Update actual cost after background work
             saveActualCost(runId);
 
+            backgroundValidationService.markCompleted(runId);
             log.info("Run {} — background validation complete", runId);
         } catch (Exception e) {
             log.error("Background validation failed for run {}: {}", runId, e.getMessage(), e);
+            backgroundValidationService.markFailed(runId, e.getMessage());
             broadcaster.emit(runId, RunEvent.validationFailed(runId, null,
                 "Validation could not complete: " + e.getMessage()));
         } finally {
-            backgroundValidationRuns.remove(runId);
             runKeyStore.remove(runId);
             runBudgetTracker.remove(runId);
             runCostBudgetService.remove(runId);
@@ -2452,6 +2649,32 @@ public class PipelineHarness {
             writeRunCostLog(runId, cost);
         } catch (Exception e) {
             log.warn("[PipelineHarness] Could not compute actual cost for run {}: {}", runId, e.getMessage());
+        }
+        // Record E2E duration for SLO tracking (non-fatal)
+        recordE2eDuration(runId, "completed");
+    }
+
+    /**
+     * Records the end-to-end pipeline duration from run start to the current instant.
+     * Tagged with execution mode (real_time/batch) and outcome (completed/failed).
+     * Non-fatal — any failure is logged and ignored.
+     */
+    private void recordE2eDuration(String runId, String outcome) {
+        try {
+            stateStore.findRun(runId).ifPresent(run -> {
+                if (run.getStartedAt() != null) {
+                    java.time.Duration e2e = java.time.Duration.between(run.getStartedAt(), java.time.Instant.now());
+                    String mode = "BATCH".equals(run.getApprovedExecutionMode()) ? "batch" : "real_time";
+                    io.micrometer.core.instrument.Timer.builder(
+                                    com.navneet.executespec.config.CustomMetricsConfig.RUN_E2E_DURATION)
+                            .tag("mode", mode)
+                            .tag("status", outcome)
+                            .register(meterRegistry)
+                            .record(e2e);
+                }
+            });
+        } catch (Exception ex) {
+            log.debug("[PipelineHarness] Could not record E2E duration for run {}: {}", runId, ex.getMessage());
         }
     }
 
@@ -2818,6 +3041,12 @@ public class PipelineHarness {
     }
 
     // ── Tier 5: Run restart ───────────────────────────────────────────────────
+
+    /** Records E2E duration for failed runs (for SLO tracking). */
+    @EventListener
+    public void onRunFailed(PipelineEvent.RunFailed event) {
+        recordE2eDuration(event.runId(), "failed");
+    }
 
     /**
      * Handles restart requests published by {@link com.navneet.executespec.recovery.RunRecoveryService}.
@@ -3196,6 +3425,10 @@ public class PipelineHarness {
     }
 
     private int countQueued() {
+        // Prefer live pool queue depth for accurate real-time position
+        int poolQueued = providerRunPoolManager.totalQueuedRuns();
+        if (poolQueued > 0) return poolQueued;
+        // Fallback to DB count (handles queued runs from previous instance restarts)
         return (int) stateStore.listRuns("QUEUED",
             org.springframework.data.domain.PageRequest.of(0, 1000)).getTotalElements();
     }
@@ -3646,6 +3879,32 @@ public class PipelineHarness {
             return;
         }
 
+        // Route through provider pool after acquiring global slot
+        String batchUserTier = "FREE";
+        try {
+            batchUserTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("[Run {}] Could not resolve tier for batch resume — defaulting to FREE", runId);
+        }
+        try {
+            final boolean slotAcquired = acquired;
+            final PipelineRun batchRun = run;
+            final String batchTier = batchUserTier;
+            dispatchToProviderPool(run.getAiProvider(), runId, batchTier, () -> {
+                runBatchResumeInPool(runId, batchRun, slotAcquired);
+            });
+            return; // pool dispatch handles the rest
+        } catch (ProviderRunPool.ProviderQueueFullException e) {
+            if (acquired) runSlots.release();
+            log.warn("[Run {}] Batch resume rejected — provider pool full: {}", runId, e.getMessage());
+            stateStore.markFailed(runId, "Batch resume failed: provider queue full — " + e.getMessage());
+            return;
+        }
+
+    }
+
+    /** Executes the batch resume pipeline body inside a provider pool slot. */
+    private void runBatchResumeInPool(String runId, PipelineRun run, boolean slotAcquired) {
         // H3 fix: register thread so cancelRun() can interrupt batch resume operations
         pipelineThreads.put(runId, Thread.currentThread());
 
@@ -3725,7 +3984,7 @@ public class PipelineHarness {
 
             // Background validation (review, test gen, preview) — same as real-time runs
             final CompileResult finalCompileResult = compileResult;
-            backgroundValidationRuns.add(runId);
+            backgroundValidationService.create(runId);
             final PipelineRun bgRun = stateStore.findRun(runId).orElse(run);
             var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
             Thread.ofVirtual().name("bg-validation-batch-" + runId).start(
@@ -3735,10 +3994,7 @@ public class PipelineHarness {
                                     bgRun.getPlanJson(), bgRun.getUserRequest(),
                                     finalCompileResult, false, true);
                         } finally {
-                            backgroundValidationRuns.remove(runId);
-                            runKeyStore.remove(runId);
-                            runBudgetTracker.remove(runId);
-                            runCostBudgetService.remove(runId);
+                            // cleanup is handled inside runBackgroundValidation's finally block
                             broadcaster.complete(runId);
                         }
                     })
@@ -3758,7 +4014,27 @@ public class PipelineHarness {
         } finally {
             // H2+H3 cleanup: release semaphore and unregister thread
             pipelineThreads.remove(runId);
-            if (acquired) runSlots.release();
+            if (slotAcquired) runSlots.release();
+        }
+    }
+
+    // ── Instance heartbeat ────────────────────────────────────────────────────
+
+    /**
+     * Refreshes {@code execution_heartbeat} every 30s for all runs executing on this instance.
+     * {@link com.navneet.executespec.recovery.StuckRunMonitor} uses stale heartbeats (>2 min)
+     * to detect dead instances and recover their runs.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 30_000)
+    void refreshInstanceHeartbeats() {
+        if (activeRunThreads.isEmpty()) return;
+        Instant now = Instant.now();
+        for (String runId : activeRunThreads) {
+            try {
+                stateStore.updateHeartbeat(runId, INSTANCE_ID, now);
+            } catch (Exception e) {
+                log.debug("[Heartbeat] Failed to update heartbeat for run {}: {}", runId, e.getMessage());
+            }
         }
     }
 }

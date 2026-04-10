@@ -83,6 +83,7 @@ public class ReviewerAgentV2 {
     private final ObjectMapper mapper;
     private final LlmOutputParser outputParser;
     private final ObservationRegistry observationRegistry;
+    private final com.navneet.executespec.agent.PromptAssembler promptAssembler;
 
     @Value("classpath:prompts/reviewer-v2.txt")
     private Resource reviewerV2Prompt;
@@ -695,11 +696,7 @@ public class ReviewerAgentV2 {
     }
 
     private String loadPrompt() {
-        try {
-            return reviewerV2Prompt.getContentAsString(StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load reviewer-v2 prompt", e);
-        }
+        return promptAssembler.assemble("reviewer-v2.txt");
     }
 
     // ============================

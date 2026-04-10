@@ -77,6 +77,7 @@ public class PreviewService {
     private final TierConfigRepository tierConfigRepo;
     private final WorkspaceRestoreService restoreService;
     private final MeterRegistry meterRegistry;
+    private final GlobalPreviewLimiter globalPreviewLimiter;
 
     /** Optional — only present when preview.proxy.enabled=true (VM with Caddy). */
     @Autowired(required = false)
@@ -129,7 +130,8 @@ public class PreviewService {
                           AgentProperties agentProps,
                           TierConfigRepository tierConfigRepo,
                           WorkspaceRestoreService restoreService,
-                          MeterRegistry meterRegistry) {
+                          MeterRegistry meterRegistry,
+                          GlobalPreviewLimiter globalPreviewLimiter) {
         this.dockerfileGen = dockerfileGen;
         this.databaseDetector = databaseDetector;
         this.envVarDetector = envVarDetector;
@@ -143,6 +145,7 @@ public class PreviewService {
         this.tierConfigRepo = tierConfigRepo;
         this.restoreService = restoreService;
         this.meterRegistry = meterRegistry;
+        this.globalPreviewLimiter = globalPreviewLimiter;
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -215,7 +218,7 @@ public class PreviewService {
                 }
             }
 
-            // Guard: concurrent preview limit
+            // Guard: concurrent preview limit (in-memory check for single-instance correctness)
             long userPreviewCount = active.values().stream()
                     .filter(s -> stateStore.findRun(s.runId())
                             .map(r -> user.getId().equals(r.getCreatedByUserId()))
@@ -225,6 +228,12 @@ public class PreviewService {
             if (userPreviewCount >= maxConcurrent) {
                 throw new PreviewException("Max concurrent previews reached (" + maxConcurrent +
                         " for " + user.getTier() + " tier). Stop an existing preview first.");
+            }
+
+            // Guard: Redis-backed global limit (cross-instance enforcement)
+            if (!globalPreviewLimiter.tryAcquire(user.getId().toString(), user.getTier())) {
+                throw new PreviewException("Max concurrent previews reached for your tier (" +
+                        user.getTier() + "). Stop an existing preview first.");
             }
 
             // Guard: per-run preview start limit
@@ -309,6 +318,7 @@ public class PreviewService {
         if (session == null) return;
         // Note: lastEnvVars NOT removed here — rebuild() needs them after stop()
         Metrics.ACTIVE_PREVIEWS.decrementAndGet();
+        releaseGlobalPreviewSlot(runId);
 
         String mode;
         if (isVmMode() && vmPreviewService != null && session.composeProjectName() != null) {
@@ -817,6 +827,7 @@ public class PreviewService {
             Counter.builder(PREVIEW_FAILURES).tag("reason", "timeout")
                     .register(meterRegistry).increment();
             Metrics.ACTIVE_PREVIEWS.decrementAndGet();
+            releaseGlobalPreviewSlot(runId);
             cleanupOnFailure(runId, projectName, hostPort);
             updateSession(runId, s -> new PreviewSession(
                     s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
@@ -914,6 +925,14 @@ public class PreviewService {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
+    private void releaseGlobalPreviewSlot(String runId) {
+        stateStore.findRun(runId).ifPresent(run -> {
+            if (run.getCreatedByUserId() != null) {
+                globalPreviewLimiter.release(run.getCreatedByUserId().toString());
+            }
+        });
+    }
+
     private void checkDeadline(Instant deadline, String phase) {
         if (Instant.now().isAfter(deadline)) {
             throw new DeadlineExceededException(phase);
@@ -924,6 +943,7 @@ public class PreviewService {
         Counter.builder(PREVIEW_FAILURES).tag("reason", classifyFailureReason(message))
                 .register(meterRegistry).increment();
         Metrics.ACTIVE_PREVIEWS.decrementAndGet();
+        releaseGlobalPreviewSlot(runId);
 
         PreviewSession session = active.get(runId);
         if (session != null) {

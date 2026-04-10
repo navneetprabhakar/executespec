@@ -24,6 +24,7 @@ public class ModelResolver {
 
     private final ModelMatrixProperties matrixProps;
     private final ProviderHealthTracker healthTracker;
+    private final ModelPerformanceTracker modelPerfTracker;
     private final MeterRegistry meterRegistry;
 
     /**
@@ -41,13 +42,34 @@ public class ModelResolver {
             tier = AgentTier.WORKHORSE;
         }
 
-        // Try the user's selected provider first
+        // Try the user's selected provider first — but prefer a healthy alternative with
+        // materially better success rate (≥10 pp improvement with sufficient samples).
         if (healthTracker.isHealthy(userProvider)) {
-            String model = lookupModel(userProvider, tier);
+            String primaryModel = lookupModel(userProvider, tier);
+            // Adaptive: check if a failover provider has materially better performance
+            LlmProvider adaptiveProvider = selectAdaptiveProvider(
+                    userProvider, primaryModel, tier, agentName);
+            if (adaptiveProvider != null && adaptiveProvider != userProvider) {
+                String adaptiveModel = lookupModel(adaptiveProvider, tier);
+                log.info("[ModelResolver] Adaptive routing: {} → {} for agent {} (better success rate)",
+                        userProvider, adaptiveProvider, agentName);
+                Counter.builder("executespec.routing.adaptive_switch")
+                        .tag("from", userProvider.name())
+                        .tag("to", adaptiveProvider.name())
+                        .tag("agent", agentName)
+                        .register(meterRegistry).increment();
+                return ResolvedModel.builder()
+                        .requestedProvider(userProvider)
+                        .actualProvider(adaptiveProvider)
+                        .model(adaptiveModel)
+                        .agentTier(tier)
+                        .fallback(true)
+                        .build();
+            }
             return ResolvedModel.builder()
                     .requestedProvider(userProvider)
                     .actualProvider(userProvider)
-                    .model(model)
+                    .model(primaryModel)
                     .agentTier(tier)
                     .fallback(false)
                     .build();
@@ -154,6 +176,28 @@ public class ModelResolver {
         }
 
         throw new IllegalStateException("No fallback provider available excluding " + excludeProvider);
+    }
+
+    /**
+     * Checks if a healthy failover provider has materially better performance than the primary.
+     * Returns the better provider, or null if the primary is best (or data is insufficient).
+     */
+    private LlmProvider selectAdaptiveProvider(LlmProvider primary, String primaryModel,
+                                                AgentTier tier, String agentName) {
+        List<String> failoverList = matrixProps.getFailoverOrder()
+                .get(primary.name().toLowerCase());
+        if (failoverList == null) return null;
+
+        for (String fallbackName : failoverList) {
+            LlmProvider candidate = LlmProvider.valueOf(fallbackName.toUpperCase());
+            if (!healthTracker.isHealthy(candidate)) continue;
+            String candidateModel = lookupModel(candidate, tier);
+            if (modelPerfTracker.isMateriallyBetter(
+                    candidate.name(), candidateModel, primary.name(), primaryModel)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private String lookupModel(LlmProvider provider, AgentTier tier) {

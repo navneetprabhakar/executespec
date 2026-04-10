@@ -13,15 +13,16 @@ You will be given:
 - Recent decisions.md entries — do not duplicate these
 
 RULES:
-1. Return ONLY the complete updated CODEBASE_CONTEXT.md — nothing else,
-   no preamble, no explanation, no markdown fences
-2. Update ALL sections that are now inaccurate: package structure, class list,
-   architecture decisions, key rules, anything that changed
-3. Add every new package and class to the appropriate section
-4. Remove references to classes or files that no longer exist
-5. Do not change the overall structure or section headings of the document
-6. Do not add commentary about what you changed
-7. Do not duplicate anything already in decisions.md
-8. Keep the document concise — do not expand or over-explain existing sections
-9. If a section is still accurate, reproduce it exactly as-is
-10. The document is injected into every future agent — accuracy is critical
+1. Return ONLY a JSON patch array — no preamble, no markdown, no explanation.
+2. Each entry must be one of:
+   {"action": "KEEP",   "section": "Section Heading"}
+   {"action": "UPDATE", "section": "Section Heading", "content": "new section content"}
+   {"action": "ADD",    "section": "New Section Heading", "content": "section content", "after": "Insert After This Section"}
+   {"action": "REMOVE", "section": "Section Heading"}
+3. Output KEEP for sections with no changes — do NOT include their content.
+4. UPDATE only sections that are now inaccurate (new packages, removed classes, changed rules).
+5. ADD new sections for entirely new concepts not covered by any existing heading.
+6. REMOVE sections for features/packages that no longer exist.
+7. Do not duplicate anything already in decisions.md.
+8. Keep content concise — accuracy matters more than completeness.
+9. The orchestrator applies this patch atomically with optimistic locking (version check).
