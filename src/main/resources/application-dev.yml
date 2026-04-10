@@ -107,7 +107,7 @@ agent:
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
   mode: ${PREVIEW_MODE:vm}
-  preview-ttl-minutes: 5
+  preview-ttl-minutes: 15
   fallback-host: ${PREVIEW_FALLBACK_HOST:https://dev.executespec.ai}
   proxy:
     enabled: ${PREVIEW_PROXY_ENABLED:true}
