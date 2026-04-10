@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -104,6 +105,13 @@ public class PreviewService {
 
     /** runId → last-used env vars (preserved across rebuild so users don't re-enter secrets) */
     private final ConcurrentHashMap<String, Map<String, String>> lastEnvVars = new ConcurrentHashMap<>();
+
+    /**
+     * Queue of preview start requests that couldn't start immediately because all VM slots
+     * were at capacity. Drained (FIFO) whenever a preview stops and a slot opens up.
+     */
+    private record QueuedPreview(String runId, AppUser user, Map<String, String> envVars) {}
+    private final ConcurrentLinkedQueue<QueuedPreview> previewQueue = new ConcurrentLinkedQueue<>();
 
     private static final Set<String> COMPLETE_STATUSES = Set.of("COMPLETE", "PARTIAL");
     private static final Set<String> PREVIEW_ALLOWED_STATUSES = Set.of(
@@ -290,6 +298,21 @@ public class PreviewService {
         var snapshot = ContextSnapshotFactory.builder().build().captureAll();
         String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
         if (isVmMode()) {
+            // Check VM capacity before spawning the thread — if at capacity, queue this
+            // request and return a QUEUED session immediately rather than failing later.
+            if (vmPreviewService != null && !vmPreviewService.hasCapacity()) {
+                log.info("VM preview at capacity for run {} — queuing (user={})", runId, user.getId());
+                previewQueue.add(new QueuedPreview(runId, user, safeEnvVars));
+                Metrics.ACTIVE_PREVIEWS.decrementAndGet(); // undo the increment above; not active yet
+                PreviewSession queued = new PreviewSession(
+                        runId, null, type, mode, null,
+                        PreviewStatus.QUEUED, null, 0, "Waiting for a preview slot...",
+                        Instant.now(), null, null, null);
+                active.put(runId, queued);
+                broadcaster.emit(runId, RunEvent.log(runId, null,
+                        "⏳ All preview VMs at capacity — queued. Will start automatically when a slot opens."));
+                return queued;
+            }
             Thread.ofVirtual().name("preview-vm-" + shortId)
                     .start(snapshot.wrap(() -> buildAndStartVm(runId, workspace, type, mode, projectName)));
         } else if (isCloudRunMode()) {
@@ -339,6 +362,11 @@ public class PreviewService {
 
         broadcaster.emit(runId, new RunEvent("PREVIEW_STOPPED", runId, null, null, Instant.now()));
         log.info("Preview stopped for run {} (mode={})", runId, mode);
+
+        // A slot just opened — start the next queued preview if any
+        if (isVmMode()) {
+            drainPreviewQueue();
+        }
     }
 
     /**
@@ -527,6 +555,25 @@ public class PreviewService {
             log.warn("VM preview deploy failed for run {}: {}", runId, e.getMessage());
             fail(runId, "VM preview failed: " + e.getMessage(), 0);
         }
+    }
+
+    /**
+     * Drain one entry from the preview queue when a slot opens (called from {@link #stop}).
+     * Runs the dequeued preview start in a virtual thread to avoid blocking the stop caller.
+     */
+    private void drainPreviewQueue() {
+        QueuedPreview next = previewQueue.poll();
+        if (next == null) return;
+        log.info("Preview slot opened — starting queued preview for run {}", next.runId());
+        // Remove the QUEUED placeholder so start() treats it as a fresh start
+        active.remove(next.runId());
+        Thread.ofVirtual().name("preview-queue-drain-" + next.runId()).start(() -> {
+            try {
+                start(next.runId(), next.user(), next.envVars().isEmpty() ? null : next.envVars());
+            } catch (Exception e) {
+                log.warn("Queued preview start failed for run {}: {}", next.runId(), e.getMessage());
+            }
+        });
     }
 
     // ── Private: build and start with Cloud Run ───────────────────────────
