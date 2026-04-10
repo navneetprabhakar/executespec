@@ -91,6 +91,11 @@ public class CustomMetricsConfig {
     public static final String PROVIDER_POOL_QUEUED = "executespec.provider.pool.queued";
     public static final String PROVIDER_POOL_CAPACITY = "executespec.provider.pool.capacity";
 
+    /** Redis + Gate HA */
+    public static final String REDIS_CONNECTION_FAILURES = "executespec.redis.connection_failures";
+    public static final String GATE_DB_FALLBACK          = "executespec.gate.db_fallback";
+    public static final String REDIS_FAILOPEN            = "executespec.redis.failopen";
+
     /** Deploy */
     public static final String DEPLOY_TOTAL = "executespec.deploy.total";
     public static final String DEPLOY_DURATION = "executespec.deploy.duration";
