@@ -3,10 +3,14 @@ package com.navneet.executespec.recovery;
 import com.navneet.executespec.harness.BackgroundValidationService;
 import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.harness.entity.BackgroundValidation;
+import com.navneet.executespec.router.AvailableProviderResolver;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ProviderStatusService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
+import com.navneet.executespec.state.entity.PipelineRun;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.Observation;
@@ -36,6 +40,8 @@ public class StuckRunMonitor {
     private final ObservationRegistry observationRegistry;
     private final MeterRegistry meterRegistry;
     private final BackgroundValidationService backgroundValidationService;
+    private final ProviderStatusService providerStatusService;
+    private final AvailableProviderResolver availableProviderResolver;
 
     /** Background validations stalled longer than this are marked FAILED. */
     private static final int STALLED_VALIDATION_THRESHOLD_MINUTES = 20;
@@ -107,11 +113,47 @@ public class StuckRunMonitor {
 
             // Check for stalled background validations
             checkStalledValidations();
+
+            // Retry runs queued due to provider outage
+            checkOutageQueuedRuns();
         } catch (Exception e) {
             obs.error(e);
             throw e;
         } finally {
             obs.stop();
+        }
+    }
+
+    /**
+     * Finds runs that were queued due to a total provider outage and re-submits them
+     * once at least one provider recovers. The re-submission goes through the normal
+     * slot + provider-pool path — if providers are still down, the run stays QUEUED.
+     */
+    private void checkOutageQueuedRuns() {
+        try {
+            List<PipelineRun> outageQueued = stateStore.getOutageQueuedRuns();
+            if (outageQueued.isEmpty()) return;
+
+            for (PipelineRun run : outageQueued) {
+                LlmProvider primary = run.getAiProviderEnum() != null
+                        ? run.getAiProviderEnum() : LlmProvider.OPENAI;
+                var available = availableProviderResolver.resolve(run.getRunId());
+                if (providerStatusService.isAnyProviderHealthy(primary, available)) {
+                    log.info("[StuckRunMonitor] Provider recovered — retrying outage-queued run {}",
+                            run.getRunId());
+                    providerStatusService.recordOutageQueueReleased();
+                    run.setFailureReason(null);
+                    stateStore.save(run);
+                    try {
+                        harness.resumeRun(run.getRunId());
+                    } catch (Exception e) {
+                        log.warn("[StuckRunMonitor] Could not retry outage-queued run {}: {}",
+                                run.getRunId(), e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[StuckRunMonitor] Failed to check outage-queued runs: {}", e.getMessage());
         }
     }
 

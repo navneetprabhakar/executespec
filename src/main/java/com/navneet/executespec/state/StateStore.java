@@ -999,6 +999,11 @@ public class StateStore {
         return taskRepo.findByStatus("WORKING");
     }
 
+    /** Returns QUEUED runs that were stalled due to a provider outage (for automatic retry). */
+    public List<PipelineRun> getOutageQueuedRuns() {
+        return runRepo.findOutageQueuedRuns();
+    }
+
     public void updateLastActivity(String taskId) {
         taskRepo.findById(taskId).ifPresent(task -> {
             task.setLastActivityAt(Instant.now());

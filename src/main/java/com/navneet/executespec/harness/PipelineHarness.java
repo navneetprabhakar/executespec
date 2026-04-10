@@ -217,6 +217,9 @@ public class PipelineHarness {
     /** Per-provider isolated run pools with priority queuing. */
     private final ProviderRunPoolManager providerRunPoolManager;
 
+    /** Checks combined circuit-breaker + status-page health across the failover chain. */
+    private final com.navneet.executespec.router.ProviderStatusService providerStatusService;
+
     /** Limits simultaneous active pipeline runs. */
     private Semaphore runSlots;
     /** Thread pool for async pipeline execution (unbounded — threads block on semaphore). */
@@ -531,6 +534,24 @@ public class PipelineHarness {
             log.debug("Could not resolve tier for run {} — defaulting to FREE", runId);
         }
         final String submitUserTier = runUserTier;
+
+        // Provider outage guard — if all providers in the failover chain are unhealthy,
+        // queue the run rather than immediately failing it. StuckRunMonitor retries every 2 min.
+        {
+            var availableProviders = availableProviderResolver.resolve(runId);
+            LlmProvider primaryProvider = run.getAiProviderEnum() != null
+                    ? run.getAiProviderEnum() : LlmProvider.OPENAI;
+            if (!providerStatusService.isAnyProviderHealthy(primaryProvider, availableProviders)) {
+                run.setStatus("QUEUED");
+                run.setQueuePosition(0);
+                run.setFailureReason("LLM providers unavailable — run will retry automatically when providers recover");
+                stateStore.save(run);
+                providerStatusService.recordQueuedDueToOutage();
+                broadcaster.emit(runId, RunEvent.queued(runId, 0));
+                log.warn("[PipelineHarness] All providers unhealthy for run {} — queued for outage recovery", runId);
+                return run;
+            }
+        }
 
         if (!runSlots.tryAcquire()) {
             // No global slot available — queue in provider pool (which will acquire slot when ready)
