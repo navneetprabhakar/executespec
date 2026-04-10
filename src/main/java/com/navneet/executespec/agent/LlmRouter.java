@@ -88,6 +88,7 @@ public class LlmRouter {
     private final ProviderHealthTracker healthTracker;
     private final ModelRegistry modelRegistry;
     private final RunProviderPinStore pinStore;
+    private final com.navneet.executespec.router.ModelPerformanceTracker modelPerfTracker;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -200,6 +201,7 @@ public class LlmRouter {
                     Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
                             .register(meterRegistry).record(callDuration);
                     healthTracker.recordSuccess(llmProvider);
+                    modelPerfTracker.recordCall(provider, model, callDuration.toMillis(), true);
                     // Pin this run to the provider that just succeeded
                     pinStore.pinIfAbsent(runId, provider);
                     if (j > 0) {
@@ -227,6 +229,8 @@ public class LlmRouter {
                         lastError = e;
                     } else {
                         healthTracker.recordFailure(llmProvider);
+                        Duration failDuration = Duration.between(callStart, Instant.now());
+                        modelPerfTracker.recordCall(provider, model, failDuration.toMillis(), false);
                         log.warn("[LlmRouter] Provider {} failed for {} (non-rate-limit, iteration={}): {}",
                             provider, agentId, iteration, e.getMessage());
                         Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", "provider_error")
