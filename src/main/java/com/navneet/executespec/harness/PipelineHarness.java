@@ -215,6 +215,9 @@ public class PipelineHarness {
     private final GateStore gateStore;
     private final ModelRegistry modelRegistry;
 
+    /** Per-provider isolated run pools with priority queuing. */
+    private final ProviderRunPoolManager providerRunPoolManager;
+
     /** Limits simultaneous active pipeline runs. */
     private Semaphore runSlots;
     /** Thread pool for async pipeline execution (unbounded — threads block on semaphore). */
@@ -250,7 +253,8 @@ public class PipelineHarness {
                 },
                 new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
         );
-        log.info("PipelineHarness ready — max concurrent runs: {}", maxRuns);
+        log.info("PipelineHarness ready — max concurrent runs: {}, per-provider pools: {}",
+                maxRuns, providerRunPoolManager.totalActiveRuns());
     }
 
     // ── Auto-retry ───────────────────────────────────────────────────────────
@@ -520,14 +524,23 @@ public class PipelineHarness {
 
         String runId = run.getRunId();
 
+        // Resolve user tier for priority queuing (best-effort; FREE is safe default)
+        String runUserTier = "FREE";
+        try {
+            runUserTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for run {} — defaulting to FREE", runId);
+        }
+        final String submitUserTier = runUserTier;
+
         if (!runSlots.tryAcquire()) {
-            // No slot available right now — queue the run
+            // No global slot available — queue in provider pool (which will acquire slot when ready)
             Metrics.QUEUED_RUNS.incrementAndGet();
             run.setStatus("QUEUED");
             run.setQueuePosition(countQueued() + 1);
             stateStore.save(run);
             broadcaster.emit(runId, RunEvent.queued(runId, run.getQueuePosition()));
-            log.info("Run {} queued at position {}", runId, run.getQueuePosition());
+            log.info("Run {} queued at position {} (provider: {})", runId, run.getQueuePosition(), run.getAiProvider());
 
             final PipelineRun queuedRun = run;
             executor.submit(() -> {
@@ -541,30 +554,62 @@ public class PipelineHarness {
                     r.setStatus("PLANNING");
                     r.setQueuePosition(0);
                     stateStore.save(r);
-                    executeRunAsync(runId, userRequest);
+                    // Route through provider pool after acquiring global slot
+                    dispatchToProviderPool(r.getAiProvider(), runId, submitUserTier, () -> {
+                        try {
+                            executeRunAsync(runId, userRequest);
+                        } finally {
+                            pipelineThreads.remove(runId);
+                            runSlots.release();
+                        }
+                    });
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     stateStore.markFailed(runId, "Interrupted while waiting for run slot");
+                } catch (ProviderRunPool.ProviderQueueFullException e) {
+                    runSlots.release();
+                    stateStore.markFailed(runId, e.getMessage());
+                    log.warn("Run {} rejected — provider pool full: {}", runId, e.getMessage());
                 } finally {
                     pipelineThreads.remove(runId);
-                    if (acquired) runSlots.release();
+                    if (acquired && !Thread.currentThread().isInterrupted()) {
+                        // Only release here on exceptional path; normal path releases inside the pool task
+                    }
                 }
             });
 
         } else {
-            // Slot available — start immediately
-            executor.submit(() -> {
-                pipelineThreads.put(runId, Thread.currentThread());
-                try {
-                    executeRunAsync(runId, userRequest);
-                } finally {
-                    pipelineThreads.remove(runId);
-                    runSlots.release();
-                }
-            });
+            // Global slot available — route directly to provider pool
+            try {
+                final PipelineRun frozenRun = run;
+                dispatchToProviderPool(run.getAiProvider(), runId, submitUserTier, () -> {
+                    pipelineThreads.put(runId, Thread.currentThread());
+                    try {
+                        executeRunAsync(runId, userRequest);
+                    } finally {
+                        pipelineThreads.remove(runId);
+                        runSlots.release();
+                    }
+                });
+            } catch (ProviderRunPool.ProviderQueueFullException e) {
+                runSlots.release();
+                stateStore.markFailed(runId, e.getMessage());
+                log.warn("Run {} rejected — provider pool full at submit: {}", runId, e.getMessage());
+            }
         }
 
         return run;
+    }
+
+    /**
+     * Routes a task into the appropriate provider pool.
+     * The task is responsible for releasing the global run slot when done.
+     */
+    private void dispatchToProviderPool(String providerName, String runId, String userTier, Runnable task) {
+        ProviderRunPool pool = providerRunPoolManager.poolFor(providerName);
+        pool.submit(runId, userTier, Instant.now(), task);
+        log.debug("Run {} dispatched to {} pool (queued={})",
+                runId, providerName, pool.queueDepth());
     }
 
     /**
@@ -849,13 +894,26 @@ public class PipelineHarness {
             "▶️ Resuming paused run — re-running incomplete tasks"));
 
         final PipelineRun frozenRun = stateStore.findRun(runId).orElse(run);
-        Thread.ofVirtual().name("resume-" + runId).start(() -> {
-            try {
-                runResumeAsync(frozenRun);
-            } finally {
-                runSlots.release();
-            }
-        });
+        String resumeUserTier = "FREE";
+        try {
+            resumeUserTier = tierEnforcementService.resolveUserTier(frozenRun.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for resume of run {} — defaulting to FREE", runId);
+        }
+        final String finalResumeTier = resumeUserTier;
+        try {
+            dispatchToProviderPool(frozenRun.getAiProvider(), runId, finalResumeTier, () -> {
+                try {
+                    runResumeAsync(frozenRun);
+                } finally {
+                    runSlots.release();
+                }
+            });
+        } catch (ProviderRunPool.ProviderQueueFullException e) {
+            runSlots.release();
+            log.warn("Run {} resume rejected — provider pool full: {}", runId, e.getMessage());
+            return false;
+        }
         return true;
     }
 
@@ -1345,10 +1403,19 @@ public class PipelineHarness {
             throw new IllegalStateException("Server at capacity — cannot apply suggestion right now. Try again shortly.");
         }
 
-        executor.submit(() -> {
-            log.info("[ApplySuggestion] Starting execution of {} tasks for run {}", taskIds.size(), runId);
-            PipelineRun run = stateStore.findRun(runId).orElseThrow();
-            String previousStatus = run.getStatus();
+        PipelineRun applyRun = stateStore.findRun(runId).orElseThrow();
+        String applyUserTier = "FREE";
+        try {
+            applyUserTier = tierEnforcementService.resolveUserTier(applyRun.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for apply-suggestion run {} — defaulting to FREE", runId);
+        }
+        final String applySuggestionTier = applyUserTier;
+        try {
+            dispatchToProviderPool(applyRun.getAiProvider(), runId, applySuggestionTier, () -> {
+                log.info("[ApplySuggestion] Starting execution of {} tasks for run {}", taskIds.size(), runId);
+                PipelineRun run = stateStore.findRun(runId).orElseThrow();
+                String previousStatus = run.getStatus();
 
             try {
                 // Ensure workspace is available (may restore from GCS after VM restart)
@@ -1443,7 +1510,12 @@ public class PipelineHarness {
             } finally {
                 runSlots.release();
             }
-        });
+            });
+        } catch (ProviderRunPool.ProviderQueueFullException e) {
+            runSlots.release();
+            log.warn("[ApplySuggestion] Run {} rejected — provider pool full: {}", runId, e.getMessage());
+            throw new IllegalStateException(e.getMessage());
+        }
     }
 
     // ── REST async path: iteration run (starts from a completed run's codebase) ──
@@ -1458,12 +1530,20 @@ public class PipelineHarness {
      */
     public void startIterationRun(String runId, String newRequest) {
         PipelineRun run = stateStore.findRun(runId).orElseThrow();
+        String iterUserTier = "FREE";
+        try {
+            iterUserTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("Could not resolve tier for iteration run {} — defaulting to FREE", runId);
+        }
+        final String iterTier = iterUserTier;
+
         if (!runSlots.tryAcquire()) {
             run.setStatus("QUEUED");
             run.setQueuePosition(countQueued() + 1);
             stateStore.save(run);
             broadcaster.emit(runId, RunEvent.queued(runId, run.getQueuePosition()));
-            log.info("Iteration run {} queued at position {}", runId, run.getQueuePosition());
+            log.info("Iteration run {} queued at position {} (provider: {})", runId, run.getQueuePosition(), run.getAiProvider());
             final PipelineRun queuedRun = run;
             executor.submit(() -> {
                 boolean acquired = false;
@@ -1474,22 +1554,38 @@ public class PipelineHarness {
                     r.setStatus("PLANNING");
                     r.setQueuePosition(0);
                     stateStore.save(r);
-                    executeRunAsync(runId, newRequest);
+                    dispatchToProviderPool(r.getAiProvider(), runId, iterTier, () -> {
+                        try {
+                            executeRunAsync(runId, newRequest);
+                        } finally {
+                            runSlots.release();
+                        }
+                    });
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     stateStore.markFailed(runId, "Interrupted while waiting for run slot");
-                } finally {
+                } catch (ProviderRunPool.ProviderQueueFullException e) {
                     if (acquired) runSlots.release();
+                    stateStore.markFailed(runId, e.getMessage());
+                    log.warn("Iteration run {} rejected — provider pool full: {}", runId, e.getMessage());
+                } finally {
+                    // slot released inside dispatchToProviderPool task; catch blocks release on error
                 }
             });
         } else {
-            executor.submit(() -> {
-                try {
-                    executeRunAsync(runId, newRequest);
-                } finally {
-                    runSlots.release();
-                }
-            });
+            try {
+                dispatchToProviderPool(run.getAiProvider(), runId, iterTier, () -> {
+                    try {
+                        executeRunAsync(runId, newRequest);
+                    } finally {
+                        runSlots.release();
+                    }
+                });
+            } catch (ProviderRunPool.ProviderQueueFullException e) {
+                runSlots.release();
+                stateStore.markFailed(runId, e.getMessage());
+                log.warn("Iteration run {} rejected — provider pool full at dispatch: {}", runId, e.getMessage());
+            }
         }
     }
 
@@ -3196,6 +3292,10 @@ public class PipelineHarness {
     }
 
     private int countQueued() {
+        // Prefer live pool queue depth for accurate real-time position
+        int poolQueued = providerRunPoolManager.totalQueuedRuns();
+        if (poolQueued > 0) return poolQueued;
+        // Fallback to DB count (handles queued runs from previous instance restarts)
         return (int) stateStore.listRuns("QUEUED",
             org.springframework.data.domain.PageRequest.of(0, 1000)).getTotalElements();
     }
@@ -3646,6 +3746,32 @@ public class PipelineHarness {
             return;
         }
 
+        // Route through provider pool after acquiring global slot
+        String batchUserTier = "FREE";
+        try {
+            batchUserTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
+        } catch (Exception e) {
+            log.debug("[Run {}] Could not resolve tier for batch resume — defaulting to FREE", runId);
+        }
+        try {
+            final boolean slotAcquired = acquired;
+            final PipelineRun batchRun = run;
+            final String batchTier = batchUserTier;
+            dispatchToProviderPool(run.getAiProvider(), runId, batchTier, () -> {
+                runBatchResumeInPool(runId, batchRun, slotAcquired);
+            });
+            return; // pool dispatch handles the rest
+        } catch (ProviderRunPool.ProviderQueueFullException e) {
+            if (acquired) runSlots.release();
+            log.warn("[Run {}] Batch resume rejected — provider pool full: {}", runId, e.getMessage());
+            stateStore.markFailed(runId, "Batch resume failed: provider queue full — " + e.getMessage());
+            return;
+        }
+
+    }
+
+    /** Executes the batch resume pipeline body inside a provider pool slot. */
+    private void runBatchResumeInPool(String runId, PipelineRun run, boolean slotAcquired) {
         // H3 fix: register thread so cancelRun() can interrupt batch resume operations
         pipelineThreads.put(runId, Thread.currentThread());
 
@@ -3758,7 +3884,7 @@ public class PipelineHarness {
         } finally {
             // H2+H3 cleanup: release semaphore and unregister thread
             pipelineThreads.remove(runId);
-            if (acquired) runSlots.release();
+            if (slotAcquired) runSlots.release();
         }
     }
 }

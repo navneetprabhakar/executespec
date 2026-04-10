@@ -86,6 +86,11 @@ public class CustomMetricsConfig {
     public static final String PREVIEW_DEPLOY_DURATION = "executespec.preview.deploy_duration";
     public static final String PREVIEW_FAILURES = "executespec.preview.failures";
 
+    /** Per-provider run pool */
+    public static final String PROVIDER_POOL_ACTIVE = "executespec.provider.pool.active";
+    public static final String PROVIDER_POOL_QUEUED = "executespec.provider.pool.queued";
+    public static final String PROVIDER_POOL_CAPACITY = "executespec.provider.pool.capacity";
+
     /** Deploy */
     public static final String DEPLOY_TOTAL = "executespec.deploy.total";
     public static final String DEPLOY_DURATION = "executespec.deploy.duration";
