@@ -884,6 +884,29 @@ Central orchestrator that manages the entire pipeline lifecycle. Handles both CL
 |--------|-----------|-------------|
 | `runBackgroundValidation` | `void runBackgroundValidation(String runId, PipelineRun run, List<WorkerReport> reports, String planJson, String userRequest, CompileResult compileResult, boolean computeHadFailures)` | Shared method that runs ReviewerAgentV2, TestGenOrchestrator, TestPreviewCoordinator, and ValidationReport generation in a background virtual thread (`bg-validation-{runId}`). Called from both the main pipeline flow and the iteration/resume paths. |
 
+**PlannerAgent Retry (transient LLM failure hardening):**
+
+`executeRunAsync()` wraps `plannerAgent.plan()` in an inline retry loop before propagating the exception to the outer `markFailed` handler:
+
+```java
+int planAttempt = 0;
+long[] planBackoffs = {5_000L, 15_000L};  // 5s then 15s
+while (true) {
+    try {
+        plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
+        break;
+    } catch (Exception planEx) {
+        if (planAttempt >= planBackoffs.length) throw planEx;
+        log.warn("[PipelineHarness][{}] PlannerAgent attempt {} failed...", ...);
+        Thread.sleep(planBackoffs[planAttempt++]);
+    }
+}
+```
+
+- Up to **3 total attempts** (2 retries) with 5 s / 15 s backoff
+- Only runs inside the existing observation scope — the outer catch still calls `markFailed` if all attempts are exhausted
+- Eliminates "0/0 tasks" failures caused by transient LLM provider errors during planning
+
 **Gate Architecture (Redis-backed):**
 
 Gates use Redis polling (500ms interval, 2h TTL) so that HTTP approve/reject calls work regardless of which server instance receives them:
@@ -1516,9 +1539,20 @@ Thread.ofVirtual().name("preview-cr-" + runId.substring(0, 8))
 - Per-run preview start limit (tier-based, from `TierConfig.maxPreviewStarts`)
 - Idempotent: returns existing session if already ANALYZING/BUILDING/STARTING/RUNNING; clears and retries if FAILED/TIMED_OUT
 
+**Container Console (Docker mode only):**
+
+`execInContainer(runId, cmd, args)` allows allowlisted commands to be run inside the live app container via `docker compose exec -T`:
+
+- **Server-side allowlist:** `ls`, `ps`, `cat`, `curl`, `env`, `df`, `free`, `netstat`, `ss`, `ping`, `whoami`, `hostname`, `date`, `uptime`, `pwd`
+- **Shell metacharacter rejection:** `|`, `&`, `;`, `` ` ``, `>`, `<`, `..`, `\n` — throws `IllegalArgumentException` before exec
+- **State guard:** throws `IllegalStateException` (→ HTTP 503) if preview is not `RUNNING`
+- **Docker-only:** Cloud Run mode returns `IllegalStateException` ("exec not supported in cloud-run mode")
+- Delegates to `ComposeExecutor.execInService(projectName, "app", cmd, Duration.ofSeconds(10))`
+- Returns `ExecResult(stdout, stderr, exitCode)` — exposed via `POST /api/runs/{runId}/preview/exec`
+
 **TTL Enforcement:**
 
-A `@Scheduled` method runs every 30 seconds to expire previews past their TTL (5 minutes, configurable via `preview.preview-ttl-minutes`). Expired Docker previews are torn down via `docker compose down`; expired Cloud Run previews trigger `cleanupCloudRun()`.
+A `@Scheduled` method runs every 30 seconds to expire previews past their TTL (**30 minutes**, configurable via `preview.preview-ttl-minutes`). Expired Docker previews are torn down via `docker compose down`; expired Cloud Run previews trigger `cleanupCloudRun()`.
 
 **Project Type Detection:**
 
@@ -2132,7 +2166,32 @@ EscalationService.escalate(task)
   |-- workerPool.resubmitTask(task, runId)
 ```
 
-### 19.7 Worker Stall Detection
+### 19.7 PartialRunResumeService
+
+**File:** `harness/PartialRunResumeService.java`
+
+Scheduled job that automatically resumes `PARTIAL` runs — runs where some tasks completed but at least one failed or got stuck before the pipeline could finish.
+
+**Trigger:** `@Scheduled(fixedDelay = 5 * 60 * 1000)` — every 5 minutes
+**Lock:** `@SchedulerLock(name = "partial-run-resume", lockAtMostFor = "4m")` — prevents concurrent sweeps in multi-instance deployments
+
+**Detection Logic:**
+- Queries `PipelineRunRepository.findByStatusIn(List.of("PARTIAL"))`
+- Filters to runs where `completedAt < Instant.now().minusSeconds(600)` (10-minute debounce — ensures runs that are still finishing don't get swept prematurely)
+- Skips runs where `harness.isRunActive(runId)` returns true (already being processed by a pipeline thread)
+
+**Recovery Flow per run:**
+1. Find tasks with status `FAILED` or `STUCK` (up to 3 tasks per sweep per run)
+2. Call `stateStore.markWorking(runId)` — sets run status back to `WORKING`
+3. Call `harness.retryPartialTask(runId, taskId)` for each — same codepath as the manual retry button in the UI
+
+**Safety Limits:**
+- Max 3 tasks retried per run per invocation (prevents thundering herd)
+- Tasks already at `task-max-retries` (default: 3) are skipped by the existing retry guard and bubble up as permanently failed
+
+**Note:** This service is a companion to `StuckRunMonitor` (detects individual stuck tasks mid-run) and handles the terminal-status gap where a run reached `PARTIAL` and would otherwise require manual intervention.
+
+### 19.8 Worker Stall Detection
 
 The 25-minute wall-clock worker time limit includes stall detection with model escalation. WorkerAgent uses non-JSON escalation when a worker response does not start with `{` (not a completion report).
 
@@ -2341,6 +2400,7 @@ billing:
 | `concurrency.max-task-duration-minutes` | `int` | 25 | Max wall-clock time per task |
 | `concurrency.max-iterations` | `int` | 80 | Max agentic loop iterations per task |
 | `concurrency.safety-iteration-cap` | `int` | 500 | Hard iteration cap (safety net) |
+| `concurrency.task-max-retries` | `int` | 3 | Max per-task retry attempts before marking permanently failed (increased from 2 to improve pipeline success rate) |
 | `shell.sandbox-enabled` | `boolean` | true | Enable shell command sandboxing |
 | `shell.timeout-seconds` | `int` | 300 | Max shell command execution time |
 | `compiler.enabled` | `boolean` | true | Enable post-worker compilation |

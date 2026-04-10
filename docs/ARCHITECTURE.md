@@ -125,6 +125,7 @@ graph TB
 
     subgraph "Service Layer"
         PH[PipelineHarness]
+        PRRS[PartialRunResumeService]
         PS[PreviewService]
         DS[DeploymentService]
         AS[AuthService]
@@ -194,6 +195,8 @@ graph TB
     FFC --> FFS
     PAC --> PAS
 
+    PRRS --> PH & SS
+
     PH --> PA & WA & RA & CA & TGO
     PH --> STE & GMS & GS
     PH --> SS & SB
@@ -216,7 +219,7 @@ graph TB
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** ProviderRunPoolManager (per-provider PriorityBlockingQueue, ENTERPRISE > PRO > FREE) → plan → approve (Redis + DB fallback gate) → work (tiered parallel tasks, progressive merge per task with fast syntax check) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL, skipped for batch runs) → durable background validation (DB-tracked: review → test gen → preview reuse → test exec → validation report). Merge is automatic (no manual gate). **Batch mode:** BatchClientRouter → BatchPollService → BatchResumeService (resolves WORKHORSE model/provider) → auto-retry failed tasks in real-time → compile. **Distributed SSE:** Redis pub/sub (`sse:channel:{runId}`) with replay log (`sse:replay:{runId}`, 200-event cap) for Last-Event-ID reconnection.
+**Pipeline flow:** ProviderRunPoolManager (per-provider PriorityBlockingQueue, ENTERPRISE > PRO > FREE) → plan (PlannerAgent with 3-attempt retry, 5 s / 15 s backoff) → approve (Redis + DB fallback gate) → work (tiered parallel tasks, progressive merge per task with fast syntax check, `task-max-retries=3`) → compile → auto-merge all → **COMPLETE** → auto-preview (30-min TTL, skipped for batch runs) → durable background validation (DB-tracked: review → test gen → preview reuse → test exec → validation report). Merge is automatic (no manual gate). **Batch mode:** BatchClientRouter → BatchPollService → BatchResumeService (resolves WORKHORSE model/provider) → auto-retry failed tasks in real-time → compile. **PARTIAL recovery:** `PartialRunResumeService` (`@Scheduled` every 5 min, `@SchedulerLock`) auto-resumes stale PARTIAL runs by calling `retryPartialTask()` for up to 3 failed/stuck tasks per sweep. **Distributed SSE:** Redis pub/sub (`sse:channel:{runId}`) with replay log (`sse:replay:{runId}`, 200-event cap) for Last-Event-ID reconnection.
 
 **Background validation lifecycle:** After COMPLETE, `PipelineHarness` spawns a virtual thread (`bg-validation-{runId}`) tracked in `backgroundValidationRuns` ConcurrentHashSet. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` are deferred to the background thread's `finally` block. On failure, emits `VALIDATION_FAILED` SSE event.
 
@@ -869,6 +872,8 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 | Background validation failure | v2: `background_validation` table tracks stage + attempts; auto-retry 3x; manual retry via `POST /api/runs/{id}/retry-validation` |
 | Resume/retry path stale | `doReviewAndMerge()` not updated for background validation pattern |
 | Gate lost on server restart | v2: `GateStore` dual-writes to Redis + `gate_record` table; falls back to DB on Redis miss |
+| PlannerAgent transient LLM failure kills pipeline thread at 0/0 tasks | Inline 3-attempt retry (5 s / 15 s backoff) in `PipelineHarness.executeRunAsync()` before propagating to `markFailed` |
+| PARTIAL runs require manual retry | `PartialRunResumeService` auto-resumes stale PARTIAL runs every 5 min (up to 3 tasks per sweep) |
 
 ---
 
