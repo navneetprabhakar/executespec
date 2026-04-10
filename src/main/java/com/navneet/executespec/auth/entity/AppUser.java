@@ -155,6 +155,16 @@ public class AppUser {
     @Column(name = "confluence_api_token")
     private String confluenceApiToken;
 
+    // ── Session invalidation ─────────────────────────────────────────────────
+
+    /**
+     * Per-user JWT invalidation timestamp.
+     * If set, any JWT with {@code iat < tokenInvalidatedAt} is rejected.
+     * Null means no per-user invalidation (global epoch check still applies).
+     */
+    @Column(name = "token_invalidated_at")
+    private Instant tokenInvalidatedAt;
+
     // ── OAuth ────────────────────────────────────────────────────────────────
 
     @Column(name = "oauth_provider")

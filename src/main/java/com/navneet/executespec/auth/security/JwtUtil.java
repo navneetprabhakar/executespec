@@ -117,19 +117,38 @@ public class JwtUtil {
     }
 
     public boolean isTokenValid(String token) {
+        return isTokenValid(token, null);
+    }
+
+    /**
+     * Validates a JWT token with optional per-user invalidation check.
+     *
+     * @param token                  the JWT to validate
+     * @param userTokenInvalidatedAt if non-null, tokens issued before this instant are rejected
+     *                               (per-user session invalidation, complementing the global epoch)
+     */
+    public boolean isTokenValid(String token, Instant userTokenInvalidatedAt) {
         try {
             Claims claims = parseToken(token);
+            Date issuedAt = claims.getIssuedAt();
 
-            // Force-logout check: reject tokens issued before the logout epoch
+            // Global force-logout check: reject tokens issued before the logout epoch
             String epoch = featureFlagService.getString("force_logout_epoch", null);
             if (epoch != null) {
                 Instant logoutEpoch = Instant.parse(epoch);
-                Date issuedAt = claims.getIssuedAt();
                 if (issuedAt != null && issuedAt.toInstant().isBefore(logoutEpoch)) {
                     log.debug("JWT rejected: issued before force_logout_epoch (iat={}, epoch={})",
                             issuedAt.toInstant(), logoutEpoch);
                     return false;
                 }
+            }
+
+            // Per-user invalidation check: reject tokens issued before the user's invalidation timestamp
+            if (userTokenInvalidatedAt != null && issuedAt != null
+                    && issuedAt.toInstant().isBefore(userTokenInvalidatedAt)) {
+                log.debug("JWT rejected: issued before per-user token_invalidated_at (iat={}, invalidatedAt={})",
+                        issuedAt.toInstant(), userTokenInvalidatedAt);
+                return false;
             }
 
             return true;
