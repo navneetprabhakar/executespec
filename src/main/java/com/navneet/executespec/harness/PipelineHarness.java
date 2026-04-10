@@ -175,6 +175,7 @@ public class PipelineHarness {
     // ── Single-shot fast path (Phase 1 simplification) ──────────────────────
     private final com.navneet.executespec.agent.RequestTriageService requestTriageService;
     private final SingleShotExecutor singleShotExecutor;
+    private final com.navneet.executespec.agent.TriageEscalationDetector triageEscalationDetector;
 
     // ── Test generation pipeline ─────────────────────────────────────────────
     private final com.navneet.executespec.testgen.TestGenOrchestrator testGenOrchestrator;
@@ -1730,6 +1731,7 @@ public class PipelineHarness {
                 }
 
                 // Execute single-shot: synthetic plan → auto-approve → worker on main branch
+                Instant singleShotStart = Instant.now();
                 var singleShotResult = singleShotExecutor.execute(run, effectiveRequest);
 
                 if (!singleShotResult.success()) {
@@ -1751,6 +1753,17 @@ public class PipelineHarness {
                     compileResult = compilerAgent.runCompileAndFix(runId);
                 } catch (Exception compileEx) {
                     log.warn("[SingleShot] Compile failed for run {}: {}", runId, compileEx.getMessage());
+                }
+
+                // ── Triage escalation detection (feedback loop) ─────────────
+                // Records whether thresholds (iterations/files/errors/duration) were exceeded.
+                // Does not re-execute — outcome stored in triage_outcome for analytics.
+                var escalation = triageEscalationDetector.evaluate(
+                        runId, singleShotResult.reports(), compileResult, singleShotStart, "COMPLETE");
+                if (escalation.shouldEscalate()) {
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                            "[Triage] This request exceeded single-shot thresholds (" + escalation.reason()
+                            + "). Future similar requests will be routed to multi-task."));
                 }
 
                 // ── Mark COMPLETE + auto-start preview (both modes) ─────────
