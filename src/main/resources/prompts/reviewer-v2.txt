@@ -7,14 +7,27 @@ Your review focuses on issues that compilers and linters CANNOT catch:
 - Is error handling adequate?
 - Are there security red flags?
 
-REVIEW FLAGS — scan every file you read for these red flags across ALL five axes:
-  CORRECTNESS:  Spec mismatch? Missing edge case? Off-by-one? Wrong return type?
-  READABILITY:  Deep nesting (>3 levels)? Cryptic names? Clever tricks over clarity?
-  ARCHITECTURE: Circular dependency? Business logic in controller? Wrong abstraction layer?
-  SECURITY:     Unvalidated input? Hardcoded secret? Missing auth check? Raw SQL?
-  PERFORMANCE:  N+1 query? Unbounded list fetch? Large object in hot path? Missing pagination?
-A file that compiles and matches the spec can still fail on security or performance.
+REVIEW FLAGS — scan every file you read for these red flags across ALL six axes:
+  CORRECTNESS:    Spec mismatch? Missing edge case? Off-by-one? Wrong return type?
+  READABILITY:    Deep nesting (>3 levels)? Cryptic names? Clever tricks over clarity?
+  ARCHITECTURE:   Circular dependency? Business logic in controller? Wrong abstraction layer?
+  SECURITY:       Unvalidated input? Hardcoded secret? Missing auth check? Raw SQL?
+  PERFORMANCE:    N+1 query? Unbounded list fetch? Large object in hot path? Missing pagination?
+  DEPLOYABILITY:  Can this project actually build and run in a container?
+    - package.json has valid "start" or "dev" script that starts the server
+    - All imports/requires resolve to actual files or declared dependencies
+    - Server binds to 0.0.0.0 (not just localhost) — required for Docker
+    - Port configuration matches what the app expects (PORT env var used, not hardcoded)
+    - No missing dependencies referenced in code but absent from package.json/pom.xml/requirements.txt
+    - Static assets referenced in HTML (CSS, JS, images) actually exist in the workspace
+    - Entry point file referenced in package.json "main" or Dockerfile CMD exists
+A file that compiles and matches the spec can still fail on security, performance, or deployability.
 Flag anything suspicious — then decide severity using the rules below.
+
+COMPILATION STATUS:
+The compilation status section in the user prompt tells you whether the code compiled successfully.
+If compilation FAILED, prioritize checking the files mentioned in the error summary for regressions
+or semantic issues that the compiler agent may have introduced while fixing syntax errors.
 
 You do NOT need to check for:
 - Compilation errors (already validated)
@@ -153,6 +166,9 @@ CRITICAL (auto-fix required, blocks completion):
 - Missing auth/authorization check on endpoint that should be protected
 - Unbounded data fetching (no pagination, no LIMIT) on list endpoints
 - Race condition in shared state mutation
+- Missing or invalid start/dev script in package.json (app won't launch)
+- Missing dependency in package.json/pom.xml that is imported in code
+- Entry point file referenced in package.json "main" or Dockerfile CMD does not exist
 
 IMPORTANT (auto-fix attempted, reported if unfixable):
 - Incorrect HTTP status codes (200 for create instead of 201)

@@ -18,7 +18,7 @@ public class PreviewVmProperties {
 
     private List<VmConfig> vms = new ArrayList<>();
 
-    private int defaultTtlHours = 2;
+    private int defaultTtlMinutes = 20;
 
     @Data
     public static class GatewayConfig {
