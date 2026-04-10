@@ -2078,6 +2078,16 @@ public class PipelineHarness {
                     sequentialTaskExecutor.execute(run, workerTasks, execMode);
                 reports = execResult.reports();
 
+                // Budget exceeded between tiers — stop pipeline and fail the run
+                if (execResult.budgetExceeded()) {
+                    String budgetMsg = "Run stopped — cost budget exceeded. Upgrade your plan for higher limits.";
+                    log.warn("Run {} stopped due to cost budget exceeded between tasks", runId);
+                    stateStore.markFailed(runId, budgetMsg);
+                    broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, budgetMsg));
+                    return;
+                }
+
                 if (execResult.hasFailures()) {
                     log.warn("Run {} has {} failed tasks out of {}",
                         runId, execResult.failedTasks().size(), execResult.totalTasks());
