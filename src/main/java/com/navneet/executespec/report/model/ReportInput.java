@@ -18,13 +18,15 @@ public record ReportInput(
     List<AgentTask> tasks,
     TestExecutionSummary testSummary,
     List<TestResult> testResults,
-    boolean generatedAfterImprovements
+    boolean generatedAfterImprovements,
+    /** Preview URL at the time the report was generated. Null if preview expired or never started. */
+    String previewUrl
 ) {
     /** Backward-compatible constructor for call sites that don't have test data. */
     public ReportInput(PipelineRun run, List<WorkerReport> workerReports,
                        ReviewReportV2 review, CompileResult compileResult,
                        List<AgentTask> tasks) {
-        this(run, workerReports, review, compileResult, tasks, null, List.of(), false);
+        this(run, workerReports, review, compileResult, tasks, null, List.of(), false, null);
     }
 
     /** Constructor with test data but no afterImprovements flag. */
@@ -32,6 +34,6 @@ public record ReportInput(
                        ReviewReportV2 review, CompileResult compileResult,
                        List<AgentTask> tasks, TestExecutionSummary testSummary,
                        List<TestResult> testResults) {
-        this(run, workerReports, review, compileResult, tasks, testSummary, testResults, false);
+        this(run, workerReports, review, compileResult, tasks, testSummary, testResults, false, null);
     }
 }

@@ -44,8 +44,13 @@ public class AnthropicBatchClient implements LlmBatchClient {
                 .build();
     }
 
+    private static final int SUBMIT_MAX_ATTEMPTS = 3;
+    private static final long[] SUBMIT_BACKOFF_MS = {1_000L, 4_000L, 16_000L};
+
     @Override
     public String submitBatch(String runId, List<BatchRequest> requests, String apiKey) {
+        // Build the request body once — reused across retry attempts
+        final String bodyJson;
         try {
             ArrayNode requestsArray = objectMapper.createArrayNode();
             for (BatchRequest req : requests) {
@@ -74,34 +79,75 @@ public class AnthropicBatchClient implements LlmBatchClient {
 
             ObjectNode body = objectMapper.createObjectNode();
             body.set("requests", requestsArray);
+            bodyJson = objectMapper.writeValueAsString(body);
+        } catch (Exception e) {
+            throw new BatchSubmissionException("Anthropic batch request serialization error: " + e.getMessage(), e);
+        }
 
-            HttpRequest httpReq = HttpRequest.newBuilder()
-                    .uri(URI.create(BASE_URL + "/v1/messages/batches"))
-                    .header("x-api-key", apiKey)
-                    .header("anthropic-version", API_VERSION)
-                    .header("anthropic-beta", BETA_HEADER)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                    .timeout(Duration.ofSeconds(60))
-                    .build();
+        // Retry loop with exponential backoff (1s, 4s, 16s)
+        Exception lastException = null;
+        for (int attempt = 1; attempt <= SUBMIT_MAX_ATTEMPTS; attempt++) {
+            try {
+                HttpRequest httpReq = HttpRequest.newBuilder()
+                        .uri(URI.create(BASE_URL + "/v1/messages/batches"))
+                        .header("x-api-key", apiKey)
+                        .header("anthropic-version", API_VERSION)
+                        .header("anthropic-beta", BETA_HEADER)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
+                        .timeout(Duration.ofSeconds(60))
+                        .build();
 
-            HttpResponse<String> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-                throw new BatchSubmissionException(
-                        "Anthropic batch submit failed: " + resp.statusCode() + " — " + resp.body(),
-                        resp.statusCode());
+                HttpResponse<String> resp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
+
+                // 4xx client errors are not retryable (bad request, auth failure)
+                if (resp.statusCode() >= 400 && resp.statusCode() < 500) {
+                    throw new BatchSubmissionException(
+                            "Anthropic batch submit failed (non-retryable): " + resp.statusCode() + " — " + resp.body(),
+                            resp.statusCode());
+                }
+                if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                    throw new BatchSubmissionException(
+                            "Anthropic batch submit failed: " + resp.statusCode() + " — " + resp.body(),
+                            resp.statusCode());
+                }
+
+                JsonNode result = objectMapper.readTree(resp.body());
+                String batchId = result.path("id").asText();
+                log.info("[Run {}] Anthropic batch submitted: {} ({} requests, attempt {}/{})",
+                        runId, batchId, requests.size(), attempt, SUBMIT_MAX_ATTEMPTS);
+                return batchId;
+
+            } catch (BatchSubmissionException e) {
+                // Non-retryable 4xx — rethrow immediately
+                if (e.getStatusCode() >= 400 && e.getStatusCode() < 500) {
+                    throw e;
+                }
+                lastException = e;
+                log.warn("[Run {}] Anthropic batch submit attempt {}/{} failed: {}",
+                        runId, attempt, SUBMIT_MAX_ATTEMPTS, e.getMessage());
+            } catch (Exception e) {
+                lastException = e;
+                log.warn("[Run {}] Anthropic batch submit attempt {}/{} error: {}",
+                        runId, attempt, SUBMIT_MAX_ATTEMPTS, e.getMessage());
             }
 
-            JsonNode result = objectMapper.readTree(resp.body());
-            String batchId = result.path("id").asText();
-            log.info("[Run {}] Anthropic batch submitted: {} ({} requests)", runId, batchId, requests.size());
-            return batchId;
-
-        } catch (BatchSubmissionException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new BatchSubmissionException("Anthropic batch submit error: " + e.getMessage(), e);
+            if (attempt < SUBMIT_MAX_ATTEMPTS) {
+                long backoff = SUBMIT_BACKOFF_MS[attempt - 1];
+                log.info("[Run {}] Retrying batch submit in {}ms (attempt {}/{})", runId, backoff, attempt + 1, SUBMIT_MAX_ATTEMPTS);
+                try {
+                    Thread.sleep(backoff);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new BatchSubmissionException("Batch submit interrupted during retry backoff", ie);
+                }
+            }
         }
+
+        throw new BatchSubmissionException(
+                "Anthropic batch submit failed after " + SUBMIT_MAX_ATTEMPTS + " attempts: "
+                        + (lastException != null ? lastException.getMessage() : "unknown error"),
+                lastException);
     }
 
     @Override

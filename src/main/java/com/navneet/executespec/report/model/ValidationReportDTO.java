@@ -27,5 +27,7 @@ public record ValidationReportDTO(
     // Phase 3: Accuracy assessment fields (nullable — older runs won't have these)
     Integer accuracyScore,     // 0-100 spec adherence score
     String accuracyGrade,      // A/B/C/D/F
-    String accuracyJson        // full AccuracyReport JSON for frontend detail view
+    String accuracyJson,       // full AccuracyReport JSON for frontend detail view
+    // Preview URL at time of report generation (nullable — batch runs and expired previews won't have this)
+    String previewUrl
 ) {}
