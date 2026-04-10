@@ -77,6 +77,7 @@ public class SequentialTaskExecutor {
     private final CompilerAgent compilerAgent;
     private final SubtaskDecomposer subtaskDecomposer;
     private final ProgressiveMergeValidator mergeValidator;
+    private final AdaptiveIterationService adaptiveIterationService;
 
     /**
      * Result of sequential execution across all tasks.
@@ -501,6 +502,13 @@ public class SequentialTaskExecutor {
         String workerStatus = normalizeStatus(report.getStatus());
         stateStore.completeTask(taskId, report);
         trackMetric(runId, task, model, 1, "COMPLETE".equals(workerStatus), durationMs, report);
+
+        // Record actual iterations for adaptive cap tuning (only on genuine completions)
+        if ("COMPLETE".equals(workerStatus) && report.getIterationCount() > 0) {
+            adaptiveIterationService.recordTaskCompletion(
+                    task.getComplexity() != null ? task.getComplexity() : "MEDIUM",
+                    report.getIterationCount());
+        }
 
         return report;
     }
