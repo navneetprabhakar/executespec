@@ -48,6 +48,7 @@ public class PlannerAgent {
     private final MergeConflictAnalyser conflictAnalyser;
     private final ModelResolver modelResolver;
     private final ModelRegistry modelRegistry;
+    private final PromptAssembler promptAssembler;
 
     @Value("classpath:prompts/planner.txt")
     private Resource plannerPrompt;
@@ -245,18 +246,14 @@ public class PlannerAgent {
      */
     public TaskPlan replanWithFeedback(String originalGoal, String existingPlanJson, String feedback, String runId) {
         log.info("Planner re-planning with feedback for run {}", runId);
-        String fullPromptText;
-        try {
-            fullPromptText = plannerPrompt.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load planner prompt", e);
-        }
+        // Resolve includes; keep edit-mode block by removing its markers but not the content
+        String fullPromptText = promptAssembler.assemble("planner.txt",
+                java.util.Map.of("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic")));
 
         // Activate edit mode: keep the {{#if editMode}}...{{/if}} block, inject variables
         String systemPrompt = fullPromptText
             .replace("{{#if editMode}}", "")
             .replace("{{/if}}", "")
-            .replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"))
             .replace("{userFeedback}", feedback)
             .replace("{currentPlan}", existingPlanJson);
 
@@ -339,15 +336,11 @@ public class PlannerAgent {
     }
 
     private String loadPrompt() {
-        try {
-            String raw = plannerPrompt.getContentAsString(StandardCharsets.UTF_8);
-            // Strip the edit-mode block for fresh plans (only active in replanWithFeedback)
-            raw = stripEditModeBlock(raw);
-            // Substitute config-driven model name so prompt templates stay model-agnostic
-            return raw.replace("{{WORKER_MODEL}}", modelRegistry.workhouseModelFor("anthropic"));
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load planner prompt", e);
-        }
+        // Assemble with include resolution + variable substitution
+        String raw = promptAssembler.assemble("planner.txt",
+                java.util.Map.of("WORKER_MODEL", modelRegistry.workhouseModelFor("anthropic")));
+        // Strip the edit-mode block for fresh plans (only active in replanWithFeedback)
+        return stripEditModeBlock(raw);
     }
 
     /**
