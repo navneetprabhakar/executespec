@@ -4,12 +4,14 @@ import {
   analyzePreview, probeApiDocs, runTests,
 } from '@/lib/api';
 import type { LocalPreviewStatus, PreviewAnalysis, ApiDocsProbeResult } from '@/lib/api';
+import ConsolePanel from './ConsolePanel';
 import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
 import {
   Play, Square, RefreshCw, ChevronDown, Terminal, ExternalLink,
   Filter, AlertTriangle, Database, Eye, EyeOff, X, Shield, Clock, TestTube2,
 } from 'lucide-react';
+import { TerminalSquare } from 'lucide-react';
 
 const BACKEND_ONLY = new Set(['SPRING_BOOT', 'GRADLE', 'NODE_BACKEND', 'PYTHON']);
 
@@ -65,6 +67,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
   const [countdown, setCountdown] = useState<number>(0);
   const [warmupReady, setWarmupReady] = useState(false);
   const [testsTriggered, setTestsTriggered] = useState(false);
+  const [showConsole, setShowConsole] = useState(false);
   const logPollRef = useRef<ReturnType<typeof setInterval>>();
   const countdownRef = useRef<ReturnType<typeof setInterval>>();
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -440,6 +443,21 @@ export default function PreviewTab({ runId }: { runId: string }) {
               <span className="text-[9px] font-semibold uppercase tracking-wider opacity-70">Beta</span>
             </button>
           )}
+          {isRunning && (
+            <button
+              onClick={() => setShowConsole(c => !c)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
+                showConsole
+                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                  : 'bg-[var(--gray-200)] text-muted hover:text-secondary hover:bg-[var(--gray-300)]'
+              )}
+              title="Toggle container console"
+            >
+              <TerminalSquare className="h-3 w-3" />
+              Console
+            </button>
+          )}
           {(isRunning || isStartingPhase) && (
             <button
               onClick={handleStop}
@@ -558,6 +576,13 @@ export default function PreviewTab({ runId }: { runId: string }) {
           </div>
         )}
       </div>
+
+      {/* ── Console panel ── */}
+      {isRunning && showConsole && (
+        <div className="border-t border-[var(--border-default)] flex-shrink-0 p-3">
+          <ConsolePanel runId={runId} />
+        </div>
+      )}
 
       {/* ── Log panel (collapsible) ── */}
       {hasLogs && (

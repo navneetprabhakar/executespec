@@ -388,6 +388,51 @@ public class PreviewService {
         return logs.isEmpty() ? "No logs available yet." : logs;
     }
 
+    // ── Allowed commands for container exec (Console feature) ─────────────────
+    private static final java.util.Set<String> EXEC_ALLOWLIST = java.util.Set.of(
+            "ls", "ps", "cat", "curl", "env", "df", "free", "netstat", "ss", "ping",
+            "whoami", "hostname", "date", "uptime", "pwd"
+    );
+
+    /**
+     * Execute an allowlisted command inside the running preview app container.
+     * Only available in Docker mode (not Cloud Run or VM).
+     *
+     * @param runId   run owning the preview
+     * @param cmd     command name (must be in EXEC_ALLOWLIST)
+     * @param args    command arguments (must not contain shell metacharacters)
+     * @return stdout/stderr from the container exec
+     * @throws IllegalStateException   if preview is not running in Docker mode
+     * @throws IllegalArgumentException if command is not allowlisted or args are unsafe
+     */
+    public ExecResult execInContainer(String runId, String cmd, List<String> args) {
+        PreviewSession session = active.get(runId);
+        if (session == null || session.status() != PreviewStatus.RUNNING) {
+            throw new IllegalStateException("Preview is not running for run " + runId);
+        }
+        if (session.composeProjectName() == null) {
+            throw new IllegalStateException("Container exec is only available in Docker preview mode");
+        }
+        if (!EXEC_ALLOWLIST.contains(cmd)) {
+            throw new IllegalArgumentException("Command not allowed: " + cmd
+                    + ". Allowed: " + String.join(", ", EXEC_ALLOWLIST.stream().sorted().toList()));
+        }
+        // Reject args containing shell metacharacters to prevent injection
+        for (String arg : args) {
+            if (arg.contains("|") || arg.contains("&") || arg.contains(";")
+                    || arg.contains("$") || arg.contains("`") || arg.contains(">")
+                    || arg.contains("<") || arg.contains("..") || arg.contains("\n")) {
+                throw new IllegalArgumentException("Argument contains unsafe characters: " + arg);
+            }
+        }
+        var fullCmd = new java.util.ArrayList<String>();
+        fullCmd.add(cmd);
+        fullCmd.addAll(args);
+        log.info("[PreviewExec][{}] exec: {}", runId, fullCmd);
+        return composeExecutor.execInService(session.composeProjectName(), "app",
+                fullCmd, java.time.Duration.ofSeconds(10));
+    }
+
     /**
      * Fetch Cloud Run service logs via gcloud CLI.
      */
