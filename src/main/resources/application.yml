@@ -242,7 +242,7 @@ agent:
     max-runs: 50   # Temporarily increased for load testing (was 10)
     max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
     safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
-    task-max-retries: 2           # Auto-retry failed tasks/subtasks up to 2 times before marking FAILED
+    task-max-retries: 3           # Auto-retry failed tasks/subtasks up to 3 times before marking FAILED
   provider-pools:
     default-concurrency: 3        # Per-provider concurrent run limit (default for any unspecified provider)
     default-queue-capacity: 10    # Max runs waiting per provider before HTTP 429

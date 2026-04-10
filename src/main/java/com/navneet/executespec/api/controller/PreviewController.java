@@ -239,6 +239,38 @@ public class PreviewController {
         return ResponseEntity.ok(new ApiDocsProbeResult(false, null, null));
     }
 
+    // ── Console exec ─────────────────────────────────────────────────────────
+
+    public record ExecRequest(String cmd, List<String> args) {}
+
+    public record ExecResponse(String stdout, String stderr, int exitCode) {}
+
+    /**
+     * Execute an allowlisted command inside the running preview container.
+     * Only available in Docker preview mode (not Cloud Run or VM).
+     *
+     * <p>The command is run non-interactively via {@code docker compose exec -T}.
+     * A server-side allowlist prevents arbitrary code execution.
+     */
+    @PostMapping("/{runId}/preview/exec")
+    public ResponseEntity<ExecResponse> execInContainer(
+            @PathVariable String runId,
+            @RequestBody ExecRequest request,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+        log.info("POST /api/runs/{}/preview/exec cmd={}", runId, request.cmd());
+
+        try {
+            List<String> args = request.args() != null ? request.args() : List.of();
+            ExecResult result = previewService.execInContainer(runId, request.cmd(), args);
+            return ResponseEntity.ok(new ExecResponse(result.stdout(), result.stderr(), result.exitCode()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(new ExecResponse("", e.getMessage(), -1));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(503).body(new ExecResponse("", e.getMessage(), -1));
+        }
+    }
+
     // ── Mapping ──────────────────────────────────────────────────────────────
 
     private PreviewStatusDto toDto(String runId, PreviewSession session) {

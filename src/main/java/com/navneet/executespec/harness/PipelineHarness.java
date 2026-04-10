@@ -1853,7 +1853,25 @@ public class PipelineHarness {
             try (Observation.Scope planScope = planObs.openScope()) {
                 // Pass the stored plannerModel so UI model-overrides are honoured.
                 // run was already fetched from DB above, no extra DB call needed.
-                plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
+                // Retry up to 2 times (3 total attempts) with backoff — absorbs transient LLM failures
+                // that would otherwise kill the pipeline thread at 0/0 tasks.
+                plan = null;
+                int planAttempt = 0;
+                long[] planBackoffs = {5_000L, 15_000L};
+                while (true) {
+                    try {
+                        plan = plannerAgent.plan(effectiveRequest, runId, run.getPlannerModel());
+                        break;
+                    } catch (Exception planEx) {
+                        if (planAttempt >= planBackoffs.length) throw planEx;
+                        log.warn("[PipelineHarness][{}] PlannerAgent attempt {} failed, retrying in {}s: {}",
+                                 runId, planAttempt + 1, planBackoffs[planAttempt] / 1000, planEx.getMessage());
+                        try { Thread.sleep(planBackoffs[planAttempt++]); } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw planEx;
+                        }
+                    }
+                }
                 stateStore.savePlan(runId, plan);
 
                 // Resolve and persist ui_style for frontend task generation (3-signal priority)
