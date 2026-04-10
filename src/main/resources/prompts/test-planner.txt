@@ -20,6 +20,8 @@ USER SPECIFICATION:
 API CONVENTIONS:
 {conventions_doc}
 
+{api_surface}
+
 Generate a JSON array of test tasks. Each task has:
 - taskName: PascalCase class name ending in "Test" (e.g., "UserCrudTest")
 - description: 1-2 sentence description of what this test class verifies

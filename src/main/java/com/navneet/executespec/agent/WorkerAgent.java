@@ -54,6 +54,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -128,6 +129,8 @@ public class WorkerAgent {
         boolean midTaskRecoveryAttempted;
         boolean urgencyInjected;
         boolean isSubtask;
+        int lastCommitIteration = -1;       // iteration when last commit was dispatched
+        int lastListFilesIteration = -1;    // iteration when last listFiles/list_files was dispatched
         int effectiveIterationLimit;
         Instant deadline;
         Instant lastCheckpointTime;
@@ -641,6 +644,12 @@ public class WorkerAgent {
                         continue; // skip dispatch, result already cached
                     }
                     String result = dispatchTool(tc, runId, taskId);
+                    // Track commit / listFiles iterations for self-review enforcement
+                    if ("commit".equals(tc.name()) || "git_commit".equals(tc.name())) {
+                        state.lastCommitIteration = state.iteration;
+                    } else if ("listFiles".equals(tc.name()) || "list_files".equals(tc.name())) {
+                        state.lastListFilesIteration = state.iteration;
+                    }
                     if (isFileWriteTool(tc.name())) {
                         state.fileWritesSinceCheck++; state.totalFileWrites++;
                         // Invalidate dedup cache for written path
@@ -751,6 +760,12 @@ public class WorkerAgent {
                     if (dedupKey != null) {
                         state.readOnlyToolCache.put(dedupKey, result);
                     }
+                    // Track commit / listFiles iterations for self-review enforcement
+                    if ("commit".equals(tc.name()) || "git_commit".equals(tc.name())) {
+                        state.lastCommitIteration = state.iteration;
+                    } else if ("listFiles".equals(tc.name()) || "list_files".equals(tc.name())) {
+                        state.lastListFilesIteration = state.iteration;
+                    }
                 }
                 if (isFileWriteTool(tc.name())) {
                     state.fileWritesSinceCheck++;
@@ -811,6 +826,17 @@ public class WorkerAgent {
                                              int maxFabricatedCompletions) {
         log.info("[Worker {}] taskComplete tool called — building completion report", taskId);
         stateStore.appendTaskLog(taskId, "TASK_COMPLETE_TOOL_CALLED");
+
+        // Self-review enforcement: reject completion if no listFiles since last commit
+        if (state.lastCommitIteration >= 0 && state.lastListFilesIteration <= state.lastCommitIteration) {
+            log.info("[Worker {}] Rejecting completion — no listFiles after commit (commit@{}, listFiles@{})",
+                    taskId, state.lastCommitIteration, state.lastListFilesIteration);
+            stateStore.appendTaskLog(taskId, "SELF_REVIEW_ENFORCED:listFiles required after commit");
+            responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(),
+                    "REJECTED: You must call listFiles after your commit to verify files exist on disk " +
+                    "before reporting done. Call listFiles(path='.') now."));
+            return null; // continue loop
+        }
         String completionJson = buildCompletionJsonFromToolCall(tc.arguments(), taskId);
         if (looksLikeCompletionReport(completionJson, taskId)) {
             int claimedFileCount = countClaimedFiles(completionJson);
@@ -913,6 +939,12 @@ public class WorkerAgent {
                         result = dispatchTool(tc, runId, taskId);
                         if (dedupKey != null) {
                             state.readOnlyToolCache.put(dedupKey, result);
+                        }
+                        // Track commit / listFiles iterations for self-review enforcement
+                        if ("commit".equals(tc.name()) || "git_commit".equals(tc.name())) {
+                            state.lastCommitIteration = state.iteration;
+                        } else if ("listFiles".equals(tc.name()) || "list_files".equals(tc.name())) {
+                            state.lastListFilesIteration = state.iteration;
                         }
                     }
                     if (isFileWriteTool(tc.name())) {
@@ -2329,7 +2361,9 @@ public class WorkerAgent {
             String runId, String taskId, String agentId,
             int iteration, boolean justCompacted,
             String complexity) {
-        String systemPrompt = loadPrompt(provider);
+        String systemPrompt = (iteration == 1)
+                ? loadPromptAndTrack(provider, runId, taskId)
+                : loadPrompt(provider);
         int maxOut = budgetMonitor.maxOutputTokens(model, complexity);
         boolean isOpenAi = "openai".equalsIgnoreCase(provider);
         boolean useNativeTools = isOpenAi;
@@ -2572,12 +2606,35 @@ public class WorkerAgent {
                 " chars omitted — use read_file for full content]...\n" + end;
     }
 
-    /** Provider-aware prompt loading via PromptAssembler; resolves {{include:...}} fragments. */
+    /** Provider-aware prompt loading via PromptAssembler; resolves {{include:...}} fragments.
+     *  STYLING_SECTION is always empty here — per-task styling is injected via buildFrontendBlock()
+     *  which loads from the UiStyleResolver design system (folder path in application.yml). */
     private String loadPrompt(String provider) {
         String providerFile = "worker-" + provider.toLowerCase() + ".txt";
         Resource providerPrompt = resourceLoader.getResource("classpath:prompts/" + providerFile);
         String promptPath = providerPrompt.exists() ? providerFile : "worker.txt";
-        return promptAssembler.assemble(promptPath);
+        return promptAssembler.assemble(promptPath, java.util.Map.of("STYLING_SECTION", ""));
+    }
+
+    /**
+     * Load prompt and record a prompt_audit row for the given run/task.
+     * Called only on iteration 1 to avoid redundant DB writes.
+     * STYLING_SECTION is always empty — styling is injected per task via buildFrontendBlock().
+     */
+    private String loadPromptAndTrack(String provider, String runId, String taskId) {
+        String providerFile = "worker-" + provider.toLowerCase() + ".txt";
+        Resource providerPrompt = resourceLoader.getResource("classpath:prompts/" + providerFile);
+        String promptPath = providerPrompt.exists() ? providerFile : "worker.txt";
+        try {
+            UUID runUuid = UUID.fromString(runId);
+            PromptAssembler.AssembledPrompt assembled =
+                    promptAssembler.assembleAndTrack(promptPath, java.util.Map.of("STYLING_SECTION", ""), runUuid, "worker");
+            stateStore.setPromptHash(taskId, assembled.hash());
+            return assembled.text();
+        } catch (Exception e) {
+            // Fall back to simple assemble — tracking must never block execution
+            return promptAssembler.assemble(promptPath, java.util.Map.of("STYLING_SECTION", ""));
+        }
     }
 
     /** Derive provider from model name via ModelRegistry; fall back to configured role provider. */

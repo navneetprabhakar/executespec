@@ -13,6 +13,8 @@ CONVENTIONS:
 USER SPECIFICATION:
 {user_request}
 
+{api_probe_results}
+
 TECHNICAL REQUIREMENTS:
 {technical_requirements}
 

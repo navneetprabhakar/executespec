@@ -1,5 +1,7 @@
 package com.navneet.executespec.testgen;
 
+import com.navneet.executespec.deployment.preview.PreviewService;
+import com.navneet.executespec.deployment.preview.PreviewStatus;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
@@ -9,7 +11,9 @@ import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -36,6 +40,11 @@ public class TestGenOrchestrator {
     private final ApplicationEventPublisher eventPublisher;
     private final SseBroadcaster broadcaster;
     private final com.navneet.executespec.deployment.preview.DevDockerfileGenerator dockerfileGenerator;
+    private final ApiProber apiProber;
+
+    /** Lazy to avoid circular dependency: PreviewService → TestPreviewCoordinator → TestGenOrchestrator */
+    @Lazy @Autowired
+    private PreviewService previewService;
 
     /**
      * Entry point — triggered when plan is approved.
@@ -65,13 +74,27 @@ public class TestGenOrchestrator {
             emitTestEvent(runId, "TEST_PLANNING_COMPLETED",
                     "Test plan created with " + tasks.size() + " test classes");
 
-            // 5. Generate test classes sequentially
+            // 5. Probe preview if already running (auto-started by PipelineHarness after COMPLETE)
+            String apiProbeResults = "";
+            try {
+                var existingPreview = previewService.getStatus(runId);
+                if (existingPreview != null && existingPreview.status() == PreviewStatus.RUNNING
+                        && existingPreview.url() != null) {
+                    log.info("[TestGen] Probing running preview at {} for run {}", existingPreview.url(), runId);
+                    apiProbeResults = apiProber.probe(existingPreview.url(), List.of());
+                }
+            } catch (Exception e) {
+                log.debug("[TestGen] Preview probe skipped for run {}: {}", runId, e.getMessage());
+            }
+
+            // 6. Generate test classes sequentially
             emitTestEvent(runId, "TEST_GENERATION_STARTED",
                     "Generating " + tasks.size() + " test classes");
 
+            final String probeResults = apiProbeResults;
             for (TestTask task : tasks) {
                 try {
-                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest, isCli, isStaticHtml);
+                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest, isCli, isStaticHtml, probeResults);
                 } catch (Exception e) {
                     log.error("[TestGen] Test generation failed for task {}: {}",
                             task.getTaskName(), e.getMessage());
@@ -81,7 +104,7 @@ public class TestGenOrchestrator {
                 }
             }
 
-            // 6. Compile all generated tests together
+            // 7. Compile all generated tests together
             emitTestEvent(runId, "TEST_COMPILATION_STARTED", "Compiling generated tests");
             TestCompilationGate.CompilationResult compilationResult = testCompilationGate.compileTests(runId);
 

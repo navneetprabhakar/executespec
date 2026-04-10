@@ -8,7 +8,11 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,6 +39,11 @@ public class PromptAssembler {
     private static final String PROMPTS_BASE = "classpath:prompts/";
 
     private final ResourceLoader resourceLoader;
+    private final PromptAuditRepository promptAuditRepository;
+
+    /** Returned by {@link #assembleAndTrack}. */
+    public record AssembledPrompt(String text, String hash) {}
+
 
     @Value("${prompts.base-path:classpath:prompts}")
     private String basePath;
@@ -76,6 +85,37 @@ public class PromptAssembler {
         }
         matcher.appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * Assemble and record a {@link PromptAudit} row for tracking.
+     * Returns the assembled text together with its 12-char SHA-256 prefix hash.
+     */
+    public AssembledPrompt assembleAndTrack(String promptPath, Map<String, String> variables,
+                                            UUID runId, String agentType) {
+        String text = assemble(promptPath, variables);
+        String hash = sha256Prefix(text, 12);
+        try {
+            promptAuditRepository.save(PromptAudit.builder()
+                    .runId(runId)
+                    .agentType(agentType)
+                    .promptHash(hash)
+                    .charCount(text.length())
+                    .build());
+        } catch (Exception e) {
+            // Non-fatal — audit failure must never block execution
+        }
+        return new AssembledPrompt(text, hash);
+    }
+
+    private static String sha256Prefix(String input, int prefixLen) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, prefixLen);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 unavailable", e);
+        }
     }
 
     /**

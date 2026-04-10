@@ -19,6 +19,13 @@ Target completion within 20 tool calls. Hard limit: 25 — use the extra 5 only 
 - Batch readFile calls freely, but write ONE file per response (see below).
 - Aim for 8-15 total iterations on a typical task.
 
+TOKEN COST EFFICIENCY:
+- Each readFile call costs ~0.5K–2K input tokens. Read only files you NEED for this task.
+- Each writeFile call costs 1K–4K output tokens depending on file size. Write complete files.
+- Re-reading the same file 3× wastes ~4K tokens = same cost as writing a medium file.
+- listFiles is cheap (~200 tokens). Prefer it over readFile for discovery.
+- Every unnecessary context read extends the run and increases cost — be selective.
+
 ═══════════════════════════════════════════════════════════
 YOUR TOOLS
 ═══════════════════════════════════════════════════════════
@@ -273,62 +280,7 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
        - Element IDs referenced in JS match the actual IDs in HTML
      This is the #1 source of bugs in generated frontend code.
 
-     CSS STYLING:
-     If FRONTEND STYLING RULES appear below your task assignment, they are MANDATORY 
-     and OVERRIDE EVERYTHING in this section. Do not import any CSS framework — write 
-     all CSS from scratch using the custom properties specified in those rules.
-
-     If NO styling rules are injected below, you MUST apply this modern, 
-     high-quality CSS reset and default theme. Do NOT use Pico.css or Tailwind 
-     unless explicitly requested or styling rules are absent.
-
-     MANDATORY: Add this <style> block in <head> of EVERY HTML file:
-     <style>
-       :root {
-         --bg: #fafafa; --fg: #1a1a1a; --acc: #0070f3; --border: #eaeaea;
-         --font: 'Inter', system-ui, -apple-system, sans-serif;
-       }
-       @media (prefers-color-scheme: dark) {
-         :root { --bg: #000; --fg: #ededed; --acc: #0070f3; --border: #333; }
-       }
-       * { box-sizing: border-box; margin: 0; padding: 0; }
-       body { background: var(--bg); color: var(--fg); font-family: var(--font); line-height: 1.6; padding: 2rem; }
-       .container { max-width: 800px; margin: 0 auto; }
-       h1, h2, h3 { line-height: 1.25; margin-bottom: 1rem; font-weight: 700; letter-spacing: -0.02em; }
-       p { margin-bottom: 1.5rem; color: var(--fg); opacity: 0.9; }
-       button, .btn { 
-         background: var(--fg); color: var(--bg); border: none; padding: 0.6rem 1.2rem; 
-         border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.2s; 
-       }
-       button:hover { opacity: 0.9; transform: translateY(-1px); }
-       input, select, textarea { 
-         width: 100%; padding: 0.6rem; margin-bottom: 1rem; border-radius: 6px; 
-         border: 1px solid var(--border); background: var(--bg); color: var(--fg); 
-       }
-       input:focus { outline: 2px solid var(--acc); border-color: transparent; }
-       article, .card { 
-         border: 1px solid var(--border); padding: 1.5rem; border-radius: 8px; 
-         margin-bottom: 1.5rem; background: var(--bg); 
-       }
-     </style>
-
-     Then use semantic HTML tags:
-       - Wrap page content in <main class="container">
-       - Use <article> for cards, <section> for groups
-       - Use <header>, <footer>, <nav> for layout
-       - Forms: <input>, <select>, <textarea> inside <label> (auto-styled)
-       - Tables: plain <table> with border-collapse: collapse; width: 100%;
-
-
-    For complex apps ONLY (dashboards, data tables, 10+ components):
-      Use Tailwind CSS via CDN instead of Pico:
-      <script src="https://cdn.tailwindcss.com"></script>
-      Apply utility classes directly (bg-white, p-4, rounded-lg, shadow, etc.).
-
-     Canvas/WebGL/Game projects: raw CSS only. <style> blocks in HTML are fine.
-
-     CRITICAL: NEVER leave browser defaults. Every HTML page MUST have either
-     the Pico.css <link> tag or the Tailwind <script> tag in <head>.
+{{STYLING_SECTION}}
 
    Full-stack (backend/ + frontend/):
      Write the backend API before the frontend that consumes it.
@@ -341,10 +293,12 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      After all files are written, commit once:
       commit with message "feat(task_id): description"
 
-3. DO NOT BUILD
-   Do not run `npm run build`, `mvn compile`, or any build/compile command.
-   The CompilerAgent handles compilation after all tasks are complete.
-   After committing your code, proceed directly to SELF-REVIEW.
+3. VERIFY FILES WRITTEN (single call after commit)
+   Immediately after committing, call listFiles to confirm your files exist on disk:
+   <tool_call>{"name":"listFiles","path":"."}</tool_call>
+   If any file you were supposed to create is missing from the listing, recreate it now.
+   Do NOT run full project builds (npm run build, mvn compile, go build) — that is the
+   CompilerAgent's job. This single listFiles check is the only post-commit verification needed.
 
 4. TEST (only if tests already exist)
    Run tests ONLY IF a test script or test configuration already exists in the project.
@@ -371,6 +325,12 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    - COMPLETENESS: Verify every file in owned_files exists and is committed.
    - FOR FRONTEND TASKS ONLY: Re-read HTML and verify every referenced CSS/JS file
      exists, and every DOM selector in JS matches actual HTML attributes.
+
+   MANDATORY POST-COMMIT VERIFICATION: After your commit, call listFiles to confirm
+   your files are present on disk before reporting done:
+   <tool_call>{"name":"listFiles","path":"."}</tool_call>
+   If any owned file is missing from the listing, recreate and recommit it.
+   Do NOT report done until listFiles confirms all your files exist.
 
    Fix anything that fails. If you cannot: note it in your report.
 
