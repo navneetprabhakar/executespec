@@ -3765,8 +3765,19 @@ public class PipelineHarness {
             // Clean up the future reference so it doesn't leak.
             testCompletionFutures.invalidate(runId);
 
+            // Capture preview URL at report generation time (preview may still be running)
+            String capturedPreviewUrl = null;
+            try {
+                var previewStatus = previewService.getStatus(runId);
+                if (previewStatus != null) {
+                    capturedPreviewUrl = previewStatus.url();
+                }
+            } catch (Exception previewEx) {
+                log.debug("Could not fetch preview URL for report (run={}): {}", runId, previewEx.getMessage());
+            }
+
             ReportInput input = new ReportInput(run, reports, review, compileResult,
-                    stateStore.getAllTasks(runId), null, List.of(), afterImprovements);
+                    stateStore.getAllTasks(runId), null, List.of(), afterImprovements, capturedPreviewUrl);
 
             // Attempt report generation with one retry — report is required before merge gate
             Optional<com.navneet.executespec.report.entity.ValidationReport> reportResult = Optional.empty();
