@@ -11,6 +11,7 @@ import com.navneet.executespec.agent.WorkerAgent;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.*;
+import com.navneet.executespec.reviewer.AccuracyAssessmentService;
 import com.navneet.executespec.router.*;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
@@ -84,6 +85,7 @@ public class ReviewerAgentV2 {
     private final LlmOutputParser outputParser;
     private final ObservationRegistry observationRegistry;
     private final com.navneet.executespec.agent.PromptAssembler promptAssembler;
+    private final AccuracyAssessmentService accuracyAssessmentService;
 
     @Value("classpath:prompts/reviewer-v2.txt")
     private Resource reviewerV2Prompt;
@@ -217,6 +219,20 @@ public class ReviewerAgentV2 {
         }
 
         // ============================
+        // PHASE 3: ACCURACY ASSESSMENT
+        // ============================
+
+        sseBroadcaster.emit(runId, RunEvent.log(runId, null, "Running accuracy assessment…"));
+        AccuracyReport accuracyReport = null;
+        try {
+            accuracyReport = accuracyAssessmentService.assess(
+                    runId, reviewModel.providerName(), reviewModel, originalGoal, issues);
+            sseBroadcaster.emit(runId, RunEvent.log(runId, null, accuracyReport.toOneLiner()));
+        } catch (Exception e) {
+            log.warn("[ReviewerV2] Accuracy assessment failed for run {}: {}", runId, e.getMessage());
+        }
+
+        // ============================
         // BUILD FINAL REPORT
         // ============================
 
@@ -259,6 +275,7 @@ public class ReviewerAgentV2 {
                 .overallConfidence(confidence)
                 .mergeBlockers(mergeBlockers)
                 .postMergeSuggestions(postMergeSuggestions)
+                .accuracyReport(accuracyReport)
                 .build();
 
         sseBroadcaster.emit(runId, RunEvent.log(runId, null,
@@ -272,6 +289,11 @@ public class ReviewerAgentV2 {
         obs.highCardinalityKeyValue("autofix.attempted", String.valueOf(autoFixAttempted));
         obs.highCardinalityKeyValue("autofix.succeeded", String.valueOf(autoFixSucceeded));
         obs.highCardinalityKeyValue("duration.seconds", String.valueOf(reviewDuration.toSeconds()));
+        if (accuracyReport != null) {
+            obs.highCardinalityKeyValue("accuracy.score", String.valueOf(accuracyReport.getSpecAdherenceScore()));
+            obs.lowCardinalityKeyValue("accuracy.grade", accuracyReport.getOverallAccuracyGrade() != null
+                    ? accuracyReport.getOverallAccuracyGrade() : "?");
+        }
 
         return report;
     }

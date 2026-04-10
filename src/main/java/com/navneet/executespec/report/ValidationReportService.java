@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
+import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -56,7 +57,26 @@ public class ValidationReportService {
             // 2. Call LLM to generate markdown report
             var llmResult = generator.generate(input);
 
-            // 3. Build and persist entity
+            // 3. Extract accuracy data from ReviewReportV2 (Phase 3 output)
+            AccuracyReport accuracyReport = input.review() != null ? input.review().getAccuracyReport() : null;
+            Integer accuracyScore = null;
+            String accuracyGrade = null;
+            String accuracyJson = null;
+            if (accuracyReport != null) {
+                accuracyScore = accuracyReport.getSpecAdherenceScore();
+                accuracyGrade = accuracyReport.getOverallAccuracyGrade();
+                try {
+                    accuracyJson = objectMapper.writeValueAsString(accuracyReport);
+                } catch (Exception e) {
+                    log.warn("Failed to serialize AccuracyReport for run={}: {}", runId, e.getMessage());
+                }
+                // Include accuracy in checks_passed if score is high
+                if (accuracyScore != null && accuracyScore >= 80) {
+                    checksPassed.add("ACCURACY_CHECK");
+                }
+            }
+
+            // 4. Build and persist entity
             var report = ValidationReport.builder()
                 .id(UUID.randomUUID().toString())
                 .runId(runId)
@@ -71,6 +91,9 @@ public class ValidationReportService {
                 .outputTokens(llmResult.outputTokens())
                 .generationTimeMs(System.currentTimeMillis() - startTime)
                 .generatedAfterImprovements(input.generatedAfterImprovements())
+                .accuracyScore(accuracyScore)
+                .accuracyGrade(accuracyGrade)
+                .accuracyJson(accuracyJson)
                 .build();
 
             // Accumulate report tokens into run total for billing accuracy
@@ -84,7 +107,7 @@ public class ValidationReportService {
             repository.findByRunId(runId).ifPresent(existing -> repository.delete(existing));
             var saved = repository.save(report);
 
-            // 4. Metrics
+            // 5. Metrics
             meterRegistry.counter("executespec.report.generated",
                 "result", pipelineResult.name()).increment();
             meterRegistry.counter("executespec.report.issues_caught")
@@ -92,9 +115,13 @@ public class ValidationReportService {
             Timer.builder("executespec.report.generation_duration")
                 .register(meterRegistry)
                 .record(Duration.ofMillis(System.currentTimeMillis() - startTime));
+            if (accuracyScore != null) {
+                meterRegistry.summary("executespec.report.accuracy_score")
+                    .record(accuracyScore);
+            }
 
-            log.info("Validation report generated for run={} issues={} result={} tokens={}+{} time={}ms",
-                runId, issues.size(), pipelineResult,
+            log.info("Validation report generated for run={} issues={} result={} accuracy={}/{} tokens={}+{} time={}ms",
+                runId, issues.size(), pipelineResult, accuracyScore, accuracyGrade,
                 llmResult.inputTokens(), llmResult.outputTokens(),
                 report.getGenerationTimeMs());
 
@@ -343,7 +370,10 @@ public class ValidationReportService {
             entity.getShareToken() != null
                 ? "/reports/shared/" + entity.getShareToken()
                 : null,
-            entity.isGeneratedAfterImprovements()
+            entity.isGeneratedAfterImprovements(),
+            entity.getAccuracyScore(),
+            entity.getAccuracyGrade(),
+            entity.getAccuracyJson()
         );
     }
 
