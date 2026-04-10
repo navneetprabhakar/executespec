@@ -76,6 +76,7 @@ public class SequentialTaskExecutor {
     private final RunCostBudgetService runCostBudgetService;
     private final CompilerAgent compilerAgent;
     private final SubtaskDecomposer subtaskDecomposer;
+    private final ProgressiveMergeValidator mergeValidator;
 
     /**
      * Result of sequential execution across all tasks.
@@ -396,8 +397,55 @@ public class SequentialTaskExecutor {
             synchronized (mergeLock) {
                 boolean merged = tryMergeToMain(runId, task, branchName, previouslyMerged);
                 if (merged) {
-                    mergedTaskIds.add(taskId);
-                    previouslyMerged.add(task);
+                    // Quick compile check after merge — catches broken main before next task starts
+                    Path workspacePath = gitTool.getWorkspacePath(runId);
+                    ProgressiveMergeValidator.MergeCheckResult checkResult =
+                            mergeValidator.quickCheck(runId, workspacePath);
+
+                    if (checkResult.result() == ProgressiveMergeValidator.CheckResult.FAILED) {
+                        log.warn("[ProgressiveMerge] Compile check FAILED after merging task {} for run {} — reverting and retrying",
+                                taskId, runId);
+                        sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
+                                "Post-merge compile check failed — reverting and retrying task with compile error context"));
+
+                        boolean reverted = mergeService.revertLastMerge(runId);
+                        if (reverted) {
+                            // Retry task once with compile error injected as context
+                            WorkerReport retryReport = retryTaskWithCompileError(
+                                    run, task, branchName, checkResult.errorOutput(), availableProviders);
+                            String retryStatus = normalizeStatus(retryReport.getStatus());
+                            if ("COMPLETE".equals(retryStatus)) {
+                                // Re-attempt merge with the fixed output
+                                boolean reMerged = tryMergeToMain(runId, task, branchName, previouslyMerged);
+                                if (reMerged) {
+                                    mergedTaskIds.add(taskId);
+                                    previouslyMerged.add(task);
+                                    metricsTaskOutcome = "COMPLETE_AFTER_COMPILE_FIX";
+                                } else {
+                                    completed.remove(task);
+                                    failed.add(task);
+                                    metricsTaskOutcome = "MERGE_FAILED_AFTER_RETRY";
+                                    taskObs.lowCardinalityKeyValue("task.outcome", metricsTaskOutcome);
+                                }
+                            } else {
+                                // Retry also failed — mark PARTIAL and continue pipeline
+                                completed.remove(task);
+                                failed.add(task);
+                                metricsTaskOutcome = "PARTIAL_COMPILE_FAILED";
+                                taskObs.lowCardinalityKeyValue("task.outcome", metricsTaskOutcome);
+                                log.warn("[ProgressiveMerge] Task {} retry also failed — marking PARTIAL, continuing", taskId);
+                            }
+                        } else {
+                            // Revert failed — merge is broken, mark task failed
+                            completed.remove(task);
+                            failed.add(task);
+                            metricsTaskOutcome = "REVERT_FAILED";
+                            taskObs.lowCardinalityKeyValue("task.outcome", metricsTaskOutcome);
+                        }
+                    } else {
+                        mergedTaskIds.add(taskId);
+                        previouslyMerged.add(task);
+                    }
                 } else {
                     // Merge failed — downgrade to failed
                     completed.remove(task);
@@ -454,6 +502,36 @@ public class SequentialTaskExecutor {
         stateStore.completeTask(taskId, report);
         trackMetric(runId, task, model, 1, "COMPLETE".equals(workerStatus), durationMs, report);
 
+        return report;
+    }
+
+    /**
+     * Retries a task once with the compile error injected as additional context.
+     * Called after a post-merge compile check fails and the merge has been reverted.
+     * Uses the existing reworkFeedback mechanism in TaskDefinition so WorkerAgent
+     * automatically surfaces the error in the initial task prompt.
+     */
+    private WorkerReport retryTaskWithCompileError(PipelineRun run, AgentTask task,
+                                                    String branchName, String compileError,
+                                                    Set<LlmProvider> availableProviders) {
+        String runId = run.getRunId();
+        String taskId = task.getTaskId();
+
+        log.info("[ProgressiveMerge] Retrying task {} with compile error feedback for run {}", taskId, runId);
+        sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
+                "Retrying task with compile error context: " +
+                (compileError.length() > 300 ? compileError.substring(0, 300) + "…" : compileError)));
+
+        // Inject compile error via reworkFeedback — WorkerAgent reads this and surfaces it in prompt
+        String feedback = "Post-merge compile check failed. Fix the following errors:\n" + compileError;
+        stateStore.markRetryingWithFeedback(runId, taskId, feedback);
+
+        // Re-read the updated task (markRetryingWithFeedback modifies taskJson in DB)
+        AgentTask updatedTask;
+        try { updatedTask = stateStore.getTask(taskId); } catch (Exception ex) { updatedTask = task; }
+
+        WorkerReport report = workerAgent.execute(updatedTask, runId);
+        stateStore.completeTask(taskId, report);
         return report;
     }
 
