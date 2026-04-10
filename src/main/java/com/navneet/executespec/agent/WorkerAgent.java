@@ -84,6 +84,7 @@ public class WorkerAgent {
     private final ModelRegistry modelRegistry;
     private final ContextWindowPolicy contextWindowPolicy;
     private final com.navneet.executespec.harness.AdaptiveIterationService adaptiveIterationService;
+    private final PromptAssembler promptAssembler;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -2571,18 +2572,12 @@ public class WorkerAgent {
                 " chars omitted — use read_file for full content]...\n" + end;
     }
 
-    /** Provider-aware prompt loading via ResourceLoader; fallback to worker.txt */
+    /** Provider-aware prompt loading via PromptAssembler; resolves {{include:...}} fragments. */
     private String loadPrompt(String provider) {
-        String resourcePath = "classpath:prompts/worker-" + provider.toLowerCase() + ".txt";
-        Resource providerPrompt = resourceLoader.getResource(resourcePath);
-        try {
-            if (providerPrompt.exists()) {
-                return providerPrompt.getContentAsString(StandardCharsets.UTF_8);
-            }
-            return workerPromptFallback.getContentAsString(StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load worker prompt for provider: " + provider, e);
-        }
+        String providerFile = "worker-" + provider.toLowerCase() + ".txt";
+        Resource providerPrompt = resourceLoader.getResource("classpath:prompts/" + providerFile);
+        String promptPath = providerPrompt.exists() ? providerFile : "worker.txt";
+        return promptAssembler.assemble(promptPath);
     }
 
     /** Derive provider from model name via ModelRegistry; fall back to configured role provider. */
