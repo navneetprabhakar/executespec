@@ -369,7 +369,8 @@ public class PipelineHarness {
             stateStore.markReviewing(run.getRunId());
             run = stateStore.findRun(run.getRunId()).orElse(run);
             var providers = availableProviderResolver.resolve(run.getRunId());
-            ReviewReportV2 review = reviewerAgentV2.review(run, tasks, run.getUserRequest(), providers);
+            ReviewReportV2 review = reviewerAgentV2.review(run, tasks, run.getUserRequest(),
+                    CompileResult.skip(), providers);
             stateStore.saveReviewV2(run.getRunId(), review);
 
             boolean shouldMerge = approvalGate.requestMerge(review);
@@ -1262,7 +1263,8 @@ public class PipelineHarness {
                 PipelineRun freshRun = stateStore.findRun(runId).orElse(run);
                 var providers = availableProviderResolver.resolve(runId);
                 review = reviewerAgentV2.review(freshRun, stateStore.getAllTasks(runId),
-                        freshRun.getUserRequest(), providers);
+                        freshRun.getUserRequest(), postMergeCompile != null ? postMergeCompile : CompileResult.skip(),
+                        providers);
                 stateStore.saveReviewV2(runId, review);
 
                 // ── 4. Validation Report (non-fatal) ─────────────────────
@@ -1381,7 +1383,8 @@ public class PipelineHarness {
                 try {
                     var freshRun = stateStore.findRun(runId).orElseThrow();
                     var providers = availableProviderResolver.resolve(runId);
-                    reviewResult = reviewerAgentV2.review(freshRun, newTasks, freshRun.getUserRequest(), providers);
+                    reviewResult = reviewerAgentV2.review(freshRun, newTasks, freshRun.getUserRequest(),
+                            compileResult != null ? compileResult : CompileResult.skip(), providers);
                     stateStore.saveReviewV2(runId, reviewResult);
                 } catch (Exception e) {
                     log.warn("[ApplySuggestion] Reviewer failed for run {}: {}", runId, e.getMessage());
@@ -1632,10 +1635,10 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness", "Code ready — starting preview..."));
                 autoStartPreview(runId, currentRun);
 
-                // ── Background validation (all modes — test gen only in PRODUCTION) ──
+                // ── Background validation (all modes — includes test gen) ──
                 {
                     final String bgUserReq = effectiveRequest;
-                    final boolean runTests = execMode.isProduction();
+                    final boolean runTests = true;
                     String bgPlanJson;
                     try {
                         bgPlanJson = mapper.writeValueAsString(singleShotResult.syntheticPlan());
@@ -2165,10 +2168,10 @@ public class PipelineHarness {
             // ── 6. BACKGROUND VALIDATION (all modes) ─────────────────────────
             // ══════════════════════════════════════════════════════════════════
             // Review and validation report run in background for ALL modes.
-            // Test generation/execution only runs in PRODUCTION mode.
+            // Test generation/execution runs in all modes.
             {
                 final CompileResult finalPostMergeCompile = postMergeCompile != null ? postMergeCompile : mainCompileResult;
-                final boolean runTests = execMode.isProduction();
+                final boolean runTests = true;
                 String bgPlanJson;
                 try {
                     bgPlanJson = mapper.writeValueAsString(plan);
@@ -2257,7 +2260,7 @@ public class PipelineHarness {
                 run = stateStore.findRun(run.getRunId()).orElse(run);
                 var providers = availableProviderResolver.resolve(run.getRunId());
                 ReviewReportV2 review = reviewerAgentV2.review(run, stateStore.getAllTasks(run.getRunId()),
-                        run.getUserRequest(), providers);
+                        run.getUserRequest(), CompileResult.skip(), providers);
                 stateStore.saveReviewV2(run.getRunId(), review);
                 runMergeGate(run);
             }
@@ -2277,7 +2280,7 @@ public class PipelineHarness {
         PipelineRun fresh = stateStore.findRun(run.getRunId()).orElse(run);
         var providers = availableProviderResolver.resolve(run.getRunId());
         ReviewReportV2 review = reviewerAgentV2.review(fresh, stateStore.getAllTasks(run.getRunId()),
-                fresh.getUserRequest(), providers);
+                fresh.getUserRequest(), CompileResult.skip(), providers);
         stateStore.saveReviewV2(run.getRunId(), review);
         runMergeGate(run);
     }
@@ -2356,7 +2359,8 @@ public class PipelineHarness {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background review starting..."));
                 var providers = availableProviderResolver.resolve(runId);
                 review = reviewerAgentV2.review(run, stateStore.getAllTasks(runId),
-                        run.getUserRequest(), providers);
+                        run.getUserRequest(), compileResult != null ? compileResult : CompileResult.skip(),
+                        providers);
                 stateStore.saveReviewV2(runId, review);
 
                 if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES

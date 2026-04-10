@@ -408,7 +408,7 @@ preview:
     enterprise-max: 10
   vm:
     enabled: false                       # set true to enable VM-based preview deployment
-    default-ttl-hours: 2
+    default-ttl-minutes: 20
     gateway:
       ip: ${PREVIEW_GATEWAY_IP:}
       internal-ip: ${PREVIEW_GW_INTERNAL_IP:}
