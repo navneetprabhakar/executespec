@@ -4,65 +4,76 @@
     "language": "Python",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 40,
-    "model": "anthropic",
+    "duration": 194,
+    "model": "OPENAI:gpt-5.4-mini",
     "report": "HAS_REPORT",
     "share": "SHARE_OK",
-    "notes": " "
+    "notes": " [retries:1] [compile:FAIL] [preview:PREVIEW_FAILED] [chat:CHAT_OK] [github_new:GITHUB_NEW_OK] [github_pr:GITHUB_PR_FAILED] "
   },
   {
     "index": 1,
     "language": "JavaScript",
-    "status": "TIMEOUT",
-    "tasks": "?/?",
-    "duration": 602,
-    "model": "",
-    "report": "NO_REPORT",
-    "share": "NONE",
-    "notes": "Timed out after 602s "
+    "status": "COMPLETE",
+    "tasks": "1/1",
+    "duration": 96,
+    "model": "OPENAI:gpt-5.4-mini",
+    "report": "HAS_REPORT",
+    "share": "SHARE_OK",
+    "notes": " [compile:PASS] [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
   },
   {
     "index": 2,
     "language": "Java",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 50,
-    "model": "anthropic",
+    "duration": 21,
+    "model": "OPENAI:gpt-5.4-mini",
     "report": "HAS_REPORT",
     "share": "SHARE_OK",
-    "notes": " "
+    "notes": " [compile:PASS] [preview:PREVIEW_TIMEOUT] [chat:CHAT_OK] "
   },
   {
     "index": 3,
     "language": "TypeScript",
     "status": "COMPLETE",
-    "tasks": "2/2",
-    "duration": 110,
-    "model": "anthropic",
+    "tasks": "1/1",
+    "duration": 22,
+    "model": "OPENAI:gpt-5.4-mini",
     "report": "HAS_REPORT",
     "share": "SHARE_OK",
-    "notes": " "
+    "notes": " [compile:PASS] [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
   },
   {
     "index": 4,
-    "language": "Static HTML",
+    "language": "Go",
     "status": "COMPLETE",
     "tasks": "1/1",
-    "duration": 121,
-    "model": "anthropic",
+    "duration": 21,
+    "model": "OPENAI:gpt-5.4-mini",
     "report": "HAS_REPORT",
     "share": "SHARE_OK",
-    "notes": " "
+    "notes": " [compile:FAIL] [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
   },
   {
     "index": 5,
+    "language": "Static HTML",
+    "status": "COMPLETE",
+    "tasks": "1/1",
+    "duration": 162,
+    "model": "OPENAI:gpt-5.4-mini",
+    "report": "HAS_REPORT",
+    "share": "SHARE_OK",
+    "notes": " [retries:1] [compile:FAIL] [preview:PREVIEW_FAILED] [chat:CHAT_OK] "
+  },
+  {
+    "index": 6,
     "language": "Cancel",
-    "status": "PASS",
+    "status": "SKIP",
     "tasks": "0/0",
-    "duration": 124,
+    "duration": 18,
     "model": "",
     "report": "NO_REPORT",
     "share": "NONE",
-    "notes": "Cancel flow works "
+    "notes": "Planning failed before gate "
   }
 ]

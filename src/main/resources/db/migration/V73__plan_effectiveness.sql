@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS plan_effectiveness (
     id                  BIGSERIAL PRIMARY KEY,
-    run_id              UUID REFERENCES pipeline_run(id) ON DELETE CASCADE,
+    run_id              VARCHAR(255) REFERENCES pipeline_run(run_id) ON DELETE CASCADE,
     task_id             VARCHAR(100),
     planned_complexity  VARCHAR(10),
     planned_file_count  INT,

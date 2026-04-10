@@ -89,7 +89,7 @@ model-matrix:
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4
-      lightweight: gpt-5.4
+      lightweight: gpt-5.4-mini
 
   # ── Canonical model registry (single source of truth for all model metadata) ──
   models:

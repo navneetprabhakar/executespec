@@ -1168,7 +1168,8 @@ public class StateStore {
             totalCacheRead += st.getCacheReadTokens() != null ? st.getCacheReadTokens() : 0;
             totalCacheWrite += st.getCacheWriteTokens() != null ? st.getCacheWriteTokens() : 0;
 
-            if ("FAILED".equals(st.getStatus()) || "BLOCKED".equals(st.getStatus())) {
+            if ("FAILED".equals(st.getStatus()) || "BLOCKED".equals(st.getStatus())
+                    || "PARTIAL".equals(st.getStatus())) {
                 anyFailed = true;
             }
             if (st.getProvider() != null) provider = st.getProvider();
@@ -1203,6 +1204,7 @@ public class StateStore {
                         subtasks.stream().filter(s -> "COMPLETE".equals(s.getStatus())).count() + " complete")
                 .build();
 
+        // A parent is PARTIAL if any subtask is FAILED, BLOCKED, or PARTIAL
         parent.setStatus(anyFailed ? "PARTIAL" : "COMPLETE");
         parent.setWorkerReportJson(toJson(compositeReport));
         parent.setInputTokens(totalIn);

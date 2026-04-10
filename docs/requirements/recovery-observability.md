@@ -1,6 +1,6 @@
 # Recovery & Observability — Requirements
 
-> Last updated: 2026-04-03
+> Last updated: 2026-04-10
 
 ## Overview
 
@@ -61,18 +61,23 @@ Automatic detection and recovery of stuck tasks, real-time SSE event streaming, 
 
 **Requirements:**
 - Track consecutive failure counts per provider via Redis (shared across threads/instances)
-- 5 consecutive failures = mark provider unhealthy (circuit OPEN)
-- 60-second auto-recovery via Redis TTL expiry
+- **v2: 10 consecutive failures** = mark provider unhealthy (circuit OPEN) — raised from 5 to reduce false trips on burst rate limits
+- **v2: 180-second auto-recovery** via Redis TTL expiry — extended from 60s to allow longer provider recovery windows
+- **v2: 429 responses excluded from failure count** — rate limit responses no longer open the circuit breaker
 - LlmRouter skips unhealthy providers in fallback chain; ModelResolver also filters by health during model selection
+- **v2: Per-run provider pinning** — `RunProviderPinStore` (Redis, 2h TTL) pins first-successful provider to run; subsequent tasks reuse pinned provider as primary, preventing mid-run provider switch context drift
 - Fail-open on Redis errors (never block LLM calls due to Redis unavailability)
 - Metrics: `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed`
+- **v2: Provider degradation queuing** — when all providers are simultaneously degraded, incoming runs are queued in Redis instead of immediately rejected. Queued runs are retried automatically when any provider recovers. Metric: `executespec.provider.degradation_queue_depth`
 
 ### 6. Server-Sent Events (SSE)
 
 **Requirements:**
 - Real-time event streaming: `GET /api/runs/{id}/events`
-- SseBroadcaster: in-memory, no-timeout emitters
-- LB cookie affinity ensures clients hit same instance as pipeline thread
+- **v2: Redis Pub/Sub distribution** — events published to `sse:channel:{runId}`; all MIG instances subscribed and deliver to connected clients. Cookie affinity no longer required for correctness (still recommended for performance).
+- **v2: SSE replay log** — `sse:replay:{runId}` Redis list stores last 200 events per run. Clients reconnecting with `Last-Event-ID` receive missed events automatically.
+- **v2: Emitter bounds** — maximum 5 emitters per run, 500 global cap. Excess registration returns HTTP 429. Metrics: `executespec.sse.emitters.active`, `executespec.sse.emitters.rejected`.
+- SseBroadcaster: no-timeout emitters, auto-prune on send failure
 - Event type format: SCREAMING_SNAKE_CASE (e.g., `RUN_STATUS`, not `runStatus`)
 - Event types:
   - Pipeline: RUN_STATUS, TASK_STATUS, LOG, GATE_OPENED, GATE_RESOLVED
@@ -191,6 +196,20 @@ Automatic detection and recovery of stuck tasks, real-time SSE event streaming, 
 **Circuit breaker metrics:**
 - `executespec.provider.circuit_opened` (counter) — circuit breaker opens
 - `executespec.provider.circuit_closed` (counter) — circuit breaker closes
+- `executespec.provider.degradation_queue_depth` (gauge) — runs queued while all providers are degraded (v2)
+
+**SSE metrics (v2):**
+- `executespec.sse.emitters.active` (gauge) — currently active SSE emitters across all runs
+- `executespec.sse.emitters.rejected` (counter) — emitter registrations rejected due to per-run or global cap
+
+**LLM tracing metrics (v2):**
+- `executespec.llm.latency` (timer) — per-call latency tagged by `provider`, `model`, `agent_tier`
+- `executespec.llm.tokens.input` (distribution summary) — input token counts tagged by `provider`, `model`, `agent_tier`
+- `executespec.llm.tokens.output` (distribution summary) — output token counts tagged by `provider`, `model`, `agent_tier`
+
+**Provider pool metrics (v2):**
+- `executespec.provider.pool.queue_depth` (gauge) — per-provider queue depth tagged by `provider`
+- `executespec.provider.pool.rejections` (counter) — HTTP 429 rejections from per-provider queue capacity tagged by `provider`
 
 **Observability stack:**
 - Local: Micrometer + OTel -> Prometheus + Tempo + Grafana (docker-compose in `observability/`)
@@ -222,6 +241,24 @@ agent:
     hard-stop-pct: 0.55
   concurrency:
     max-iterations: 80
+  provider-pools:
+    anthropic:
+      max-concurrent: 10
+      queue-capacity: 50
+    openai:
+      max-concurrent: 10
+      queue-capacity: 50
+    google:
+      max-concurrent: 10
+      queue-capacity: 50
+  triage:
+    file-threshold: 8           # escalate single-shot if file count exceeds this
+    time-threshold-minutes: 8   # escalate if wall-clock exceeds this
+    error-threshold: 5          # escalate if compiler errors exceed this
+  background-validation:
+    stall-check-interval-minutes: 5
+    stall-timeout-minutes: 10
+    max-retry-attempts: 3
 ```
 
 ## Key Files
@@ -243,3 +280,7 @@ agent:
 | `ratelimit/RateLimitFilter.java` | Redis-backed API rate limiting |
 | `ratelimit/RateLimitPolicy.java` | Per-group, per-tier rate policies |
 | `ratelimit/RateLimitProperties.java` | Rate limit configuration properties |
+| `harness/ProviderRunPoolManager.java` | Per-provider priority thread pools (v2) |
+| `harness/BackgroundValidationMonitor.java` | Stall detection + auto-retry for durable background validation (v2) |
+| `router/RunProviderPinStore.java` | Redis-backed per-run provider pinning (v2) |
+| `sse/SseBroadcaster.java` | SSE emitter management with Redis pub/sub + replay log (v2) |

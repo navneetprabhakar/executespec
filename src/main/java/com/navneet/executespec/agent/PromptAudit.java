@@ -7,7 +7,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
-import java.util.UUID;
 
 @Entity
 @Table(name = "prompt_audit")
@@ -21,8 +20,8 @@ public class PromptAudit {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "run_id", nullable = false)
-    private UUID runId;
+    @Column(name = "run_id", nullable = false, length = 255)
+    private String runId;
 
     @Column(name = "agent_type", nullable = false, length = 30)
     private String agentType;

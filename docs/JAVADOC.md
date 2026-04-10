@@ -1012,8 +1012,8 @@ The system uses a YAML-configured model matrix that maps `AgentTier x Provider -
 | Tier | Anthropic | Google | OpenAI |
 |------|----------|--------|--------|
 | PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
 **Default Provider:** OpenAI
 
@@ -2100,7 +2100,7 @@ Manages the model/provider escalation ladder when a task is stuck or failing.
 ```
 Level 0-1: Upgrade to capable model (same provider)
    |-- anthropic: claude-haiku-4-5 -> capable model from props
-   |-- openai: gpt-5.4-mini -> gpt-5.4
+   |-- openai: gpt-5.4 -> gpt-5.4 (no escalation — same model)
    |
 Level 2: Switch to alternate provider entirely
    |-- anthropic -> openai
@@ -2172,14 +2172,14 @@ spring:
       api-key: ${OPENAI_API_KEY:}
       chat:
         options:
-          model: gpt-5.4-mini
+          model: gpt-5.4
           max-tokens: 16000
     google:
       genai:
         api-key: ${GOOGLE_API_KEY:}
         chat:
           options:
-            model: gemini-2.5-flash
+            model: gemini-3-flash-preview
 
 # Model Matrix (user-selected provider x agent tier -> model)
 model-matrix:
@@ -2190,12 +2190,12 @@ model-matrix:
       lightweight: claude-haiku-4-5-20251001
     google:
       planning: gemini-3-flash-preview
-      workhorse: gemini-2.5-flash
-      lightweight: gemini-2.5-flash
+      workhorse: gemini-3-flash-preview
+      lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4-mini
-      lightweight: gpt-5.4-mini
+      workhorse: gpt-5.4
+      lightweight: gpt-5.4
   agent-tier-map:
     PlannerAgent: PLANNING
     ReviewerAgentV2: PLANNING

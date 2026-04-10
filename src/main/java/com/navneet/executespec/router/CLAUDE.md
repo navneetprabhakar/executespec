@@ -12,9 +12,9 @@ User-selected provider architecture with YAML-configured model matrix and Redis-
 - `AvailableProviderResolver.java` — Resolves available providers per run based on org policy + API key availability
 
 ## Agent Tiers (from application.yml model-matrix)
-- PLANNING: Sonnet 4.6 / GPT-5.4 / Gemini 2.5 Flash (planner, reviewer, worker stall escalation)
-- WORKHORSE: Haiku 4.5 / GPT-5.4-mini / Gemini 2.5 Flash (workers, compiler, test planner, test worker, conflict resolver, prompt optimiser, report generator)
-- LIGHTWEIGHT: Haiku 4.5 / GPT-5.4-mini / Gemini 2.5 Flash (chat, context, test report, triage)
+- PLANNING: Sonnet 4.6 / GPT-5.4 / Gemini 3 Flash Preview (planner, reviewer, worker stall escalation)
+- WORKHORSE: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (workers, compiler, test planner, test worker, conflict resolver, prompt optimiser, report generator)
+- LIGHTWEIGHT: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (chat, context, test report, triage)
 
 ## Provider Selection
 Each project selects its AI provider (ANTHROPIC/GOOGLE/OPENAI). ModelResolver maps `agentTier × provider → model` from YAML config. Failover to next healthy provider if selected provider is down.

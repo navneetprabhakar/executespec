@@ -39,7 +39,7 @@ public class PromptAssembler {
     private static final String PROMPTS_BASE = "classpath:prompts/";
 
     private final ResourceLoader resourceLoader;
-    private final PromptAuditRepository promptAuditRepository;
+    private final PromptHashAuditRepository promptAuditRepository;
 
     /** Returned by {@link #assembleAndTrack}. */
     public record AssembledPrompt(String text, String hash) {}
@@ -97,7 +97,7 @@ public class PromptAssembler {
         String hash = sha256Prefix(text, 12);
         try {
             promptAuditRepository.save(PromptAudit.builder()
-                    .runId(runId)
+                    .runId(runId != null ? runId.toString() : null)
                     .agentType(agentType)
                     .promptHash(hash)
                     .charCount(text.length())

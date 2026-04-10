@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS triage_outcome (
     id                      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id                  UUID          NOT NULL REFERENCES pipeline_run(id) ON DELETE CASCADE,
+    run_id                  VARCHAR(255)  NOT NULL REFERENCES pipeline_run(run_id) ON DELETE CASCADE,
     original_classification VARCHAR(20)   NOT NULL,  -- SINGLE_SHOT or MULTI_TASK
     escalated               BOOLEAN       NOT NULL DEFAULT false,
     escalation_reason       TEXT,                     -- which threshold(s) triggered
