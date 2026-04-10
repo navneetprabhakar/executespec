@@ -449,6 +449,34 @@ public class GitMergeService {
         return sorted;
     }
 
+    /**
+     * Reverts the last merge commit on main (git reset --hard HEAD~1).
+     * Used by ProgressiveMergeValidator to roll back a merge that broke compilation.
+     *
+     * @return true if the revert succeeded
+     */
+    public boolean revertLastMerge(String runId) {
+        Path workspacePath = gitTool.getWorkspacePath(runId);
+        try {
+            ProcessBuilder pb = new ProcessBuilder("git", "reset", "--hard", "HEAD~1")
+                    .directory(workspacePath.toFile())
+                    .redirectErrorStream(true);
+            Process proc = pb.start();
+            String output = new String(proc.getInputStream().readAllBytes());
+            int exit = proc.waitFor();
+            if (exit == 0) {
+                log.info("[GitMerge] Reverted last merge on main for run {}", runId);
+                return true;
+            } else {
+                log.error("[GitMerge] Failed to revert last merge for run {} (exit={}): {}", runId, exit, output);
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("[GitMerge] Exception reverting last merge for run {}: {}", runId, e.getMessage());
+            return false;
+        }
+    }
+
     private TaskDefinition parseTaskDef(String json) {
         try {
             return mapper.readValue(json, TaskDefinition.class);
