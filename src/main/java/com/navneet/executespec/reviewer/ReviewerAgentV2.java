@@ -114,7 +114,25 @@ public class ReviewerAgentV2 {
             return doReview(run, tasks, originalGoal, compileResult, availableProviders, obs);
         } catch (Exception e) {
             obs.error(e);
-            throw e;
+            // Return a partial report rather than crashing the entire background validation thread.
+            // Issues collected before the crash are preserved; the report clearly marks the partial state.
+            log.error("[ReviewerV2][{}] Review crashed — returning partial report: {}", run.getRunId(), e.getMessage(), e);
+            return ReviewReportV2.builder()
+                    .verdict(ReviewVerdict.NEEDS_FIXES)
+                    .issues(List.of())
+                    .criticalCount(0)
+                    .minorCount(0)
+                    .autoFixAttempted(0)
+                    .autoFixSucceeded(0)
+                    .summary("Review crashed before completing: " + e.getMessage())
+                    .reviewDuration(Duration.ZERO)
+                    .reviewerModel("unknown")
+                    .readmeUpdated(false)
+                    .overallConfidence("LOW")
+                    .mergeBlockers(List.of())
+                    .postMergeSuggestions(List.of())
+                    .accuracyReport(null)
+                    .build();
         } finally {
             obs.stop();
         }
@@ -204,16 +222,23 @@ public class ReviewerAgentV2 {
                 sseBroadcaster.emit(runId, RunEvent.log(runId, null,
                         String.format("Auto-fixing issue %s: %s", issue.getId(), issue.getDescription())));
 
-                FixResult result = attemptAutoFix(run, workspacePath, issue, availableProviders);
-                totalFixIterations += result.iterationsUsed();
+                try {
+                    FixResult result = attemptAutoFix(run, workspacePath, issue, availableProviders);
+                    totalFixIterations += result.iterationsUsed();
 
-                issue.setAutoFixed(true);
-                issue.setFixSucceeded(result.succeeded());
-                if (result.succeeded()) {
-                    autoFixSucceeded++;
-                    log.info("Auto-fix succeeded for issue {} ({} iterations)", issue.getId(), result.iterationsUsed());
-                } else {
-                    log.warn("Auto-fix failed for issue {} ({} iterations)", issue.getId(), result.iterationsUsed());
+                    issue.setAutoFixed(true);
+                    issue.setFixSucceeded(result.succeeded());
+                    if (result.succeeded()) {
+                        autoFixSucceeded++;
+                        log.info("[ReviewerV2][{}] Auto-fix succeeded for issue {} ({} iterations)", runId, issue.getId(), result.iterationsUsed());
+                    } else {
+                        log.warn("[ReviewerV2][{}] Auto-fix failed for issue {} ({} iterations)", runId, issue.getId(), result.iterationsUsed());
+                    }
+                } catch (Exception fixEx) {
+                    log.error("[ReviewerV2][{}] Auto-fix threw unexpectedly for issue {} — skipping: {}",
+                            runId, issue.getId(), fixEx.getMessage());
+                    issue.setAutoFixed(true);
+                    issue.setFixSucceeded(false);
                 }
             }
         }
@@ -391,6 +416,13 @@ public class ReviewerAgentV2 {
                 continue;
             }
             toolCallCount++;
+            try {
+                var args = mapper.readTree(tc.argsJson);
+                String path = args.path("path").asText("");
+                log.info("[ReviewerV2][{}] tool_call {}/{}: {} path={}", runId, toolCallCount, MAX_TOOL_CALLS, tc.name, path);
+            } catch (Exception ignored) {
+                log.info("[ReviewerV2][{}] tool_call {}/{}: {}", runId, toolCallCount, MAX_TOOL_CALLS, tc.name);
+            }
             String result = dispatchReadOnlyTool(tc, runId);
             results.append("[").append(tc.name).append(" result]\n<output>\n")
                    .append(result).append("\n</output>\n\n");
