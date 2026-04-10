@@ -193,6 +193,28 @@ public class ComposeExecutor {
         }
     }
 
+    /**
+     * Execute a command inside a running compose service container.
+     * Uses {@code docker compose exec -T <service> <cmd>} — non-interactive, no TTY.
+     *
+     * @param projectName compose project name (e.g. "es-preview-abc12345")
+     * @param serviceName service to exec into (e.g. "app")
+     * @param userCmd     command + args to run inside the container
+     * @param timeout     maximum wall-clock time for the exec
+     * @return stdout and stderr merged, plus exit code
+     */
+    public ExecResult execInService(String projectName, String serviceName,
+                                    List<String> userCmd, Duration timeout) {
+        var cmd = baseCmd(projectName);
+        cmd.add("exec");
+        cmd.add("-T");       // disable TTY — required for non-interactive exec
+        cmd.add(serviceName);
+        cmd.addAll(userCmd);
+
+        var result = exec(cmd, timeout, null);
+        return new ExecResult(result.output(), "", result.exitCode());
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────
 
     private List<String> baseCmd(String projectName) {

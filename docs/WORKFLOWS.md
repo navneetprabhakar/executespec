@@ -537,6 +537,38 @@ flowchart TD
     style L fill:#22c55e,color:#fff
 ```
 
+### Automatic PARTIAL Run Recovery (PartialRunResumeService)
+
+```mermaid
+flowchart TD
+    A([PartialRunResumeService — every 5 min]) --> B{Any runs with status = PARTIAL\nand completedAt > 10 min ago?}
+    B -->|No| C[Sleep until next check]
+    B -->|Yes| D{harness.isRunActive\(runId\)?}
+    D -->|Yes — already processing| C
+    D -->|No| E[Find up to 3 FAILED or STUCK tasks per run]
+    E --> F[StateStore.markWorking\(runId\)]
+    F --> G[harness.retryPartialTask\(runId, taskId\) — up to 3 tasks]
+    G --> H[Task reset to PENDING — same flow as manual retry]
+    H --> I{All tasks complete?}
+    I -->|No| J[Remaining tasks picked up by SequentialTaskExecutor]
+    I -->|Yes| K[CompilerAgent → auto-merge → COMPLETE]
+    K --> L([Background validation starts])
+
+    style A fill:#8b5cf6,color:#fff
+    style K fill:#22c55e,color:#fff
+    style L fill:#22c55e,color:#fff
+```
+
+**Trigger conditions:**
+- Run status is `PARTIAL` (some tasks completed, at least one failed/stuck)
+- `completedAt` is more than 10 minutes ago (debounce for runs still wrapping up)
+- Run is not currently active in any pipeline thread
+
+**Safety limits:**
+- Max 3 tasks retried per run per sweep (avoids thundering herd)
+- `@SchedulerLock(name = "partial-run-resume", lockAtMostFor = "4m")` prevents concurrent sweeps in multi-instance deployments
+- Tasks already at `task-max-retries` (3) are skipped — bubble up as truly failed
+
 ### Automatic Recovery (StuckRunMonitor)
 
 ```mermaid

@@ -770,6 +770,18 @@ export const rebuildPreview = (runId: string) =>
 export const getPreviewLogs = (runId: string, lines = 0, filter: 'all' | 'backend' | 'frontend' | 'db' = 'all') =>
   req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}&filter=${filter}`);
 
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+export const execPreviewCommand = (runId: string, cmd: string, args: string[] = []) =>
+  req<ExecResult>(`/runs/${runId}/preview/exec`, {
+    method: 'POST',
+    body: JSON.stringify({ cmd, args }),
+  });
+
 // ── Conversation (pre-flight chat) ────────────────────────────────────────────
 
 export interface ConversationMessage {
