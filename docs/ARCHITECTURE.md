@@ -84,7 +84,7 @@ graph TB
         end
 
         subgraph "Serverless"
-            CR1[Cloud Run<br/>Preview services<br/>es-preview-*<br/>5-min TTL]
+            CR1[Cloud Run<br/>Preview services<br/>es-preview-*<br/>30-min TTL]
             CR2[Cloud Run<br/>Deployed services<br/>es-deploy-*<br/>7-day TTL]
         end
     end
@@ -125,6 +125,7 @@ graph TB
 
     subgraph "Service Layer"
         PH[PipelineHarness]
+        PRRS[PartialRunResumeService]
         PS[PreviewService]
         DS[DeploymentService]
         AS[AuthService]
@@ -194,6 +195,8 @@ graph TB
     FFC --> FFS
     PAC --> PAS
 
+    PRRS --> PH & SS
+
     PH --> PA & WA & RA & CA & TGO
     PH --> STE & GMS & GS
     PH --> SS & SB
@@ -216,7 +219,7 @@ graph TB
 
 ### 3.2 Agent Architecture
 
-**Pipeline flow:** ProviderRunPoolManager (per-provider PriorityBlockingQueue, ENTERPRISE > PRO > FREE) → plan → approve (Redis + DB fallback gate) → work (tiered parallel tasks, progressive merge per task with fast syntax check) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL, skipped for batch runs) → durable background validation (DB-tracked: review → test gen → preview reuse → test exec → validation report). Merge is automatic (no manual gate). **Batch mode:** BatchClientRouter → BatchPollService → BatchResumeService (resolves WORKHORSE model/provider) → auto-retry failed tasks in real-time → compile. **Distributed SSE:** Redis pub/sub (`sse:channel:{runId}`) with replay log (`sse:replay:{runId}`, 200-event cap) for Last-Event-ID reconnection.
+**Pipeline flow:** ProviderRunPoolManager (per-provider PriorityBlockingQueue, ENTERPRISE > PRO > FREE) → plan (PlannerAgent with 3-attempt retry, 5 s / 15 s backoff) → approve (Redis + DB fallback gate) → work (tiered parallel tasks, progressive merge per task with fast syntax check, `task-max-retries=3`) → compile → auto-merge all → **COMPLETE** → auto-preview (30-min TTL, skipped for batch runs) → durable background validation (DB-tracked: review → test gen → preview reuse → test exec → validation report). Merge is automatic (no manual gate). **Batch mode:** BatchClientRouter → BatchPollService → BatchResumeService (resolves WORKHORSE model/provider) → auto-retry failed tasks in real-time → compile. **PARTIAL recovery:** `PartialRunResumeService` (`@Scheduled` every 5 min, `@SchedulerLock`) auto-resumes stale PARTIAL runs by calling `retryPartialTask()` for up to 3 failed/stuck tasks per sweep. **Distributed SSE:** Redis pub/sub (`sse:channel:{runId}`) with replay log (`sse:replay:{runId}`, 200-event cap) for Last-Event-ID reconnection.
 
 **Background validation lifecycle:** After COMPLETE, `PipelineHarness` spawns a virtual thread (`bg-validation-{runId}`) tracked in `backgroundValidationRuns` ConcurrentHashSet. SSE `broadcaster.complete()`, `runKeyStore.remove()`, and `runBudgetTracker.remove()` are deferred to the background thread's `finally` block. On failure, emits `VALIDATION_FAILED` SSE event.
 
@@ -296,7 +299,94 @@ graph TB
 
 **Planner prompts:** `planner_edit.txt` has been deleted and merged into `planner.txt` using `{{#if editMode}}` conditional templating.
 
-### 3.3 Code Validation Pipeline
+### 3.3 Run Lifecycle — State Machine & Stage Reference
+
+**State transitions:**
+
+```
+QUEUED ─(slot available)─> PLANNING
+                              │
+                       AWAITING_APPROVAL
+                        │           │              │
+                   (rejected)  (approved)   (batch approved)
+                     FAILED     WORKING    QUEUED_BATCH → IN_PROGRESS_BATCH
+                                                → BATCH_COMPLETE → auto-retry failed
+                                                → COMPILING
+                                   │
+                             +─────+──────+
+                         (all ok)    (some failed)
+                             │              │
+                         COMPILING       PARTIAL ──(PartialRunResumeService / manual retry)──> WORKING
+                             │
+                         MERGING
+                             │
+                         COMPLETE ──> auto-preview (30-min TTL) + bg-validation thread
+
+Terminal: COMPLETE, PARTIAL, FAILED, ARCHIVED
+Side paths: AWAITING_CLARIFICATION ──(reply)──> PLANNING
+            AWAITING_APPROVAL ──(paused)──> PAUSED ──(resume)──> WORKING
+```
+
+**Stage-by-stage reference:**
+
+| Stage | Name | Handler | State change | Key behaviour |
+|-------|------|---------|-------------|---------------|
+| 0 | Submission | `RunController` → `PipelineHarness.submitRun()` | → QUEUED or PLANNING | Pre-flight (tier, quota, API keys); stamp ownership before async thread starts; HTTP 202 |
+| 1 | Workspace init | `executeRunAsync()` | PLANNING | Clone/copy/fresh workspace; language validation; JIRA/Confluence reference extraction; AWAITING_CLARIFICATION side path |
+| 2 | Planning | `PlannerAgent.plan()` (3-attempt retry) | PLANNING → AWAITING_APPROVAL | Planner prompt + workspace context; async Python detection; TaskPlan → AgentTask entities; cost estimate; release compute slot at gate |
+| 3 | Plan gate | `GateStore` (Redis, 500ms poll, 2h TTL) | AWAITING_APPROVAL → WORKING or FAILED | Human approve/reject or `skipApproval`; gate-loss fallback on restart; slot reacquired after approval |
+| 4 | Worker execution | `SequentialTaskExecutor` → `SubtaskDecomposer` → `WorkerAgent` | WORKING | Dependency-tier parallel dispatch; 25-min wall-clock per task; progressive merge after each task; `task-max-retries=3` |
+| 5 | Compilation | `CompilerAgent.runCompileAndFix()` | COMPILING | Detect build tool; up to 3 LLM-guided fix attempts; dynamic error truncation by file count; non-fatal |
+| 6 | Auto-merge & complete | `PipelineHarness` → `StateStore.markComplete()` | MERGING → COMPLETE | Merge all task branches; mark COMPLETE **before** review; auto-start preview; GitHub push/PR if configured |
+| 7 | Review (bg) | `ReviewerAgentV2.review()` | COMPLETE (bg thread) | Phase 1: inspect (max 10 tool calls); Phase 2: auto-fix CRITICAL issues; Phase 3: AccuracyAssessmentService |
+| 8 | Test gen (bg) | `TestGenOrchestrator` | COMPLETE (bg thread) | TestPlannerAgent → TestWorkerAgent; test compilation with retry |
+| 9 | Test exec (bg) | `TestPreviewCoordinator` | COMPLETE (bg thread) | Reuse auto-started preview; batch runs publish empty event to unblock report; non-fatal |
+| 10 | Validation report (bg) | `ValidationReportService` | COMPLETE (bg thread) | LLM-generated report; persist with accuracy score/grade; non-fatal |
+| 11 | BG cleanup | `runBackgroundValidation()` finally block | — | Publish `MergeCompleted` event (triggers JIRA/Confluence/Slack); cost calc; close SSE stream |
+
+**Agent & Service Map:**
+
+| Agent / Service | Stages | Responsibility |
+|-----------------|--------|---------------|
+| `RunController` | 0 | REST entry, tier/quota checks |
+| `PipelineHarness` | 1–11 | Orchestrator, async thread, gate polling, `runBackgroundValidation()` |
+| `PlannerAgent` | 2 | Task decomposition, project type, async Python detection |
+| `SequentialTaskExecutor` | 4 | Dependency graph, tiered parallel dispatch, SubtaskDecomposer |
+| `WorkerAgent` | 4, 7 | Agentic tool-use loop (25 min), code generation |
+| `CompilerAgent` | 5 | Build detection, LLM-guided compile fixes |
+| `GitMergeService` | 4, 6 | Branch merging, conflict detection |
+| `ReviewerAgentV2` | 7 | Code inspection, auto-fix, accuracy assessment |
+| `AccuracyAssessmentService` | 7 | Spec adherence scoring (Phase 3 of review) |
+| `TestGenOrchestrator` | 8 | Orchestrates test planning + generation |
+| `TestPreviewCoordinator` | 9 | Preview reuse, test execution lifecycle |
+| `ValidationReportService` | 10 | Report generation & persistence |
+| `PartialRunResumeService` | — | Auto-resume PARTIAL runs every 5 min |
+| `GateStore` | 3 | Redis-backed gates (500ms poll, 2h TTL) |
+| `StateStore` | All | Central state persistence |
+| `PreviewService` | 6, 9 | Dual-mode preview lifecycle |
+
+**Model escalation rules:**
+
+| Trigger | Behaviour |
+|---------|-----------|
+| Validation retry ≥3 (LIGHTWEIGHT task) | Escalate LIGHTWEIGHT → WORKHORSE |
+| Validation retry ≥3 (WORKHORSE task) | Stay WORKHORSE — never auto-escalates to PLANNING |
+| No file writes for 5 min (stall) | Escalate within same provider (Haiku → Sonnet) |
+| Provider circuit-breaker open (5 failures, 60s TTL) | Cross-provider fallback at same tier |
+| Mid-task provider failure | Compact conversation + `resolveFallbackExcluding()` (1 attempt) |
+| Manual retry via UI / `PartialRunResumeService` | Retries at whatever tier the task was at |
+
+**Context window thresholds (WorkerAgent):**
+
+| Threshold | Action |
+|-----------|--------|
+| 25% input tokens | Warn in logs |
+| 35% input tokens | Compact (sliding window: first 2 + last 18 messages) |
+| 55% input tokens | Hard stop — force completion report |
+
+Tool output truncation: `readFile` 8k chars · `shell` 6k chars · `diff` 5k chars
+
+### 3.4 Code Validation Pipeline
 
 ```mermaid
 graph LR
@@ -555,8 +645,8 @@ The preview system operates in two modes, selected by the `executespec.preview.m
 
 | Mode | Environment | TTL | Networking | Use Case |
 |------|-------------|-----|------------|----------|
-| `docker` | Local dev | 5 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
-| `cloud-run` | Dev / Prod | 5 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
+| `docker` | Local dev | 30 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
+| `cloud-run` | Dev / Prod | 30 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
 
 **Concurrency limits:** FREE=1, PRO=3, ENTERPRISE=10 concurrent previews.
 
@@ -567,6 +657,24 @@ The preview system operates in two modes, selected by the `executespec.preview.m
 - Virtual threads use `ContextSnapshotFactory.captureAll().wrap(runnable)` for Micrometer trace propagation
 - `ACTIVE_PREVIEWS` gauge correctly decremented on all terminal states (success, failure, TTL expiry)
 - `probeApiDocs()` works for both modes: Docker (`localhost:{port}`) and Cloud Run (service URL)
+- TTL increased from 5 min → 30 min to ensure preview outlives background validation (review + test gen)
+
+#### 6.2.2 Container Console (Docker Mode Only)
+
+Users can run allowlisted diagnostic commands directly inside the running preview container without SSH or terminal access. The command executes via `docker compose exec -T` from the backend — the token never reaches the browser.
+
+```
+Browser → POST /api/runs/{runId}/preview/exec
+       → RunAccessGuard (JWT + run ownership)
+       → PreviewService.execInContainer() — server-side allowlist check
+       → ComposeExecutor.execInService() → docker compose exec -T app <cmd>
+       → ExecResult { stdout, stderr, exitCode }
+       → ConsolePanel (frontend)
+```
+
+**Allowlisted commands:** `ls`, `ps`, `cat`, `curl`, `env`, `df`, `free`, `netstat`, `ss`, `ping`, `whoami`, `hostname`, `date`, `uptime`, `pwd`
+
+**Security:** Shell metacharacters (`|`, `&`, `;`, `$`, `` ` ``, `>`, `<`, `..`) rejected server-side. Container already hardened with `cap_drop: ALL` + `no-new-privileges:true`. Only available in Docker preview mode — Cloud Run and VM modes return 503.
 
 #### 6.2.1 Cloud Run Preview Flow
 
@@ -597,7 +705,7 @@ sequenceDiagram
     PS->>PS: Health check (probeApiDocs)
     PS->>PS: Update session → RUNNING
     PS->>PS: Increment ACTIVE_PREVIEWS gauge
-    PS->>PS: Schedule TTL cleanup (5 min)
+    PS->>PS: Schedule TTL cleanup (30 min)
 
     Note over PS: After TTL expires:
     PS->>CR: deleteService(serviceName)
@@ -634,7 +742,7 @@ sequenceDiagram
     PS->>PS: Health check (probeApiDocs → localhost:{port})
     PS->>PS: Update session → RUNNING
     PS->>PS: Increment ACTIVE_PREVIEWS gauge
-    PS->>PS: Schedule TTL cleanup (5 min)
+    PS->>PS: Schedule TTL cleanup (30 min)
 
     Note over PS: After TTL expires:
     PS->>DC: docker compose down
@@ -851,6 +959,8 @@ Result truncation: readFile → 8k chars, shell → 6k chars, diff → 5k chars.
 | Background validation failure | v2: `background_validation` table tracks stage + attempts; auto-retry 3x; manual retry via `POST /api/runs/{id}/retry-validation` |
 | Resume/retry path stale | `doReviewAndMerge()` not updated for background validation pattern |
 | Gate lost on server restart | v2: `GateStore` dual-writes to Redis + `gate_record` table; falls back to DB on Redis miss |
+| PlannerAgent transient LLM failure kills pipeline thread at 0/0 tasks | Inline 3-attempt retry (5 s / 15 s backoff) in `PipelineHarness.executeRunAsync()` before propagating to `markFailed` |
+| PARTIAL runs require manual retry | `PartialRunResumeService` auto-resumes stale PARTIAL runs every 5 min (up to 3 tasks per sweep) |
 
 ---
 
