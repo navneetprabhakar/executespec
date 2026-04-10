@@ -14,9 +14,9 @@ ALTER TABLE validation_report
 ALTER TABLE tier_config
     ADD COLUMN IF NOT EXISTS retention_days INT;
 
-UPDATE tier_config SET retention_days = 30  WHERE tier_name = 'FREE';
-UPDATE tier_config SET retention_days = 90  WHERE tier_name = 'PRO';
-UPDATE tier_config SET retention_days = 365 WHERE tier_name = 'ENTERPRISE';
+UPDATE tier_config SET retention_days = 30  WHERE tier = 'FREE';
+UPDATE tier_config SET retention_days = 90  WHERE tier = 'PRO';
+UPDATE tier_config SET retention_days = 365 WHERE tier = 'ENTERPRISE';
 
 -- Partial indexes for efficient retention sweeps (skip already-deleted rows)
 CREATE INDEX IF NOT EXISTS idx_pipeline_run_retention

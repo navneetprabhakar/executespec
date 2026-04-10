@@ -4,6 +4,7 @@ import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.compiler.CompileResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -22,10 +23,11 @@ import java.util.Set;
  * have been classified as MULTI_TASK. Results are persisted to {@code triage_outcome}
  * for feedback loop analysis.
  *
- * <h3>Escalation thresholds</h3>
+ * <h3>Escalation thresholds (configurable via application.yml)</h3>
  * <ul>
  *   <li>{@code iterations > 20} — too many LLM calls for a "simple" request</li>
- *   <li>{@code files_written > 3} — touched too many files for single-shot</li>
+ *   <li>{@code files_written > 8 AND iterations > 15} — BOTH conditions must be true to escalate;
+ *       single-shot runs for full Spring Boot / Python apps legitimately write 8–15 files</li>
  *   <li>{@code compile_errors > 2} — required too many compile iterations</li>
  *   <li>{@code duration > 8 minutes} — exceeded expected single-shot wall time</li>
  * </ul>
@@ -39,10 +41,21 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class TriageEscalationDetector {
 
-    static final int ESCALATE_ITERATIONS    = 20;
-    static final int ESCALATE_FILES         = 3;
-    static final int ESCALATE_COMPILE_ERRORS = 2;
-    static final Duration ESCALATE_DURATION = Duration.ofMinutes(8);
+    // Configurable thresholds — override in application.yml under triage.escalation.*
+    @Value("${triage.escalation.iterations:20}")
+    int escalateIterations;
+
+    @Value("${triage.escalation.files:8}")
+    int escalateFiles;
+
+    @Value("${triage.escalation.files-min-iterations:15}")
+    int escalateFilesMinIterations;
+
+    @Value("${triage.escalation.compile-errors:2}")
+    int escalateCompileErrors;
+
+    @Value("${triage.escalation.duration-minutes:8}")
+    int escalateDurationMinutes;
 
     private final JdbcTemplate jdbc;
 
@@ -87,15 +100,20 @@ public class TriageEscalationDetector {
         int durationSeconds = runStart != null
                 ? (int) Duration.between(runStart, Instant.now()).toSeconds() : 0;
 
+        Duration escalateDuration = Duration.ofMinutes(escalateDurationMinutes);
+
         List<String> reasons = new ArrayList<>();
-        if (totalIterations > ESCALATE_ITERATIONS)
-            reasons.add("iterations=" + totalIterations + " > " + ESCALATE_ITERATIONS);
-        if (totalFilesWritten > ESCALATE_FILES)
-            reasons.add("files=" + totalFilesWritten + " > " + ESCALATE_FILES);
-        if (compileErrors > ESCALATE_COMPILE_ERRORS)
-            reasons.add("compileErrors=" + compileErrors + " > " + ESCALATE_COMPILE_ERRORS);
-        if (durationSeconds > ESCALATE_DURATION.toSeconds())
-            reasons.add("duration=" + durationSeconds + "s > " + ESCALATE_DURATION.toSeconds() + "s");
+        if (totalIterations > escalateIterations)
+            reasons.add("iterations=" + totalIterations + " > " + escalateIterations);
+        // File count escalation requires BOTH high file count AND high iteration count —
+        // single-shot runs for full apps legitimately write 8–15 files in few iterations.
+        if (totalFilesWritten > escalateFiles && totalIterations > escalateFilesMinIterations)
+            reasons.add("files=" + totalFilesWritten + " > " + escalateFiles
+                    + " AND iterations=" + totalIterations + " > " + escalateFilesMinIterations);
+        if (compileErrors > escalateCompileErrors)
+            reasons.add("compileErrors=" + compileErrors + " > " + escalateCompileErrors);
+        if (durationSeconds > escalateDuration.toSeconds())
+            reasons.add("duration=" + durationSeconds + "s > " + escalateDuration.toSeconds() + "s");
 
         boolean escalate = !reasons.isEmpty();
         String reason = escalate ? String.join(", ", reasons) : null;

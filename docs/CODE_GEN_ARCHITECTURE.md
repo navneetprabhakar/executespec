@@ -384,12 +384,12 @@ model-matrix:
       lightweight: claude-haiku-4-5-20251001
     google:
       planning:    gemini-3-flash-preview
-      workhorse:   gemini-2.5-flash
-      lightweight: gemini-2.5-flash
+      workhorse:   gemini-3-flash-preview
+      lightweight: gemini-3-flash-preview
     openai:
       planning:    gpt-5.4
-      workhorse:   gpt-5.4-mini
-      lightweight: gpt-5.4-mini
+      workhorse:   gpt-5.4
+      lightweight: gpt-5.4
 
   agent-tier-map:
     PlannerAgent:             PLANNING

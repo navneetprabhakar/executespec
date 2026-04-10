@@ -6,7 +6,7 @@ ALTER TABLE agent_task ADD COLUMN IF NOT EXISTS prompt_hash VARCHAR(12);
 
 CREATE TABLE IF NOT EXISTS prompt_audit (
     id          BIGSERIAL PRIMARY KEY,
-    run_id      UUID NOT NULL,
+    run_id      VARCHAR(255) NOT NULL,
     agent_type  VARCHAR(30) NOT NULL,
     prompt_hash VARCHAR(12) NOT NULL,
     char_count  INT NOT NULL,

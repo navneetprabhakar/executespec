@@ -250,17 +250,28 @@ public class RunMapper {
      * Pulls a human-readable failure reason from the task's stored report JSON
      * (WorkerReport#blockers for BLOCKED, WorkerReport#selfReview for PARTIAL)
      * or falls back to the lastLlmFailure flag set by the recovery system.
+     *
+     * <p>Note: {@code self_review} is intentionally skipped for COMPLETE tasks — parent tasks
+     * completed from subtask decomposition store "Decomposed into N subtasks: N complete" in
+     * {@code self_review}, which is a success note, not a failure reason. That info is already
+     * surfaced via {@code completionNotes} in the TaskSummary.
      */
     private String extractFailureReason(AgentTask t) {
+        boolean isComplete = "COMPLETE".equals(t.getStatus());
         if (t.getWorkerReportJson() != null && !t.getWorkerReportJson().isBlank()) {
             try {
                 JsonNode report = objectMapper.readTree(t.getWorkerReportJson());
                 // BLOCKED tasks: "blockers" field
                 String blockers = report.path("blockers").asText("");
                 if (!blockers.isBlank()) return blockers;
-                // PARTIAL tasks: "self_review" (snake_case from WorkerReport)
-                String selfReview = report.path("self_review").asText("");
-                if (!selfReview.isBlank()) return selfReview;
+                // PARTIAL tasks: "self_review" (snake_case from WorkerReport).
+                // Skip for COMPLETE tasks — self_review on COMPLETE tasks contains subtask
+                // decomposition summaries ("Decomposed into N subtasks: N complete"), which
+                // are success notes, not failures. These are already in completionNotes.
+                if (!isComplete) {
+                    String selfReview = report.path("self_review").asText("");
+                    if (!selfReview.isBlank()) return selfReview;
+                }
             } catch (Exception ignored) {}
         }
         // Fallback: lastLlmFailure (set by blockTask / recovery)

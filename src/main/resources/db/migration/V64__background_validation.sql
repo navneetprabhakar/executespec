@@ -3,7 +3,7 @@
 
 CREATE TABLE background_validation (
     id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id        UUID          NOT NULL REFERENCES pipeline_run(run_id) ON DELETE CASCADE,
+    run_id        VARCHAR(255)  NOT NULL REFERENCES pipeline_run(run_id) ON DELETE CASCADE,
     status        VARCHAR(20)   NOT NULL DEFAULT 'PENDING',   -- PENDING, RUNNING, COMPLETED, FAILED
     current_phase VARCHAR(50),                                -- TEST_GEN, REVIEW, RE_VALIDATE, REPORT
     phase_results JSONB         NOT NULL DEFAULT '{}',

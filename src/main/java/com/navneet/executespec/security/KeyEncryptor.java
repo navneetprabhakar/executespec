@@ -36,7 +36,7 @@ public class KeyEncryptor {
     private final SecretKey secretKey;
     private final SecureRandom rng = new SecureRandom();
 
-    public KeyEncryptor(@Value("${security.jwt.secret}") String jwtSecret) {
+    public KeyEncryptor(@Value("${app.jwt.secret}") String jwtSecret) {
         try {
             byte[] keyBytes = MessageDigest.getInstance("SHA-256")
                     .digest(jwtSecret.getBytes(StandardCharsets.UTF_8));
