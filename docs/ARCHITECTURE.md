@@ -84,7 +84,7 @@ graph TB
         end
 
         subgraph "Serverless"
-            CR1[Cloud Run<br/>Preview services<br/>es-preview-*<br/>5-min TTL]
+            CR1[Cloud Run<br/>Preview services<br/>es-preview-*<br/>30-min TTL]
             CR2[Cloud Run<br/>Deployed services<br/>es-deploy-*<br/>7-day TTL]
         end
     end
@@ -618,7 +618,7 @@ sequenceDiagram
     PS->>PS: Health check (probeApiDocs)
     PS->>PS: Update session → RUNNING
     PS->>PS: Increment ACTIVE_PREVIEWS gauge
-    PS->>PS: Schedule TTL cleanup (5 min)
+    PS->>PS: Schedule TTL cleanup (30 min)
 
     Note over PS: After TTL expires:
     PS->>CR: deleteService(serviceName)
@@ -655,7 +655,7 @@ sequenceDiagram
     PS->>PS: Health check (probeApiDocs → localhost:{port})
     PS->>PS: Update session → RUNNING
     PS->>PS: Increment ACTIVE_PREVIEWS gauge
-    PS->>PS: Schedule TTL cleanup (5 min)
+    PS->>PS: Schedule TTL cleanup (30 min)
 
     Note over PS: After TTL expires:
     PS->>DC: docker compose down

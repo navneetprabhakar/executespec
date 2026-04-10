@@ -718,7 +718,11 @@ SUPER_ADMIN (global -- full system access)
 | Post-merge agents | Done | Context, optimizer, API test suite |
 | Task retry | Done | Retry individual failed tasks |
 | Run pause/resume | Done | Graceful pause with state preservation |
-| Manual resume | Done | Users resume stuck runs manually via UI (auto-resume disabled) |
+| Manual resume | Done | Users resume stuck runs manually via UI |
+| PARTIAL run auto-recovery | Done | `PartialRunResumeService` (`@Scheduled` every 5 min, `@SchedulerLock`) auto-resumes stale PARTIAL runs by retrying up to 3 failed/stuck tasks per sweep; guarded by `isRunActive` check |
+| Batch execution | Done | OpenAI Batch API + Anthropic Batch API (50% cost discount). User selects real-time or batch at plan approval. `BatchPollService` polls every 30s; `BatchResumeService` parses results and publishes `BatchCompleteEvent`; failed batch tasks auto-retried in real-time |
+| Planner retry | Done | `PlannerAgent.plan()` retried up to 3 attempts (5 s / 15 s backoff) on transient LLM failure before marking run FAILED — eliminates "0/0 tasks" thread-death failures |
+| Spec adherence assessment | Done | Phase 3 of review pipeline: `AccuracyAssessmentService` scores generated code against original spec (0-100, A-F grade, endpoint coverage, schema accuracy, test coverage, missing requirements). Score persisted to `validation_report` via V74 migration |
 | Run archive | Done | Archive completed runs, hide from default list |
 | Stall detection | Done | 5min no output -> model escalation |
 | 25-min time limit | Done | Wall-clock limit per task, target 20 iterations, hard limit 35 tool calls |
@@ -742,8 +746,9 @@ SUPER_ADMIN (global -- full system access)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Cloud Run preview | Done | 5-min ephemeral containers (auto-start on COMPLETE) |
-| Docker Compose preview | Done | 5-min TTL, Caddy proxy with Cloudflare Origin Certificate |
+| Cloud Run preview | Done | 30-min ephemeral containers (auto-start on COMPLETE; TTL increased from 5 min to outlive background validation) |
+| Docker Compose preview | Done | 30-min TTL, Caddy proxy with Cloudflare Origin Certificate |
+| Container console | Done | Docker mode only: run allowlisted diagnostic commands inside preview container via `POST /api/runs/{runId}/preview/exec` (ls, ps, cat, curl, env, df, free, netstat, ss, ping, whoami, hostname, date, uptime, pwd). Server-side allowlist + shell metacharacter rejection. Frontend `ConsolePanel.tsx` in `PreviewTab` |
 | Dockerfile auto-detect | Done | Node/React/Spring Boot/Python/Full-stack/Static HTML/Monorepo (fixed shell escape bug in full-stack Dockerfile generation) |
 | Project type from planner | Done | Planner declares `project_type` -> `.agent-context/project.json` |
 | Path A: Cloud Run Direct | Done | Simple containerized deployment |
@@ -918,7 +923,7 @@ SUPER_ADMIN (global -- full system access)
 
 ## 8. Database Schema
 
-### 8.1 Migrations Summary (V1-V58)
+### 8.1 Migrations Summary (V1-V75)
 
 | Range | Scope |
 |-------|-------|

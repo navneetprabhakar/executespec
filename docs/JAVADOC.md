@@ -191,7 +191,9 @@ All packages are under `com.navneet.executespec`.
 | Package | Description |
 |---------|-------------|
 | `router/` | Model routing: ModelResolver (matrix-based tier x provider routing), AgentTier, LlmProvider, ResolvedModel, ProviderHealthTracker (Redis-backed circuit breaker), AvailableProviderResolver, ModelTaskMetric, ModelMatrixProperties |
-| `reviewer/` | Agentic reviewer V2: ReviewerAgentV2 (two-phase inspect + fix), ReviewReportV2 |
+| `reviewer/` | Agentic reviewer V2: ReviewerAgentV2 (three-phase: inspect + fix + accuracy assessment), AccuracyAssessmentService, ReviewReportV2 |
+| `reviewer/model/` | AccuracyReport (spec adherence scoring record with EndpointCoverage nested type), ReviewIssue, IssueSeverity |
+| `batch/` | Batch LLM execution: LlmBatchClient (interface), BatchClientRouter, AnthropicBatchClient, OpenAiBatchClient, GoogleBatchClient, BatchRequestBuilder, BatchPollService (`@Scheduled` 30s + `@SchedulerLock`), BatchResumeService (result parsing + event publish), BatchCompleteEvent |
 | `validator/` | Code validation: CodeValidator, CodeValidatorImpl, ValidationLevel, ValidationResult, ValidationVerdict, Language |
 | `validator/model/` | Validation data models |
 | `validator/prompt/` | RetryPromptBuilder (builds error feedback for retries) |
@@ -392,6 +394,14 @@ PostMergeOrchestrator.onMergeCompleted(event)
 
 **Prompt Template:** `planner_edit.txt` has been merged into `planner.txt`. The single prompt uses `{{#if editMode}}...{{/if}}` blocks: fresh plans strip the edit block, while `replanWithFeedback()` activates it and substitutes the existing plan JSON and user feedback.
 
+**Async Python Stack Detection:**
+
+Before calling the LLM, `PlannerAgent` inspects the user goal for async Python dependency patterns (`asyncpg`, `sqlalchemy[asyncio]`, `sqlalchemy.ext.asyncio`, `redis.asyncio`, `aioredis`). When detected, it injects a `<complexity_signal>` XML block into the planner prompt that:
+- Guides task decomposition: dedicated setup task for async DB engine + session factory, separate task for async Redis client
+- Warns about Google Gemini's weaker async Python support and recommends sync drivers if Google provider is selected
+
+This prevents the planner from under-scoping async Python setups, which were a common source of PARTIAL runs before this fix.
+
 **Output:** `TaskPlan` containing:
 - `planSummary` -- high-level description
 - `project_type` -- declared project type (e.g., STATIC_HTML, NODE_BACKEND, FULL_STACK)
@@ -472,13 +482,14 @@ PostMergeOrchestrator.onMergeCompleted(event)
 **File:** `reviewer/ReviewerAgentV2.java`
 **Tier:** PLANNING
 **Model (Anthropic):** `claude-sonnet-4-6`
-**Mode:** Two-phase agentic review
+**Mode:** Three-phase agentic review
 
-**Purpose:** Reviews merged code on main with tool-use inspection and automatic fix application for critical issues. Runs in the background validation thread AFTER the run is marked COMPLETE.
+**Purpose:** Reviews merged code on main with tool-use inspection, automatic fix application for critical issues, and spec adherence accuracy assessment. Runs in the background validation thread AFTER the run is marked COMPLETE.
 
 **Phases:**
 1. **Inspect Phase:** Reads file tree and selected source files via tool-use loop (max 10 tool calls). Produces a list of ReviewIssues classified as CRITICAL or MINOR.
 2. **Fix Phase:** For each CRITICAL issue (max 8), sends a targeted fix instruction to WorkerAgent, then validates the fix via CodeValidator.
+3. **Accuracy Assessment Phase:** Calls `AccuracyAssessmentService.assess()` to measure spec adherence. Returns `AccuracyReport` with score 0-100, grade A-F, endpoint coverage, schema accuracy, and missing requirements. Score + grade are persisted to the `validation_report` table via V74 migration.
 
 **Verdict Enum:** `APPROVED`, `APPROVED_WITH_NOTES`, `NEEDS_FIXES`, `REJECTED`
 
@@ -498,6 +509,42 @@ PostMergeOrchestrator.onMergeCompleted(event)
 - Max 8 critical issues trigger auto-fix
 - 2 fix attempts per critical issue (FAST -> CAPABLE escalation)
 - Total phase timeout: 3 minutes
+
+### 5.4.1 AccuracyAssessmentService
+
+**File:** `reviewer/AccuracyAssessmentService.java`
+**Tier:** PLANNING (same tier as ReviewerAgentV2)
+
+**Purpose:** Phase 3 of the review pipeline. Makes a focused LLM call that scores the generated code against the original user specification, returning a structured `AccuracyReport`.
+
+**Public API:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `assess` | `AccuracyReport assess(String runId, String provider, ResolvedModel model, String userGoal, List<ReviewIssue> issues)` | Main entry. Builds prompt with file tree + issues summary, calls LLM, parses `AccuracyReport` JSON. Falls back to `defaultReport()` on any failure. |
+
+**Accuracy Dimensions:**
+
+| Dimension | Type | Description |
+|-----------|------|-------------|
+| `specAdherenceScore` | `int` (0-100) | Percentage of explicitly stated requirements implemented |
+| `overallAccuracyGrade` | `String` (A-F) | Letter grade derived from score (A ≥ 90, B ≥ 80, C ≥ 70, D ≥ 60, F < 60) |
+| `endpointCoverage` | `EndpointCoverage` | For API specs: required, implemented, missing HTTP endpoints |
+| `schemaAccuracy` | `String` (HIGH/MEDIUM/LOW) | How closely request/response payloads match the spec |
+| `testCoverage` | `String` (NONE/PARTIAL/GOOD/COMPREHENSIVE) | Test coverage level relative to spec expectations |
+| `nonFunctionalCoverage` | `List<String>` | Which non-functional requirements are covered (auth, pagination, rate limiting, error handling) |
+| `missingRequirements` | `List<String>` | Specific requirements from the spec that are absent or incomplete |
+| `partialRequirements` | `List<String>` | Requirements partially implemented |
+
+**AccuracyReport helper methods:**
+- `isHighAccuracy()` — true if `specAdherenceScore >= 80`
+- `hasSignificantGaps()` — true if `missingRequirements.size() > 2 || specAdherenceScore < 70`
+- `incompleteRequirementsCount()` — `missingRequirements.size() + partialRequirements.size()`
+- `toOneLiner()` — compact single-line summary for logging / SSE events
+
+**Failure handling:** Any LLM call failure or JSON parse error returns a conservative default report (score = 50, grade = C) rather than propagating the exception, so Phase 3 failures never block the validation report from being generated.
+
+**DB persistence:** `ValidationReportService` reads `accuracyScore` and `accuracyGrade` from the returned report and persists them to the `validation_report` table (columns added by V74 migration). The full `AccuracyReport` JSON is not stored — only the scalar fields that the frontend needs.
 
 ### 5.5 CompilerAgent
 
@@ -1790,6 +1837,7 @@ For existing-repo runs, the pipeline automatically:
 | `DELETE` | `/api/runs/{runId}/preview/stop` | Stop and tear down preview |
 | `GET` | `/api/runs/{runId}/preview/logs` | Get logs (Docker Compose or Cloud Run via `gcloud logging read`) |
 | `GET` | `/api/runs/{runId}/preview/probe-api-docs` | Probe for OpenAPI/Swagger endpoints (works for both Docker and Cloud Run) |
+| `POST` | `/api/runs/{runId}/preview/exec` | Execute an allowlisted diagnostic command inside the running preview container (Docker mode only). Body: `{"cmd":"ls","args":["-la"]}`. Returns `{stdout, stderr, exitCode}`. 400 on blocked command, 503 if preview not RUNNING or in Cloud Run mode. |
 
 ### 17.8 Deployment Endpoints (`DeploymentController`)
 
@@ -1814,6 +1862,21 @@ For existing-repo runs, the pipeline automatically:
 | `GET` | `/api/runs/{runId}/report/pdf` | Download report as PDF |
 | `POST` | `/api/runs/{runId}/report/share` | Generate share link |
 | `GET` | `/api/reports/shared/{token}` | Public shared report (no auth) |
+
+**`ValidationReportDTO` response fields** (`report/model/ValidationReportDTO.java`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `runId` | String | |
+| `verdict` | String | APPROVED / APPROVED_WITH_NOTES / NEEDS_FIXES / REJECTED |
+| `summary` | String | Text summary from reviewer |
+| `issues` | List | List of `ReportIssueDTO` (severity, description, file) |
+| `pipelineResult` | String | PASS / FAIL / PARTIAL |
+| `testReport` | String | Test execution summary |
+| `accuracyScore` | Integer | 0-100 spec adherence score (nullable — null if assessment failed or batch run) |
+| `accuracyGrade` | String | A/B/C/D/F letter grade (nullable) |
+| `previewUrl` | String | URL to the running preview (nullable — null for expired or batch runs) |
+| `createdAt` | String | ISO timestamp |
 
 ### 17.11 Integration Endpoints (`IntegrationController`)
 
@@ -2207,9 +2270,12 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      pool:
-        max-active: 50
-        min-idle: 5
+      lettuce:
+        pool:
+          max-active: 50
+          min-idle: 5
+          test-on-borrow: true      # validates connections before use (P0 fix — prevents STOPPED conn errors)
+          test-while-idle: true     # evicts dead connections from pool proactively
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     username: ${POSTGRES_USER:postgres}
@@ -2334,7 +2400,7 @@ preview:
   enabled: true
   mode: docker
   total-startup-timeout-seconds: 480
-  preview-ttl-minutes: 5
+  preview-ttl-minutes: 30           # increased from 5 min — ensures preview outlives background validation (10-25 min)
   port-range-start: 10000
   port-range-end: 10100
   preview-domain: executespec.ai
@@ -2461,6 +2527,26 @@ billing:
 | V54 | Stripe multi-currency (multi-currency pricing, org country/currency, tax IDs, gateway tracking) |
 | V55 | Payment audit expansion (gateway tracking, webhook_event_log table for idempotent webhook processing) |
 | V56 | Task completion notes (`agent_task.completion_notes` TEXT column) |
+| V57 | Tier display name (`tier_config.display_name` column) |
+| V58 | Subtask support (`agent_task.parent_task_id`, `subtask_index`, `subtask_total` columns) |
+| V59 | Bitbucket support (repository provider enum expansion) |
+| V60 | Preview registry (`preview_session` table for persistent session tracking) |
+| V60_1 | Cost credits and pricing (`pipeline_run.credits_charged`, `credits_estimated`, `hard_cap_usd`; `run_cost_log` table) |
+| V61 | Batch execution and notifications (`pipeline_run.batch_id`, `approved_execution_mode`; `notification` table) |
+| V62 | Billing plan restructure (billing plan table schema changes) |
+| V63 | Top-up package restructure (top-up package schema normalization) |
+| V64 | Background validation tracking (`background_validation` table — stage, attempt count, per-stage timestamps) |
+| V65 | Gate record DB fallback (`gate_record` table — dual-write with Redis for cross-restart gate survival) |
+| V66 | User token invalidation (`app_user.token_invalidated_at` — epoch-based force-logout support) |
+| V67 | RLS tenant isolation (PostgreSQL row-level security policies on core tables) |
+| V68 | Event log and instance tracking (`run_event_log` table; `server_instance` table for instance-aware SSE routing) |
+| V69 | Side-effect outbox (`side_effect_outbox` table — transactional outbox for external integration calls) |
+| V70 | Data retention (`pipeline_run.retain_until` column; retention policy configuration) |
+| V71 | Triage outcome tracking (`triage_outcome` table — stores classification + confidence for ML feedback loop) |
+| V72 | Prompt audit (`prompt_audit` table — SHA-256 hash, prompt path, substitution keys, LLM response metadata) |
+| V73 | Plan effectiveness tracking (`plan_effectiveness` table — per-run planner model + provider + task outcome rates) |
+| V74 | Validation report accuracy (`validation_report.accuracy_score` INTEGER, `accuracy_grade` TEXT, `accuracy_json` TEXT — persists Phase 3 accuracy assessment results) |
+| V75 | Validation report preview URL (`validation_report.preview_url` TEXT — stores the preview URL at time of report generation for persistent access) |
 
 ### 21.2 Entity Relationship Diagram
 
