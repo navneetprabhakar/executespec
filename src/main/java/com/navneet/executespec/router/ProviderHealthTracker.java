@@ -31,9 +31,9 @@ import java.time.Duration;
 @RequiredArgsConstructor
 public class ProviderHealthTracker {
 
-    private static final int UNHEALTHY_THRESHOLD = 5;
-    private static final Duration RECOVERY_WINDOW = Duration.ofSeconds(60);
-    private static final Duration FAILURE_COUNTER_TTL = Duration.ofSeconds(120);
+    private static final int UNHEALTHY_THRESHOLD = 10;
+    private static final Duration RECOVERY_WINDOW = Duration.ofSeconds(180);
+    private static final Duration FAILURE_COUNTER_TTL = Duration.ofSeconds(300);
 
     private static final String HEALTH_KEY_PREFIX = "provider:health:";
     private static final String FAILURE_KEY_PREFIX = "provider:failures:";
@@ -73,6 +73,19 @@ public class ProviderHealthTracker {
         } catch (Exception e) {
             log.debug("Redis error recording success for {}", provider, e);
         }
+    }
+
+    /**
+     * Records a 429 rate-limit response — increments metric but does NOT advance
+     * the circuit-breaker failure counter. Rate limits are transient quota events,
+     * not provider health events; opening the circuit on 429 causes false-positive
+     * outages and unnecessary failovers.
+     */
+    public void recordRateLimit(LlmProvider provider) {
+        Counter.builder("executespec.llm.rate_limited")
+                .tag("provider", provider.name())
+                .register(meterRegistry).increment();
+        log.debug("Provider {} rate-limited (429) — circuit breaker NOT incremented", provider);
     }
 
     /**

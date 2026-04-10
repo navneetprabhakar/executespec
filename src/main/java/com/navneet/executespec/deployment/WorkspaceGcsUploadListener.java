@@ -2,6 +2,7 @@ package com.navneet.executespec.deployment;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.event.PipelineEvent;
+import com.navneet.executespec.saga.SideEffectOutbox;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Immediately uploads a run's workspace to GCS when the run reaches a terminal state.
@@ -39,6 +41,7 @@ public class WorkspaceGcsUploadListener {
     private final WorkspaceExportService exportService;
     private final GcsWorkspaceStore gcsStore;
     private final StateStore stateStore;
+    private final SideEffectOutbox sideEffectOutbox;
 
     // ── Event-driven upload (covers COMPLETE + FAILED + PARTIAL) ─────────────
 
@@ -101,8 +104,15 @@ public class WorkspaceGcsUploadListener {
                 Files.deleteIfExists(zipPath);
             }
         } catch (Exception e) {
-            log.warn("[GcsUpload] Failed to upload workspace for run {}: {}", runId, e.getMessage());
-            // Non-fatal — the archive job will pick it up later
+            log.warn("[GcsUpload] Failed to upload workspace for run {}: {} — enqueuing for retry via outbox",
+                    runId, e.getMessage());
+            // Enqueue for reliable retry via SideEffectOutbox (max 3 attempts, exp. backoff)
+            sideEffectOutbox.enqueue(runId, "GCS_ARCHIVE", Map.of(
+                    "runId", runId,
+                    "bucket", deploymentProps.workspace().gcsBucket() != null
+                            ? deploymentProps.workspace().gcsBucket() : "",
+                    "error", e.getMessage() != null ? e.getMessage() : "unknown"
+            ));
         }
     }
 }

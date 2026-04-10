@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-09
+> Last updated: 2026-04-10
 
 ## Architecture
 
@@ -23,6 +23,8 @@
 - **Feature flags:** DB-backed `FeatureFlagService` with Redis pub/sub cache invalidation + 60s scheduled reload. Admin-manageable via `FeatureFlagController`.
 - **Rate limiting:** Redis-backed per-tenant rate limiting via `RateLimitFilter`. Endpoint groups: AUTH, RUNS, WEBHOOK, READ, WRITE, PREVIEW, DEPLOY with per-tier limits.
 - **Observability:** Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP)
+- **Prompt architecture:** Composable fragment system via `PromptAssembler` (`@Service`). Shared rules stored in `prompts/fragments/*.md`, injected via `{{include:name}}` markers. Per-project-type scaffold templates in `prompts/scaffolds/*.md`, injected via `{{SCAFFOLD_TEMPLATE}}`. `assembleAndTrack()` computes SHA-256 prefix hash, saves row to `prompt_audit` table. Inline CSS removed from worker system prompts (`{{STYLING_SECTION}}` = empty string); actual design content arrives via `buildFrontendBlock()` → `UiStyleResolver` → filesystem folder in `application.yml`.
+- **Request triage:** Three-tier classification (`SINGLE_SHOT | MEDIUM | MULTI_TASK`) via `RequestTriageService`. Full-stack pattern safety check before LLM call. Workspace context (`file_tree`, `detected_frameworks`) injected into triage prompt. Structured JSON output `{"classification", "confidence", "reason"}`. Confidence < 0.7 → escalates to MULTI_TASK. MEDIUM → planner capped at 4 tasks.
 
 ## Code Conventions
 
@@ -34,7 +36,8 @@
 - **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling). Self-play prevention: fabricated `<tool_result>` blocks stripped before parsing. XML-first parsing for PATH B (Anthropic/Google), JSON fallback.
 - **Completion detection:** Worker response must START with `{` (strict JSON check)
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V61)
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V73)
+- **Prompt assembly:** LLM prompts assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 
 ## Patterns: MUST Follow
 
@@ -268,7 +271,14 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Rate limiting | `ratelimit/RateLimitFilter.java` |
 | Input sanitizer | `security/InputSanitizer.java` |
 | Code abuse scanner | `security/CodeAbuseScanner.java` |
-| Request triage | `agent/RequestTriageService.java` |
+| Request triage | `agent/RequestTriageService.java` (3-tier: SINGLE_SHOT/MEDIUM/MULTI_TASK, workspace context injection) |
+| Prompt assembler | `agent/PromptAssembler.java` (fragment resolution, variable substitution, hash tracking) |
+| Prompt audit entity | `agent/PromptAudit.java`, `agent/PromptAuditRepository.java` |
+| Failure pattern service | `agent/FailurePatternService.java` (queries recent runs, returns markdown bullet list for planner) |
+| Prompt fragments | `resources/prompts/fragments/*.md` (security-rules, preview-defaults, cors-config, etc.) |
+| Scaffold templates | `resources/prompts/scaffolds/*.md` (spring-boot, node-backend, node-frontend, python, go, etc.) |
+| API prober | `testgen/ApiProber.java` (probes live preview endpoints before test generation) |
+| API surface extractor | `testgen/ApiSurfaceExtractor.java` (regex-extracts routes from workspace for test planner) |
 | Slack integration | `integration/slack/SlackNotificationService.java` |
 | GitHub repo service | `integration/github/GitHubRepoService.java` (branch, PR creation, default branch lookup) |
 | Git tool | `tool/GitTool.java` (workspace git ops, `pushToBranch()` for existing repos) |
@@ -279,7 +289,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
 | Test execution service | `testgen/TestExecutionService.java` |
 | Test result controller | `testgen/TestResultController.java` (apply-test-fixes, run-tests) |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V58) |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V73; V72=prompt_audit, V73=plan_effectiveness) |
 | LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
@@ -294,8 +304,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
 | PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
 Default provider: OpenAI (user-selected per project). Failover order: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier. See `application.yml` → `model-matrix:` for full configuration.
 
@@ -321,7 +331,7 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - GitHub branch + PR creation for existing-repo runs (branch `executespec/{runId-short}`, PR opened automatically)
 - Chat copilot + apply suggestion (chat/review improvements on same run)
 - Run archive feature
-- Request triage (single-shot fast path for simple requests)
+- Request triage: three-tier (SINGLE_SHOT / MEDIUM / MULTI_TASK) with workspace context, confidence scoring, and full-stack safety pattern
 - Observability: Micrometer traces + custom metrics (30+ meters) + structured logging
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
@@ -349,6 +359,7 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Subtask decomposition: multi-file tasks split into per-file subtasks (SubtaskDecomposer), tracked via parentTaskId/subtaskIndex/subtaskTotal
 - Self-play prevention: WorkerAgent strips fabricated `<tool_result>` blocks from LLM responses, uses XML-first parsing for PATH B providers (Anthropic/Google)
 - Task graph subtask grouping: frontend TaskGraph renders subtasks as smaller nodes grouped under parent with expand/collapse, progress bar, aggregate status
+- Prompt architecture remediation (19 issues): shared fragment system (`PromptAssembler`), scaffold templates, planner restructured to ≤3500 words with priority tiers, per-language complexity heuristics, prompt version tracking (SHA-256 hash → `prompt_audit`), failure pattern injection into planner, live API probe for test generation (`ApiProber`), API surface extraction for test planner (`ApiSurfaceExtractor`), conflict resolver structured JSON output with risk level, token cost awareness in worker prompts, self-review enforcement (post-commit `listFiles` required), command allowlist in `ProcessExecutor`
 
 ### In Progress
 - Production deployment preparation
@@ -362,3 +373,4 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Apply-to-run: `plan_version` duplicate key error on retry (incrementPlanVersion may not be working correctly)
 - `@Lazy @Autowired` on `PreviewService` in `TestPreviewCoordinator` — only field injection in codebase, needed to break circular dependency
 - Default provider is OpenAI but eval results show Anthropic (Haiku) and Google (Gemini) perform better — consider changing default
+- `context-agent.txt` outputs JSON patch array (`KEEP/UPDATE/ADD/REMOVE`) but `ContextAgent.java` still writes raw LLM response — Java-side patch application not yet implemented

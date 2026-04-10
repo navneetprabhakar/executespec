@@ -4,6 +4,7 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ProviderHealthTracker;
+import com.navneet.executespec.router.RunProviderPinStore;
 import com.navneet.executespec.state.InboxService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -86,6 +87,8 @@ public class LlmRouter {
     private final MeterRegistry meterRegistry;
     private final ProviderHealthTracker healthTracker;
     private final ModelRegistry modelRegistry;
+    private final RunProviderPinStore pinStore;
+    private final com.navneet.executespec.router.ModelPerformanceTracker modelPerfTracker;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -118,6 +121,20 @@ public class LlmRouter {
 
         try {
             List<String[]> chain = resolveChain(primaryModel);
+
+            // Per-run provider pinning: if this run was previously served by a different
+            // provider, prefer that provider (shift startIndex). Pin is advisory — if pinned
+            // provider is unhealthy we fall back normally and re-pin to the new provider.
+            String pinnedProvider = pinStore.getPin(runId).orElse(null);
+            if (pinnedProvider != null && !pinnedProvider.equalsIgnoreCase(primaryProvider)) {
+                int pinnedIndex = findIndexInChain(chain, pinnedProvider);
+                if (pinnedIndex >= 0 && healthTracker.isHealthy(toLlmProvider(pinnedProvider))) {
+                    log.debug("[LlmRouter] Run {} pinned to {} — reordering chain", runId, pinnedProvider);
+                    primaryProvider = chain.get(pinnedIndex)[0];
+                    primaryModel    = chain.get(pinnedIndex)[1];
+                }
+            }
+
             int startIndex = findIndexInChain(chain, primaryProvider);
 
             // Resolve per-run keys to check provider restrictions
@@ -148,6 +165,10 @@ public class LlmRouter {
                 if (!healthTracker.isHealthy(llmProvider)) {
                     log.info("[LlmRouter] Provider {} circuit OPEN — skipping for agent {} (iteration={})",
                         provider, agentId, iteration);
+                    // If this was the pinned provider, clear the pin so next call re-pins to healthy one
+                    if (provider.equalsIgnoreCase(pinnedProvider)) {
+                        pinStore.clearPin(runId);
+                    }
                     continue;
                 }
 
@@ -157,9 +178,18 @@ public class LlmRouter {
                         "Falling back from " + fromProvider + " to " + provider));
                     Counter.builder(LLM_FALLBACK).tag("from", fromProvider).tag("to", provider)
                             .register(meterRegistry).increment();
+                    // Provider switch mid-run: clear old pin so new provider gets pinned on success
+                    if (pinnedProvider != null && !fromProvider.equalsIgnoreCase(provider)) {
+                        pinStore.clearPin(runId);
+                        Counter.builder("executespec.llm.provider_switch")
+                                .tag("from", fromProvider).tag("to", provider)
+                                .register(meterRegistry).increment();
+                        log.warn("[LlmRouter] Provider switch mid-run {} → {}: style consistency prompt will be used",
+                            fromProvider, provider);
+                    }
                     log.warn("[LlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
-                        primaryProvider, provider, agentId, iteration);
-                    inboxService.sendProviderFallback(runId, agentId, primaryProvider, provider,
+                        fromProvider, provider, agentId, iteration);
+                    inboxService.sendProviderFallback(runId, agentId, fromProvider, provider,
                         lastError != null ? lastError.getMessage() : "unknown error");
                 }
 
@@ -171,14 +201,19 @@ public class LlmRouter {
                     Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
                             .register(meterRegistry).record(callDuration);
                     healthTracker.recordSuccess(llmProvider);
+                    modelPerfTracker.recordCall(provider, model, callDuration.toMillis(), true);
+                    // Pin this run to the provider that just succeeded
+                    pinStore.pinIfAbsent(runId, provider);
                     if (j > 0) {
                         log.info("[LlmRouter] Fallback succeeded: {} for {}", provider, agentId);
                     }
-                    recordTokenMetrics(response, provider, model, llmObs);
+                    recordTokenMetrics(response, provider, model, llmObs, agentId, callDuration, true);
                     llmObs.lowCardinalityKeyValue("outcome", "success");
                     return new LlmResponse(response, provider, model);
                 } catch (Exception e) {
                     if (isPerMinuteRateLimit(e)) {
+                        // 429 = transient quota event — record metric but do NOT open circuit breaker
+                        healthTracker.recordRateLimit(llmProvider);
                         LlmResponse retryResult = handleRetryAfterSleep(
                             "rate_limit", "Per-minute rate limit", 30_000,
                             provider, model, prompt, runId, agentId, iteration,
@@ -192,9 +227,28 @@ public class LlmRouter {
                             callStart, llmProvider, llmObs);
                         if (retryResult != null) return retryResult;
                         lastError = e;
-                    } else {
+                    } else if (!isFatalClientError(e) && isTransientServerError(e)) {
+                        // Transient server error (5xx, "Failed to generate content", network issue)
+                        // Apply exponential backoff before falling over — gives provider time to recover
+                        LlmResponse retryResult = handleRetryAfterSleep(
+                            "server_error", "Transient server error", 30_000,
+                            provider, model, prompt, runId, agentId, iteration,
+                            callStart, llmProvider, llmObs);
+                        if (retryResult != null) return retryResult;
+                        // All retry attempts exhausted — now record the failure and fall over
                         healthTracker.recordFailure(llmProvider);
-                        log.warn("[LlmRouter] Provider {} failed for {} (non-rate-limit, iteration={}): {}",
+                        Duration failDuration = Duration.between(callStart, Instant.now());
+                        modelPerfTracker.recordCall(provider, model, failDuration.toMillis(), false);
+                        Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", "server_error_retry_exhausted")
+                                .register(meterRegistry).increment();
+                        lastError = e;
+                    } else {
+                        // Fatal or unknown error (401 auth, 403 forbidden, 400 bad request, etc.)
+                        // Fall over immediately — retrying won't help
+                        healthTracker.recordFailure(llmProvider);
+                        Duration failDuration = Duration.between(callStart, Instant.now());
+                        modelPerfTracker.recordCall(provider, model, failDuration.toMillis(), false);
+                        log.warn("[LlmRouter] Provider {} failed for {} (non-retriable, iteration={}): {}",
                             provider, agentId, iteration, e.getMessage());
                         Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", "provider_error")
                                 .register(meterRegistry).increment();
@@ -273,60 +327,132 @@ public class LlmRouter {
      */
     private void recordTokenMetrics(ChatResponse response, String provider, String model,
                                     Observation obs) {
+        recordTokenMetrics(response, provider, model, obs, null, null, null);
+    }
+
+    private void recordTokenMetrics(ChatResponse response, String provider, String model,
+                                    Observation obs, String agentId, Duration callDuration, Boolean success) {
         try {
             var usage = response.getMetadata().getUsage();
+            long inputTokens  = usage.getPromptTokens()     != null ? usage.getPromptTokens()     : 0L;
+            long outputTokens = usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0L;
+
             Counter.builder(LLM_TOKENS_INPUT).tag("provider", provider).tag("model", model)
-                    .register(meterRegistry).increment(usage.getPromptTokens());
+                    .register(meterRegistry).increment(inputTokens);
             Counter.builder(LLM_TOKENS_OUTPUT).tag("provider", provider).tag("model", model)
-                    .register(meterRegistry).increment(usage.getCompletionTokens());
-            obs.highCardinalityKeyValue("tokens.prompt", String.valueOf(usage.getPromptTokens()));
-            obs.highCardinalityKeyValue("tokens.completion", String.valueOf(usage.getCompletionTokens()));
-            obs.highCardinalityKeyValue("tokens.total", String.valueOf(usage.getTotalTokens()));
+                    .register(meterRegistry).increment(outputTokens);
+
+            // Distribution summaries — histogram view for SLO percentiles
+            io.micrometer.core.instrument.DistributionSummary.builder(LLM_TOKENS_INPUT_DIST)
+                    .tag("provider", provider).tag("model", model)
+                    .register(meterRegistry).record(inputTokens);
+            io.micrometer.core.instrument.DistributionSummary.builder(LLM_TOKENS_OUTPUT_DIST)
+                    .tag("provider", provider).tag("model", model)
+                    .register(meterRegistry).record(outputTokens);
+
+            obs.highCardinalityKeyValue("tokens.prompt", String.valueOf(inputTokens));
+            obs.highCardinalityKeyValue("tokens.completion", String.valueOf(outputTokens));
+            obs.highCardinalityKeyValue("tokens.total", String.valueOf(usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L));
+
+            // Extended latency timer with agent_tier + success for SLO tracking
+            if (callDuration != null) {
+                String tier = resolveAgentTier(agentId);
+                String successTag = Boolean.TRUE.equals(success) ? "true" : "false";
+                Timer.builder(LLM_LATENCY)
+                        .tag("provider", provider).tag("model", model)
+                        .tag("agent_tier", tier).tag("success", successTag)
+                        .register(meterRegistry).record(callDuration);
+            }
         } catch (Exception ignored) {
             // token extraction is best-effort
         }
     }
 
+    /** Maps agent name to tier label for SLO tagging. */
+    private static String resolveAgentTier(String agentId) {
+        if (agentId == null) return "UNKNOWN";
+        return switch (agentId.toLowerCase()) {
+            case "planneragent", "revieweragentv2", "revieweragent" -> "PLANNING";
+            case "workeragent", "compileragent", "testplanneragent",
+                 "testworkeragent", "apitestsuiteagent", "conflictresolveragent",
+                 "promptoptimiseragent", "validationreportgenerator" -> "WORKHORSE";
+            default -> "LIGHTWEIGHT";
+        };
+    }
+
     /**
-     * Sleeps then retries the same provider once. Used for rate-limit and overload scenarios.
-     * Returns the successful LlmResponse, or null if the retry also failed.
+     * Exponential-backoff retry for rate-limit and overload scenarios.
+     *
+     * <p>Retry schedule (provider is at highest tier — limits are per-minute):
+     * <pre>
+     *   Attempt 1: sleep  2 s
+     *   Attempt 2: sleep  5 s
+     *   Attempt 3: sleep 10 s
+     *   Attempt 4: sleep 20 s
+     *   Attempt 5: sleep 60 s  ← covers full minute quota window
+     * </pre>
+     * Continues retrying as long as the error is still a rate-limit or overload.
+     * Falls through (returns null) only when:
+     * - a non-transient error is encountered, or
+     * - all 5 attempts are exhausted.
+     *
+     * @return successful LlmResponse, or null to signal fall-over to next provider
      */
-    private LlmResponse handleRetryAfterSleep(String eventKey, String eventDescription, long sleepMs,
+    private static final long[] RATE_LIMIT_BACKOFF_DELAYS_MS = {2_000, 5_000, 10_000, 20_000, 60_000};
+
+    private LlmResponse handleRetryAfterSleep(String eventKey, String eventDescription, long ignoredSleepMs,
                                                String provider, String model, Prompt prompt,
                                                String runId, String agentId, int iteration,
                                                Instant callStart, LlmProvider llmProvider,
                                                Observation llmObs) {
         llmObs.event(Observation.Event.of(eventKey, eventDescription + " on " + provider));
-        log.warn("[LlmRouter] {} on {} for {} (iteration={}) — sleeping {} ms before retry",
-            eventDescription, provider, agentId, iteration, sleepMs);
-        try {
-            Thread.sleep(sleepMs);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            throw new ProviderUnavailableException("Interrupted during " + eventKey + " sleep for " + agentId);
+        int maxAttempts = RATE_LIMIT_BACKOFF_DELAYS_MS.length;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            long sleepMs = RATE_LIMIT_BACKOFF_DELAYS_MS[attempt];
+            log.warn("[LlmRouter] {} on {} for {} (iteration={}) — attempt {}/{}, sleeping {}ms before retry",
+                eventDescription, provider, agentId, iteration, attempt + 1, maxAttempts, sleepMs);
+            try {
+                Thread.sleep(sleepMs);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new ProviderUnavailableException("Interrupted during " + eventKey + " sleep for " + agentId);
+            }
+            try {
+                ChatResponse retryResponse = callWithModelOptions(provider, model, prompt, runId);
+                Duration retryDuration = Duration.between(callStart, Instant.now());
+                Counter.builder(LLM_CALLS).tag("provider", provider).tag("model", model)
+                        .register(meterRegistry).increment();
+                Counter.builder(LLM_RETRY_COUNT).tag("provider", provider).tag("model", model)
+                        .register(meterRegistry).increment();
+                Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
+                        .register(meterRegistry).record(retryDuration);
+                healthTracker.recordSuccess(llmProvider);
+                log.info("[LlmRouter] Post-{} retry succeeded: {} for {} (attempt {}/{})",
+                    eventKey, provider, agentId, attempt + 1, maxAttempts);
+                recordTokenMetrics(retryResponse, provider, model, llmObs);
+                llmObs.lowCardinalityKeyValue("outcome", "success_after_retry");
+                return new LlmResponse(retryResponse, provider, model);
+            } catch (Exception retryEx) {
+                boolean stillTransient = isPerMinuteRateLimit(retryEx)
+                    || isOverloaded(retryEx)
+                    || (!isFatalClientError(retryEx) && isTransientServerError(retryEx));
+                if (stillTransient && attempt < maxAttempts - 1) {
+                    // Still transient — continue to next backoff level
+                    log.warn("[LlmRouter] Still {} on {} (attempt {}/{}) — will retry with longer delay",
+                        eventKey, provider, attempt + 1, maxAttempts);
+                    continue;
+                }
+                // Non-transient error, fatal client error, or final attempt exhausted
+                healthTracker.recordFailure(llmProvider);
+                log.warn("[LlmRouter] Post-{} retry exhausted on {} for {} (attempt {}/{}): {}",
+                    eventKey, provider, agentId, attempt + 1, maxAttempts, retryEx.getMessage());
+                Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", eventKey + "_retry_exhausted")
+                        .register(meterRegistry).increment();
+                return null;
+            }
         }
-        try {
-            ChatResponse retryResponse = callWithModelOptions(provider, model, prompt, runId);
-            Duration retryDuration = Duration.between(callStart, Instant.now());
-            Counter.builder(LLM_CALLS).tag("provider", provider).tag("model", model)
-                    .register(meterRegistry).increment();
-            Counter.builder(LLM_RETRY_COUNT).tag("provider", provider).tag("model", model)
-                    .register(meterRegistry).increment();
-            Timer.builder(LLM_DURATION).tag("provider", provider).tag("model", model)
-                    .register(meterRegistry).record(retryDuration);
-            healthTracker.recordSuccess(llmProvider);
-            log.info("[LlmRouter] Post-{} retry succeeded: {} for {}", eventKey, provider, agentId);
-            recordTokenMetrics(retryResponse, provider, model, llmObs);
-            llmObs.lowCardinalityKeyValue("outcome", "success_after_retry");
-            return new LlmResponse(retryResponse, provider, model);
-        } catch (Exception retryEx) {
-            healthTracker.recordFailure(llmProvider);
-            log.warn("[LlmRouter] Post-{} retry also failed on {} for {}: {}",
-                eventKey, provider, agentId, retryEx.getMessage());
-            Counter.builder(LLM_ERRORS).tag("provider", provider).tag("error_type", eventKey + "_retry_failed")
-                    .register(meterRegistry).increment();
-            return null;
-        }
+        return null;
     }
 
     // ── Internal ───────────────────────────────────────────────────────────────
@@ -566,6 +692,47 @@ public class LlmRouter {
             || msg.toLowerCase().contains("overloaded");
     }
 
+    /**
+     * Returns true for transient server-side errors that are worth retrying:
+     * 5xx HTTP errors, Google "Failed to generate content", connection resets, timeouts.
+     * These failures are NOT the caller's fault and often resolve within seconds.
+     */
+    private boolean isTransientServerError(Exception e) {
+        if (e == null) return false;
+        String msg = e.getMessage();
+        if (msg == null) return false;
+        String lower = msg.toLowerCase();
+        // 5xx HTTP errors
+        if (msg.contains("500") || msg.contains("502") || msg.contains("503") || msg.contains("504")) return true;
+        // Google Gemini content generation failure (quota or transient infra)
+        if (lower.contains("failed to generate content")) return true;
+        // Generic server/service unavailability
+        if (lower.contains("server_error") || lower.contains("service_unavailable")
+                || lower.contains("internal error")) return true;
+        // Network-level issues
+        if (lower.contains("connection") || lower.contains("timeout") || lower.contains("i/o error")) return true;
+        return false;
+    }
+
+    /**
+     * Returns true for fatal client-side errors that should NOT be retried.
+     * Retrying would just produce the same error (wrong key, malformed request, etc.).
+     */
+    private boolean isFatalClientError(Exception e) {
+        if (e == null) return false;
+        String msg = e.getMessage();
+        if (msg == null) return false;
+        String lower = msg.toLowerCase();
+        // Authentication failures — key is invalid/expired, no point retrying
+        if (msg.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key")
+                || lower.contains("authentication_error")) return true;
+        // Forbidden — org/project blocked
+        if (msg.contains("403") || lower.contains("forbidden")) return true;
+        // Bad request — prompt or parameter issue, retrying won't fix it
+        if (msg.contains("400") || lower.contains("bad_request_error")) return true;
+        return false;
+    }
+
     // ── Call counter lifecycle ─────────────────────────────────────────────────
 
     /** Call when a run completes (success or failure) to free memory. */
@@ -573,6 +740,7 @@ public class LlmRouter {
         if (runId != null) {
             runCallCounters.invalidate(runId);
             runUserTierCache.invalidate(runId);
+            pinStore.clearPin(runId); // clean up Redis pin
         }
     }
 

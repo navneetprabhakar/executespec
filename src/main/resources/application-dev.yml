@@ -45,6 +45,8 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+  flyway:
+    out-of-order: true   # Safety net: v2 branch added V68 after V69-V73 were applied on some envs
   ai:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
@@ -100,15 +102,19 @@ agent:
       redirect-uri: ${SLACK_REDIRECT_URI:https://dev.executespec.ai/api/integrations/slack/oauth/callback}
       dashboard-url: ${DASHBOARD_URL:https://dev.executespec.ai}
   recovery:
-    enabled: false
+    enabled: true
+    auto-resume-on-startup: true
+    startup-resume-delay-seconds: 30
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 preview:
-  mode: cloud-run
-  preview-ttl-minutes: 5
+  mode: ${PREVIEW_MODE:vm}
+  preview-ttl-minutes: 15
   fallback-host: ${PREVIEW_FALLBACK_HOST:https://dev.executespec.ai}
   proxy:
-    enabled: false
+    enabled: ${PREVIEW_PROXY_ENABLED:true}
+  vm:
+    enabled: true
 
 # ── App (JWT, CORS, Mail) ────────────────────────────────────────────────────
 app:

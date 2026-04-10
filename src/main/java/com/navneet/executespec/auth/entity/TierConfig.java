@@ -76,4 +76,8 @@ public class TierConfig {
     /** Max USD cost per run. null = unlimited. FREE=$3, PRO=$5 (no BYOK). */
     @Column(name = "max_run_cost_usd")
     private Double maxRunCostUsd;
+
+    /** Data retention period in days. null = system default (30). FREE=30, PRO=90, ENTERPRISE=365. */
+    @Column(name = "retention_days")
+    private Integer retentionDays;
 }

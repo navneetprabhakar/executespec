@@ -8,6 +8,8 @@ import com.navneet.executespec.api.dto.TaskSummary;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.harness.BackgroundValidationService;
+import com.navneet.executespec.harness.entity.BackgroundValidation;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
@@ -27,6 +29,7 @@ public class RunMapper {
     private final AppUserRepository appUserRepository;
     private final TestPlanRepository testPlanRepository;
     private final ObjectMapper objectMapper;
+    private final BackgroundValidationService backgroundValidationService;
 
     public RunSummary toSummary(PipelineRun r) {
         return new RunSummary(
@@ -53,7 +56,10 @@ public class RunMapper {
             r.getRunSummary(),
             r.getExecutionMode(),
             r.getArchivedAt(),
-            r.getApprovedExecutionMode()
+            r.getApprovedExecutionMode(),
+            r.getAiProvider(),
+            r.getSourceRunId() != null,
+            r.getSourceRunId()
         );
     }
 
@@ -178,6 +184,14 @@ public class RunMapper {
             .creditSavings(r.getCreditSavings())
             .batchProgressCompleted(r.getBatchProgressCompleted())
             .batchProgressTotal(r.getBatchProgressTotal())
+            .aiProvider(r.getAiProvider())
+            .isRetry(r.getSourceRunId() != null)
+            .sourceRunId(r.getSourceRunId())
+            .runRetryCount(r.getRunRetryCount())
+            .validationStatus(backgroundValidationService.find(r.getRunId())
+                    .map(BackgroundValidation::getStatus).orElse(null))
+            .validationPhase(backgroundValidationService.find(r.getRunId())
+                    .map(BackgroundValidation::getCurrentPhase).orElse(null))
             .build();
     }
 
@@ -236,17 +250,28 @@ public class RunMapper {
      * Pulls a human-readable failure reason from the task's stored report JSON
      * (WorkerReport#blockers for BLOCKED, WorkerReport#selfReview for PARTIAL)
      * or falls back to the lastLlmFailure flag set by the recovery system.
+     *
+     * <p>Note: {@code self_review} is intentionally skipped for COMPLETE tasks — parent tasks
+     * completed from subtask decomposition store "Decomposed into N subtasks: N complete" in
+     * {@code self_review}, which is a success note, not a failure reason. That info is already
+     * surfaced via {@code completionNotes} in the TaskSummary.
      */
     private String extractFailureReason(AgentTask t) {
+        boolean isComplete = "COMPLETE".equals(t.getStatus());
         if (t.getWorkerReportJson() != null && !t.getWorkerReportJson().isBlank()) {
             try {
                 JsonNode report = objectMapper.readTree(t.getWorkerReportJson());
                 // BLOCKED tasks: "blockers" field
                 String blockers = report.path("blockers").asText("");
                 if (!blockers.isBlank()) return blockers;
-                // PARTIAL tasks: "self_review" (snake_case from WorkerReport)
-                String selfReview = report.path("self_review").asText("");
-                if (!selfReview.isBlank()) return selfReview;
+                // PARTIAL tasks: "self_review" (snake_case from WorkerReport).
+                // Skip for COMPLETE tasks — self_review on COMPLETE tasks contains subtask
+                // decomposition summaries ("Decomposed into N subtasks: N complete"), which
+                // are success notes, not failures. These are already in completionNotes.
+                if (!isComplete) {
+                    String selfReview = report.path("self_review").asText("");
+                    if (!selfReview.isBlank()) return selfReview;
+                }
             } catch (Exception ignored) {}
         }
         // Fallback: lastLlmFailure (set by blockTask / recovery)

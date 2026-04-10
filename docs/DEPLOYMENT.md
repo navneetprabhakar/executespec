@@ -26,9 +26,9 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1-V58).
+Flyway migrations run automatically on startup and create all tables (V1-V73).
 
-#### Migration Reference (V45-V58)
+#### Migration Reference (V45-V73)
 
 | Migration | Description |
 |-----------|-------------|
@@ -45,6 +45,18 @@ Flyway migrations run automatically on startup and create all tables (V1-V58).
 | V55 | Payment audit trail expansion (webhook events, CSV export) |
 | V56 | Task completion notes (`agent_task.completion_notes` TEXT column) |
 | V58 | Subtask support (`parent_task_id`, `subtask_index`, `subtask_total` on `agent_task`) |
+| V59 | Bitbucket integration (`bitbucket_*` columns on `app_user`; `scm_pr_url`, `scm_provider` on `pipeline_run`) |
+| V60-V63 | Billing plan restructure (4 plans INR/USD, 6 top-up packages, prorated refund columns) |
+| V64 | Durable background validation (`background_validation` table — stage, attempt, last_attempt_at) |
+| V65 | DB gate fallback (`gate_record` table — mirrors Redis gate state) |
+| V66 | Per-user force-logout timestamp (`app_user.token_invalidated_at`) |
+| V67 | PostgreSQL row-level security (RLS policies on `pipeline_run`, `agent_task`, `validation_report`) |
+| V68 | Event log + execution heartbeat (`event_log`, `pipeline_run.executing_instance`, `pipeline_run.execution_heartbeat`) |
+| V69 | Side-effect outbox (`side_effect_outbox` — type, payload, status, attempts, compensation_payload) |
+| V70 | Data retention + GDPR soft-delete (`deleted_at`, `retention_expires_at` on core tables; `data_retention_policy` table) |
+| V71 | Triage outcome feedback (`triage_outcome` — classification, escalation_reason, trigger values) |
+| V72 | Prompt audit + task hash (`prompt_audit`, `agent_task.prompt_hash`) |
+| V73 | Plan effectiveness metrics (`plan_effectiveness` — planned vs actual task counts + duration) |
 
 ### Redis Setup
 
@@ -55,6 +67,8 @@ docker run -d -p 6379:6379 redis:7-alpine
 # Or install via Homebrew (macOS)
 brew install redis && brew services start redis
 ```
+
+> **v2.0 Note:** ExecuteSpec v2.0 stores encrypted API keys, SSE replay logs, gate state, and provider pins in Redis. For local development, the default in-memory Redis configuration is sufficient. For production deployments, see the v2.0 requirements in the GCP section below.
 
 ### Environment Variables
 
@@ -566,7 +580,7 @@ echo "Redis host: $REDIS_HOST"
 
 > Save this IP — you'll store it as a secret in Step 6.
 
-Redis is used for: gate coordination (plan approval polling), provider health circuit breaker, feature flag cache invalidation (pub/sub), per-tenant rate limiting, and general caching. Pool is configured with `max-active: 50`, `min-idle: 5`.
+Redis is used for: gate coordination (plan approval polling + DB fallback), provider health circuit breaker, feature flag cache invalidation (pub/sub), per-tenant rate limiting, SSE pub/sub distribution + replay logs, encrypted API key store, per-run provider pins, and provider degradation queuing. Pool is configured with `max-active: 50`, `min-idle: 5`. See the v2.0 deployment requirements section for persistence recommendations.
 
 ---
 
@@ -1983,3 +1997,139 @@ sudo journalctl -u executespec -f           # app logs on VM
 | Load Balancer | $18/mo | $18/mo |
 | Cloud NAT + GCS | $4/mo | $8/mo |
 | **Total** | **~$132/mo** | **~$373/mo** |
+
+---
+
+## v2.0.0 Deployment Requirements
+
+### Redis Persistence (Required for v2 features)
+
+v2.0 stores durable state in Redis:
+- Encrypted API keys (`RunKeyStore`, AES-256-GCM, 2h TTL)
+- SSE replay logs (`sse:replay:{runId}`, up to 200 events per run)
+- Per-run provider pins (`sse:provider-pin:{runId}`, 2h TTL)
+- Side-effect outbox dispatch state
+- Provider degradation queue
+
+**Production recommendation:** Enable **AOF (Append-Only File) persistence** on your Redis instance to survive process restarts without data loss:
+
+```bash
+# For self-managed Redis (not Memorystore):
+# In redis.conf:
+appendonly yes
+appendfsync everysec
+```
+
+**GCP Memorystore:** Memorystore Basic tier does not support AOF persistence. For production v2 deployments, upgrade to **Standard tier** (HA, automatic failover) which persists data to disk. Standard tier is significantly more expensive but eliminates the risk of key loss on Redis node restart.
+
+```bash
+# Upgrade dev Redis to Standard tier (HA)
+gcloud redis instances create executespec-redis-prod \
+  --size=2 \
+  --region=$REGION \
+  --tier=STANDARD_HA \
+  --redis-version=redis_7_0 \
+  --network=default \
+  --display-name="ExecuteSpec Redis (HA)"
+```
+
+**Fallback behavior:** If Redis is unavailable, the `GateStore` falls back to the `gate_record` PostgreSQL table for gate reads. The `RunKeyStore` will fail with `KeyResolutionException` for OWN_KEYS runs if Redis is down — MANAGED-mode runs continue using system keys loaded at startup.
+
+### Per-Provider Pool Configuration
+
+Configure the per-provider thread pools in `application.yml` (or via environment variables in the startup script):
+
+```yaml
+agent:
+  provider-pools:
+    anthropic:
+      max-concurrent: 10       # Max simultaneous Anthropic LLM calls
+      queue-capacity: 50       # Max queued Anthropic runs before 429
+    openai:
+      max-concurrent: 10
+      queue-capacity: 50
+    google:
+      max-concurrent: 10
+      queue-capacity: 50
+```
+
+**Tuning guidance:**
+
+| Provider | Recommended `max-concurrent` | Notes |
+|----------|------------------------------|-------|
+| Anthropic | 8–12 | Claude rate limits: tier-3 keys allow ~50 RPM |
+| OpenAI | 8–12 | GPT rate limits: tier-4 keys allow ~500 RPM |
+| Google | 8–12 | Gemini rate limits: similar to Anthropic |
+
+Increase `queue-capacity` if you expect bursty submission patterns. Runs that exceed `queue-capacity` receive HTTP 429; clients should retry with exponential backoff.
+
+### PostgreSQL RLS Setup
+
+v2.0 adds row-level security (RLS) policies via Flyway V67. Flyway applies these automatically on startup. No manual SQL required.
+
+Verify RLS is active after deployment:
+
+```bash
+# SSH into VM and connect to DB
+psql -h $POSTGRES_HOST -U appuser -d executespec
+
+# Check RLS is enabled on core tables
+SELECT relname, relrowsecurity FROM pg_class
+WHERE relname IN ('pipeline_run', 'agent_task', 'validation_report');
+
+-- Expected: relrowsecurity = true for all three
+```
+
+**Important:** The `appuser` DB account used by the application must NOT be a PostgreSQL superuser. Superusers bypass RLS. Verify:
+
+```sql
+SELECT usename, usesuper FROM pg_user WHERE usename = 'appuser';
+-- Expected: usesuper = false
+```
+
+### Data Retention Scheduler
+
+v2.0 adds a nightly retention enforcement job (`RetentionPolicyEnforcer`) that soft-deletes runs past their tier's retention window. Verify it is enabled in `application.yml`:
+
+```yaml
+executespec:
+  retention:
+    enabled: true
+    cron: "0 3 * * *"   # 3 AM daily (cron expression, local server time)
+```
+
+The scheduler uses `@SchedulerLock` (Redis-backed) to ensure only one MIG instance runs the cleanup job per day.
+
+### New Environment Variables (v2)
+
+No new mandatory environment variables for v2.0 — all v2 features derive their configuration from existing secrets (`JWT_SECRET` for `KeyEncryptor`, `REDIS_HOST` for all Redis-backed stores).
+
+Optional new variables:
+
+```bash
+# Background validation tuning
+AGENT_BACKGROUND_VALIDATION_MAX_RETRY_ATTEMPTS=3   # default: 3
+AGENT_BACKGROUND_VALIDATION_STALL_TIMEOUT_MINUTES=10  # default: 10
+
+# Provider pool tuning (overrides application.yml defaults)
+AGENT_PROVIDER_POOLS_ANTHROPIC_MAX_CONCURRENT=10
+AGENT_PROVIDER_POOLS_OPENAI_MAX_CONCURRENT=10
+AGENT_PROVIDER_POOLS_GOOGLE_MAX_CONCURRENT=10
+```
+
+### Updated Redis Key Inventory (v2)
+
+| Key Pattern | Purpose | TTL |
+|------------|---------|-----|
+| `gate:plan:{runId}` | Plan approval gate | 2h |
+| `gate:merge:{runId}` | Merge gate (legacy) | 2h |
+| `rks:{runId}:{provider}` | Encrypted API key per provider | 2h |
+| `sse:channel:{runId}` | Pub/Sub channel for SSE | Duration of run |
+| `sse:replay:{runId}` | SSE replay log (list, 200 entries) | 30min after run completes |
+| `sse:provider-pin:{runId}` | First-successful provider pin | 2h |
+| `health:{provider}` | Circuit breaker failure count | 180s (auto-reset) |
+| `rl:{userId}:{group}:{bucket}` | Rate limit sliding window | 60s |
+| `ff:{key}` | Feature flag cache | 60s (pub/sub invalidated) |
+| `pp:{provider}:queue` | Provider pool queue (list) | Duration of run |
+| `provider:degrade-queue` | Degradation queue for all-down scenario | 24h |
+| `scheduler-lock:{taskName}` | ShedLock distributed scheduler lock | Varies by job |

@@ -1,6 +1,10 @@
 You are a request classifier for a code generation pipeline.
 
-Given a user's request, classify it as either SINGLE_SHOT or MULTI_TASK.
+Given a user's request and workspace context, classify it as SINGLE_SHOT, MEDIUM, or MULTI_TASK.
+
+WORKSPACE CONTEXT (use this to avoid recreating existing files):
+{file_tree}
+DETECTED FRAMEWORKS: {detected_frameworks}
 
 ## SINGLE_SHOT criteria (ALL must be true):
 - The request involves creating or modifying 1-5 files total
@@ -30,7 +34,12 @@ If the request mentions ANY of these patterns, it is ALWAYS MULTI_TASK:
 - "todo app", "task manager", "blog", "e-commerce", "chat app" — these ALWAYS need backend + frontend separation
 - Database mentions (MongoDB, PostgreSQL, MySQL, SQLite, Prisma, Mongoose) alongside frontend work
 
+## MEDIUM criteria (simplified planner — 2-4 tasks max):
+- The request clearly spans 2-3 related files in ONE layer (e.g., add a service method + controller endpoint)
+- Not as broad as a full feature, but too coupled for a single worker to do atomically
+- Examples: "Add search to the existing product API", "Add login endpoint to existing Spring Boot app", "Add one React component to an existing frontend"
+
 ## When in doubt, classify as MULTI_TASK. Unnecessary decomposition adds minimal overhead, but missing decomposition causes context exhaustion and single-file failures.
 
 Respond with ONLY a JSON object, no markdown, no explanation:
-{"classification":"SINGLE_SHOT"} or {"classification":"MULTI_TASK"}
+{"classification": "SINGLE_SHOT|MEDIUM|MULTI_TASK", "confidence": 0.0-1.0, "reason": "one sentence"}

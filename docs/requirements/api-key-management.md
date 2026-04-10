@@ -1,6 +1,6 @@
 # API Key Management — Requirements
 
-> Last updated: 2026-04-03
+> Last updated: 2026-04-10
 
 ## Overview
 
@@ -36,9 +36,11 @@ Multi-level API key resolution with three key source modes, per-org provider res
 **Requirements:**
 - ApiKeyResolver resolves at run-start based on user + org + mode
 - Returns ResolvedKeys (per-provider key or null for system fallback)
-- Keys stored in RunKeyStore (ConcurrentHashMap keyed by runId) for runtime injection
+- Keys stored in **RunKeyStore** (Redis-backed, AES-256-GCM encrypted, 2h TTL) for runtime injection (v2: previously in-memory ConcurrentHashMap; now encrypted Redis for security + HA)
+- `KeyEncryptor` encrypts each key with AES/GCM/NoPadding, random 12-byte IV, key derived from `app.jwt.secret` via SHA-256 (v2)
 - LlmRouter looks up per-run keys from RunKeyStore for every LLM call
-- Keys cleared from RunKeyStore after run completes
+- TTL extended to cover background validation phase (2h from run start) — previously cleared at COMPLETE (v2, issue #6)
+- Accessing a key in OWN_KEYS mode when no key is present throws `KeyResolutionException` (v2) — previously returned null silently
 
 ### 3. Provider Restrictions
 
@@ -57,8 +59,8 @@ Multi-level API key resolution with three key source modes, per-org provider res
 - YAML-configured model matrix maps AgentTier x Provider to Model via ModelResolver
 - Three agent tiers with provider-specific models:
   - PLANNING: `claude-sonnet-4-6` / `gemini-3-flash-preview` / `gpt-5.4`
-  - WORKHORSE: `claude-haiku-4-5-20251001` / `gemini-2.5-flash` / `gpt-5.4-mini`
-  - LIGHTWEIGHT: `claude-haiku-4-5-20251001` / `gemini-2.5-flash` / `gpt-5.4-mini`
+  - WORKHORSE: `claude-haiku-4-5-20251001` / `gemini-3-flash-preview` / `gpt-5.4`
+  - LIGHTWEIGHT: `claude-haiku-4-5-20251001` / `gemini-3-flash-preview` / `gpt-5.4`
 - Health-based failover via ProviderHealthTracker (Redis-backed circuit breaker)
 - Failover chains by primary provider:
   - Anthropic -> [OpenAI, Google]
@@ -74,11 +76,21 @@ Multi-level API key resolution with three key source modes, per-org provider res
 
 **Requirements:**
 - Redis-backed circuit breaker for provider availability tracking
-- 5 consecutive failures per provider -> circuit OPEN (provider marked unhealthy)
-- 60-second TTL auto-recovery (circuit resets to CLOSED after TTL expires)
+- **v2: 10 consecutive failures** per provider → circuit OPEN (raised from 5; excludes HTTP 429 from count)
+- **v2: 180-second TTL** auto-recovery (extended from 60s)
 - LlmRouter checks provider health before each call
 - LlmRouter records success/failure after each call
+- **v2: LlmRouter exponential backoff** for rate limits — 2s → 5s → 10s → 20s → 60s before provider fallover
 - Metrics tracked per provider: failure count, circuit state, last failure timestamp
+
+### 5a. Per-Run Provider Pinning (v2, Issue #4)
+
+**Requirements:**
+- `RunProviderPinStore`: Redis-backed, key `sse:provider-pin:{runId}`, 2h TTL
+- After first successful LLM call for a run, pin the responding provider to the run ID
+- Subsequent tasks use pinned provider as primary; fallover proceeds normally if pinned provider fails
+- Pin is released when the run reaches a terminal state
+- Prevents mid-run provider switch that causes context drift and cross-provider import failures
 
 ### 6. ModelResolver (Tier-Based Model Selection)
 
@@ -96,13 +108,15 @@ Multi-level API key resolution with three key source modes, per-org provider res
 |------|---------|
 | `agent/ApiKeyResolver.java` | Multi-level key resolution |
 | `agent/ResolvedKeys.java` | Resolved key set per run |
-| `agent/RunKeyStore.java` | Runtime key injection store |
-| `agent/LlmRouter.java` | Provider fallback chains + per-run key injection |
+| `agent/RunKeyStore.java` | Runtime key injection store (v2: encrypted Redis, 2h TTL) |
+| `security/KeyEncryptor.java` | AES-256-GCM encryption for RunKeyStore (v2) |
+| `agent/LlmRouter.java` | Provider fallback chains + per-run key injection + exponential backoff (v2) |
 | `router/ModelResolver.java` | Tier-based model selection (AgentTier x Provider) |
 | `router/ModelMatrixProperties.java` | YAML model matrix configuration |
 | `router/AgentTier.java` | Agent tier enum (PLANNING, WORKHORSE, LIGHTWEIGHT) |
 | `router/AvailableProviderResolver.java` | Org provider restrictions bridge |
-| `router/ProviderHealthTracker.java` | Redis-backed circuit breaker (5 failures, 60s TTL) |
+| `router/ProviderHealthTracker.java` | Redis-backed circuit breaker (v2: 10 failures, 180s TTL, 429 excluded) |
+| `router/RunProviderPinStore.java` | Per-run provider pinning (v2) |
 | `router/ModelTaskMetric.java` | Per-task metrics entity |
 
 ## Database Migrations

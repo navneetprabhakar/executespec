@@ -1,17 +1,13 @@
 package com.navneet.executespec.integration;
 
 import com.navneet.executespec.harness.PipelineHarness;
-import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.state.StateStore;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.state.entity.IntegrationEventLog;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationEventLogRepository;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
-import io.micrometer.context.ContextSnapshotFactory;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -22,20 +18,19 @@ import java.util.Optional;
 import static java.util.stream.Collectors.toMap;
 
 /**
- * Central hub for all integration traffic.
- * Routes inbound webhooks to the pipeline and writes status changes back to source systems.
- * The pipeline (PlannerAgent, WorkerAgent, ReviewerAgent) is completely unaware this exists.
+ * Inbound integration hub — routes webhooks from external source systems into the pipeline.
  *
- * <p>Outbound notifications listen for {@link PipelineEvent} via Spring's event bus —
- * no direct circular dependency with {@link PipelineHarness}.
- * Inbound submission injects {@link PipelineHarness} directly (safe, no cycle).
+ * <p>Handles webhook verification, idempotency (via {@code IntegrationEventLog}),
+ * event parsing, and run submission. Has no outbound concerns.
+ *
+ * <p>Outbound notifications are handled by {@link IntegrationOutboundListener} which
+ * listens to Spring events independently of this class.
  */
 @Service
 @Slf4j
 public class IntegrationManager {
 
     private final Map<String, InboundAdapter> inboundAdapters;
-    private final Map<String, OutboundAdapter> outboundAdapters;
     private final IntegrationRunRepository integrationRunRepo;
     private final IntegrationEventLogRepository eventLogRepo;
     private final StateStore stateStore;
@@ -43,13 +38,11 @@ public class IntegrationManager {
 
     public IntegrationManager(
             List<InboundAdapter> inbound,
-            List<OutboundAdapter> outbound,
             IntegrationRunRepository integrationRunRepo,
             IntegrationEventLogRepository eventLogRepo,
             StateStore stateStore,
             PipelineHarness harness) {
         this.inboundAdapters  = inbound.stream().collect(toMap(InboundAdapter::sourceType, a -> a));
-        this.outboundAdapters = outbound.stream().collect(toMap(OutboundAdapter::sourceType, a -> a));
         this.integrationRunRepo = integrationRunRepo;
         this.eventLogRepo = eventLogRepo;
         this.stateStore = stateStore;
@@ -117,66 +110,6 @@ public class IntegrationManager {
 
         log.info("[Integration] Manual run {} submitted for {} source {}", run.getRunId(), event.sourceType(), event.sourceId());
         return run.getRunId();
-    }
-
-    // ── Outbound — Spring event listeners ────────────────────────────────────
-
-    @EventListener
-    public void onRunStarted(PipelineEvent.RunStarted event) {
-        notifyOutbound(event.runId(), "PLANNING");
-    }
-
-    /**
-     * Listen to MergeCompleted instead of RunCompleted — the review report is guaranteed
-     * to exist at this point. RunCompleted fires before background review starts, so the
-     * review report is null and adapters silently skip the notification.
-     */
-    @EventListener
-    public void onMergeCompleted(PipelineEvent.MergeCompleted event) {
-        notifyOutbound(event.runId(), "COMPLETE");
-    }
-
-    @EventListener
-    public void onRunFailed(PipelineEvent.RunFailed event) {
-        notifyOutbound(event.runId(), "FAILED");
-    }
-
-    /**
-     * Runs the outbound integration callback in a virtual thread — never blocks the caller.
-     */
-    private void notifyOutbound(String runId, String newStatus) {
-        Runnable task = ContextSnapshotFactory.builder().build().captureAll().wrap(() -> {
-            integrationRunRepo.findByRunId(runId).ifPresent(ir -> {
-                OutboundAdapter adapter = outboundAdapters.get(ir.getSourceType());
-                if (adapter == null) return;
-
-                PipelineRun run;
-                try {
-                    run = stateStore.findRun(runId).orElse(null);
-                    if (run == null) return;
-                } catch (Exception e) {
-                    log.error("[Integration] Could not load run {} for outbound callback: {}", runId, e.getMessage());
-                    return;
-                }
-
-                try {
-                    switch (newStatus) {
-                        case "PLANNING" -> adapter.onRunStarted(ir, run);
-                        case "COMPLETE" -> {
-                            ReviewReportV2 review = stateStore.getReviewReportV2(runId);
-                            adapter.onRunComplete(ir, run, review);
-                        }
-                        case "FAILED" -> adapter.onRunFailed(ir, run,
-                                run.getFailureReason() != null ? run.getFailureReason() : "Unknown failure");
-                        default -> {}
-                    }
-                } catch (Exception e) {
-                    log.error("[Integration] Outbound call failed for run {} to {}: {}",
-                            runId, ir.getSourceType(), e.getMessage());
-                }
-            });
-        });
-        Thread.ofVirtual().name("integration-outbound-" + runId).start(task);
     }
 
     // ── Query methods ─────────────────────────────────────────────────────────

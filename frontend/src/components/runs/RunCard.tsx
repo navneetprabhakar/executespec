@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ChevronRight, FolderOpen, Github, User } from 'lucide-react';
+import { ChevronRight, FolderOpen, Github, RefreshCw, User } from 'lucide-react';
 import GlowDot from '@/components/shared/GlowDot';
 import { fmtTokens, relativeTime, truncate, describeRunStatus } from '@/lib/utils';
 import type { RunSummary } from '@/lib/api';
@@ -83,6 +83,11 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
             <span className="text-xs text-muted">{relativeTime(run.startedAt)}</span>
             {run.approvedExecutionMode === 'BATCH' && (
               <span className="text-[9px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full leading-none">Batch</span>
+            )}
+            {run.isRetry && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-accent-amber bg-accent-amber/10 px-1.5 py-0.5 rounded-full leading-none">
+                <RefreshCw className="h-2.5 w-2.5" />Retry
+              </span>
             )}
           </div>
           <p className="text-[11px] text-muted mb-1 line-clamp-1">

@@ -39,6 +39,7 @@ public class AuthController {
     private final TierPermissionService tierPermissionService;
     private final ActivityAuditService auditService;
     private final com.navneet.executespec.repo.BitbucketRepoService bitbucketRepoService;
+    private final com.navneet.executespec.compliance.DataRetentionService dataRetentionService;
 
     private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
     private final PasswordEncoder passwordEncoder;
@@ -121,6 +122,23 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<UserDto> me(@AuthenticationPrincipal AppUserDetails userDetails) {
         return ResponseEntity.ok(UserDto.from(userDetails.getUser(), userDetails.getOrgMember()));
+    }
+
+    /**
+     * Invalidates all existing JWTs for the current user by setting {@code token_invalidated_at}
+     * to now. Any token with {@code iat < token_invalidated_at} will be rejected by
+     * {@code JwtAuthenticationFilter}. The caller must re-login to get a fresh token.
+     */
+    @PostMapping("/invalidate-sessions")
+    public ResponseEntity<Map<String, String>> invalidateSessions(
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        String userId = userDetails.getUser().getId();
+        userRepo.findById(userId).ifPresent(user -> {
+            user.setTokenInvalidatedAt(java.time.Instant.now());
+            userRepo.save(user);
+            log.info("[Auth] Per-user session invalidation set for userId={}", userId);
+        });
+        return ResponseEntity.ok(Map.of("message", "All sessions invalidated. Please log in again."));
     }
 
     @GetMapping("/me/permissions")
@@ -402,5 +420,20 @@ public class AuthController {
     @GetMapping("generate")
     public String generate(@RequestParam(name = "password")String password) {
         return passwordEncoder.encode(password);
+    }
+
+    // ── GDPR right-to-erasure ─────────────────────────────────────────────────
+
+    /**
+     * Soft-deletes all completed/failed runs belonging to the authenticated user.
+     * Active runs (currently executing) are skipped and must be cancelled first.
+     * The actual workspace GCS deletion happens asynchronously via the retention scheduler.
+     */
+    @DeleteMapping("/me/data")
+    public ResponseEntity<Map<String, Object>> eraseMyData(
+            @AuthenticationPrincipal com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        if (userDetails == null) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        int deleted = dataRetentionService.eraseUserData(userDetails.getUser().getId());
+        return ResponseEntity.ok(Map.of("runsScheduledForDeletion", deleted));
     }
 }

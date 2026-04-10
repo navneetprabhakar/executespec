@@ -1,14 +1,19 @@
 # deployment/ — Preview & Deploy
 
-Dual-mode preview system (Docker Compose for local, Cloud Run for dev/prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.
+Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.
 
 ## Key Files
-- `preview/PreviewService.java` — Dual-mode preview lifecycle (docker/cloud-run). TTL: 5min (both modes). Preview auto-starts after COMPLETE via PipelineHarness. Idempotent: returns existing session if already running.
+- `preview/PreviewService.java` — Triple-mode preview lifecycle (docker/vm/cloud-run). TTL: 15min (dev), 5min (prod). Preview auto-starts after COMPLETE via PipelineHarness. Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews from in-memory `active` map.
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first, falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`.
 - `preview/PreviewProjectType.java` — Enum: SPRING_BOOT, JAVA, NODE_FRONTEND, NODE_BACKEND, PYTHON, GO, RUST, FULL_STACK, STATIC_HTML (9 types).
 - `preview/ComposeFileGenerator.java` — Generates docker-compose.yml for Docker previews. Port mapping uses `PreviewProjectType.getContainerPort()`. Blocks cloud metadata endpoints via `extra_hosts` (metadata.google.internal + 169.254.169.254 → 127.0.0.1). App containers hardened with `no-new-privileges`, `cap_drop: ALL`.
+- `preview/vm/PreviewDeploymentService.java` — VM-mode preview orchestration. SSH/SCP to preview-gw VM, invokes `/opt/preview-engine/bin/deploy-preview.sh`, parses `PREVIEW_JSON:{...}` output. 5-min process timeout.
+- `preview/vm/PreviewVmProperties.java` — VM config: gateway IP, SSH key, TTL (minutes), VM list with load balancing.
+- `preview/vm/PreviewGarbageCollector.java` — DB-backed GC for VM previews. Runs every 10 min, tears down previews past `expiresAt`. Safety net for app restarts (in-memory map lost).
+- `preview/vm/PreviewRegistry.java` — JPA entity for `preview_registry` table. Tracks status, VM assignment, port, TTL, deploy duration.
+- `preview/vm/PreviewVmController.java` — REST: teardown, extend TTL, list active, stats, per-VM stats.
 - `DeploymentService.java` — Full Cloud Run deployment. 9-language support, 7-day TTL. Tier-based deployment limits enforced via `TierConfig.maxDeployments` (FREE=0, PRO=5, ENTERPRISE=-1).
 - `CloudRunClient.java` — GCP Cloud Run API client. All subprocess calls have timeouts.
 - `ArtifactRegistryClient.java` — Docker build + push to Artifact Registry. Build/push have timeouts.
@@ -66,6 +71,39 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 | Mode | Environment | Infrastructure | TTL | HTTPS |
 |------|-------------|---------------|-----|-------|
 | `docker` | Local dev | Docker Compose + optional Caddy proxy | 5 min | Caddy + Cloudflare Origin Cert |
-| `cloud-run` | Dev/Prod (GCE) | Artifact Registry + Cloud Run | 5 min | Managed by Cloud Run |
+| `vm` | Dev (GCE) | SSH/SCP to preview-gw VM + Docker + Caddy | 15 min | Caddy on preview-gw |
+| `cloud-run` | Prod (GCE) | Artifact Registry + Cloud Run | 5 min | Managed by Cloud Run |
 
-Configured via `preview.mode` in `application.yml` (default: `docker`).
+Configured via `preview.mode` in `application.yml` (default: `docker`, dev: `vm`).
+
+## VM Preview Architecture
+
+Separate repo: [`navneetprabhakar/preview-engine`](https://github.com/navneetprabhakar/preview-engine) — see its CLAUDE.md for script details.
+
+```
+App VM (executespec)                    Preview GW VM (preview-gw)
+┌────────────────────────────┐          ┌──────────────────────────────────┐
+│ PreviewService              │          │ /opt/preview-engine/bin/         │
+│   → buildAndStartVm()      │──SSH/SCP─▶│   deploy-preview.sh            │
+│   → PreviewDeploymentService│          │   teardown-preview.sh           │
+│   → PreviewGarbageCollector │          │                                 │
+│                             │          │ Caddy (port 443)                │
+│ preview_registry (DB)       │          │   *.preview.executespec.ai      │
+│   → source of truth for GC  │          │                                 │
+└────────────────────────────┘          │ Docker: preview-{id} on :10000+ │
+                                        └──────────────────────────────────┘
+```
+
+**VM preview flow:**
+1. `PreviewService.buildAndStartVm()` generates Dockerfile + docker-compose.yml in workspace
+2. `PreviewDeploymentService.deploy()` SCPs workspace to preview-gw, invokes `deploy-preview.sh` via SSH
+3. Script builds Docker image, starts container on random port (10000-60000), configures Caddy, health checks
+4. Script outputs `PREVIEW_JSON:{...}` — parsed by `PreviewDeploymentService`
+5. `PreviewService` updates session, emits `PREVIEW_READY` SSE event
+
+**VM preview GC (3 layers):**
+1. **App-side** (`PreviewService.cleanupExpired()`): every 60s, checks in-memory `active` map against `expiresAt`
+2. **DB-backed** (`PreviewGarbageCollector`): every 10 min, queries `preview_registry` for expired entries — catches orphans after app restart
+3. **VM cron** (`cleanup-expired.sh`): every 5 min, checks directory age on preview-gw — last-resort safety net
+
+**VM config:** `preview.vm.*` in `application.yml` — gateway IP, SSH key, TTL, VM list with `maxConcurrent` for load balancing.

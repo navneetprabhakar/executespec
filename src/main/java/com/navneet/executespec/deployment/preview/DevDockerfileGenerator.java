@@ -201,7 +201,7 @@ public class DevDockerfileGenerator {
         } else if (type == PreviewProjectType.FULL_STACK) {
             // Full-stack gets a multi-service Dockerfile
             FullStackLayout layout = detectFullStack(workspace);
-            dockerfile = layout != null
+            dockerfile = layout != null && layout.hasFrontend() && layout.hasBackend()
                     ? fullStackDockerfile(workspace, layout)
                     : singlePackageFullStackDockerfile(workspace);
         } else {
@@ -632,7 +632,7 @@ public class DevDockerfileGenerator {
 
         // 2. Check directory layout (frontend/ + backend/)
         FullStackLayout layout = detectFullStack(workspace);
-        if (layout != null && layout.hasFrontend() && layout.hasBackend()) {
+        if (layout != null && layout.hasFrontend() && layout.hasBackend() && layout.backendType() != null) {
             if (layout.frontendType() == PreviewProjectType.STATIC_HTML) {
                 return cloudRun_FullStack_StaticBackend(workspace, layout);
             }
@@ -1766,6 +1766,10 @@ public class DevDockerfileGenerator {
     private String fullStackDockerfile(Path workspace, FullStackLayout layout) {
         if (layout.frontendType() == PreviewProjectType.STATIC_HTML) {
             return fullStackStaticBackend(workspace, layout);
+        }
+        if (layout.backendType() == null) {
+            // Single-package full-stack (e.g. React + Express in same package.json)
+            return singlePackageFullStackDockerfile(workspace);
         }
         return switch (layout.backendType()) {
             case SPRING_BOOT -> fullStackNodeSpringBoot(workspace, layout);

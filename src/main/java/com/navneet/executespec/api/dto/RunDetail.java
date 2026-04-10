@@ -95,6 +95,17 @@ public class RunDetail {
     /** Timestamp when the run was archived by the user. Null for active runs. */
     Instant archivedAt;
 
+    /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
+    String aiProvider;
+
+    // ── Retry tracking ──────────────────────────────────────────────────────
+    /** True if this run is a retry of a previous run. */
+    Boolean isRetry;
+    /** RunId of the original run this was retried from. Null for original runs. */
+    String sourceRunId;
+    /** Number of auto-retry attempts on this run chain (0 = original run). */
+    Integer runRetryCount;
+
     // ── Batch execution ──────────────────────────────────────────────────────
     /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
     String approvedExecutionMode;
@@ -112,6 +123,12 @@ public class RunDetail {
     // ── Per-agent token breakdown (V19) ─────────────────────────────────────
     /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
     List<AgentTokenEntry> agentTokens;
+
+    // ── Background validation (V64) ─────────────────────────────────────────
+    /** Status of the background validation thread: PENDING, RUNNING, COMPLETED, FAILED, or null. */
+    String validationStatus;
+    /** Current phase of background validation (TEST_GEN, REVIEW, RE_VALIDATE, REPORT). */
+    String validationPhase;
 
     /** Present if this run was triggered by an external integration. */
     public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
