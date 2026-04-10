@@ -2593,6 +2593,32 @@ public class PipelineHarness {
         } catch (Exception e) {
             log.warn("[PipelineHarness] Could not compute actual cost for run {}: {}", runId, e.getMessage());
         }
+        // Record E2E duration for SLO tracking (non-fatal)
+        recordE2eDuration(runId, "completed");
+    }
+
+    /**
+     * Records the end-to-end pipeline duration from run start to the current instant.
+     * Tagged with execution mode (real_time/batch) and outcome (completed/failed).
+     * Non-fatal — any failure is logged and ignored.
+     */
+    private void recordE2eDuration(String runId, String outcome) {
+        try {
+            stateStore.findRun(runId).ifPresent(run -> {
+                if (run.getStartedAt() != null) {
+                    java.time.Duration e2e = java.time.Duration.between(run.getStartedAt(), java.time.Instant.now());
+                    String mode = "BATCH".equals(run.getApprovedExecutionMode()) ? "batch" : "real_time";
+                    io.micrometer.core.instrument.Timer.builder(
+                                    com.navneet.executespec.config.CustomMetricsConfig.RUN_E2E_DURATION)
+                            .tag("mode", mode)
+                            .tag("status", outcome)
+                            .register(meterRegistry)
+                            .record(e2e);
+                }
+            });
+        } catch (Exception ex) {
+            log.debug("[PipelineHarness] Could not record E2E duration for run {}: {}", runId, ex.getMessage());
+        }
     }
 
     /** Persists a RunCostLog entry for pricing analytics. Non-fatal. */
@@ -2958,6 +2984,12 @@ public class PipelineHarness {
     }
 
     // ── Tier 5: Run restart ───────────────────────────────────────────────────
+
+    /** Records E2E duration for failed runs (for SLO tracking). */
+    @EventListener
+    public void onRunFailed(PipelineEvent.RunFailed event) {
+        recordE2eDuration(event.runId(), "failed");
+    }
 
     /**
      * Handles restart requests published by {@link com.navneet.executespec.recovery.RunRecoveryService}.
