@@ -81,6 +81,7 @@ public class PlannerAgent {
 
         // Prepend existing-codebase context when the workspace was cloned from a real repo
         String existingCodebaseHeader = buildExistingCodebaseHeader(runId);
+        String asyncPythonWarning = buildAsyncPythonWarning(userRequest);
         String userMessage = existingCodebaseHeader + """
                 <user_request>
                 %s
@@ -93,7 +94,7 @@ public class PlannerAgent {
 
                 Current workspace context:
                 %s
-                """.formatted(userRequest, contextSummary);
+                %s""".formatted(userRequest, contextSummary, asyncPythonWarning);
 
         stateStore.logMessage(runId, "harness", "planner",
                 "TASK_ASSIGNMENT", "Plan: " + userRequest, 0);
@@ -516,5 +517,40 @@ public class PlannerAgent {
         if (model == null) return props.getRoles().getPlanner();
         String provider = modelRegistry.providerFor(model);
         return provider != null ? provider : props.getRoles().getPlanner();
+    }
+
+    /**
+     * Detects async Python complexity in the spec and returns a planner warning block.
+     * Async Python stacks (asyncpg + SQLAlchemy async + redis.asyncio) require careful
+     * task decomposition — Gemini Flash has shown repeated PARTIAL failures with this stack.
+     * The warning guides the planner to prefer synchronous Python drivers when the selected
+     * provider is Google, or to break async setup into its own dedicated task.
+     */
+    private String buildAsyncPythonWarning(String userRequest) {
+        if (userRequest == null) return "";
+        String lower = userRequest.toLowerCase();
+        boolean hasAsyncpg = lower.contains("asyncpg");
+        boolean hasAsyncSqlAlchemy = lower.contains("sqlalchemy[asyncio]")
+                || lower.contains("sqlalchemy async")
+                || lower.contains("async sqlalchemy")
+                || lower.contains("sqlalchemy.ext.asyncio");
+        boolean hasAsyncRedis = lower.contains("redis.asyncio")
+                || lower.contains("aioredis");
+        int asyncSignals = (hasAsyncpg ? 1 : 0) + (hasAsyncSqlAlchemy ? 1 : 0) + (hasAsyncRedis ? 1 : 0);
+        if (asyncSignals < 2) return "";
+        return """
+
+                <complexity_signal>
+                ASYNC PYTHON STACK DETECTED: The spec requests asyncpg / SQLAlchemy[asyncio] / redis.asyncio.
+                This stack has high implementation complexity and is known to cause partial task failures.
+                Planning guidance:
+                - Create a dedicated setup task for the async DB engine and session factory (asyncpg + SQLAlchemy).
+                - Create a separate task for the async Redis client (redis.asyncio / aioredis).
+                - Do NOT mix async and sync driver imports in the same task.
+                - If the selected provider is Google (Gemini), prefer synchronous drivers
+                  (psycopg2 + SQLAlchemy sync + redis-py) unless async is a hard requirement.
+                - Mark async database and cache setup tasks as HIGH complexity.
+                </complexity_signal>
+                """;
     }
 }
