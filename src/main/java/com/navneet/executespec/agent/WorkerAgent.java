@@ -83,6 +83,7 @@ public class WorkerAgent {
     private final com.navneet.executespec.harness.RunCostBudgetService runCostBudgetService;
     private final ModelRegistry modelRegistry;
     private final ContextWindowPolicy contextWindowPolicy;
+    private final com.navneet.executespec.harness.AdaptiveIterationService adaptiveIterationService;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -413,7 +414,9 @@ public class WorkerAgent {
 
         // Timing and iteration state
         s.isSubtask = task.getParentTaskId() != null;
-        s.effectiveIterationLimit = s.isSubtask ? SUBTASK_ITERATION_LIMIT : HARD_ITERATION_LIMIT;
+        s.effectiveIterationLimit = s.isSubtask
+                ? SUBTASK_ITERATION_LIMIT
+                : adaptiveIterationService.getAdaptiveCap(s.complexity, SUBTASK_ITERATION_LIMIT, HARD_ITERATION_LIMIT);
         s.configuredMaxOutput = budgetMonitor.maxOutputTokens(s.model, s.complexity);
         s.deadline = Instant.now().plus(Duration.ofMinutes(s.taskDurationMinutes));
         s.lastCheckpointTime = Instant.now();
