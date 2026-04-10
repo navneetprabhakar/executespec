@@ -83,8 +83,16 @@ public class SequentialTaskExecutor {
     public record SequentialExecutionResult(
             List<WorkerReport> reports,
             List<AgentTask> completedTasks,
-            List<AgentTask> failedTasks
+            List<AgentTask> failedTasks,
+            boolean budgetExceeded
     ) {
+        /** Convenience constructor for the common non-budget-exceeded case. */
+        public SequentialExecutionResult(List<WorkerReport> reports,
+                                         List<AgentTask> completedTasks,
+                                         List<AgentTask> failedTasks) {
+            this(reports, completedTasks, failedTasks, false);
+        }
+
         public boolean hasFailures() {
             return failedTasks != null && !failedTasks.isEmpty();
         }
@@ -111,6 +119,7 @@ public class SequentialTaskExecutor {
         List<AgentTask> failed = Collections.synchronizedList(new ArrayList<>());
         List<AgentTask> previouslyMerged = Collections.synchronizedList(new ArrayList<>());
         Set<String> mergedTaskIds = ConcurrentHashMap.newKeySet();
+        boolean budgetExceededBetweenTasks = false;
         String runId = run.getRunId();
         String defaultModel = run.getWorkerModel();
 
@@ -230,14 +239,28 @@ public class SequentialTaskExecutor {
                 }
             }
 
+            // Inter-tier cost budget check: stop before starting next tier if hard cap reached
+            if (runCostBudgetService.isOverBudget(runId)) {
+                String tier = runCostBudgetService.getRunTier(runId);
+                Double budget = runCostBudgetService.getBudget(runId);
+                double currentCost = runCostBudgetService.getCurrentCost(runId);
+                log.warn("[CostBudget] Run {} exceeded ${} budget between tiers (current=${}) — stopping pipeline",
+                        runId, budget != null ? String.format("%.2f", budget) : "?",
+                        String.format("%.4f", currentCost));
+                sseBroadcaster.emit(runId, RunEvent.budgetExceeded(runId, tier,
+                        budget != null ? budget : 0.0));
+                budgetExceededBetweenTasks = true;
+                break;
+            }
+
             } finally {
                 tierObs.stop();
             }
         }
 
-        log.info("Tiered execution complete: {}/{} tasks succeeded (merged: {})",
-                completed.size(), tasks.size(), mergedTaskIds);
-        return new SequentialExecutionResult(allReports, completed, failed);
+        log.info("Tiered execution complete: {}/{} tasks succeeded (merged: {}, budgetExceeded={})",
+                completed.size(), tasks.size(), mergedTaskIds, budgetExceededBetweenTasks);
+        return new SequentialExecutionResult(allReports, completed, failed, budgetExceededBetweenTasks);
     }
 
     /**
