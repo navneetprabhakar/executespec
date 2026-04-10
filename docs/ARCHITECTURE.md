@@ -555,8 +555,8 @@ The preview system operates in two modes, selected by the `executespec.preview.m
 
 | Mode | Environment | TTL | Networking | Use Case |
 |------|-------------|-----|------------|----------|
-| `docker` | Local dev | 5 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
-| `cloud-run` | Dev / Prod | 5 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
+| `docker` | Local dev | 30 min | Docker Compose + Caddy reverse proxy (Cloudflare Origin Cert) | Local/VM development |
+| `cloud-run` | Dev / Prod | 30 min | Cloud Run managed HTTPS (`*.run.app`) | Hosted environments |
 
 **Concurrency limits:** FREE=1, PRO=3, ENTERPRISE=10 concurrent previews.
 
@@ -567,6 +567,24 @@ The preview system operates in two modes, selected by the `executespec.preview.m
 - Virtual threads use `ContextSnapshotFactory.captureAll().wrap(runnable)` for Micrometer trace propagation
 - `ACTIVE_PREVIEWS` gauge correctly decremented on all terminal states (success, failure, TTL expiry)
 - `probeApiDocs()` works for both modes: Docker (`localhost:{port}`) and Cloud Run (service URL)
+- TTL increased from 5 min → 30 min to ensure preview outlives background validation (review + test gen)
+
+#### 6.2.2 Container Console (Docker Mode Only)
+
+Users can run allowlisted diagnostic commands directly inside the running preview container without SSH or terminal access. The command executes via `docker compose exec -T` from the backend — the token never reaches the browser.
+
+```
+Browser → POST /api/runs/{runId}/preview/exec
+       → RunAccessGuard (JWT + run ownership)
+       → PreviewService.execInContainer() — server-side allowlist check
+       → ComposeExecutor.execInService() → docker compose exec -T app <cmd>
+       → ExecResult { stdout, stderr, exitCode }
+       → ConsolePanel (frontend)
+```
+
+**Allowlisted commands:** `ls`, `ps`, `cat`, `curl`, `env`, `df`, `free`, `netstat`, `ss`, `ping`, `whoami`, `hostname`, `date`, `uptime`, `pwd`
+
+**Security:** Shell metacharacters (`|`, `&`, `;`, `$`, `` ` ``, `>`, `<`, `..`) rejected server-side. Container already hardened with `cap_drop: ALL` + `no-new-privileges:true`. Only available in Docker preview mode — Cloud Run and VM modes return 503.
 
 #### 6.2.1 Cloud Run Preview Flow
 
