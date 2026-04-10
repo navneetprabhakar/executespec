@@ -124,6 +124,12 @@ public class RunDetail {
     /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
     List<AgentTokenEntry> agentTokens;
 
+    // ── Background validation (V64) ─────────────────────────────────────────
+    /** Status of the background validation thread: PENDING, RUNNING, COMPLETED, FAILED, or null. */
+    String validationStatus;
+    /** Current phase of background validation (TEST_GEN, REVIEW, RE_VALIDATE, REPORT). */
+    String validationPhase;
+
     /** Present if this run was triggered by an external integration. */
     public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
 

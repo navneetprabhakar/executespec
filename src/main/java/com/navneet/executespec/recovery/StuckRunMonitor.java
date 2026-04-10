@@ -1,6 +1,8 @@
 package com.navneet.executespec.recovery;
 
+import com.navneet.executespec.harness.BackgroundValidationService;
 import com.navneet.executespec.harness.PipelineHarness;
+import com.navneet.executespec.harness.entity.BackgroundValidation;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -33,6 +35,10 @@ public class StuckRunMonitor {
     private final RecoveryProperties props;
     private final ObservationRegistry observationRegistry;
     private final MeterRegistry meterRegistry;
+    private final BackgroundValidationService backgroundValidationService;
+
+    /** Background validations stalled longer than this are marked FAILED. */
+    private static final int STALLED_VALIDATION_THRESHOLD_MINUTES = 20;
 
     @Scheduled(fixedDelay = 2 * 60 * 1000)
     @SchedulerLock(name = "StuckRunMonitor", lockAtMostFor = "90s", lockAtLeastFor = "15s")
@@ -98,11 +104,40 @@ public class StuckRunMonitor {
 
             obs.highCardinalityKeyValue("tasks.stuck", String.valueOf(stuckCount));
             obs.lowCardinalityKeyValue("outcome", stuckCount > 0 ? "recovery_triggered" : "all_healthy");
+
+            // Check for stalled background validations
+            checkStalledValidations();
         } catch (Exception e) {
             obs.error(e);
             throw e;
         } finally {
             obs.stop();
+        }
+    }
+
+    /**
+     * Marks background validations that have been RUNNING for more than
+     * {@link #STALLED_VALIDATION_THRESHOLD_MINUTES} minutes as FAILED.
+     * The in-memory thread is assumed dead (app restart or OOM); the record is
+     * left in FAILED state so {@code /retry-validation} can re-trigger it.
+     */
+    private void checkStalledValidations() {
+        try {
+            List<BackgroundValidation> stalled =
+                    backgroundValidationService.findStalled(STALLED_VALIDATION_THRESHOLD_MINUTES);
+            for (BackgroundValidation bv : stalled) {
+                log.warn("[StuckRunMonitor] Background validation for run {} stalled at phase '{}' (started {})" +
+                         " — marking FAILED",
+                        bv.getRunId(), bv.getCurrentPhase(), bv.getStartedAt());
+                backgroundValidationService.markFailed(bv.getRunId(),
+                        "Stalled — no progress for " + STALLED_VALIDATION_THRESHOLD_MINUTES + " minutes");
+                sseBroadcaster.emit(bv.getRunId(), RunEvent.log(bv.getRunId(), "monitor",
+                        "⚠️ Background validation stalled and was marked failed. Use retry-validation to re-run."));
+                Counter.builder("executespec.background_validation.stalled")
+                        .register(meterRegistry).increment();
+            }
+        } catch (Exception e) {
+            log.warn("[StuckRunMonitor] Failed to check stalled validations: {}", e.getMessage());
         }
     }
 }

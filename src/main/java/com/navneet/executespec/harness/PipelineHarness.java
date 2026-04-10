@@ -193,11 +193,10 @@ public class PipelineHarness {
                     .build();
 
     /**
-     * Tracks runs with active background validation (review + test gen + report).
-     * When a run is in this set, the executeRunAsync finally block defers
-     * broadcaster.complete() and runKeyStore.remove() to the background thread.
+     * DB-backed tracker for background validation lifecycle.
+     * Replaces the in-memory {@code ConcurrentHashSet} so app restarts don't lose state.
      */
-    private final Set<String> backgroundValidationRuns = ConcurrentHashMap.newKeySet();
+    private final BackgroundValidationService backgroundValidationService;
 
     /**
      * Tracks runs with an active pipeline thread (executeRunAsync or runResumeAsync).
@@ -1166,6 +1165,25 @@ public class PipelineHarness {
      * are COMPLETE before submitting; throws a descriptive exception otherwise so the caller
      * can return 4xx.
      */
+    /**
+     * Re-runs background validation for a COMPLETE run whose prior validation failed.
+     * Called from the retry-validation API endpoint after {@link BackgroundValidationService#prepareRetry}
+     * has already incremented the attempt counter and reset status to PENDING.
+     */
+    public void retryBackgroundValidation(String runId) {
+        PipelineRun run = stateStore.findRun(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+        List<WorkerReport> reports = java.util.Collections.emptyList();
+        String planJson = run.getPlanJson() != null ? run.getPlanJson() : "{}";
+        CompileResult compileResult = CompileResult.skip();
+        backgroundValidationService.create(runId);
+        var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+        Thread.ofVirtual().name("bg-validation-retry-" + runId).start(snapshot.wrap(() ->
+                runBackgroundValidation(runId, run, reports, planJson,
+                        run.getUserRequest(), compileResult, false, true)));
+        log.info("[PipelineHarness] Retry background validation queued for run {}", runId);
+    }
+
     public void reopenMergeGate(String runId) {
         PipelineRun run = stateStore.findRun(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -1743,7 +1761,7 @@ public class PipelineHarness {
                         log.warn("[SingleShot] Could not serialize synthetic plan for run {}: {}", runId, jsonEx.getMessage());
                     }
                     final String finalBgPlanJson = bgPlanJson;
-                    backgroundValidationRuns.add(runId);
+                    backgroundValidationService.create(runId);
                     var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                     Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
                         runBackgroundValidation(runId, currentRun, currentReports,
@@ -1759,7 +1777,7 @@ public class PipelineHarness {
             } finally {
                 runSlots.release();
                 // If background validation is running, defer cleanup to that thread
-                if (!backgroundValidationRuns.contains(runId)) {
+                if (!backgroundValidationService.isActive(runId)) {
                     broadcaster.complete(runId);
                     runKeyStore.remove(runId);
                     runBudgetTracker.remove(runId);
@@ -2286,7 +2304,7 @@ public class PipelineHarness {
                     log.warn("Could not serialize plan for run {}: {}", runId, jsonEx.getMessage());
                 }
                 final String finalBgPlanJson = bgPlanJson;
-                backgroundValidationRuns.add(runId);
+                backgroundValidationService.create(runId);
                 var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
                 Thread.ofVirtual().name("bg-validation-" + runId).start(bgSnapshot.wrap(() -> {
                     runBackgroundValidation(runId, currentRun, currentReports,
@@ -2339,7 +2357,7 @@ public class PipelineHarness {
 
             runObs.stop();
             // If background validation is running, defer cleanup to that thread
-            if (!backgroundValidationRuns.contains(runId)) {
+            if (!backgroundValidationService.isActive(runId)) {
                 broadcaster.complete(runId);
                 runKeyStore.remove(runId);  // clean up per-run API keys
                 runBudgetTracker.remove(runId);  // clean up per-run budget tracking
@@ -2440,16 +2458,21 @@ public class PipelineHarness {
                                          List<WorkerReport> reports, String planJson,
                                          String userRequest, CompileResult compileResult,
                                          boolean computeHadFailures, boolean runTests) {
+        backgroundValidationService.markRunning(runId);
+        broadcaster.emit(runId, RunEvent.log(runId, "harness", "Background validation started"));
         try {
             // Test generation (async — fires TestsReadyEvent when done)
             // Skipped for PROTOTYPE mode to keep lightweight
             if (runTests) {
+                backgroundValidationService.setPhase(runId, "TEST_GEN");
                 try {
                     testCompletionFutures.put(runId, new CompletableFuture<>());
                     testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
+                    backgroundValidationService.recordPhaseResult(runId, "TEST_GEN", "completed");
                     log.info("Run {} — test gen pipeline completed in background", runId);
                 } catch (Exception e) {
                     testCompletionFutures.invalidate(runId);
+                    backgroundValidationService.recordPhaseResult(runId, "TEST_GEN", "failed: " + e.getMessage());
                     log.warn("Run {} — background test gen failed: {}", runId, e.getMessage());
                 }
             } else {
@@ -2457,6 +2480,7 @@ public class PipelineHarness {
             }
 
             // Review merged code
+            backgroundValidationService.setPhase(runId, "REVIEW");
             ReviewReportV2 review = null;
             Observation reviewObs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
                 .lowCardinalityKeyValue("run.id", runId)
@@ -2468,6 +2492,8 @@ public class PipelineHarness {
                         run.getUserRequest(), compileResult != null ? compileResult : CompileResult.skip(),
                         providers);
                 stateStore.saveReviewV2(runId, review);
+                backgroundValidationService.recordPhaseResult(runId, "REVIEW",
+                        review.getVerdict() != null ? review.getVerdict().name() : "UNKNOWN");
 
                 if (review.getVerdict() == ReviewVerdict.NEEDS_FIXES
                         || review.getVerdict() == ReviewVerdict.REJECTED) {
@@ -2487,12 +2513,15 @@ public class PipelineHarness {
             }
 
             // Re-validate after auto-fix
+            backgroundValidationService.setPhase(runId, "RE_VALIDATE");
             boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
             if (fixesApplied) {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness",
                     "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
                 try {
                     CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
+                    backgroundValidationService.recordPhaseResult(runId, "RE_VALIDATE",
+                            revalidation.passed() ? "passed" : "issues");
                     if (revalidation.passed() || revalidation.skipped()) {
                         broadcaster.emit(runId, RunEvent.log(runId, "compiler",
                             "✅ Re-validation passed — all fixes confirmed"));
@@ -2501,6 +2530,7 @@ public class PipelineHarness {
                             "⚠️ Re-validation found issues: " + revalidation.errorSummary()));
                     }
                 } catch (Exception revalEx) {
+                    backgroundValidationService.recordPhaseResult(runId, "RE_VALIDATE", "failed");
                     log.warn("Post-fix re-validation failed for run {}: {}", runId, revalEx.getMessage());
                 }
             }
@@ -2509,9 +2539,12 @@ public class PipelineHarness {
             testPreviewCoordinator.cancelIfPending(runId);
 
             // Validation report
+            backgroundValidationService.setPhase(runId, "REPORT");
             try {
                 generateValidationReport(runId, run, reports, review, compileResult);
+                backgroundValidationService.recordPhaseResult(runId, "REPORT", "completed");
             } catch (Exception reportEx) {
+                backgroundValidationService.recordPhaseResult(runId, "REPORT", "failed");
                 log.warn("Background validation report failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
                 broadcaster.emit(runId, RunEvent.log(runId, "report",
                     "⚠️ Report generation failed"));
@@ -2527,13 +2560,14 @@ public class PipelineHarness {
             // Update actual cost after background work
             saveActualCost(runId);
 
+            backgroundValidationService.markCompleted(runId);
             log.info("Run {} — background validation complete", runId);
         } catch (Exception e) {
             log.error("Background validation failed for run {}: {}", runId, e.getMessage(), e);
+            backgroundValidationService.markFailed(runId, e.getMessage());
             broadcaster.emit(runId, RunEvent.validationFailed(runId, null,
                 "Validation could not complete: " + e.getMessage()));
         } finally {
-            backgroundValidationRuns.remove(runId);
             runKeyStore.remove(runId);
             runBudgetTracker.remove(runId);
             runCostBudgetService.remove(runId);
@@ -3861,7 +3895,7 @@ public class PipelineHarness {
 
             // Background validation (review, test gen, preview) — same as real-time runs
             final CompileResult finalCompileResult = compileResult;
-            backgroundValidationRuns.add(runId);
+            backgroundValidationService.create(runId);
             final PipelineRun bgRun = stateStore.findRun(runId).orElse(run);
             var bgSnapshot = ContextSnapshotFactory.builder().build().captureAll();
             Thread.ofVirtual().name("bg-validation-batch-" + runId).start(
@@ -3871,10 +3905,7 @@ public class PipelineHarness {
                                     bgRun.getPlanJson(), bgRun.getUserRequest(),
                                     finalCompileResult, false, true);
                         } finally {
-                            backgroundValidationRuns.remove(runId);
-                            runKeyStore.remove(runId);
-                            runBudgetTracker.remove(runId);
-                            runCostBudgetService.remove(runId);
+                            // cleanup is handled inside runBackgroundValidation's finally block
                             broadcaster.complete(runId);
                         }
                     })
