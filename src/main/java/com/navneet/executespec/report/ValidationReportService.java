@@ -94,6 +94,7 @@ public class ValidationReportService {
                 .accuracyScore(accuracyScore)
                 .accuracyGrade(accuracyGrade)
                 .accuracyJson(accuracyJson)
+                .previewUrl(input.previewUrl())
                 .build();
 
             // Accumulate report tokens into run total for billing accuracy
@@ -373,7 +374,8 @@ public class ValidationReportService {
             entity.isGeneratedAfterImprovements(),
             entity.getAccuracyScore(),
             entity.getAccuracyGrade(),
-            entity.getAccuracyJson()
+            entity.getAccuracyJson(),
+            entity.getPreviewUrl()
         );
     }
 

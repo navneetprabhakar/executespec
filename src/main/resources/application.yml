@@ -19,6 +19,8 @@ spring:
         pool:
           max-active: 50
           min-idle: 5
+          test-on-borrow: true
+          test-while-idle: true
 
   datasource:
     url: jdbc:postgresql://localhost:5432/executespec
@@ -408,7 +410,7 @@ preview:
   enabled: true
   mode: ${PREVIEW_MODE:docker}           # "docker" (Docker Compose, local), "cloud-run" (GCP Cloud Run), or "vm" (GCE VM)
   total-startup-timeout-seconds: 480   # 8-minute total deadline (Spring Boot cold builds need extra time)
-  preview-ttl-minutes: 5              # auto-shutdown after 5 minutes
+  preview-ttl-minutes: 30             # auto-shutdown after 30 min (extended for PRODUCTION validation: 10-25 min)
   port-range-start: 10000              # Docker Compose host port range
   port-range-end: 10100
   preview-domain: executespec.ai       # single-level: preview-{id}.executespec.ai
