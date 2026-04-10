@@ -245,6 +245,12 @@
       <version>1.16.1</version>
     </dependency>
 
+    <!-- Spring AOP — required for @Aspect (TenantConnectionInterceptor) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-aop</artifactId>
+    </dependency>
+
     <!-- Spring Validation -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
