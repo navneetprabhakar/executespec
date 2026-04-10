@@ -299,7 +299,94 @@ graph TB
 
 **Planner prompts:** `planner_edit.txt` has been deleted and merged into `planner.txt` using `{{#if editMode}}` conditional templating.
 
-### 3.3 Code Validation Pipeline
+### 3.3 Run Lifecycle — State Machine & Stage Reference
+
+**State transitions:**
+
+```
+QUEUED ─(slot available)─> PLANNING
+                              │
+                       AWAITING_APPROVAL
+                        │           │              │
+                   (rejected)  (approved)   (batch approved)
+                     FAILED     WORKING    QUEUED_BATCH → IN_PROGRESS_BATCH
+                                                → BATCH_COMPLETE → auto-retry failed
+                                                → COMPILING
+                                   │
+                             +─────+──────+
+                         (all ok)    (some failed)
+                             │              │
+                         COMPILING       PARTIAL ──(PartialRunResumeService / manual retry)──> WORKING
+                             │
+                         MERGING
+                             │
+                         COMPLETE ──> auto-preview (30-min TTL) + bg-validation thread
+
+Terminal: COMPLETE, PARTIAL, FAILED, ARCHIVED
+Side paths: AWAITING_CLARIFICATION ──(reply)──> PLANNING
+            AWAITING_APPROVAL ──(paused)──> PAUSED ──(resume)──> WORKING
+```
+
+**Stage-by-stage reference:**
+
+| Stage | Name | Handler | State change | Key behaviour |
+|-------|------|---------|-------------|---------------|
+| 0 | Submission | `RunController` → `PipelineHarness.submitRun()` | → QUEUED or PLANNING | Pre-flight (tier, quota, API keys); stamp ownership before async thread starts; HTTP 202 |
+| 1 | Workspace init | `executeRunAsync()` | PLANNING | Clone/copy/fresh workspace; language validation; JIRA/Confluence reference extraction; AWAITING_CLARIFICATION side path |
+| 2 | Planning | `PlannerAgent.plan()` (3-attempt retry) | PLANNING → AWAITING_APPROVAL | Planner prompt + workspace context; async Python detection; TaskPlan → AgentTask entities; cost estimate; release compute slot at gate |
+| 3 | Plan gate | `GateStore` (Redis, 500ms poll, 2h TTL) | AWAITING_APPROVAL → WORKING or FAILED | Human approve/reject or `skipApproval`; gate-loss fallback on restart; slot reacquired after approval |
+| 4 | Worker execution | `SequentialTaskExecutor` → `SubtaskDecomposer` → `WorkerAgent` | WORKING | Dependency-tier parallel dispatch; 25-min wall-clock per task; progressive merge after each task; `task-max-retries=3` |
+| 5 | Compilation | `CompilerAgent.runCompileAndFix()` | COMPILING | Detect build tool; up to 3 LLM-guided fix attempts; dynamic error truncation by file count; non-fatal |
+| 6 | Auto-merge & complete | `PipelineHarness` → `StateStore.markComplete()` | MERGING → COMPLETE | Merge all task branches; mark COMPLETE **before** review; auto-start preview; GitHub push/PR if configured |
+| 7 | Review (bg) | `ReviewerAgentV2.review()` | COMPLETE (bg thread) | Phase 1: inspect (max 10 tool calls); Phase 2: auto-fix CRITICAL issues; Phase 3: AccuracyAssessmentService |
+| 8 | Test gen (bg) | `TestGenOrchestrator` | COMPLETE (bg thread) | TestPlannerAgent → TestWorkerAgent; test compilation with retry |
+| 9 | Test exec (bg) | `TestPreviewCoordinator` | COMPLETE (bg thread) | Reuse auto-started preview; batch runs publish empty event to unblock report; non-fatal |
+| 10 | Validation report (bg) | `ValidationReportService` | COMPLETE (bg thread) | LLM-generated report; persist with accuracy score/grade; non-fatal |
+| 11 | BG cleanup | `runBackgroundValidation()` finally block | — | Publish `MergeCompleted` event (triggers JIRA/Confluence/Slack); cost calc; close SSE stream |
+
+**Agent & Service Map:**
+
+| Agent / Service | Stages | Responsibility |
+|-----------------|--------|---------------|
+| `RunController` | 0 | REST entry, tier/quota checks |
+| `PipelineHarness` | 1–11 | Orchestrator, async thread, gate polling, `runBackgroundValidation()` |
+| `PlannerAgent` | 2 | Task decomposition, project type, async Python detection |
+| `SequentialTaskExecutor` | 4 | Dependency graph, tiered parallel dispatch, SubtaskDecomposer |
+| `WorkerAgent` | 4, 7 | Agentic tool-use loop (25 min), code generation |
+| `CompilerAgent` | 5 | Build detection, LLM-guided compile fixes |
+| `GitMergeService` | 4, 6 | Branch merging, conflict detection |
+| `ReviewerAgentV2` | 7 | Code inspection, auto-fix, accuracy assessment |
+| `AccuracyAssessmentService` | 7 | Spec adherence scoring (Phase 3 of review) |
+| `TestGenOrchestrator` | 8 | Orchestrates test planning + generation |
+| `TestPreviewCoordinator` | 9 | Preview reuse, test execution lifecycle |
+| `ValidationReportService` | 10 | Report generation & persistence |
+| `PartialRunResumeService` | — | Auto-resume PARTIAL runs every 5 min |
+| `GateStore` | 3 | Redis-backed gates (500ms poll, 2h TTL) |
+| `StateStore` | All | Central state persistence |
+| `PreviewService` | 6, 9 | Dual-mode preview lifecycle |
+
+**Model escalation rules:**
+
+| Trigger | Behaviour |
+|---------|-----------|
+| Validation retry ≥3 (LIGHTWEIGHT task) | Escalate LIGHTWEIGHT → WORKHORSE |
+| Validation retry ≥3 (WORKHORSE task) | Stay WORKHORSE — never auto-escalates to PLANNING |
+| No file writes for 5 min (stall) | Escalate within same provider (Haiku → Sonnet) |
+| Provider circuit-breaker open (5 failures, 60s TTL) | Cross-provider fallback at same tier |
+| Mid-task provider failure | Compact conversation + `resolveFallbackExcluding()` (1 attempt) |
+| Manual retry via UI / `PartialRunResumeService` | Retries at whatever tier the task was at |
+
+**Context window thresholds (WorkerAgent):**
+
+| Threshold | Action |
+|-----------|--------|
+| 25% input tokens | Warn in logs |
+| 35% input tokens | Compact (sliding window: first 2 + last 18 messages) |
+| 55% input tokens | Hard stop — force completion report |
+
+Tool output truncation: `readFile` 8k chars · `shell` 6k chars · `diff` 5k chars
+
+### 3.4 Code Validation Pipeline
 
 ```mermaid
 graph LR
