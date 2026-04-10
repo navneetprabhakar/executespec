@@ -82,6 +82,7 @@ public class WorkerAgent {
     private final com.navneet.executespec.harness.RunBudgetTracker runBudgetTracker;
     private final com.navneet.executespec.harness.RunCostBudgetService runCostBudgetService;
     private final ModelRegistry modelRegistry;
+    private final ContextWindowPolicy contextWindowPolicy;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -2334,29 +2335,28 @@ public class WorkerAgent {
         log.info("[Worker callModel] provider={} model={} complexity={} maxOut={} nativeTools={}",
                 provider, model, complexity, maxOut, useNativeTools);
 
-        // Sliding window: always send the first 2 messages (task assignment + initial
-        // context) and the most-recent HISTORY_WINDOW messages. This bounds input tokens
-        // per call regardless of iteration count, while compaction handles summarising
-        // the full history. The full `messages` list is preserved in memory for compact().
+        // Context window: relevance-scored policy (first 2 + high-relevance mid + recent tail).
+        // Native tool calling (OpenAI) skips windowing — AssistantMessage(tool_calls) and
+        // ToolResponseMessage pairs MUST stay together; splitting them causes 400 errors.
         final int HISTORY_WINDOW = 18;
         List<Message> windowed;
         if (useNativeTools || messages.size() <= HISTORY_WINDOW + 2) {
-            // Native tool calling (OpenAI): skip sliding window entirely.
-            // AssistantMessage(tool_calls) and ToolResponseMessage pairs MUST stay together;
-            // the window boundary would split them causing 400 errors. Rely on compaction instead.
             windowed = messages;
         } else {
-            int windowStart = messages.size() - HISTORY_WINDOW;
-            // Ensure the window boundary does not split an AssistantMessage(tool_calls)
-            // from its ToolResponseMessage.
-            while (windowStart > 2 && windowStart < messages.size()
-                    && messages.get(windowStart) instanceof ToolResponseMessage) {
-                windowStart--;
+            windowed = contextWindowPolicy.apply(messages, HISTORY_WINDOW);
+            // Ensure window boundary does not split AssistantMessage(tool_calls)/ToolResponseMessage pairs.
+            // If first message after anchor is a ToolResponseMessage, walk back until it isn't.
+            if (windowed.size() > 2 && windowed.get(2) instanceof ToolResponseMessage) {
+                // Rebuild without the offending leading ToolResponseMessage
+                List<Message> safeWindowed = new ArrayList<>(windowed.subList(0, 2));
+                boolean skipLeadingToolResponses = true;
+                for (int i = 2; i < windowed.size(); i++) {
+                    if (skipLeadingToolResponses && windowed.get(i) instanceof ToolResponseMessage) continue;
+                    skipLeadingToolResponses = false;
+                    safeWindowed.add(windowed.get(i));
+                }
+                windowed = safeWindowed;
             }
-            windowed = new ArrayList<>(messages.subList(0, 2));
-            windowed.addAll(messages.subList(windowStart, messages.size()));
-            log.debug("[Worker callModel] Sliding window: kept first 2 + last {} of {} messages",
-                    messages.size() - windowStart, messages.size());
         }
 
         List<Message> allMessages = new ArrayList<>();
