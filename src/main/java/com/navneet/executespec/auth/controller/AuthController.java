@@ -39,6 +39,7 @@ public class AuthController {
     private final TierPermissionService tierPermissionService;
     private final ActivityAuditService auditService;
     private final com.navneet.executespec.repo.BitbucketRepoService bitbucketRepoService;
+    private final com.navneet.executespec.compliance.DataRetentionService dataRetentionService;
 
     private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
     private final PasswordEncoder passwordEncoder;
@@ -419,5 +420,20 @@ public class AuthController {
     @GetMapping("generate")
     public String generate(@RequestParam(name = "password")String password) {
         return passwordEncoder.encode(password);
+    }
+
+    // ── GDPR right-to-erasure ─────────────────────────────────────────────────
+
+    /**
+     * Soft-deletes all completed/failed runs belonging to the authenticated user.
+     * Active runs (currently executing) are skipped and must be cancelled first.
+     * The actual workspace GCS deletion happens asynchronously via the retention scheduler.
+     */
+    @DeleteMapping("/me/data")
+    public ResponseEntity<Map<String, Object>> eraseMyData(
+            @AuthenticationPrincipal com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        if (userDetails == null) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        int deleted = dataRetentionService.eraseUserData(userDetails.getUser().getId());
+        return ResponseEntity.ok(Map.of("runsScheduledForDeletion", deleted));
     }
 }

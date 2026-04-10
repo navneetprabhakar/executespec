@@ -357,4 +357,18 @@ public class PipelineRun {
         return archivedAt != null;
     }
 
+    // ── GDPR soft-delete ─────────────────────────────────────────────────────
+
+    /**
+     * Timestamp when the user (or retention job) soft-deleted this run.
+     * Soft-deleted runs are excluded from queries and hard-deleted by the
+     * retention scheduler after the workspace GCS deletion is confirmed.
+     */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    public boolean isSoftDeleted() {
+        return deletedAt != null;
+    }
+
 }
