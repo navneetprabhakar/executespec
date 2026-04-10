@@ -8,6 +8,8 @@ import com.navneet.executespec.api.dto.TaskSummary;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.harness.BackgroundValidationService;
+import com.navneet.executespec.harness.entity.BackgroundValidation;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
@@ -27,6 +29,7 @@ public class RunMapper {
     private final AppUserRepository appUserRepository;
     private final TestPlanRepository testPlanRepository;
     private final ObjectMapper objectMapper;
+    private final BackgroundValidationService backgroundValidationService;
 
     public RunSummary toSummary(PipelineRun r) {
         return new RunSummary(
@@ -185,6 +188,10 @@ public class RunMapper {
             .isRetry(r.getSourceRunId() != null)
             .sourceRunId(r.getSourceRunId())
             .runRetryCount(r.getRunRetryCount())
+            .validationStatus(backgroundValidationService.find(r.getRunId())
+                    .map(BackgroundValidation::getStatus).orElse(null))
+            .validationPhase(backgroundValidationService.find(r.getRunId())
+                    .map(BackgroundValidation::getCurrentPhase).orElse(null))
             .build();
     }
 
