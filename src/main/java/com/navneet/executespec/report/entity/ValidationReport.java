@@ -81,6 +81,10 @@ public class ValidationReport {
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
 
+    /** Preview URL captured at report generation time. Null if preview expired or was never started. */
+    @Column(name = "preview_url", length = 512)
+    private String previewUrl;
+
     @Column(name = "share_token", length = 64, unique = true)
     private String shareToken;
 
