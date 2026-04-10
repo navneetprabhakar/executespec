@@ -3,6 +3,8 @@ package com.navneet.executespec.ratelimit;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.TierEnforcementService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -45,6 +47,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final TierEnforcementService tierEnforcementService;
+    private final Counter redisFailopenCounter;
 
     private static final String RATE_LIMIT_KEY_PREFIX = "rl:";
     private static final String TIER_CACHE_PREFIX = "rl:tier:";
@@ -56,12 +59,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     public RateLimitFilter(RateLimitProperties properties, RateLimitPolicy policy,
                            StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
-                           TierEnforcementService tierEnforcementService) {
+                           TierEnforcementService tierEnforcementService,
+                           MeterRegistry meterRegistry) {
         this.properties = properties;
         this.policy = policy;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.tierEnforcementService = tierEnforcementService;
+        this.redisFailopenCounter = Counter.builder("executespec.redis.failopen")
+                .description("Rate limiter requests passed through due to Redis being unreachable (fail-open)")
+                .register(meterRegistry);
     }
 
     @Override
@@ -125,8 +132,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
 
         } catch (Exception e) {
-            // Redis failure — use in-memory fallback with conservative limits
+            // Redis failure — use in-memory fallback with conservative limits (fail-open)
             log.warn("[RateLimit] Redis error, using local fallback: {}", e.getMessage());
+            redisFailopenCounter.increment();
             int fallbackLimit = Math.max(1, limit / 2); // 50% of normal limit
             String localKey = identifier + ":" + group + ":" + minuteBucket;
             cleanupLocalCounters(minuteBucket);

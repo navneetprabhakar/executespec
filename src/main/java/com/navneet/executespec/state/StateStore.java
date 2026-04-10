@@ -501,6 +501,14 @@ public class StateStore {
         });
     }
 
+    /** Store the assembled prompt hash on a task for version tracking. */
+    public void setPromptHash(String taskId, String promptHash) {
+        taskRepo.findById(taskId).ifPresent(task -> {
+            task.setPromptHash(promptHash);
+            taskRepo.save(task);
+        });
+    }
+
     /** Reset a failed task for real-time retry (batch fallback). */
     public void resetTaskForRetry(String taskId) {
         taskRepo.findById(taskId).ifPresent(task -> {
@@ -999,6 +1007,11 @@ public class StateStore {
         return taskRepo.findByStatus("WORKING");
     }
 
+    /** Returns QUEUED runs that were stalled due to a provider outage (for automatic retry). */
+    public List<PipelineRun> getOutageQueuedRuns() {
+        return runRepo.findOutageQueuedRuns();
+    }
+
     public void updateLastActivity(String taskId) {
         taskRepo.findById(taskId).ifPresent(task -> {
             task.setLastActivityAt(Instant.now());
@@ -1155,7 +1168,8 @@ public class StateStore {
             totalCacheRead += st.getCacheReadTokens() != null ? st.getCacheReadTokens() : 0;
             totalCacheWrite += st.getCacheWriteTokens() != null ? st.getCacheWriteTokens() : 0;
 
-            if ("FAILED".equals(st.getStatus()) || "BLOCKED".equals(st.getStatus())) {
+            if ("FAILED".equals(st.getStatus()) || "BLOCKED".equals(st.getStatus())
+                    || "PARTIAL".equals(st.getStatus())) {
                 anyFailed = true;
             }
             if (st.getProvider() != null) provider = st.getProvider();
@@ -1190,6 +1204,7 @@ public class StateStore {
                         subtasks.stream().filter(s -> "COMPLETE".equals(s.getStatus())).count() + " complete")
                 .build();
 
+        // A parent is PARTIAL if any subtask is FAILED, BLOCKED, or PARTIAL
         parent.setStatus(anyFailed ? "PARTIAL" : "COMPLETE");
         parent.setWorkerReportJson(toJson(compositeReport));
         parent.setInputTokens(totalIn);
@@ -1597,6 +1612,18 @@ public class StateStore {
         PipelineRun run = runRepo.findById(runId).orElseThrow();
         run.setStatus(status);
         runRepo.save(run);
+    }
+
+    /**
+     * Updates the instance heartbeat for a run. Called every 30s by PipelineHarness.
+     * Uses a lightweight JPA update to avoid loading the full entity.
+     */
+    public void updateHeartbeat(String runId, String instanceId, java.time.Instant heartbeat) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setExecutingInstance(instanceId);
+            run.setExecutionHeartbeat(heartbeat);
+            runRepo.save(run);
+        });
     }
 
     private String toJson(Object obj) {

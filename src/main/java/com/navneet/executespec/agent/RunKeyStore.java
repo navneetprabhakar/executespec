@@ -1,37 +1,61 @@
 package com.navneet.executespec.agent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.navneet.executespec.security.KeyEncryptor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
 
 /**
  * Holds the per-run resolved API keys for the lifetime of each pipeline run.
  *
- * <p>Keys are stored here (keyed by runId) so that {@link LlmRouter} can look them
- * up without any changes to agent method signatures. Every LLM call already passes
- * a runId, making this a zero-friction injection point.
+ * <p>Two-layer store:
+ * <ol>
+ *   <li><b>L1 — Caffeine</b>: same-instance hot path; avoids Redis roundtrip per LLM call.</li>
+ *   <li><b>L2 — Redis</b>: AES-256-GCM encrypted, 2h TTL; survives rolling deployments so
+ *       a run resumed on a different instance can still find its keys.</li>
+ * </ol>
+ *
+ * <p>On L1 miss: try Redis decrypt → promote to L1. On Redis miss: return
+ * {@link ResolvedKeys#SYSTEM_ONLY} (graceful fallback — agents use system beans).
  *
  * <p>Lifecycle:
  * <pre>
- *   PipelineHarness.executeRunAsync()  → runKeyStore.put(runId, keys)
- *   [agents run normally]
- *   PipelineHarness finally block      → runKeyStore.remove(runId)
+ *   PipelineHarness.executeRunAsync()           → runKeyStore.put(runId, keys)
+ *   [agents run normally — L1 hit for every call]
+ *   PipelineHarness.runBackgroundValidation finally → runKeyStore.remove(runId)
  * </pre>
- *
- * <p>Thread-safety: {@link ConcurrentHashMap} — safe for concurrent worker tasks within
- * the same run as well as multiple runs executing in parallel.
  */
 @Service
 @Slf4j
 public class RunKeyStore {
 
-    private final Map<String, ResolvedKeys> store = new ConcurrentHashMap<>();
+    private static final Duration L1_TTL    = Duration.ofMinutes(30);
+    private static final Duration REDIS_TTL = Duration.ofHours(2);
+    private static final String   KEY_PFX   = "runkey:";
 
-    /** Register resolved keys at the start of a run. */
+    private final Cache<String, ResolvedKeys> l1 = Caffeine.newBuilder()
+            .expireAfterAccess(L1_TTL)
+            .build();
+
+    private final StringRedisTemplate redis;
+    private final KeyEncryptor encryptor;
+    private final ObjectMapper mapper;
+
+    public RunKeyStore(StringRedisTemplate redis, KeyEncryptor encryptor, ObjectMapper mapper) {
+        this.redis     = redis;
+        this.encryptor = encryptor;
+        this.mapper    = mapper;
+    }
+
+    /** Register resolved keys at the start of a run (writes to L1 + Redis). */
     public void put(String runId, ResolvedKeys keys) {
-        store.put(runId, keys);
+        l1.put(runId, keys);
+        writeToRedis(runId, keys);
         log.debug("[RunKeyStore] Stored keys for run {} — anthropic={}, openai={}, gemini={}",
                 runId,
                 keys.anthropicKey() != null,
@@ -41,16 +65,59 @@ public class RunKeyStore {
 
     /**
      * Returns the resolved keys for the given run.
-     * Falls back to {@link ResolvedKeys#SYSTEM_ONLY} if no entry exists
-     * (e.g. recovery runs, test contexts, or background agents).
+     * L1 hit → return immediately. L2 hit → promote to L1. Miss → SYSTEM_ONLY.
      */
     public ResolvedKeys get(String runId) {
-        return store.getOrDefault(runId, ResolvedKeys.SYSTEM_ONLY);
+        // L1 hit (hot path — same instance, no serialization overhead)
+        ResolvedKeys cached = l1.getIfPresent(runId);
+        if (cached != null) return cached;
+
+        // L2 (Redis) — cross-instance recovery after rolling deploy
+        ResolvedKeys fromRedis = readFromRedis(runId);
+        if (fromRedis != null) {
+            l1.put(runId, fromRedis); // promote to L1
+            log.debug("[RunKeyStore] L2 hit for run {} — promoted to L1", runId);
+            return fromRedis;
+        }
+
+        log.debug("[RunKeyStore] Cache miss for run {} — using SYSTEM_ONLY", runId);
+        return ResolvedKeys.SYSTEM_ONLY;
     }
 
-    /** Remove the entry at the end of a run (cleanup). */
+    /** Remove entry at the end of a run (clears both L1 and Redis). */
     public void remove(String runId) {
-        store.remove(runId);
+        l1.invalidate(runId);
+        try {
+            redis.delete(KEY_PFX + runId);
+        } catch (Exception e) {
+            log.debug("[RunKeyStore] Redis delete failed for run {} — L1 already cleared", runId, e);
+        }
         log.debug("[RunKeyStore] Cleaned up keys for run {}", runId);
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private void writeToRedis(String runId, ResolvedKeys keys) {
+        try {
+            String json      = mapper.writeValueAsString(keys);
+            String encrypted = encryptor.encrypt(json);
+            redis.opsForValue().set(KEY_PFX + runId, encrypted, REDIS_TTL);
+        } catch (Exception e) {
+            log.warn("[RunKeyStore] Failed to write keys to Redis for run {} — L1 only: {}",
+                    runId, e.getMessage());
+        }
+    }
+
+    private ResolvedKeys readFromRedis(String runId) {
+        try {
+            String encrypted = redis.opsForValue().get(KEY_PFX + runId);
+            if (encrypted == null) return null;
+            String json = encryptor.decrypt(encrypted);
+            return mapper.readValue(json, ResolvedKeys.class);
+        } catch (Exception e) {
+            log.warn("[RunKeyStore] Failed to read/decrypt keys from Redis for run {}: {}",
+                    runId, e.getMessage());
+            return null;
+        }
     }
 }

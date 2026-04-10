@@ -54,6 +54,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -82,6 +83,9 @@ public class WorkerAgent {
     private final com.navneet.executespec.harness.RunBudgetTracker runBudgetTracker;
     private final com.navneet.executespec.harness.RunCostBudgetService runCostBudgetService;
     private final ModelRegistry modelRegistry;
+    private final ContextWindowPolicy contextWindowPolicy;
+    private final com.navneet.executespec.harness.AdaptiveIterationService adaptiveIterationService;
+    private final PromptAssembler promptAssembler;
 
     @Value("classpath:prompts/worker.txt")
     private Resource workerPromptFallback;
@@ -125,6 +129,8 @@ public class WorkerAgent {
         boolean midTaskRecoveryAttempted;
         boolean urgencyInjected;
         boolean isSubtask;
+        int lastCommitIteration = -1;       // iteration when last commit was dispatched
+        int lastListFilesIteration = -1;    // iteration when last listFiles/list_files was dispatched
         int effectiveIterationLimit;
         Instant deadline;
         Instant lastCheckpointTime;
@@ -412,7 +418,9 @@ public class WorkerAgent {
 
         // Timing and iteration state
         s.isSubtask = task.getParentTaskId() != null;
-        s.effectiveIterationLimit = s.isSubtask ? SUBTASK_ITERATION_LIMIT : HARD_ITERATION_LIMIT;
+        s.effectiveIterationLimit = s.isSubtask
+                ? SUBTASK_ITERATION_LIMIT
+                : adaptiveIterationService.getAdaptiveCap(s.complexity, SUBTASK_ITERATION_LIMIT, HARD_ITERATION_LIMIT);
         s.configuredMaxOutput = budgetMonitor.maxOutputTokens(s.model, s.complexity);
         s.deadline = Instant.now().plus(Duration.ofMinutes(s.taskDurationMinutes));
         s.lastCheckpointTime = Instant.now();
@@ -636,6 +644,12 @@ public class WorkerAgent {
                         continue; // skip dispatch, result already cached
                     }
                     String result = dispatchTool(tc, runId, taskId);
+                    // Track commit / listFiles iterations for self-review enforcement
+                    if ("commit".equals(tc.name()) || "git_commit".equals(tc.name())) {
+                        state.lastCommitIteration = state.iteration;
+                    } else if ("listFiles".equals(tc.name()) || "list_files".equals(tc.name())) {
+                        state.lastListFilesIteration = state.iteration;
+                    }
                     if (isFileWriteTool(tc.name())) {
                         state.fileWritesSinceCheck++; state.totalFileWrites++;
                         // Invalidate dedup cache for written path
@@ -746,6 +760,12 @@ public class WorkerAgent {
                     if (dedupKey != null) {
                         state.readOnlyToolCache.put(dedupKey, result);
                     }
+                    // Track commit / listFiles iterations for self-review enforcement
+                    if ("commit".equals(tc.name()) || "git_commit".equals(tc.name())) {
+                        state.lastCommitIteration = state.iteration;
+                    } else if ("listFiles".equals(tc.name()) || "list_files".equals(tc.name())) {
+                        state.lastListFilesIteration = state.iteration;
+                    }
                 }
                 if (isFileWriteTool(tc.name())) {
                     state.fileWritesSinceCheck++;
@@ -806,6 +826,17 @@ public class WorkerAgent {
                                              int maxFabricatedCompletions) {
         log.info("[Worker {}] taskComplete tool called — building completion report", taskId);
         stateStore.appendTaskLog(taskId, "TASK_COMPLETE_TOOL_CALLED");
+
+        // Self-review enforcement: reject completion if no listFiles since last commit
+        if (state.lastCommitIteration >= 0 && state.lastListFilesIteration <= state.lastCommitIteration) {
+            log.info("[Worker {}] Rejecting completion — no listFiles after commit (commit@{}, listFiles@{})",
+                    taskId, state.lastCommitIteration, state.lastListFilesIteration);
+            stateStore.appendTaskLog(taskId, "SELF_REVIEW_ENFORCED:listFiles required after commit");
+            responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(),
+                    "REJECTED: You must call listFiles after your commit to verify files exist on disk " +
+                    "before reporting done. Call listFiles(path='.') now."));
+            return null; // continue loop
+        }
         String completionJson = buildCompletionJsonFromToolCall(tc.arguments(), taskId);
         if (looksLikeCompletionReport(completionJson, taskId)) {
             int claimedFileCount = countClaimedFiles(completionJson);
@@ -908,6 +939,12 @@ public class WorkerAgent {
                         result = dispatchTool(tc, runId, taskId);
                         if (dedupKey != null) {
                             state.readOnlyToolCache.put(dedupKey, result);
+                        }
+                        // Track commit / listFiles iterations for self-review enforcement
+                        if ("commit".equals(tc.name()) || "git_commit".equals(tc.name())) {
+                            state.lastCommitIteration = state.iteration;
+                        } else if ("listFiles".equals(tc.name()) || "list_files".equals(tc.name())) {
+                            state.lastListFilesIteration = state.iteration;
                         }
                     }
                     if (isFileWriteTool(tc.name())) {
@@ -2324,7 +2361,9 @@ public class WorkerAgent {
             String runId, String taskId, String agentId,
             int iteration, boolean justCompacted,
             String complexity) {
-        String systemPrompt = loadPrompt(provider);
+        String systemPrompt = (iteration == 1)
+                ? loadPromptAndTrack(provider, runId, taskId)
+                : loadPrompt(provider);
         int maxOut = budgetMonitor.maxOutputTokens(model, complexity);
         boolean isOpenAi = "openai".equalsIgnoreCase(provider);
         boolean useNativeTools = isOpenAi;
@@ -2334,29 +2373,28 @@ public class WorkerAgent {
         log.info("[Worker callModel] provider={} model={} complexity={} maxOut={} nativeTools={}",
                 provider, model, complexity, maxOut, useNativeTools);
 
-        // Sliding window: always send the first 2 messages (task assignment + initial
-        // context) and the most-recent HISTORY_WINDOW messages. This bounds input tokens
-        // per call regardless of iteration count, while compaction handles summarising
-        // the full history. The full `messages` list is preserved in memory for compact().
+        // Context window: relevance-scored policy (first 2 + high-relevance mid + recent tail).
+        // Native tool calling (OpenAI) skips windowing — AssistantMessage(tool_calls) and
+        // ToolResponseMessage pairs MUST stay together; splitting them causes 400 errors.
         final int HISTORY_WINDOW = 18;
         List<Message> windowed;
         if (useNativeTools || messages.size() <= HISTORY_WINDOW + 2) {
-            // Native tool calling (OpenAI): skip sliding window entirely.
-            // AssistantMessage(tool_calls) and ToolResponseMessage pairs MUST stay together;
-            // the window boundary would split them causing 400 errors. Rely on compaction instead.
             windowed = messages;
         } else {
-            int windowStart = messages.size() - HISTORY_WINDOW;
-            // Ensure the window boundary does not split an AssistantMessage(tool_calls)
-            // from its ToolResponseMessage.
-            while (windowStart > 2 && windowStart < messages.size()
-                    && messages.get(windowStart) instanceof ToolResponseMessage) {
-                windowStart--;
+            windowed = contextWindowPolicy.apply(messages, HISTORY_WINDOW);
+            // Ensure window boundary does not split AssistantMessage(tool_calls)/ToolResponseMessage pairs.
+            // If first message after anchor is a ToolResponseMessage, walk back until it isn't.
+            if (windowed.size() > 2 && windowed.get(2) instanceof ToolResponseMessage) {
+                // Rebuild without the offending leading ToolResponseMessage
+                List<Message> safeWindowed = new ArrayList<>(windowed.subList(0, 2));
+                boolean skipLeadingToolResponses = true;
+                for (int i = 2; i < windowed.size(); i++) {
+                    if (skipLeadingToolResponses && windowed.get(i) instanceof ToolResponseMessage) continue;
+                    skipLeadingToolResponses = false;
+                    safeWindowed.add(windowed.get(i));
+                }
+                windowed = safeWindowed;
             }
-            windowed = new ArrayList<>(messages.subList(0, 2));
-            windowed.addAll(messages.subList(windowStart, messages.size()));
-            log.debug("[Worker callModel] Sliding window: kept first 2 + last {} of {} messages",
-                    messages.size() - windowStart, messages.size());
         }
 
         List<Message> allMessages = new ArrayList<>();
@@ -2568,17 +2606,34 @@ public class WorkerAgent {
                 " chars omitted — use read_file for full content]...\n" + end;
     }
 
-    /** Provider-aware prompt loading via ResourceLoader; fallback to worker.txt */
+    /** Provider-aware prompt loading via PromptAssembler; resolves {{include:...}} fragments.
+     *  STYLING_SECTION is always empty here — per-task styling is injected via buildFrontendBlock()
+     *  which loads from the UiStyleResolver design system (folder path in application.yml). */
     private String loadPrompt(String provider) {
-        String resourcePath = "classpath:prompts/worker-" + provider.toLowerCase() + ".txt";
-        Resource providerPrompt = resourceLoader.getResource(resourcePath);
+        String providerFile = "worker-" + provider.toLowerCase() + ".txt";
+        Resource providerPrompt = resourceLoader.getResource("classpath:prompts/" + providerFile);
+        String promptPath = providerPrompt.exists() ? providerFile : "worker.txt";
+        return promptAssembler.assemble(promptPath, java.util.Map.of("STYLING_SECTION", ""));
+    }
+
+    /**
+     * Load prompt and record a prompt_audit row for the given run/task.
+     * Called only on iteration 1 to avoid redundant DB writes.
+     * STYLING_SECTION is always empty — styling is injected per task via buildFrontendBlock().
+     */
+    private String loadPromptAndTrack(String provider, String runId, String taskId) {
+        String providerFile = "worker-" + provider.toLowerCase() + ".txt";
+        Resource providerPrompt = resourceLoader.getResource("classpath:prompts/" + providerFile);
+        String promptPath = providerPrompt.exists() ? providerFile : "worker.txt";
         try {
-            if (providerPrompt.exists()) {
-                return providerPrompt.getContentAsString(StandardCharsets.UTF_8);
-            }
-            return workerPromptFallback.getContentAsString(StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load worker prompt for provider: " + provider, e);
+            UUID runUuid = UUID.fromString(runId);
+            PromptAssembler.AssembledPrompt assembled =
+                    promptAssembler.assembleAndTrack(promptPath, java.util.Map.of("STYLING_SECTION", ""), runUuid, "worker");
+            stateStore.setPromptHash(taskId, assembled.hash());
+            return assembled.text();
+        } catch (Exception e) {
+            // Fall back to simple assemble — tracking must never block execution
+            return promptAssembler.assemble(promptPath, java.util.Map.of("STYLING_SECTION", ""));
         }
     }
 

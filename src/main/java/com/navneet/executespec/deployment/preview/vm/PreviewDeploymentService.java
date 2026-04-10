@@ -46,7 +46,7 @@ public class PreviewDeploymentService {
     public PreviewVmResult deploy(String projectName, String executionId, Path projectDir) {
         String previewId = generatePreviewId(projectName);
         PreviewVmProperties.VmConfig targetVm = selectVm();
-        int ttlHours = vmProperties.getDefaultTtlHours();
+        int ttlMinutes = vmProperties.getDefaultTtlMinutes();
 
         PreviewRegistry entry = PreviewRegistry.builder()
                 .id(previewId)
@@ -58,8 +58,8 @@ public class PreviewDeploymentService {
                 .status("deploying")
                 .healthy(false)
                 .createdAt(Instant.now())
-                .expiresAt(Instant.now().plus(ttlHours, ChronoUnit.HOURS))
-                .ttlHours(ttlHours)
+                .expiresAt(Instant.now().plus(ttlMinutes, ChronoUnit.MINUTES))
+                .ttlHours(ttlMinutes)  // field name is legacy; stores minutes now
                 .build();
         registryRepo.save(entry);
 
@@ -73,7 +73,7 @@ public class PreviewDeploymentService {
             // Deploy containers on target VM
             String output = sshExec(targetVm.getExternalIp(),
                     String.format("/opt/preview-engine/bin/deploy-preview.sh %s %s %d",
-                            previewId, remoteTmpDir, ttlHours));
+                            previewId, remoteTmpDir, ttlMinutes));
 
             // Parse result from script output
             PreviewVmResult result = parsePreviewJson(output);
@@ -143,19 +143,19 @@ public class PreviewDeploymentService {
     /**
      * Extend a preview's TTL.
      */
-    public void extend(String previewId, int extraHours) {
+    public void extend(String previewId, int extraMinutes) {
         PreviewRegistry entry = registryRepo.findById(previewId)
                 .orElseThrow(() -> new PreviewDeploymentException("Preview not found: " + previewId));
 
         String vmExternalIp = resolveExternalIp(entry.getVmId());
 
         sshExec(vmExternalIp, String.format(
-                "/opt/preview-engine/bin/extend-preview.sh %s %d", previewId, extraHours));
+                "/opt/preview-engine/bin/extend-preview.sh %s %d", previewId, extraMinutes));
 
-        entry.setExpiresAt(Instant.now().plus(extraHours, ChronoUnit.HOURS));
+        entry.setExpiresAt(Instant.now().plus(extraMinutes, ChronoUnit.MINUTES));
         registryRepo.save(entry);
 
-        log.info("Preview {} extended by {}h", previewId, extraHours);
+        log.info("Preview {} extended by {}m", previewId, extraMinutes);
     }
 
     /**

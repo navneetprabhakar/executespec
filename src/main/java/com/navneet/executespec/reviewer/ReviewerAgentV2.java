@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmOutputParser;
 import com.navneet.executespec.agent.LlmResponseCleaner;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.compiler.CompileResult;
 import com.navneet.executespec.agent.LlmRouter.FallbackMode;
 import com.navneet.executespec.agent.WorkerAgent;
 import com.navneet.executespec.agent.model.TaskDefinition;
@@ -82,12 +83,14 @@ public class ReviewerAgentV2 {
     private final ObjectMapper mapper;
     private final LlmOutputParser outputParser;
     private final ObservationRegistry observationRegistry;
+    private final com.navneet.executespec.agent.PromptAssembler promptAssembler;
 
     @Value("classpath:prompts/reviewer-v2.txt")
     private Resource reviewerV2Prompt;
 
     private static final int MAX_TOOL_CALLS = 50;  // generous limit for inspect phase — reviewer must read many files
-    private static final Duration REVIEW_TIMEOUT = Duration.ofMinutes(15); // reviewer runs once, fixes everything
+    private static final Duration REVIEW_TIMEOUT = Duration.ofMinutes(10); // reviewer runs once, fixes everything
+    private static final int MAX_FIX_ITERATIONS = 100;  // total fix iterations across ALL issues
 
     /**
      * Run the full review: inspect → fix loop → report.
@@ -99,13 +102,14 @@ public class ReviewerAgentV2 {
      * @return the final review report
      */
     public ReviewReportV2 review(PipelineRun run, List<AgentTask> tasks,
-                                  String originalGoal, Set<LlmProvider> availableProviders) {
+                                  String originalGoal, CompileResult compileResult,
+                                  Set<LlmProvider> availableProviders) {
         Observation obs = Observation.createNotStarted("executespec.run.phase.review", observationRegistry)
             .lowCardinalityKeyValue("run.id", run.getRunId())
             .start();
 
         try {
-            return doReview(run, tasks, originalGoal, availableProviders, obs);
+            return doReview(run, tasks, originalGoal, compileResult, availableProviders, obs);
         } catch (Exception e) {
             obs.error(e);
             throw e;
@@ -115,7 +119,8 @@ public class ReviewerAgentV2 {
     }
 
     private ReviewReportV2 doReview(PipelineRun run, List<AgentTask> tasks,
-                                     String originalGoal, Set<LlmProvider> availableProviders,
+                                     String originalGoal, CompileResult compileResult,
+                                     Set<LlmProvider> availableProviders,
                                      Observation obs) {
         Instant start = Instant.now();
         String runId = run.getRunId();
@@ -134,7 +139,7 @@ public class ReviewerAgentV2 {
 
         String fileTree = getFileTree(runId);
         String taskSummary = buildTaskSummary(tasks);
-        String reviewPrompt = buildReviewPrompt(originalGoal, taskSummary, fileTree);
+        String reviewPrompt = buildReviewPrompt(originalGoal, taskSummary, fileTree, compileResult);
 
         List<ReviewIssue> issues = executeInspection(run, workspacePath, reviewPrompt, reviewModel);
 
@@ -166,11 +171,13 @@ public class ReviewerAgentV2 {
 
         int autoFixAttempted = 0;
         int autoFixSucceeded = 0;
+        int totalFixIterations = 0;
         int totalFixable = issues.size();
 
         {
-            // Fix ALL issues (CRITICAL first, then MINOR) — no cap, reviewer runs once and fixes everything
-            log.info("Auto-fixing {} issues for run {}", totalFixable, runId);
+            // Fix ALL issues (CRITICAL first, then MINOR) within time + iteration budget
+            log.info("Auto-fixing {} issues for run {} (budget: {}min, {} iterations)",
+                    totalFixable, runId, REVIEW_TIMEOUT.toMinutes(), MAX_FIX_ITERATIONS);
             List<ReviewIssue> fixableIssues = issues.stream()
                     .sorted((a, b) -> {
                         if (a.getSeverity() == IssueSeverity.CRITICAL && b.getSeverity() != IssueSeverity.CRITICAL) return -1;
@@ -180,31 +187,31 @@ public class ReviewerAgentV2 {
                     .toList();
 
             for (ReviewIssue issue : fixableIssues) {
+                // Check both time and iteration limits
                 boolean timedOut = Duration.between(start, Instant.now()).compareTo(REVIEW_TIMEOUT) > 0;
                 if (timedOut) {
-                    if (issue.getSeverity() == IssueSeverity.CRITICAL) {
-                        // Always fix CRITICAL issues even past timeout
-                        log.warn("Review timeout reached but continuing for CRITICAL issue {}", issue.getId());
-                    } else {
-                        // Skip MINOR issues when time is up
-                        log.info("Review timeout reached — skipping MINOR issue {}", issue.getId());
-                        continue;
-                    }
+                    log.warn("Review timeout ({}min) reached — skipping remaining issues", REVIEW_TIMEOUT.toMinutes());
+                    break;
+                }
+                if (totalFixIterations >= MAX_FIX_ITERATIONS) {
+                    log.warn("Fix iteration limit ({}) reached — skipping remaining issues", MAX_FIX_ITERATIONS);
+                    break;
                 }
 
                 autoFixAttempted++;
                 sseBroadcaster.emit(runId, RunEvent.log(runId, null,
                         String.format("Auto-fixing issue %s: %s", issue.getId(), issue.getDescription())));
 
-                boolean fixed = attemptAutoFix(run, workspacePath, issue, availableProviders);
+                FixResult result = attemptAutoFix(run, workspacePath, issue, availableProviders);
+                totalFixIterations += result.iterationsUsed();
 
                 issue.setAutoFixed(true);
-                issue.setFixSucceeded(fixed);
-                if (fixed) {
+                issue.setFixSucceeded(result.succeeded());
+                if (result.succeeded()) {
                     autoFixSucceeded++;
-                    log.info("Auto-fix succeeded for issue {}", issue.getId());
+                    log.info("Auto-fix succeeded for issue {} ({} iterations)", issue.getId(), result.iterationsUsed());
                 } else {
-                    log.warn("Auto-fix failed for issue {}", issue.getId());
+                    log.warn("Auto-fix failed for issue {} ({} iterations)", issue.getId(), result.iterationsUsed());
                 }
             }
         }
@@ -422,15 +429,20 @@ public class ReviewerAgentV2 {
      */
     private static final int MAX_FIX_ATTEMPTS = 2;
 
-    private boolean attemptAutoFix(PipelineRun run, Path workspacePath,
-                                    ReviewIssue issue, Set<LlmProvider> availableProviders) {
+    /** Result of an auto-fix attempt, tracking both success and iterations consumed. */
+    private record FixResult(boolean succeeded, int iterationsUsed) {}
+
+    private FixResult attemptAutoFix(PipelineRun run, Path workspacePath,
+                                      ReviewIssue issue, Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
+        int iterationsUsed = 0;
 
         // Use WORKHORSE tier (Sonnet) for fix workers — single-file fixes don't need Opus.
         // Review/inspection stays on PLANNING tier; only the fix execution is downgraded.
         ResolvedModel fixModel = modelResolver.resolve("WorkerAgent", run.getAiProviderEnum());
 
         for (int attempt = 0; attempt < MAX_FIX_ATTEMPTS; attempt++) {
+            iterationsUsed++;
             try {
                 AgentTask fixTask = createFixTask(run, issue, fixModel);
 
@@ -447,7 +459,7 @@ public class ReviewerAgentV2 {
                 if (mergeResult != null && mergeResult.startsWith("ERROR")) {
                     log.warn("Fix branch merge failed for {}: {}", issue.getId(), mergeResult);
                     if (attempt < MAX_FIX_ATTEMPTS - 1) continue;
-                    return false;
+                    return new FixResult(false, iterationsUsed);
                 }
                 log.info("Merged fix branch {} to main for issue {}", fixBranchName, issue.getId());
 
@@ -469,22 +481,22 @@ public class ReviewerAgentV2 {
                             log.info("Retrying fix for {} with escalated tier", issue.getId());
                             continue;
                         }
-                        return false;
+                        return new FixResult(false, iterationsUsed);
                     }
                 }
 
                 // Commit any remaining dirty state (e.g. merge artifacts)
                 gitTool.commitIfDirty(runId, "Auto-fix: " + issue.getId() + " — " + issue.getDescription());
-                return true;
+                return new FixResult(true, iterationsUsed);
 
             } catch (Exception e) {
                 log.error("Auto-fix attempt {} failed for issue {}: {}", attempt + 1, issue.getId(), e.getMessage());
                 if (attempt >= MAX_FIX_ATTEMPTS - 1) {
-                    return false;
+                    return new FixResult(false, iterationsUsed);
                 }
             }
         }
-        return false;
+        return new FixResult(false, iterationsUsed);
     }
 
     /**
@@ -574,12 +586,30 @@ public class ReviewerAgentV2 {
     // PROMPT BUILDERS
     // ============================
 
-    private String buildReviewPrompt(String originalGoal, String taskSummary, String fileTree) {
+    private String buildReviewPrompt(String originalGoal, String taskSummary, String fileTree,
+                                      CompileResult compileResult) {
+        String compileStatus;
+        if (compileResult == null || compileResult.skipped()) {
+            compileStatus = "Skipped (no build tool detected)";
+        } else if (compileResult.passed()) {
+            compileStatus = "Passed" + (compileResult.attempts() > 1
+                    ? " after " + compileResult.attempts() + " attempts (compiler agent fixed errors)"
+                    : " on first attempt");
+        } else {
+            String summary = compileResult.errorSummary() != null
+                    ? compileResult.errorSummary().substring(0, Math.min(2000, compileResult.errorSummary().length()))
+                    : "Unknown errors";
+            compileStatus = "FAILED after " + compileResult.attempts() + " attempts. Errors:\n" + summary;
+        }
+
         return String.format("""
             === ORIGINAL SPECIFICATION ===
             %s
 
             === TASK PLAN ===
+            %s
+
+            === COMPILATION STATUS ===
             %s
 
             === FILE TREE ===
@@ -601,7 +631,7 @@ public class ReviewerAgentV2 {
 
             After inspecting, produce your final output as a JSON array of issues.
             If no issues found, return: []
-            """, originalGoal, taskSummary, fileTree);
+            """, originalGoal, taskSummary, compileStatus, fileTree);
     }
 
     private String buildFixPrompt(ReviewIssue issue) {
@@ -666,11 +696,7 @@ public class ReviewerAgentV2 {
     }
 
     private String loadPrompt() {
-        try {
-            return reviewerV2Prompt.getContentAsString(StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot load reviewer-v2 prompt", e);
-        }
+        return promptAssembler.assemble("reviewer-v2.txt");
     }
 
     // ============================

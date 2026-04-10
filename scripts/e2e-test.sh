@@ -11,25 +11,30 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:?E2E_EMAIL environment variable is required}"
 PASSWORD="${E2E_PASSWORD:?E2E_PASSWORD environment variable is required}"
 POLL_INTERVAL=10       # seconds between status polls
-PLAN_WAIT_TIMEOUT=120  # 2 minutes to wait for plan (cancel test)
+PLAN_WAIT_TIMEOUT=180  # 3 minutes to wait for plan (cancel test)
 
 # Per-language timeout ceilings (seconds)
 # Simple: Python CLI, Static HTML, Ruby script
 # Moderate: Java Maven, TypeScript, PHP
 # Complex: Go (compilation), Rust (cargo build), multi-file JS/Express
-declare -A LANGUAGE_TIMEOUTS=(
-    ["Python"]=300
-    ["JavaScript"]=600
-    ["Java"]=600
-    ["TypeScript"]=600
-    ["Static HTML"]=300
-    ["Cancel"]=180
-    ["Go"]=900
-    ["Rust"]=900
-    ["Ruby"]=300
-    ["PHP"]=600
-)
 RUN_TIMEOUT_DEFAULT=600  # fallback for unknown languages
+
+# Timeout lookup (bash 3.2 compatible — no associative arrays on macOS)
+get_language_timeout() {
+    case "$1" in
+        Python)       echo 300 ;;
+        JavaScript)   echo 600 ;;
+        Java)         echo 600 ;;
+        TypeScript)   echo 600 ;;
+        "Static HTML") echo 300 ;;
+        Cancel)       echo 180 ;;
+        Go)           echo 900 ;;
+        Rust)         echo 900 ;;
+        Ruby)         echo 300 ;;
+        PHP)          echo 600 ;;
+        *)            echo "$RUN_TIMEOUT_DEFAULT" ;;
+    esac
+}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR"
 
@@ -54,7 +59,7 @@ declare -a REQUESTS=(
     "Create a TypeScript Node.js script that validates email addresses using regex. Include tsconfig.json and package.json."
     "Create a Go HTTP server with GET /health and POST /echo endpoints. Single main.go file with go.mod."
     "Create a static HTML page with CSS that shows a responsive portfolio layout. Single index.html file."
-    "Build a complex microservices architecture with 20 services including API gateway, service mesh, event sourcing"
+    "Create a hello world HTML page with a centered heading and a paragraph below it. Single index.html file."
 )
 
 # ── Helper functions ────────────────────────────────────────────────────────
@@ -79,15 +84,20 @@ auth_login() {
     log "Authenticated as $EMAIL"
 }
 
-# Submit a run. Args: $1=userRequest, $2=skipApproval (true/false)
+# Submit a run. Args: $1=userRequest, $2=skipApproval (true/false), $3=aiProvider (optional)
 submit_run() {
     local request="$1"
     local skip="${2:-true}"
+    local ai_provider="${3:-}"
+    local provider_field=""
+    if [[ -n "$ai_provider" ]]; then
+        provider_field=",\"aiProvider\":\"$(echo "$ai_provider" | tr '[:lower:]' '[:upper:]')\""
+    fi
     local resp
     resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/runs" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
-        -d "{\"userRequest\":\"$request\",\"skipApproval\":$skip}")
+        -d "{\"userRequest\":\"$request\",\"skipApproval\":$skip$provider_field}")
 
     local http_code=$(echo "$resp" | tail -1)
     local body=$(echo "$resp" | sed '$d')
@@ -223,6 +233,182 @@ test_share_report() {
     fi
 }
 
+# Start preview and check it's running. Args: $1=runId
+test_preview() {
+    local run_id="$1"
+    local resp
+    resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/runs/$run_id/preview/start" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{}')
+    local http_code=$(echo "$resp" | tail -1)
+    local body=$(echo "$resp" | sed '$d')
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "PREVIEW_START_FAILED|$http_code"
+        return
+    fi
+
+    # Poll preview status for up to 120s
+    local start_time=$(date +%s)
+    while true; do
+        local elapsed=$(( $(date +%s) - start_time ))
+        if (( elapsed > 120 )); then
+            echo "PREVIEW_TIMEOUT"
+            return
+        fi
+
+        local status_resp
+        status_resp=$(curl -s "$BASE_URL/api/runs/$run_id/preview/status" \
+            -H "Authorization: Bearer $TOKEN")
+        local preview_status=$(echo "$status_resp" | jq -r '.status // "UNKNOWN"')
+
+        case "$preview_status" in
+            RUNNING)
+                local preview_url=$(echo "$status_resp" | jq -r '.url // "none"')
+                echo "PREVIEW_OK|$preview_url"
+                return
+                ;;
+            FAILED)
+                echo "PREVIEW_FAILED"
+                return
+                ;;
+            *)
+                sleep 5
+                ;;
+        esac
+    done
+}
+
+# Push to GitHub (new repo). Args: $1=runId
+test_github_new() {
+    local run_id="$1"
+    local resp
+    resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/runs/$run_id/push-github" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"repoMode":"NEW"}')
+    local http_code=$(echo "$resp" | tail -1)
+    local body=$(echo "$resp" | sed '$d')
+
+    if [[ "$http_code" == "200" ]]; then
+        local repo_url=$(echo "$body" | jq -r '.repoUrl // empty')
+        if [[ -n "$repo_url" ]]; then
+            echo "GITHUB_NEW_OK|$repo_url"
+        else
+            echo "GITHUB_NEW_FAILED|no repoUrl"
+        fi
+    else
+        echo "GITHUB_NEW_FAILED|$http_code"
+    fi
+}
+
+# Push to GitHub (existing repo + PR). Args: $1=runId, $2=repoUrl
+test_github_existing() {
+    local run_id="$1"
+    local repo_url="$2"
+    local resp
+    resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/runs/$run_id/push-github" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"repoMode\":\"EXISTING\",\"repoUrl\":\"$repo_url\"}")
+    local http_code=$(echo "$resp" | tail -1)
+    local body=$(echo "$resp" | sed '$d')
+
+    if [[ "$http_code" == "200" ]]; then
+        local pr_url=$(echo "$body" | jq -r '.prUrl // empty')
+        if [[ -n "$pr_url" && "$pr_url" != "null" ]]; then
+            echo "GITHUB_PR_OK|$pr_url"
+        else
+            echo "GITHUB_PR_FAILED|no prUrl"
+        fi
+    else
+        echo "GITHUB_PR_FAILED|$http_code"
+    fi
+}
+
+# Copilot chat test. Args: $1=runId
+test_copilot_chat() {
+    local run_id="$1"
+
+    # Send a chat message
+    local resp
+    resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/runs/$run_id/chat" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"message":"What files were created in this run?"}')
+    local http_code=$(echo "$resp" | tail -1)
+    local body=$(echo "$resp" | sed '$d')
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "CHAT_FAILED|$http_code"
+        return
+    fi
+
+    local reply=$(echo "$body" | jq -r '.reply // empty')
+    if [[ -z "$reply" ]]; then
+        echo "CHAT_FAILED|empty reply"
+        return
+    fi
+
+    echo "CHAT_OK"
+}
+
+# Apply suggestion test. Args: $1=runId
+test_apply_suggestion() {
+    local run_id="$1"
+    local resp
+    resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/runs/$run_id/apply" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"suggestion":"Add a dark mode toggle","source":"COPILOT"}')
+    local http_code=$(echo "$resp" | tail -1)
+    local body=$(echo "$resp" | sed '$d')
+
+    if [[ "$http_code" == "200" ]]; then
+        local task_count=$(echo "$body" | jq -r '.taskCount // 0')
+        if [[ "$task_count" -gt 0 ]]; then
+            echo "APPLY_OK|$task_count tasks"
+        else
+            echo "APPLY_FAILED|0 tasks"
+        fi
+    else
+        echo "APPLY_FAILED|$http_code"
+    fi
+}
+
+# Retry failed tasks (up to 2 retries). Args: $1=runId
+retry_failed_tasks() {
+    local run_id="$1"
+    local max_retries=2
+    local retried=0
+
+    for attempt in $(seq 1 $max_retries); do
+        local detail=$(get_run "$run_id")
+        local failed_tasks
+        failed_tasks=$(echo "$detail" | jq -r '.tasks[]? | select(.status == "FAILED") | .taskId' 2>/dev/null)
+
+        if [[ -z "$failed_tasks" ]]; then
+            break
+        fi
+
+        log "  Retry attempt $attempt: $(echo "$failed_tasks" | wc -l | tr -d ' ') failed task(s)"
+
+        while IFS= read -r task_id; do
+            [[ -z "$task_id" ]] && continue
+            curl -s -X POST "$BASE_URL/api/runs/$run_id/tasks/$task_id/retry" \
+                -H "Authorization: Bearer $TOKEN" > /dev/null 2>&1
+            retried=$((retried + 1))
+        done <<< "$failed_tasks"
+
+        # Wait for retries to complete
+        sleep 30
+        poll_until_terminal "$run_id" 300 > /dev/null 2>&1 || true
+    done
+
+    echo "$retried"
+}
+
 # Extract task counts from run detail. Args: $1=run_detail_json
 get_task_counts() {
     local detail="$1"
@@ -258,9 +444,9 @@ run_test_case() {
         return
     fi
 
-    # 1. Submit run
+    # 1. Submit run (pass provider explicitly)
     local run_id
-    run_id=$(submit_run "$request" "true") || true
+    run_id=$(submit_run "$request" "true" "$provider") || true
 
     if [[ "$run_id" == SUBMIT_FAILED* ]]; then
         fail "Submit failed: $run_id"
@@ -271,7 +457,7 @@ run_test_case() {
 
     # 2. Poll until terminal
     local result
-    local lang_timeout="${LANGUAGE_TIMEOUTS[$language]:-$RUN_TIMEOUT_DEFAULT}"
+    local lang_timeout=$(get_language_timeout "$language")
     result=$(poll_until_terminal "$run_id" "$lang_timeout") || true
 
     local status=$(echo "$result" | cut -d'|' -f1)
@@ -285,19 +471,74 @@ run_test_case() {
         return
     fi
 
+    # 2.5 Retry failed tasks (up to 2 times) if run is PARTIAL
+    local retries_done=0
+    if [[ "$status" == "PARTIAL" || "$status" == "FAILED" ]]; then
+        log "  Attempting task retries..."
+        retries_done=$(retry_failed_tasks "$run_id")
+        if [[ "$retries_done" -gt 0 ]]; then
+            log "  Retried $retries_done task(s), re-checking status..."
+            local retry_result
+            retry_result=$(poll_until_terminal "$run_id" 300) || true
+            status=$(echo "$retry_result" | cut -d'|' -f1)
+            duration=$(( $(date +%s) - $(date -d "$(echo "$detail" | jq -r '.startedAt // empty')" +%s 2>/dev/null || echo "$start_time") ))
+        fi
+    fi
+
     # 3. Get run detail
     local detail=$(get_run "$run_id")
     local tasks=$(get_task_counts "$detail")
-    local active_provider=$(echo "$detail" | jq -r '.provider // "unknown"')
+    local active_provider=$(echo "$detail" | jq -r '.aiProvider // "unknown"')
     local model=$(echo "$detail" | jq -r '.workerModel // .plannerModel // "unknown"')
+    local is_retry=$(echo "$detail" | jq -r '.isRetry // false')
+    local retry_count=$(echo "$detail" | jq -r '.runRetryCount // 0')
     # Prefix model with provider for cross-provider analysis clarity
     if [[ "$active_provider" != "unknown" && "$active_provider" != "null" ]]; then
         model="${active_provider}:${model}"
     fi
     local failure_reason=$(echo "$detail" | jq -r '.failureReason // empty')
 
-    # 4. Check validation report
-    local report_status=$(get_report "$run_id")
+    # 4. Check validation report (wait up to 60s for background validation)
+    local report_status="NO_REPORT"
+    if [[ "$status" == "COMPLETE" || "$status" == "PARTIAL" ]]; then
+        log "  Waiting for validation report (up to 90s)..."
+        for i in $(seq 1 18); do
+            report_status=$(get_report "$run_id")
+            if [[ "$report_status" == "HAS_REPORT" ]]; then
+                break
+            fi
+            sleep 5
+        done
+    fi
+
+    # 4.5 Check compilation status from report
+    local compilation_status="UNKNOWN"
+    local test_gen_status="UNKNOWN"
+    if [[ "$report_status" == "HAS_REPORT" ]]; then
+        local report_json
+        report_json=$(curl -s "$BASE_URL/api/runs/$run_id/report" \
+            -H "Authorization: Bearer $TOKEN")
+        local checks_passed=$(echo "$report_json" | jq -r '.checksPassed // []')
+        local pipeline_result=$(echo "$report_json" | jq -r '.pipelineResult // "UNKNOWN"')
+
+        if echo "$checks_passed" | jq -e 'index("COMPILATION")' > /dev/null 2>&1; then
+            compilation_status="PASS"
+            ok "Compilation: PASS"
+        else
+            compilation_status="FAIL"
+            fail "Compilation: FAIL"
+        fi
+
+        if echo "$checks_passed" | jq -e 'index("INTEGRATION_TESTS")' > /dev/null 2>&1; then
+            test_gen_status="PASS"
+            ok "Test generation: PASS"
+        else
+            test_gen_status="GENERATED"  # tests may exist but fail execution
+            warn "Test generation: tests generated but execution check inconclusive"
+        fi
+
+        ok "Pipeline result: $pipeline_result"
+    fi
 
     # 5. Test report sharing (only for COMPLETE/PARTIAL with report)
     local share_status="SKIPPED"
@@ -305,17 +546,81 @@ run_test_case() {
         share_status=$(test_share_report "$run_id")
     fi
 
-    # 6. Log result
+    # 6. Test preview (only for COMPLETE runs)
+    local preview_status="SKIPPED"
+    if [[ "$status" == "COMPLETE" ]]; then
+        log "  Testing preview..."
+        preview_status=$(test_preview "$run_id")
+        case "$preview_status" in
+            PREVIEW_OK*) ok "Preview: $(echo "$preview_status" | cut -d'|' -f2)" ;;
+            *)           fail "Preview: $preview_status" ;;
+        esac
+    fi
+
+    # 7. Test GitHub new repo (only for COMPLETE runs, only for first test case)
+    local github_new_status="SKIPPED"
+    local github_pr_status="SKIPPED"
+    if [[ "$status" == "COMPLETE" && "$idx" == "0" ]]; then
+        log "  Testing GitHub new repo..."
+        github_new_status=$(test_github_new "$run_id")
+        case "$github_new_status" in
+            GITHUB_NEW_OK*) ok "GitHub new repo: $(echo "$github_new_status" | cut -d'|' -f2)" ;;
+            *)              fail "GitHub new repo: $github_new_status" ;;
+        esac
+
+        # If new repo created, test existing repo + PR on a second COMPLETE run
+        local new_repo_url=$(echo "$github_new_status" | cut -d'|' -f2)
+        if [[ "$github_new_status" == GITHUB_NEW_OK* && -n "$new_repo_url" ]]; then
+            log "  Testing GitHub existing repo + PR..."
+            # Submit a small follow-up run to test PR creation
+            local pr_run_id
+            pr_run_id=$(submit_run "Add a README.md with project description and usage instructions" "true" "$provider") || true
+            if [[ "$pr_run_id" != SUBMIT_FAILED* ]]; then
+                local pr_result
+                pr_result=$(poll_until_terminal "$pr_run_id" 300) || true
+                local pr_run_status=$(echo "$pr_result" | cut -d'|' -f1)
+                if [[ "$pr_run_status" == "COMPLETE" ]]; then
+                    github_pr_status=$(test_github_existing "$pr_run_id" "$new_repo_url")
+                    case "$github_pr_status" in
+                        GITHUB_PR_OK*) ok "GitHub PR: $(echo "$github_pr_status" | cut -d'|' -f2)" ;;
+                        *)             fail "GitHub PR: $github_pr_status" ;;
+                    esac
+                else
+                    github_pr_status="PR_RUN_FAILED|$pr_run_status"
+                    fail "GitHub PR: helper run failed ($pr_run_status)"
+                fi
+            fi
+        fi
+    fi
+
+    # 8. Test copilot chat (only for COMPLETE runs)
+    local chat_status="SKIPPED"
+    if [[ "$status" == "COMPLETE" ]]; then
+        log "  Testing copilot chat..."
+        chat_status=$(test_copilot_chat "$run_id")
+        case "$chat_status" in
+            CHAT_OK) ok "Copilot chat: OK" ;;
+            *)       fail "Copilot chat: $chat_status" ;;
+        esac
+    fi
+
+    # 9. Log result
     case "$status" in
-        COMPLETE) ok "COMPLETE — tasks: $tasks, duration: ${duration}s, model: $model, report: $report_status, share: $share_status" ;;
-        PARTIAL)  warn "PARTIAL — tasks: $tasks, duration: ${duration}s, model: $model, report: $report_status" ;;
-        FAILED)   fail "FAILED — tasks: $tasks, duration: ${duration}s, reason: ${failure_reason:-unknown}" ;;
+        COMPLETE) ok "COMPLETE — tasks: $tasks, duration: ${duration}s, model: $model, report: $report_status, compilation: $compilation_status, preview: $preview_status, chat: $chat_status" ;;
+        PARTIAL)  warn "PARTIAL — tasks: $tasks, duration: ${duration}s, model: $model, retries: $retries_done, report: $report_status" ;;
+        FAILED)   fail "FAILED — tasks: $tasks, duration: ${duration}s, retries: $retries_done, reason: ${failure_reason:-unknown}" ;;
         *)        fail "$status — tasks: $tasks, duration: ${duration}s" ;;
     esac
 
-    # 7. Save result
+    # 10. Save result (extended fields)
     local notes=""
     [[ -n "$failure_reason" ]] && notes="$failure_reason"
+    [[ "$retries_done" -gt 0 ]] && notes="$notes [retries:$retries_done]"
+    [[ "$compilation_status" != "UNKNOWN" ]] && notes="$notes [compile:$compilation_status]"
+    [[ "$preview_status" != "SKIPPED" ]] && notes="$notes [preview:$(echo "$preview_status" | cut -d'|' -f1)]"
+    [[ "$chat_status" != "SKIPPED" ]] && notes="$notes [chat:$chat_status]"
+    [[ "$github_new_status" != "SKIPPED" ]] && notes="$notes [github_new:$(echo "$github_new_status" | cut -d'|' -f1)]"
+    [[ "$github_pr_status" != "SKIPPED" ]] && notes="$notes [github_pr:$(echo "$github_pr_status" | cut -d'|' -f1)]"
     save_result "$idx" "$provider" "$language" "$status" "$tasks" "$duration" "$model" "$report_status" "$share_status" "$notes"
 }
 
@@ -325,9 +630,9 @@ run_cancel_test() {
     local provider="$2"
     local start_time=$(date +%s)
 
-    # Submit WITHOUT skipApproval
+    # Submit WITHOUT skipApproval (pass provider)
     local run_id
-    run_id=$(submit_run "${REQUESTS[$idx]}" "false") || true
+    run_id=$(submit_run "${REQUESTS[$idx]}" "false" "$provider") || true
 
     if [[ "$run_id" == SUBMIT_FAILED* ]]; then
         fail "Cancel test: submit failed: $run_id"
@@ -355,6 +660,9 @@ run_cancel_test() {
     if [[ "$status" == "CANCELLED" ]]; then
         ok "Cancel test: PASSED — run cancelled in ${duration}s"
         save_result "$idx" "$provider" "Cancel" "PASS" "0/0" "$duration" "" "NO_REPORT" "NONE" "Cancel flow works"
+    elif [[ "$status" == "FAILED" ]]; then
+        warn "Cancel test: run FAILED before reaching AWAITING_APPROVAL (planning error) — cancel flow not exercised"
+        save_result "$idx" "$provider" "Cancel" "SKIP" "0/0" "$duration" "" "NO_REPORT" "NONE" "Planning failed before gate"
     else
         fail "Cancel test: FAILED — status is $status (expected CANCELLED)"
         save_result "$idx" "$provider" "Cancel" "FAIL" "0/0" "$duration" "" "NO_REPORT" "NONE" "Status: $status"

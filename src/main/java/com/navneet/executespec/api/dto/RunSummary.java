@@ -36,5 +36,11 @@ public record RunSummary(
     /** Timestamp when the run was archived by the user. Null for active runs. */
     Instant archivedAt,
     /** "REALTIME" | "BATCH". Null for pre-V61 runs or runs not yet approved. */
-    String approvedExecutionMode
+    String approvedExecutionMode,
+    /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
+    String aiProvider,
+    /** True if this run is a retry of a previous run. */
+    Boolean isRetry,
+    /** RunId of the original run this was retried from. Null for original runs. */
+    String sourceRunId
 ) {}

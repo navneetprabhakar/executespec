@@ -13,6 +13,7 @@ import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
+import com.navneet.executespec.harness.BackgroundValidationService;
 import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
@@ -55,6 +56,7 @@ public class RunController {
 
     private final PipelineHarness harness;
     private final StateStore stateStore;
+    private final BackgroundValidationService backgroundValidationService;
     private final RunMapper mapper;
     private final RunRecoveryRepository recoveryRepository;
     private final WorkspaceExportService workspaceExportService;
@@ -601,6 +603,26 @@ public class RunController {
         } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
+    }
+
+    /**
+     * Manually retry background validation (review + test gen + report) for a COMPLETE run
+     * whose background validation failed. Returns 409 if validation is already running or
+     * max retries exhausted.
+     */
+    @PostMapping("/{runId}/retry-validation")
+    public ResponseEntity<Void> retryValidation(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+        log.info("POST /api/runs/{}/retry-validation", runId);
+        boolean prepared = backgroundValidationService.prepareRetry(runId);
+        if (!prepared) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Validation cannot be retried — either not failed, already running, or max attempts reached.");
+        }
+        harness.retryBackgroundValidation(runId);
+        return ResponseEntity.accepted().build();
     }
 
     /** Get recovery history for a run. */

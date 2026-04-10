@@ -168,7 +168,7 @@ Side paths:
 |---|---|
 | **Trigger** | All tasks merged |
 | **Handler** | `CompilerAgent.runCompileAndFix()` |
-| **Model** | WORKHORSE tier (`claude-haiku-4-5-20251001` / `gemini-2.5-flash` / `gpt-5.4-mini`) |
+| **Model** | WORKHORSE tier (`claude-haiku-4-5-20251001` / `gemini-3-flash-preview` / `gpt-5.4`) |
 | **State** | `COMPILING` |
 
 1. **Detect build tool** — Maven / Gradle / npm from sentinel files.
@@ -358,8 +358,8 @@ Side paths:
 
 | Tier | Anthropic | OpenAI | Google |
 |------|-----------|--------|--------|
-| **LIGHTWEIGHT** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-2.5-flash` |
-| **WORKHORSE** | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-2.5-flash` |
+| **LIGHTWEIGHT** | `claude-haiku-4-5-20251001` | `gpt-5.4` | `gemini-3-flash-preview` |
+| **WORKHORSE** | `claude-haiku-4-5-20251001` | `gpt-5.4` | `gemini-3-flash-preview` |
 | **PLANNING** | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-flash-preview` |
 
 ### Provider Selection
@@ -413,7 +413,7 @@ If a worker produces no file writes for 5 minutes, the model is escalated **with
 ```
 claude-haiku-4-5-20251001  ->  claude-sonnet-4-6
 claude-haiku-4-5-20251001  ->  claude-sonnet-4-6
-gpt-5.4-mini               ->  gpt-5.4
+gpt-5.4                    ->  gpt-5.4           (no escalation — same model)
 ```
 
 Check interval: every 5 minutes during the agentic loop.
@@ -431,8 +431,8 @@ Three fixed fallback chains:
 | Chain | Anthropic | Google | OpenAI |
 |-------|-----------|--------|--------|
 | PLANNING | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-2.5-flash` | `gpt-5.4-mini` |
+| WORKHORSE | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
 **Mid-task recovery**: On provider failure mid-execution, WorkerAgent compacts the conversation to a provider-agnostic checkpoint and switches to a fallback provider via `ModelResolver.resolveFallbackExcluding()` (limited to 1 recovery attempt per task). Emits `mid_task_recovery` metric and SSE log event.
 

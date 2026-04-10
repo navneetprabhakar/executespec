@@ -15,18 +15,32 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.function.Supplier;
 
 @Component
 @Slf4j
 public class GitTool {
 
+    /** Redis lock TTL — long enough to cover the slowest merge; released on completion. */
+    private static final Duration GIT_LOCK_TTL = Duration.ofMinutes(2);
+    /** Prefix for workspace-level git operation locks. */
+    private static final String GIT_LOCK_PREFIX = "git:lock:workspace:";
+
     @Value("${agent.workspace}")
     private String workspaceRoot;
+
+    private final StringRedisTemplate redis;
+
+    public GitTool(StringRedisTemplate redis) {
+        this.redis = redis;
+    }
 
     /**
      * Opens the git repo for this task's working directory.
@@ -258,32 +272,34 @@ public class GitTool {
     public String createBranch(
             @ToolParam(description = "runId", required = true) String runId,
             @ToolParam(description = "Branch name to create", required = true) String branchName) {
-        try (Git git = openRepo(runId)) {
-            // If branch already exists (e.g. task retry after recovery), just check it out
-            // rather than failing with RefAlreadyExistsException.
-            boolean exists = git.getRepository().findRef(branchName) != null;
-            if (exists) {
-                git.checkout().setName(branchName).call();
-                log.info("[GitTool] Branch '{}' already exists — checked out (task retry)", branchName);
-                return "Checked out existing branch: " + branchName + " (retry)";
+        return withWorkspaceLock(runId, () -> {
+            try (Git git = openRepo(runId)) {
+                // If branch already exists (e.g. task retry after recovery), just check it out
+                // rather than failing with RefAlreadyExistsException.
+                boolean exists = git.getRepository().findRef(branchName) != null;
+                if (exists) {
+                    git.checkout().setName(branchName).call();
+                    log.info("[GitTool] Branch '{}' already exists — checked out (task retry)", branchName);
+                    return "Checked out existing branch: " + branchName + " (retry)";
+                }
+                git.checkout().setCreateBranch(true).setName(branchName).call();
+                return "Created and checked out branch: " + branchName;
+            } catch (RefAlreadyExistsException e) {
+                // findRef() missed the branch (race condition or JGit ref-DB quirk after thread
+                // interrupt). Fall back to a plain checkout instead of returning an error.
+                log.warn("[GitTool] RefAlreadyExistsException for '{}' — findRef missed it; checking out directly",
+                        branchName);
+                try (Git git2 = openRepo(runId)) {
+                    git2.checkout().setName(branchName).call();
+                    log.info("[GitTool] Branch '{}' checked out via fallback path (task retry)", branchName);
+                    return "Checked out existing branch: " + branchName + " (retry-fallback)";
+                } catch (Exception ce) {
+                    return "Branch creation failed: " + ce.getMessage();
+                }
+            } catch (Exception e) {
+                return "Branch creation failed: " + e.getMessage();
             }
-            git.checkout().setCreateBranch(true).setName(branchName).call();
-            return "Created and checked out branch: " + branchName;
-        } catch (RefAlreadyExistsException e) {
-            // findRef() missed the branch (race condition or JGit ref-DB quirk after thread
-            // interrupt). Fall back to a plain checkout instead of returning an error.
-            log.warn("[GitTool] RefAlreadyExistsException for '{}' — findRef missed it; checking out directly",
-                    branchName);
-            try (Git git2 = openRepo(runId)) {
-                git2.checkout().setName(branchName).call();
-                log.info("[GitTool] Branch '{}' checked out via fallback path (task retry)", branchName);
-                return "Checked out existing branch: " + branchName + " (retry-fallback)";
-            } catch (Exception ce) {
-                return "Branch creation failed: " + ce.getMessage();
-            }
-        } catch (Exception e) {
-            return "Branch creation failed: " + e.getMessage();
-        }
+        });
     }
 
     @Tool(description = "Stage and commit all current changes in the workspace.")
@@ -349,22 +365,24 @@ public class GitTool {
     // ── Harness-only operations ───────────────────────────────────────────────
 
     public String mergeBranchToMain(String runId, String branchName) {
-        try (Git git = openRepo(runId)) {
-            git.checkout().setName("main").call();
-            MergeResult result = git.merge()
-                    .include(git.getRepository().findRef(branchName))
-                    .setFastForward(MergeCommand.FastForwardMode.NO_FF)
-                    .setCommit(true)
-                    .setMessage("chore: merge " + branchName)
-                    .call();
-            if (result.getMergeStatus().isSuccessful()) {
-                return "Merged " + branchName + " -> main";
-            } else {
-                return "ERROR: Merge conflict on " + branchName + ": " + result.getMergeStatus();
+        return withWorkspaceLock(runId, () -> {
+            try (Git git = openRepo(runId)) {
+                git.checkout().setName("main").call();
+                MergeResult result = git.merge()
+                        .include(git.getRepository().findRef(branchName))
+                        .setFastForward(MergeCommand.FastForwardMode.NO_FF)
+                        .setCommit(true)
+                        .setMessage("chore: merge " + branchName)
+                        .call();
+                if (result.getMergeStatus().isSuccessful()) {
+                    return "Merged " + branchName + " -> main";
+                } else {
+                    return "ERROR: Merge conflict on " + branchName + ": " + result.getMergeStatus();
+                }
+            } catch (Exception e) {
+                return "ERROR: Merge failed: " + e.getMessage();
             }
-        } catch (Exception e) {
-            return "ERROR: Merge failed: " + e.getMessage();
-        }
+        });
     }
 
     /**
@@ -877,5 +895,61 @@ public class GitTool {
             p.reset(reader, id);
         }
         return p;
+    }
+
+    // ── Workspace-level locking ───────────────────────────────────────────────
+
+    /**
+     * Acquires a Redis-backed mutex for the given run's workspace, executes
+     * {@code work}, then releases the lock. Prevents concurrent git mutations
+     * (branch create, merge-to-main) from racing on the same workspace during
+     * retry races or multi-instance deployments.
+     *
+     * <p>Fail-open: if Redis is unavailable, the operation runs without a lock
+     * and a warning is emitted. This avoids blocking git ops on Redis outages.
+     *
+     * @param runId workspace identifier (one lock per run workspace)
+     * @param work  the git operation to execute while holding the lock
+     * @return result of {@code work}
+     */
+    private String withWorkspaceLock(String runId, Supplier<String> work) {
+        String lockKey = GIT_LOCK_PREFIX + runId;
+        String lockValue = Thread.currentThread().getName();
+        boolean locked = false;
+        try {
+            // SET NX EX — atomic acquire
+            Boolean acquired = redis.opsForValue()
+                    .setIfAbsent(lockKey, lockValue, GIT_LOCK_TTL);
+            locked = Boolean.TRUE.equals(acquired);
+            if (!locked) {
+                // Another thread holds the lock; wait briefly and retry once
+                log.debug("[GitTool] Lock contention on workspace {} — waiting 500ms", runId);
+                Thread.sleep(500);
+                acquired = redis.opsForValue().setIfAbsent(lockKey, lockValue, GIT_LOCK_TTL);
+                locked = Boolean.TRUE.equals(acquired);
+                if (!locked) {
+                    log.warn("[GitTool] Could not acquire workspace lock for run {} after retry — proceeding without lock", runId);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[GitTool] Redis lock acquisition failed for run {} — proceeding without lock: {}", runId, e.getMessage());
+        }
+
+        try {
+            return work.get();
+        } finally {
+            if (locked) {
+                try {
+                    // Only release if we still own the lock (value check prevents releasing a lock
+                    // that expired and was re-acquired by another thread)
+                    String current = redis.opsForValue().get(lockKey);
+                    if (lockValue.equals(current)) {
+                        redis.delete(lockKey);
+                    }
+                } catch (Exception e) {
+                    log.debug("[GitTool] Failed to release workspace lock for run {}: {}", runId, e.getMessage());
+                }
+            }
+        }
     }
 }

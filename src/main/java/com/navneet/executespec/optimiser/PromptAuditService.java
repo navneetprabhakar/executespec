@@ -1,8 +1,11 @@
 package com.navneet.executespec.optimiser;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.config.PromptVersioningService;
 import com.navneet.executespec.state.entity.PromptAuditEntry;
 import com.navneet.executespec.state.repository.PromptAuditRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +19,8 @@ public class PromptAuditService {
 
     private final PromptAuditRepository repository;
     private final ObjectMapper objectMapper;
+    private final PromptVersioningService versioningService;
+    private final MeterRegistry meterRegistry;
 
     public void record(
         String promptFile,
@@ -45,6 +50,11 @@ public class PromptAuditService {
             .failuresAfter(0)
             .build();
 
+        Counter.builder("executespec.prompt.optimisation.applied")
+                .tag("prompt", promptFile)
+                .tag("trigger", triggerType)
+                .register(meterRegistry).increment();
+
         repository.save(entry);
     }
 
@@ -54,6 +64,7 @@ public class PromptAuditService {
             if (hadFailures) entry.setFailuresAfter(entry.getFailuresAfter() + 1);
             repository.save(entry);
         });
+        versioningService.checkAndRollbackIfDegraded();
     }
 
     public List<PromptAuditEntry> getHistory(String promptFile) {

@@ -28,6 +28,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SubtaskDecomposer {
 
+    private final CoherenceGroupAnalyzer coherenceAnalyzer;
+
     /**
      * Returns {@code true} if the task should be decomposed into subtasks.
      * <p>Triggers on:
@@ -67,72 +69,95 @@ public class SubtaskDecomposer {
         return decomposeByFiles(parent);
     }
 
-    // ── File-based decomposition (existing logic) ─────────────────────────────
+    // ── File-based decomposition (coherence-aware) ────────────────────────────
 
     /**
-     * Creates N {@link TaskDefinition} objects, one per owned file.
-     * Each subtask inherits the parent's context but is constrained to a single file.
+     * Creates one {@link TaskDefinition} per coherence group.
+     * Related files (interface+impl, source+test, component+styles, model+migration)
+     * are grouped together so cross-file consistency is maintained within a single subtask.
+     * A group of up to {@link CoherenceGroupAnalyzer#MAX_GROUP_SIZE} files may produce
+     * that many {@code writeFile} calls.
      */
     private List<TaskDefinition> decomposeByFiles(TaskDefinition parent) {
         List<String> files = parent.getOwnedFiles();
-        int total = files.size();
-        List<TaskDefinition> subtasks = new ArrayList<>(total);
+        List<List<String>> groups = coherenceAnalyzer.analyze(files);
+        int totalGroups = groups.size();
+        List<TaskDefinition> subtasks = new ArrayList<>(totalGroups);
 
-        for (int i = 0; i < total; i++) {
-            String file = files.get(i);
-            String shortName = extractFileName(file);
+        // Track which groups have already been emitted (for context injection)
+        List<List<String>> emittedGroups = new ArrayList<>();
+
+        for (int i = 0; i < totalGroups; i++) {
+            List<String> group = groups.get(i);
+            String groupLabel = group.size() == 1
+                    ? extractFileName(group.get(0))
+                    : group.stream().map(f -> extractFileName(f)).reduce((a, b) -> a + "+" + b).orElse("group");
 
             subtasks.add(TaskDefinition.builder()
                     .taskId(parent.getTaskId() + "_" + (i + 1))
-                    .title(parent.getTitle() + " [" + (i + 1) + "/" + total + ": " + shortName + "]")
-                    .objective(buildFileSubtaskObjective(parent, file, i, files))
+                    .title(parent.getTitle() + " [" + (i + 1) + "/" + totalGroups + ": " + groupLabel + "]")
+                    .objective(buildGroupSubtaskObjective(parent, group, emittedGroups, groups, i))
                     .boundaries(parent.getBoundaries())
-                    .outputFormat("Create exactly ONE file: " + file)
-                    .acceptanceCriteria("File " + file + " exists and is valid")
+                    .outputFormat(buildGroupOutputFormat(group))
+                    .acceptanceCriteria(buildGroupAcceptanceCriteria(group))
                     .dependsOn(parent.getDependsOn())
                     .complexity("LOW")
                     .assignedModel(parent.getAssignedModel())
                     .taskLayer(parent.getTaskLayer())
-                    .ownedFiles(List.of(file))
+                    .ownedFiles(new ArrayList<>(group))
                     .sharedFiles(parent.getSharedFiles())
                     .build());
+
+            emittedGroups.add(group);
         }
         return subtasks;
     }
 
-    /**
-     * Builds a focused subtask objective for file-based decomposition.
-     * Includes parent context, prior files created, and single-file constraint.
-     */
-    private String buildFileSubtaskObjective(TaskDefinition parent, String targetFile,
-                                              int index, List<String> allFiles) {
+    private String buildGroupSubtaskObjective(TaskDefinition parent, List<String> group,
+                                               List<List<String>> emitted,
+                                               List<List<String>> allGroups, int groupIndex) {
         StringBuilder sb = new StringBuilder();
+        sb.append("PARENT TASK CONTEXT:\n").append(parent.getObjective()).append("\n\n");
 
-        sb.append("PARENT TASK CONTEXT:\n");
-        sb.append(parent.getObjective());
-        sb.append("\n\n");
-
-        if (index > 0) {
-            sb.append("FILES ALREADY CREATED (available in workspace — use readFile if you need to reference them):\n");
-            for (int j = 0; j < index; j++) {
-                sb.append("  - ").append(allFiles.get(j)).append("\n");
-            }
+        // Already created files
+        List<String> alreadyCreated = emitted.stream().flatMap(List::stream).toList();
+        if (!alreadyCreated.isEmpty()) {
+            sb.append("FILES ALREADY CREATED (available in workspace — use readFile to reference):\n");
+            alreadyCreated.forEach(f -> sb.append("  - ").append(f).append("\n"));
             sb.append("\n");
         }
 
-        if (index < allFiles.size() - 1) {
+        // Future files
+        List<String> future = allGroups.subList(groupIndex + 1, allGroups.size())
+                .stream().flatMap(List::stream).toList();
+        if (!future.isEmpty()) {
             sb.append("FILES TO BE CREATED LATER (by subsequent subtasks — do NOT create these):\n");
-            for (int j = index + 1; j < allFiles.size(); j++) {
-                sb.append("  - ").append(allFiles.get(j)).append("\n");
-            }
+            future.forEach(f -> sb.append("  - ").append(f).append("\n"));
             sb.append("\n");
         }
 
-        sb.append("YOUR ASSIGNMENT: Create ONLY this file: ").append(targetFile).append("\n");
-        sb.append("Call writeFile exactly ONCE with the complete contents of this file.\n");
-        sb.append("Do NOT create any other files. Do NOT output a completion report until the file is written.");
-
+        if (group.size() == 1) {
+            sb.append("YOUR ASSIGNMENT: Create ONLY this file: ").append(group.get(0)).append("\n");
+            sb.append("Call writeFile exactly ONCE with the complete contents of this file.\n");
+        } else {
+            sb.append("YOUR ASSIGNMENT: Create these ").append(group.size())
+              .append(" related files together (they are coupled — implement them consistently):\n");
+            group.forEach(f -> sb.append("  - ").append(f).append("\n"));
+            sb.append("\nCall writeFile once per file (").append(group.size())
+              .append(" calls total). Ensure imports and interfaces are consistent across the group.\n");
+        }
+        sb.append("Do NOT create any other files. Do NOT output a completion report until all assigned files are written.");
         return sb.toString();
+    }
+
+    private String buildGroupOutputFormat(List<String> group) {
+        if (group.size() == 1) return "Create exactly ONE file: " + group.get(0);
+        return "Create exactly " + group.size() + " files: " + String.join(", ", group);
+    }
+
+    private String buildGroupAcceptanceCriteria(List<String> group) {
+        if (group.size() == 1) return "File " + group.get(0) + " exists and is valid";
+        return "All files exist and are mutually consistent: " + String.join(", ", group);
     }
 
     // ── Phase-based decomposition (method-level for complex single-file tasks) ─

@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp, Github, Archive } from 'lucide-react';
+import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp, Github, Archive, RefreshCw } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
@@ -202,8 +202,18 @@ export default function RunDetail() {
   // Retry all FAILED/PARTIAL tasks within this run
   const failedTasks = useMemo(() => {
     if (!activeRun?.tasks) return [];
-    return activeRun.tasks.filter((t: any) =>
-      ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status) && !t.parentTaskId
+    const tasks = activeRun.tasks as any[];
+    // Parent IDs that have at least one FAILED/PARTIAL/BLOCKED subtask —
+    // catches the case where a subtask returned PARTIAL but the parent was
+    // incorrectly persisted as COMPLETE (subtask decomposition edge case).
+    const parentIdsWithFailedSubtasks = new Set(
+      tasks
+        .filter(t => t.parentTaskId && ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status))
+        .map(t => t.parentTaskId)
+    );
+    return tasks.filter(t =>
+      !t.parentTaskId &&
+      (['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status) || parentIdsWithFailedSubtasks.has(t.taskId))
     );
   }, [activeRun?.tasks]);
 
@@ -319,6 +329,22 @@ export default function RunDetail() {
               <X className="h-4 w-4" />
             </button>
           </div>
+
+          {/* Retry banner */}
+          {activeRun.isRetry && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-accent-amber/10 border-b border-accent-amber/20 text-xs text-accent-amber flex-shrink-0">
+              <RefreshCw className="h-3 w-3 flex-shrink-0" />
+              <span>
+                This run is auto-retry #{activeRun.runRetryCount ?? 1} of{' '}
+                <button
+                  onClick={() => activeRun.sourceRunId && setActiveRunId(activeRun.sourceRunId)}
+                  className="underline hover:text-primary transition-colors"
+                >
+                  {activeRun.sourceRunId?.slice(0, 12)}
+                </button>
+              </span>
+            </div>
+          )}
 
           {/* Gate banner */}
           {activeRun.status === 'AWAITING_APPROVAL' && (

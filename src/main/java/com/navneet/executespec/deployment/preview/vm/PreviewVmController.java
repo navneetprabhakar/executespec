@@ -43,8 +43,8 @@ public class PreviewVmController {
     @PostMapping("/{previewId}/extend")
     public ResponseEntity<Void> extend(
             @PathVariable String previewId,
-            @RequestParam(defaultValue = "2") int hours) {
-        previewService.extend(previewId, hours);
+            @RequestParam(defaultValue = "15") int minutes) {
+        previewService.extend(previewId, minutes);
         return ResponseEntity.ok().build();
     }
 

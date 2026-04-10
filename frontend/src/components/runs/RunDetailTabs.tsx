@@ -332,6 +332,17 @@ function groupTasksBySource(tasks: RunDetail['tasks']): { label: string; taskCou
   return Array.from(groups.values()).sort((a, b) => a.order - b.order);
 }
 
+/** Maps internal provider ID to user-facing display name. */
+function displayProvider(provider: string | null | undefined): string {
+  if (!provider) return '—';
+  switch (provider.toUpperCase()) {
+    case 'GOOGLE': return 'Gemini';
+    case 'ANTHROPIC': return 'Anthropic';
+    case 'OPENAI': return 'OpenAI';
+    default: return provider;
+  }
+}
+
 /** Aggregate token counts per model from task list + pipeline agent entries (planner/reviewer/compiler). */
 function tokensByModel(
   tasks: RunDetail['tasks'],
@@ -771,7 +782,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                   )}
                   {provider && (
                     <span className="text-[10px] font-mono text-muted bg-[var(--gray-200)] px-1 py-0.5 rounded flex-shrink-0">
-                      {provider}
+                      {displayProvider(provider)}
                     </span>
                   )}
                   <span className="text-xs font-mono text-secondary truncate">{model}</span>
@@ -793,12 +804,15 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
       {/* AI Provider */}
       <div className="pt-2 border-t border-[var(--border-default)]">
         <p className="text-xs text-muted">Provider</p>
-        <p className="text-sm text-primary mt-0.5 font-mono capitalize">
-          {run.tasks?.[0]?.provider
-            ?? (run.plannerModel?.startsWith('claude') ? 'anthropic'
-              : run.plannerModel?.startsWith('gpt') ? 'openai'
-              : run.plannerModel?.startsWith('gemini') ? 'google'
-              : '—')}
+        <p className="text-sm text-primary mt-0.5 font-mono">
+          {displayProvider(
+            run.aiProvider
+            ?? run.tasks?.[0]?.provider
+            ?? (run.plannerModel?.startsWith('claude') ? 'ANTHROPIC'
+              : run.plannerModel?.startsWith('gpt') ? 'OPENAI'
+              : run.plannerModel?.startsWith('gemini') ? 'GOOGLE'
+              : null)
+          )}
         </p>
       </div>
 
