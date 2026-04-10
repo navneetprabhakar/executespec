@@ -1604,6 +1604,18 @@ public class StateStore {
         runRepo.save(run);
     }
 
+    /**
+     * Updates the instance heartbeat for a run. Called every 30s by PipelineHarness.
+     * Uses a lightweight JPA update to avoid loading the full entity.
+     */
+    public void updateHeartbeat(String runId, String instanceId, java.time.Instant heartbeat) {
+        runRepo.findById(runId).ifPresent(run -> {
+            run.setExecutingInstance(instanceId);
+            run.setExecutionHeartbeat(heartbeat);
+            runRepo.save(run);
+        });
+    }
+
     private String toJson(Object obj) {
         try {
             return mapper.writeValueAsString(obj);

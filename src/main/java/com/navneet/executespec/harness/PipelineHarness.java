@@ -86,6 +86,18 @@ public class PipelineHarness {
      */
     private static final String OPENAPI_TASK_ID = "generate_openapi_spec";
 
+    /** Stable identifier for this JVM instance — used for instance tracking in pipeline_run. */
+    private static final String INSTANCE_ID = resolveInstanceId();
+
+    private static String resolveInstanceId() {
+        try {
+            return java.net.InetAddress.getLocalHost().getHostName()
+                    + "-" + ProcessHandle.current().pid();
+        } catch (Exception e) {
+            return "unknown-" + ProcessHandle.current().pid();
+        }
+    }
+
     private final PlannerAgent plannerAgent;
     private final WorkerPool workerPool;
     private final CostEstimator costEstimator;
@@ -1677,6 +1689,10 @@ public class PipelineHarness {
         String userTier = tierEnforcementService.resolveUserTier(run.getCreatedByUserId());
         run.setUserTier(userTier);
         llmRouter.setRunUserTier(runId, userTier);
+
+        // Stamp executing instance + initial heartbeat for cross-instance recovery detection
+        run.setExecutingInstance(INSTANCE_ID);
+        run.setExecutionHeartbeat(Instant.now());
 
         stateStore.saveRun(run);
 
@@ -3992,6 +4008,26 @@ public class PipelineHarness {
             // H2+H3 cleanup: release semaphore and unregister thread
             pipelineThreads.remove(runId);
             if (slotAcquired) runSlots.release();
+        }
+    }
+
+    // ── Instance heartbeat ────────────────────────────────────────────────────
+
+    /**
+     * Refreshes {@code execution_heartbeat} every 30s for all runs executing on this instance.
+     * {@link com.navneet.executespec.recovery.StuckRunMonitor} uses stale heartbeats (>2 min)
+     * to detect dead instances and recover their runs.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 30_000)
+    void refreshInstanceHeartbeats() {
+        if (activeRunThreads.isEmpty()) return;
+        Instant now = Instant.now();
+        for (String runId : activeRunThreads) {
+            try {
+                stateStore.updateHeartbeat(runId, INSTANCE_ID, now);
+            } catch (Exception e) {
+                log.debug("[Heartbeat] Failed to update heartbeat for run {}: {}", runId, e.getMessage());
+            }
         }
     }
 }
