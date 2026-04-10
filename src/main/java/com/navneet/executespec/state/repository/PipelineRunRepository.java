@@ -175,4 +175,21 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
      */
     @Query("SELECT r FROM PipelineRun r WHERE r.archivedAt IS NOT NULL AND r.archivedAt < :cutoff")
     List<PipelineRun> findArchivedRunsOlderThan(@Param("cutoff") Instant cutoff);
+
+    /** Returns runs completed before cutoff, for a given tier, that have not yet been soft-deleted. */
+    @Query("SELECT r FROM PipelineRun r WHERE r.userTier = :tier " +
+           "AND r.completedAt IS NOT NULL AND r.completedAt < :cutoff " +
+           "AND r.deletedAt IS NULL")
+    List<PipelineRun> findExpiredRunsForTier(@Param("tier") String tier, @Param("cutoff") Instant cutoff);
+
+    /** Returns soft-deleted runs that are ready for hard deletion. */
+    @Query("SELECT r FROM PipelineRun r WHERE r.deletedAt IS NOT NULL AND r.deletedAt < :cutoff")
+    List<PipelineRun> findSoftDeletedOlderThan(@Param("cutoff") Instant cutoff);
+
+    /** Soft-deletes all non-active runs belonging to a user (GDPR right-to-erasure). */
+    @Modifying
+    @Query("UPDATE PipelineRun r SET r.deletedAt = :now " +
+           "WHERE r.createdByUserId = :userId AND r.deletedAt IS NULL " +
+           "AND r.status NOT IN ('PENDING', 'PLANNING', 'IN_PROGRESS', 'IN_PROGRESS_BATCH')")
+    int softDeleteByUserId(@Param("userId") String userId, @Param("now") Instant now);
 }
