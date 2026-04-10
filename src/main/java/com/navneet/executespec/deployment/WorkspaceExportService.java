@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -54,6 +55,31 @@ public class WorkspaceExportService {
         "*.class",
         "*.jar"
     );
+
+    /**
+     * Exact filenames that are stripped from ZIP exports for security.
+     * Prevents accidentally including credentials written by agents.
+     */
+    private static final Set<String> SECRET_EXACT_NAMES = Set.of(
+        ".env",
+        "credentials.json",
+        "service-account.json",
+        "keyfile.json",
+        "secrets.yml",
+        "secrets.yaml"
+    );
+
+    /**
+     * Returns true if the given filename matches a known secret pattern.
+     * Covers: .env.* variants and files ending in .pem or .key.
+     */
+    private static boolean isSecretFile(String name) {
+        if (SECRET_EXACT_NAMES.contains(name)) return true;
+        if (name.startsWith(".env.")) return true;     // .env.local, .env.production, etc.
+        if (name.endsWith(".pem")) return true;
+        if (name.endsWith(".key")) return true;
+        return false;
+    }
 
     /**
      * Builds a zip of the run's workspace and returns the path to the temp file.
@@ -106,6 +132,10 @@ public class WorkspaceExportService {
                         throws IOException {
                     String relative = workspacePath.relativize(file).toString();
                     if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+                    if (isSecretFile(file.getFileName().toString())) {
+                        log.info("[WorkspaceExportService] Skipping secret file from ZIP: {}", relative);
+                        return FileVisitResult.CONTINUE;
+                    }
 
                     ZipEntry entry = new ZipEntry(relative);
                     entry.setTime(attrs.lastModifiedTime().toMillis());
@@ -191,6 +221,10 @@ public class WorkspaceExportService {
                         throws IOException {
                     String relative = workspacePath.relativize(file).toString();
                     if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+                    if (isSecretFile(file.getFileName().toString())) {
+                        log.info("[WorkspaceExportService] Skipping secret file from repo ZIP: {}", relative);
+                        return FileVisitResult.CONTINUE;
+                    }
 
                     zos.putNextEntry(new ZipEntry(relative));
                     Files.copy(file, zos);
