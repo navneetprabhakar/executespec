@@ -64,6 +64,20 @@ public class CustomMetricsConfig {
     public static final String LLM_DURATION = "executespec.llm.duration";
     public static final String LLM_RETRY_COUNT = "executespec.llm.retry_count";
 
+    /**
+     * Extended LLM latency timer — includes agent_tier (PLANNING/WORKHORSE/LIGHTWEIGHT)
+     * and success (true/false) for SLO tracking.
+     * Complements {@link #LLM_DURATION} with additional dimensions.
+     */
+    public static final String LLM_LATENCY = "executespec.llm.latency";
+
+    /** Token distribution summaries — histogram view of per-call token usage. */
+    public static final String LLM_TOKENS_INPUT_DIST  = "executespec.llm.tokens.input.dist";
+    public static final String LLM_TOKENS_OUTPUT_DIST = "executespec.llm.tokens.output.dist";
+
+    /** End-to-end pipeline run duration (from run start to COMPLETE/FAILED). */
+    public static final String RUN_E2E_DURATION = "executespec.run.e2e.duration";
+
     /** Tool calls */
     public static final String TOOL_CALLS = "executespec.tool.calls";
 

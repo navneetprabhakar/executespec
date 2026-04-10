@@ -174,7 +174,7 @@ public class LlmRouter {
                     if (j > 0) {
                         log.info("[LlmRouter] Fallback succeeded: {} for {}", provider, agentId);
                     }
-                    recordTokenMetrics(response, provider, model, llmObs);
+                    recordTokenMetrics(response, provider, model, llmObs, agentId, callDuration, true);
                     llmObs.lowCardinalityKeyValue("outcome", "success");
                     return new LlmResponse(response, provider, model);
                 } catch (Exception e) {
@@ -273,18 +273,57 @@ public class LlmRouter {
      */
     private void recordTokenMetrics(ChatResponse response, String provider, String model,
                                     Observation obs) {
+        recordTokenMetrics(response, provider, model, obs, null, null, null);
+    }
+
+    private void recordTokenMetrics(ChatResponse response, String provider, String model,
+                                    Observation obs, String agentId, Duration callDuration, Boolean success) {
         try {
             var usage = response.getMetadata().getUsage();
+            long inputTokens  = usage.getPromptTokens()     != null ? usage.getPromptTokens()     : 0L;
+            long outputTokens = usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0L;
+
             Counter.builder(LLM_TOKENS_INPUT).tag("provider", provider).tag("model", model)
-                    .register(meterRegistry).increment(usage.getPromptTokens());
+                    .register(meterRegistry).increment(inputTokens);
             Counter.builder(LLM_TOKENS_OUTPUT).tag("provider", provider).tag("model", model)
-                    .register(meterRegistry).increment(usage.getCompletionTokens());
-            obs.highCardinalityKeyValue("tokens.prompt", String.valueOf(usage.getPromptTokens()));
-            obs.highCardinalityKeyValue("tokens.completion", String.valueOf(usage.getCompletionTokens()));
-            obs.highCardinalityKeyValue("tokens.total", String.valueOf(usage.getTotalTokens()));
+                    .register(meterRegistry).increment(outputTokens);
+
+            // Distribution summaries — histogram view for SLO percentiles
+            io.micrometer.core.instrument.DistributionSummary.builder(LLM_TOKENS_INPUT_DIST)
+                    .tag("provider", provider).tag("model", model)
+                    .register(meterRegistry).record(inputTokens);
+            io.micrometer.core.instrument.DistributionSummary.builder(LLM_TOKENS_OUTPUT_DIST)
+                    .tag("provider", provider).tag("model", model)
+                    .register(meterRegistry).record(outputTokens);
+
+            obs.highCardinalityKeyValue("tokens.prompt", String.valueOf(inputTokens));
+            obs.highCardinalityKeyValue("tokens.completion", String.valueOf(outputTokens));
+            obs.highCardinalityKeyValue("tokens.total", String.valueOf(usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L));
+
+            // Extended latency timer with agent_tier + success for SLO tracking
+            if (callDuration != null) {
+                String tier = resolveAgentTier(agentId);
+                String successTag = Boolean.TRUE.equals(success) ? "true" : "false";
+                Timer.builder(LLM_LATENCY)
+                        .tag("provider", provider).tag("model", model)
+                        .tag("agent_tier", tier).tag("success", successTag)
+                        .register(meterRegistry).record(callDuration);
+            }
         } catch (Exception ignored) {
             // token extraction is best-effort
         }
+    }
+
+    /** Maps agent name to tier label for SLO tagging. */
+    private static String resolveAgentTier(String agentId) {
+        if (agentId == null) return "UNKNOWN";
+        return switch (agentId.toLowerCase()) {
+            case "planneragent", "revieweragentv2", "revieweragent" -> "PLANNING";
+            case "workeragent", "compileragent", "testplanneragent",
+                 "testworkeragent", "apitestsuiteagent", "conflictresolveragent",
+                 "promptoptimiseragent", "validationreportgenerator" -> "WORKHORSE";
+            default -> "LIGHTWEIGHT";
+        };
     }
 
     /**
