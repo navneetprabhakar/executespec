@@ -47,6 +47,7 @@ class PreviewServiceTest {
     @Mock StateStore stateStore;
     @Mock TierConfigRepository tierConfigRepo;
     @Mock WorkspaceRestoreService restoreService;
+    @Mock com.navneet.executespec.deployment.preview.GlobalPreviewLimiter globalPreviewLimiter;
     io.micrometer.core.instrument.MeterRegistry meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
 
     PreviewPortPool portPool;
@@ -81,8 +82,9 @@ class PreviewServiceTest {
         // Default: preview mode is WEB
         when(dockerfileGen.detectMode(any(), any())).thenReturn(PreviewMode.REST);
 
+        when(globalPreviewLimiter.tryAcquire(any(), any())).thenReturn(true);
         service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                composeFileGen, composeExecutor, portPool, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
+                composeFileGen, composeExecutor, portPool, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry, globalPreviewLimiter);
     }
 
     @AfterEach
@@ -121,7 +123,7 @@ class PreviewServiceTest {
         void throwsWhenDisabled() {
             props.setEnabled(false);
             service = new PreviewService(dockerfileGen, databaseDetector, envVarDetector,
-                    composeFileGen, composeExecutor, portPool, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry);
+                    composeFileGen, composeExecutor, portPool, props, broadcaster, stateStore, agentProps, tierConfigRepo, restoreService, meterRegistry, globalPreviewLimiter);
 
             assertThatThrownBy(() -> service.start("run-1", freeUser()))
                     .isInstanceOf(PreviewException.class)
