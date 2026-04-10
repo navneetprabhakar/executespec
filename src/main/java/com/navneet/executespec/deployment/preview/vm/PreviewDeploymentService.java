@@ -159,6 +159,20 @@ public class PreviewDeploymentService {
     }
 
     /**
+     * Returns true if at least one VM has a free slot. Used by PreviewService to check
+     * capacity before spawning a build thread, so requests can be queued gracefully.
+     */
+    public boolean hasCapacity() {
+        List<PreviewVmProperties.VmConfig> vms = vmProperties.getVms();
+        if (vms.isEmpty()) return false;
+        Map<String, Long> loadMap = registryRepo
+                .findByStatusIn(List.of("active", "deploying", "unhealthy"))
+                .stream()
+                .collect(Collectors.groupingBy(PreviewRegistry::getVmId, Collectors.counting()));
+        return vms.stream().anyMatch(vm -> loadMap.getOrDefault(vm.getId(), 0L) < vm.getMaxConcurrent());
+    }
+
+    /**
      * Select the VM with the lowest active preview count that has capacity.
      */
     private PreviewVmProperties.VmConfig selectVm() {

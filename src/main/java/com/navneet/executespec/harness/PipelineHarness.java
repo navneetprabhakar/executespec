@@ -2946,6 +2946,10 @@ public class PipelineHarness {
 
         log.info("Force-retrying task [{}] in run {}", taskId, runId);
         stateStore.markRetrying(runId, taskId);
+        // Persist WORKING to DB so PartialRunResumeService won't re-pick up this run
+        // during the retry. Without this, the scheduler finds status=PARTIAL in DB and
+        // starts another retry loop every 5 minutes.
+        stateStore.updateStatus(runId, "WORKING");
         broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "PENDING"));
         broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
         broadcaster.emit(runId, RunEvent.log(runId, "harness",
@@ -2984,9 +2988,21 @@ public class PipelineHarness {
             // still incomplete (PARTIAL, BLOCKED, FAILED, PENDING, or LOCKED).
             // Reset and run them all before proceeding to reviewer — otherwise
             // the merge gate would open prematurely with missing work.
-            List<AgentTask> otherIncomplete = stateStore.getAllTasks(runId).stream()
+            //
+            // Subtask-aware: if a parent task shows as incomplete but has subtasks,
+            // skip the parent — its failed subtasks are already in the task list and
+            // will be retried individually. Retrying the parent would re-spawn ALL
+            // subtasks (including already-COMPLETE ones), wasting tokens and causing loops.
+            List<AgentTask> allTasksNow = stateStore.getAllTasks(runId);
+            Set<String> parentIdsWithSubtasks = allTasksNow.stream()
+                .filter(t -> t.getParentTaskId() != null)
+                .map(AgentTask::getParentTaskId)
+                .collect(java.util.stream.Collectors.toSet());
+
+            List<AgentTask> otherIncomplete = allTasksNow.stream()
                 .filter(t -> !taskId.equals(t.getTaskId()))
                 .filter(t -> !isSystemTask(t))
+                .filter(t -> !parentIdsWithSubtasks.contains(t.getTaskId()))
                 .filter(t -> {
                     String s = t.getStatus();
                     return "PARTIAL".equals(s) || "BLOCKED".equals(s) || "FAILED".equals(s)
