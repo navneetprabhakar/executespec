@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Periodically scans for PARTIAL runs (pipeline completed but some tasks failed/stuck)
@@ -69,9 +71,19 @@ public class PartialRunResumeService {
             return;
         }
 
-        // Find failed or stuck tasks for this run
-        List<AgentTask> failedTasks = stateStore.getAllTasks(runId).stream()
+        // Find failed or stuck tasks — prefer subtask granularity over parent-level retry.
+        // If a parent task has subtasks, retry the individual failed subtasks directly
+        // (not the parent, which would re-spawn ALL subtasks including already-COMPLETE ones).
+        List<AgentTask> allTasks = stateStore.getAllTasks(runId);
+        Set<String> tasksWithSubtasks = allTasks.stream()
+                .filter(t -> t.getParentTaskId() != null)
+                .map(AgentTask::getParentTaskId)
+                .collect(Collectors.toSet());
+
+        List<AgentTask> failedTasks = allTasks.stream()
                 .filter(t -> "FAILED".equals(t.getStatus()) || "STUCK".equals(t.getStatus()))
+                // Skip parent tasks that have subtasks — we'll retry their failed subtasks instead
+                .filter(t -> !tasksWithSubtasks.contains(t.getTaskId()))
                 .limit(MAX_RETRIES_PER_SWEEP)
                 .toList();
 
@@ -80,7 +92,8 @@ public class PartialRunResumeService {
             return;
         }
 
-        log.info("[PartialResume] Auto-retrying {} task(s) for PARTIAL run {}", failedTasks.size(), runId);
+        log.info("[PartialResume] Auto-retrying {} task(s) for PARTIAL run {} (subtask-aware)",
+                failedTasks.size(), runId);
         for (AgentTask task : failedTasks) {
             try {
                 boolean started = harness.retryPartialTask(runId, task.getTaskId());
