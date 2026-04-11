@@ -199,6 +199,7 @@ model-matrix:
   agent-tier-map:
     PlannerAgent: PLANNING
     ReviewerAgentV2: PLANNING
+    TaskCompileSupervisor: PLANNING
     TestPlannerAgent: WORKHORSE
     WorkerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
