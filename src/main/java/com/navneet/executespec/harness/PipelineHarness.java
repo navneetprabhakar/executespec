@@ -211,6 +211,9 @@ public class PipelineHarness {
      */
     private final BackgroundValidationService backgroundValidationService;
 
+    /** Post-review iterative gap-closing loop (max 3 cycles, target score ≥ 90). */
+    private final com.navneet.executespec.reviewer.GapClosingService gapClosingService;
+
     /**
      * Tracks runs with an active pipeline thread (executeRunAsync or runResumeAsync).
      * Used by OrphanedRunWatchdog and StuckRunMonitor to avoid triggering recovery
@@ -2587,6 +2590,49 @@ public class PipelineHarness {
                 reviewObs.stop();
             }
 
+            // ── GAP_CLOSING (after review, before re-validate) ─────────────────────
+            if (review != null) {
+                com.navneet.executespec.reviewer.model.AccuracyReport finalAccuracy = review.getAccuracyReport();
+                if (finalAccuracy != null
+                        && finalAccuracy.getSpecAdherenceScore() < 90
+                        && !runCostBudgetService.isOverBudget(runId)) {
+                    backgroundValidationService.setPhase(runId, "GAP_CLOSING");
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        String.format("Score %d/100 — starting gap-closing loop (target: 90+)",
+                            finalAccuracy.getSpecAdherenceScore())));
+                    try {
+                        var reviewModel = modelResolver.resolve("ReviewerAgentV2", run.getAiProviderEnum());
+                        var gapAccuracy = gapClosingService.closeGaps(
+                            run, finalAccuracy, run.getUserRequest(),
+                            review.getIssues() != null ? review.getIssues() : java.util.List.of(),
+                            reviewModel);
+                        // Rebuild review with updated accuracy score for validation report
+                        review = com.navneet.executespec.reviewer.model.ReviewReportV2.builder()
+                            .verdict(review.getVerdict())
+                            .issues(review.getIssues())
+                            .criticalCount(review.getCriticalCount())
+                            .minorCount(review.getMinorCount())
+                            .autoFixAttempted(review.getAutoFixAttempted())
+                            .autoFixSucceeded(review.getAutoFixSucceeded())
+                            .summary(review.getSummary())
+                            .reviewDuration(review.getReviewDuration())
+                            .reviewerModel(review.getReviewerModel())
+                            .readmeUpdated(review.isReadmeUpdated())
+                            .overallConfidence(review.getOverallConfidence())
+                            .mergeBlockers(review.getMergeBlockers())
+                            .postMergeSuggestions(review.getPostMergeSuggestions())
+                            .accuracyReport(gapAccuracy)
+                            .build();
+                        stateStore.saveReviewV2(runId, review);
+                        backgroundValidationService.recordPhaseResult(runId, "GAP_CLOSING",
+                            String.valueOf(gapAccuracy.getSpecAdherenceScore()));
+                    } catch (Exception gapEx) {
+                        log.warn("Run {} — gap-closing failed (non-fatal): {}", runId, gapEx.getMessage());
+                        backgroundValidationService.recordPhaseResult(runId, "GAP_CLOSING", "failed");
+                    }
+                }
+            }
+
             // Re-validate after auto-fix
             backgroundValidationService.setPhase(runId, "RE_VALIDATE");
             boolean fixesApplied = review != null && review.getAutoFixSucceeded() > 0;
@@ -3516,6 +3562,26 @@ public class PipelineHarness {
                     sb.append("  - [").append(issue.getSeverity()).append("]")
                       .append(loc).append(" ").append(issue.getDescription()).append("\n");
                 }
+            }
+        }
+
+        // Include accuracy gaps so rework workers know exactly what's missing
+        com.navneet.executespec.reviewer.model.AccuracyReport accuracy = review.getAccuracyReport();
+        if (accuracy != null) {
+            if (accuracy.getMissingRequirements() != null && !accuracy.getMissingRequirements().isEmpty()) {
+                sb.append("\nUnimplemented requirements (spec adherence check):\n");
+                accuracy.getMissingRequirements().forEach(r -> sb.append("  - ").append(r).append("\n"));
+            }
+            if (accuracy.getEndpointCoverage() != null
+                    && accuracy.getEndpointCoverage().getMissing() != null
+                    && !accuracy.getEndpointCoverage().getMissing().isEmpty()) {
+                sb.append("\nMissing endpoints (confirmed absent from code):\n");
+                accuracy.getEndpointCoverage().getMissing()
+                    .forEach(ep -> sb.append("  - ").append(ep).append("\n"));
+            }
+            if (accuracy.getPartialRequirements() != null && !accuracy.getPartialRequirements().isEmpty()) {
+                sb.append("\nIncomplete requirements (exist but partial):\n");
+                accuracy.getPartialRequirements().forEach(r -> sb.append("  - ").append(r).append("\n"));
             }
         }
 

@@ -36,6 +36,38 @@ public class ApiSurfaceExtractor {
     private static final int MAX_PATHS = 30;
 
     /**
+     * Walk the workspace root and return raw API endpoint paths as a list.
+     * Used by ApiProber to probe spec-required endpoints against a live preview.
+     *
+     * @param workspaceRoot root of the generated workspace
+     * @return deduplicated list of paths (e.g. ["/api/tasks", "/api/users"]); empty if none found
+     */
+    public List<String> extractPaths(Path workspaceRoot) {
+        if (workspaceRoot == null || !Files.exists(workspaceRoot)) {
+            return List.of();
+        }
+        List<String> paths = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(workspaceRoot, 8)) {
+            walk.filter(Files::isRegularFile)
+                .filter(p -> {
+                    String name = p.getFileName().toString();
+                    return name.endsWith(".java") || name.endsWith(".js") || name.endsWith(".ts")
+                            || name.endsWith(".py") || name.endsWith(".go") || name.endsWith(".kt");
+                })
+                .forEach(file -> {
+                    try {
+                        extractFromContent(Files.readString(file), paths);
+                    } catch (IOException e) {
+                        // skip unreadable files
+                    }
+                });
+        } catch (IOException e) {
+            log.debug("[ApiSurfaceExtractor] Walk failed for {}: {}", workspaceRoot, e.getMessage());
+        }
+        return paths.stream().distinct().limit(MAX_PATHS).toList();
+    }
+
+    /**
      * Walk the workspace root and extract API endpoint paths.
      * Returns a markdown-formatted summary of found endpoints.
      *

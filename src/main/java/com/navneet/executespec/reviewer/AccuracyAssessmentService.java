@@ -60,8 +60,8 @@ public class AccuracyAssessmentService {
 
     private static final String SYSTEM_PROMPT = """
             You are a specification adherence auditor. Your ONLY job is to compare the ORIGINAL USER SPECIFICATION
-            against the FILE TREE and REVIEW ISSUES to determine how accurately the generated code implements
-            what was asked for.
+            against the FILE TREE, KEY SOURCE FILES, and REVIEW ISSUES to determine how accurately the generated
+            code implements what was asked for.
 
             You are NOT re-reviewing the code quality — that was done already. You are measuring COMPLETENESS
             and ACCURACY of the implementation relative to the specification.
@@ -95,10 +95,14 @@ public class AccuracyAssessmentService {
 
             RULES:
             - Base your score on the SPECIFICATION, not on what is "good enough"
-            - A requirement is IMPLEMENTED if it appears in the file tree AND no review issue flags it as missing
-            - A requirement is MISSING if there is no file/code that could implement it, or a CRITICAL review issue flags it
+            - A requirement is IMPLEMENTED if it appears in KEY SOURCE FILES content OR the file tree shows a file
+              that clearly implements it — even if the file is named differently (e.g., all routes in src/index.js)
+            - A requirement is MISSING only if you cannot find any evidence of it in the source files
             - A requirement is PARTIAL if an issue flags it as incomplete (e.g., endpoint exists but validation missing)
-            - For endpointCoverage: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check file tree
+            - For endpointCoverage: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check
+              KEY SOURCE FILES content for the route handler — not just file names
+            - README and documentation gaps count at most 5 points total toward specAdherenceScore
+            - The specAdherenceScore must primarily reflect FUNCTIONAL compliance (endpoints, features, business logic)
             - If spec has no explicit endpoints (non-API project), set endpointCoverage to null
             - schemaAccuracy = HIGH if spec defines schemas and code matches them; MEDIUM if minor deviations; LOW if major mismatches
             - testCoverageLevel = based on what the spec REQUIRED (if spec says "add unit tests", assess against that)
@@ -121,8 +125,9 @@ public class AccuracyAssessmentService {
 
         try {
             String fileTree = getFileTree(runId);
+            String keyFileSnippets = buildKeyFileSnippets(runId, fileTree);
             String issuesSummary = buildIssuesSummary(issues);
-            String userMessage = buildAssessmentPrompt(originalGoal, fileTree, issuesSummary);
+            String userMessage = buildAssessmentPrompt(originalGoal, fileTree, keyFileSnippets, issuesSummary);
 
             List<Message> messages = new ArrayList<>();
             messages.add(new SystemMessage(SYSTEM_PROMPT));
@@ -218,7 +223,11 @@ public class AccuracyAssessmentService {
     // Prompt builder
     // ──────────────────────────────────────────────────────────────────────────
 
-    private String buildAssessmentPrompt(String originalGoal, String fileTree, String issuesSummary) {
+    private String buildAssessmentPrompt(String originalGoal, String fileTree,
+                                          String keyFileSnippets, String issuesSummary) {
+        String filesSection = keyFileSnippets.isBlank()
+                ? "(no key source files available — rely on file tree)"
+                : keyFileSnippets;
         return String.format("""
                 === ORIGINAL SPECIFICATION (this is what the user asked for) ===
                 %s
@@ -226,20 +235,24 @@ public class AccuracyAssessmentService {
                 === GENERATED FILE TREE (files that were created) ===
                 %s
 
+                === KEY SOURCE FILES (actual code — use this to verify endpoint/feature existence) ===
+                %s
+
                 === REVIEW ISSUES FOUND (critical and minor issues identified in code review) ===
                 %s
 
                 === TASK ===
-                Based on the specification, file tree, and review issues above:
+                Based on the specification, file tree, source files, and review issues above:
                 1. Extract every explicit requirement from the specification
-                2. Check which requirements are IMPLEMENTED (file exists, no critical issue blocks it)
-                3. Check which are MISSING (no file could implement it, or critical issue flags it absent)
-                4. Check which are PARTIAL (exists but flagged as incomplete by a review issue)
-                5. For API specs: extract every HTTP endpoint (METHOD /path) from the spec and check coverage
-                6. Assign a specAdherenceScore (0-100) and grade
+                2. Check KEY SOURCE FILES content to verify each requirement is actually implemented
+                3. Mark as IMPLEMENTED only if you find the implementation in source files or file tree
+                4. Mark as MISSING only if you find NO evidence in any source file
+                5. Mark as PARTIAL if a review issue flags it incomplete, or if code exists but is clearly incomplete
+                6. For API specs: check KEY SOURCE FILES for route handlers matching each required endpoint
+                7. Assign a specAdherenceScore (0-100) — README/doc gaps max 5 pts penalty
 
                 Return your assessment as a JSON object. No markdown fences. No explanation outside the JSON.
-                """, originalGoal, fileTree, issuesSummary);
+                """, originalGoal, fileTree, filesSection, issuesSummary);
     }
 
     private String buildIssuesSummary(List<ReviewIssue> issues) {
@@ -275,6 +288,58 @@ public class AccuracyAssessmentService {
             log.warn("[AccuracyAssessment] Could not get file tree for run {}: {}", runId, e.getMessage());
             return "(file tree unavailable)";
         }
+    }
+
+    /**
+     * Reads key source files (routes, controllers, models, entry points) and returns
+     * their content as annotated snippets for the accuracy scorer.
+     * Capped at 6 files × 2,500 chars each to control token cost (~15K extra tokens max).
+     */
+    private String buildKeyFileSnippets(String runId, String fileTree) {
+        List<String> candidates = inferKeyFilePaths(fileTree);
+        if (candidates.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        int filesRead = 0;
+        for (String path : candidates) {
+            if (filesRead >= 6) break;
+            try {
+                String content = fileSystemTool.readFile(runId, path);
+                if (content == null || content.isBlank()) continue;
+                String snip = content.length() > 2_500
+                        ? content.substring(0, 2_500) + "\n...(truncated, " + content.length() + " chars total)"
+                        : content;
+                sb.append("### ").append(path).append("\n```\n").append(snip).append("\n```\n\n");
+                filesRead++;
+            } catch (Exception e) {
+                log.debug("[AccuracyAssessment] Could not read key file {} for run {}: {}", path, runId, e.getMessage());
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Heuristically identifies key structural files from the file tree listing.
+     * Targets route handlers, controllers, models, and entry points — the files most
+     * likely to contain endpoint implementations the spec auditor needs to verify.
+     * Excludes test files, compiled output, and node_modules.
+     */
+    private List<String> inferKeyFilePaths(String fileTree) {
+        if (fileTree == null || fileTree.isBlank()) return List.of();
+        return fileTree.lines()
+                .map(String::trim)
+                // Strip leading tree characters (├──, └──, │, spaces)
+                .map(l -> l.replaceAll("^[│├└\\s─]+", "").trim())
+                // Keep only files (contain a dot extension) that match structural patterns
+                .filter(l -> l.matches(".*\\.(java|js|ts|py|go|rb|php|kt|cs)$"))
+                .filter(l -> l.matches("(?i).*(route|router|controller|handler|resolver|service|" +
+                        "model|schema|index|main|app|server|api).*"))
+                // Exclude test files, vendor, compiled output
+                .filter(l -> !l.matches("(?i).*(test|spec|__pycache__|node_modules|target|build|dist|\\.min\\.).*"))
+                // Prefer shorter paths (closer to root = more likely to be entry points)
+                .sorted(java.util.Comparator.comparingInt(l -> l.length()))
+                .limit(10)
+                .toList();
     }
 
     // ──────────────────────────────────────────────────────────────────────────

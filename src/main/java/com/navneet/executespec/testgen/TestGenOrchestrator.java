@@ -41,6 +41,8 @@ public class TestGenOrchestrator {
     private final SseBroadcaster broadcaster;
     private final com.navneet.executespec.deployment.preview.DevDockerfileGenerator dockerfileGenerator;
     private final ApiProber apiProber;
+    private final ApiSurfaceExtractor apiSurfaceExtractor;
+    private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
 
     /** Lazy to avoid circular dependency: PreviewService → TestPreviewCoordinator → TestGenOrchestrator */
     @Lazy @Autowired
@@ -80,8 +82,13 @@ public class TestGenOrchestrator {
                 var existingPreview = previewService.getStatus(runId);
                 if (existingPreview != null && existingPreview.status() == PreviewStatus.RUNNING
                         && existingPreview.url() != null) {
-                    log.info("[TestGen] Probing running preview at {} for run {}", existingPreview.url(), runId);
-                    apiProbeResults = apiProber.probe(existingPreview.url(), List.of());
+                    // Extract actual route paths from the generated workspace code and pass to ApiProber
+                    // so it probes spec-required endpoints rather than just common health paths
+                    List<String> workspacePaths = apiSurfaceExtractor.extractPaths(
+                            workspaceInitService.runWorkspacePath(runId));
+                    log.info("[TestGen] Probing running preview at {} for run {} ({} workspace paths)",
+                            existingPreview.url(), runId, workspacePaths.size());
+                    apiProbeResults = apiProber.probe(existingPreview.url(), workspacePaths);
                 }
             } catch (Exception e) {
                 log.debug("[TestGen] Preview probe skipped for run {}: {}", runId, e.getMessage());
