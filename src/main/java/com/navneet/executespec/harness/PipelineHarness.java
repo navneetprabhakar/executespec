@@ -590,6 +590,9 @@ public class PipelineHarness {
                     r.setStatus("PLANNING");
                     r.setQueuePosition(0);
                     stateStore.save(r);
+                    // Register as active NOW (before provider pool queue) so the watchdog
+                    // doesn't misdetect this run as orphaned while it waits for a pool slot.
+                    activeRunThreads.add(runId);
                     // Route through provider pool after acquiring global slot
                     dispatchToProviderPool(r.getAiProvider(), runId, submitUserTier, () -> {
                         try {
@@ -616,6 +619,8 @@ public class PipelineHarness {
 
         } else {
             // Global slot available — route directly to provider pool
+            // Register active before dispatching so watchdog sees this run immediately
+            activeRunThreads.add(runId);
             try {
                 final PipelineRun frozenRun = run;
                 dispatchToProviderPool(run.getAiProvider(), runId, submitUserTier, () -> {
@@ -628,6 +633,7 @@ public class PipelineHarness {
                     }
                 });
             } catch (ProviderRunPool.ProviderQueueFullException e) {
+                activeRunThreads.remove(runId);
                 runSlots.release();
                 stateStore.markFailed(runId, e.getMessage());
                 log.warn("Run {} rejected — provider pool full at submit: {}", runId, e.getMessage());
