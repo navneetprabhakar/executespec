@@ -96,13 +96,18 @@ poll_run() {
 fetch_report() {
     local run_id="$1"
     local elapsed=0
-    local resp report_status
+    local resp http_code score
 
     while [[ $elapsed -lt $REPORT_WAIT ]]; do
-        resp=$(curl -s "$BASE_URL/api/runs/$run_id/report" -H "Authorization: Bearer $TOKEN")
-        report_status=$(echo "$resp" | jq -r '.status // "NOT_GENERATED"')
-        if [[ "$report_status" == "COMPLETE" ]]; then
-            echo "$resp"; return 0
+        resp=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" "$BASE_URL/api/runs/$run_id/report" -H "Authorization: Bearer $TOKEN")
+        http_code=$(echo "$resp" | grep -o '__HTTP_CODE__:[0-9]*' | cut -d: -f2)
+        resp=$(echo "$resp" | sed 's/__HTTP_CODE__:[0-9]*//')
+        # Report is ready when HTTP 200 and accuracyScore is non-null
+        if [[ "$http_code" == "200" ]]; then
+            score=$(echo "$resp" | jq -r '.accuracyScore // "null"')
+            if [[ "$score" != "null" ]]; then
+                echo "$resp"; return 0
+            fi
         fi
         sleep 10
         elapsed=$((elapsed + 10))
@@ -171,18 +176,18 @@ run_provider() {
         log "[$provider] Waiting for validation report…"
         local report_json
         report_json=$(fetch_report "$run_id")
-        report_status=$(echo "$report_json" | jq -r '.status // "NOT_GENERATED"')
+        accuracy_score=$(echo "$report_json" | jq -r '.accuracyScore // "N/A"')
 
-        if [[ "$report_status" == "COMPLETE" ]]; then
-            # accuracyScore is a top-level field on ValidationReportDTO (not nested under .content)
-            accuracy_score=$(echo "$report_json"   | jq -r '.accuracyScore   // "N/A"')
+        if [[ "$accuracy_score" != "N/A" && "$accuracy_score" != "null" ]]; then
+            report_status="COMPLETE"
             accuracy_grade=$(echo "$report_json"   | jq -r '.accuracyGrade   // "N/A"')
             issues_total=$(echo "$report_json"     | jq -r '.issuesCaught    // 0')
             build_breakers=$(echo "$report_json"   | jq -r '.buildBreakers   // 0')
             review_failures=$(echo "$report_json"  | jq -r '.reviewFailures  // 0')
             ok "[$provider] Report: accuracy=$accuracy_score ($accuracy_grade), issues=$issues_total (build=$build_breakers, review=$review_failures)"
         else
-            warn "[$provider] Report not ready within ${REPORT_WAIT}s (status=$report_status)"
+            report_status="NOT_GENERATED"
+            warn "[$provider] Report not ready within ${REPORT_WAIT}s"
         fi
     fi
 
