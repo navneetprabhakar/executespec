@@ -20,7 +20,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Post-review gap-closing loop. Fires during background validation when the
@@ -84,6 +86,8 @@ public class GapClosingService {
                                     ResolvedModel reviewModel) {
         String runId = run.getRunId();
         AccuracyReport current = initial;
+        // Track gap texts already attempted across cycles — each gap gets at most 1 attempt
+        Set<String> attemptedGapTexts = new HashSet<>();
 
         for (int cycle = 1; cycle <= MAX_CYCLES; cycle++) {
 
@@ -98,9 +102,11 @@ public class GapClosingService {
                 break;
             }
 
-            List<GapItem> gaps = extractGaps(current);
+            List<GapItem> gaps = extractGaps(current).stream()
+                    .filter(g -> !attemptedGapTexts.contains(g.text()))
+                    .toList();
             if (gaps.isEmpty()) {
-                log.info("[GapCloser][{}] No actionable gaps found — stopping early", runId);
+                log.info("[GapCloser][{}] No new actionable gaps found — stopping early", runId);
                 break;
             }
 
@@ -110,6 +116,9 @@ public class GapClosingService {
             broadcaster.emit(runId, RunEvent.log(runId, "gap-closer",
                     String.format("🔍 Gap-closing cycle %d/%d — %d gap(s) (score: %d/100 → target: %d)",
                             cycle, MAX_CYCLES, gaps.size(), current.getSpecAdherenceScore(), TARGET_SCORE)));
+
+            // Mark gaps as attempted before running — prevents duplicate tasks on re-score
+            gaps.forEach(g -> attemptedGapTexts.add(g.text()));
 
             // Build, persist, and execute gap tasks
             List<AgentTask> tasks = buildGapTasks(gaps, run, cycle);
@@ -212,7 +221,7 @@ public class GapClosingService {
                     .runId(run.getRunId())
                     .title(title)
                     .status("PENDING")
-                    .complexity("LOW")
+                    .complexity("MEDIUM")
                     .assignedModel(run.getWorkerModel())
                     .taskJson(taskJson)
                     .build();
@@ -252,7 +261,7 @@ public class GapClosingService {
                         + "Only ADD the missing functionality. Read existing files first to understand "
                         + "the project structure and conventions, then make the minimal change needed. "
                         + "Commit with message: '" + commitMsg + "'")
-                .complexity("LOW")
+                .complexity("MEDIUM")
                 .dependsOn(List.of())
                 .ownedFiles(List.of())
                 .sharedFiles(List.of())
