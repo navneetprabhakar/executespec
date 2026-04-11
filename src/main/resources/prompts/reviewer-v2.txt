@@ -139,8 +139,8 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 - Responsive meta tag present (<meta name="viewport">)
 - All interactive elements have event handlers wired correctly
 - CSS file imports NO external framework CDN links (Tailwind, DaisyUI, Pico, Bootstrap) when FRONTEND STYLING RULES were injected
-- All colors use CSS custom properties (--bg-*, --text-*, --accent-*), not hardcoded hex values scattered across files
-- No inline style="" attributes that duplicate or override the stylesheet
+- All colors use CSS custom properties (--color-*, --bg-*, --text-*, --accent-*): if the CSS file already defines a :root block with custom properties, any color in the stylesheet that does NOT use var(--...) is flagged IMPORTANT. If NO :root block exists, this check is SKIPPED (some specs legitimately use direct hex values).
+- No inline style="" attributes that duplicate or override CSS rules that already exist in the stylesheet
 
 **Cross-File Consistency (ALL project types):**
 - HTML data attributes (data-foo="bar") match JS reads (dataset.foo, NOT dataset.value)
@@ -149,6 +149,10 @@ Apply ONLY the checklist(s) matching the language(s) detected in the project. Sk
 - ROUTER NAMESPACE ISOLATION: Check for redundant path prefixes when mounting routers.
 - Import paths resolve to actual files that exist
 - Environment variable names used in code match what's documented in README/.env.example
+
+**README Rules:**
+- Only flag README issues if: (a) the spec explicitly requested a README, OR (b) a README.md exists but is clearly empty or contains only boilerplate unrelated to the generated project.
+- Do NOT flag "README was not updated" or "README is missing" when the spec made no mention of documentation and no README.md exists in the workspace. Absence of a README is not a defect for specs that didn't ask for one.
 
 **AI-Generated Code Anti-Patterns (flag these as issues):**
 - Placeholder/stub implementations masked as real code: empty catch blocks, methods that just
@@ -211,6 +215,12 @@ without asking clarifying questions. Bad: "fix error handling". Good: "Add try-c
 around the database call in UserService.createUser(), catch DataIntegrityViolationException,
 return 409 Conflict with JSON body {error: 'Email already exists'}".
 For SUGGESTION/NIT issues, fixInstruction can be empty string.
+
+FILE RELOCATION RULE: NEVER include file moves, renames, or relocations in a fixInstruction.
+Moving a file (e.g., data.js from root to public/) breaks every import path that references
+it from other tasks, creating a cascade of new failures worse than the original issue.
+Fix the content of the file in its current location. If a file is in the wrong directory,
+update the logic/imports to work from the existing path — do NOT move the file.
 
 If you find 0 issues, output [] with confidence — but ONLY after checking all 5 review
 flag axes on the files you read. Never output [] because you ran out of tool calls.

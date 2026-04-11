@@ -2,7 +2,10 @@ package com.navneet.executespec.auth.entity;
 
 import com.navneet.executespec.router.LlmProvider;
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 

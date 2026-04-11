@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Decomposes tasks into subtasks at execution time using two strategies:
@@ -35,20 +37,47 @@ public class SubtaskDecomposer {
      * <p>Triggers on:
      * <ul>
      *   <li>Multi-file tasks: ownedFiles has 2+ entries</li>
-     *   <li>Complex single-file tasks: ownedFiles has 1 entry + MEDIUM or HIGH complexity</li>
+     *   <li>Complex single-file tasks: ownedFiles has 1 entry + MEDIUM or HIGH complexity,
+     *       but ONLY if no dependency task already owns the same file. If a dependency task
+     *       owns the same file, the worker will read-and-extend it anyway, making phase
+     *       decomposition redundant and inflating task count.</li>
      * </ul>
      * Excluded: rework tasks (have reworkFeedback).
      */
     public boolean shouldDecompose(TaskDefinition taskDef) {
+        return shouldDecompose(taskDef, Map.of());
+    }
+
+    /**
+     * Context-aware variant that skips phase decomposition when a dependency task
+     * already owns the same single file (avoids redundant phasing for sequential
+     * same-file chains).
+     *
+     * @param taskDef        the task to evaluate
+     * @param taskOwnedFiles map of taskId → set of owned file paths for all tasks in the plan
+     */
+    public boolean shouldDecompose(TaskDefinition taskDef, Map<String, Set<String>> taskOwnedFiles) {
         if (taskDef == null) return false;
         if (taskDef.getReworkFeedback() != null && !taskDef.getReworkFeedback().isBlank()) return false;
         List<String> files = taskDef.getOwnedFiles();
         if (files == null || files.isEmpty()) return false;
-        // Multi-file: always decompose
+        // Multi-file: always decompose (by files, not phases)
         if (files.size() > 1) return true;
         // Single-file: decompose if MEDIUM or HIGH complexity
         String complexity = taskDef.getComplexity();
-        return "MEDIUM".equalsIgnoreCase(complexity) || "HIGH".equalsIgnoreCase(complexity);
+        if (!"MEDIUM".equalsIgnoreCase(complexity) && !"HIGH".equalsIgnoreCase(complexity)) return false;
+        // Skip phase decomposition if a dependency task already owns this same file.
+        // The worker will read the existing file and extend it — no extra phases needed.
+        if (!taskOwnedFiles.isEmpty() && taskDef.getDependsOn() != null) {
+            String singleFile = files.get(0);
+            for (String depId : taskDef.getDependsOn()) {
+                Set<String> depFiles = taskOwnedFiles.get(depId);
+                if (depFiles != null && depFiles.contains(singleFile)) {
+                    return false; // dep task already wrote this file — skip phase decomp
+                }
+            }
+        }
+        return true;
     }
 
     /**
@@ -202,6 +231,13 @@ public class SubtaskDecomposer {
         List<TaskDefinition> subtasks = new ArrayList<>(total);
 
         for (int i = 0; i < total; i++) {
+            // Phase 0 inherits parent deps; each subsequent phase depends on the prior phase.
+            // Without this chaining, all phases land in the same execution tier and run in
+            // parallel — Phase 2 would read an empty file before Phase 1 has written anything.
+            List<String> phaseDeps = (i == 0)
+                    ? (parent.getDependsOn() != null ? parent.getDependsOn() : List.of())
+                    : List.of(parent.getTaskId() + "_" + i);
+
             subtasks.add(TaskDefinition.builder()
                     .taskId(parent.getTaskId() + "_" + (i + 1))
                     .title(parent.getTitle() + " [Phase " + (i + 1) + "/" + total + ": " + shortName + "]")
@@ -211,7 +247,7 @@ public class SubtaskDecomposer {
                             ? "Create exactly ONE file: " + file
                             : "Update file: " + file + " (read existing content first, then rewrite with additions)")
                     .acceptanceCriteria("File " + file + " exists and is valid")
-                    .dependsOn(parent.getDependsOn())
+                    .dependsOn(phaseDeps)
                     .complexity("LOW")
                     .assignedModel(parent.getAssignedModel())
                     .taskLayer(parent.getTaskLayer())

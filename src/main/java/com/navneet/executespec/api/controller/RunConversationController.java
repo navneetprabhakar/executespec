@@ -4,7 +4,6 @@ import com.navneet.executespec.agent.ApplySuggestionTooLargeException;
 import com.navneet.executespec.agent.ConversationAgent;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.api.RunMapper;
-import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.TierEnforcementService;
