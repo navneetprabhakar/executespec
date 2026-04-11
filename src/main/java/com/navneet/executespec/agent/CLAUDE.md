@@ -20,8 +20,9 @@ All LLM-calling agents and the routing infrastructure.
 
 ## Patterns
 - Worker completion = response starts with `{` (strict JSON check)
-- Sliding window context: first 2 + last 18 messages
-- Truncation limits: readFile 8k, shell 6k, diff 5k chars
+- Sliding window context: first 2 + last 12 units (reduced from 18 to cut ~33% input tokens)
+- Truncation limits: readFile 5k, shell 4k, diff 3k chars (reduced from 8k/6k/5k)
+- Non-subtask iteration floor: 25 (`REGULAR_TASK_MIN_ITERATIONS`) vs subtask floor 15 (`SUBTASK_ITERATION_LIMIT`)
 - Never call LLM providers directly — always through LlmRouter
 - Worker stall detection: no file writes in 5min → escalate model (WORKHORSE → PLANNING tier)
 - Worker prompts: `worker.txt` (Anthropic), `worker-openai.txt` (OpenAI), `worker-gemini.txt` (Google)

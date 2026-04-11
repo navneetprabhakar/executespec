@@ -162,6 +162,10 @@ public class WorkerAgent {
      *  typically spend 6-8 calls reading context (CODEBASE_CONTEXT, task-assignments, file-locks,
      *  listFiles) before writing. 15 gives enough headroom for context reads + writeFile. */
     private static final int SUBTASK_ITERATION_LIMIT = 15;
+    /** Minimum iteration floor for regular (non-subtask) tasks. README/doc tasks read many source
+     *  files before writing, easily consuming 10-12 read calls before a writeFile. Set higher than
+     *  SUBTASK_ITERATION_LIMIT so the adaptive cap never floors below a useful budget. */
+    private static final int REGULAR_TASK_MIN_ITERATIONS = 25;
     /** Maximum tool calls dispatched from a single LLM response. Prevents Gemini's
      *  100+ call batches from consuming the entire iteration budget in one response.
      *  Excess calls are dropped with a message telling the model to re-request if needed. */
@@ -420,7 +424,7 @@ public class WorkerAgent {
         s.isSubtask = task.getParentTaskId() != null;
         s.effectiveIterationLimit = s.isSubtask
                 ? SUBTASK_ITERATION_LIMIT
-                : adaptiveIterationService.getAdaptiveCap(s.complexity, SUBTASK_ITERATION_LIMIT, HARD_ITERATION_LIMIT);
+                : adaptiveIterationService.getAdaptiveCap(s.complexity, REGULAR_TASK_MIN_ITERATIONS, HARD_ITERATION_LIMIT);
         s.configuredMaxOutput = budgetMonitor.maxOutputTokens(s.model, s.complexity);
         s.deadline = Instant.now().plus(Duration.ofMinutes(s.taskDurationMinutes));
         s.lastCheckpointTime = Instant.now();
@@ -2385,8 +2389,11 @@ public class WorkerAgent {
         //   (a) AssistantMessage with tool_calls + all following ToolResponseMessages, or
         //   (b) any other single message (UserMessage, plain AssistantMessage)
         // The window of HISTORY_WINDOW applies to units, not individual messages, so pairs
+        // (AssistantMessage + its ToolResponseMessages) count as one unit. Reduced from 18→12
+        // to cut ~33% of per-call input tokens; 12 units ≈ 24-36 actual messages of context,
+        // which is sufficient for any single-task workflow.
         // are never split and no 400 errors occur.
-        final int HISTORY_WINDOW = 18;
+        final int HISTORY_WINDOW = 12;
         List<Message> windowed;
         if (messages.size() <= HISTORY_WINDOW + 2) {
             windowed = messages;
@@ -2622,9 +2629,9 @@ public class WorkerAgent {
      * full in the message list wastes tokens on every subsequent API call.
      * The model can always re-read the file if it needs the full content.
      */
-    private static final int MAX_RESULT_CHARS_FILE = 8_000; // read_file / list_files
-    private static final int MAX_RESULT_CHARS_SHELL = 6_000; // run_command / run_build / run_tests
-    private static final int MAX_RESULT_CHARS_DIFF = 5_000; // git_diff
+    private static final int MAX_RESULT_CHARS_FILE = 5_000;  // read_file / list_files (was 8k)
+    private static final int MAX_RESULT_CHARS_SHELL = 4_000; // run_command / run_build / run_tests (was 6k)
+    private static final int MAX_RESULT_CHARS_DIFF = 3_000;  // git_diff (was 5k)
 
     private String truncateResult(String toolName, String result) {
         if (result == null)
