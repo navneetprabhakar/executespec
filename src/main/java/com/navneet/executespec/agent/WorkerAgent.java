@@ -132,6 +132,7 @@ public class WorkerAgent {
         int lastCommitIteration = -1;       // iteration when last commit was dispatched
         int lastListFilesIteration = -1;    // iteration when last listFiles/list_files was dispatched
         int effectiveIterationLimit;
+        int maxToolCallsPerResponse;  // provider-aware cap: 15 for Gemini, 30 for Anthropic/OpenAI
         Instant deadline;
         Instant lastCheckpointTime;
         Instant lastStallCheckTime;
@@ -158,18 +159,39 @@ public class WorkerAgent {
      *  Set high enough that truncation recovery (2 continues + 2 skeleton recoveries) doesn't
      *  exhaust the budget. Each recovery burns ~2-3 tool calls, so 35 gives ~10 recovery slots. */
     private static final int HARD_ITERATION_LIMIT = 35;
-    /** Reduced iteration limit for subtasks — a subtask writes ONE file but Gemini models
-     *  typically spend 6-8 calls reading context (CODEBASE_CONTEXT, task-assignments, file-locks,
-     *  listFiles) before writing. 15 gives enough headroom for context reads + writeFile. */
-    private static final int SUBTASK_ITERATION_LIMIT = 15;
     /** Minimum iteration floor for regular (non-subtask) tasks. README/doc tasks read many source
      *  files before writing, easily consuming 10-12 read calls before a writeFile. Set higher than
-     *  SUBTASK_ITERATION_LIMIT so the adaptive cap never floors below a useful budget. */
+     *  subtask limits so the adaptive cap never floors below a useful budget. */
     private static final int REGULAR_TASK_MIN_ITERATIONS = 25;
+
+    /**
+     * Subtask iteration limits by complexity. Subtasks own exactly one file, but the
+     * amount of context reading and writing varies significantly by complexity:
+     * <ul>
+     *   <li>LOW (15): simple config/boilerplate files, 3-5 reads + writeFile</li>
+     *   <li>MEDIUM (20): component/service files with imports, 6-10 reads + writeFile + fixups</li>
+     *   <li>HIGH (25): complex files with many deps/methods, 10-15 reads + multiple writeFile attempts</li>
+     * </ul>
+     */
+    private static int subtaskIterationLimit(String complexity) {
+        return switch (complexity != null ? complexity.toUpperCase() : "MEDIUM") {
+            case "LOW"  -> 15;
+            case "HIGH" -> 25;
+            default     -> 20; // MEDIUM
+        };
+    }
     /** Maximum tool calls dispatched from a single LLM response. Prevents Gemini's
      *  100+ call batches from consuming the entire iteration budget in one response.
-     *  Excess calls are dropped with a message telling the model to re-request if needed. */
-    private static final int MAX_TOOL_CALLS_PER_RESPONSE = 15;
+     *  Excess calls are dropped with a message telling the model to re-request if needed.
+     *  Gemini: 15 (it produces 100+ call batches). Anthropic/OpenAI: 30 (they produce 15-25,
+     *  capping at 15 creates a re-request loop that burns iterations unnecessarily). */
+    private static final int MAX_TOOL_CALLS_PER_RESPONSE_GEMINI   = 15;
+    private static final int MAX_TOOL_CALLS_PER_RESPONSE_DEFAULT  = 30;
+
+    private static int maxToolCallsPerResponse(String provider) {
+        return "google".equalsIgnoreCase(provider) ? MAX_TOOL_CALLS_PER_RESPONSE_GEMINI
+                                                   : MAX_TOOL_CALLS_PER_RESPONSE_DEFAULT;
+    }
     /** Max auto-continue attempts when LLM response is truncated (hit maxTokens). */
     private static final int MAX_CONTINUATIONS = 2;
     /** Max skeleton recovery attempts before escalating model anyway. */
@@ -422,9 +444,21 @@ public class WorkerAgent {
 
         // Timing and iteration state
         s.isSubtask = task.getParentTaskId() != null;
-        s.effectiveIterationLimit = s.isSubtask
-                ? SUBTASK_ITERATION_LIMIT
-                : adaptiveIterationService.getAdaptiveCap(s.complexity, REGULAR_TASK_MIN_ITERATIONS, HARD_ITERATION_LIMIT);
+        int baseLimit = s.isSubtask
+                ? subtaskIterationLimit(s.complexity)
+                : adaptiveIterationService.getAdaptiveCap(s.provider, s.complexity, REGULAR_TASK_MIN_ITERATIONS, HARD_ITERATION_LIMIT);
+
+        // Force-retry (compile-error or rework feedback) gets a 50% boost — the first attempt
+        // already explored context, so a retry needs headroom to fix, not re-discover.
+        boolean isRetry = taskDef.getReworkFeedback() != null && !taskDef.getReworkFeedback().isBlank();
+        s.effectiveIterationLimit = isRetry
+                ? Math.min(HARD_ITERATION_LIMIT, (int) Math.ceil(baseLimit * 1.5))
+                : baseLimit;
+        if (isRetry) {
+            log.info("[Worker {}] Retry detected — iteration limit boosted {} → {} (50% boost, cap={})",
+                    taskId, baseLimit, s.effectiveIterationLimit, HARD_ITERATION_LIMIT);
+        }
+        s.maxToolCallsPerResponse = maxToolCallsPerResponse(s.provider);
         s.configuredMaxOutput = budgetMonitor.maxOutputTokens(s.model, s.complexity);
         s.deadline = Instant.now().plus(Duration.ofMinutes(s.taskDurationMinutes));
         s.lastCheckpointTime = Instant.now();
@@ -630,10 +664,10 @@ public class WorkerAgent {
             // Cap salvage calls: use the tighter of per-response cap or remaining iteration budget
             // (leave 1 slot for the model's next writeFile call after continuation)
             int remainingBudget = Math.max(1, state.effectiveIterationLimit - state.toolCallCount - 1);
-            int salvageCap = Math.min(MAX_TOOL_CALLS_PER_RESPONSE, remainingBudget);
+            int salvageCap = Math.min(state.maxToolCallsPerResponse, remainingBudget);
             if (salvageCalls.size() > salvageCap) {
                 log.warn("[Worker {}] Capping salvage calls from {} to {} (cap={}, remaining budget={})",
-                        taskId, salvageCalls.size(), salvageCap, MAX_TOOL_CALLS_PER_RESPONSE, remainingBudget);
+                        taskId, salvageCalls.size(), salvageCap, state.maxToolCallsPerResponse, remainingBudget);
                 salvageCalls = new ArrayList<>(salvageCalls.subList(0, salvageCap));
             }
             int dedupHits = 0;
@@ -737,9 +771,9 @@ public class WorkerAgent {
                 continue;
             }
             // ── Per-response cap: skip excess tool calls (defensive for PATH A) ──
-            if (dispatched >= MAX_TOOL_CALLS_PER_RESPONSE) {
+            if (dispatched >= state.maxToolCallsPerResponse) {
                 responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(),
-                        "Skipped — per-response limit of " + MAX_TOOL_CALLS_PER_RESPONSE +
+                        "Skipped — per-response limit of " + state.maxToolCallsPerResponse +
                         " reached. Re-request this call in your next response if still needed."));
                 skipped++;
                 continue;
@@ -791,7 +825,7 @@ public class WorkerAgent {
         state.toolCallCount += skipped; // skipped calls still count to prevent gaming
         if (skipped > 0) {
             log.warn("[Worker {}] Capped native tool calls: {} dispatched, {} skipped (limit {})",
-                    taskId, dispatched, skipped, MAX_TOOL_CALLS_PER_RESPONSE);
+                    taskId, dispatched, skipped, state.maxToolCallsPerResponse);
             stateStore.appendTaskLog(taskId, "TOOL_CALLS_CAPPED:" + (dispatched + skipped) + "->" + dispatched);
         }
 
@@ -916,11 +950,11 @@ public class WorkerAgent {
 
             // ── Per-response cap: prevent a single response from exhausting the budget ──
             int skipped = 0;
-            if (toolCalls.size() > MAX_TOOL_CALLS_PER_RESPONSE) {
-                skipped = toolCalls.size() - MAX_TOOL_CALLS_PER_RESPONSE;
+            if (toolCalls.size() > state.maxToolCallsPerResponse) {
+                skipped = toolCalls.size() - state.maxToolCallsPerResponse;
                 log.warn("[Worker {}] Capping tool calls from {} to {} per response ({} skipped)",
-                        taskId, toolCalls.size(), MAX_TOOL_CALLS_PER_RESPONSE, skipped);
-                toolCalls = new ArrayList<>(toolCalls.subList(0, MAX_TOOL_CALLS_PER_RESPONSE));
+                        taskId, toolCalls.size(), state.maxToolCallsPerResponse, skipped);
+                toolCalls = new ArrayList<>(toolCalls.subList(0, state.maxToolCallsPerResponse));
             }
 
             StringBuilder results = new StringBuilder();
@@ -975,11 +1009,11 @@ public class WorkerAgent {
             if (skipped > 0) {
                 results.append("<system_note>\n")
                        .append(skipped).append(" tool call(s) were skipped because you exceeded the per-response limit of ")
-                       .append(MAX_TOOL_CALLS_PER_RESPONSE).append(". ")
+                       .append(state.maxToolCallsPerResponse).append(". ")
                        .append("Re-request only the calls you still need in your next response. ")
                        .append("Do NOT repeat calls that already returned results above.\n")
                        .append("</system_note>\n\n");
-                stateStore.appendTaskLog(taskId, "TOOL_CALLS_CAPPED:" + (MAX_TOOL_CALLS_PER_RESPONSE + skipped) + "->" + MAX_TOOL_CALLS_PER_RESPONSE);
+                stateStore.appendTaskLog(taskId, "TOOL_CALLS_CAPPED:" + (state.maxToolCallsPerResponse + skipped) + "->" + state.maxToolCallsPerResponse);
             }
 
             // ── Subtask write nudge (PATH B): if 5+ tool calls with zero writes, force it ──
@@ -1109,7 +1143,7 @@ public class WorkerAgent {
                     taskId, state.isSubtask ? "subtask" : "hard", state.toolCallCount,
                     (state.isSubtask && state.totalFileWrites > 0) ? "completion (file written)" : "partial completion");
             stateStore.appendTaskLog(taskId, "ITERATION_LIMIT:" + state.toolCallCount +
-                    (state.isSubtask ? " (subtask cap=" + SUBTASK_ITERATION_LIMIT + ")" : ""));
+                    (state.isSubtask ? " (subtask cap=" + state.effectiveIterationLimit + ")" : ""));
             return true;
         }
         return false;

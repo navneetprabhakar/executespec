@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class SseBroadcaster {
 
     /** Maximum SSE connections per run. */
-    static final int MAX_EMITTERS_PER_RUN = 5;
+    static final int MAX_EMITTERS_PER_RUN = 15;
     /** Global cap on live SSE emitters across all runs. */
     static final int MAX_TOTAL_EMITTERS   = 500;
     /** Maximum events to retain per run for replay. */
@@ -117,8 +117,25 @@ public class SseBroadcaster {
                     "SSE connection limit reached. Try again later.");
         }
 
-        // Per-run limit
+        // Per-run limit — prune stale/dead emitters first to reclaim slots before checking
         List<SseEmitter> runEmitters = emitters.computeIfAbsent(runId, id -> new CopyOnWriteArrayList<>());
+        if (runEmitters.size() >= MAX_EMITTERS_PER_RUN) {
+            // Attempt to flush dead connections by sending a keep-alive; removes those that throw
+            List<SseEmitter> dead = new ArrayList<>();
+            for (SseEmitter e : runEmitters) {
+                try {
+                    e.send(SseEmitter.event().comment("ping"));
+                } catch (Throwable t) {
+                    dead.add(e);
+                    try { e.completeWithError(t); } catch (Throwable ignored) {}
+                }
+            }
+            if (!dead.isEmpty()) {
+                runEmitters.removeAll(dead);
+                totalEmitterCount.addAndGet(-dead.size());
+                log.debug("SSE pruned {} dead emitter(s) for run {}", dead.size(), runId);
+            }
+        }
         if (runEmitters.size() >= MAX_EMITTERS_PER_RUN) {
             Counter.builder("executespec.sse.emitters.rejected")
                     .tag("reason", "per_run_limit")

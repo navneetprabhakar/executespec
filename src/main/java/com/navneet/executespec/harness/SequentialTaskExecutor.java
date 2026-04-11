@@ -506,6 +506,7 @@ public class SequentialTaskExecutor {
         // Record actual iterations for adaptive cap tuning (only on genuine completions)
         if ("COMPLETE".equals(workerStatus) && report.getIterationCount() > 0) {
             adaptiveIterationService.recordTaskCompletion(
+                    report.getProvider(),
                     task.getComplexity() != null ? task.getComplexity() : "MEDIUM",
                     report.getIterationCount());
         }
@@ -996,26 +997,21 @@ public class SequentialTaskExecutor {
             sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, parentTaskId,
                     anyFailed ? "PARTIAL" : "COMPLETE"));
 
-            if (!anyFailed) {
-                completed.add(parentTask);
-
-                // Commit all subtask files in one commit + progressive merge
-                commitWorktreeIfDirty(runId, parentTaskId);
-                synchronized (mergeLock) {
-                    boolean merged = tryMergeToMain(runId, parentTask, branchName, previouslyMerged);
-                    if (merged) {
-                        mergedTaskIds.add(parentTaskId);
-                        previouslyMerged.add(parentTask);
-                    } else {
-                        completed.remove(parentTask);
-                        failed.add(parentTask);
-                        return "MERGE_FAILED";
-                    }
+            // Commit all subtask files in one commit + progressive merge regardless of partial status
+            commitWorktreeIfDirty(runId, parentTaskId);
+            synchronized (mergeLock) {
+                boolean merged = tryMergeToMain(runId, parentTask, branchName, previouslyMerged);
+                if (merged) {
+                    mergedTaskIds.add(parentTaskId);
+                    previouslyMerged.add(parentTask);
+                    // Treat PARTIAL decomposed tasks as completed so dependents can still run.
+                    // Consistent with non-decomposed PARTIAL task behavior (also added to completed).
+                    completed.add(parentTask);
+                    return anyFailed ? "PARTIAL" : "COMPLETE";
+                } else {
+                    failed.add(parentTask);
+                    return "MERGE_FAILED";
                 }
-                return "COMPLETE";
-            } else {
-                failed.add(parentTask);
-                return "PARTIAL";
             }
 
         } catch (Exception e) {
