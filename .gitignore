@@ -37,6 +37,9 @@ workspace-test/
 workspace-test/*
 test-workspace-e2e/
 
+scripts/*.md
+scripts/*.json
+
 # Frontend build outputs (rebuilt by npm run build)
 frontend/dist/
 src/main/resources/static/assets/
