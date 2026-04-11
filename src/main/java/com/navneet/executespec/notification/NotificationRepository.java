@@ -14,6 +14,8 @@ public interface NotificationRepository extends JpaRepository<Notification, Stri
 
     long countByUserIdAndReadFalse(String userId);
 
+    boolean existsByLinkAndType(String link, String type);
+
     @Modifying
     @Transactional
     @Query("UPDATE Notification n SET n.read = true WHERE n.userId = :userId AND n.read = false")

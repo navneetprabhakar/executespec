@@ -32,7 +32,7 @@ public class RunDetailSseService {
     private static final Set<String> DETAIL_TRIGGER_TYPES = Set.of(
             "TASK_STATUS", "RUN_STATUS", "GATE_OPENED", "GATE_RESOLVED",
             "COMPLETE", "RUN_RESTARTED", "PREVIEW_READY", "REVIEW_COMPLETE",
-            "TEST_REPORT_READY", "BUDGET_EXCEEDED", "TASK_DECOMPOSED"
+            "TEST_REPORT_READY", "VALIDATION_REPORT_READY", "BUDGET_EXCEEDED", "TASK_DECOMPOSED"
     );
 
     private final SseBroadcaster broadcaster;

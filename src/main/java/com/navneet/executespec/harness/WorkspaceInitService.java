@@ -63,7 +63,7 @@ public class WorkspaceInitService {
 
             // Standard build-artifact exclusions
             Files.writeString(workspace.resolve(".gitignore"),
-                "target/\nbuild/\nnode_modules/\n.gradle/\n__pycache__/\n*.class\n*.pyc\n*.log\n");
+                "target/\nbuild/\nnode_modules/\n.gradle/\n__pycache__/\n*.class\n*.pyc\n*.log\n.batch_output/\n");
 
             // Every worker MUST update README.md (hard requirement in worker.txt step 7).
             // Parallel workers all modify README.md independently from the same base, causing
