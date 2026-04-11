@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-10
+> Last updated: 2026-04-11
 
 ## Architecture
 
@@ -212,6 +212,9 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 |---------|------|
 | Pipeline orchestrator | `harness/PipelineHarness.java` |
 | Sequential task executor | `harness/SequentialTaskExecutor.java` |
+| Compile supervisor | `harness/TaskCompileSupervisor.java` (PASS/AUTO_FIX/RETRY_TASK/CONTINUE_WITH_WARNING) |
+| Supervision action enum | `harness/SupervisionAction.java` |
+| Supervision decision record | `harness/TaskCompileDecision.java` |
 | Subtask decomposer | `harness/SubtaskDecomposer.java` (multi-file → per-file subtask splitting) |
 | Run cost budget | `harness/RunCostBudgetService.java` (silent hard cap only, no progressive warnings) |
 | Cost estimator | `agent/CostEstimator.java` (per-run cost estimate + credit calculation) |
@@ -303,7 +306,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| PLANNING | PlannerAgent, ReviewerAgentV2, TaskCompileSupervisor | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
 | WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 | LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
@@ -360,6 +363,12 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Self-play prevention: WorkerAgent strips fabricated `<tool_result>` blocks from LLM responses, uses XML-first parsing for PATH B providers (Anthropic/Google)
 - Task graph subtask grouping: frontend TaskGraph renders subtasks as smaller nodes grouped under parent with expand/collapse, progress bar, aggregate status
 - Prompt architecture remediation (19 issues): shared fragment system (`PromptAssembler`), scaffold templates, planner restructured to ≤3500 words with priority tiers, per-language complexity heuristics, prompt version tracking (SHA-256 hash → `prompt_audit`), failure pattern injection into planner, live API probe for test generation (`ApiProber`), API surface extraction for test planner (`ApiSurfaceExtractor`), conflict resolver structured JSON output with risk level, token cost awareness in worker prompts, self-review enforcement (post-commit `listFiles` required), command allowlist in `ProcessExecutor`
+- **TaskCompileSupervisor:** Per-task intelligent compile triage between merge and revert. Rule-based fast path classifies errors as CASCADING / STUB / FIXABLE / STRUCTURAL; PLANNING-tier LLM call for borderline cases. Actions: PASS (cascading noise, keep merge), AUTO_FIX (targeted `CompilerAgent.applyTargetedFix()` on owned files only), RETRY_TASK (re-run worker with targeted feedback), CONTINUE_WITH_WARNING (errors in non-owned files). Replaces the old "always revert + retry" logic that caused PARTIAL cascades. Metric: `executespec.supervisor.decision` tagged by action.
+- **Gap-closer reliability:** `GapClosingService` tracks attempted gap texts across cycles via `HashSet` — each gap gets at most 1 attempt, eliminating duplicate task records on multi-cycle runs. Gap task complexity upgraded LOW → MEDIUM so adaptive iteration cap uses the MEDIUM bucket (28 cold-start vs 20), giving gap tasks sufficient budget for codebase exploration before writing.
+- **WorkerAgent method chain fix:** `buildInitialUserMessage`, `handlePromptBasedToolCalls`, `handlePathBCompletion`, and `injectFabricationRetryContext` now correctly thread `AgentTask agentTask` as a separate parameter alongside `TaskDefinition taskDef`, fixing a compile error where `getParentTaskId()` was called on the wrong type.
+- **FileViewer markdown preview:** `.md` files in the workspace viewer show a Preview/Source toggle. Preview mode renders via `MarkdownContent`; Source mode uses Monaco editor.
+- **UI gap task display:** Gap-closing tasks (`_gap_` taskId pattern) excluded from main task counters in RunDetail and RunDetailTabs. Shown collapsed in a "Gap fixes (background)" section, deduplicated by title.
+- **Provider eval script (4-dimension):** `scripts/test-providers.sh` measures cost, time, accuracy (from validation report), and efficiency (tokens, tasks) per provider. Outputs per-provider table + timestamped JSON results file.
 
 ### In Progress
 - Production deployment preparation
@@ -374,3 +383,4 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - `@Lazy @Autowired` on `PreviewService` in `TestPreviewCoordinator` — only field injection in codebase, needed to break circular dependency
 - Default provider is OpenAI but eval results show Anthropic (Haiku) and Google (Gemini) perform better — consider changing default
 - `context-agent.txt` outputs JSON patch array (`KEEP/UPDATE/ADD/REMOVE`) but `ContextAgent.java` still writes raw LLM response — Java-side patch application not yet implemented
+- **Validation report `status` field:** `ValidationReport` entity has no `status` field — `/api/runs/{id}/report` returns 404 when not ready and 200 with data when ready. Eval script and any consumers must detect presence via `accuracyScore != null`, not `status == "COMPLETE"`.

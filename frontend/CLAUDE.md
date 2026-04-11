@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-09
+> Last updated: 2026-04-11
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
@@ -62,7 +62,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **ProviderModelSelector.tsx** — AI provider selection (Anthropic/Google/OpenAI) for run submission.
 - **CommandPalette.tsx** — Global command palette (keyboard shortcut activated).
 - **Vibe* components** — VibeRunSubmit, VibeRunSummary, VibeProgressNarrative: simplified UX for non-technical users.
-- **FileTree.tsx / FileViewer.tsx** — Workspace file browsing and viewing with Monaco editor.
+- **FileTree.tsx / FileViewer.tsx** — Workspace file browsing and viewing with Monaco editor. `.md` files show a Preview/Source toggle: Preview renders via `MarkdownContent`, Source shows Monaco.
 - **TestProgressTracker.tsx** — Real-time test execution progress display.
 - **DeployWizardModal.tsx** — Multi-step deploy configuration wizard.
 - **FeasibilityEstimator.tsx** — Pre-run feasibility and complexity estimation.
@@ -76,6 +76,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - Task graph groups: nodes grouped by `_cop{N}_`/`_rev{N}_` prefix into separate collapsible sections
 - **Subtask graph grouping:** Subtask nodes (with `parentTaskId`) rendered as smaller nodes (164×36) grouped under parent with dashed border, aggregate status dot, progress bar ("N/M"), and expand/collapse chevron. Uses variable-height layout — groups compute height based on collapsed/expanded state. Kahn's topological sort only operates on standalone + group parent nodes. Backward compatible: no `parentTaskId` = no groups = same as before.
 - SSE refetch triggers include COMPILING and MERGING statuses (useSse.ts)
+- Gap tasks (`_gap_` in taskId) excluded from main task counters in RunDetail and RunDetailTabs. Shown collapsed under "Gap fixes (background)", deduplicated by title to suppress retry duplicates.
 - RunDetail API includes `githubPrUrl` field — displayed as clickable link in overview tab
 - RunDetail API includes `creditsCharged` and `hardCapUsd` — displayed at plan approval gate for multi-credit runs
 - `approveRun()` sends `creditsConfirmed` echoing the credit count shown in UI — backend returns 409 if pricing changed since plan
