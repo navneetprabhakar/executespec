@@ -383,22 +383,21 @@ public class LlmRouter {
     /**
      * Exponential-backoff retry for rate-limit and overload scenarios.
      *
-     * <p>Retry schedule (provider is at highest tier — limits are per-minute):
+     * <p>Retry schedule — exponential backoff with 15s multiplier:
      * <pre>
-     *   Attempt 1: sleep  2 s
-     *   Attempt 2: sleep  5 s
-     *   Attempt 3: sleep 10 s
-     *   Attempt 4: sleep 20 s
-     *   Attempt 5: sleep 60 s  ← covers full minute quota window
+     *   Attempt 1: sleep  15 s
+     *   Attempt 2: sleep  30 s
+     *   Attempt 3: sleep  60 s
+     *   Attempt 4: sleep 120 s  ← covers full 2-minute quota window
      * </pre>
      * Continues retrying as long as the error is still a rate-limit or overload.
      * Falls through (returns null) only when:
      * - a non-transient error is encountered, or
-     * - all 5 attempts are exhausted.
+     * - all 4 attempts are exhausted.
      *
      * @return successful LlmResponse, or null to signal fall-over to next provider
      */
-    private static final long[] RATE_LIMIT_BACKOFF_DELAYS_MS = {2_000, 5_000, 10_000, 20_000, 60_000};
+    private static final long[] RATE_LIMIT_BACKOFF_DELAYS_MS = {15_000, 30_000, 60_000, 120_000};
 
     private LlmResponse handleRetryAfterSleep(String eventKey, String eventDescription, long ignoredSleepMs,
                                                String provider, String model, Prompt prompt,

@@ -58,12 +58,13 @@ public class CostEstimator {
     private static final double HIGH_ESTIMATE_MULTIPLIER = 1.50;
 
     // Iteration count ranges per complexity (low / high scenarios).
-    private static final int LOW_ITER_LOW    = 5;
-    private static final int LOW_ITER_HIGH   = 15;
-    private static final int MEDIUM_ITER_LOW  = 15;
-    private static final int MEDIUM_ITER_HIGH = 40;
-    private static final int HIGH_ITER_LOW    = 30;
-    private static final int HIGH_ITER_HIGH   = 80;
+    // Calibrated against observed P50/P95 across real runs (Apr 2026).
+    private static final int LOW_ITER_LOW    = 3;
+    private static final int LOW_ITER_HIGH   = 10;
+    private static final int MEDIUM_ITER_LOW  = 8;
+    private static final int MEDIUM_ITER_HIGH = 25;
+    private static final int HIGH_ITER_LOW    = 15;
+    private static final int HIGH_ITER_HIGH   = 50;
 
     // Probability that stall detection promotes a WORKHORSE task to PLANNING tier mid-run.
     // Added as a premium to the high-end estimate only.
@@ -76,15 +77,16 @@ public class CostEstimator {
     private static final double CACHE_READ_COST_MULTIPLIER = 0.10;
 
     // Input token estimates per iteration by complexity.
-    // Based on typical context window usage at compaction thresholds (45%/60%/80% of 200K limit).
-    private static final int LOW_IN_TOKENS    = 15_000;
-    private static final int MEDIUM_IN_TOKENS = 40_000;
-    private static final int HIGH_IN_TOKENS   = 80_000;
+    // Calibrated against observed sliding-window context sizes (first 2 + last 12 messages,
+    // truncation at 5k/4k/3k per tool result). P50 actuals: LOW≈6k, MEDIUM≈15k, HIGH≈30k.
+    private static final int LOW_IN_TOKENS    = 8_000;
+    private static final int MEDIUM_IN_TOKENS = 18_000;
+    private static final int HIGH_IN_TOKENS   = 35_000;
 
     // Output token estimates per iteration by complexity.
-    private static final int LOW_OUT_TOKENS    = 4_000;
-    private static final int MEDIUM_OUT_TOKENS = 8_000;
-    private static final int HIGH_OUT_TOKENS   = 16_000;
+    private static final int LOW_OUT_TOKENS    = 1_500;
+    private static final int MEDIUM_OUT_TOKENS = 3_000;
+    private static final int HIGH_OUT_TOKENS   = 6_000;
 
     public CostBreakdown estimate(TaskPlan plan) {
         return estimate(plan, LlmProvider.ANTHROPIC);
@@ -122,7 +124,7 @@ public class CostEstimator {
         totalLow  += costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
         totalHigh += costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
         totalLow  += costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, reviewerOut, 1, reviewerRates);
-        totalHigh += costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, reviewerOut, 2, reviewerRates);
+        totalHigh += costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, reviewerOut, 1, reviewerRates);
 
         // Apply 50% buffer to high estimate to account for retries, failover,
         // and cache-write overhead that the simple model doesn't capture.
@@ -190,10 +192,10 @@ public class CostEstimator {
         int plannerOut = tokenBudgetMonitor.maxOutputTokens(null, "HIGH");
         double planningCost = costUsd(MEDIUM_IN_TOKENS, plannerOut, 1, plannerRates);
 
-        // Reviewer cost (1 call per task, uses lightweight/planning tier)
+        // Reviewer cost (1 call total — inspects the full merged workspace once)
         int reviewerOut = tokenBudgetMonitor.maxOutputTokens(null, "MEDIUM");
         double reviewCost = costUsd(MEDIUM_IN_TOKENS + REVIEWER_CONTEXT_BUFFER, reviewerOut,
-                plan.getTasks().size(), reviewerRates);
+                1, reviewerRates);
 
         // Compiler cost (1 call)
         double compilerCost = costUsd(MEDIUM_IN_TOKENS, reviewerOut, 1, reviewerRates);

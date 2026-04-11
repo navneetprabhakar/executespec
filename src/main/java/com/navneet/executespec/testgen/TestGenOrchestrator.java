@@ -94,21 +94,29 @@ public class TestGenOrchestrator {
                 log.debug("[TestGen] Preview probe skipped for run {}: {}", runId, e.getMessage());
             }
 
-            // 6. Generate test classes sequentially
+            // 6. Generate test classes in parallel (one virtual thread per test task)
             emitTestEvent(runId, "TEST_GENERATION_STARTED",
-                    "Generating " + tasks.size() + " test classes");
+                    "Generating " + tasks.size() + " test classes in parallel");
 
             final String probeResults = apiProbeResults;
-            for (TestTask task : tasks) {
-                try {
-                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc, userRequest, isCli, isStaticHtml, probeResults);
-                } catch (Exception e) {
-                    log.error("[TestGen] Test generation failed for task {}: {}",
-                            task.getTaskName(), e.getMessage());
-                    task.setStatus(TestTaskStatus.FAILED);
-                    task.setCompilationError(e.getMessage());
-                    testTaskRepository.save(task);
-                }
+            var genSnapshot = io.micrometer.context.ContextSnapshotFactory.builder().build().captureAll();
+            java.util.List<Thread> genThreads = tasks.stream()
+                    .map(task -> Thread.ofVirtual().name("testgen-task-" + runId + "-" + task.getId())
+                            .start(genSnapshot.wrap(() -> {
+                                try {
+                                    testWorkerAgent.generateTestClass(runId, task, conventionsDoc,
+                                            userRequest, isCli, isStaticHtml, probeResults);
+                                } catch (Exception e) {
+                                    log.error("[TestGen] Test generation failed for task {}: {}",
+                                            task.getTaskName(), e.getMessage());
+                                    task.setStatus(TestTaskStatus.FAILED);
+                                    task.setCompilationError(e.getMessage());
+                                    testTaskRepository.save(task);
+                                }
+                            })))
+                    .toList();
+            for (Thread t : genThreads) {
+                try { t.join(); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
             }
 
             // 7. Compile all generated tests together

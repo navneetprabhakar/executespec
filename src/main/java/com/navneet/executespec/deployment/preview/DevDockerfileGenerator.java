@@ -1442,10 +1442,12 @@ public class DevDockerfileGenerator {
             }
         }
 
-        // Ensure vite, concurrently, and common React dependencies are available if it's a Vite project
-        String viteInstall = "";
+        // Always ensure concurrently is available — dev:all script uses it regardless of Vite
+        StringBuilder missing = new StringBuilder();
+        if (!fileContainsPattern(workspace.resolve("package.json"), "\"concurrently\"")) missing.append(" concurrently");
+
+        // Also install Vite-related deps if this is a Vite project
         if (usesVite) {
-            StringBuilder missing = new StringBuilder();
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"vite\"")) missing.append(" vite");
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"@vitejs/plugin-react\"")) missing.append(" @vitejs/plugin-react");
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"react\"")) missing.append(" react");
@@ -1454,14 +1456,11 @@ public class DevDockerfileGenerator {
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"lucide-react\"")) missing.append(" lucide-react");
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"clsx\"")) missing.append(" clsx");
             if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\"")) missing.append(" tailwind-merge");
-            
-            // Mandate concurrently for full-stack projects to ensure both FE and BE start
-            if (!fileContainsPattern(workspace.resolve("package.json"), "\"concurrently\"")) missing.append(" concurrently");
-
-            if (missing.length() > 0) {
-                viteInstall = " && npm install -D" + missing.toString() + " --legacy-peer-deps";
-            }
         }
+
+        String viteInstall = missing.length() > 0
+                ? " && npm install -D" + missing + " --legacy-peer-deps"
+                : "";
 
         return """
                 FROM node:20-alpine
