@@ -2225,6 +2225,23 @@ public class WorkerAgent {
                 task.getBoundaries(), task.getOutputFormat(), task.getAcceptanceCriteria(),
                 deps, task.getComplexity(), branchName);
 
+        // Subtask-specific preamble: tight budget, write immediately
+        if (task.getParentTaskId() != null) {
+            String ownedFile = (task.getOwnedFiles() != null && !task.getOwnedFiles().isEmpty())
+                    ? task.getOwnedFiles().getFirst() : "your assigned file";
+            int iterLimit = subtaskIterationLimit(task.getComplexity());
+            String subtaskPreamble = """
+                    ⚡ SUBTASK MODE — WRITE IMMEDIATELY
+                    You own exactly ONE file: %s
+                    Total budget: %d iterations. Use at most 2–3 reads for context, then write.
+                    Your writeFile call MUST happen by iteration 4 at the latest.
+                    Do NOT spend more tool calls reading/listing/searching — you have enough context from the task definition.
+
+                    """.formatted(ownedFile, iterLimit);
+            String frontendBlock = buildFrontendBlock(task, runId);
+            return subtaskPreamble + baseAssignment + (frontendBlock != null ? "\n" + frontendBlock : "");
+        }
+
         // Inject frontend design system constraints if this is a frontend task
         String frontendBlock = buildFrontendBlock(task, runId);
         if (frontendBlock != null) {
@@ -2347,18 +2364,19 @@ public class WorkerAgent {
     private String buildSubtaskWriteNudge(TaskDefinition taskDef, int toolCallCount) {
         String ownedFile = (taskDef.getOwnedFiles() != null && !taskDef.getOwnedFiles().isEmpty())
                 ? taskDef.getOwnedFiles().getFirst() : "your assigned file";
+        int iterLimit = subtaskIterationLimit(taskDef.getComplexity());
         return """
                 ═══ SUBTASK WRITE NUDGE ═══
 
                 You are on a SUBTASK. You own exactly ONE file: %s
-                You have used %d of 10 allowed tool calls and have written ZERO files.
+                You have used %d of %d allowed iterations and have written ZERO files.
 
                 STOP READING. You have enough context.
                 Your NEXT tool call MUST be writeFile to create %s.
                 If you call readFile, listFiles, or searchFiles again, this task WILL be terminated.
 
                 Write the complete file NOW.
-                """.formatted(ownedFile, toolCallCount, ownedFile);
+                """.formatted(ownedFile, toolCallCount, iterLimit, ownedFile);
     }
 
     /**

@@ -30,8 +30,10 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
 
   const reportReady = useSseStore((s) => s.entries).some(e => e.type === 'VALIDATION_REPORT_READY');
   useEffect(() => {
-    if (!FETCH_STATUSES.has(status) || !reportReady) return;
-    getValidationReport(runId).then(setReport);
+    if (!FETCH_STATUSES.has(status)) return;
+    // Fetch immediately if run is terminal (navigated to after stream closed),
+    // or when the live VALIDATION_REPORT_READY event arrives during the session.
+    getValidationReport(runId).then(r => { if (r) setReport(r); });
   }, [runId, status, reportReady]);
 
   if (!report) return null;
