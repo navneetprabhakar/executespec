@@ -2373,28 +2373,69 @@ public class WorkerAgent {
         log.info("[Worker callModel] provider={} model={} complexity={} maxOut={} nativeTools={}",
                 provider, model, complexity, maxOut, useNativeTools);
 
-        // Context window: relevance-scored policy (first 2 + high-relevance mid + recent tail).
-        // Native tool calling (OpenAI) skips windowing — AssistantMessage(tool_calls) and
-        // ToolResponseMessage pairs MUST stay together; splitting them causes 400 errors.
+        // Context window: pair-aware sliding window applied uniformly to all providers.
+        //
+        // Previously OpenAI skipped windowing entirely because AssistantMessage(tool_calls)
+        // and ToolResponseMessage pairs must be adjacent — splitting them causes 400 errors.
+        // That caused OpenAI to accumulate the full message history (5x more input tokens
+        // vs Anthropic on multi-task specs, e.g. 70K/task vs 14K/task on Node.js backend).
+        //
+        // Fix: group messages into atomic pair-units before windowing, then flatten.
+        // A "pair unit" is either:
+        //   (a) AssistantMessage with tool_calls + all following ToolResponseMessages, or
+        //   (b) any other single message (UserMessage, plain AssistantMessage)
+        // The window of HISTORY_WINDOW applies to units, not individual messages, so pairs
+        // are never split and no 400 errors occur.
         final int HISTORY_WINDOW = 18;
         List<Message> windowed;
-        if (useNativeTools || messages.size() <= HISTORY_WINDOW + 2) {
+        if (messages.size() <= HISTORY_WINDOW + 2) {
             windowed = messages;
-        } else {
+        } else if (!useNativeTools) {
+            // Anthropic/Google: existing relevance-scored policy (first 2 + high-relevance mid + recent tail).
             windowed = contextWindowPolicy.apply(messages, HISTORY_WINDOW);
-            // Ensure window boundary does not split AssistantMessage(tool_calls)/ToolResponseMessage pairs.
-            // If first message after anchor is a ToolResponseMessage, walk back until it isn't.
+            // Guard: don't start with an orphaned ToolResponseMessage after the anchor pair.
             if (windowed.size() > 2 && windowed.get(2) instanceof ToolResponseMessage) {
-                // Rebuild without the offending leading ToolResponseMessage
                 List<Message> safeWindowed = new ArrayList<>(windowed.subList(0, 2));
-                boolean skipLeadingToolResponses = true;
+                boolean skip = true;
                 for (int i = 2; i < windowed.size(); i++) {
-                    if (skipLeadingToolResponses && windowed.get(i) instanceof ToolResponseMessage) continue;
-                    skipLeadingToolResponses = false;
+                    if (skip && windowed.get(i) instanceof ToolResponseMessage) continue;
+                    skip = false;
                     safeWindowed.add(windowed.get(i));
                 }
                 windowed = safeWindowed;
             }
+        } else {
+            // OpenAI native tool calling: pair-aware sliding window.
+            // Group history (after the first 2 anchor messages) into atomic units.
+            List<Message> anchor = messages.subList(0, 2);
+            List<List<Message>> units = new ArrayList<>();
+            List<Message> rest = messages.subList(2, messages.size());
+            int i = 0;
+            while (i < rest.size()) {
+                Message m = rest.get(i);
+                if (m instanceof AssistantMessage am && !am.getToolCalls().isEmpty()) {
+                    // Collect this AssistantMessage plus all following ToolResponseMessages
+                    List<Message> unit = new ArrayList<>();
+                    unit.add(am);
+                    i++;
+                    while (i < rest.size() && rest.get(i) instanceof ToolResponseMessage) {
+                        unit.add(rest.get(i));
+                        i++;
+                    }
+                    units.add(unit);
+                } else {
+                    units.add(List.of(m));
+                    i++;
+                }
+            }
+            // Keep the most recent HISTORY_WINDOW units
+            List<List<Message>> keptUnits = units.size() <= HISTORY_WINDOW
+                    ? units
+                    : units.subList(units.size() - HISTORY_WINDOW, units.size());
+            windowed = new ArrayList<>(anchor);
+            keptUnits.forEach(windowed::addAll);
+            log.debug("[Worker callModel] OpenAI pair-aware window: {} units → {} messages (was {})",
+                    units.size(), windowed.size(), messages.size());
         }
 
         List<Message> allMessages = new ArrayList<>();
