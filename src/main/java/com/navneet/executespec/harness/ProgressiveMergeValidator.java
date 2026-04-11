@@ -59,8 +59,7 @@ public class ProgressiveMergeValidator {
                         new String[]{"mvn", "compile", "-q", "-B"}, JAVA_TIMEOUT_SEC);
             }
             if (Files.exists(workspacePath.resolve("tsconfig.json"))) {
-                return runCheck(runId, "typescript", workspacePath,
-                        new String[]{"npx", "tsc", "--noEmit"}, NODE_TIMEOUT_SEC);
+                return runTypeScriptCheck(runId, workspacePath);
             }
             // Python: check if any *.py files exist
             if (hasPythonFiles(workspacePath)) {
@@ -75,6 +74,57 @@ public class ProgressiveMergeValidator {
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
+
+    /**
+     * TypeScript check with progressive-merge awareness.
+     *
+     * <p>During progressive merge, components are written before their imports exist,
+     * so TS2307 (Cannot find module) and TS2304 (Cannot find name) errors are expected
+     * and must not block a merge. Only real syntax and type errors (e.g. TS1005, TS2345,
+     * TS2339) should cause a FAILED result.
+     *
+     * <p>If ALL errors in the tsc output are missing-import errors, the check is treated
+     * as SKIPPED (not FAILED). If there are any other errors, the check FAILS with only
+     * those real errors surfaced to the retry worker.
+     */
+    private MergeCheckResult runTypeScriptCheck(String runId, Path workspace)
+            throws IOException, InterruptedException {
+        MergeCheckResult raw = runCheck(runId, "typescript", workspace,
+                new String[]{"npx", "tsc", "--noEmit", "--skipLibCheck"}, NODE_TIMEOUT_SEC);
+
+        if (raw.result() != CheckResult.FAILED) return raw;
+
+        // Filter out missing-import errors that are expected during progressive merge.
+        // TS2307: Cannot find module '...'
+        // TS2304: Cannot find name '...'
+        // TS2305: Module '...' has no exported member '...' (can occur before sibling file exists)
+        // TS6059: File '...' is not under 'rootDir' (project setup in progress)
+        // Strip ANSI escape codes before processing (tsc emits colour codes on some terminals)
+        String output = raw.errorOutput().replaceAll("\u001B\\[[;\\d]*m", "").replaceAll("\\[\\d+m", "");
+        String[] lines = output.split("\n");
+        StringBuilder realErrors = new StringBuilder();
+        for (String line : lines) {
+            // Skip blank/whitespace-only lines (may be ANSI-stripped colour markers)
+            if (line.isBlank()) continue;
+            boolean missingImport = line.contains("TS2307") || line.contains("TS2304")
+                    || line.contains("TS2305") || line.contains("TS6059");
+            if (!missingImport) {
+                realErrors.append(line).append("\n");
+            }
+        }
+
+        String realErrorOutput = realErrors.toString().trim();
+        if (realErrorOutput.isEmpty()) {
+            log.debug("[MergeValidator] TypeScript check — only missing-import errors (expected during progressive merge) for run {} — treating as SKIPPED", runId);
+            recordMetric("typescript", "skipped_missing_imports");
+            return MergeCheckResult.skipped();
+        }
+
+        // Real errors found — fail with only those
+        String truncated = realErrorOutput.length() > 2000 ? realErrorOutput.substring(0, 2000) + "…" : realErrorOutput;
+        log.warn("[MergeValidator] TypeScript check FAILED (real errors) for run {}: {}", runId, truncated);
+        return MergeCheckResult.failed(truncated);
+    }
 
     private MergeCheckResult runCheck(String runId, String language, Path workspace,
                                       String[] command, int timeoutSec) throws IOException, InterruptedException {
