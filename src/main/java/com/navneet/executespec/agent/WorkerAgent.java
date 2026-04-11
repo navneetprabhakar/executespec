@@ -216,7 +216,7 @@ public class WorkerAgent {
         // ── Initialize execution state ───────────────────────────────────────
         TaskExecutionState state = initializeExecutionState(task, taskDef, runId);
         List<Message> messages = new ArrayList<>();
-        messages.add(new UserMessage(buildInitialUserMessage(taskDef, state.branchName, runId)));
+        messages.add(new UserMessage(buildInitialUserMessage(taskDef, task, state.branchName, runId)));
         final int MAX_CONSECUTIVE_NULL_RESPONSES = 3;
         final int MAX_FABRICATED_COMPLETIONS = 2;
 
@@ -1113,7 +1113,7 @@ public class WorkerAgent {
 
         boolean nativeFabricationMode = "openai".equalsIgnoreCase(state.provider) || "anthropic".equalsIgnoreCase(state.provider);
         messages.clear();
-        messages.add(new UserMessage(buildInitialUserMessage(taskDef, state.branchName, runId)));
+        messages.add(new UserMessage(buildInitialUserMessage(taskDef, task, state.branchName, runId)));
         String fabricationExample = nativeFabricationMode
                 ? "Call the writeFile tool now for your next file."
                 : "Example:\n" +
