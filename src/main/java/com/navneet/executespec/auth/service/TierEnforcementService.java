@@ -473,6 +473,7 @@ public class TierEnforcementService {
      * Safe to call from async pipeline threads where there is no auth principal.
      */
     public String resolveUserTier(String userId) {
+        if (userId == null) return "FREE";
         AppUser user = userRepo.findById(userId).orElse(null);
         if (user == null) return "FREE";
         if ("SUPER_ADMIN".equals(user.getGlobalRole())) return "ENTERPRISE";
