@@ -49,16 +49,12 @@ export default function RunDetail() {
   const loadMe = useAuthStore((s) => s.loadMe);
   const sseEntries = useSseStore((s) => s.entries);
 
-  // Show toast when context compaction is triggered
-  const compactionShownRef = useRef<Set<string>>(new Set());
+  // Show toast for budget events; suppress compaction toasts (too noisy with subtask decomposition)
   const budgetShownRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     for (const entry of sseEntries) {
-      if (entry.type === 'COMPACTION_TRIGGERED' && !compactionShownRef.current.has(entry.id)) {
-        compactionShownRef.current.add(entry.id);
-        const taskId = (entry.data?.taskId as string) || 'unknown';
-        addToast({ type: 'info', message: `Context compacted for task ${taskId}` });
-      }
+      // COMPACTION_TRIGGERED: skip toasts — they appear in the live log and are too frequent
+      // when subtask decomposition creates many parallel sub-tasks each hitting context limits.
       if (entry.type === 'BUDGET_EXCEEDED' && !budgetShownRef.current.has(entry.id)) {
         budgetShownRef.current.add(entry.id);
         const parts = ((entry.data?.payload as string) || '').split('|');
@@ -632,8 +628,8 @@ export default function RunDetail() {
                 timestamp: new Date(e.timestamp).toISOString(),
               }))}
               status={activeRun.status}
-              taskCount={activeRun.tasks?.length || 0}
-              completedTaskCount={activeRun.tasks?.filter(t => t.status === 'COMPLETE').length || 0}
+              taskCount={activeRun.tasks?.filter(t => !t.parentTaskId).length || 0}
+              completedTaskCount={activeRun.tasks?.filter(t => !t.parentTaskId && t.status === 'COMPLETE').length || 0}
             />
           </div>
 
@@ -721,13 +717,9 @@ export default function RunDetail() {
           </div>
 
           {/* Reports + Tabs — single scrollable region */}
-          <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
-            <div className="flex-shrink-0">
-              <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} />
-            </div>
-            <div className="flex-1 min-h-0">
-              <RunDetailTabs />
-            </div>
+          <div className="flex-1 overflow-y-auto">
+            <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} />
+            <RunDetailTabs />
           </div>
           </>
           )}

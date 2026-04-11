@@ -293,34 +293,20 @@ public class OrphanedRunWatchdog {
             .build();
 
         if (hasPendingTasks) {
-            // Partial progress — pause and resume to re-execute incomplete tasks
-            // StateStore.pauseRun() sets non-COMPLETE tasks to FAILED,
-            // StateStore.resumeRun() resets all non-COMPLETE tasks back to PENDING.
-            // PipelineHarness.resumeRun() then spawns a new async thread.
-            recovery.setActionTaken("AUTO_RESUME");
+            // Auto-resume of entire runs is disabled — task/subtask retries happen within the
+            // pipeline itself (SequentialTaskExecutor). A dead pipeline thread with pending tasks
+            // means something went wrong at the orchestration level; fail fast and let the user
+            // re-submit rather than silently retrying in a potentially broken state.
+            long pendingCount = allTasks.stream().filter(t -> "PENDING".equals(t.getStatus())).count();
+            recovery.setActionTaken("AUTO_FAIL");
             recoveryRepo.save(recovery);
 
-            boolean paused = stateStore.pauseRun(runId);
-            if (!paused) {
-                // Run may have changed status between detection and recovery
-                log.warn("Orphaned run {} could not be paused — status may have changed", runId);
-                recordAudit(run, "AUTO_RESUME_FAILED", idle);
-                return;
-            }
-
-            boolean resumed = harness.resumeRun(runId);
-            if (resumed) {
-                broadcaster.emit(runId, RunEvent.log(runId, null,
-                    "\uD83D\uDD04 Watchdog: Pipeline thread recovered — resuming incomplete tasks"));
-                log.info("Orphaned run {} auto-resumed ({} pending tasks)", runId,
-                    allTasks.stream().filter(t -> "PENDING".equals(t.getStatus())).count());
-                recordAudit(run, "AUTO_RESUME", idle);
-            } else {
-                stateStore.markFailed(runId, "Watchdog: Auto-resume failed after pause");
-                broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
-                log.error("Orphaned run {} auto-resume failed", runId);
-                recordAudit(run, "AUTO_RESUME_FAILED", idle);
-            }
+            stateStore.markFailed(runId,
+                "Watchdog: Pipeline thread died with " + pendingCount + " task(s) pending — please re-run");
+            broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
+            log.info("Orphaned run {} marked FAILED — {} pending task(s), auto-resume disabled",
+                runId, pendingCount);
+            recordAudit(run, "AUTO_FAIL", idle);
 
         } else if (hasCompletedTasks) {
             // All executable tasks done — pipeline died during post-processing.

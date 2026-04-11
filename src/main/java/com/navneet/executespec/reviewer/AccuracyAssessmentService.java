@@ -133,13 +133,15 @@ public class AccuracyAssessmentService {
             messages.add(new SystemMessage(SYSTEM_PROMPT));
             messages.add(new UserMessage(userMessage));
 
-            AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                    .temperature(0.0)
-                    .cacheOptions(AnthropicCacheOptions.builder()
-                            .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
-                            .build())
-                    .build();
-            Prompt prompt = new Prompt(messages, opts);
+            AnthropicChatOptions opts = "ANTHROPIC".equalsIgnoreCase(provider)
+                    ? AnthropicChatOptions.builder()
+                            .temperature(0.0)
+                            .cacheOptions(AnthropicCacheOptions.builder()
+                                    .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                                    .build())
+                            .build()
+                    : null;
+            Prompt prompt = opts != null ? new Prompt(messages, opts) : new Prompt(messages);
 
             LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
                     provider, model.getModel(), prompt,
@@ -185,7 +187,8 @@ public class AccuracyAssessmentService {
                         "Your response was not valid JSON. Return ONLY a valid JSON object matching the required format. No markdown, no explanation."));
                 try {
                     LlmRouter.LlmResponse retryLr = llmRouter.callWithFallbackTracked(
-                            provider, model.getModel(), new Prompt(messages, opts),
+                            provider, model.getModel(),
+                            opts != null ? new Prompt(messages, opts) : new Prompt(messages),
                             runId, "accuracy-assessment-retry", LlmRouter.FallbackMode.IMMEDIATE, 1, false);
                     String retryText = retryLr.response().getResult().getOutput().getText();
                     String retryCleaned = LlmResponseCleaner.stripMarkdownFences(retryText).trim();
@@ -350,7 +353,7 @@ public class AccuracyAssessmentService {
      * Conservative default when LLM call fails.
      * Derives a rough score from review issue counts.
      */
-    private AccuracyReport defaultReport(List<ReviewIssue> issues) {
+    AccuracyReport defaultReport(List<ReviewIssue> issues) {
         long unfixedCritical = issues == null ? 0 : issues.stream()
                 .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
                 .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())

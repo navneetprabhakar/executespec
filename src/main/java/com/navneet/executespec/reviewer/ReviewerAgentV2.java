@@ -248,13 +248,14 @@ public class ReviewerAgentV2 {
         // ============================
 
         sseBroadcaster.emit(runId, RunEvent.log(runId, null, "Running accuracy assessment…"));
-        AccuracyReport accuracyReport = null;
+        AccuracyReport accuracyReport;
         try {
             accuracyReport = accuracyAssessmentService.assess(
                     runId, reviewModel.providerName(), reviewModel, originalGoal, issues);
             sseBroadcaster.emit(runId, RunEvent.log(runId, null, accuracyReport.toOneLiner()));
         } catch (Exception e) {
             log.warn("[ReviewerV2] Accuracy assessment failed for run {}: {}", runId, e.getMessage());
+            accuracyReport = accuracyAssessmentService.defaultReport(issues);
         }
 
         // ============================
@@ -346,14 +347,17 @@ public class ReviewerAgentV2 {
 
         int toolCallCount = 0;
 
+        AnthropicChatOptions reviewOpts = "ANTHROPIC".equalsIgnoreCase(provider)
+                ? AnthropicChatOptions.builder()
+                        .temperature(0.0)
+                        .cacheOptions(AnthropicCacheOptions.builder()
+                                .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                                .build())
+                        .build()
+                : null;
+
         for (int iteration = 0; iteration < MAX_TOOL_CALLS + 5; iteration++) {
-            AnthropicChatOptions opts = AnthropicChatOptions.builder()
-                    .temperature(0.0)
-                    .cacheOptions(AnthropicCacheOptions.builder()
-                            .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
-                            .build())
-                    .build();
-            Prompt prompt = new Prompt(messages, opts);
+            Prompt prompt = reviewOpts != null ? new Prompt(messages, reviewOpts) : new Prompt(messages);
 
             LlmRouter.LlmResponse lr;
             try {

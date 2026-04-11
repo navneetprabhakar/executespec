@@ -590,6 +590,9 @@ public class PipelineHarness {
                     r.setStatus("PLANNING");
                     r.setQueuePosition(0);
                     stateStore.save(r);
+                    // Register as active NOW (before provider pool queue) so the watchdog
+                    // doesn't misdetect this run as orphaned while it waits for a pool slot.
+                    activeRunThreads.add(runId);
                     // Route through provider pool after acquiring global slot
                     dispatchToProviderPool(r.getAiProvider(), runId, submitUserTier, () -> {
                         try {
@@ -616,6 +619,8 @@ public class PipelineHarness {
 
         } else {
             // Global slot available — route directly to provider pool
+            // Register active before dispatching so watchdog sees this run immediately
+            activeRunThreads.add(runId);
             try {
                 final PipelineRun frozenRun = run;
                 dispatchToProviderPool(run.getAiProvider(), runId, submitUserTier, () -> {
@@ -628,6 +633,7 @@ public class PipelineHarness {
                     }
                 });
             } catch (ProviderRunPool.ProviderQueueFullException e) {
+                activeRunThreads.remove(runId);
                 runSlots.release();
                 stateStore.markFailed(runId, e.getMessage());
                 log.warn("Run {} rejected — provider pool full at submit: {}", runId, e.getMessage());
@@ -2403,6 +2409,7 @@ public class PipelineHarness {
                 stateStore.markFailed(runId, reason);
                 broadcaster.emit(runId, RunEvent.complete(runId, "FAILED"));
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, reason));
+                maybeStartFailedValidation(runId);
             }
         } catch (Exception e) {
             log.error("Async run {} failed: {}", runId, e.getMessage(), e);
@@ -2417,6 +2424,7 @@ public class PipelineHarness {
                 eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, e.getMessage()));
                 PipelineRun failedRunEx = stateStore.findRun(runId).orElse(null);
                 if (failedRunEx != null) autoRetryRunIfEligible(failedRunEx);
+                maybeStartFailedValidation(runId);
             }
         } finally {
             activeRunThreads.remove(runId);
@@ -2693,6 +2701,37 @@ public class PipelineHarness {
             runBudgetTracker.remove(runId);
             runCostBudgetService.remove(runId);
             broadcaster.complete(runId);
+        }
+    }
+
+    /**
+     * Starts a background validation report thread for a FAILED run, but only if at least one
+     * task reached COMPLETE or PARTIAL status (i.e., some code was written).
+     * Skips test execution — report-only mode.
+     */
+    private void maybeStartFailedValidation(String runId) {
+        try {
+            List<AgentTask> tasks = stateStore.getAllTasks(runId);
+            boolean hasWork = tasks.stream()
+                    .anyMatch(t -> "COMPLETE".equals(t.getStatus()) || "PARTIAL".equals(t.getStatus()));
+            if (!hasWork) {
+                log.info("Run {} failed with no completed tasks — skipping validation report", runId);
+                return;
+            }
+            PipelineRun failedRun = stateStore.findRun(runId).orElse(null);
+            if (failedRun == null) return;
+
+            List<WorkerReport> reports = getWorkerReports(runId);
+            String planJson = failedRun.getPlanJson() != null ? failedRun.getPlanJson() : "{}";
+
+            backgroundValidationService.create(runId);
+            var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+            Thread.ofVirtual().name("bg-validation-failed-" + runId).start(snapshot.wrap(() ->
+                    runBackgroundValidation(runId, failedRun, reports, planJson,
+                            failedRun.getUserRequest(), CompileResult.skip(), true, false)));
+            log.info("Run {} — started background validation report for FAILED run", runId);
+        } catch (Exception e) {
+            log.warn("Could not start validation report for FAILED run {}: {}", runId, e.getMessage());
         }
     }
 
@@ -3885,6 +3924,7 @@ public class PipelineHarness {
                 reportResult = validationReportService.generateAndPersist(runId, input);
                 if (reportResult.isPresent()) {
                     broadcaster.emit(runId, RunEvent.log(runId, "report", "✅ Validation report generated"));
+                    broadcaster.emit(runId, RunEvent.validationReportReady(runId));
                     break;
                 }
                 if (attempt < 2) {

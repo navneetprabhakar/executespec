@@ -98,7 +98,9 @@ export default function RunConversation({ runId }: Props) {
   useEffect(() => {
     if (!activeRun) return;
     const isTerminal = ['COMPLETE', 'PARTIAL', 'FAILED'].includes(activeRun.status);
-    if (!isTerminal || !reportReady) return;
+    if (!isTerminal) return;
+    // Fetch immediately if run is terminal (navigated to after stream closed),
+    // or when the live VALIDATION_REPORT_READY event arrives during the session.
     getValidationReport(activeRun.runId).then((report) => {
       if (!report) return;
       setValidationReport(report);

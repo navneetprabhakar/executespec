@@ -78,6 +78,7 @@ public class SequentialTaskExecutor {
     private final SubtaskDecomposer subtaskDecomposer;
     private final ProgressiveMergeValidator mergeValidator;
     private final AdaptiveIterationService adaptiveIterationService;
+    private final TaskCompileSupervisor taskCompileSupervisor;
 
     /**
      * Result of sequential execution across all tasks.
@@ -236,8 +237,22 @@ public class SequentialTaskExecutor {
             if (!mergedTaskIds.isEmpty()) {
                 String syntaxError = compilerAgent.quickCompileAndFix(runId);
                 if (syntaxError != null) {
-                    log.warn("Post-tier {} compile still failing for run {} after auto-fix — continuing",
+                    log.warn("Post-tier {} compile still failing for run {} after auto-fix — consulting supervisor",
                             tierIdx, runId);
+                    // Supervisor provides insight/metrics; structural errors deferred to final compile phase
+                    List<AgentTask> currentTierMerged = tiers.get(tierIdx).stream()
+                            .filter(t -> mergedTaskIds.contains(t.getTaskId()))
+                            .toList();
+                    if (!currentTierMerged.isEmpty()) {
+                        TaskCompileDecision tierDecision = taskCompileSupervisor.superviseTaskGroup(
+                                run, currentTierMerged.get(0), currentTierMerged,
+                                syntaxError, mergedTaskIds, availableProviders);
+                        if (tierDecision.action() == SupervisionAction.RETRY_TASK) {
+                            sseBroadcaster.emit(run.getRunId(), RunEvent.log(run.getRunId(), "pipeline",
+                                    "⚠️ Tier " + tierIdx + " structural errors detected (fixability: "
+                                    + tierDecision.fixabilityScore() + "/100) — deferred to final compile phase"));
+                        }
+                    }
                 }
             }
 
@@ -404,44 +419,55 @@ public class SequentialTaskExecutor {
                             mergeValidator.quickCheck(runId, workspacePath);
 
                     if (checkResult.result() == ProgressiveMergeValidator.CheckResult.FAILED) {
-                        log.warn("[ProgressiveMerge] Compile check FAILED after merging task {} for run {} — reverting and retrying",
-                                taskId, runId);
-                        sseBroadcaster.emit(runId, RunEvent.log(runId, taskId,
-                                "Post-merge compile check failed — reverting and retrying task with compile error context"));
+                        // ── Supervisor: intelligent triage before deciding to revert ──────────
+                        TaskCompileDecision decision = taskCompileSupervisor.supervise(
+                                run, task, checkResult.errorOutput(), mergedTaskIds, availableProviders);
+                        log.info("[Supervisor] task={} action={} fixability={} owned={} cascading={}",
+                                taskId, decision.action(), decision.fixabilityScore(),
+                                decision.ownedErrorCount(), decision.cascadingErrorCount());
 
-                        boolean reverted = mergeService.revertLastMerge(runId);
-                        if (reverted) {
-                            // Retry task once with compile error injected as context
-                            WorkerReport retryReport = retryTaskWithCompileError(
-                                    run, task, branchName, checkResult.errorOutput(), availableProviders);
-                            String retryStatus = normalizeStatus(retryReport.getStatus());
-                            if ("COMPLETE".equals(retryStatus)) {
-                                // Re-attempt merge with the fixed output
-                                boolean reMerged = tryMergeToMain(runId, task, branchName, previouslyMerged);
-                                if (reMerged) {
-                                    mergedTaskIds.add(taskId);
-                                    previouslyMerged.add(task);
-                                    metricsTaskOutcome = "COMPLETE_AFTER_COMPILE_FIX";
-                                } else {
-                                    completed.remove(task);
-                                    failed.add(task);
-                                    metricsTaskOutcome = "MERGE_FAILED_AFTER_RETRY";
-                                    taskObs.lowCardinalityKeyValue("task.outcome", metricsTaskOutcome);
-                                }
-                            } else {
-                                // Retry also failed — mark PARTIAL and continue pipeline
-                                completed.remove(task);
-                                failed.add(task);
-                                metricsTaskOutcome = "PARTIAL_COMPILE_FAILED";
-                                taskObs.lowCardinalityKeyValue("task.outcome", metricsTaskOutcome);
-                                log.warn("[ProgressiveMerge] Task {} retry also failed — marking PARTIAL, continuing", taskId);
+                        switch (decision.action()) {
+                            case PASS -> {
+                                // All errors are cascading noise — keep merge as-is
+                                mergedTaskIds.add(taskId);
+                                previouslyMerged.add(task);
+                                metricsTaskOutcome = "PASS_CASCADING";
                             }
-                        } else {
-                            // Revert failed — merge is broken, mark task failed
-                            completed.remove(task);
-                            failed.add(task);
-                            metricsTaskOutcome = "REVERT_FAILED";
-                            taskObs.lowCardinalityKeyValue("task.outcome", metricsTaskOutcome);
+                            case CONTINUE_WITH_WARNING -> {
+                                // Errors in non-owned files — not this task's fault
+                                mergedTaskIds.add(taskId);
+                                previouslyMerged.add(task);
+                                metricsTaskOutcome = "CONTINUE_WARNING";
+                            }
+                            case AUTO_FIX -> {
+                                String buildTool = compilerAgent.detectBuildTool(runId);
+                                boolean patched = buildTool != null && compilerAgent.applyTargetedFix(
+                                        runId, extractOwnedFilesFromTask(task),
+                                        decision.autoFixInstructions(), buildTool);
+                                if (patched) {
+                                    Path wp = gitTool.getWorkspacePath(runId);
+                                    ProgressiveMergeValidator.MergeCheckResult recheck =
+                                            mergeValidator.quickCheck(runId, wp);
+                                    if (recheck.result() != ProgressiveMergeValidator.CheckResult.FAILED) {
+                                        mergedTaskIds.add(taskId);
+                                        previouslyMerged.add(task);
+                                        metricsTaskOutcome = "AUTO_FIXED";
+                                        break;
+                                    }
+                                    // Patch insufficient — escalate to retry
+                                    decision = decision.escalateToRetry(recheck.errorOutput());
+                                } else {
+                                    decision = decision.escalateToRetry(checkResult.errorOutput());
+                                }
+                                metricsTaskOutcome = handleRetryTask(run, task, branchName, decision,
+                                        availableProviders, completed, failed, previouslyMerged,
+                                        mergedTaskIds, taskObs);
+                            }
+                            case RETRY_TASK -> {
+                                metricsTaskOutcome = handleRetryTask(run, task, branchName, decision,
+                                        availableProviders, completed, failed, previouslyMerged,
+                                        mergedTaskIds, taskObs);
+                            }
                         }
                     } else {
                         mergedTaskIds.add(taskId);
@@ -506,11 +532,77 @@ public class SequentialTaskExecutor {
         // Record actual iterations for adaptive cap tuning (only on genuine completions)
         if ("COMPLETE".equals(workerStatus) && report.getIterationCount() > 0) {
             adaptiveIterationService.recordTaskCompletion(
+                    report.getProvider(),
                     task.getComplexity() != null ? task.getComplexity() : "MEDIUM",
                     report.getIterationCount());
         }
 
         return report;
+    }
+
+    /**
+     * Supervisor RETRY_TASK handler: revert merge → re-run worker with targeted feedback → re-merge.
+     * Extracted from the old inline retry block so it can be called from both RETRY_TASK
+     * and AUTO_FIX-escalated paths.
+     *
+     * @return a metrics outcome string (e.g. "COMPLETE_AFTER_RETRY", "PARTIAL_COMPILE_FAILED")
+     */
+    private String handleRetryTask(PipelineRun run, AgentTask task, String branchName,
+                                    TaskCompileDecision decision,
+                                    Set<LlmProvider> availableProviders,
+                                    List<AgentTask> completed, List<AgentTask> failed,
+                                    List<AgentTask> previouslyMerged, Set<String> mergedTaskIds,
+                                    Observation taskObs) {
+        String runId = run.getRunId();
+        String taskId = task.getTaskId();
+
+        String feedback = (decision.retryInstructions() != null && !decision.retryInstructions().isBlank())
+                ? decision.retryInstructions()
+                : "Post-merge compile check failed. Fix the following errors:\n" + decision.assessment();
+
+        log.warn("[Supervisor] RETRY_TASK: reverting merge for task {} — {}", taskId, decision.assessment());
+
+        boolean reverted = mergeService.revertLastMerge(runId);
+        if (reverted) {
+            WorkerReport retryReport = retryTaskWithCompileError(run, task, branchName, feedback, availableProviders);
+            String retryStatus = normalizeStatus(retryReport.getStatus());
+            if ("COMPLETE".equals(retryStatus)) {
+                boolean reMerged = tryMergeToMain(runId, task, branchName, previouslyMerged);
+                if (reMerged) {
+                    mergedTaskIds.add(taskId);
+                    previouslyMerged.add(task);
+                    return "COMPLETE_AFTER_RETRY";
+                } else {
+                    completed.remove(task);
+                    failed.add(task);
+                    taskObs.lowCardinalityKeyValue("task.outcome", "MERGE_FAILED_AFTER_RETRY");
+                    return "MERGE_FAILED_AFTER_RETRY";
+                }
+            } else {
+                completed.remove(task);
+                failed.add(task);
+                taskObs.lowCardinalityKeyValue("task.outcome", "PARTIAL_COMPILE_FAILED");
+                log.warn("[Supervisor] Task {} retry also failed — marking PARTIAL, continuing", taskId);
+                return "PARTIAL_COMPILE_FAILED";
+            }
+        } else {
+            completed.remove(task);
+            failed.add(task);
+            taskObs.lowCardinalityKeyValue("task.outcome", "REVERT_FAILED");
+            return "REVERT_FAILED";
+        }
+    }
+
+    /** Extracts the owned file list from a task's JSON, returning empty list on failure. */
+    private List<String> extractOwnedFilesFromTask(AgentTask task) {
+        if (task.getTaskJson() == null) return List.of();
+        try {
+            com.navneet.executespec.agent.model.TaskDefinition def =
+                    mapper.readValue(task.getTaskJson(), com.navneet.executespec.agent.model.TaskDefinition.class);
+            return def.getOwnedFiles() != null ? def.getOwnedFiles() : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**
@@ -996,26 +1088,21 @@ public class SequentialTaskExecutor {
             sseBroadcaster.emit(runId, RunEvent.taskStatus(runId, parentTaskId,
                     anyFailed ? "PARTIAL" : "COMPLETE"));
 
-            if (!anyFailed) {
-                completed.add(parentTask);
-
-                // Commit all subtask files in one commit + progressive merge
-                commitWorktreeIfDirty(runId, parentTaskId);
-                synchronized (mergeLock) {
-                    boolean merged = tryMergeToMain(runId, parentTask, branchName, previouslyMerged);
-                    if (merged) {
-                        mergedTaskIds.add(parentTaskId);
-                        previouslyMerged.add(parentTask);
-                    } else {
-                        completed.remove(parentTask);
-                        failed.add(parentTask);
-                        return "MERGE_FAILED";
-                    }
+            // Commit all subtask files in one commit + progressive merge regardless of partial status
+            commitWorktreeIfDirty(runId, parentTaskId);
+            synchronized (mergeLock) {
+                boolean merged = tryMergeToMain(runId, parentTask, branchName, previouslyMerged);
+                if (merged) {
+                    mergedTaskIds.add(parentTaskId);
+                    previouslyMerged.add(parentTask);
+                    // Treat PARTIAL decomposed tasks as completed so dependents can still run.
+                    // Consistent with non-decomposed PARTIAL task behavior (also added to completed).
+                    completed.add(parentTask);
+                    return anyFailed ? "PARTIAL" : "COMPLETE";
+                } else {
+                    failed.add(parentTask);
+                    return "MERGE_FAILED";
                 }
-                return "COMPLETE";
-            } else {
-                failed.add(parentTask);
-                return "PARTIAL";
             }
 
         } catch (Exception e) {

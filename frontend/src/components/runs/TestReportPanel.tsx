@@ -31,7 +31,9 @@ export default function TestReportPanel({ runId, status }: Props) {
 
   const testReportReady = useSseStore((s) => s.entries).some(e => e.type === 'TEST_REPORT_READY');
   useEffect(() => {
-    if (!['COMPLETE', 'PARTIAL', 'FAILED'].includes(status) || !testReportReady) return;
+    if (!['COMPLETE', 'PARTIAL', 'FAILED'].includes(status)) return;
+    // Fetch immediately if run is terminal (navigated to after stream closed),
+    // or when the live TEST_REPORT_READY event arrives during the session.
     fetchReport();
   }, [status, fetchReport, testReportReady]);
 

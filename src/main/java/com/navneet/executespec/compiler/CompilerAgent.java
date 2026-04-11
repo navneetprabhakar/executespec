@@ -382,9 +382,82 @@ public class CompilerAgent {
         }
     }
 
+    // ── Targeted fix (per-task supervisor) ───────────────────────────────────
+
+    /**
+     * Applies a single-pass targeted LLM patch scoped to a task's owned files.
+     * Unlike {@link #applyLlmFixes}, this is a single pass (no loop), uses only the
+     * owned files as context, and returns whether the patch was successfully applied.
+     * The caller is responsible for re-running {@code quickCheck()} after this returns.
+     *
+     * @param runId        the run
+     * @param ownedFiles   the task's declared owned files (scope for the patch)
+     * @param instructions patch instructions from {@link com.navneet.executespec.harness.TaskCompileDecision}
+     * @param buildTool    e.g. "mvn", "npm", "python"
+     * @return true if the LLM produced and applied a valid fix; false on LLM or parse failure
+     */
+    public boolean applyTargetedFix(String runId, List<String> ownedFiles,
+                                     String instructions, String buildTool) {
+        if (ownedFiles == null || ownedFiles.isEmpty() || instructions == null) return false;
+        try {
+            broadcaster.emit(runId, RunEvent.log(runId, "compiler",
+                    "🔧 Applying targeted fix for " + ownedFiles.size() + " owned file(s)..."));
+
+            // Load only the owned files as context (not broad workspace scan)
+            var context = new StringBuilder();
+            for (String filePath : ownedFiles) {
+                String content = fsTool.readFile(runId, filePath);
+                if (content != null && !content.startsWith("ERROR")) {
+                    context.append("=== ").append(filePath).append(" ===\n")
+                           .append(content).append("\n\n");
+                }
+            }
+
+            String system = compilerPrompt.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            String user = "Build tool: " + buildTool
+                    + "\n\nTARGETED FIX INSTRUCTIONS:\n" + instructions
+                    + "\n\nOWNED SOURCE FILES (only patch these files — do not create new files):\n"
+                    + context
+                    + "\n\nOutput ONLY a JSON array: [{\"path\":\"...\",\"content\":\"...\"}]"
+                    + "\nOnly include files from the OWNED SOURCE FILES section.";
+
+            ResolvedModel resolved = modelResolver.resolve("CompilerAgent",
+                    stateStore.findRun(runId).map(r -> r.getAiProviderEnum())
+                            .orElse(com.navneet.executespec.router.LlmProvider.ANTHROPIC));
+            AnthropicChatOptions opts = AnthropicChatOptions.builder()
+                    .temperature(0.0)
+                    .model(resolved.getModel())
+                    .build();
+            Prompt prompt = new Prompt(
+                    List.of(new SystemMessage(system), new UserMessage(user)), opts);
+
+            LlmRouter.LlmResponse lr = llmRouter.callWithFallbackTracked(
+                    resolved.providerName(), resolved.getModel(),
+                    prompt, runId, "compiler-targeted",
+                    LlmRouter.FallbackMode.IMMEDIATE, 0, false);
+
+            // Track tokens
+            try {
+                int inTok = lr.response().getMetadata().getUsage().getPromptTokens().intValue();
+                int outTok = lr.response().getMetadata().getUsage().getCompletionTokens().intValue();
+                stateStore.addTokensToRun(runId, inTok, outTok);
+                stateStore.setAgentTokens(runId, "compiler-targeted", inTok, outTok, lr.provider(), lr.model());
+            } catch (Exception ex) {
+                log.warn("[TargetedFix] Could not extract token counts: {}", ex.getMessage());
+            }
+
+            applyJsonFixes(runId, lr.response().getResult().getOutput().getText());
+            return true;
+
+        } catch (Exception e) {
+            log.warn("[TargetedFix] Failed to apply targeted fix for run {}: {}", runId, e.getMessage());
+            return false;
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    String detectBuildTool(String runId) {
+    public String detectBuildTool(String runId) {
         Path ws = Path.of(workspaceRoot, runId);
         if (Files.exists(ws.resolve("pom.xml")))
             return "mvn";

@@ -54,8 +54,22 @@ public class ValidationReportService {
             int filesGenerated = countFilesGenerated(input);
             PipelineResult pipelineResult = computeResult(issues, input);
 
-            // 2. Call LLM to generate markdown report
-            var llmResult = generator.generate(input);
+            // 2. Call LLM to generate markdown report (with fallback if LLM unavailable)
+            String reportMarkdown;
+            String modelUsed = null;
+            int inputTokens = 0;
+            int outputTokens = 0;
+            try {
+                var llmResult = generator.generate(input);
+                reportMarkdown = llmResult.markdown();
+                modelUsed      = llmResult.model();
+                inputTokens    = llmResult.inputTokens();
+                outputTokens   = llmResult.outputTokens();
+            } catch (Exception llmEx) {
+                log.warn("[Report] LLM report generation failed for run={} — saving structured fallback: {}",
+                        runId, llmEx.getMessage());
+                reportMarkdown = buildFallbackMarkdown(runId, issues, input);
+            }
 
             // 3. Extract accuracy data from ReviewReportV2 (Phase 3 output)
             AccuracyReport accuracyReport = input.review() != null ? input.review().getAccuracyReport() : null;
@@ -85,10 +99,10 @@ public class ValidationReportService {
                 .pipelineResult(pipelineResult)
                 .issuesJson(issuesJson)
                 .checksPassed(String.join(",", checksPassed))
-                .reportMarkdown(llmResult.markdown())
-                .modelUsed(llmResult.model())
-                .inputTokens(llmResult.inputTokens())
-                .outputTokens(llmResult.outputTokens())
+                .reportMarkdown(reportMarkdown)
+                .modelUsed(modelUsed)
+                .inputTokens(inputTokens)
+                .outputTokens(outputTokens)
                 .generationTimeMs(System.currentTimeMillis() - startTime)
                 .generatedAfterImprovements(input.generatedAfterImprovements())
                 .accuracyScore(accuracyScore)
@@ -99,7 +113,9 @@ public class ValidationReportService {
 
             // Accumulate report tokens into run total for billing accuracy
             try {
-                stateStore.addTokensToRun(runId, llmResult.inputTokens(), llmResult.outputTokens());
+                if (inputTokens > 0 || outputTokens > 0) {
+                    stateStore.addTokensToRun(runId, inputTokens, outputTokens);
+                }
             } catch (Exception tokenEx) {
                 log.warn("Failed to accumulate report tokens to run {}: {}", runId, tokenEx.getMessage());
             }
@@ -123,7 +139,7 @@ public class ValidationReportService {
 
             log.info("Validation report generated for run={} issues={} result={} accuracy={}/{} tokens={}+{} time={}ms",
                 runId, issues.size(), pipelineResult, accuracyScore, accuracyGrade,
-                llmResult.inputTokens(), llmResult.outputTokens(),
+                inputTokens, outputTokens,
                 report.getGenerationTimeMs());
 
             return Optional.of(saved);
@@ -475,6 +491,43 @@ public class ValidationReportService {
         // Fallback: first 60 chars, normalized
         String normalized = msg.replaceAll("\\s+", " ");
         return normalized.length() <= 60 ? normalized : normalized.substring(0, 60) + "...";
+    }
+
+    /** Minimal markdown report used when the LLM call fails, so the report is always persisted. */
+    private String buildFallbackMarkdown(String runId, List<ReportIssueDTO> issues, ReportInput input) {
+        var sb = new StringBuilder();
+        sb.append("# Validation Report\n\n");
+        sb.append("> _Automated quality check summary (narrative generation unavailable)._\n\n");
+
+        if (input.compileResult() != null && !input.compileResult().skipped()) {
+            sb.append("## Compilation\n");
+            sb.append(input.compileResult().passed() ? "✅ Passed\n\n" : "❌ Failed\n\n");
+        }
+
+        if (input.review() != null) {
+            sb.append("## Code Review\n");
+            int issueCount = issues.size();
+            if (issueCount == 0) {
+                sb.append("✅ No issues found.\n\n");
+            } else {
+                sb.append("Found %d issue(s):\n\n".formatted(issueCount));
+                for (ReportIssueDTO issue : issues) {
+                    sb.append("- **[%s]** %s".formatted(issue.severity(), issue.description()));
+                    if (issue.fix() != null) sb.append(" — %s".formatted(issue.fix()));
+                    sb.append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+
+        if (input.testSummary() != null && input.testSummary().getTotalTests() > 0) {
+            var ts = input.testSummary();
+            sb.append("## Integration Tests\n");
+            sb.append("- Total: %d, Passed: %d, Failed: %d\n\n"
+                    .formatted(ts.getTotalTests(), ts.getPassed(), ts.getFailed()));
+        }
+
+        return sb.toString();
     }
 
     private String truncate(String s, int maxLen) {
