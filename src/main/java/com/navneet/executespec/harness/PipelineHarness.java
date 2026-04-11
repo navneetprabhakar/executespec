@@ -3924,6 +3924,7 @@ public class PipelineHarness {
                 reportResult = validationReportService.generateAndPersist(runId, input);
                 if (reportResult.isPresent()) {
                     broadcaster.emit(runId, RunEvent.log(runId, "report", "✅ Validation report generated"));
+                    broadcaster.emit(runId, RunEvent.validationReportReady(runId));
                     break;
                 }
                 if (attempt < 2) {

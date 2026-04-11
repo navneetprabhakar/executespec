@@ -230,6 +230,10 @@ public record RunEvent(
         return new RunEvent("TEST_EXECUTION_SKIPPED", runId, null, reason, Instant.now());
     }
 
+    public static RunEvent validationReportReady(String runId) {
+        return new RunEvent("VALIDATION_REPORT_READY", runId, null, null, Instant.now());
+    }
+
     public static RunEvent testReportReady(String runId, String reportJson) {
         return new RunEvent("TEST_REPORT_READY", runId, null, reportJson, Instant.now());
     }
