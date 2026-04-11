@@ -68,7 +68,7 @@ spring:
       api-key: ""                   # set via env var in profile files
       chat:
         options:
-          model: gpt-5.4
+          model: gpt-5.4-mini
           max-tokens: 16384                  # gpt-5.4 max; per-call limits applied by TokenBudgetMonitor
     google:
       genai:
@@ -90,7 +90,7 @@ model-matrix:
       lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4
+      workhorse: gpt-5.4-mini
       lightweight: gpt-5.4-mini
 
   # ── Canonical model registry (single source of truth for all model metadata) ──
