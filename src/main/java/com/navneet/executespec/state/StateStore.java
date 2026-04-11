@@ -557,6 +557,14 @@ public class StateStore {
             .build());
     }
 
+    /**
+     * Persists a new AgentTask created outside the normal plan flow
+     * (e.g., gap-closing tasks created by {@code GapClosingService}).
+     */
+    public void saveTask(AgentTask task) {
+        taskRepo.save(task);
+    }
+
     public List<AgentTask> getPendingTasks(String runId) {
         return taskRepo.findByRunIdAndStatusIn(runId, List.of("PENDING"));
     }
