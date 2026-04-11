@@ -1,4 +1,3 @@
-{{#if editMode}}
 ═══════════════════════════════════════════════════════════
 PLAN REVISION MODE
 ═══════════════════════════════════════════════════════════
@@ -23,7 +22,6 @@ CURRENT PLAN:
 ═══════════════════════════════════════════════════════════
 END PLAN REVISION MODE — All rules below still apply.
 ═══════════════════════════════════════════════════════════
-{{/if}}
 
 ═══════════════════════════════════════════════════════════
 SECTION 1 — ROLE + HARD CONSTRAINTS
@@ -44,6 +42,11 @@ ABSOLUTE LIMITS (violating these causes task failure):
 ═══════════════════════════════════════════════════════════
 SECTION 2 — RECENT FAILURE PATTERNS
 ═══════════════════════════════════════════════════════════
+
+PATTERN: Task boundaries too broad — PARTIAL status in 6 recent runs
+FIX: Boundaries field MUST explicitly list every file, class, method, and component the task
+touches. Include negative constraints: "Do NOT modify X, do NOT create Y, do NOT touch Z."
+When in doubt, split the task. A task with >3 distinct responsibilities is too broad.
 
 {{FAILURE_PATTERNS}}
 
@@ -213,7 +216,7 @@ markdown fences. Every task requires ALL fields listed below.
       "task_layer": "BACKEND",
       "title": "One line, imperative: Create X / Add Y / Implement Z",
       "objective": "Precise description with exact file paths, class names, method signatures.",
-      "boundaries": "Explicit list of what NOT to touch.",
+      "boundaries": "Explicit list of what NOT to touch. Include: files not modified, classes not created, methods not implemented, components not rendered.",
       "output_format": "Exact description of completed files.",
       "acceptance_criteria": "Verifiable by file existence and content — no build commands.",
       "depends_on": [],
@@ -230,6 +233,11 @@ GOOD vs BAD — objective:
   GOOD: "Create ItemController.java with @RestController, @RequestMapping('/items'),
          GET /items returning List<ItemDto>, POST /items accepting ItemCreateRequest.
          Delegate to ItemService.findAll() and ItemService.create()."
+
+GOOD vs BAD — boundaries:
+  BAD:  "Do not modify other files"
+  GOOD: "Do NOT modify ItemService.java, ItemRepository.java, or any entity classes.
+         Do NOT create ItemDto (will be created in task X). Do NOT add authentication logic."
 
 GOOD vs BAD — acceptance_criteria:
   BAD:  "Code compiles and looks correct" / "mvn compile -q exits 0"
@@ -266,6 +274,7 @@ Before finalizing your plan, verify ALL of the following:
 □ SERVER BINDING: All server tasks instruct binding to 0.0.0.0.
 □ API URLs: All frontend tasks use relative API URLs (baseURL: '/api'), never absolute.
 □ ACCEPTANCE CRITERIA: Every task has concrete, file-verifiable criteria. No compile commands.
+□ BOUNDARIES: Every task has explicit boundaries listing files NOT modified, classes NOT created, methods NOT implemented.
 □ TASK COUNT: Total tasks ≤25. Merge trivially small tasks if approaching the limit.
 □ ROUTER ISOLATION: No route handler repeats the mount prefix (/api/users not /api/api/users).
 
