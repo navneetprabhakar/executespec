@@ -136,8 +136,8 @@ export default function RunDetailTabs() {
   ];
 
   return (
-    <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-      <Tabs.List className="flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 lg:px-4 overflow-x-auto scrollbar-hide">
+    <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col">
+      <Tabs.List className="flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 lg:px-4 overflow-x-auto scrollbar-hide sticky top-0 z-10 bg-[var(--gray-100)]">
         {TABS.map((tab) => (
           <Tabs.Trigger
             key={tab.value}
@@ -167,12 +167,12 @@ export default function RunDetailTabs() {
         </button>
       </Tabs.List>
 
-      <div className="flex-1 overflow-hidden">
-        <Tabs.Content value="overview" className="h-full overflow-y-auto p-4">
+      <div>
+        <Tabs.Content value="overview" className="p-4">
           <OverviewTab run={activeRun} fetchRun={fetchRun} fetchRuns={fetchRuns} />
         </Tabs.Content>
 
-        <Tabs.Content value="tasks" className="h-full overflow-y-auto p-4 space-y-2">
+        <Tabs.Content value="tasks" className="p-4 space-y-2">
           {activeRun.tasks.length === 0 && testTasks.length === 0
             ? <p className="text-sm text-muted">No tasks yet.</p>
             : (
@@ -218,19 +218,19 @@ export default function RunDetailTabs() {
           }
         </Tabs.Content>
 
-        <Tabs.Content value="log" className="h-full">
+        <Tabs.Content value="log" className="h-[calc(100vh-180px)]">
           <LiveLog />
         </Tabs.Content>
 
-        <Tabs.Content value="plan" className="h-full overflow-y-auto p-4">
+        <Tabs.Content value="plan" className="p-4">
           <PlanTab run={activeRun} />
         </Tabs.Content>
 
-        <Tabs.Content value="code" className="h-full overflow-hidden">
+        <Tabs.Content value="code" className="h-[calc(100vh-180px)] overflow-hidden">
           <CodeTab runId={activeRun.runId} files={files} filesLoading={filesLoading} repoUrl={activeRun.repoUrl} status={activeRun.status} scmProvider={activeRun.scmProvider} />
         </Tabs.Content>
 
-        <Tabs.Content value="graph" className="h-full overflow-auto p-4">
+        <Tabs.Content value="graph" className="p-4 overflow-auto">
           <TaskGraphGroups runId={activeRun.runId} isActive={isActive} />
           {testGraph && testGraph.nodes.length > 0 && (
             <CollapsibleGraphSection title="Test Pipeline" defaultOpen>
@@ -241,7 +241,7 @@ export default function RunDetailTabs() {
           )}
         </Tabs.Content>
 
-        <Tabs.Content value="preview" className="h-full overflow-hidden">
+        <Tabs.Content value="preview" className="h-[calc(100vh-180px)] overflow-hidden">
           {previewReady ? (
             <PreviewTab runId={activeRun.runId} />
           ) : (
@@ -252,7 +252,7 @@ export default function RunDetailTabs() {
           )}
         </Tabs.Content>
 
-        <Tabs.Content value="chat" className="h-full overflow-hidden">
+        <Tabs.Content value="chat" className="h-[calc(100vh-180px)] overflow-hidden">
           {chatReady ? (
             <RunConversation runId={activeRun.runId} />
           ) : (

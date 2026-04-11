@@ -75,7 +75,7 @@ spring:
         api-key: ""                 # set via env var in profile files
         chat:
           options:
-            model: gemini-3-flash-preview    # default; all tiers now use gemini-3-flash-preview
+            model: gemini-2.5-flash          # default; all tiers use gemini-2.5-flash
 
 # ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
@@ -85,9 +85,9 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning: gemini-3-flash-preview
-      workhorse: gemini-3-flash-preview
-      lightweight: gemini-3-flash-preview
+      planning: gemini-2.5-flash
+      workhorse: gemini-2.5-flash
+      lightweight: gemini-2.5-flash
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4-mini
@@ -181,14 +181,14 @@ model-matrix:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: google, model: gemini-2.5-flash }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: google, model: gemini-2.5-flash }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: google, model: gemini-2.5-flash }
       - { provider: openai, model: gpt-5.4 }
 
   # ── FREE tier model lock ──────────────────────────────────────────────────────
@@ -199,6 +199,7 @@ model-matrix:
   agent-tier-map:
     PlannerAgent: PLANNING
     ReviewerAgentV2: PLANNING
+    TaskCompileSupervisor: PLANNING
     TestPlannerAgent: WORKHORSE
     WorkerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE

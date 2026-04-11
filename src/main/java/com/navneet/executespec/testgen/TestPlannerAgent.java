@@ -106,10 +106,10 @@ public class TestPlannerAgent {
         String llmResponse = lr.response().getResult().getOutput().getText();
         accumulatePlannerTokens(testPlan, lr, model);
 
-        // Parse response — retry once on failure
+        // Parse response — strip markdown fences then retry once on failure
         List<TestTaskPlan> taskPlans;
         try {
-            taskPlans = objectMapper.readValue(llmResponse, new TypeReference<>() {});
+            taskPlans = objectMapper.readValue(stripMarkdown(llmResponse), new TypeReference<>() {});
         } catch (Exception e) {
             log.warn("[TestPlanner] JSON parse failed, retrying with stricter prompt: {}", e.getMessage());
             String retryPrompt = systemPrompt + "\n\nIMPORTANT: Your previous response was not valid JSON. " +
@@ -118,7 +118,7 @@ public class TestPlannerAgent {
             llmResponse = lr2.response().getResult().getOutput().getText();
             accumulatePlannerTokens(testPlan, lr2, model);
             try {
-                taskPlans = objectMapper.readValue(llmResponse, new TypeReference<>() {});
+                taskPlans = objectMapper.readValue(stripMarkdown(llmResponse), new TypeReference<>() {});
             } catch (Exception e2) {
                 log.error("[TestPlanner] JSON parse failed on retry for run {}: {}", runId, e2.getMessage());
                 testPlan.setStatus(TestPlanStatus.FAILED);
@@ -191,6 +191,23 @@ public class TestPlannerAgent {
                 model.providerName(), model.getModel(),
                 chatPrompt, runId, "test-planner",
                 LlmRouter.FallbackMode.IMMEDIATE, attempt - 1, false);
+    }
+
+    /** Strips markdown code fences (```json ... ``` or ``` ... ```) from LLM responses. */
+    private static String stripMarkdown(String response) {
+        if (response == null) return "";
+        String trimmed = response.trim();
+        // Strip ```json ... ``` or ``` ... ```
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline != -1) {
+                trimmed = trimmed.substring(firstNewline + 1);
+            }
+            if (trimmed.endsWith("```")) {
+                trimmed = trimmed.substring(0, trimmed.lastIndexOf("```")).trim();
+            }
+        }
+        return trimmed;
     }
 
     private void accumulatePlannerTokens(TestPlan testPlan, LlmRouter.LlmResponse lr, ResolvedModel model) {
