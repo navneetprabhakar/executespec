@@ -1,11 +1,7 @@
 package com.navneet.executespec.state.entity;
 
 import com.navneet.executespec.tenant.TenantInterceptor;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EntityListeners;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

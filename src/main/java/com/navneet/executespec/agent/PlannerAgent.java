@@ -1,5 +1,4 @@
 package com.navneet.executespec.agent;
-import com.navneet.executespec.router.ModelRegistry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,11 +7,11 @@ import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.merge.MergeConflictAnalyser;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.tool.FileSystemTool;
-import com.navneet.executespec.tool.ToolResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -28,8 +27,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Service

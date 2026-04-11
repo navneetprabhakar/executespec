@@ -151,9 +151,35 @@ Before starting, read these files if they exist (batch all reads in one response
   .agent-context/task-assignments.json   — the full plan (shows all tasks and who owns what)
   .agent-context/shared-contracts.json   — API contracts, shared types, interface definitions
 
-If you define a new API contract, shared interface, or type that other tasks will depend on,
-write it to .agent-context/shared-contracts.json immediately after writing the code.
-Do not wait until your task is complete — other workers may need it while you're still running.
+MANDATORY: If your task creates ANY of the following, you MUST write to shared-contracts.json
+immediately after writing the code (before committing):
+  - An Express router mounted at a path (record: mount point + all route paths)
+  - A REST endpoint (record: method, exact path, request shape, response shape)
+  - A data model or TypeScript interface used by multiple files (record: field names + types)
+  - An exported function/class used by another task (record: module path + export name + signature)
+  - Environment variables the server reads (record: var name + default value)
+
+HOW to write shared-contracts.json:
+  1. Read the existing file first (it may already have entries from other tasks).
+  2. Merge your additions — do NOT overwrite the entire file.
+  3. Use this structure:
+     {
+       "routes": [
+         { "method": "GET", "path": "/api/expenses", "handler": "routes/expenses.js" }
+       ],
+       "models": [
+         { "name": "Expense", "fields": { "id": "string", "amount": "number", "category": "string" } }
+       ],
+       "exports": [
+         { "module": "models/Expense.js", "export": "Expense", "type": "class" }
+       ],
+       "env": [
+         { "name": "PORT", "default": "3001" }
+       ]
+     }
+
+DO NOT skip this step. A missing shared-contracts.json entry is the #1 cause of cross-task
+import mismatches and router namespace duplication in multi-task runs.
 
 ═══════════════════════════════════════════════════════════
 WORKING SEQUENCE — FOLLOW THIS ORDER
@@ -163,6 +189,18 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    Read .agent-context/CODEBASE_CONTEXT.md, task-assignments.json, and file-locks.json.
    Read existing files relevant to your task (imports, interfaces, parent classes).
    Do NOT read every file in the repo — read only what you need.
+
+   MODULE SYSTEM — MANDATORY FOR JS/TS TASKS:
+   If your task creates or modifies ANY .js or .ts files, you MUST read package.json in the
+   SAME batch as the other context reads (do NOT write any code before reading it).
+   From package.json, determine:
+     - If `"type": "module"` is present → use ESM (import/export) in ALL your files.
+     - If `"type": "module"` is absent → use CommonJS (require/module.exports) in ALL your files.
+   NEVER mix module systems within the same project. A file using require() in an ESM project
+   (or import/export in a CommonJS project) will crash immediately at startup.
+   Also read the existing "start" or "dev" script in package.json — do NOT rewrite it unless
+   your task explicitly owns package.json.
+
    After reading, determine what files you will create and what code you will write.
    DO NOT output your plan — proceed immediately to writing code.
 
@@ -236,10 +274,16 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    {{include:fullstack-directory}}
 
    HTML/CSS/JS (static projects — no framework):
-     Every HTML file that references a CSS or JS file via <link> or <script> tags MUST
+     Every HTML file that references a CSS or JS file via <link> or <script> tags MUST reference a file that exists in the workspace.
       FRONTEND DOMAIN — MANDATORY RULES:
       - NEVER use absolute paths for assets; use relative paths.
       - If you create style.css, YOU must create style.css — do not assume another task will.
+      - CSS CUSTOM PROPERTIES — MANDATORY: Define a :root block at the top of your CSS file
+        declaring ALL colors, radii, and shadows as custom properties. Reference them everywhere.
+        GOOD:  :root { --color-primary: #3b82f6; --color-bg: #f8fafc; }
+               .card { background: var(--color-bg); border-radius: var(--radius); }
+        BAD:   .card { background: #f8fafc; border-radius: 8px; }
+        This ensures the design is themeable and passes the review gate.
 
       {{include:preview-defaults}}
 
@@ -286,7 +330,8 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
      Write the backend API before the frontend that consumes it.
      {{include:api-url-rules}}
      {{include:router-isolation}}
-     FULL-STACK START SCRIPT: For Node.js full-stack projects, you MUST ensure `package.json` has a single `dev` or `start` script that runs BOTH the frontend (Vite) and the backend (Server) concurrently (e.g., using the `concurrently` package).
+     FULL-STACK START SCRIPT: For Node.js full-stack projects where the frontend is a SEPARATE SPA (React/Vue/Vite in its own directory with its own package.json or vite.config.js), ensure `package.json` has a single `dev` or `start` script that runs BOTH the frontend and backend concurrently (e.g., using the `concurrently` package).
+     STATIC FRONTEND EXCEPTION (common): If the frontend is plain HTML/CSS/JS served as static files by Express (e.g., `app.use(express.static('public'))` or `express.static(__dirname)`), the `start` script must be a SINGLE command: `"node server.js"`. Do NOT use concurrently. Do NOT reference `npm run dev` — there is no frontend dev server. Express serves the HTML directly.
      {{include:cors-config}}
 
    Write each file COMPLETE in one writeFile call — never partial content.
@@ -325,6 +370,34 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    - COMPLETENESS: Verify every file in owned_files exists and is committed.
    - FOR FRONTEND TASKS ONLY: Re-read HTML and verify every referenced CSS/JS file
      exists, and every DOM selector in JS matches actual HTML attributes.
+
+   CROSS-TASK CONSISTENCY CHECK (run this for ALL tasks in multi-file projects):
+   After writing your files, run these checks before committing:
+
+   1. ROUTER NAMESPACE: If you mounted a router (app.use('/api', router)), run:
+      searchFiles for "router.get('/api" or "router.post('/api" in your route files.
+      If any route INSIDE the router starts with '/api', remove the prefix immediately.
+      Routes inside a mounted router MUST NOT repeat the mount path.
+
+   2. IMPORT VERIFICATION: For every import/require statement in your files, verify
+      the target file exists in the workspace using searchFiles or listFiles.
+      If it does not exist yet (it's a future task's output), use shared-contracts.json
+      to confirm the path, and add a comment: // will be created by task: <task_id>
+
+   3. FRONTEND API URLS: If you write frontend JS that calls the backend, run:
+      searchFiles for "http://localhost" or "http://127.0.0.1" in your files.
+      If found, replace ALL absolute URLs with relative paths (/api/...).
+      Absolute URLs break in Docker preview — this is a CRITICAL review failure.
+
+   4. ENV VARS: If your server reads process.env.PORT or other env vars, verify
+      they're recorded in shared-contracts.json under "env".
+
+   5. START SCRIPT + MODULE SYSTEM: If you wrote or modified package.json:
+      - Read the "start" or "dev:all" script. If it calls `npm run dev` or `npm run frontend`,
+        verify that script EXISTS in package.json. If it does not exist, simplify to `node server.js`.
+      - Read one of your route files. If it uses `import`/`export`, verify package.json has
+        `"type": "module"`. If it uses `require()`/`module.exports`, verify `"type": "module"`
+        is NOT present. Mixed module systems cause runtime crashes at preview time.
 
    MANDATORY POST-COMMIT VERIFICATION: After your commit, call listFiles to confirm
    your files are present on disk before reporting done:

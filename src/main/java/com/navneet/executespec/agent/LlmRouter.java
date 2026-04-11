@@ -1,5 +1,8 @@
 package com.navneet.executespec.agent;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.google.genai.Client;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelRegistry;
@@ -11,9 +14,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
-
-import static com.navneet.executespec.config.CustomMetricsConfig.*;
-import com.navneet.executespec.config.CustomMetricsConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -22,7 +22,6 @@ import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import com.google.genai.Client;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
@@ -35,14 +34,12 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
 
 /**
  * Routes LLM calls with provider fallback guardrails.

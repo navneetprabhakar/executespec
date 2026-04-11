@@ -1,7 +1,5 @@
 package com.navneet.executespec.notification;
 
-import com.navneet.executespec.batch.BatchResumeService;
-import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;

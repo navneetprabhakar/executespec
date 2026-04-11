@@ -2,17 +2,16 @@ package com.navneet.executespec.report;
 
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.compiler.CompileResult;
+import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
-import com.navneet.executespec.compiler.CompileResult;
-import com.navneet.executespec.report.model.ReportInput;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
-import com.navneet.executespec.state.entity.AgentTask;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -25,8 +24,10 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 @Component
 @Slf4j

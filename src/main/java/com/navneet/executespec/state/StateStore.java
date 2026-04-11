@@ -1,15 +1,15 @@
 package com.navneet.executespec.state;
-import com.navneet.executespec.router.ModelRegistry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.ReviewReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.state.entity.*;
 import com.navneet.executespec.state.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -216,12 +216,15 @@ public class StateStore {
     }
 
     /**
-     * Marks the run complete. If any tasks are BLOCKED or PARTIAL, the run is marked
-     * PARTIAL (merged but incomplete) rather than COMPLETE so the UI reflects reality.
+     * Marks the run complete. If any non-gap worker tasks are BLOCKED or PARTIAL, the run
+     * is marked PARTIAL (merged but incomplete) rather than COMPLETE so the UI reflects reality.
+     * Gap-closing tasks (_gap_ in taskId) are excluded — they run after the ≥85% threshold
+     * path and their failures should not downgrade an otherwise-successful run.
      */
     public void markComplete(String runId) {
         PipelineRun run = runRepo.findById(runId).orElseThrow();
         boolean hasIncomplete = taskRepo.findByRunId(runId).stream()
+            .filter(t -> !t.getTaskId().contains("_gap_"))
             .anyMatch(t -> "BLOCKED".equals(t.getStatus()) || "PARTIAL".equals(t.getStatus()));
         finaliseRun(run,
             hasIncomplete ? "PARTIAL" : "COMPLETE",

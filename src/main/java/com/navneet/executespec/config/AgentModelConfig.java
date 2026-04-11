@@ -1,7 +1,7 @@
 package com.navneet.executespec.config;
-import com.navneet.executespec.router.ModelRegistry;
 
 import com.google.genai.Client;
+import com.navneet.executespec.router.ModelRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;

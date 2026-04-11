@@ -1,11 +1,6 @@
 package com.navneet.executespec.config;
 
-import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
-import com.google.cloud.secretmanager.v1.SecretVersionName;
-import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
-import com.google.cloud.secretmanager.v1.ListSecretsRequest;
-import com.google.cloud.secretmanager.v1.ProjectName;
-import com.google.cloud.secretmanager.v1.Secret;
+import com.google.cloud.secretmanager.v1.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;

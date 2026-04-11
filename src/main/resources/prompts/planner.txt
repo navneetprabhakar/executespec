@@ -38,6 +38,11 @@ ABSOLUTE LIMITS (violating these causes task failure):
 - Max 25 tasks total per plan
 - Tasks in the same tier MUST NOT share any file in owned_files (they run concurrently)
 - No two tasks may write to the same file unless sequenced via depends_on + shared_files
+- Any single file may appear in owned_files across AT MOST 2 tasks total in the entire plan.
+  If a file needs 3+ sequential passes, merge the extra passes into the 2nd task instead.
+  This prevents task count explosion: 5 tasks for the same file = always wrong.
+- Node.js/Express projects with 5+ tasks MUST include a "shared_contracts" key in the plan JSON
+  (missing = plan rejection). See Section 5 for required fields.
 
 ═══════════════════════════════════════════════════════════
 SECTION 2 — RECENT FAILURE PATTERNS
@@ -210,6 +215,28 @@ TASK COUNT GUIDELINES:
 INTERFACE CONTRACTS: When task B depends on task A's output, state the expected interface in B's
 objective. Example: "Create UserService using UserRepository.findByEmail(String email) from task A."
 
+CROSS-TASK CONTRACTS — MANDATORY for Node.js/Express projects with 5+ tasks:
+Add a top-level "shared_contracts" key listing:
+  1. The EXACT router mount path (e.g., app.use('/api', router)) so all route tasks know
+     their internal paths MUST NOT repeat '/api'.
+  2. The EXACT data model field names (so frontend and backend tasks use the same names).
+  3. The EXACT relative API base used by frontend (always '/api' — never 'http://localhost:...').
+  4. The server PORT env var and default value.
+
+Example shared_contracts block (add to your JSON output for multi-task Express projects):
+  "shared_contracts": {
+    "router_mount": "app.use('/api', router) — internal routes must NOT start with /api",
+    "api_base_frontend": "All frontend fetch calls use relative path: fetch('/api/...')",
+    "port": "process.env.PORT || 3001",
+    "models": {
+      "Expense": "{ id: string, title: string, amount: number, category: string, date: string, notes: string }"
+    }
+  }
+
+Workers read this from task-assignments.json before writing code. It eliminates router
+namespace bugs and data field inconsistencies without requiring workers to guess.
+For Java/Spring and Python projects: include the base package path and DTO field names instead.
+
 ═══════════════════════════════════════════════════════════
 SECTION 6 — OUTPUT FORMAT + EXAMPLES
 ═══════════════════════════════════════════════════════════
@@ -222,6 +249,14 @@ markdown fences. Every task requires ALL fields listed below.
   "ui_style": null,
   "plan_title": "Short project name, 3-8 words",
   "plan_summary": "One sentence describing what this plan builds",
+  "shared_contracts": {
+    "router_mount": "app.use('/api', router) — internal routes must NOT start with /api",
+    "api_base_frontend": "All frontend fetch calls use relative path: fetch('/api/...')",
+    "port": "process.env.PORT || 3001",
+    "models": {
+      "Item": "{ id: string, name: string, ... }"
+    }
+  },
   "tasks": [
     {
       "task_id": "snake_case_identifier_max_30_chars",
@@ -290,6 +325,8 @@ Before finalizing your plan, verify ALL of the following:
 □ TASK COUNT: Total tasks ≤25. Merge trivially small tasks if approaching the limit.
 □ ROUTER ISOLATION: No route handler repeats the mount prefix (/api/users not /api/api/users).
 □ RESPONSIBILITY COUNT: Every task has ≤3 distinct responsibilities. If >3, split into sequential tasks.
+□ SHARED_CONTRACTS: For Node.js/Express projects with 5+ tasks, shared_contracts block is present and includes router_mount, api_base_frontend, port, and model field definitions.
+□ SAME-FILE SEQUENCE CAP: No single file appears in owned_files of more than 2 tasks. Count occurrences — if any file exceeds 2, merge the excess tasks together.
 
 ═══════════════════════════════════════════════════════════
 SECURITY — MANDATORY

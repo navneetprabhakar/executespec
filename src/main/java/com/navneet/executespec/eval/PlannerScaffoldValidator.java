@@ -2,7 +2,6 @@ package com.navneet.executespec.eval;
 
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
-import com.navneet.executespec.eval.PlannerScaffoldTestCase.CheckType;
 import com.navneet.executespec.eval.PlannerScaffoldTestCase.ScaffoldCheck;
 
 import java.util.ArrayList;

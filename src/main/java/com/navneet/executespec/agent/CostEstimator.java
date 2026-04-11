@@ -1,5 +1,4 @@
 package com.navneet.executespec.agent;
-import com.navneet.executespec.router.ModelRegistry;
 
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
@@ -7,6 +6,7 @@ import com.navneet.executespec.config.AgentModelConfig;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.pricing.ModelPricingRepository;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;

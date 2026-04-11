@@ -1,7 +1,5 @@
 package com.navneet.executespec.billing.scheduler;
 
-import com.navneet.executespec.auth.entity.AppUser;
-import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.billing.entity.BillingSubscription;

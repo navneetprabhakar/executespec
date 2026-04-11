@@ -1,10 +1,6 @@
 package com.navneet.executespec.deployment.analyzer;
 
-import com.navneet.executespec.deployment.preview.DatabaseDetector;
-import com.navneet.executespec.deployment.preview.DatabaseType;
-import com.navneet.executespec.deployment.preview.DevDockerfileGenerator;
-import com.navneet.executespec.deployment.preview.EnvVarDetector;
-import com.navneet.executespec.deployment.preview.PreviewProjectType;
+import com.navneet.executespec.deployment.preview.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
