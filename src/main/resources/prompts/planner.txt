@@ -43,12 +43,12 @@ ABSOLUTE LIMITS (violating these causes task failure):
 SECTION 2 — RECENT FAILURE PATTERNS
 ═══════════════════════════════════════════════════════════
 
-PATTERN: Task boundaries too broad — PARTIAL status in 6 recent runs
+PATTERN: Task boundaries too broad — PARTIAL status in 4 recent runs
 FIX: Boundaries field MUST explicitly list every file, class, method, and component the task
 touches. Include negative constraints: "Do NOT modify X, do NOT create Y, do NOT touch Z."
-When in doubt, split the task. A task with >3 distinct responsibilities is too broad.
-
-{{FAILURE_PATTERNS}}
+When in doubt, split the task. A task with >3 distinct responsibilities is too broad. If a task
+touches >2 files or has >4 methods/functions, consider splitting into sequential tasks using
+depends_on + shared_files. Verify each task has a single, atomic outcome.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
@@ -71,6 +71,18 @@ PER-LANGUAGE ADJUSTMENTS (verbose languages need lower line caps):
 SINGLE-FILE COMPLEXITY TRAP: A single file with 200+ lines of logic (complex UI components,
 dashboards, form wizards with 4+ distinct features) WILL exhaust the worker token budget even at
 1 file. Fix: split into sequential tasks on the SAME file using shared_files + depends_on.
+
+SINGLE-FILE PROJECT PATTERN (Vanilla JS / Static HTML / single-page no-framework):
+When ALL UI lives in one file (index.html, app.js, script.js, etc.) you MUST NOT create
+parallel tasks all owning that file — they will overwrite each other. Two options:
+  Option A (preferred for ≤300 lines): ONE task owns the entire file.
+  Option B (required for >300 lines): Sequential tasks, each building on the prior:
+    Task 1: "Setup + HTML structure"  → owned_files: ["index.html"]
+    Task 2: "Add JavaScript logic"    → owned_files: ["index.html"], depends_on: ["task_1"]
+    Task 3: "CSS styling + polish"    → owned_files: ["index.html"], depends_on: ["task_2"]
+  Each task reads the existing file first, then rewrites it with additions.
+  The HARD RULE: if two tasks share a file in owned_files they MUST be in different tiers
+  via depends_on. Parallel tasks owning the same file ALWAYS cause overwrite corruption.
 
 COMPLEXITY BIAS RULES:
   1. Default to LOW. When unsure between LOW/MEDIUM → choose LOW.
@@ -277,6 +289,7 @@ Before finalizing your plan, verify ALL of the following:
 □ BOUNDARIES: Every task has explicit boundaries listing files NOT modified, classes NOT created, methods NOT implemented.
 □ TASK COUNT: Total tasks ≤25. Merge trivially small tasks if approaching the limit.
 □ ROUTER ISOLATION: No route handler repeats the mount prefix (/api/users not /api/api/users).
+□ RESPONSIBILITY COUNT: Every task has ≤3 distinct responsibilities. If >3, split into sequential tasks.
 
 ═══════════════════════════════════════════════════════════
 SECURITY — MANDATORY
