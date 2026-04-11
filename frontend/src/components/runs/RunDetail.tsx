@@ -628,8 +628,8 @@ export default function RunDetail() {
                 timestamp: new Date(e.timestamp).toISOString(),
               }))}
               status={activeRun.status}
-              taskCount={activeRun.tasks?.filter(t => !t.parentTaskId).length || 0}
-              completedTaskCount={activeRun.tasks?.filter(t => !t.parentTaskId && t.status === 'COMPLETE').length || 0}
+              taskCount={activeRun.tasks?.filter(t => !t.parentTaskId && !t.taskId?.includes('_gap_')).length || 0}
+              completedTaskCount={activeRun.tasks?.filter(t => !t.parentTaskId && !t.taskId?.includes('_gap_') && t.status === 'COMPLETE').length || 0}
             />
           </div>
 

@@ -178,8 +178,10 @@ export default function RunDetailTabs() {
             : (
               <>
                 {(() => {
-                  // Group: show parent tasks, nest subtasks underneath
-                  const parentTasks = activeRun.tasks.filter(t => !t.parentTaskId);
+                  // Group: show parent tasks, nest subtasks underneath.
+                  // Exclude gap-closing tasks (taskId contains _gap_) — they're background best-effort
+                  // and shown separately below; including them inflates the count and alarms users.
+                  const parentTasks = activeRun.tasks.filter(t => !t.parentTaskId && !t.taskId?.includes('_gap_'));
                   const subtaskMap = new Map<string, typeof activeRun.tasks>();
                   activeRun.tasks.filter(t => t.parentTaskId).forEach(t => {
                     const list = subtaskMap.get(t.parentTaskId!) || [];
@@ -199,6 +201,31 @@ export default function RunDetailTabs() {
                       ))}
                     </div>
                   ));
+                })()}
+
+                {/* Gap-closing tasks — background best-effort, shown collapsed */}
+                {(() => {
+                  const gapTasks = activeRun.tasks.filter(t => t.taskId?.includes('_gap_'));
+                  // Deduplicate by title — keep most recent (last in array)
+                  const seen = new Map<string, typeof gapTasks[0]>();
+                  gapTasks.forEach(t => seen.set(t.title, t));
+                  const uniqueGapTasks = Array.from(seen.values());
+                  if (uniqueGapTasks.length === 0) return null;
+                  const doneCount = uniqueGapTasks.filter(t => t.status === 'COMPLETE').length;
+                  return (
+                    <details className="mt-2 border-t border-[var(--border-default)]">
+                      <summary className="flex items-center gap-2 pt-3 pb-1 cursor-pointer select-none text-muted hover:text-secondary">
+                        <Wrench className="h-3.5 w-3.5" />
+                        <span className="text-xs font-medium">Gap fixes (background)</span>
+                        <span className="text-xs opacity-60">{doneCount}/{uniqueGapTasks.length} completed</span>
+                      </summary>
+                      <div className="mt-1 space-y-1">
+                        {uniqueGapTasks.map((t) => (
+                          <TaskCard key={t.taskId} task={t} runId={activeRun.runId} runStatus={activeRun.status} />
+                        ))}
+                      </div>
+                    </details>
+                  );
                 })()}
 
                 {testTasks.length > 0 && (
