@@ -324,7 +324,7 @@ public class WorkerAgent {
                 // ── PATH B: Prompt-based tool calls (Anthropic/Google) ───────────────
                 if (assistantText != null && !assistantText.isBlank()) {
                     WorkerReport pathBResult = handlePromptBasedToolCalls(
-                            assistantText, messages, taskDef, taskId, runId, state, MAX_FABRICATED_COMPLETIONS);
+                            assistantText, messages, taskDef, task, taskId, runId, state, MAX_FABRICATED_COMPLETIONS);
                     if (pathBResult == CONTINUE_LOOP) {
                         // Tool calls dispatched or fabrication retry — continue to next iteration
                         continue;
@@ -927,8 +927,9 @@ public class WorkerAgent {
      *         or {@code null} if no tool calls and no completion found (fall through)
      */
     private WorkerReport handlePromptBasedToolCalls(String assistantText, List<Message> messages,
-                                                     TaskDefinition taskDef, String taskId,
-                                                     String runId, TaskExecutionState state,
+                                                     TaskDefinition taskDef, AgentTask agentTask,
+                                                     String taskId, String runId,
+                                                     TaskExecutionState state,
                                                      int maxFabricatedCompletions) {
         // 1. Strip fabricated <tool_result> blocks (self-play prevention).
         //    Some models (Anthropic Sonnet) simulate entire tool conversations
@@ -1034,7 +1035,7 @@ public class WorkerAgent {
 
         // 2. Strict completion detection: JSON must be the entire response
         if (looksLikeCompletionReport(assistantText, taskId)) {
-            return handlePathBCompletion(assistantText, messages, taskDef, taskId, runId, state, maxFabricatedCompletions);
+            return handlePathBCompletion(assistantText, messages, taskDef, agentTask, taskId, runId, state, maxFabricatedCompletions);
         }
 
         return null; // no tool calls and no completion — fall through
@@ -1045,8 +1046,9 @@ public class WorkerAgent {
      * @return {@link #CONTINUE_LOOP} for fabrication retry, or a final WorkerReport
      */
     private WorkerReport handlePathBCompletion(String assistantText, List<Message> messages,
-                                                TaskDefinition taskDef, String taskId,
-                                                String runId, TaskExecutionState state,
+                                                TaskDefinition taskDef, AgentTask agentTask,
+                                                String taskId, String runId,
+                                                TaskExecutionState state,
                                                 int maxFabricatedCompletions) {
         // Validate: if the report claims files were created or modified but no
         // writeFile/editFile was dispatched, the model fabricated the report.
@@ -1091,7 +1093,7 @@ public class WorkerAgent {
             // (which burns 100k+ tokens per retry), reset to task assignment +
             // summary of actual work done + explicit file-by-file instructions.
             // This cuts retry cost from ~100k tokens to ~5k tokens.
-            injectFabricationRetryContext(messages, taskDef, taskId, runId, state, claimedFileCount);
+            injectFabricationRetryContext(messages, taskDef, agentTask, taskId, runId, state, claimedFileCount);
             return CONTINUE_LOOP; // retry with trimmed context
         }
         return withProviderModel(
@@ -1104,7 +1106,7 @@ public class WorkerAgent {
 
     /** Resets conversation context after a fabricated completion rejection. */
     private void injectFabricationRetryContext(List<Message> messages, TaskDefinition taskDef,
-                                               String taskId, String runId,
+                                               AgentTask agentTask, String taskId, String runId,
                                                TaskExecutionState state, int claimedFileCount) {
         int filesRemaining = Math.max(0, claimedFileCount - state.totalFileWrites);
         String writtenFilesSummary = state.totalFileWrites > 0
@@ -1113,7 +1115,7 @@ public class WorkerAgent {
 
         boolean nativeFabricationMode = "openai".equalsIgnoreCase(state.provider) || "anthropic".equalsIgnoreCase(state.provider);
         messages.clear();
-        messages.add(new UserMessage(buildInitialUserMessage(taskDef, task, state.branchName, runId)));
+        messages.add(new UserMessage(buildInitialUserMessage(taskDef, agentTask, state.branchName, runId)));
         String fabricationExample = nativeFabricationMode
                 ? "Call the writeFile tool now for your next file."
                 : "Example:\n" +
@@ -2177,7 +2179,7 @@ public class WorkerAgent {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private String buildInitialUserMessage(TaskDefinition task, String branchName, String runId) {
+    private String buildInitialUserMessage(TaskDefinition task, AgentTask agentTask, String branchName, String runId) {
         // REWORK mode: apply ONLY the specific reviewer fixes — do not redo the whole task.
         // The harness injects reworkFeedback when a reviewer returned REWORK so the worker
         // knows exactly which files and lines to touch without re-generating everything.
@@ -2226,7 +2228,7 @@ public class WorkerAgent {
                 deps, task.getComplexity(), branchName);
 
         // Subtask-specific preamble: tight budget, write immediately
-        if (task.getParentTaskId() != null) {
+        if (agentTask.getParentTaskId() != null) {
             String ownedFile = (task.getOwnedFiles() != null && !task.getOwnedFiles().isEmpty())
                     ? task.getOwnedFiles().getFirst() : "your assigned file";
             int iterLimit = subtaskIterationLimit(task.getComplexity());
