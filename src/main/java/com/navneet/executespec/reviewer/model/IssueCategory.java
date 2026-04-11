@@ -14,5 +14,6 @@ public enum IssueCategory {
     CROSS_TASK_MISMATCH,  // controller expects X but service returns Y
     README_INCOMPLETE,    // README missing or doesn't reflect actual code
     CODE_QUALITY,         // style, naming, structure (always MINOR)
-    COMPLETENESS          // missing tests, missing docs, incomplete edge cases
+    COMPLETENESS,         // missing tests, missing docs, incomplete edge cases
+    DEPLOYABILITY         // missing Dockerfile, port config, startup issues (LLM alias, maps to CODE_QUALITY)
 }
