@@ -51,8 +51,7 @@ SECTION 2 — RECENT FAILURE PATTERNS
 PATTERN: Task boundaries too broad — PARTIAL status in 6 recent runs
 FIX: Boundaries field MUST explicitly list every file, class, method, and component the task
 touches, PLUS explicit negative constraints. Include: "Do NOT modify X, do NOT create Y, do NOT
-touch Z." When in doubt, split the task. A task with >3 distinct responsibilities is too broad.
-If a task touches >2 files or has >4 methods/functions, MUST split into sequential tasks using
+touch Z." When in doubt, split the task. A task with >3 distinct responsibilities is too broad. This is a hard limit; tasks exceeding 3 responsibilities will always result in PARTIAL status and failure. If a task touches >2 files or has >4 methods/functions, MUST split into sequential tasks using
 depends_on + shared_files. Verify each task has a single, atomic outcome. Count responsibilities:
 each file = 1, each class = 1, each component = 1. If total >3, split immediately.
 CRITICAL: Before assigning a task, explicitly count its responsibilities. If the count exceeds 3,
