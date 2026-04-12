@@ -1,6 +1,8 @@
 package com.navneet.executespec.v2.test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.v2.agent.OpenAiNativeToolClient;
+import com.navneet.executespec.v2.agent.OpenAiNativeToolClient.OpenAiToolCallRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -10,13 +12,12 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -46,6 +47,7 @@ import java.util.Map;
 public class NativeToolsTestController {
 
     private final ObjectMapper objectMapper;
+    private final OpenAiNativeToolClient openAiNativeToolClient;
 
     // Inject all three model beans by their default qualifiers (defined in AgentModelConfig).
     // These may be null if the provider's API key is not configured — handled per-request.
@@ -53,16 +55,25 @@ public class NativeToolsTestController {
     @Qualifier("anthropicChatModel")
     private AnthropicChatModel anthropicModel;
 
-    @Autowired(required = false)
-    @Qualifier("openAiChatModel")
-    private OpenAiChatModel openAiModel;
+    // OpenAI: do NOT use the auto-configured bean — its defaults (max-tokens: 16384 from
+    // application.yml) get merged into call-time options and Spring AI 1.1.4 serializes the
+    // legacy max_tokens field into extra_body for gpt-5.x reasoning models, which the
+    // chat-completions endpoint rejects. Build a fresh model inline with cleared defaults
+    // (mirrors V1 LlmRouter.buildOpenAiModel pattern at LlmRouter.java:613-621).
+    @Value("${spring.ai.openai.api-key:}")
+    private String openAiApiKey;
+
+    @Value("${spring.ai.openai.chat.options.model:gpt-5.4-mini}")
+    private String openAiModelName;
 
     @Autowired(required = false)
     @Qualifier("googleGenAiChatModel")
     private GoogleGenAiChatModel geminiModel;
 
     @GetMapping("/native-tools")
-    public Map<String, Object> testNativeTools(@RequestParam String provider) {
+    public Map<String, Object> testNativeTools(
+            @RequestParam String provider,
+            @RequestParam(required = false) String model) {
         ToolCallback echo = buildEchoToolCallback();
         List<ToolCallback> callbacks = List.of(echo);
         String userPrompt = "Use the echoMessage tool to echo back the text 'hello-v2'.";
@@ -70,11 +81,12 @@ public class NativeToolsTestController {
         Map<String, Object> result = new HashMap<>();
         result.put("provider", provider);
         result.put("prompt", userPrompt);
+        if (model != null) result.put("modelOverride", model);
         try {
             ChatResponse resp = switch (provider.toLowerCase()) {
-                case "anthropic" -> callAnthropic(userPrompt, callbacks);
-                case "openai" -> callOpenAi(userPrompt, callbacks);
-                case "gemini" -> callGemini(userPrompt, callbacks);
+                case "anthropic" -> callAnthropic(userPrompt, callbacks, model);
+                case "openai" -> callOpenAi(userPrompt, callbacks, model);
+                case "gemini" -> callGemini(userPrompt, callbacks, model);
                 default -> throw new IllegalArgumentException("Unknown provider: " + provider);
             };
             return summarizeResponse(result, resp);
@@ -86,55 +98,158 @@ public class NativeToolsTestController {
         }
     }
 
-    private ChatResponse callAnthropic(String userPrompt, List<ToolCallback> callbacks) {
+    private ChatResponse callAnthropic(String userPrompt, List<ToolCallback> callbacks, String modelOverride) {
         if (anthropicModel == null) throw new IllegalStateException("Anthropic model not configured");
-        AnthropicChatOptions opts = AnthropicChatOptions.builder()
+        var b = AnthropicChatOptions.builder()
                 .temperature(0.0)
                 .maxTokens(512)
                 .toolCallbacks(callbacks)
-                .internalToolExecutionEnabled(false)
-                .build();
-        return anthropicModel.call(new Prompt(List.of(new UserMessage(userPrompt)), opts));
+                .internalToolExecutionEnabled(false);
+        if (modelOverride != null && !modelOverride.isBlank()) b.model(modelOverride);
+        return anthropicModel.call(new Prompt(List.of(new UserMessage(userPrompt)), b.build()));
     }
 
-    private ChatResponse callOpenAi(String userPrompt, List<ToolCallback> callbacks) {
-        if (openAiModel == null) throw new IllegalStateException("OpenAI model not configured");
-        OpenAiChatOptions opts = OpenAiChatOptions.builder()
+    private ChatResponse callOpenAi(String userPrompt, List<ToolCallback> callbacks, String modelOverride) {
+        String modelToUse = (modelOverride != null && !modelOverride.isBlank()) ? modelOverride : openAiModelName;
+        // Routes through OpenAiNativeToolClient — direct REST call, bypasses Spring AI's
+        // OpenAi serialization (which adds extra_body when toolCallbacks is set in 1.1.4).
+        return openAiNativeToolClient.call(OpenAiToolCallRequest.builder()
+                .model(modelToUse)
+                .userPrompt(userPrompt)
+                .tools(callbacks)
                 .temperature(0.0)
-                .maxTokens(512)
-                .toolCallbacks(callbacks)
-                .internalToolExecutionEnabled(false)
-                .build();
-        return openAiModel.call(new Prompt(List.of(new UserMessage(userPrompt)), opts));
+                .maxCompletionTokens(512)
+                .build());
     }
 
-    private ChatResponse callGemini(String userPrompt, List<ToolCallback> callbacks) {
+    /**
+     * Tests every model in the V2 plan matrix for native tool calling support. Single curl
+     * for full Phase 0 verification.
+     */
+    @GetMapping("/native-tools/all")
+    public Map<String, Object> testAll() {
+        // V2 model matrix (per application.yml model-matrix) + control models for OpenAI.
+        List<String[]> matrix = List.of(
+                new String[]{"anthropic", "claude-sonnet-4-6"},
+                new String[]{"anthropic", "claude-haiku-4-5-20251001"},
+                new String[]{"gemini", "gemini-2.5-flash"},
+                new String[]{"gemini", "gemini-3-flash-preview"},
+                new String[]{"openai", "gpt-5.4"},
+                new String[]{"openai", "gpt-5.4-mini"},
+                new String[]{"openai", "gpt-4o"},          // control: standard model
+                new String[]{"openai", "gpt-4o-mini"}      // control: standard model
+        );
+        ToolCallback echo = buildEchoToolCallback();
+        List<ToolCallback> callbacks = List.of(echo);
+        String userPrompt = "Use the echoMessage tool to echo back the text 'hello-v2'.";
+
+        List<Map<String, Object>> results = new java.util.ArrayList<>();
+        for (String[] pair : matrix) {
+            String provider = pair[0];
+            String model = pair[1];
+            Map<String, Object> row = new java.util.LinkedHashMap<>();
+            row.put("provider", provider);
+            row.put("model", model);
+            try {
+                ChatResponse resp = switch (provider) {
+                    case "anthropic" -> callAnthropic(userPrompt, callbacks, model);
+                    case "openai" -> callOpenAi(userPrompt, callbacks, model);
+                    case "gemini" -> callGemini(userPrompt, callbacks, model);
+                    default -> throw new IllegalArgumentException("Unknown provider: " + provider);
+                };
+                int tcCount = 0;
+                for (var gen : resp.getResults()) {
+                    if (gen.getOutput().getToolCalls() != null) tcCount += gen.getOutput().getToolCalls().size();
+                }
+                row.put("ok", tcCount > 0);
+                row.put("toolCalls", tcCount);
+                row.put("finishReason", resp.getResult().getMetadata().getFinishReason());
+            } catch (Exception e) {
+                row.put("ok", false);
+                String msg = e.getMessage();
+                row.put("error", e.getClass().getSimpleName() + ": "
+                        + (msg == null ? "" : msg.substring(0, Math.min(300, msg.length()))));
+            }
+            results.add(row);
+        }
+        Map<String, Object> out = new HashMap<>();
+        out.put("totalTested", results.size());
+        out.put("passed", results.stream().filter(r -> Boolean.TRUE.equals(r.get("ok"))).count());
+        out.put("failed", results.stream().filter(r -> !Boolean.TRUE.equals(r.get("ok"))).count());
+        out.put("results", results);
+        return out;
+    }
+
+    private ChatResponse callGemini(String userPrompt, List<ToolCallback> callbacks, String modelOverride) {
         if (geminiModel == null) throw new IllegalStateException("Gemini model not configured");
-        GoogleGenAiChatOptions opts = GoogleGenAiChatOptions.builder()
+        var b = GoogleGenAiChatOptions.builder()
                 .temperature(0.0)
                 .maxOutputTokens(512)
                 .toolCallbacks(callbacks)
-                .internalToolExecutionEnabled(false)
-                .build();
-        return geminiModel.call(new Prompt(List.of(new UserMessage(userPrompt)), opts));
+                .internalToolExecutionEnabled(false);
+        if (modelOverride != null && !modelOverride.isBlank()) b.model(modelOverride);
+        return geminiModel.call(new Prompt(List.of(new UserMessage(userPrompt)), b.build()));
     }
 
     private Map<String, Object> summarizeResponse(Map<String, Object> result, ChatResponse resp) {
-        var output = resp.getResult().getOutput();
-        var toolCalls = output.getToolCalls();
-        boolean hasNativeToolCall = toolCalls != null && !toolCalls.isEmpty();
-        result.put("ok", hasNativeToolCall);
-        result.put("nativeToolCallCount", toolCalls == null ? 0 : toolCalls.size());
-        result.put("textContent", output.getText());
-        if (hasNativeToolCall) {
-            var first = toolCalls.get(0);
+        // Scan ALL generations for tool calls — Anthropic returns multiple generations
+        // (e.g. an empty text block followed by a tool_use block); resp.getResult() only
+        // returns generation #0, which may be the empty one.
+        org.springframework.ai.chat.messages.AssistantMessage.ToolCall firstToolCall = null;
+        int totalToolCalls = 0;
+        String winningFinishReason = null;
+        for (var gen : resp.getResults()) {
+            var msg = gen.getOutput();
+            if (msg.getToolCalls() != null && !msg.getToolCalls().isEmpty()) {
+                totalToolCalls += msg.getToolCalls().size();
+                if (firstToolCall == null) {
+                    firstToolCall = msg.getToolCalls().get(0);
+                    winningFinishReason = gen.getMetadata().getFinishReason();
+                }
+            }
+        }
+        result.put("ok", firstToolCall != null);
+        result.put("nativeToolCallCount", totalToolCalls);
+        result.put("hasToolCallsFlag", resp.getResult().getOutput().hasToolCalls());
+        result.put("textContent", resp.getResult().getOutput().getText());
+        if (firstToolCall != null) {
             Map<String, Object> tc = new HashMap<>();
-            tc.put("name", first.name());
-            tc.put("arguments", first.arguments());
-            tc.put("id", first.id());
+            tc.put("name", firstToolCall.name());
+            tc.put("arguments", firstToolCall.arguments());
+            tc.put("id", firstToolCall.id());
             result.put("firstToolCall", tc);
         }
-        result.put("finishReason", resp.getResult().getMetadata().getFinishReason());
+        result.put("finishReason", winningFinishReason != null
+                ? winningFinishReason
+                : resp.getResult().getMetadata().getFinishReason());
+
+        // Diagnostic: walk all generations (some providers split tool calls into separate Generations)
+        List<Map<String, Object>> allGens = new java.util.ArrayList<>();
+        for (var gen : resp.getResults()) {
+            Map<String, Object> g = new HashMap<>();
+            var msg = gen.getOutput();
+            g.put("text", msg.getText());
+            g.put("toolCallCount", msg.getToolCalls() == null ? 0 : msg.getToolCalls().size());
+            g.put("hasToolCalls", msg.hasToolCalls());
+            g.put("finishReason", gen.getMetadata().getFinishReason());
+            g.put("messageType", msg.getClass().getSimpleName());
+            g.put("messageToString", String.valueOf(msg).substring(0, Math.min(500, String.valueOf(msg).length())));
+            allGens.add(g);
+        }
+        result.put("allGenerations", allGens);
+
+        // Diagnostic: response-level metadata
+        var meta = resp.getMetadata();
+        if (meta != null) {
+            Map<String, Object> m = new HashMap<>();
+            m.put("model", meta.getModel());
+            m.put("id", meta.getId());
+            if (meta.getUsage() != null) {
+                m.put("promptTokens", meta.getUsage().getPromptTokens());
+                m.put("completionTokens", meta.getUsage().getCompletionTokens());
+            }
+            result.put("responseMetadata", m);
+        }
         return result;
     }
 
