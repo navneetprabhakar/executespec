@@ -61,6 +61,23 @@ public class RequestTriageService {
      * @param provider    user's selected AI provider
      * @return SINGLE_SHOT, MEDIUM, or MULTI_TASK
      */
+    /**
+     * Patterns that indicate a console app / pure algorithm task — always SINGLE_SHOT.
+     * Checked BEFORE the LLM call. These specs don't need a planner or multi-task decomposition.
+     * The presence of a build file (pom.xml, Cargo.toml) is irrelevant — the algorithm is the only file.
+     */
+    private static final java.util.regex.Pattern CONSOLE_APP_PATTERN = java.util.regex.Pattern.compile(
+        "(?i)\\b(?:" +
+        "fibonacci|factorial|palindrome|prime\\s+number|sorting\\s+algorithm|binary\\s+search|" +
+        "linked\\s+list|stack\\s+implementation|queue\\s+implementation|tree\\s+traversal|" +
+        "data\\s+structure|algorithm|cli\\s+(?:app|tool|program|script)|command[- ]line|" +
+        "console\\s+app|standalone\\s+script|print\\s+(?:the|a|output)|" +
+        "no\\s+(?:http|server|web|api|database|framework)|" +
+        "function\\s+that\\s+(?:returns|takes|accepts|calculates|computes)|" +
+        "script\\s+that\\s+(?:reads|parses|outputs|prints|processes|takes)" +
+        ")\\b"
+    );
+
     /** Patterns that indicate a full-stack project — always MULTI_TASK regardless of LLM classification. */
     private static final java.util.regex.Pattern FULL_STACK_PATTERN = java.util.regex.Pattern.compile(
         "(?i)(?:" +
@@ -79,6 +96,15 @@ public class RequestTriageService {
         if (!triageEnabled) {
             log.info("[Triage] Disabled via config — defaulting to MULTI_TASK for run {}", runId);
             return TriageResult.MULTI_TASK;
+        }
+
+        // Fast path: force SINGLE_SHOT for console app / algorithm specs — zero LLM cost.
+        // These specs never need multi-task decomposition regardless of target language.
+        // Check BEFORE full-stack pattern so "fibonacci CLI" doesn't fall through to MULTI_TASK.
+        if (CONSOLE_APP_PATTERN.matcher(userRequest).find()
+                && !FULL_STACK_PATTERN.matcher(userRequest).find()) {
+            log.info("[Triage] Run {} matches console-app pattern — forcing SINGLE_SHOT (no LLM call)", runId);
+            return TriageResult.SINGLE_SHOT;
         }
 
         // Safety check: force MULTI_TASK for requests that match full-stack patterns
@@ -120,11 +146,13 @@ public class RequestTriageService {
             log.info("[Triage] Run {} classified as {} (confidence={}, reason={})",
                     runId, classification.result(), classification.confidence(), classification.reason());
 
-            // Low confidence → escalate to MULTI_TASK for safety
-            if (classification.confidence() < 0.7 && classification.result() != TriageResult.MULTI_TASK) {
-                log.info("[Triage] Run {} — low confidence ({}) → escalating to MULTI_TASK",
+            // Low confidence → escalate to MEDIUM (not MULTI_TASK) unless already MULTI_TASK.
+            // Escalating to MULTI_TASK on uncertainty caused 10x cost inflation for simple specs.
+            // MEDIUM caps the planner at 4 tasks and is far cheaper than a full MULTI_TASK plan.
+            if (classification.confidence() < 0.7 && classification.result() == TriageResult.SINGLE_SHOT) {
+                log.info("[Triage] Run {} — low confidence ({}) for SINGLE_SHOT → escalating to MEDIUM",
                         runId, classification.confidence());
-                return TriageResult.MULTI_TASK;
+                return TriageResult.MEDIUM;
             }
             return classification.result();
 

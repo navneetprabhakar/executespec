@@ -1,14 +1,12 @@
 package com.navneet.executespec.deployment;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.deployment.strategy.DeploymentStrategy;
 import com.navneet.executespec.state.entity.Deployment;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.deployment.preview.PreviewProjectType;
 
 import java.io.IOException;
 import java.nio.file.Files;

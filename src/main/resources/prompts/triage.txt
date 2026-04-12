@@ -19,6 +19,13 @@ DETECTED FRAMEWORKS: {detected_frameworks}
 - A single API endpoint, service, or component addition
 - Examples: "Create a lawyer/restaurant/business website", "Build a responsive landing page"
 
+## Console apps and algorithm tasks are ALWAYS SINGLE_SHOT regardless of language:
+- Any request that asks to print output, return a value, or implement an algorithm with NO HTTP server / NO web framework
+- Fibonacci, sorting, data structures, math problems, CLI scripts, programs that run and exit
+- The presence of a build file (pom.xml, Cargo.toml, go.mod) does NOT make a console app MULTI_TASK
+- Keywords that force SINGLE_SHOT: "fibonacci", "factorial", "sorting", "algorithm", "CLI", "command line", "console app", "print output", "no HTTP", "no server", "no web", "script that", "function that returns"
+- Examples: "Write a fibonacci program in Java", "Implement quicksort in Rust", "Build a CLI calculator", "Write a script that reads CSV and prints stats"
+
 ## MULTI_TASK criteria (ANY of these):
 - The request involves BOTH a backend (Express, FastAPI, Spring Boot, etc.) AND a frontend (React, Vue, etc.)
 - Multiple backend services, APIs, or data models that need separate implementation phases
@@ -39,7 +46,7 @@ If the request mentions ANY of these patterns, it is ALWAYS MULTI_TASK:
 - Not as broad as a full feature, but too coupled for a single worker to do atomically
 - Examples: "Add search to the existing product API", "Add login endpoint to existing Spring Boot app", "Add one React component to an existing frontend"
 
-## When in doubt, classify as MULTI_TASK. Unnecessary decomposition adds minimal overhead, but missing decomposition causes context exhaustion and single-file failures.
+## When in doubt, classify as MEDIUM. Only use MULTI_TASK when the spec clearly describes multiple independent components that cannot be built by a single developer in one sitting. Unnecessary decomposition into MULTI_TASK inflates cost by 5-10x for simple problems and introduces cross-task wiring bugs. Prefer MEDIUM → SINGLE_SHOT over MEDIUM → MULTI_TASK when unsure.
 
 Respond with ONLY a JSON object, no markdown, no explanation:
 {"classification": "SINGLE_SHOT|MEDIUM|MULTI_TASK", "confidence": 0.0-1.0, "reason": "one sentence"}

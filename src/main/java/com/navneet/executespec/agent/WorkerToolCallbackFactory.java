@@ -5,7 +5,6 @@ import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
 
 import java.util.List;
-import java.util.function.BiFunction;
 
 /**
  * Factory that creates Spring AI {@link ToolCallback} instances for the 9 worker tools.

@@ -4,8 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.WorkerAgent;
 import com.navneet.executespec.agent.model.TaskDefinition;
-import com.navneet.executespec.compiler.CompilerAgent;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.compiler.CompilerAgent;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.router.*;
 import com.navneet.executespec.sse.RunEvent;
@@ -20,9 +20,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
-
-import static com.navneet.executespec.config.CustomMetricsConfig.*;
-import com.navneet.executespec.config.CustomMetricsConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,6 +31,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.TASK_DURATION;
+import static com.navneet.executespec.config.CustomMetricsConfig.TASK_TOTAL;
 
 /**
  * Executes worker tasks in <b>tiered parallel</b> order based on the dependency graph.
@@ -131,6 +131,9 @@ public class SequentialTaskExecutor {
         // Resolve available providers for this run's org (API key-aware routing)
         Set<LlmProvider> availableProviders = providerResolver.resolve(runId);
 
+        // Pre-build taskId → owned files map for context-aware subtask decomposition (RC6)
+        Map<String, Set<String>> taskOwnedFilesMap = buildTaskOwnedFilesMap(tasks);
+
         // Compute execution tiers from dependency graph
         List<List<AgentTask>> tiers = computeTiers(tasks);
 
@@ -190,7 +193,7 @@ public class SequentialTaskExecutor {
                 // Single task in tier — run directly on current thread (no thread overhead)
                 executeSingleTask(executable.get(0), run, defaultModel,
                         availableProviders, allReports, completed, failed,
-                        previouslyMerged, mergedTaskIds, mergeLock);
+                        previouslyMerged, mergedTaskIds, mergeLock, taskOwnedFilesMap);
             } else {
                 // Multiple independent tasks — run in parallel using virtual threads
                 List<Thread> threads = new ArrayList<>();
@@ -202,7 +205,7 @@ public class SequentialTaskExecutor {
                             .name("worker-tier" + tier + "-" + task.getTaskId())
                             .start(snapshot.wrap(() -> executeSingleTask(task, run, defaultModel,
                                     availableProviders, allReports, completed, failed,
-                                    previouslyMerged, mergedTaskIds, mergeLock)));
+                                    previouslyMerged, mergedTaskIds, mergeLock, taskOwnedFilesMap)));
                     threads.add(vt);
                 }
 
@@ -256,6 +259,20 @@ public class SequentialTaskExecutor {
                 }
             }
 
+            // Inter-tier progression stall check: warn user if spending fast but completing slowly.
+            // This is NOT a hard stop — emits a warning SSE so the user can cancel before hitting the ceiling.
+            if (runCostBudgetService.isProgressionStalled(runId, completed.size(), tasks.size())) {
+                String tier = runCostBudgetService.getRunTier(runId);
+                Double budget = runCostBudgetService.getBudget(runId);
+                double currentCost = runCostBudgetService.getCurrentCost(runId);
+                log.warn("[CostBudget] Run {} progression stalled: {}/{} tasks done at ${} spent — emitting warning",
+                        runId, completed.size(), tasks.size(), String.format("%.2f", currentCost));
+                sseBroadcaster.emit(runId, RunEvent.log(runId, "pipeline",
+                        String.format("⚠️ COST_STALL_WARNING: $%.2f spent but only %d/%d tasks complete. " +
+                                "Workers may be stuck in read loops. Consider cancelling to avoid further cost.",
+                                currentCost, completed.size(), tasks.size())));
+            }
+
             // Inter-tier cost budget check: stop before starting next tier if hard cap reached
             if (runCostBudgetService.isOverBudget(runId)) {
                 String tier = runCostBudgetService.getRunTier(runId);
@@ -288,7 +305,8 @@ public class SequentialTaskExecutor {
                                     Set<LlmProvider> availableProviders,
                                     List<WorkerReport> allReports, List<AgentTask> completed,
                                     List<AgentTask> failed, List<AgentTask> previouslyMerged,
-                                    Set<String> mergedTaskIds, Object mergeLock) {
+                                    Set<String> mergedTaskIds, Object mergeLock,
+                                    Map<String, Set<String>> taskOwnedFilesMap) {
         String runId = run.getRunId();
         String taskId = task.getTaskId();
 
@@ -347,7 +365,7 @@ public class SequentialTaskExecutor {
 
         // === Subtask decomposition: split multi-file tasks into per-file subtasks ===
         TaskDefinition taskDef = parseTaskDef(task.getTaskJson());
-        if (subtaskDecomposer.shouldDecompose(taskDef)) {
+        if (subtaskDecomposer.shouldDecompose(taskDef, taskOwnedFilesMap)) {
             metricsTaskOutcome = executeDecomposedTask(task, taskDef, run, availableProviders,
                     allReports, completed, failed, previouslyMerged, mergedTaskIds, mergeLock,
                     branchName);
@@ -1122,6 +1140,27 @@ public class SequentialTaskExecutor {
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Cannot parse task definition", e);
         }
+    }
+
+    /**
+     * Pre-builds a taskId → owned files map from the full task list.
+     * Used by SubtaskDecomposer to detect same-file sequential chains and skip
+     * redundant phase decomposition (RC6).
+     */
+    private Map<String, Set<String>> buildTaskOwnedFilesMap(List<AgentTask> tasks) {
+        Map<String, Set<String>> result = new HashMap<>();
+        for (AgentTask task : tasks) {
+            if (task.getTaskJson() == null) continue;
+            try {
+                TaskDefinition def = parseTaskDef(task.getTaskJson());
+                if (def.getOwnedFiles() != null && !def.getOwnedFiles().isEmpty()) {
+                    result.put(task.getTaskId(), new java.util.HashSet<>(def.getOwnedFiles()));
+                }
+            } catch (Exception e) {
+                log.debug("Could not parse task {} for owned-files map: {}", task.getTaskId(), e.getMessage());
+            }
+        }
+        return result;
     }
 
     /**

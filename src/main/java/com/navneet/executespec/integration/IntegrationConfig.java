@@ -1,11 +1,12 @@
 package com.navneet.executespec.integration;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.integration.bitbucket.BitbucketAdapter;
+import com.navneet.executespec.integration.bitbucket.BitbucketClient;
 import com.navneet.executespec.integration.confluence.ConfluenceAdapter;
 import com.navneet.executespec.integration.confluence.ConfluenceClient;
 import com.navneet.executespec.integration.jira.JiraAdapter;
 import com.navneet.executespec.integration.jira.JiraClient;
-import com.navneet.executespec.integration.bitbucket.BitbucketAdapter;
-import com.navneet.executespec.integration.bitbucket.BitbucketClient;
 import com.navneet.executespec.integration.pagerduty.PagerDutyAdapter;
 import com.navneet.executespec.integration.pagerduty.PagerDutyClient;
 import com.navneet.executespec.integration.servicenow.ServiceNowAdapter;
@@ -15,7 +16,6 @@ import com.navneet.executespec.integration.slack.SlackMessageBuilder;
 import com.navneet.executespec.integration.slack.SlackOAuthService;
 import com.navneet.executespec.integration.slack.model.OrgSlackIntegrationRepository;
 import com.navneet.executespec.integration.slack.model.ProjectSlackChannelRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

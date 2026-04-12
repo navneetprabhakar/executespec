@@ -1,19 +1,21 @@
 package com.navneet.executespec.report;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.reviewer.model.IssueSeverity;
-import com.navneet.executespec.reviewer.model.ReviewIssue;
-import com.navneet.executespec.reviewer.model.AccuracyReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
-import com.navneet.executespec.report.model.*;
+import com.navneet.executespec.report.model.ReportInput;
+import com.navneet.executespec.report.model.ReportIssueDTO;
+import com.navneet.executespec.report.model.ValidationReportDTO;
+import com.navneet.executespec.report.model.ValidationReportShareDTO;
+import com.navneet.executespec.reviewer.model.AccuracyReport;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
-import com.navneet.executespec.state.StateStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +26,6 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j

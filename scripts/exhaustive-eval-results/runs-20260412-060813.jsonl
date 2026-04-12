@@ -1,0 +1,432 @@
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "html_todo",
+  "spec_type": "HTML",
+  "language": "HTML/JS",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:13Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fibonacci_java",
+  "spec_type": "FIBONACCI",
+  "language": "Java",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:16Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fibonacci_python",
+  "spec_type": "FIBONACCI",
+  "language": "Python",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:19Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fibonacci_go",
+  "spec_type": "FIBONACCI",
+  "language": "Go",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:22Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fibonacci_rust",
+  "spec_type": "FIBONACCI",
+  "language": "Rust",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:26Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fibonacci_nodejs",
+  "spec_type": "FIBONACCI",
+  "language": "Node.js",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:29Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fullstack_nodejs",
+  "spec_type": "FULLSTACK",
+  "language": "Node.js",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:32Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fullstack_spring",
+  "spec_type": "FULLSTACK",
+  "language": "Java",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:35Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fullstack_python",
+  "spec_type": "FULLSTACK",
+  "language": "Python",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:38Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fullstack_go",
+  "spec_type": "FULLSTACK",
+  "language": "Go",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:41Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "fullstack_rust",
+  "spec_type": "FULLSTACK",
+  "language": "Rust",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:44Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "backend_nodejs",
+  "spec_type": "BACKEND",
+  "language": "Node.js",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:47Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "backend_spring",
+  "spec_type": "BACKEND",
+  "language": "Java",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:50Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "backend_python",
+  "spec_type": "BACKEND",
+  "language": "Python",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:53Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "backend_go",
+  "spec_type": "BACKEND",
+  "language": "Go",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:56Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC OPENAI",
+  "spec_name": "backend_rust",
+  "spec_type": "BACKEND",
+  "language": "Rust",
+  "run_id": "",
+  "timestamp": "2026-04-12T00:38:59Z",
+  "status": "SUBMIT_FAILED",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 0
+  },
+  "cost": {
+    "actual_usd": "null"
+  },
+  "efficiency": {
+    "tasks_total": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
