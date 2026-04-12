@@ -216,7 +216,14 @@ public class V2RunOrchestrator {
                 persistReviewFailure(runId, e);
             }
 
-            // ── 4. Terminal status mapping ─────────────────────────────────
+            // ── 4. Ensure README.md exists in the workspace ─────────────────
+            // If the planner emitted a "create README" task the file is already there
+            // and we leave it alone. If not (typical for trivial specs), write a
+            // deterministic run-meta README so the download-zip experience always
+            // includes an entry-point doc.
+            ensureReadme(runId, workspace, userRequest, plan, execResult, reviewResult, startedAt);
+
+            // ── 5. Terminal status mapping ─────────────────────────────────
             String finalStatus = mapOverallToV1Status(execResult.overall());
             terminate(runId, finalStatus,
                     "overall=" + execResult.overall()
@@ -351,6 +358,97 @@ public class V2RunOrchestrator {
         metrics.recordRunOutcome(finalStatus);
         metrics.recordRunLatency(finalStatus,
                 java.time.Duration.between(startedAt, Instant.now()));
+    }
+
+    // ─── README generation ──────────────────────────────────────────────────
+
+    /**
+     * Writes a run-meta README.md into the workspace if one doesn't already exist.
+     *
+     * <p>The planner is instructed (in prompts/v2/planner.md invariant #3) to emit a
+     * "Create README.md" task for non-trivial specs. That user-facing README is
+     * authored by the worker and takes precedence — we never overwrite it. For
+     * trivial specs (single-file, no framework) the planner skips the README task;
+     * this method then writes a deterministic run-meta README so the download-zip
+     * experience always includes an entry-point doc.
+     *
+     * <p>Best-effort — IO errors are logged and swallowed. A missing README isn't
+     * worth failing a run over.
+     */
+    private void ensureReadme(String runId, Path workspace, String userRequest,
+                               PlanV2 plan, ExecutionResult execResult,
+                               ReviewerResult reviewResult, Instant startedAt) {
+        Path readme = workspace.resolve("README.md");
+        if (Files.exists(readme)) {
+            log.debug("V2RunOrchestrator run={} README.md already present (planner-authored), skipping", runId);
+            return;
+        }
+        try {
+            Files.writeString(readme, renderRunReadme(runId, userRequest, plan, execResult, reviewResult, startedAt));
+            log.info("V2RunOrchestrator run={} wrote run-meta README.md ({} bytes)",
+                    runId, Files.size(readme));
+        } catch (IOException e) {
+            log.warn("V2RunOrchestrator run={} failed to write README.md: {}", runId, e.getMessage());
+        }
+    }
+
+    private String renderRunReadme(String runId, String userRequest, PlanV2 plan,
+                                    ExecutionResult execResult, ReviewerResult reviewResult,
+                                    Instant startedAt) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# ").append(plan.planTitle() != null ? plan.planTitle() : "Run Output").append("\n\n");
+        if (plan.planSummary() != null && !plan.planSummary().isBlank()) {
+            sb.append(plan.planSummary()).append("\n\n");
+        } else {
+            sb.append("This project was generated from the following request:\n\n> ")
+              .append(userRequest).append("\n\n");
+        }
+
+        // How to run
+        String buildCmd = plan.buildCommand();
+        if (buildCmd != null && !buildCmd.isBlank()) {
+            sb.append("## How to build / run\n\n```bash\n").append(buildCmd).append("\n```\n\n");
+        } else {
+            sb.append("## How to run\n\nSee source files for entry points.\n\n");
+        }
+
+        // Task summary
+        sb.append("## Tasks\n\n| ID | Title | Status |\n|---|---|---|\n");
+        for (TaskOutcome t : execResult.perTask()) {
+            sb.append("| `").append(t.taskId()).append("` | ")
+              .append(t.taskTitle() == null ? "" : t.taskTitle().replace("|", "\\|"))
+              .append(" | `").append(t.status().name()).append("` |\n");
+        }
+        sb.append("\n");
+
+        // Review verdict
+        if (reviewResult != null) {
+            sb.append("## Code review\n\n")
+              .append("**Verdict:** `").append(reviewResult.overall().name()).append("`");
+            if (reviewResult.finalBuildPassed() != null) {
+                sb.append("  \n**Build passed:** `").append(reviewResult.finalBuildPassed()).append("`");
+            }
+            sb.append("\n\n");
+            if (reviewResult.generalPassSummary() != null && !reviewResult.generalPassSummary().isBlank()) {
+                sb.append("**General review:** ").append(reviewResult.generalPassSummary()).append("\n\n");
+            }
+            if (reviewResult.wiringPassSummary() != null && !reviewResult.wiringPassSummary().isBlank()) {
+                sb.append("**Wiring review:** ").append(reviewResult.wiringPassSummary()).append("\n\n");
+            }
+        }
+
+        // Run metadata
+        sb.append("## Run details\n\n")
+          .append("- **Run ID:** `").append(runId).append("`\n")
+          .append("- **Started:** `").append(startedAt).append("`\n")
+          .append("- **Completed:** `").append(Instant.now()).append("`\n")
+          .append("- **Harness:** ExecuteSpec V2\n")
+          .append("- **Overall:** `").append(execResult.overall().name()).append("`\n");
+        if (plan.projectType() != null && !plan.projectType().isBlank()) {
+            sb.append("- **Project type:** `").append(plan.projectType()).append("`\n");
+        }
+        sb.append("\n---\n\n*Generated by ExecuteSpec V2.*\n");
+        return sb.toString();
     }
 
     // ─── mapping helpers ────────────────────────────────────────────────────
