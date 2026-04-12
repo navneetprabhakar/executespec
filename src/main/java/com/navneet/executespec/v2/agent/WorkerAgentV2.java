@@ -3,6 +3,7 @@ package com.navneet.executespec.v2.agent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.v2.context.ContextStoreV2;
 import com.navneet.executespec.v2.tool.CompleteTaskTool;
 import com.navneet.executespec.v2.tool.Tool;
 import com.navneet.executespec.v2.tool.ToolRegistryV2;
@@ -61,9 +62,13 @@ public class WorkerAgentV2 {
      *  for SubtaskDecomposer removal). */
     public static final int DEFAULT_MAX_ITER = 40;
 
+    /** Persist context every N iterations (Phase 8 — plan P8.1 says "every 5"). */
+    public static final int CONTEXT_PERSIST_EVERY_N_ITERATIONS = 5;
+
     private final LlmRouterV2 router;
     private final ToolRegistryV2 toolRegistry;
     private final ObjectMapper objectMapper;
+    private final ContextStoreV2 contextStore;
 
     public WorkerResult run(WorkerTaskRequest req) {
         long start = System.currentTimeMillis();
@@ -154,6 +159,8 @@ public class WorkerAgentV2 {
                     // Append the tool response so the conversation is well-formed
                     // (matters for any post-hoc inspection / persistence).
                     history.add(ToolResponseMessage.builder().responses(toolResponses).build());
+                    // Successful completion — context is no longer needed for recovery.
+                    contextStore.delete(req.context());
                     return WorkerResult.builder()
                             .outcome(WorkerResult.Outcome.COMPLETED)
                             .iterations(iter)
@@ -170,6 +177,13 @@ public class WorkerAgentV2 {
                 toolLog.add(tc.name() + "(" + previewArgs(tc.arguments()) + ")");
             }
             history.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+            // Periodic context persistence for crash recovery / retry-with-context. Best-effort;
+            // failures inside ContextStoreV2 don't propagate. Save on the iteration boundary
+            // so a saved snapshot always ends on a well-formed tool-response turn.
+            if (iter % CONTEXT_PERSIST_EVERY_N_ITERATIONS == 0) {
+                contextStore.save(req.context(), history, iter);
+            }
         }
 
         log.warn("WorkerAgentV2 ITERATION LIMIT run={} task={} iters={}",
