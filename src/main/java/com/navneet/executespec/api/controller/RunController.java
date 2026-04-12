@@ -54,6 +54,8 @@ import java.util.stream.Collectors;
 public class RunController {
 
     private final PipelineHarness harness;
+    private final com.navneet.executespec.v2.rollout.HarnessVersionResolver harnessVersionResolver;
+    private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
     private final StateStore stateStore;
     private final BackgroundValidationService backgroundValidationService;
     private final RunMapper mapper;
@@ -109,22 +111,42 @@ public class RunController {
         // pipeline thread re-loads and re-saves the run without ownership fields).
         String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
 
-        PipelineRun run = harness.submitRun(
-            req.userRequest(),
-            req.source() != null ? req.source() : "REST",
-            req.repoUrl(),
-            req.repoMode(),
-            githubPat,
-            githubOwner,
-            Boolean.TRUE.equals(req.skipApproval()),
-            Boolean.TRUE.equals(req.autoMerge()),
-            req.modelName(),
-            req.aiProvider(),
-            userDetails.getUser().getId(),
-            userDetails.getUser().getOrgId(),
-            req.projectId(),
-            executionMode
-        );
+        // Phase 11.A: consult HarnessVersionResolver and route V1 vs V2 pipeline.
+        // Both paths have identical submitRun signatures and return a populated
+        // PipelineRun synchronously — the frontend sees no difference in API behavior.
+        com.navneet.executespec.v2.rollout.HarnessVersion chosen = harnessVersionResolver.resolve();
+        log.info("POST /api/runs dispatch → harness={}", chosen);
+        PipelineRun run = (chosen == com.navneet.executespec.v2.rollout.HarnessVersion.V2)
+                ? v2Orchestrator.submitRun(
+                        req.userRequest(),
+                        req.source() != null ? req.source() : "REST",
+                        req.repoUrl(),
+                        req.repoMode(),
+                        githubPat,
+                        githubOwner,
+                        Boolean.TRUE.equals(req.skipApproval()),
+                        Boolean.TRUE.equals(req.autoMerge()),
+                        req.modelName(),
+                        req.aiProvider(),
+                        userDetails.getUser().getId(),
+                        userDetails.getUser().getOrgId(),
+                        req.projectId(),
+                        executionMode)
+                : harness.submitRun(
+                        req.userRequest(),
+                        req.source() != null ? req.source() : "REST",
+                        req.repoUrl(),
+                        req.repoMode(),
+                        githubPat,
+                        githubOwner,
+                        Boolean.TRUE.equals(req.skipApproval()),
+                        Boolean.TRUE.equals(req.autoMerge()),
+                        req.modelName(),
+                        req.aiProvider(),
+                        userDetails.getUser().getId(),
+                        userDetails.getUser().getOrgId(),
+                        req.projectId(),
+                        executionMode);
 
         // Run count already incremented atomically in assertAndIncrementRunCount above
         usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);

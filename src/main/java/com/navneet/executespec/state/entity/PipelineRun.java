@@ -27,6 +27,16 @@ public class PipelineRun {
     private String status;              // PLANNING | AWAITING_APPROVAL | WORKING |
                                         // REVIEWING | AWAITING_MERGE | COMPLETE | FAILED
 
+    /**
+     * Which pipeline produced this run. "v1" = V1 PipelineHarness; "v2" = V2RunOrchestrator.
+     * Default "v1" (see V76 migration) so legacy rows and any row written without the
+     * field set are treated as V1. HarnessVersionResolver reads this for per-run action
+     * routing so actions dispatched on a running V2 run always land in V2 code paths.
+     */
+    @Column(name = "harness_version", length = 16)
+    @lombok.Builder.Default
+    private String harnessVersion = "v1";
+
     @Column(columnDefinition = "TEXT")
     private String planJson;            // full TaskPlan JSON from planner
 
