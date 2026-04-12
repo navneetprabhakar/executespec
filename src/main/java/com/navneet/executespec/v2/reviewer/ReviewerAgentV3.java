@@ -150,7 +150,7 @@ public class ReviewerAgentV3 {
                 .context(passCtx)
                 .maxIterations(maxIter)
                 .temperature(0.0)
-                .maxTokensPerCall(4096)
+                .maxTokensPerCall(8192)
                 .build());
     }
 

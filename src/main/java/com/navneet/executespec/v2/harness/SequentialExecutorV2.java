@@ -69,6 +69,13 @@ public class SequentialExecutorV2 {
               compiles.
             - When the task is fully complete, call completeTask with a brief summary.
               Do not output any text that is not needed to complete the task.
+
+            Efficiency — batch tool calls whenever the work is independent:
+            - If you need to read multiple files, emit ALL the readFile calls in ONE turn.
+            - If you've planned out several independent edits, emit them together.
+            - Do NOT use separate turns to call tools that don't depend on each other's
+              output. Each turn re-sends the whole conversation; batching saves tokens
+              and latency proportionally.
             """;
 
     private final WorkerAgentV2 worker;
@@ -118,7 +125,7 @@ public class SequentialExecutorV2 {
                 .context(taskCtx)
                 .maxIterations(req.maxIterationsPerTask())
                 .temperature(0.0)
-                .maxTokensPerCall(4096)
+                .maxTokensPerCall(8192)
                 .build());
 
         // Worker didn't reach COMPLETED — can't even attempt a smoke test meaningfully.
@@ -174,7 +181,7 @@ public class SequentialExecutorV2 {
                 .context(taskCtx)
                 .maxIterations(req.maxIterationsPerTask())
                 .temperature(0.0)
-                .maxTokensPerCall(4096)
+                .maxTokensPerCall(8192)
                 .build());
 
         int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
