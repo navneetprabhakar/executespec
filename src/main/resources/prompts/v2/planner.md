@@ -44,6 +44,11 @@ The plan schema:
 - `planSummary`: one-paragraph summary of what the plan accomplishes
 - `projectType`: one of `java-spring-boot`, `node-backend`, `node-frontend`, `python`, `go`, `rust`, `cli`, `unknown`. Infer from the spec.
 - `buildCommand`: explicit shell build command (e.g. `mvn -q -DskipTests compile`, `npm run build`, `cargo build --quiet`). Omit / use null only if you genuinely cannot determine one — the harness will fall back to framework inference.
+
+  **Runtime conventions — do NOT violate these:**
+  - For Python projects, **always emit `python3`** (never bare `python`). Python 2 is deprecated; many systems (modern macOS, minimal containers) only install `python3` and bare `python` returns exit 127 "command not found".
+  - For Node projects, prefer `npm run <script>` over raw `node` invocations when a script exists in package.json.
+  - For Java/Maven, prefer `mvn -q -DskipTests compile` over full `mvn install` for smoke tests — faster and still catches type errors.
 - `smokeTestStrategy`: one of `BUILD` (default — build must pass), `PREVIEW_HEALTH` (start a server and hit `/health`), `TEST_SUITE` (run the test suite).
 - `tasks`: array of task objects, each with:
   - `id`: short identifier unique within the plan (e.g. `T1`, `T2`, `T3`)

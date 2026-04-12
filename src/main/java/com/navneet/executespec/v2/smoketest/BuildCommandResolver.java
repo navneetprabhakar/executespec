@@ -31,7 +31,7 @@ public class BuildCommandResolver {
     public BuildCommand resolve(Path workspaceRoot, String plannerDeclaredCommand) {
         if (plannerDeclaredCommand != null && !plannerDeclaredCommand.isBlank()) {
             return BuildCommand.builder()
-                    .command(plannerDeclaredCommand.trim())
+                    .command(normalizePython(plannerDeclaredCommand.trim()))
                     .timeoutSeconds(180)
                     .sourceDescription("planner-declared")
                     .build();
@@ -70,9 +70,34 @@ public class BuildCommandResolver {
         if (exists(workspaceRoot, "pyproject.toml") || exists(workspaceRoot, "setup.py")
                 || exists(workspaceRoot, "requirements.txt")) {
             // Python has no "compile" — use a syntax check across the project as a smoke proxy.
-            return Optional.of(build("python -m compileall -q .", 120, "inferred:python"));
+            // Always use python3: python2 is deprecated, many systems (incl. modern macOS)
+            // ship only python3, bare `python` often exits 127 with "command not found".
+            return Optional.of(build("python3 -m compileall -q .", 120, "inferred:python"));
         }
         return Optional.empty();
+    }
+
+    /**
+     * Rewrites bare {@code python} invocations to {@code python3} in planner-declared
+     * build commands. Safe: only replaces {@code python} when followed by a space or
+     * end-of-string (never touches {@code python3}, {@code python3.11}, or paths like
+     * {@code /usr/bin/python}) and only at a word boundary.
+     *
+     * <p>Examples:
+     * <ul>
+     *   <li>{@code "python fib.py"} → {@code "python3 fib.py"}</li>
+     *   <li>{@code "python -m pytest && echo ok"} → {@code "python3 -m pytest && echo ok"}</li>
+     *   <li>{@code "python3 fib.py"} → {@code "python3 fib.py"} (unchanged)</li>
+     *   <li>{@code "/usr/bin/python foo"} → {@code "/usr/bin/python foo"} (unchanged — explicit path)</li>
+     * </ul>
+     */
+    static String normalizePython(String command) {
+        if (command == null || command.isBlank()) return command;
+        // (?<![./\w]) = not preceded by a path char or word char (prevents matching inside /usr/bin/python)
+        // python = literal
+        // (?!\d|_) = not followed by a digit (prevents touching python3, python2.7, python_utils)
+        // (?=\s|$) = followed by whitespace or end (only matches whole-word python before args)
+        return command.replaceAll("(?<![./\\w])python(?!\\d|_)(?=\\s|$)", "python3");
     }
 
     private static boolean exists(Path root, String relative) {
