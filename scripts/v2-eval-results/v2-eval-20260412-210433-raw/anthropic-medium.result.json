@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "medium",
+  "run_id": "41e5288d-6ad9-4a6e-a6e2-191a5d41366e",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T15:34:33.447361Z",
+  "completedAt": "2026-04-12T15:38:15.325192Z",
+  "tasks_total": 3,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"overall\":\"FIXED_ISSUES\",\"generalPassSummary\":\"Found 1 issue, fixed 1. Issue: Unused dependency 'uuid' declared in package.json but never imported or used in the code (contract violation). The code correctly uses randomUUID from the built-in crypto module instead. Removed the unused dependency from package.json.\",\"wiringPassSummary\":\"Wiring review complete. No wiring issues found. This is a simple Express.js to-do list API with a single server.js file. All route handlers (POST /todos, GET /todos, GET /todos/:id, PATCH /todos/:id, DELETE /todos/:id) are properly registered with the Express app instance. Middleware (express.json()) is correctly configured. The server is properly initialized and started. No orphaned files or unregistered modules exist. The project builds successfully.\",\"totalLatencyMs\":42614,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.160172,
+  "est_low": 0.33560000000000006,
+  "est_high": 0.5873000000000002,
+  "credits": 1,
+  "total_input": 41680,
+  "total_output": 11642,
+  "accuracy": 73,
+  "report_ok": true
+}

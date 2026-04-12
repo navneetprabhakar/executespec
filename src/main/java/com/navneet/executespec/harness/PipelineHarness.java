@@ -62,6 +62,7 @@ import static com.navneet.executespec.config.CustomMetricsConfig.*;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Deprecated(since = "v2")
 public class PipelineHarness {
 
     /**
@@ -74,6 +75,7 @@ public class PipelineHarness {
     /** Stable identifier for this JVM instance — used for instance tracking in pipeline_run. */
     private static final String INSTANCE_ID = resolveInstanceId();
 
+    @Deprecated(since = "v2")
     private static String resolveInstanceId() {
         try {
             return java.net.InetAddress.getLocalHost().getHostName()
@@ -262,6 +264,7 @@ public class PipelineHarness {
 
     // ── Auto-retry ───────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private boolean autoRetryRunIfEligible(PipelineRun run) {
         // Look up tier
         String tier = "FREE";
@@ -333,6 +336,7 @@ public class PipelineHarness {
     // ── CLI path ─────────────────────────────────────────────────────────────
 
     /** Synchronous CLI entry-point (blocking). Unchanged from Tier 1/2 logic. */
+    @Deprecated(since = "v2")
     public void run(String userRequest) {
         Optional<PipelineRun> resumable = stateStore.findResumableRun();
         if (resumable.isPresent()) {
@@ -410,6 +414,7 @@ public class PipelineHarness {
      * <p>If the maximum concurrent-run limit is already reached the run is
      * queued (status=QUEUED) and starts as soon as a slot is released.
      */
+    @Deprecated(since = "v2")
     public PipelineRun submitRun(String userRequest, String source,
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner) {
@@ -423,6 +428,7 @@ public class PipelineHarness {
      * avoiding the race condition where the async pipeline thread re-loads and re-saves
      * the run entity before the controller can stamp these fields.
      */
+    @Deprecated(since = "v2")
     public PipelineRun submitRun(String userRequest, String source,
                                   String repoUrl, String repoMode,
                                   String githubPat, String githubOwner,
@@ -632,6 +638,7 @@ public class PipelineHarness {
      * Routes a task into the appropriate provider pool.
      * The task is responsible for releasing the global run slot when done.
      */
+    @Deprecated(since = "v2")
     private void dispatchToProviderPool(String providerName, String runId, String userTier, Runnable task) {
         ProviderRunPool pool = providerRunPoolManager.poolFor(providerName);
         pool.submit(runId, userTier, Instant.now(), task);
@@ -647,6 +654,7 @@ public class PipelineHarness {
      *
      * @return false if the run is not in AWAITING_APPROVAL (unknown runId or wrong state → 404)
      */
+    @Deprecated(since = "v2")
     public boolean resolvePlanGate(String runId, boolean approved, String comment) {
         Optional<PipelineRun> optRun = stateStore.findRun(runId);
         if (optRun.isEmpty()) return false;
@@ -673,6 +681,7 @@ public class PipelineHarness {
      * @param response the user's clarification text (e.g., a JIRA key or Confluence URL)
      * @return false if the run is not in AWAITING_CLARIFICATION state
      */
+    @Deprecated(since = "v2")
     public boolean resolveClarificationGate(String runId, String response) {
         Optional<PipelineRun> optRun = stateStore.findRun(runId);
         if (optRun.isEmpty()) return false;
@@ -696,6 +705,7 @@ public class PipelineHarness {
      *
      * @return false only if the runId is unknown or not in AWAITING_MERGE state (→ 404)
      */
+    @Deprecated(since = "v2")
     public boolean resolveMergeGate(String runId, boolean approved, String comment) {
         Optional<PipelineRun> optRun = stateStore.findRun(runId);
         if (optRun.isEmpty()) return false;
@@ -760,6 +770,7 @@ public class PipelineHarness {
      * Backwards-compat: handles runs stuck in AWAITING_MERGE from before the gate removal.
      * Delegates to doReviewAndMerge which now does: merge → review → report → complete.
      */
+    @Deprecated(since = "v2")
     private void performMergeOnRestart(String runId, boolean approved, String comment) {
         PipelineRun run = stateStore.findRun(runId).orElse(null);
         if (run == null) {
@@ -788,6 +799,7 @@ public class PipelineHarness {
     }
 
     /** Cancels a run. Returns false if run is already terminal. */
+    @Deprecated(since = "v2")
     public boolean cancelRun(String runId) {
         // Signal open gates via Redis so the pipeline thread's polling loop unblocks.
         // The pipeline thread will read the rejection value and bail out normally.
@@ -828,6 +840,7 @@ public class PipelineHarness {
      * Pauses a run: signals open gates via Redis, cancels in-flight workers,
      * and marks the run PAUSED. The user can then edit the goal and restart.
      */
+    @Deprecated(since = "v2")
     public boolean pauseRun(String runId) {
         gateStore.setPlanGate(runId, false);
         gateStore.setMergeGate(runId, MergeDecision.DECLINE);
@@ -846,6 +859,7 @@ public class PipelineHarness {
      * Creates a fresh run with an edited goal, linking it back to the paused source run.
      * Carries forward credentials, ownership, org, project, and model settings.
      */
+    @Deprecated(since = "v2")
     public PipelineRun restartWithNewGoal(PipelineRun pausedRun, String newGoal) {
         log.info("Restarting paused run {} with new goal", pausedRun.getRunId());
 
@@ -888,6 +902,7 @@ public class PipelineHarness {
      * (either executeRunAsync or runResumeAsync). Used by recovery components
      * (OrphanedRunWatchdog, StuckRunMonitor) to avoid spawning duplicate threads.
      */
+    @Deprecated(since = "v2")
     public boolean isRunActive(String runId) {
         return activeRunThreads.contains(runId);
     }
@@ -897,6 +912,7 @@ public class PipelineHarness {
      * preserving completed tasks and re-running incomplete ones.
      * Unlike restartWithNewGoal(), this does NOT create a new run.
      */
+    @Deprecated(since = "v2")
     public boolean resumeRun(String runId) {
         PipelineRun run = stateStore.findRun(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -951,6 +967,7 @@ public class PipelineHarness {
      * Routes to the correct resume path based on run status. Acquires a semaphore slot
      * (blocking if at capacity) to respect concurrency limits.
      */
+    @Deprecated(since = "v2")
     public void resumeOnStartup(PipelineRun run) {
         String runId = run.getRunId();
         String status = run.getStatus();
@@ -1034,6 +1051,7 @@ public class PipelineHarness {
      * Re-enters the plan-approval gate for a run in AWAITING_APPROVAL.
      * The plan already exists in DB; we just need to re-poll the gate (decision may be in Redis).
      */
+    @Deprecated(since = "v2")
     private void resumeFromPlanGate(PipelineRun run) {
         String runId = run.getRunId();
 
@@ -1198,6 +1216,7 @@ public class PipelineHarness {
      * Called from the retry-validation API endpoint after {@link BackgroundValidationService#prepareRetry}
      * has already incremented the attempt counter and reset status to PENDING.
      */
+    @Deprecated(since = "v2")
     public void retryBackgroundValidation(String runId) {
         PipelineRun run = stateStore.findRun(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -1212,6 +1231,7 @@ public class PipelineHarness {
         log.info("[PipelineHarness] Retry background validation queued for run {}", runId);
     }
 
+    @Deprecated(since = "v2")
     public void reopenMergeGate(String runId) {
         PipelineRun run = stateStore.findRun(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -1243,6 +1263,7 @@ public class PipelineHarness {
      *       {@link #doReviewAndMerge} on the executor directly.</li>
      * </ul>
      */
+    @Deprecated(since = "v2")
     public void implementSuggestions(String runId) {
         PipelineRun run = stateStore.findRun(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -1275,6 +1296,7 @@ public class PipelineHarness {
      *       {@link #doReviewAndMerge} on the executor directly.</li>
      * </ul>
      */
+    @Deprecated(since = "v2")
     public void reworkRun(String runId) {
         PipelineRun run = stateStore.findRun(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -1306,6 +1328,7 @@ public class PipelineHarness {
      *   semaphore slot); false when called from standalone handlers or {@link #runRetryAsync}
      *   (which do not hold a slot). The gate wait releases the slot iff this flag is true.
      */
+    @Deprecated(since = "v2")
     private void doReviewAndMerge(PipelineRun run, boolean holdsComputeSlot) {
         doReviewAndMerge(run, holdsComputeSlot, true);
     }
@@ -1314,6 +1337,7 @@ public class PipelineHarness {
      * Merge → Review → Report → Auto-fix → Re-validate → Complete.
      * Used by retry/resume paths. No manual merge gate.
      */
+    @Deprecated(since = "v2")
     private void doReviewAndMerge(PipelineRun run, boolean holdsComputeSlot, boolean needsReview) {
         String runId = run.getRunId();
 
@@ -1448,6 +1472,7 @@ public class PipelineHarness {
      * @param runId   the existing run ID
      * @param taskIds IDs of the newly appended tasks to execute
      */
+    @Deprecated(since = "v2")
     public void executeApplySuggestion(String runId, List<String> taskIds) {
         // Acquire semaphore slot to respect concurrency limits
         if (!runSlots.tryAcquire()) {
@@ -1580,6 +1605,7 @@ public class PipelineHarness {
      * @param runId      the new run's ID (already persisted via StateStore.createIterationRun())
      * @param newRequest the user's refined request
      */
+    @Deprecated(since = "v2")
     public void startIterationRun(String runId, String newRequest) {
         PipelineRun run = stateStore.findRun(runId).orElseThrow();
         String iterUserTier = "FREE";
@@ -1644,12 +1670,14 @@ public class PipelineHarness {
     // ── Internal async pipeline execution ────────────────────────────────────
 
     /** Returns true if the run has been cancelled (interrupted or DB-cancelled). */
+    @Deprecated(since = "v2")
     private boolean isCancelled(String runId) {
         if (Thread.currentThread().isInterrupted()) return true;
         PipelineRun r = stateStore.findRun(runId).orElse(null);
         return r != null && "CANCELLED".equals(r.getStatus());
     }
 
+    @Deprecated(since = "v2")
     private void executeRunAsync(String runId, String userRequest) {
         log.info("Executing async run {}", runId);
         activeRunThreads.add(runId);
@@ -2480,6 +2508,7 @@ public class PipelineHarness {
 
     // ── Resume (CLI) ──────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private void resume(PipelineRun run) {
         log.info("Resuming run {} from state [{}]", run.getRunId(), run.getStatus());
         switch (run.getStatus()) {
@@ -2506,6 +2535,7 @@ public class PipelineHarness {
         }
     }
 
+    @Deprecated(since = "v2")
     private void runWorkersAndReview(PipelineRun run) {
         List<AgentTask> incomplete = stateStore.getIncompleteTasks(run.getRunId());
         workspaceInitService.ensureRunWorkspace(run.getRunId());
@@ -2522,6 +2552,7 @@ public class PipelineHarness {
         runMergeGate(run);
     }
 
+    @Deprecated(since = "v2")
     private void runMergeGate(PipelineRun run) {
         ReviewReportV2 review = parseJson(run.getReviewJson(), ReviewReportV2.class);
         boolean shouldMerge = approvalGate.requestMerge(review);
@@ -2559,6 +2590,7 @@ public class PipelineHarness {
      * @param compileResult      compile result to include in the validation report
      * @param computeHadFailures if true, compute hadFailures from reports; if false, pass false
      */
+    @Deprecated(since = "v2")
     private void runBackgroundValidation(String runId, PipelineRun run,
                                          List<WorkerReport> reports, String planJson,
                                          String userRequest, CompileResult compileResult,
@@ -2567,6 +2599,7 @@ public class PipelineHarness {
                 computeHadFailures, true);
     }
 
+    @Deprecated(since = "v2")
     private void runBackgroundValidation(String runId, PipelineRun run,
                                          List<WorkerReport> reports, String planJson,
                                          String userRequest, CompileResult compileResult,
@@ -2736,6 +2769,7 @@ public class PipelineHarness {
      * task reached COMPLETE or PARTIAL status (i.e., some code was written).
      * Skips test execution — report-only mode.
      */
+    @Deprecated(since = "v2")
     private void maybeStartFailedValidation(String runId) {
         try {
             List<AgentTask> tasks = stateStore.getAllTasks(runId);
@@ -2769,6 +2803,7 @@ public class PipelineHarness {
      * Uses per-task provider/model pricing with Anthropic cache multipliers.
      * Non-fatal: a failure here does not affect run status.
      */
+    @Deprecated(since = "v2")
     private void saveActualCost(String runId) {
         try {
             double cost = costEstimator.computeCostForRun(runId);
@@ -2789,6 +2824,7 @@ public class PipelineHarness {
      * Tagged with execution mode (real_time/batch) and outcome (completed/failed).
      * Non-fatal — any failure is logged and ignored.
      */
+    @Deprecated(since = "v2")
     private void recordE2eDuration(String runId, String outcome) {
         try {
             stateStore.findRun(runId).ifPresent(run -> {
@@ -2809,6 +2845,7 @@ public class PipelineHarness {
     }
 
     /** Persists a RunCostLog entry for pricing analytics. Non-fatal. */
+    @Deprecated(since = "v2")
     private void writeRunCostLog(String runId, double actualCost) {
         try {
             PipelineRun run = stateStore.findRun(runId).orElse(null);
@@ -2860,6 +2897,7 @@ public class PipelineHarness {
      * Non-fatal: logs a warning but does not fail the run.
      */
     /** Public entry point for manual SCM push from RunController. */
+    @Deprecated(since = "v2")
     public void pushToScmManual(PipelineRun run) {
         var scmUser = run.getCreatedByUserId() != null
                 ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null) : null;
@@ -2876,6 +2914,7 @@ public class PipelineHarness {
      * Route SCM push to the correct provider based on run/user credentials.
      * Bitbucket takes precedence if credentials present on the run; falls back to GitHub.
      */
+    @Deprecated(since = "v2")
     private void pushToScmIfConfigured(PipelineRun run, com.navneet.executespec.auth.entity.AppUser user) {
         // Check Bitbucket first (on run, then on user)
         if (StringUtils.hasText(run.getBitbucketUsername()) && StringUtils.hasText(run.getBitbucketWorkspace())) {
@@ -2896,6 +2935,7 @@ public class PipelineHarness {
         pushToGitHubIfConfigured(run);
     }
 
+    @Deprecated(since = "v2")
     private void pushToBitbucket(PipelineRun run) {
         String workspace = run.getBitbucketWorkspace();
         String repoSlug = run.getBitbucketRepoSlug();
@@ -2933,6 +2973,7 @@ public class PipelineHarness {
         }
     }
 
+    @Deprecated(since = "v2")
     private void pushToGitHubIfConfigured(PipelineRun run) {
         String repoMode = run.getRepoMode();
         String repoUrl  = run.getRepoUrl();
@@ -3025,6 +3066,7 @@ public class PipelineHarness {
      * The run must currently be PARTIAL or FAILED (already finished).
      * Returns {@code true} if the retry was accepted and started asynchronously.
      */
+    @Deprecated(since = "v2")
     public boolean retryPartialTask(String runId, String taskId) {
         PipelineRun run = stateStore.findRun(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
@@ -3073,6 +3115,7 @@ public class PipelineHarness {
         return true;
     }
 
+    @Deprecated(since = "v2")
     private void runRetryAsync(PipelineRun run, AgentTask task) {
         String runId  = run.getRunId();
         String taskId = task.getTaskId();
@@ -3190,6 +3233,7 @@ public class PipelineHarness {
 
     /** Records E2E duration for failed runs (for SLO tracking). */
     @EventListener
+    @Deprecated(since = "v2")
     public void onRunFailed(PipelineEvent.RunFailed event) {
         recordE2eDuration(event.runId(), "failed");
     }
@@ -3199,6 +3243,7 @@ public class PipelineHarness {
      * Submits a new run with the same goal and carries forward the restart counter.
      */
     @EventListener
+    @Deprecated(since = "v2")
     public void onRestartRun(PipelineEvent.RestartRun event) {
         log.info("[Recovery] RestartRun event received — original={} attempt={}",
             event.originalRunId(), event.autoRestartCount());
@@ -3224,6 +3269,7 @@ public class PipelineHarness {
      * Called by RunRecoveryService after escalation is exhausted.
      * Returns the new run ID.
      */
+    @Deprecated(since = "v2")
     public String restartRun(PipelineRun original) {
         log.info("Restarting run {} (auto-recovery)", original.getRunId());
         // Pass ownership INTO submitRun so it's stamped BEFORE the async thread starts
@@ -3258,6 +3304,7 @@ public class PipelineHarness {
      * @param original the failed run whose goal is being retried
      * @return the new run ID
      */
+    @Deprecated(since = "v2")
     public String restartRunWithCount(PipelineRun original) {
         int newCount = original.getAutoRestartCount() + 1;
         log.info("Auto-restarting run {} due to transient failure (restart #{})",
@@ -3294,6 +3341,7 @@ public class PipelineHarness {
      * Submits a run triggered by an external integration (Jira, Confluence, ServiceNow, PagerDuty).
      * Same as submitRun but sets skipApproval and source on the PipelineRun.
      */
+    @Deprecated(since = "v2")
     public PipelineRun submitIntegrationRun(String userRequest, String source, boolean skipApproval) {
         // skipApproval passed directly into submitRun so it's set before the async thread starts
         // Integration runs also auto-merge when skipApproval is true (fully automated)
@@ -3309,6 +3357,7 @@ public class PipelineHarness {
      * then persists the updated task JSON so SequentialTaskExecutor sees the new tiers.
      * This is non-fatal — logs warnings and auto-corrects.
      */
+    @Deprecated(since = "v2")
     private void validateFileOwnership(List<AgentTask> workerTasks, String runId) {
         Map<String, List<String>> fileToOwners = new java.util.HashMap<>();
         Map<String, com.navneet.executespec.agent.model.TaskDefinition> taskDefs = new java.util.HashMap<>();
@@ -3395,6 +3444,7 @@ public class PipelineHarness {
      * @return {@code true} if workspace is ready; {@code false} if the run was
      *         marked FAILED and the caller should return immediately.
      */
+    @Deprecated(since = "v2")
     private boolean initializeWorkspace(String runId, PipelineRun run) {
         if (run.getSourceRunId() != null && !run.getSourceRunId().isBlank()) {
             try {
@@ -3444,6 +3494,7 @@ public class PipelineHarness {
      *
      * @throws InterruptedException if interrupted while waiting at the clarification gate
      */
+    @Deprecated(since = "v2")
     private String resolveContextReferences(String runId, PipelineRun run, String userRequest)
             throws InterruptedException {
         String effectiveRequest = userRequest;
@@ -3512,6 +3563,7 @@ public class PipelineHarness {
      * @return {@code true} if all tasks are COMPLETE and execution should continue;
      *         {@code false} if the run was marked FAILED or PARTIAL and the caller should return.
      */
+    @Deprecated(since = "v2")
     private boolean checkTaskCompletionEligibility(List<AgentTask> workerTasks, String runId, String context) {
         boolean allBlocked = workerTasks.stream()
             .allMatch(t -> "BLOCKED".equals(t.getStatus()) || "FAILED".equals(t.getStatus()));
@@ -3542,6 +3594,7 @@ public class PipelineHarness {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private void initAgentContext(String runId, String planJson) {
         fsTool.writeFile(runId, ".agent-context/task-assignments.json", planJson);
         fsTool.writeFile(runId, ".agent-context/file-locks.json", "{}");
@@ -3601,6 +3654,7 @@ public class PipelineHarness {
         log.info("Agent context initialized for run {} (.agent-context/)", runId);
     }
 
+    @Deprecated(since = "v2")
     private List<WorkerReport> getWorkerReports(String runId) {
         return stateStore.getAllTasks(runId).stream()
             .filter(t -> t.getWorkerReportJson() != null)
@@ -3608,6 +3662,7 @@ public class PipelineHarness {
             .toList();
     }
 
+    @Deprecated(since = "v2")
     private <T> T parseJson(String json, Class<T> type) {
         try {
             return mapper.readValue(json, type);
@@ -3616,6 +3671,7 @@ public class PipelineHarness {
         }
     }
 
+    @Deprecated(since = "v2")
     private int countQueued() {
         // Prefer live pool queue depth for accurate real-time position
         int poolQueued = providerRunPoolManager.totalQueuedRuns();
@@ -3631,6 +3687,7 @@ public class PipelineHarness {
      * CRITICAL issues exist, all non-system task IDs are returned for rework.
      * Returns empty set when no unfixed CRITICAL issues remain.
      */
+    @Deprecated(since = "v2")
     private Set<String> getFailedTaskIds(ReviewReportV2 review, String runId) {
         boolean hasUnfixedCritical = review.getIssues() != null && review.getIssues().stream()
             .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
@@ -3650,6 +3707,7 @@ public class PipelineHarness {
      * V2 uses a flat issue list (no per-task breakdown), so all unfixed CRITICAL
      * issues are included as context for the worker to fix.
      */
+    @Deprecated(since = "v2")
     private String buildRemediationFeedback(ReviewReportV2 review, String taskId) {
         StringBuilder sb = new StringBuilder();
 
@@ -3711,6 +3769,7 @@ public class PipelineHarness {
      *         re-open the merge gate); {@code false} if any task failed (run is already
      *         marked PARTIAL with a "Suggestions implementation failed" reason).
      */
+    @Deprecated(since = "v2")
     private boolean doSuggestionImplementation(PipelineRun run) {
         String runId = run.getRunId();
 
@@ -3788,6 +3847,7 @@ public class PipelineHarness {
      * @return {@code true} if all targeted tasks completed (caller should re-review);
      *         {@code false} if any task failed (run is already marked PARTIAL).
      */
+    @Deprecated(since = "v2")
     private boolean doReworkImplementation(PipelineRun run, ReviewReportV2 review) {
         String runId = run.getRunId();
 
@@ -3854,6 +3914,7 @@ public class PipelineHarness {
      * Returns all non-system task IDs if unfixed MINOR issues exist in the V2 review.
      * V2 uses a flat issue list (no per-task breakdown).
      */
+    @Deprecated(since = "v2")
     private Set<String> getSuggestionTaskIds(ReviewReportV2 review, String runId) {
         boolean hasUnfixedMinor = review.getIssues() != null && review.getIssues().stream()
             .filter(i -> i.getSeverity() == IssueSeverity.MINOR)
@@ -3871,6 +3932,7 @@ public class PipelineHarness {
      * Builds suggestion feedback from V2 review: global post-merge suggestions
      * plus all unfixed MINOR issues. V2 uses a flat issue list (no per-task breakdown).
      */
+    @Deprecated(since = "v2")
     private String buildSuggestionFeedback(ReviewReportV2 review, String taskId) {
         StringBuilder sb = new StringBuilder();
 
@@ -3901,6 +3963,7 @@ public class PipelineHarness {
      * Returns {@code true} for legacy system tasks that must be excluded from the
      * worker task pool and partial-completion checks.
      */
+    @Deprecated(since = "v2")
     private boolean isSystemTask(com.navneet.executespec.state.entity.AgentTask t) {
         return OPENAPI_TASK_ID.equals(t.getTaskId())
             || "generate_preview".equals(t.getTaskId()); // legacy plans in DB
@@ -3914,6 +3977,7 @@ public class PipelineHarness {
      * immediately after {@code workerPool.runAll()} so the task moves to COMPLETE before
      * the all-tasks-complete gate check.
      */
+    @Deprecated(since = "v2")
     private void markOpenapiTaskComplete(String runId, List<com.navneet.executespec.state.entity.AgentTask> tasks) {
         tasks.stream()
             .filter(t -> OPENAPI_TASK_ID.equals(t.getTaskId()))
@@ -3945,6 +4009,7 @@ public class PipelineHarness {
      * banner disappears on the next poll without waiting for the async pipeline thread.
      * Both {@link #resolvePlanGate} and {@link #resolveMergeGate} share this fix.
      */
+    @Deprecated(since = "v2")
     private void clearGateSync(String runId) {
         // Atomic JPQL update — avoids full entity save that could overwrite concurrent field changes
         stateStore.clearCurrentGate(runId);
@@ -3956,6 +4021,7 @@ public class PipelineHarness {
      * Waits up to 3 minutes for test execution to finish so test results
      * are included in the report.
      */
+    @Deprecated(since = "v2")
     private void generateValidationReport(String runId, PipelineRun run,
                                            List<WorkerReport> reports,
                                            ReviewReportV2 review,
@@ -3963,6 +4029,7 @@ public class PipelineHarness {
         generateValidationReport(runId, run, reports, review, compileResult, false);
     }
 
+    @Deprecated(since = "v2")
     private void generateValidationReport(String runId, PipelineRun run,
                                            List<WorkerReport> reports,
                                            ReviewReportV2 review,
@@ -4027,6 +4094,7 @@ public class PipelineHarness {
     // ── Auto-start preview for test execution ──────────────────────────────
 
     /** Starts preview in a virtual thread. Public for watchdog recovery. */
+    @Deprecated(since = "v2")
     public void autoStartPreview(String runId, PipelineRun run) {
         Thread.ofVirtual().name("auto-preview-" + runId).start(() -> {
             try {
@@ -4059,6 +4127,7 @@ public class PipelineHarness {
     // ── Test execution completion listener ───────────────────────────────────
 
     @EventListener
+    @Deprecated(since = "v2")
     public void onTestExecutionCompleted(TestExecutionCompletedEvent event) {
         CompletableFuture<TestExecutionSummary> future = testCompletionFutures.getIfPresent(event.runId());
         if (future != null) {
@@ -4072,6 +4141,7 @@ public class PipelineHarness {
 
     @EventListener
     @org.springframework.scheduling.annotation.Async
+    @Deprecated(since = "v2")
     public void onBatchComplete(com.navneet.executespec.batch.BatchResumeService.BatchCompleteEvent event) {
         String runId = event.runId();
         log.info("[Run {}] Batch complete event received — resuming pipeline", runId);
@@ -4128,6 +4198,7 @@ public class PipelineHarness {
     }
 
     /** Executes the batch resume pipeline body inside a provider pool slot. */
+    @Deprecated(since = "v2")
     private void runBatchResumeInPool(String runId, PipelineRun run, boolean slotAcquired) {
         // H3 fix: register thread so cancelRun() can interrupt batch resume operations
         pipelineThreads.put(runId, Thread.currentThread());

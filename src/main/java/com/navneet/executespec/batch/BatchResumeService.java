@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class BatchResumeService {
 
     private final StateStore stateStore;
@@ -52,6 +53,7 @@ public class BatchResumeService {
      */
     private static final List<String> TERMINAL_STATUSES = List.of("CANCELLED", "FAILED", "COMPLETE", "PAUSED");
 
+    @Deprecated(since = "v2")
     public void resumeFromBatch(PipelineRun run, BatchResults results) {
         String runId = run.getRunId();
 
@@ -210,6 +212,7 @@ public class BatchResumeService {
      * 3. XML tool_call extraction (writeFile calls)
      * 4. Raw output fallback
      */
+    @Deprecated(since = "v2")
     private int writeBatchOutput(String workspacePath, String content, String taskId, String runId)
             throws IOException {
 
@@ -252,6 +255,7 @@ public class BatchResumeService {
         return 0;
     }
 
+    @Deprecated(since = "v2")
     private int tryParseStructuredJson(String workspacePath, String json, String taskId, String runId) {
         try {
             JsonNode root = objectMapper.readTree(json);
@@ -277,6 +281,7 @@ public class BatchResumeService {
         return 0;
     }
 
+    @Deprecated(since = "v2")
     private int tryParseToolCalls(String workspacePath, String content, String taskId, String runId) {
         Matcher m = TOOL_CALL_PATTERN.matcher(content);
         int count = 0;
@@ -304,6 +309,7 @@ public class BatchResumeService {
         return count;
     }
 
+    @Deprecated(since = "v2")
     private void writeFile(String workspacePath, String relativePath, String content) throws IOException {
         Path target = Path.of(workspacePath, relativePath).normalize();
         // Security: ensure path stays within workspace

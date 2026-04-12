@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "high",
+  "run_id": "40c0ac5d-287f-421f-be76-f2c632eaa7b4",
+  "status": "PARTIAL",
+  "harness": "v2",
+  "startedAt": "2026-04-12T16:23:53.992475Z",
+  "completedAt": "2026-04-12T16:35:35.442706Z",
+  "tasks_total": 4,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"generalPassSummary\":\"\",\"wiringPassSummary\":\"Found and fixed 1 critical wiring issue in this Spring Boot project:\\n\\n**Issue: Component Scan Mismatch**\\n- Main application class `XaiApplication` is in package `com.xai`\\n- All controllers, services, repositories, and exception handlers are in package `com.library`\\n- By default, `@SpringBootApplication` only scans its own package and subpackages\\n- This caused all library components to never be registered at runtime\\n\\n**Fix Applied:**\\n- Added `@ComponentScan(basePackages = {\\\"com.xai\\\", \\\"com.library\\\"})` to `XaiApplication`\\n- This explicitly includes both packages in Spring's component scanning\\n- All 3 controllers, 3 services, 3 repositories, and the global exception handler are now properly registered\\n\\nThe project now builds successfully with all components properly wired.\",\"totalLatencyMs\":177940,\"finalBuildPassed\":true,\"finalBuildExitCode\":0,\"overall\":\"FIXED_ISSUES\"}",
+  "actual_cost": 1.613467,
+  "est_low": 0.4021,
+  "est_high": 0.703675,
+  "credits": 1,
+  "total_input": 1122354,
+  "total_output": 53933,
+  "accuracy": 100,
+  "report_ok": true
+}

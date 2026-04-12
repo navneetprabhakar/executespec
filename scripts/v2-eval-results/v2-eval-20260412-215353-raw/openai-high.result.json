@@ -1,0 +1,21 @@
+{
+  "provider": "openai",
+  "band": "high",
+  "run_id": "80b45cd5-fc12-408a-804b-ea286b18a096",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T16:26:56.050042Z",
+  "completedAt": "2026-04-12T16:32:35.577244Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"generalPassSummary\":\"Found 1 issues, fixed 0. Issues: LoanService.returnLoan updates the loan and book in a transactional context, so no code change was needed; build passed.\",\"wiringPassSummary\":\"no wiring issues found; verified Spring Boot application package scan covers all controllers/services/repositories, and the project builds successfully with mvn test\",\"totalLatencyMs\":23871,\"finalBuildPassed\":true,\"finalBuildExitCode\":0,\"overall\":\"FIXED_ISSUES\"}",
+  "actual_cost": 0.54946,
+  "est_low": 0.89625,
+  "est_high": 1.5684375,
+  "credits": 1,
+  "total_input": 200728,
+  "total_output": 15559,
+  "accuracy": 95,
+  "report_ok": true
+}
