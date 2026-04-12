@@ -53,6 +53,7 @@ public class RunConversationController {
     private final PipelineHarness harness;
     private final RunMapper runMapper;
     private final RunAccessGuard guard;
+    private final com.navneet.executespec.v2.integration.V2DeferredActionGuard v2Guard;
     private final TierPermissionService tierPermissionService;
     private final TierEnforcementService tierEnforcementService;
 
@@ -92,6 +93,7 @@ public class RunConversationController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(run, "chat");
 
         // Allow chat on completed runs and at review/merge gates
         var chatStatuses = java.util.Set.of("COMPLETE", "PARTIAL", "REVIEWING");
@@ -165,6 +167,7 @@ public class RunConversationController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(run, "apply-suggestion");
         String userId = userDetails.getUser().getId();
 
         // Allow on completed runs and at review/merge gates
@@ -281,6 +284,7 @@ public class RunConversationController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
         PipelineRun sourceRun = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(sourceRun, "iterate");
 
         if (!"COMPLETE".equals(sourceRun.getStatus()) && !"PARTIAL".equals(sourceRun.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,

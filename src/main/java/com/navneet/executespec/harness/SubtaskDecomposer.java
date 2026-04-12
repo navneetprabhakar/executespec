@@ -28,6 +28,7 @@ import java.util.Set;
  */
 @Component
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class SubtaskDecomposer {
 
     private final CoherenceGroupAnalyzer coherenceAnalyzer;
@@ -44,6 +45,7 @@ public class SubtaskDecomposer {
      * </ul>
      * Excluded: rework tasks (have reworkFeedback).
      */
+    @Deprecated(since = "v2")
     public boolean shouldDecompose(TaskDefinition taskDef) {
         return shouldDecompose(taskDef, Map.of());
     }
@@ -56,6 +58,7 @@ public class SubtaskDecomposer {
      * @param taskDef        the task to evaluate
      * @param taskOwnedFiles map of taskId → set of owned file paths for all tasks in the plan
      */
+    @Deprecated(since = "v2")
     public boolean shouldDecompose(TaskDefinition taskDef, Map<String, Set<String>> taskOwnedFiles) {
         if (taskDef == null) return false;
         if (taskDef.getReworkFeedback() != null && !taskDef.getReworkFeedback().isBlank()) return false;
@@ -90,6 +93,7 @@ public class SubtaskDecomposer {
      * @param parent the original task definition
      * @return ordered list of subtask definitions
      */
+    @Deprecated(since = "v2")
     public List<TaskDefinition> decompose(TaskDefinition parent) {
         List<String> files = parent.getOwnedFiles();
         if (files.size() == 1) {
@@ -107,6 +111,7 @@ public class SubtaskDecomposer {
      * A group of up to {@link CoherenceGroupAnalyzer#MAX_GROUP_SIZE} files may produce
      * that many {@code writeFile} calls.
      */
+    @Deprecated(since = "v2")
     private List<TaskDefinition> decomposeByFiles(TaskDefinition parent) {
         List<String> files = parent.getOwnedFiles();
         List<List<String>> groups = coherenceAnalyzer.analyze(files);
@@ -142,6 +147,7 @@ public class SubtaskDecomposer {
         return subtasks;
     }
 
+    @Deprecated(since = "v2")
     private String buildGroupSubtaskObjective(TaskDefinition parent, List<String> group,
                                                List<List<String>> emitted,
                                                List<List<String>> allGroups, int groupIndex) {
@@ -179,11 +185,13 @@ public class SubtaskDecomposer {
         return sb.toString();
     }
 
+    @Deprecated(since = "v2")
     private String buildGroupOutputFormat(List<String> group) {
         if (group.size() == 1) return "Create exactly ONE file: " + group.get(0);
         return "Create exactly " + group.size() + " files: " + String.join(", ", group);
     }
 
+    @Deprecated(since = "v2")
     private String buildGroupAcceptanceCriteria(List<String> group) {
         if (group.size() == 1) return "File " + group.get(0) + " exists and is valid";
         return "All files exist and are mutually consistent: " + String.join(", ", group);
@@ -221,6 +229,7 @@ public class SubtaskDecomposer {
      * MEDIUM → 2 phases, HIGH → 3 phases.
      * Each phase builds on the previous one by reading and extending the same file.
      */
+    @Deprecated(since = "v2")
     private List<TaskDefinition> decomposeByPhases(TaskDefinition parent) {
         String file = parent.getOwnedFiles().get(0);
         String shortName = extractFileName(file);
@@ -262,6 +271,7 @@ public class SubtaskDecomposer {
      * Builds the objective for a phase-based subtask.
      * Phase 1 creates the file; phases 2+ read and extend it.
      */
+    @Deprecated(since = "v2")
     private String buildPhaseObjective(TaskDefinition parent, String targetFile,
                                         int phaseIndex, int totalPhases, String[][] phases) {
         StringBuilder sb = new StringBuilder();
@@ -298,6 +308,7 @@ public class SubtaskDecomposer {
     }
 
     /** Extracts the file name from a path (e.g., "src/main/App.java" → "App.java"). */
+    @Deprecated(since = "v2")
     static String extractFileName(String path) {
         if (path == null) return "unknown";
         int lastSlash = path.lastIndexOf('/');

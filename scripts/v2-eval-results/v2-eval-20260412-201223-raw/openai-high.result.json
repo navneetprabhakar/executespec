@@ -1,0 +1,21 @@
+{
+  "provider": "openai",
+  "band": "high",
+  "run_id": "1ff4c131-aabd-4cc4-860a-62af4b5a05f6",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T14:48:27.111381Z",
+  "completedAt": "2026-04-12T14:54:58.433645Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"overall\":\"FIXED_ISSUES\",\"generalPassSummary\":\"Found 1 issues, fixed 1. Issues: Loan checkout now saves the entity before mapping to response, ensuring the returned loan includes its generated id.\",\"wiringPassSummary\":\"No wiring issues found. Verified Spring Boot component scanning covers all controllers/services/repositories under com.example.demo, and the project builds successfully with mvn test.\",\"totalLatencyMs\":23509,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.492659,
+  "est_low": 0.89625,
+  "est_high": 1.5684375,
+  "credits": 1,
+  "total_input": 203154,
+  "total_output": 12903,
+  "accuracy": 2,
+  "report_ok": true
+}

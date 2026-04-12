@@ -52,6 +52,16 @@ The plan schema:
   - For Node projects, prefer `npm run <script>` over raw `node` invocations when a script exists in package.json.
   - For Java/Maven, prefer `mvn -q -DskipTests compile` over full `mvn install` for smoke tests — faster and still catches type errors.
 - `smokeTestStrategy`: one of `BUILD` (default — build must pass), `PREVIEW_HEALTH` (start a server and hit `/health`), `TEST_SUITE` (run the test suite).
+- `runtimeSurface`: one of `HTTP` (web server — default), `CLI` (console program invoked via args/stdin), `LIBRARY` (importable package, no entry point), `STATIC_WEB` (pure frontend). Infer from the spec:
+  - "Build a REST API…" / "Express app…" / "Spring Boot…" → `HTTP`
+  - "Write a function that…" / "Compute the nth…" / "Script that reads…" / "CLI tool…" → `CLI` if it has a main entry point, `LIBRARY` if the spec asks for a reusable function/module only
+  - "Static site" / "Landing page" → `STATIC_WEB`
+
+  **Deliverables by runtime surface (enforced by the harness — propagate to tasks via `hardConstraints` or `touchesFiles` where appropriate):**
+  - `HTTP` **backend** projects (`java-spring-boot`, `node-backend`, `python`, `go`, `rust`) MUST include `openapi.yaml` at the repo root describing every endpoint — this is how the preview renders API docs. Add a task for it if the spec doesn't mention it explicitly; the spec file is not optional.
+  - `HTTP` backend projects SHOULD expose a Swagger UI docs route (e.g. `/docs` for FastAPI, `/v3/api-docs` + springdoc for Spring, `swagger-ui-express` for Node) that reads the `openapi.yaml`. Preview will link to it automatically.
+  - `CLI` projects MUST have a runnable entry point (e.g. `python3 main.py`, `node index.js`, `java -jar …`) and include a README block with the exact invocation. Test generation runs the binary against stdin/argv fixtures and asserts stdout + exit code.
+  - `LIBRARY` projects MUST expose their public surface via a clear package entry point (`__init__.py`, `index.js` with named exports, module-level `pub` items). No preview. Test generation is unit-test-only.
 - `tasks`: array of task objects, each with:
   - `id`: short identifier unique within the plan (e.g. `T1`, `T2`, `T3`)
   - `title`: one-line title (≤ 80 chars)

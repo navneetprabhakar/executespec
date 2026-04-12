@@ -27,6 +27,7 @@ import java.util.Map;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class BatchRequestBuilder {
 
     private final ModelResolver modelResolver;
@@ -76,6 +77,7 @@ public class BatchRequestBuilder {
      * @param planJson Full plan JSON for context
      * @return Build result containing requests and decomposition metadata
      */
+    @Deprecated(since = "v2")
     public BatchBuildResult buildRequests(TaskPlan plan, LlmProvider provider, String planJson) {
         double tokenMultiplier = agentProperties.getCost().getBatch().getMaxOutputTokenMultiplier();
         List<BatchRequest> requests = new ArrayList<>();
@@ -128,6 +130,7 @@ public class BatchRequestBuilder {
         return new BatchBuildResult(requests, decomposedTasks);
     }
 
+    @Deprecated(since = "v2")
     private String buildTaskMessage(TaskDefinition task, TaskPlan plan, String planJson) {
         String deps = (task.getDependsOn() == null || task.getDependsOn().isEmpty())
                 ? "none"
@@ -172,6 +175,7 @@ public class BatchRequestBuilder {
         );
     }
 
+    @Deprecated(since = "v2")
     private int estimateOutputTokens(TaskDefinition task) {
         String complexity = task.getComplexity() != null ? task.getComplexity() : "MEDIUM";
         int fileCount = task.getOwnedFiles() != null ? task.getOwnedFiles().size() : 1;
@@ -186,6 +190,7 @@ public class BatchRequestBuilder {
         return basePerFile * Math.max(1, fileCount);
     }
 
+    @Deprecated(since = "v2")
     private int getModelMaxOutput(String model) {
         var modelConfig = modelMatrixProperties.getModels().get(model);
         if (modelConfig != null && modelConfig.getMaxOutputTokens() > 0) {
@@ -194,6 +199,7 @@ public class BatchRequestBuilder {
         return 16384; // safe default
     }
 
+    @Deprecated(since = "v2")
     private static String truncatePlanContext(String planJson) {
         // Limit plan context to ~8000 chars to stay within token budget
         if (planJson.length() > 8000) {

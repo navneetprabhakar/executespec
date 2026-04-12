@@ -1,0 +1,21 @@
+{
+  "provider": "openai",
+  "band": "low",
+  "run_id": "e411448e-4e3f-49df-b672-5b5c9f9ccff5",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T15:36:19.488148Z",
+  "completedAt": "2026-04-12T15:37:58.636292Z",
+  "tasks_total": 3,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"overall\":\"CLEAN\",\"generalPassSummary\":\"Found 0 issues, fixed 0. Issues: no in-scope issues found.\",\"wiringPassSummary\":\"no wiring issues found\",\"totalLatencyMs\":7529,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.040802,
+  "est_low": 0.09375,
+  "est_high": 0.1640625,
+  "credits": 1,
+  "total_input": 47112,
+  "total_output": 1215,
+  "accuracy": 20,
+  "report_ok": true
+}

@@ -34,6 +34,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Deprecated(since = "v2")
 public class PlannerAgent {
 
     @Qualifier("plannerModel")
@@ -55,6 +56,7 @@ public class PlannerAgent {
 
     // planner_edit.txt merged into planner.txt — edit mode uses {{#if editMode}} block
 
+    @Deprecated(since = "v2")
     public TaskPlan plan(String userRequest, String runId, String modelOverride) {
         log.info("Planner starting for run {}", runId);
 
@@ -196,6 +198,7 @@ public class PlannerAgent {
      * Returns a TaskPlan where each task has estimatedIterations and
      * estimatedTokensPerIteration populated.
      */
+    @Deprecated(since = "v2")
     public TaskPlan planWithEstimates(String goal) {
         log.info("Planner starting feasibility mode for goal: {}", goal);
 
@@ -262,6 +265,7 @@ public class PlannerAgent {
     /**
      * Re-plans with user feedback — used when the user edits the plan at the approval gate.
      */
+    @Deprecated(since = "v2")
     public TaskPlan replanWithFeedback(String originalGoal, String existingPlanJson, String feedback, String runId) {
         log.info("Planner re-planning with feedback for run {}", runId);
         // Resolve includes; keep edit-mode block by removing its markers but not the content
@@ -343,6 +347,7 @@ public class PlannerAgent {
      * @param runId the run ID, or {@code null} for feasibility-mode calls (no
      *              workspace)
      */
+    @Deprecated(since = "v2")
     private String buildWorkspaceContext(String runId) {
         if (runId == null) {
             return "No workspace context (feasibility mode — no run directory exists yet).";
@@ -362,6 +367,7 @@ public class PlannerAgent {
      *
      * @param detectedProjectType project type from workspace heuristic (null = unknown/new project)
      */
+    @Deprecated(since = "v2")
     private String getPlannerPrompt(String detectedProjectType) {
         java.util.Map<String, String> vars = new java.util.HashMap<>();
         String scaffoldPath = detectedProjectType != null
@@ -383,6 +389,7 @@ public class PlannerAgent {
      * Heuristic detection of project type from existing workspace files.
      * Returns null for new/empty workspaces so the full scaffold guide is injected.
      */
+    @Deprecated(since = "v2")
     private String detectProjectTypeFromWorkspace(String runId) {
         if (runId == null) return null;
         try {
@@ -412,6 +419,7 @@ public class PlannerAgent {
      * Strips the {@code {{#if editMode}}...{{/if}}} block from the prompt template.
      * Used by fresh plan generation; edit mode keeps the block and substitutes variables.
      */
+    @Deprecated(since = "v2")
     private String stripEditModeBlock(String prompt) {
         int start = prompt.indexOf("{{#if editMode}}");
         int end = prompt.indexOf("{{/if}}");
@@ -425,6 +433,7 @@ public class PlannerAgent {
      * Appends historical merge conflict data to the system prompt so the planner
      * can avoid patterns that frequently cause conflicts.
      */
+    @Deprecated(since = "v2")
     private String buildConflictHistoryContext() {
         try {
             return conflictAnalyser.buildPlannerContext(5, 20);
@@ -438,6 +447,7 @@ public class PlannerAgent {
      * Maps provider name → default planning model from config matrix.
      * Used only when the UI sends no model override.
      */
+    @Deprecated(since = "v2")
     private String resolveModelName(String provider) {
         String model = modelRegistry.planningModelFor(provider);
         return model != null ? model : modelRegistry.planningModelFor("openai");
@@ -447,6 +457,7 @@ public class PlannerAgent {
      * Returns a context header block when the run starts from an existing GitHub repo.
      * Empty string otherwise so normal runs are unaffected.
      */
+    @Deprecated(since = "v2")
     private String buildExistingCodebaseHeader(String runId) {
         if (runId == null) return "";
         return stateStore.findRun(runId)
@@ -468,6 +479,7 @@ public class PlannerAgent {
      * Logs warnings for mismatches but does not fail the plan — the planner prompt enforces the rule,
      * and this catches regressions.
      */
+    @Deprecated(since = "v2")
     private void validateLayerSeparation(TaskPlan plan, String runId) {
         for (TaskDefinition task : plan.getTasks()) {
             String layer = task.getTaskLayer();
@@ -489,6 +501,7 @@ public class PlannerAgent {
      * Heuristic: infers the expected layer from a file path.
      * Returns null if the file is ambiguous (e.g. README.md, .gitignore).
      */
+    @Deprecated(since = "v2")
     private String detectLayer(String filePath) {
         String lower = filePath.toLowerCase();
         // Database
@@ -522,6 +535,7 @@ public class PlannerAgent {
      * provider name from config, so we must distinguish the two to avoid treating "anthropic"
      * as a model override.
      */
+    @Deprecated(since = "v2")
     private boolean isConcreteModelName(String name) {
         return modelRegistry.isKnownModel(name);
     }
@@ -529,6 +543,7 @@ public class PlannerAgent {
     /**
      * Infers the provider from a concrete model name via ModelRegistry.
      */
+    @Deprecated(since = "v2")
     private String resolveProviderFromModel(String model) {
         if (model == null) return props.getRoles().getPlanner();
         String provider = modelRegistry.providerFor(model);
@@ -559,6 +574,7 @@ public class PlannerAgent {
      * <p>This directly addresses the {@code fullstack_nodejs = 35/F} pattern where every
      * individual task produces correct code but cross-task integration points are missing.
      */
+    @Deprecated(since = "v2")
     private void injectWiringTaskIfNeeded(TaskPlan plan, String runId) {
         if (plan.getTasks() == null || plan.getTasks().size() < 4) return;
 
@@ -620,6 +636,7 @@ public class PlannerAgent {
      * Detects the wiring language from the plan's project type, falling back to scanning owned files.
      * Returns NONE for Java/Spring Boot (component scan handles wiring) and single-file projects.
      */
+    @Deprecated(since = "v2")
     private WiringLanguage detectWiringLanguage(TaskPlan plan) {
         String pt = plan.getProjectType();
         if (pt != null) {
@@ -661,6 +678,7 @@ public class PlannerAgent {
     }
 
     /** Returns the per-language wiring task objective with explicit step-by-step instructions. */
+    @Deprecated(since = "v2")
     private String buildWiringObjective(WiringLanguage lang) {
         return switch (lang) {
             case RUST -> """
@@ -811,6 +829,7 @@ public class PlannerAgent {
         };
     }
 
+    @Deprecated(since = "v2")
     private String buildWiringAcceptanceCriteria(WiringLanguage lang) {
         return switch (lang) {
             case RUST    -> "`cargo check` passes with no module-not-found errors";
@@ -883,6 +902,7 @@ public class PlannerAgent {
     }
 
     /** Builds a prominent HARD CONSTRAINTS block for injection into the planner user message. */
+    @Deprecated(since = "v2")
     private String buildConstraintsBlock(List<String> constraints) {
         if (constraints.isEmpty()) return "";
         StringBuilder sb = new StringBuilder("\n\n<hard_constraints>\n");
@@ -904,6 +924,7 @@ public class PlannerAgent {
      * Workers read the task boundaries before writing code — seeing constraints here
      * guarantees compliance even if the LLM omitted them from the plan JSON.
      */
+    @Deprecated(since = "v2")
     private void injectConstraintsIntoPlan(TaskPlan plan, List<String> constraints) {
         if (plan.getTasks() == null || constraints.isEmpty()) return;
         String prefix = "⚠️ HARD CONSTRAINTS (must not be violated):\n" +
@@ -922,6 +943,7 @@ public class PlannerAgent {
      * The warning guides the planner to prefer synchronous Python drivers when the selected
      * provider is Google, or to break async setup into its own dedicated task.
      */
+    @Deprecated(since = "v2")
     private String buildAsyncPythonWarning(String userRequest) {
         if (userRequest == null) return "";
         String lower = userRequest.toLowerCase();

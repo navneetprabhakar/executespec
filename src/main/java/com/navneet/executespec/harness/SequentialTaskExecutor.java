@@ -56,6 +56,7 @@ import static com.navneet.executespec.config.CustomMetricsConfig.TASK_TOTAL;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class SequentialTaskExecutor {
 
     private final WorkerAgent workerAgent;
@@ -96,10 +97,12 @@ public class SequentialTaskExecutor {
             this(reports, completedTasks, failedTasks, false);
         }
 
+        @Deprecated(since = "v2")
         public boolean hasFailures() {
             return failedTasks != null && !failedTasks.isEmpty();
         }
 
+        @Deprecated(since = "v2")
         public int totalTasks() {
             return (completedTasks != null ? completedTasks.size() : 0)
                     + (failedTasks != null ? failedTasks.size() : 0);
@@ -112,10 +115,12 @@ public class SequentialTaskExecutor {
      * tier run concurrently in virtual threads.  After each tier completes,
      * branches merge to main and the next tier starts.
      */
+    @Deprecated(since = "v2")
     public SequentialExecutionResult execute(PipelineRun run, List<AgentTask> tasks) {
         return execute(run, tasks, run.getExecutionModeEnum());
     }
 
+    @Deprecated(since = "v2")
     public SequentialExecutionResult execute(PipelineRun run, List<AgentTask> tasks, ExecutionMode mode) {
         List<WorkerReport> allReports = Collections.synchronizedList(new ArrayList<>());
         List<AgentTask> completed = Collections.synchronizedList(new ArrayList<>());
@@ -301,6 +306,7 @@ public class SequentialTaskExecutor {
      * Execute a single task: lock → run worker with validation → merge to main.
      * Thread-safe — can be called from multiple virtual threads concurrently.
      */
+    @Deprecated(since = "v2")
     private void executeSingleTask(AgentTask task, PipelineRun run, String defaultModel,
                                     Set<LlmProvider> availableProviders,
                                     List<WorkerReport> allReports, List<AgentTask> completed,
@@ -524,6 +530,7 @@ public class SequentialTaskExecutor {
      * Execute a single task: select model → run worker → complete.
      * Validation is deferred to the review phase (compiler agent + reviewer post-merge).
      */
+    @Deprecated(since = "v2")
     private WorkerReport executeTask(PipelineRun run, AgentTask task,
                                       Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
@@ -565,6 +572,7 @@ public class SequentialTaskExecutor {
      *
      * @return a metrics outcome string (e.g. "COMPLETE_AFTER_RETRY", "PARTIAL_COMPILE_FAILED")
      */
+    @Deprecated(since = "v2")
     private String handleRetryTask(PipelineRun run, AgentTask task, String branchName,
                                     TaskCompileDecision decision,
                                     Set<LlmProvider> availableProviders,
@@ -612,6 +620,7 @@ public class SequentialTaskExecutor {
     }
 
     /** Extracts the owned file list from a task's JSON, returning empty list on failure. */
+    @Deprecated(since = "v2")
     private List<String> extractOwnedFilesFromTask(AgentTask task) {
         if (task.getTaskJson() == null) return List.of();
         try {
@@ -629,6 +638,7 @@ public class SequentialTaskExecutor {
      * Uses the existing reworkFeedback mechanism in TaskDefinition so WorkerAgent
      * automatically surfaces the error in the initial task prompt.
      */
+    @Deprecated(since = "v2")
     private WorkerReport retryTaskWithCompileError(PipelineRun run, AgentTask task,
                                                     String branchName, String compileError,
                                                     Set<LlmProvider> availableProviders) {
@@ -667,6 +677,7 @@ public class SequentialTaskExecutor {
      * loop.  This safety net ensures all files are committed to the branch
      * before the progressive merge to main.
      */
+    @Deprecated(since = "v2")
     private void commitWorktreeIfDirty(String runId, String taskId) {
         Path worktreePath = gitTool.getWorkspacePath(runId)
                 .resolve("worktrees").resolve(taskId);
@@ -722,6 +733,7 @@ public class SequentialTaskExecutor {
      * Uses GitMergeService's conflict resolution cascade.
      * Returns true on success, false on unresolvable conflict.
      */
+    @Deprecated(since = "v2")
     private boolean tryMergeToMain(String runId, AgentTask task, String branchName,
                                     List<AgentTask> previouslyMerged) {
         try {
@@ -762,6 +774,7 @@ public class SequentialTaskExecutor {
      * deepest dependency is in tier N-1. Tasks in the same tier are independent
      * and can run in parallel.
      */
+    @Deprecated(since = "v2")
     private List<List<AgentTask>> computeTiers(List<AgentTask> tasks) {
         Map<String, AgentTask> byId = new LinkedHashMap<>();
         Map<String, List<String>> deps = new HashMap<>();
@@ -799,6 +812,7 @@ public class SequentialTaskExecutor {
      * Recursively compute the tier level of a task.
      * A task's tier = max(dependency tiers) + 1, or 0 if no dependencies.
      */
+    @Deprecated(since = "v2")
     private int computeTierLevel(String taskId, Map<String, List<String>> deps,
                                   Map<String, AgentTask> byId, Map<String, Integer> computed,
                                   Set<String> visiting) {
@@ -827,6 +841,7 @@ public class SequentialTaskExecutor {
      * Tasks with no dependencies come first; tasks whose deps are all
      * satisfied come next, etc.
      */
+    @Deprecated(since = "v2")
     private List<AgentTask> topologicalSort(List<AgentTask> tasks) {
         Map<String, AgentTask> byId = new LinkedHashMap<>();
         Map<String, List<String>> deps = new HashMap<>();
@@ -890,6 +905,7 @@ public class SequentialTaskExecutor {
     /**
      * Track model performance metrics for future data-driven routing.
      */
+    @Deprecated(since = "v2")
     private void trackMetric(String runId, AgentTask task, ResolvedModel model,
                               int attempt, boolean passed, long durationMs,
                               WorkerReport report) {
@@ -921,6 +937,7 @@ public class SequentialTaskExecutor {
      * Check if any of this task's dependencies are in the failed list.
      * Parses dependsOn from the task's JSON definition.
      */
+    @Deprecated(since = "v2")
     private boolean hasDependencyFailure(AgentTask task, List<AgentTask> failed) {
         if (failed.isEmpty() || task.getTaskJson() == null) return false;
         try {
@@ -936,6 +953,7 @@ public class SequentialTaskExecutor {
         }
     }
 
+    @Deprecated(since = "v2")
     private String normalizeStatus(String raw) {
         if (raw == null) return "BLOCKED";
         return switch (raw.toLowerCase()) {
@@ -957,6 +975,7 @@ public class SequentialTaskExecutor {
      *
      * @return the outcome string for metrics (COMPLETE, PARTIAL, FAILED, MERGE_FAILED)
      */
+    @Deprecated(since = "v2")
     private String executeDecomposedTask(AgentTask parentTask, TaskDefinition taskDef,
                                           PipelineRun run, Set<LlmProvider> availableProviders,
                                           List<WorkerReport> allReports, List<AgentTask> completed,
@@ -1134,6 +1153,7 @@ public class SequentialTaskExecutor {
         }
     }
 
+    @Deprecated(since = "v2")
     private TaskDefinition parseTaskDef(String json) {
         try {
             return mapper.readValue(json, TaskDefinition.class);
@@ -1147,6 +1167,7 @@ public class SequentialTaskExecutor {
      * Used by SubtaskDecomposer to detect same-file sequential chains and skip
      * redundant phase decomposition (RC6).
      */
+    @Deprecated(since = "v2")
     private Map<String, Set<String>> buildTaskOwnedFilesMap(List<AgentTask> tasks) {
         Map<String, Set<String>> result = new HashMap<>();
         for (AgentTask task : tasks) {
@@ -1169,6 +1190,7 @@ public class SequentialTaskExecutor {
      * Iteration limit: subtask hit the 10-iteration cap without producing output.
      * Both failure modes are recoverable by escalating to a smarter model.
      */
+    @Deprecated(since = "v2")
     private boolean isFabricationFailure(WorkerReport report) {
         if (report == null || report.getBlockers() == null) return false;
         String blockers = report.getBlockers().toLowerCase();
@@ -1183,6 +1205,7 @@ public class SequentialTaskExecutor {
      * Resolves the PLANNING tier model for the run's selected provider.
      * Used as the escalation target when a subtask fails with fabrication.
      */
+    @Deprecated(since = "v2")
     private String getPlanningModel(PipelineRun run) {
         try {
             return modelResolver.resolve("WorkerAgent", run.getAiProviderEnum(),

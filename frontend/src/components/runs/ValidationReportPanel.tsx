@@ -58,6 +58,14 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
     summaryParts.push('Clean run, all checks passed');
   }
 
+  const score = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
+  const grade = report.accuracyGrade || null;
+  const scoreColor = score == null
+    ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
+    : score >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+    : score >= 75 ? 'text-accent-amber border-amber-500/30 bg-amber-500/10'
+    : 'text-accent-red border-red-500/30 bg-red-500/10';
+
   const handleShare = async () => {
     setSharing(true);
     try {
@@ -99,27 +107,35 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
           ? <ChevronDown className="h-4 w-4 text-secondary flex-shrink-0" />
           : <ChevronRight className="h-4 w-4 text-secondary flex-shrink-0" />
         }
-        <Shield className="h-4 w-4 text-emerald-400 flex-shrink-0" />
-        <span className="text-sm font-medium text-primary">Validation Report</span>
-        {report.generatedAfterImprovements && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded border bg-accent-blue/20 text-accent-blue border-accent-blue/30">
-            Re-validated after edits
+        <Shield className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+        <span className="text-xs font-medium text-primary">Validation Report</span>
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded border', resultCfg.color)}>
+          {resultCfg.label}
+        </span>
+        {score != null && (
+          <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded border tabular-nums', scoreColor)}>
+            {score}/100{grade ? ` · ${grade}` : ''}
           </span>
         )}
-        <span className="text-xs text-muted ml-1">{summaryParts.join(' · ')}</span>
+        {report.generatedAfterImprovements && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border bg-accent-blue/20 text-accent-blue border-accent-blue/30">
+            Re-validated
+          </span>
+        )}
+        <span className="text-[11px] text-muted ml-1 truncate">{summaryParts.join(' · ')}</span>
         <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
           <button
             onClick={handleDownloadPdf}
             disabled={downloading}
-            className="flex items-center gap-1.5 text-xs text-muted hover:text-accent-green transition-colors px-2 py-1 rounded border border-[var(--border-default)] hover:border-[var(--border-default)]"
+            className="flex items-center gap-1 text-[11px] text-muted hover:text-accent-green transition-colors px-1.5 py-0.5 rounded border border-[var(--border-default)]"
           >
             <Download className="h-3 w-3" />
-            {downloading ? 'Downloading...' : 'PDF'}
+            {downloading ? '...' : 'PDF'}
           </button>
           <button
             onClick={handleShare}
             disabled={sharing}
-            className="flex items-center gap-1.5 text-xs text-muted hover:text-accent-green transition-colors px-2 py-1 rounded border border-[var(--border-default)] hover:border-[var(--border-default)]"
+            className="flex items-center gap-1 text-[11px] text-muted hover:text-accent-green transition-colors px-1.5 py-0.5 rounded border border-[var(--border-default)]"
           >
             {copied ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
             {copied ? 'Copied' : 'Share'}
@@ -130,29 +146,42 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
       {/* Expanded content */}
       {expanded && (
         <div className="border-t border-[var(--border-default)] max-h-[600px] overflow-y-auto">
-          <div className="px-4 py-4 space-y-4">
-            {/* Issue badges summary */}
-            {report.issuesCaught > 0 && (
-              <div className="flex flex-wrap gap-2">
+          <div className="px-4 py-3 space-y-3 text-[12px] leading-relaxed">
+            {/* Accuracy + counters grid */}
+            {(score != null || report.issuesCaught > 0) && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {score != null && (
+                  <div className={cn('rounded-sm border px-2 py-1.5', scoreColor)}>
+                    <div className="text-[10px] uppercase tracking-wide opacity-70">Accuracy</div>
+                    <div className="text-sm font-mono font-semibold tabular-nums">
+                      {score}<span className="text-[10px] opacity-60">/100</span>
+                      {grade && <span className="ml-1 text-[11px]">· {grade}</span>}
+                    </div>
+                  </div>
+                )}
                 {report.buildBreakers > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_BREAK_BUILD.color)}>
-                    {report.buildBreakers} build breaker{report.buildBreakers !== 1 ? 's' : ''}
-                  </span>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_BREAK_BUILD.color)}>
+                    <div className="text-[10px] uppercase tracking-wide opacity-70">Build breakers</div>
+                    <div className="text-sm font-mono tabular-nums">{report.buildBreakers}</div>
+                  </div>
                 )}
                 {report.productionBugs > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_CAUSE_BUG.color)}>
-                    {report.productionBugs} bug risk{report.productionBugs !== 1 ? 's' : ''}
-                  </span>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_CAUSE_BUG.color)}>
+                    <div className="text-[10px] uppercase tracking-wide opacity-70">Bug risks</div>
+                    <div className="text-sm font-mono tabular-nums">{report.productionBugs}</div>
+                  </div>
                 )}
                 {report.reviewFailures > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.color)}>
-                    {report.reviewFailures} review issue{report.reviewFailures !== 1 ? 's' : ''}
-                  </span>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.color)}>
+                    <div className="text-[10px] uppercase tracking-wide opacity-70">Review</div>
+                    <div className="text-sm font-mono tabular-nums">{report.reviewFailures}</div>
+                  </div>
                 )}
                 {report.lintFailures > 0 && (
-                  <span className={cn('text-xs px-2 py-0.5 rounded-sm border', SEVERITY_CONFIG.WOULD_FAIL_LINT.color)}>
-                    {report.lintFailures} lint issue{report.lintFailures !== 1 ? 's' : ''}
-                  </span>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_LINT.color)}>
+                    <div className="text-[10px] uppercase tracking-wide opacity-70">Lint</div>
+                    <div className="text-sm font-mono tabular-nums">{report.lintFailures}</div>
+                  </div>
                 )}
               </div>
             )}
@@ -164,21 +193,21 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
 
             {/* All individual issues */}
             {report.issues && report.issues.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-[var(--border-default)]">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-secondary">
-                  All Issues ({report.issues.length})
+              <div className="space-y-1.5 pt-2 border-t border-[var(--border-default)]">
+                <h4 className="text-[10px] font-semibold uppercase tracking-wide text-secondary">
+                  All issues ({report.issues.length})
                 </h4>
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {report.issues.map((issue: ReportIssue, i: number) => {
                     const cfg = SEVERITY_CONFIG[issue.severity] ?? SEVERITY_CONFIG.WOULD_FAIL_REVIEW;
                     return (
-                      <div key={i} className="flex items-start gap-2 text-xs rounded-md bg-[var(--gray-100)] border border-[var(--border-default)] px-3 py-2">
-                        <AlertTriangle className={cn('h-3.5 w-3.5 mt-0.5 flex-shrink-0', cfg.color.split(' ')[1])} />
-                        <div className="min-w-0 flex-1">
+                      <div key={i} className="flex items-start gap-2 text-[11px] rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] px-2.5 py-1.5">
+                        <AlertTriangle className={cn('h-3 w-3 mt-0.5 flex-shrink-0', cfg.color.split(' ')[1])} />
+                        <div className="min-w-0 flex-1 leading-snug">
                           <span className="text-secondary">{issue.description}</span>
                           {issue.filePath && (
-                            <span className="flex items-center gap-1 mt-0.5 text-muted">
-                              <FileCode2 className="h-3 w-3" />
+                            <span className="flex items-center gap-1 mt-0.5 text-muted font-mono text-[10px]">
+                              <FileCode2 className="h-2.5 w-2.5" />
                               {issue.filePath}
                             </span>
                           )}
@@ -186,7 +215,7 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
                             <span className="block mt-0.5 text-emerald-400/70">Fix: {issue.fix}</span>
                           )}
                         </div>
-                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap flex-shrink-0', cfg.color)}>
+                        <span className={cn('text-[9px] px-1.5 py-0.5 rounded border whitespace-nowrap flex-shrink-0', cfg.color)}>
                           {cfg.label}
                         </span>
                       </div>
@@ -198,9 +227,9 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
 
             {/* Checks passed */}
             {report.checksPassed.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-2 border-t border-[var(--border-default)]">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 pt-2 border-t border-[var(--border-default)]">
                 {report.checksPassed.map(check => (
-                  <span key={check} className="flex items-center gap-1 text-xs text-emerald-400/80">
+                  <span key={check} className="flex items-center gap-1 text-[11px] text-emerald-400/80">
                     <Check className="h-3 w-3" />
                     {check.replace(/_/g, ' ')}
                   </span>
