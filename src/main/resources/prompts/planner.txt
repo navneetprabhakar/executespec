@@ -57,10 +57,9 @@ depends_on + shared_files. Verify each task has a single, atomic outcome. Count 
 each file = 1, each class = 1, each component = 1. If total >3, split immediately.
 CRITICAL: Before assigning a task, explicitly count its responsibilities. If the count exceeds 3,
 reject the task design and split it. Document the count in the task's objective as a sanity check.
-ENFORCEMENT: During planning, for EVERY task, write a responsibility count comment in the objective
-like "(Responsibility count: 1 file + 1 class = 2 total — within limit)" or "(Responsibility count:
-3 files + 2 classes = 5 total — EXCEEDS LIMIT, split required)". If any task's count exceeds 3,
-immediately split it into sequential tasks and recount. This is non-negotiable.
+ENFORCEMENT: Every task objective MUST include a responsibility count in parentheses at the end:
+"(Responsibility count: 1 file + 1 class = 2 total)" or "(Responsibility count: 2 files + 3 methods = 5 total — SPLIT REQUIRED)".
+If any task's count exceeds 3, the plan is invalid and must be redesigned before output.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
@@ -269,7 +268,7 @@ markdown fences. Every task requires ALL fields listed below.
       "task_id": "snake_case_identifier_max_30_chars",
       "task_layer": "BACKEND",
       "title": "One line, imperative: Create X / Add Y / Implement Z",
-      "objective": "Precise description with exact file paths, class names, method signatures. (Responsibility count: X files + Y classes + Z components = TOTAL — within/exceeds limit)",
+      "objective": "Precise description with exact file paths, class names, method signatures. (Responsibility count: X files + Y classes + Z components = TOTAL)",
       "boundaries": "Explicit list of what NOT to touch. Include: files not modified, classes not created, methods not implemented, components not rendered.",
       "output_format": "Exact description of completed files.",
       "acceptance_criteria": "Verifiable by file existence and content — no build commands.",
@@ -286,7 +285,7 @@ GOOD vs BAD — objective:
   BAD:  "Create a controller for the items API"
   GOOD: "Create ItemController.java with @RestController, @RequestMapping('/items'),
          GET /items returning List<ItemDto>, POST /items accepting ItemCreateRequest.
-         Delegate to ItemService.findAll() and ItemService.create(). (Responsibility count: 1 file + 1 class = 2 total — within limit)"
+         Delegate to ItemService.findAll() and ItemService.create(). (Responsibility count: 1 file + 1 class = 2 total)"
 
 GOOD vs BAD — boundaries:
   BAD:  "Do not modify other files"
@@ -331,10 +330,9 @@ Before finalizing your plan, verify ALL of the following:
 □ BOUNDARIES: Every task has explicit boundaries listing files NOT modified, classes NOT created, methods NOT implemented.
 □ TASK COUNT: Total tasks ≤25. Merge trivially small tasks if approaching the limit.
 □ ROUTER ISOLATION: No route handler repeats the mount prefix (/api/users not /api/api/users).
-□ RESPONSIBILITY COUNT: Every task has ≤3 distinct responsibilities. Count: each file = 1, each class = 1, each component = 1. If total >3, split into sequential tasks. Document the count in the objective.
+□ RESPONSIBILITY COUNT: Every task objective includes explicit responsibility count. If any task count exceeds 3, reject the design and split before output.
 □ SHARED_CONTRACTS: For Node.js/Express projects with 5+ tasks, shared_contracts block is present and includes router_mount, api_base_frontend, port, and model field definitions.
 □ SAME-FILE SEQUENCE CAP: No single file appears in owned_files of more than 2 tasks. Count occurrences — if any file exceeds 2, merge the excess tasks together.
-□ RESPONSIBILITY SANITY CHECK: Before assigning each task, explicitly count its responsibilities (files + classes + components). If count >3, reject and split. Document the count in the task objective.
 
 ═══════════════════════════════════════════════════════════
 SECURITY — MANDATORY
