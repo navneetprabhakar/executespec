@@ -1,0 +1,418 @@
+{
+  "provider": "OPENAI",
+  "spec_name": "html_todo",
+  "spec_type": "HTML",
+  "language": "HTML/JS",
+  "run_id": "adc10c4a-4e01-4da1-8d05-c7244cd3d515",
+  "timestamp": "2026-04-12T00:49:32Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 60
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fibonacci_java",
+  "spec_type": "FIBONACCI",
+  "language": "Java",
+  "run_id": "009ec465-0244-442a-b8d4-5820b107663b",
+  "timestamp": "2026-04-12T00:50:11Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fibonacci_python",
+  "spec_type": "FIBONACCI",
+  "language": "Python",
+  "run_id": "6f3e95aa-5cbb-41aa-b872-307f4029d7d7",
+  "timestamp": "2026-04-12T00:50:50Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fibonacci_go",
+  "spec_type": "FIBONACCI",
+  "language": "Go",
+  "run_id": "5269303e-44bb-420e-861b-518a7161a47d",
+  "timestamp": "2026-04-12T00:51:30Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 37
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fibonacci_rust",
+  "spec_type": "FIBONACCI",
+  "language": "Rust",
+  "run_id": "cc785c16-fb1a-48f6-9d03-fb96649059a5",
+  "timestamp": "2026-04-12T00:52:09Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fibonacci_nodejs",
+  "spec_type": "FIBONACCI",
+  "language": "Node.js",
+  "run_id": "552ef40d-767d-4ec6-83a3-5d055e3dd4e8",
+  "timestamp": "2026-04-12T00:52:36Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fullstack_nodejs",
+  "spec_type": "FULLSTACK",
+  "language": "Node.js",
+  "run_id": "16186491-58cb-453c-87a2-f5e97e38f27d",
+  "timestamp": "2026-04-12T01:04:05Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 686
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fullstack_spring",
+  "spec_type": "FULLSTACK",
+  "language": "Java",
+  "run_id": "2d667f67-0c3e-40c3-a7e2-912561b45c9f",
+  "timestamp": "2026-04-12T02:24:33Z",
+  "status": "PARTIAL",
+  "worker_model": "gpt-5.4-mini",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 699
+  },
+  "cost": {
+    "actual_usd": "15.132062699999999",
+    "est_low": "6.314432",
+    "est_high": "29.57142000000001",
+    "credits": "3",
+    "hard_cap": "15.0"
+  },
+  "efficiency": {
+    "input_tokens": 5874481,
+    "output_tokens": 151306,
+    "tasks_total": 66,
+    "tasks_done": 65,
+    "tasks_failed": 0,
+    "tasks_partial": 1
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "PENDING",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fullstack_python",
+  "spec_type": "FULLSTACK",
+  "language": "Python",
+  "run_id": "7a8c1b10-ee1d-4c8b-86d0-ecfa11b20fa1",
+  "timestamp": "2026-04-12T02:44:51Z",
+  "status": "COMPLETE",
+  "worker_model": "gpt-5.4-mini",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 854
+  },
+  "cost": {
+    "actual_usd": "9.8877175",
+    "est_low": "3.2684480000000002",
+    "est_high": "14.021579999999998",
+    "credits": "2",
+    "hard_cap": "10.0"
+  },
+  "efficiency": {
+    "input_tokens": 3246337,
+    "output_tokens": 118125,
+    "tasks_total": 35,
+    "tasks_done": 35,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "PENDING",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fullstack_go",
+  "spec_type": "FULLSTACK",
+  "language": "Go",
+  "run_id": "e24b1385-e41a-4dea-b534-7b7a4840cf65",
+  "timestamp": "2026-04-12T02:57:44Z",
+  "status": "COMPLETE",
+  "worker_model": "gpt-5.4-mini",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 409
+  },
+  "cost": {
+    "actual_usd": "5.986835",
+    "est_low": "2.563568",
+    "est_high": "10.749",
+    "credits": "2",
+    "hard_cap": "10.0"
+  },
+  "efficiency": {
+    "input_tokens": 1992962,
+    "output_tokens": 66962,
+    "tasks_total": 25,
+    "tasks_done": 25,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "PENDING",
+    "issues": []
+  }
+}
+{
+  "provider": "OPENAI",
+  "spec_name": "fullstack_rust",
+  "spec_type": "FULLSTACK",
+  "language": "Rust",
+  "run_id": "47ed6174-4c89-4a44-8ad8-6d6da7a74906",
+  "timestamp": "2026-04-12T03:01:36Z",
+  "status": "FAILED",
+  "worker_model": "gpt-5.4-mini",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 229
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "2.0597119999999998",
+    "est_high": "8.355630000000001",
+    "credits": "1",
+    "hard_cap": "5.0"
+  },
+  "efficiency": {
+    "input_tokens": 844868,
+    "output_tokens": 29690,
+    "tasks_total": 15,
+    "tasks_done": 12,
+    "tasks_failed": 3,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}

@@ -73,6 +73,44 @@ public class RunCostBudgetService {
         return over;
     }
 
+    /**
+     * Detects cost-inefficient progression: the run has spent a significant fraction of its
+     * budget but completed a disproportionately small fraction of its tasks.
+     *
+     * <p>Threshold: if {@code spentPct > 50%} of the budget AND {@code donePct < 30%} of tasks,
+     * the run is likely stuck in read loops or retry cycles without making real progress.
+     * The caller should emit a warning SSE event so the user can decide to cancel.
+     *
+     * <p>This is NOT a hard stop — it is an early warning signal only. The hard cap ({@link #isOverBudget})
+     * is still the enforcement mechanism. This method gives the user a chance to cancel before the ceiling.
+     *
+     * @param runId          the run ID
+     * @param completedTasks number of tasks with COMPLETE status
+     * @param totalTasks     total tasks in the plan
+     * @return true if the run shows stalled cost progression
+     */
+    public boolean isProgressionStalled(String runId, int completedTasks, int totalTasks) {
+        if (totalTasks <= 0) return false;
+        Double ceiling = budgetCeilings.getIfPresent(runId);
+        if (ceiling == null || ceiling < 0) return false;
+        // Don't fire on tiny runs — need at least $1 spent to be meaningful
+        double currentCost = costEstimator.computeCostForRun(runId);
+        if (currentCost < 1.0) return false;
+
+        double spentPct = currentCost / ceiling;
+        double donePct  = (double) completedTasks / totalTasks;
+
+        boolean stalled = spentPct > 0.50 && donePct < 0.30;
+        if (stalled) {
+            log.warn("[CostBudget] Run {} progression stalled: spent {}% of budget (${}) " +
+                    "but only {}/{} tasks complete ({}%)",
+                    runId,
+                    (int)(spentPct * 100), String.format("%.2f", currentCost),
+                    completedTasks, totalTasks, (int)(donePct * 100));
+        }
+        return stalled;
+    }
+
     /** Get the budget ceiling for a run (-1 = unlimited, null = not set). */
     public Double getBudget(String runId) {
         return budgetCeilings.getIfPresent(runId);

@@ -151,6 +151,15 @@ Before starting, read these files if they exist (batch all reads in one response
   .agent-context/task-assignments.json   — the full plan (shows all tasks and who owns what)
   .agent-context/shared-contracts.json   — API contracts, shared types, interface definitions
 
+⚠️  YOUR TASK BOUNDARIES FIELD CONTAINS HARD CONSTRAINTS.
+Read the "boundaries" field in your task definition carefully BEFORE writing any code.
+If boundaries contains a "⚠️ HARD CONSTRAINTS" section, those constraints are ABSOLUTE —
+they override your default practices for the language. A constraint that says "NO JPA" means
+you MUST NOT add spring-boot-starter-data-jpa even if you would normally do so.
+A constraint that says "NO external dependencies" means ZERO npm/maven/pip packages beyond
+what was declared in the original project_setup task. Violating hard constraints causes
+test failure and a full re-run — they are not suggestions.
+
 MANDATORY: If your task creates ANY of the following, you MUST write to shared-contracts.json
 immediately after writing the code (before committing):
   - An Express router mounted at a path (record: mount point + all route paths)
@@ -210,7 +219,8 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    - Your FIRST writeFile call MUST be pom.xml (Spring Boot) or package.json (Node/React).
    - ALSO write a .gitignore file appropriate for the project language/framework.
      Always include .agent-context/ and .env at the top of .gitignore.
-   - ALSO write README.md with project name, description, and a "## Running with Docker" section:
+   - ALSO write README.md with: project name, description, API endpoint list (if applicable),
+     setup/install instructions, and a "## Running with Docker" section:
        ## Running with Docker
        ```bash
        docker build -t app .
@@ -368,6 +378,11 @@ WORKING SEQUENCE — FOLLOW THIS ORDER
    - Did I write to any file outside my task boundaries?
    - Is there any TODO, placeholder, or stub left in my code?
    - COMPLETENESS: Verify every file in owned_files exists and is committed.
+   - HARD CONSTRAINTS: Re-read the boundaries field. Did I violate any constraint?
+     If yes: fix it now before committing.
+   - README: If a README.md exists in the workspace root, add a brief section documenting
+     what this task added (new endpoints, new modules, changed behaviour). If no README
+     exists and this is NOT project_setup, skip — do not create one unnecessarily.
    - FOR FRONTEND TASKS ONLY: Re-read HTML and verify every referenced CSS/JS file
      exists, and every DOM selector in JS matches actual HTML attributes.
 

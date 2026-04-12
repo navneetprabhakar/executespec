@@ -105,6 +105,7 @@ public class WorkerAgent {
         boolean justCompacted;
         int lastCompactedIteration = -999;
         int fileWritesSinceCheck;
+        int readOnlyCallsSinceCheck;   // read-only tool calls since last stall check window
         int totalFileWrites;
         int consecutiveNullResponses;
         int toolCallCount;
@@ -476,6 +477,26 @@ public class WorkerAgent {
         // inject recovery instruction instead of escalating — a bigger model won't fix
         // a token-limit problem, it just costs more.
         if (state.iteration > 0 && Duration.between(state.lastStallCheckTime, Instant.now()).toMinutes() >= STALL_CHECK_MINUTES) {
+            // Read loop detection: worker is reading files but not writing — burns tokens with no progress.
+            // Threshold: 10+ non-cached read-only calls with zero file writes in the check window.
+            // Inject a hard directive to stop reading and write the next file NOW.
+            if (state.readOnlyCallsSinceCheck >= 10 && state.fileWritesSinceCheck == 0) {
+                log.warn("[Worker {}] Read loop detected: {} read-only calls with 0 file writes in {}min — intervening",
+                        taskId, state.readOnlyCallsSinceCheck, STALL_CHECK_MINUTES);
+                stateStore.appendTaskLog(taskId, "READ_LOOP_INTERVENTION:" + state.readOnlyCallsSinceCheck + "_reads_no_writes");
+                messages.add(new UserMessage(
+                        "⚠️ READ LOOP DETECTED: You have called read-only tools " + state.readOnlyCallsSinceCheck +
+                        " times in the last " + STALL_CHECK_MINUTES + " minutes without writing any files.\n\n" +
+                        "STOP reading. You have enough context. Write the next file NOW using writeFile.\n" +
+                        "If you are uncertain about an import path or interface, make a reasonable assumption " +
+                        "and write the file — the CompilerAgent will fix any import errors. " +
+                        "Continuing to read without writing wastes your entire iteration budget.\n\n" +
+                        "Call writeFile for the MOST IMPORTANT missing file in your task right now."));
+                state.readOnlyCallsSinceCheck = 0;
+                state.lastStallCheckTime = Instant.now();
+                return; // don't also do model escalation this window
+            }
+
             if (state.fileWritesSinceCheck == 0) {
                 if (state.continuations > 0 && state.skeletonRecoveries < MAX_SKELETON_RECOVERIES) {
                     // Stall is likely truncation-caused — try skeleton recovery before escalating
@@ -497,9 +518,11 @@ public class WorkerAgent {
                     }
                 }
             } else {
-                log.info("[Worker {}] Progress check: {} file writes in last {}min", taskId, state.fileWritesSinceCheck, STALL_CHECK_MINUTES);
+                log.info("[Worker {}] Progress check: {} file writes, {} read-only calls in last {}min",
+                        taskId, state.fileWritesSinceCheck, state.readOnlyCallsSinceCheck, STALL_CHECK_MINUTES);
             }
             state.fileWritesSinceCheck = 0;
+            state.readOnlyCallsSinceCheck = 0;
             state.lastStallCheckTime = Instant.now();
         }
     }
@@ -795,11 +818,15 @@ public class WorkerAgent {
                 if (isFileWriteTool(tc.name())) {
                     state.fileWritesSinceCheck++;
                     state.totalFileWrites++;
+                    state.readOnlyCallsSinceCheck = 0; // reset read counter on write progress
                     String writtenPath = extractPathFromArgs(parsed);
                     if (writtenPath != null) {
                         state.readOnlyToolCache.remove("read_file|" + writtenPath);
                         state.readOnlyToolCache.remove("list_files|" + parentDir(writtenPath));
                     }
+                } else if (dedupKey != null && !wasCached) {
+                    // Count non-cached read-only calls (cached hits don't waste tokens)
+                    state.readOnlyCallsSinceCheck++;
                 }
                 responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
                 dispatched++;

@@ -1,0 +1,608 @@
+{
+  "provider": "GOOGLE",
+  "spec_name": "html_todo",
+  "spec_type": "HTML",
+  "language": "HTML/JS",
+  "run_id": "d525ee16-b2be-4d57-9fc2-1adb83b0e4c5",
+  "timestamp": "2026-04-12T00:49:08Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fibonacci_java",
+  "spec_type": "FIBONACCI",
+  "language": "Java",
+  "run_id": "ee2eee0e-4da5-45a0-86fe-544383e1c485",
+  "timestamp": "2026-04-12T00:49:59Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 48
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fibonacci_python",
+  "spec_type": "FIBONACCI",
+  "language": "Python",
+  "run_id": "0a2593b7-d845-4542-83a2-fe90650a2866",
+  "timestamp": "2026-04-12T00:50:26Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fibonacci_go",
+  "spec_type": "FIBONACCI",
+  "language": "Go",
+  "run_id": "90b299ab-4fbe-47b6-baac-06c50ba7a67c",
+  "timestamp": "2026-04-12T00:51:18Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 49
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fibonacci_rust",
+  "spec_type": "FIBONACCI",
+  "language": "Rust",
+  "run_id": "e556903c-5aff-43b3-b4e5-b6693ced2e87",
+  "timestamp": "2026-04-12T00:51:45Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fibonacci_nodejs",
+  "spec_type": "FIBONACCI",
+  "language": "Node.js",
+  "run_id": "7518d5e0-b93e-4ad1-8f07-36703b571d86",
+  "timestamp": "2026-04-12T00:52:12Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fullstack_nodejs",
+  "spec_type": "FULLSTACK",
+  "language": "Node.js",
+  "run_id": "7c9eefc2-91f9-492b-bb28-36fd671a0f48",
+  "timestamp": "2026-04-12T01:02:41Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 626
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fullstack_spring",
+  "spec_type": "FULLSTACK",
+  "language": "Java",
+  "run_id": "b733480a-fb3e-4b92-a563-35dcfff329bf",
+  "timestamp": "2026-04-12T01:10:21Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 457
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fullstack_python",
+  "spec_type": "FULLSTACK",
+  "language": "Python",
+  "run_id": "2286c179-af2a-4243-b72a-0a63b5242912",
+  "timestamp": "2026-04-12T01:21:51Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 687
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fullstack_go",
+  "spec_type": "FULLSTACK",
+  "language": "Go",
+  "run_id": "63647fc5-c819-4da8-8b29-f85f269f3b20",
+  "timestamp": "2026-04-12T01:31:08Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 554
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "fullstack_rust",
+  "spec_type": "FULLSTACK",
+  "language": "Rust",
+  "run_id": "faddc661-c309-46cf-9e4c-43b6147b387f",
+  "timestamp": "2026-04-12T01:39:49Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 518
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "backend_nodejs",
+  "spec_type": "BACKEND",
+  "language": "Node.js",
+  "run_id": "cfee6f4f-6c89-4cd7-9676-a57f3924a52d",
+  "timestamp": "2026-04-12T01:43:04Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 192
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "backend_spring",
+  "spec_type": "BACKEND",
+  "language": "Java",
+  "run_id": "611d1c43-b8a5-4643-a824-bb2e9a47b891",
+  "timestamp": "2026-04-12T02:20:44Z",
+  "status": "COMPLETE",
+  "worker_model": "gemini-2.5-flash",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 470
+  },
+  "cost": {
+    "actual_usd": "1.9369919999999996",
+    "est_low": "2.6590399999999996",
+    "est_high": "12.280800000000001",
+    "credits": "2",
+    "hard_cap": "10.0"
+  },
+  "efficiency": {
+    "input_tokens": 5569990,
+    "output_tokens": 106398,
+    "tasks_total": 58,
+    "tasks_done": 58,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "PENDING",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "backend_python",
+  "spec_type": "BACKEND",
+  "language": "Python",
+  "run_id": "72682781-7073-432b-8abc-bd9646fdbefc",
+  "timestamp": "2026-04-12T02:31:13Z",
+  "status": "PARTIAL",
+  "worker_model": "gemini-2.5-flash",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 265
+  },
+  "cost": {
+    "actual_usd": "1.5870898000000004",
+    "est_low": "1.4167999999999996",
+    "est_high": "6.4578000000000015",
+    "credits": "1",
+    "hard_cap": "5.0"
+  },
+  "efficiency": {
+    "input_tokens": 1779559,
+    "output_tokens": 32825,
+    "tasks_total": 21,
+    "tasks_done": 19,
+    "tasks_failed": 0,
+    "tasks_partial": 2
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "PENDING",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "backend_go",
+  "spec_type": "BACKEND",
+  "language": "Go",
+  "run_id": "c0b33bcd-4ec5-46dd-a7ce-c1a8e5ec6ed8",
+  "timestamp": "2026-04-12T02:42:30Z",
+  "status": "PARTIAL",
+  "worker_model": "gemini-2.5-flash",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 313
+  },
+  "cost": {
+    "actual_usd": "1.4274898",
+    "est_low": "2.2510399999999997",
+    "est_high": "10.434900000000004",
+    "credits": "2",
+    "hard_cap": "10.0"
+  },
+  "efficiency": {
+    "input_tokens": 3352216,
+    "output_tokens": 94915,
+    "tasks_total": 35,
+    "tasks_done": 34,
+    "tasks_failed": 0,
+    "tasks_partial": 1
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "PENDING",
+    "issues": []
+  }
+}
+{
+  "provider": "GOOGLE",
+  "spec_name": "backend_rust",
+  "spec_type": "BACKEND",
+  "language": "Rust",
+  "run_id": "e496dc2c-f526-4891-a9fc-fe8a7468cbe6",
+  "timestamp": "2026-04-12T02:53:10Z",
+  "status": "COMPLETE",
+  "worker_model": "gemini-2.5-flash",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 276
+  },
+  "cost": {
+    "actual_usd": "0.8530071000000001",
+    "est_low": "1.9878999999999993",
+    "est_high": "9.378000000000002",
+    "credits": "1",
+    "hard_cap": "5.0"
+  },
+  "efficiency": {
+    "input_tokens": 2361407,
+    "output_tokens": 57834,
+    "tasks_total": 24,
+    "tasks_done": 24,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "PENDING",
+    "issues": []
+  }
+}
