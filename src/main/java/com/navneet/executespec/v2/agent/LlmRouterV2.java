@@ -67,7 +67,11 @@ public class LlmRouterV2 {
      * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
      */
     public ChatResponse call(LlmRequestV2 request) {
-        List<ToolCallback> tools = toolRegistry.bind(request.context());
+        // If the caller supplied an explicit tool list (e.g. the planner restricting
+        // to just submitPlan), honor it; otherwise bind every registered V2 tool.
+        List<ToolCallback> tools = (request.toolsOverride() != null)
+                ? request.toolsOverride()
+                : toolRegistry.bind(request.context());
         long start = System.currentTimeMillis();
         log.info("LlmRouterV2 -> {} {} (tools={}, messages={})",
                 request.provider(), request.model(), tools.size(), request.messages().size());
