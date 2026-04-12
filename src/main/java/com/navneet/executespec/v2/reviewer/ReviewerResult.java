@@ -4,7 +4,7 @@ import com.navneet.executespec.v2.agent.WorkerResult;
 import lombok.Builder;
 
 /**
- * Output of {@link ReviewerAgentV2#review}.
+ * Output of {@link ReviewerAgentV3#review}.
  *
  * @param overall               terminal verdict across both review passes
  * @param generalPassOutcome    raw worker outcome of the general-review pass

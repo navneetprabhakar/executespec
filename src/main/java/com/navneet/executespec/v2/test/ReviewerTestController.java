@@ -1,6 +1,6 @@
 package com.navneet.executespec.v2.test;
 
-import com.navneet.executespec.v2.reviewer.ReviewerAgentV2;
+import com.navneet.executespec.v2.reviewer.ReviewerAgentV3;
 import com.navneet.executespec.v2.reviewer.ReviewerRequestV2;
 import com.navneet.executespec.v2.reviewer.ReviewerResult;
 import com.navneet.executespec.v2.tool.ExecutionContext;
@@ -22,7 +22,7 @@ import java.util.Map;
  *
  * <p>Seeds a temp workspace with a deliberately buggy Node.js module (two files, each
  * containing one intentional bug — an off-by-one in sum and a wrong comparison in max).
- * Runs {@link ReviewerAgentV2} against the buggy workspace and verifies:
+ * Runs {@link ReviewerAgentV3} against the buggy workspace and verifies:
  * <ul>
  *   <li>The reviewer reaches {@code FIXED_ISSUES} or {@code CLEAN} overall</li>
  *   <li>Both bugs get corrected — the smoke command now returns the expected values</li>
@@ -77,7 +77,7 @@ public class ReviewerTestController {
             console.log('smoke ok');"
             """;
 
-    private final ReviewerAgentV2 reviewer;
+    private final ReviewerAgentV3 reviewer;
 
     @GetMapping("/reviewer")
     public Map<String, Object> testReviewer(
