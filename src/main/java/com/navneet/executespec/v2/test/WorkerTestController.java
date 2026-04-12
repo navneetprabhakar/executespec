@@ -92,6 +92,7 @@ public class WorkerTestController {
             out.put("toolCallsDispatched", result.toolCallsDispatched());
             out.put("totalLatencyMs", result.totalLatencyMs());
             out.put("completionSummary", result.completionSummary());
+            out.put("finalAssistantText", result.finalAssistantText());
             out.put("toolCallLog", result.toolCallLog());
             out.put("sumFileExists", sumOnDisk != null);
             out.put("sumOnDisk", sumOnDisk);
