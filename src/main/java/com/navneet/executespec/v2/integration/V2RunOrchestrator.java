@@ -1,6 +1,7 @@
 package com.navneet.executespec.v2.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
@@ -75,6 +76,7 @@ public class V2RunOrchestrator {
     private final ReviewerAgentV3 reviewer;
     private final V2Metrics metrics;
     private final ObjectMapper objectMapper;
+    private final AgentProperties agentProps;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
@@ -147,7 +149,12 @@ public class V2RunOrchestrator {
         Instant startedAt = Instant.now();
         Path workspace = null;
         try {
-            workspace = Files.createTempDirectory("v2-run-" + runId + "-");
+            // Use V1's workspace convention: <agent.workspace>/<runId>/
+            // V1's WorkspaceFileService (Code tab, download ZIP) resolves paths via the
+            // same formula, so files written here are visible through the existing UI
+            // with zero adapter work. Phase 11.C formalizes this in the parity plan.
+            workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+            Files.createDirectories(workspace);
             ExecutionContext rootCtx = new ExecutionContext(
                     runId, "__root__", workspace.toRealPath());
             setWorkspacePath(runId, workspace.toString());
