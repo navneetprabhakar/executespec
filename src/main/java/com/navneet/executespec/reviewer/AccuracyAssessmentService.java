@@ -94,9 +94,18 @@ public class AccuracyAssessmentService {
 
             RULES:
             - Base your score on the SPECIFICATION, not on what is "good enough"
-            - A requirement is IMPLEMENTED if it appears in KEY SOURCE FILES content OR the file tree shows a file
-              that clearly implements it — even if the file is named differently (e.g., all routes in src/index.js)
-            - A requirement is MISSING only if you cannot find any evidence of it in the source files
+            - A requirement is IMPLEMENTED if ANY of these is true:
+                * It appears in the KEY SOURCE FILES content, OR
+                * The FILE TREE contains a file whose name/path clearly maps to it (e.g. `fib.py` for a Fibonacci
+                  spec, `BookController.java` for a Book endpoint, `V1__schema.sql` for a schema migration), OR
+                * The code compiled successfully AND the file tree shows the expected structural files for that
+                  feature — compile success is strong positive evidence that the declared components exist
+            - A requirement is MISSING only if:
+                * No file in the tree plausibly covers it, AND
+                * The KEY SOURCE FILES you can see actively contradict its presence
+              Absence of a file in the KEY SOURCE FILES snippet is NOT by itself proof of missing — the snippet
+              is capped at 6 files and may have skipped over the relevant one. Use the FULL FILE TREE as the
+              primary signal for presence/absence.
             - A requirement is PARTIAL if an issue flags it as incomplete (e.g., endpoint exists but validation missing)
             - For endpointCoverage: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check
               KEY SOURCE FILES content for the route handler — not just file names
@@ -285,7 +294,10 @@ public class AccuracyAssessmentService {
 
     private String getFileTree(String runId) {
         try {
-            return fileSystemTool.listFiles(runId, ".");
+            // Recursive walk — the old top-level-only listing made the assessor blind to
+            // anything in src/main/java/... so Spring Boot / nested projects always scored
+            // F. Cap at 400 entries to keep tokens bounded.
+            return fileSystemTool.listFilesRecursive(runId, 400);
         } catch (Exception e) {
             log.warn("[AccuracyAssessment] Could not get file tree for run {}: {}", runId, e.getMessage());
             return "(file tree unavailable)";
@@ -328,20 +340,35 @@ public class AccuracyAssessmentService {
      */
     private List<String> inferKeyFilePaths(String fileTree) {
         if (fileTree == null || fileTree.isBlank()) return List.of();
-        return fileTree.lines()
+        // Allow a broader extension set so shell, SQL, and config-as-code projects aren't
+        // blind. Kotlin/Swift/Rust included for Android/iOS/systems code.
+        java.util.regex.Pattern ext = java.util.regex.Pattern.compile(
+                "(?i).*\\.(java|js|jsx|ts|tsx|py|go|rb|php|kt|kts|swift|rs|cs|scala|sh|sql)$");
+        java.util.regex.Pattern exclude = java.util.regex.Pattern.compile(
+                "(?i).*(test|spec|__pycache__|node_modules|target|build|dist|\\.min\\.).*");
+        java.util.regex.Pattern structural = java.util.regex.Pattern.compile(
+                "(?i).*(route|router|controller|handler|resolver|service|model|schema|" +
+                "index|main|app|server|api|entity|repository|dao).*");
+
+        List<String> allSource = fileTree.lines()
                 .map(String::trim)
-                // Strip leading tree characters (├──, └──, │, spaces)
-                .map(l -> l.replaceAll("^[│├└\\s─]+", "").trim())
-                // Keep only files (contain a dot extension) that match structural patterns
-                .filter(l -> l.matches(".*\\.(java|js|ts|py|go|rb|php|kt|cs)$"))
-                .filter(l -> l.matches("(?i).*(route|router|controller|handler|resolver|service|" +
-                        "model|schema|index|main|app|server|api).*"))
-                // Exclude test files, vendor, compiled output
-                .filter(l -> !l.matches("(?i).*(test|spec|__pycache__|node_modules|target|build|dist|\\.min\\.).*"))
-                // Prefer shorter paths (closer to root = more likely to be entry points)
-                .sorted(java.util.Comparator.comparingInt(l -> l.length()))
+                .map(l -> l.replaceAll("^[\\[DIR\\]│├└\\s─]+", "").trim())
+                .filter(l -> !l.isBlank())
+                .filter(l -> ext.matcher(l).matches())
+                .filter(l -> !exclude.matcher(l).matches())
+                .sorted(java.util.Comparator.comparingInt(String::length))
+                .toList();
+
+        if (allSource.isEmpty()) return List.of();
+
+        // Prefer structurally-named files. If none match (e.g. a single-file CLI like
+        // fib.py or a script project), fall back to all source files — capped below.
+        List<String> structuralMatches = allSource.stream()
+                .filter(l -> structural.matcher(l).matches())
                 .limit(10)
                 .toList();
+        if (!structuralMatches.isEmpty()) return structuralMatches;
+        return allSource.stream().limit(6).toList();
     }
 
     // ──────────────────────────────────────────────────────────────────────────

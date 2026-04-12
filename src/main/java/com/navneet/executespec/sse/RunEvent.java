@@ -42,6 +42,13 @@ public record RunEvent(
         return new RunEvent("COST_UPDATE", runId, null, String.valueOf(cost), Instant.now());
     }
 
+    /** Live per-call token usage: payload encoded as "in=X,out=Y,total=Z". */
+    public static RunEvent tokenUsage(String runId, int inputTokens, int outputTokens) {
+        String payload = "in=" + inputTokens + ",out=" + outputTokens
+                + ",total=" + (inputTokens + outputTokens);
+        return new RunEvent("TOKEN_USAGE", runId, null, payload, Instant.now());
+    }
+
     public static RunEvent queued(String runId, int position) {
         return new RunEvent("QUEUED", runId, null, String.valueOf(position), Instant.now());
     }

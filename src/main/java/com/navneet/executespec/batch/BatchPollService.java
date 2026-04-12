@@ -24,6 +24,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class BatchPollService {
 
     private final StateStore stateStore;
@@ -34,6 +35,7 @@ public class BatchPollService {
 
     @Scheduled(fixedDelayString = "${agent.cost.batch.poll-interval-seconds:30}000")
     @SchedulerLock(name = "BatchPollService", lockAtMostFor = "60s", lockAtLeastFor = "10s")
+    @Deprecated(since = "v2")
     public void pollBatchRuns() {
         if (!agentProperties.getCost().getBatch().isEnabled()) return;
 
@@ -56,6 +58,7 @@ public class BatchPollService {
         }
     }
 
+    @Deprecated(since = "v2")
     private void pollSingleRun(PipelineRun run) {
         String runId = run.getRunId();
         String batchId = run.getBatchId();

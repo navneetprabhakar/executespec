@@ -209,6 +209,48 @@ public class FileSystemTool {
         }
     }
 
+    /**
+     * Recursive workspace listing for callers (like the accuracy assessor) that need
+     * to see the full tree, not just top-level entries. Excludes build artifacts,
+     * vendor dirs, and dot-files. Caps total lines to keep the output bounded.
+     */
+    public String listFilesRecursive(String runId, int maxEntries) {
+        try {
+            Path ws = workspace(runId);
+            if (!Files.isDirectory(ws)) return "(workspace not found)";
+            java.util.Set<String> skip = java.util.Set.of(
+                    ".git", ".agent-context", "node_modules", "target", "build",
+                    "dist", ".gradle", ".idea", ".vscode", "__pycache__", "venv", ".venv",
+                    "worktrees");
+            StringBuilder sb = new StringBuilder();
+            int[] count = {0};
+            try (var stream = Files.walk(ws)) {
+                stream.filter(p -> !p.equals(ws))
+                      .filter(p -> {
+                          for (Path part : ws.relativize(p)) {
+                              String n = part.toString();
+                              if (skip.contains(n)) return false;
+                              if (n.startsWith(".") && !".env.example".equals(n)) return false;
+                          }
+                          return true;
+                      })
+                      .sorted()
+                      .forEach(p -> {
+                          if (count[0] >= maxEntries) return;
+                          sb.append(Files.isDirectory(p) ? "[DIR] " : "      ")
+                            .append(ws.relativize(p).toString())
+                            .append('\n');
+                          count[0]++;
+                      });
+            }
+            if (sb.length() == 0) return "(empty)";
+            if (count[0] >= maxEntries) sb.append("...(truncated at ").append(maxEntries).append(" entries)\n");
+            return sb.toString();
+        } catch (IOException e) {
+            return "Cannot walk workspace: " + e.getMessage();
+        }
+    }
+
     @Tool(description = "Recursive grep to find patterns in files.")
     public String searchFiles(
             @ToolParam(description = "runId", required = true) String runId,

@@ -98,6 +98,9 @@ public class RunDetail {
     /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
     String aiProvider;
 
+    /** Which harness produced this run: "v1" (default) or "v2". Null for pre-V76 rows. */
+    String harnessVersion;
+
     // ── Retry tracking ──────────────────────────────────────────────────────
     /** True if this run is a retry of a previous run. */
     Boolean isRetry;

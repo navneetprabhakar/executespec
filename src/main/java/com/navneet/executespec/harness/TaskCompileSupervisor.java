@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Deprecated(since = "v2")
 public class TaskCompileSupervisor {
 
     private final StateStore stateStore;
@@ -102,6 +103,7 @@ public class TaskCompileSupervisor {
      * @param mergedTaskIds task IDs already merged to main
      * @param providers     available providers for LLM escalation
      */
+    @Deprecated(since = "v2")
     public TaskCompileDecision supervise(
             PipelineRun run,
             AgentTask task,
@@ -141,6 +143,7 @@ public class TaskCompileSupervisor {
      * Used for observability and logging; the final CompilerAgent pass handles
      * any remaining structural issues.
      */
+    @Deprecated(since = "v2")
     public TaskCompileDecision superviseTaskGroup(
             PipelineRun run,
             AgentTask parentTask,
@@ -162,6 +165,7 @@ public class TaskCompileSupervisor {
 
     // ── Classification ───────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private ErrorClassification classifyErrors(String errorOutput,
                                                 List<String> ownedFiles,
                                                 List<AgentTask> pendingTasks) {
@@ -207,6 +211,7 @@ public class TaskCompileSupervisor {
                 allNonOwned, borderline);
     }
 
+    @Deprecated(since = "v2")
     private ErrorType classifyLine(String line, Set<String> ownedSimpleNames,
                                     Set<String> pendingFileSimpleNames,
                                     Set<String> pendingPackagePrefixes) {
@@ -286,6 +291,7 @@ public class TaskCompileSupervisor {
         return ErrorType.UNCLEAR;
     }
 
+    @Deprecated(since = "v2")
     private boolean isErrorLine(String line) {
         return line.contains("error:") || line.contains(" ERROR ")
                 || Pattern.matches(".*\\.(java|ts|js|tsx|jsx|py):\\d+.*", line)
@@ -294,6 +300,7 @@ public class TaskCompileSupervisor {
 
     // ── Rule-based decision tree ──────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private TaskCompileDecision applyRules(ErrorClassification c, String errorOutput, List<String> ownedFiles) {
         int total = c.totalErrorCount();
         int owned = c.ownedErrorCount();
@@ -364,6 +371,7 @@ public class TaskCompileSupervisor {
         return null;
     }
 
+    @Deprecated(since = "v2")
     private int computeFixabilityScore(ErrorClassification c) {
         if (c.ownedErrorCount() == 0) return 100;
         int base = (int) (100.0 * c.fixableCount() / c.ownedErrorCount());
@@ -374,6 +382,7 @@ public class TaskCompileSupervisor {
 
     // ── LLM staff-engineer decision ───────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private TaskCompileDecision callLlmDecision(PipelineRun run, AgentTask task,
                                                   List<String> ownedFiles, String errorOutput,
                                                   List<AgentTask> pendingTasks,
@@ -428,6 +437,7 @@ public class TaskCompileSupervisor {
         }
     }
 
+    @Deprecated(since = "v2")
     private TaskCompileDecision parseLlmDecision(String rawResponse, String errorOutput,
                                                    List<String> ownedFiles) {
         try {
@@ -474,6 +484,7 @@ public class TaskCompileSupervisor {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private List<String> extractOwnedFiles(AgentTask task) {
         if (task.getTaskJson() == null) return List.of();
         try {
@@ -484,6 +495,7 @@ public class TaskCompileSupervisor {
         }
     }
 
+    @Deprecated(since = "v2")
     private AgentTask buildSyntheticTaskWithFiles(AgentTask parent, List<String> aggregatedOwnedFiles) {
         // Build a minimal task JSON that carries the aggregated owned files
         try {
@@ -500,12 +512,14 @@ public class TaskCompileSupervisor {
         }
     }
 
+    @Deprecated(since = "v2")
     private String simpleFileName(String filePath) {
         if (filePath == null) return "";
         int slash = filePath.lastIndexOf('/');
         return slash >= 0 ? filePath.substring(slash + 1) : filePath;
     }
 
+    @Deprecated(since = "v2")
     private String toPackagePrefix(String filePath) {
         if (filePath == null) return null;
         Matcher m = Pattern.compile("src/main/java/(.+)/[^/]+\\.java").matcher(filePath);
@@ -513,22 +527,26 @@ public class TaskCompileSupervisor {
         return null;
     }
 
+    @Deprecated(since = "v2")
     private boolean isPending(String status) {
         return "PENDING".equals(status) || "LOCKED".equals(status) || "WORKING".equals(status);
     }
 
+    @Deprecated(since = "v2")
     private String buildAutoFixHint(String errorOutput, List<String> ownedFiles) {
         String truncated = errorOutput.length() > 1500
                 ? errorOutput.substring(0, 1500) + "..." : errorOutput;
         return "Fix compile errors in owned files " + ownedFiles + ":\n" + truncated;
     }
 
+    @Deprecated(since = "v2")
     private String buildRetryFeedback(String errorOutput) {
         String truncated = errorOutput.length() > 2000
                 ? errorOutput.substring(0, 2000) + "..." : errorOutput;
         return "Post-merge compile check failed. Fix the following errors in your owned files:\n" + truncated;
     }
 
+    @Deprecated(since = "v2")
     private String buildLlmUserMessage(AgentTask task, List<String> ownedFiles,
                                         String errorOutput, String pendingFilesCtx,
                                         Set<String> mergedTaskIds) {
@@ -542,6 +560,7 @@ public class TaskCompileSupervisor {
                 + "PENDING TASKS (not yet merged) with their owned files:\n" + pendingFilesCtx;
     }
 
+    @Deprecated(since = "v2")
     private void emitDecisionEvent(String runId, String taskId, TaskCompileDecision decision) {
         String msg = switch (decision.action()) {
             case PASS -> "📋 Compile supervisor: PASS — " + decision.assessment();
@@ -561,6 +580,7 @@ public class TaskCompileSupervisor {
                 decision.ownedErrorCount(), decision.cascadingErrorCount(), decision.rationale());
     }
 
+    @Deprecated(since = "v2")
     private void recordMetric(SupervisionAction action) {
         Counter.builder("executespec.supervisor.decision")
                 .tag("action", action.name())
