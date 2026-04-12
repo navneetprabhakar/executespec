@@ -1,5 +1,7 @@
 package com.navneet.executespec.auth.service;
 
+import com.navneet.executespec.agent.model.TaskDefinition;
+import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.TierConfig;
@@ -9,8 +11,6 @@ import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.billing.service.RunTopupService;
-import com.navneet.executespec.agent.model.TaskDefinition;
-import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -473,6 +473,7 @@ public class TierEnforcementService {
      * Safe to call from async pipeline threads where there is no auth principal.
      */
     public String resolveUserTier(String userId) {
+        if (userId == null) return "FREE";
         AppUser user = userRepo.findById(userId).orElse(null);
         if (user == null) return "FREE";
         if ("SUPER_ADMIN".equals(user.getGlobalRole())) return "ENTERPRISE";

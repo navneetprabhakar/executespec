@@ -1,13 +1,14 @@
 package com.navneet.executespec.api.controller;
+
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.LlmRouter.FallbackMode;
-import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.api.dto.ConversationMessage;
 import com.navneet.executespec.api.dto.ConversationRequest;
 import com.navneet.executespec.api.dto.ConversationResponse;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -18,7 +19,10 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
 import java.util.List;

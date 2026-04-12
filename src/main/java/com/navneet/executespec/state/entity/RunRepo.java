@@ -2,7 +2,10 @@ package com.navneet.executespec.state.entity;
 
 import com.navneet.executespec.tenant.TenantInterceptor;
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.UUID;

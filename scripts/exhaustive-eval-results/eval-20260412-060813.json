@@ -1,0 +1,22 @@
+{
+  "eval_timestamp": "2026-04-12 00:39 UTC",
+  "total_runs": 0,
+  "providers": {},
+  "by_type": {
+    "HTML": {},
+    "FIBONACCI": {},
+    "BACKEND": {},
+    "FULLSTACK": {}
+  },
+  "by_language": {
+    "HTML/JS": {},
+    "Java": {},
+    "Python": {},
+    "Go": {},
+    "Rust": {},
+    "Node.js": {}
+  },
+  "critiques": [],
+  "pattern_counts": {},
+  "runs": []
+}

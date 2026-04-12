@@ -2,7 +2,10 @@ package com.navneet.executespec.integration.pagerduty;
 
 import com.navneet.executespec.integration.IntegrationProperties;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;

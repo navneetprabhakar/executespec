@@ -15,8 +15,6 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
-
-import static com.navneet.executespec.config.CustomMetricsConfig.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -26,6 +24,8 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.STUCK_DETECTED;
 
 @Component
 @RequiredArgsConstructor

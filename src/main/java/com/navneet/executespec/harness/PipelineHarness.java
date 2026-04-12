@@ -1,58 +1,46 @@
 package com.navneet.executespec.harness;
-import com.navneet.executespec.router.ModelRegistry;
-import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.LlmProvider;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.batch.BatchClientRouter;
-import com.navneet.executespec.batch.BatchRequest;
-import com.navneet.executespec.batch.BatchRequestBuilder;
-import com.navneet.executespec.agent.ApiKeyResolver;
-import com.navneet.executespec.agent.CostEstimator;
-import com.navneet.executespec.agent.RunCostEstimate;
-import com.navneet.executespec.agent.ResolvedKeys;
-import com.navneet.executespec.agent.PlannerAgent;
-import com.navneet.executespec.agent.RunKeyStore;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.navneet.executespec.agent.*;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
-import com.navneet.executespec.reviewer.model.ReviewIssue;
-import com.navneet.executespec.reviewer.model.ReviewVerdict;
-import com.navneet.executespec.reviewer.model.IssueSeverity;
-import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.batch.BatchClientRouter;
+import com.navneet.executespec.batch.BatchRequestBuilder;
 import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
+import com.navneet.executespec.compiler.CompileResult;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.event.PipelineEvent;
-import com.navneet.executespec.recovery.RecoveryProperties;
 import com.navneet.executespec.recovery.RunRecoveryService;
+import com.navneet.executespec.repo.BitbucketRepoService;
+import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.report.model.ReportInput;
-import com.navneet.executespec.compiler.CompileResult;
-import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
-import com.navneet.executespec.testgen.model.TestExecutionSummary;
-import com.navneet.executespec.testgen.model.TestResult;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
+import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewVerdict;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
-import com.navneet.executespec.repo.BitbucketRepoService;
-import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
+import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.tool.FileLockTool;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.GitTool;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.context.ContextSnapshotFactory;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
-
-import static com.navneet.executespec.config.CustomMetricsConfig.*;
-import com.navneet.executespec.config.CustomMetricsConfig;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,14 +53,11 @@ import org.springframework.web.server.ResponseStatusException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Scanner;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.*;
 
 @Service
 @RequiredArgsConstructor
@@ -1385,22 +1370,16 @@ public class PipelineHarness {
                         freshRun.getUserRequest(), postMergeCompile != null ? postMergeCompile : CompileResult.skip(),
                         providers);
                 stateStore.saveReviewV2(runId, review);
-
-                // ── 4. Validation Report (non-fatal) ─────────────────────
-                testPreviewCoordinator.cancelIfPending(runId);
-                try {
-                    generateValidationReport(runId, freshRun, reports, review, postMergeCompile);
-                } catch (Exception reportEx) {
-                    log.warn("Validation report generation failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
-                }
             }
 
-            // ── 5. Re-validate after auto-fix ─────────────────────────────
+            // ── 4. Re-validate after auto-fix (before report — captures fixed state) ──
+            CompileResult finalCompileForReport = postMergeCompile;
             if (review != null && review.getAutoFixSucceeded() > 0) {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness",
                     "Re-validating after " + review.getAutoFixSucceeded() + " auto-fix(es)..."));
                 try {
                     CompileResult revalidation = compilerAgent.runCompileAndFix(runId);
+                    finalCompileForReport = revalidation;
                     if (revalidation.passed() || revalidation.skipped()) {
                         broadcaster.emit(runId, RunEvent.log(runId, "compiler",
                             "✅ Re-validation passed — all fixes confirmed"));
@@ -1410,6 +1389,18 @@ public class PipelineHarness {
                     }
                 } catch (Exception e) {
                     log.warn("Post-fix re-validation failed for run {}: {}", runId, e.getMessage());
+                }
+            }
+
+            // ── 5. Validation Report (after re-validation so it reflects fixed state) ─
+            if (needsReview && review != null) {
+                PipelineRun freshRunForReport = stateStore.findRun(runId).orElse(run);
+                List<WorkerReport> reportsForReport = getWorkerReports(runId);
+                testPreviewCoordinator.cancelIfPending(runId);
+                try {
+                    generateValidationReport(runId, freshRunForReport, reportsForReport, review, finalCompileForReport);
+                } catch (Exception reportEx) {
+                    log.warn("Validation report generation failed for run {} (non-fatal): {}", runId, reportEx.getMessage());
                 }
             }
 
@@ -2258,27 +2249,55 @@ public class PipelineHarness {
             boolean allWorkerTasksComplete = workerTasksNow.stream()
                 .allMatch(t -> "COMPLETE".equals(t.getStatus()));
 
+            // Track whether we're proceeding with some incomplete tasks (≥85% path).
+            // Used below to restrict mergeAll to only COMPLETE tasks so partial
+            // branches don't cause merge conflicts that re-trigger the PARTIAL state.
+            final boolean proceedingWithIncompleteTasks;
+
             if (!allWorkerTasksComplete) {
-                // Some tasks did not reach COMPLETE — mark run PARTIAL so the user
-                // can retry individual tasks. The merge gate does NOT open here;
-                // it opens after a successful retry that completes all remaining tasks.
                 List<String> incompleteTitles = workerTasksNow.stream()
                     .filter(t -> !"COMPLETE".equals(t.getStatus()))
                     .map(t -> t.getTitle() + " [" + t.getStatus() + "]")
                     .toList();
+                long totalWorkerTasks = workerTasksNow.size();
+                long completedWorkerTasks = workerTasksNow.stream()
+                    .filter(t -> "COMPLETE".equals(t.getStatus())).count();
+                double completionRate = totalWorkerTasks > 0
+                        ? (double) completedWorkerTasks / totalWorkerTasks : 0.0;
                 String partialReason = "Incomplete tasks: " + String.join("; ", incompleteTitles);
-                log.warn("Run {} — {} — marking PARTIAL (no merge gate)", runId, partialReason);
+
+                log.warn("Run {} — {}/{} tasks complete ({:.0f}%) — {}",
+                        runId, completedWorkerTasks, totalWorkerTasks,
+                        completionRate * 100, partialReason);
+
+                if (completionRate < 0.85) {
+                    // Too many failures — mark PARTIAL immediately, skip merge and validation.
+                    // User can retry individual tasks from the UI.
+                    broadcaster.emit(runId, RunEvent.log(runId, "harness",
+                        "⚠️ Too many incomplete tasks (" + completedWorkerTasks + "/" + totalWorkerTasks
+                        + " complete):\n  • " + String.join("\n  • ", incompleteTitles)
+                        + "\n\nRun marked PARTIAL. Use 'Retry Task' on each incomplete task — "
+                        + "the merge gate will open once all tasks are COMPLETE."));
+                    stateStore.markPartial(runId, partialReason);
+                    broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
+                    eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, partialReason));
+                    PipelineRun partialRun = stateStore.findRun(runId).orElse(null);
+                    if (partialRun != null) autoRetryRunIfEligible(partialRun);
+                    return;
+                }
+
+                // ≥85% complete — proceed with merge and background validation.
+                // Incomplete tasks' branches are skipped during merge (see mergeAll call below)
+                // so they can't cause merge conflicts. The user can retry them after the report.
                 broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                    "⚠️ Some tasks did not complete:\n  • " + String.join("\n  • ", incompleteTitles)
-                    + "\n\nRun marked PARTIAL. Use 'Retry Task' on each incomplete task — "
-                    + "the merge gate will open once all tasks are COMPLETE."));
-                stateStore.markPartial(runId, partialReason);
-                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL"));
-                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, partialReason));
-                // Attempt auto-retry before giving up
-                PipelineRun partialRun = stateStore.findRun(runId).orElse(null);
-                if (partialRun != null) autoRetryRunIfEligible(partialRun);
-                return;
+                    "⚠️ " + incompleteTitles.size() + " task(s) incomplete ("
+                    + completedWorkerTasks + "/" + totalWorkerTasks + " = "
+                    + Math.round(completionRate * 100) + "%) — proceeding to merge and validation:\n  • "
+                    + String.join("\n  • ", incompleteTitles)));
+                proceedingWithIncompleteTasks = true;
+                // Fall through — do NOT return. Merge and background validation continue below.
+            } else {
+                proceedingWithIncompleteTasks = false;
             }
 
             // ── 3b. Cleanup stale worktrees before merge ──────────────────
@@ -2294,7 +2313,15 @@ public class PipelineHarness {
             try (Observation.Scope mergeScope = mergeObs.openScope()) {
                 broadcaster.emit(runId, RunEvent.log(runId, "harness", "Merging all task branches..."));
 
-                List<String> conflicted = mergeService.mergeAll(runId, stateStore.getAllTasks(runId));
+                // When proceeding with incomplete tasks (≥85% path), only merge COMPLETE
+                // tasks' branches — incomplete branches may be in a broken state and would
+                // cause merge conflicts that re-trigger PARTIAL status.
+                List<AgentTask> tasksToMerge = proceedingWithIncompleteTasks
+                        ? stateStore.getAllTasks(runId).stream()
+                            .filter(t -> "COMPLETE".equals(t.getStatus()))
+                            .toList()
+                        : stateStore.getAllTasks(runId);
+                List<String> conflicted = mergeService.mergeAll(runId, tasksToMerge);
                 lockTool.releaseAll(runId);
 
                 if (!conflicted.isEmpty()) {
@@ -3277,8 +3304,9 @@ public class PipelineHarness {
 
     /**
      * Validates that no two tasks claim the same file in their owned_files lists.
-     * If conflicts are detected, auto-injects dependencies to serialize the conflicting tasks
-     * (the task appearing later in the plan depends on the earlier one).
+     * When conflicts are detected, injects depends_on relationships to serialize the
+     * conflicting tasks (each later task depends on its predecessor for that file),
+     * then persists the updated task JSON so SequentialTaskExecutor sees the new tiers.
      * This is non-fatal — logs warnings and auto-corrects.
      */
     private void validateFileOwnership(List<AgentTask> workerTasks, String runId) {
@@ -3299,16 +3327,61 @@ public class PipelineHarness {
             } catch (JsonProcessingException ignore) { /* non-fatal */ }
         }
 
-        List<String> conflicts = fileToOwners.entrySet().stream()
-            .filter(e -> e.getValue().size() > 1)
-            .map(e -> e.getKey() + " claimed by: " + e.getValue())
-            .toList();
+        // For each file with multiple owners, serialize them by plan order.
+        // owner[i] must depend on owner[i-1] to prevent parallel overwrites.
+        // Track extra deps to add per taskId (accumulated across all conflicting files).
+        Map<String, java.util.Set<String>> extraDepsToAdd = new java.util.HashMap<>();
+        for (Map.Entry<String, List<String>> entry : fileToOwners.entrySet()) {
+            List<String> owners = entry.getValue();
+            if (owners.size() <= 1) continue;
 
-        if (!conflicts.isEmpty()) {
-            log.warn("File ownership conflicts detected in plan for run {}: {}", runId, conflicts);
+            log.warn("[FileOwnership][{}] Conflict on '{}' — owned by {} tasks: {}. Injecting sequential deps.",
+                    runId, entry.getKey(), owners.size(), owners);
+
+            for (int i = 1; i < owners.size(); i++) {
+                String taskId = owners.get(i);
+                String predecessorId = owners.get(i - 1);
+                com.navneet.executespec.agent.model.TaskDefinition def = taskDefs.get(taskId);
+                if (def == null) continue;
+
+                List<String> currentDeps = def.getDependsOn() != null ? def.getDependsOn() : List.of();
+                if (!currentDeps.contains(predecessorId)) {
+                    extraDepsToAdd.computeIfAbsent(taskId, k -> new java.util.HashSet<>()).add(predecessorId);
+                    log.info("[FileOwnership][{}] Task {} will depend on {} (shared file: {})",
+                            runId, taskId, predecessorId, entry.getKey());
+                }
+            }
+        }
+
+        // Persist updated task JSON — patch the dependsOn array using Jackson ObjectNode
+        // to avoid needing toBuilder() on TaskDefinition.
+        if (!extraDepsToAdd.isEmpty()) {
+            for (AgentTask wt : workerTasks) {
+                java.util.Set<String> extras = extraDepsToAdd.get(wt.getTaskId());
+                if (extras == null || extras.isEmpty()) continue;
+                try {
+                    com.fasterxml.jackson.databind.node.ObjectNode node =
+                            (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(wt.getTaskJson());
+                    com.fasterxml.jackson.databind.node.ArrayNode depsNode =
+                            node.has("dependsOn") && node.get("dependsOn").isArray()
+                                    ? (com.fasterxml.jackson.databind.node.ArrayNode) node.get("dependsOn")
+                                    : mapper.createArrayNode();
+                    java.util.Set<String> existing = new java.util.HashSet<>();
+                    depsNode.forEach(n -> existing.add(n.asText()));
+                    for (String extra : extras) {
+                        if (!existing.contains(extra)) depsNode.add(extra);
+                    }
+                    node.set("dependsOn", depsNode);
+                    wt.setTaskJson(mapper.writeValueAsString(node));
+                    stateStore.saveTask(wt);
+                } catch (Exception e) {
+                    log.error("[FileOwnership][{}] Failed to persist updated deps for task {}: {}",
+                            runId, wt.getTaskId(), e.getMessage());
+                }
+            }
             broadcaster.emit(runId, RunEvent.log(runId, "harness",
-                "⚠️ File ownership overlap detected: " + String.join("; ", conflicts)
-                + " — tasks with shared files will run sequentially."));
+                    "🔧 File ownership conflicts auto-resolved — " + extraDepsToAdd.size()
+                    + " task(s) serialized to prevent parallel overwrites."));
         }
     }
 

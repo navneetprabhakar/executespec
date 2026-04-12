@@ -1,0 +1,380 @@
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "html_todo",
+  "spec_type": "HTML",
+  "language": "HTML/JS",
+  "run_id": "7e19ed40-4956-47ea-be3b-e677c79223a9",
+  "timestamp": "2026-04-12T01:28:13Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 61
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_java",
+  "spec_type": "FIBONACCI",
+  "language": "Java",
+  "run_id": "d2f03c18-cc22-49fa-b306-796062f3f51a",
+  "timestamp": "2026-04-12T01:28:52Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_python",
+  "spec_type": "FIBONACCI",
+  "language": "Python",
+  "run_id": "a227baa1-e2f3-43ee-b767-78dd54d0e109",
+  "timestamp": "2026-04-12T01:29:31Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_go",
+  "spec_type": "FIBONACCI",
+  "language": "Go",
+  "run_id": "eb61f101-6a3f-43ff-ae16-1f17b3cc182e",
+  "timestamp": "2026-04-12T01:29:58Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_rust",
+  "spec_type": "FIBONACCI",
+  "language": "Rust",
+  "run_id": "821115b9-cf28-48e0-924d-3d62fb43e178",
+  "timestamp": "2026-04-12T01:30:26Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_nodejs",
+  "spec_type": "FIBONACCI",
+  "language": "Node.js",
+  "run_id": "ca20f8e9-c50c-476c-a9f8-97643c6b2a8f",
+  "timestamp": "2026-04-12T01:30:53Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fullstack_nodejs",
+  "spec_type": "FULLSTACK",
+  "language": "Node.js",
+  "run_id": "73db49db-8ee1-4e73-b66c-251f6ba8e6e7",
+  "timestamp": "2026-04-12T01:34:33Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 217
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fullstack_spring",
+  "spec_type": "FULLSTACK",
+  "language": "Java",
+  "run_id": "54cd01c3-0322-4bd2-a7ca-f837d1ef26a3",
+  "timestamp": "2026-04-12T01:42:01Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 445
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fullstack_python",
+  "spec_type": "FULLSTACK",
+  "language": "Python",
+  "run_id": "9d76b135-7332-4d22-9ba5-15ff4bf290ac",
+  "timestamp": "2026-04-12T01:54:55Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 771
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fullstack_go",
+  "spec_type": "FULLSTACK",
+  "language": "Go",
+  "run_id": "1e31bf10-9016-4d0c-b2b8-78e0fd86023a",
+  "timestamp": "2026-04-12T02:03:36Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 518
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}

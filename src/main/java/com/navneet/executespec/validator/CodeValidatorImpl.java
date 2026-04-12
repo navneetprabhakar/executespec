@@ -8,13 +8,13 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import static com.navneet.executespec.config.CustomMetricsConfig.*;
-
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static com.navneet.executespec.config.CustomMetricsConfig.VALIDATION_TOTAL;
 
 @Slf4j
 @Service
