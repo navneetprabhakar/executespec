@@ -13,7 +13,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
-import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, retryTask, type ReviewReport } from '@/lib/api';
+import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, retryTask, getValidationReport, type ReviewReport, type ValidationReportData } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
 import VibeProgressNarrative from './VibeProgressNarrative';
@@ -88,6 +88,14 @@ export default function RunDetail() {
     try { return JSON.parse(activeRun.reviewJson) as ReviewReport; }
     catch { return null; }
   }, [activeRun?.reviewJson]);
+
+  // Validation report — used to surface accuracy score in the review summary banner
+  const [reviewReport, setReviewReport] = useState<ValidationReportData | null>(null);
+  const reportReadyEvt = useSseStore((s) => s.entries).some(e => e.type === 'VALIDATION_REPORT_READY');
+  useEffect(() => {
+    if (!activeRunId || !['COMPLETE', 'PARTIAL', 'FAILED'].includes(activeRun?.status ?? '')) return;
+    getValidationReport(activeRunId).then(r => { if (r) setReviewReport(r); });
+  }, [activeRunId, activeRun?.status, reportReadyEvt]);
 
   const handle = async (action: () => Promise<void>, successMsg: string) => {
     try {
@@ -265,7 +273,7 @@ export default function RunDetail() {
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: '100%', opacity: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          className="flex flex-col h-full bg-[var(--gray-100)] border-l border-[var(--border-default)]"
+          className="flex flex-col h-full overflow-y-auto bg-[var(--gray-100)] border-l border-[var(--border-default)]"
         >
           {/* ── Vibe Mode: simplified view ──────────────────────────── */}
           {isVibe ? (
@@ -532,21 +540,18 @@ export default function RunDetail() {
           {activeRun.status === 'COMPLETE' && review && (
             <div className="mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs flex-shrink-0">
               <div className="flex items-center gap-2 mb-1">
-                <span className={cn(
-                  'font-semibold',
-                  (review.recommendationCompat ?? review.recommendation) === 'MERGE' ? 'text-accent-green' :
-                  (review.recommendationCompat ?? review.recommendation) === 'PARTIAL_MERGE' ? 'text-accent-amber' : 'text-accent-red'
-                )}>
-                  {(review.recommendationCompat ?? review.recommendation ?? 'MERGE').replace('_', ' ')}
-                </span>
-                <span className="text-muted">·</span>
-                <span className={cn(
-                  'text-secondary',
-                  review.overallConfidence === 'HIGH' ? 'text-accent-green/80' :
-                  review.overallConfidence === 'MEDIUM' ? 'text-accent-amber/80' : 'text-accent-red/80'
-                )}>
-                  {review.overallConfidence} confidence
-                </span>
+                {typeof reviewReport?.accuracyScore === 'number' ? (
+                  <span className={cn(
+                    'font-semibold font-mono tabular-nums',
+                    reviewReport.accuracyScore >= 90 ? 'text-accent-green' :
+                    reviewReport.accuracyScore >= 75 ? 'text-accent-amber' : 'text-accent-red'
+                  )}>
+                    {reviewReport.accuracyScore}/100 accuracy
+                    {reviewReport.accuracyGrade ? ` · ${reviewReport.accuracyGrade}` : ''}
+                  </span>
+                ) : (
+                  <span className="text-muted text-[11px]">Accuracy pending…</span>
+                )}
               </div>
               <p className="text-secondary leading-relaxed">{review.summary}</p>
             </div>
@@ -716,8 +721,9 @@ export default function RunDetail() {
             </div>
           </div>
 
-          {/* Reports + Tabs — single scrollable region */}
-          <div className="flex-1 overflow-y-auto">
+          {/* Reports + Tabs — scroll is handled by the outer container so the
+              title bar + status icons scroll together as one surface. */}
+          <div>
             <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} />
             <RunDetailTabs />
           </div>

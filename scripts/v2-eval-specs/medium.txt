@@ -1,0 +1,15 @@
+Build a minimal Express (Node.js) REST API for a to-do list with in-memory storage.
+
+Endpoints:
+- POST /todos — body {title}, returns 201 with the created todo {id, title, completed:false, createdAt}
+- GET /todos — returns all todos, sorted newest first
+- GET /todos/:id — returns one todo or 404
+- PATCH /todos/:id — body {title?, completed?}, returns the updated todo or 404
+- DELETE /todos/:id — returns 204 or 404
+
+Constraints:
+- Express 4, no external database
+- Use UUIDs for ids
+- Input validation: title required and non-empty on POST; reject unknown body fields on PATCH
+- Include a README with install + run instructions (npm install, npm start)
+- Listen on port from PORT env var or 3000

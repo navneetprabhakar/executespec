@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "medium",
+  "run_id": "efe6b3cd-143e-4dc9-8a80-d59ca2da1821",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T14:10:34.961479Z",
+  "completedAt": "2026-04-12T14:12:33.925280Z",
+  "tasks_total": 3,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildPassed\":true,\"totalLatencyMs\":23189,\"wiringPassSummary\":\"No wiring issues found in the Node.js project. All routes and middleware are correctly defined and registered within index.js.\",\"generalPassSummary\":\"No in-scope issues found after reviewing index.js. The project builds successfully.\",\"overall\":\"CLEAN\",\"finalBuildExitCode\":0}",
+  "actual_cost": 0.0262,
+  "est_low": 0.07015,
+  "est_high": 0.12276250000000001,
+  "credits": 1,
+  "total_input": 69486,
+  "total_output": 2141,
+  "accuracy": null,
+  "report_ok": false
+}

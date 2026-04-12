@@ -1,3 +1,0 @@
-ANTHROPIC 11946 scripts/exhaustive-eval-results/runs-20260412-065712-ANTHROPIC.jsonl
-OPENAI 11956 scripts/exhaustive-eval-results/runs-20260412-065712-OPENAI.jsonl
-GOOGLE 11973 scripts/exhaustive-eval-results/runs-20260412-065712-GOOGLE.jsonl

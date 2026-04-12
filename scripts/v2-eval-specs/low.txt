@@ -1,0 +1,1 @@
+Write a Python function that computes the nth Fibonacci number iteratively and save it to fib.py. Include a short docstring, a ValueError for negative inputs, and a simple __main__ block that prints the first ten Fibonacci numbers when the file is executed directly.

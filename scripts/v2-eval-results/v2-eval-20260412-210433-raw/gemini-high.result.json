@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "high",
+  "run_id": "b17e3067-24b3-4d58-9c77-6303d7edfeda",
+  "status": "FAILED",
+  "harness": "v2",
+  "startedAt": "2026-04-12T15:45:08.784981Z",
+  "completedAt": "2026-04-12T15:52:53.378072Z",
+  "tasks_total": 4,
+  "tasks_done": 3,
+  "tasks_failed": 1,
+  "review": "{\"overall\":\"FIXED_ISSUES\",\"generalPassSummary\":\"\",\"wiringPassSummary\":\"Added missing LibraryApplication.java with @SpringBootApplication to enable component scanning. All other controllers, services, and repositories were correctly wired and scannable.\",\"totalLatencyMs\":46521,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.155771,
+  "est_low": 0.11015,
+  "est_high": 0.1927625,
+  "credits": 1,
+  "total_input": 403066,
+  "total_output": 13941,
+  "accuracy": 85,
+  "report_ok": true
+}

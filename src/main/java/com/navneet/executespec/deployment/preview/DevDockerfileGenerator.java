@@ -58,8 +58,11 @@ public class DevDockerfileGenerator {
             try {
                 JsonNode node = mapper.readTree(projectJson.toFile());
                 String declared = node.path("project_type").asText(null);
-                if (declared != null && !declared.isBlank() && !"UNKNOWN".equals(declared)) {
-                    PreviewProjectType fromPlan = PreviewProjectType.valueOf(declared);
+                if (declared != null && !declared.isBlank() && !"UNKNOWN".equalsIgnoreCase(declared)) {
+                    // Planners (esp. V2) sometimes write lowercase / hyphenated forms like "node-backend".
+                    // Normalize to the enum's canonical UPPER_SNAKE form before valueOf().
+                    String normalized = declared.trim().toUpperCase().replace('-', '_');
+                    PreviewProjectType fromPlan = PreviewProjectType.valueOf(normalized);
                     // Validate: if planner declares a Node-based type, package.json must exist
                     if (requiresPackageJson(fromPlan) && !Files.exists(workspace.resolve("package.json"))) {
                         log.warn("[Detect] Planner declared {} but no package.json found — falling back to detection", fromPlan);

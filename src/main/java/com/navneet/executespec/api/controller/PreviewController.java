@@ -31,6 +31,7 @@ public class PreviewController {
     private final RunAccessGuard guard;
     private final StateStore stateStore;
     private final TierConfigRepository tierConfigRepo;
+    private final com.navneet.executespec.v2.integration.V2DeferredActionGuard v2Guard;
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
