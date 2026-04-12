@@ -5,9 +5,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
@@ -122,27 +119,12 @@ public class LlmRouterV2 {
     }
 
     private ChatResponse callOpenAi(LlmRequestV2 r, List<ToolCallback> tools) {
-        // Extract system + user prompts from the message list. The OpenAI wrapper is
-        // single-turn for now (Phase 2); multi-turn (tool result feedback) lands in
-        // Phase 3 when WorkerAgentV2 needs it.
-        String systemPrompt = null;
-        StringBuilder userBuf = new StringBuilder();
-        for (Message m : r.messages()) {
-            if (m instanceof SystemMessage sm) {
-                systemPrompt = sm.getText();
-            } else if (m instanceof UserMessage um) {
-                if (userBuf.length() > 0) userBuf.append("\n\n");
-                userBuf.append(um.getText());
-            } else {
-                throw new UnsupportedOperationException(
-                        "OpenAI wrapper Phase 2 only supports system + user messages; got "
-                                + m.getClass().getSimpleName() + ". Multi-turn ships in Phase 3.");
-            }
-        }
+        // Phase 3: pass the full Spring AI message list — wrapper serializes
+        // SystemMessage / UserMessage / AssistantMessage(+toolCalls) / ToolResponseMessage
+        // to OpenAI's chat-completions wire format, supporting multi-turn agent loops.
         return openAiNativeToolClient.call(OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
                 .model(r.model())
-                .systemPrompt(systemPrompt)
-                .userPrompt(userBuf.toString())
+                .messages(r.messages())
                 .tools(tools)
                 .temperature(r.temperature())
                 .maxCompletionTokens(r.maxTokens())

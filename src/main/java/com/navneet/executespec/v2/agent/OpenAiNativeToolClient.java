@@ -8,6 +8,10 @@ import lombok.Builder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
@@ -120,14 +124,25 @@ public class OpenAiNativeToolClient {
         body.put("model", request.model());
 
         ArrayNode messages = body.putArray("messages");
-        if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
-            ObjectNode sys = messages.addObject();
-            sys.put("role", "system");
-            sys.put("content", request.systemPrompt());
+        // Two input modes:
+        //  (a) Phase 0/2 single-turn: systemPrompt + userPrompt fields
+        //  (b) Phase 3 multi-turn: full Spring AI Message list (system, user, assistant
+        //      with tool_calls, tool response). When messages() is non-null the simpler
+        //      fields are ignored.
+        if (request.messages() != null && !request.messages().isEmpty()) {
+            for (Message m : request.messages()) {
+                appendMessage(messages, m);
+            }
+        } else {
+            if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
+                ObjectNode sys = messages.addObject();
+                sys.put("role", "system");
+                sys.put("content", request.systemPrompt());
+            }
+            ObjectNode user = messages.addObject();
+            user.put("role", "user");
+            user.put("content", request.userPrompt() == null ? "" : request.userPrompt());
         }
-        ObjectNode user = messages.addObject();
-        user.put("role", "user");
-        user.put("content", request.userPrompt());
 
         // Tools — { type: "function", function: { name, description, parameters } }
         if (request.tools() != null && !request.tools().isEmpty()) {
@@ -153,6 +168,59 @@ public class OpenAiNativeToolClient {
         if (request.maxCompletionTokens() != null) body.put("max_completion_tokens", request.maxCompletionTokens());
 
         return body;
+    }
+
+    /**
+     * Serializes a Spring AI {@link Message} to OpenAI's chat-completions wire format
+     * and appends it to the messages array. Supports the four message types V2 needs:
+     * SystemMessage, UserMessage, AssistantMessage (with optional tool_calls), and
+     * ToolResponseMessage (one or more tool results, each becoming a separate
+     * {@code role:"tool"} entry — OpenAI requires one tool message per tool_call_id).
+     */
+    private void appendMessage(ArrayNode messages, Message m) {
+        if (m instanceof SystemMessage sm) {
+            ObjectNode n = messages.addObject();
+            n.put("role", "system");
+            n.put("content", sm.getText());
+        } else if (m instanceof UserMessage um) {
+            ObjectNode n = messages.addObject();
+            n.put("role", "user");
+            n.put("content", um.getText());
+        } else if (m instanceof AssistantMessage am) {
+            ObjectNode n = messages.addObject();
+            n.put("role", "assistant");
+            String text = am.getText();
+            if (text != null && !text.isEmpty()) {
+                n.put("content", text);
+            } else {
+                n.putNull("content");
+            }
+            if (am.getToolCalls() != null && !am.getToolCalls().isEmpty()) {
+                ArrayNode tcs = n.putArray("tool_calls");
+                for (var tc : am.getToolCalls()) {
+                    ObjectNode tcn = tcs.addObject();
+                    // OpenAI requires non-empty IDs to round-trip in the tool response.
+                    tcn.put("id", (tc.id() == null || tc.id().isBlank())
+                            ? "call_" + Integer.toHexString(System.identityHashCode(tc))
+                            : tc.id());
+                    tcn.put("type", "function");
+                    ObjectNode fn = tcn.putObject("function");
+                    fn.put("name", tc.name());
+                    fn.put("arguments", tc.arguments() == null ? "{}" : tc.arguments());
+                }
+            }
+        } else if (m instanceof ToolResponseMessage trm) {
+            // OpenAI: one role:"tool" message per ToolResponse, each with its own tool_call_id.
+            for (var resp : trm.getResponses()) {
+                ObjectNode n = messages.addObject();
+                n.put("role", "tool");
+                n.put("tool_call_id", resp.id());
+                n.put("content", resp.responseData() == null ? "" : resp.responseData());
+            }
+        } else {
+            throw new IllegalArgumentException("Unsupported message type for OpenAI wrapper: "
+                    + m.getClass().getName());
+        }
     }
 
     private ChatResponse parseResponse(JsonNode response, String requestedModel) {
@@ -210,6 +278,7 @@ public class OpenAiNativeToolClient {
             String model,
             String userPrompt,
             String systemPrompt,
+            List<Message> messages,
             List<ToolCallback> tools,
             String toolChoice,
             Double temperature,
