@@ -39,7 +39,7 @@ import java.nio.charset.StandardCharsets;
  * rather than reinventing it. This gives reviewer the same native tool calling, context
  * handling, and completeTask signaling for free.
  */
-@Service
+@Service("v2ReviewerAgent")   // explicit name — V1 already has a reviewer class named ReviewerAgentV2
 @Slf4j
 @RequiredArgsConstructor
 public class ReviewerAgentV2 {
