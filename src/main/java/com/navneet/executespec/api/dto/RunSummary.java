@@ -42,5 +42,7 @@ public record RunSummary(
     /** True if this run is a retry of a previous run. */
     Boolean isRetry,
     /** RunId of the original run this was retried from. Null for original runs. */
-    String sourceRunId
+    String sourceRunId,
+    /** Which harness produced this run: "v1" (default) or "v2". */
+    String harnessVersion
 ) {}
