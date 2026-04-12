@@ -106,8 +106,9 @@ public class DockerfileGenerator {
         try {
             JsonNode node = MAPPER.readTree(projectJson.toFile());
             String declared = node.path("project_type").asText(null);
-            if (declared == null || declared.isBlank() || "UNKNOWN".equals(declared)) return null;
-            Deployment.DeployStrategy target = PROJECT_TYPE_TO_DEPLOY.get(declared);
+            if (declared == null || declared.isBlank() || "UNKNOWN".equalsIgnoreCase(declared)) return null;
+            String normalized = declared.trim().toUpperCase().replace('-', '_');
+            Deployment.DeployStrategy target = PROJECT_TYPE_TO_DEPLOY.get(normalized);
             if (target == null) {
                 log.warn("[Deploy] Unknown planner-declared project type '{}' — falling back", declared);
                 return null;

@@ -1,0 +1,21 @@
+{
+  "provider": "openai",
+  "band": "medium",
+  "run_id": "ff00a6fc-a0a6-490f-ba79-007dd422c88d",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T16:26:45.747151Z",
+  "completedAt": "2026-04-12T16:28:58.498307Z",
+  "tasks_total": 3,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"generalPassSummary\":\"Found 1 issue, fixed 1. Issue: POST todo validation incorrectly allowed non-boolean completed values when the field was omitted from destructuring defaults.\",\"wiringPassSummary\":\"no wiring issues found\",\"totalLatencyMs\":13382,\"finalBuildPassed\":true,\"finalBuildExitCode\":0,\"overall\":\"FIXED_ISSUES\"}",
+  "actual_cost": 0.253965,
+  "est_low": 0.643,
+  "est_high": 1.12525,
+  "credits": 1,
+  "total_input": 111783,
+  "total_output": 4780,
+  "accuracy": 100,
+  "report_ok": true
+}

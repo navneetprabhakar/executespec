@@ -54,6 +54,8 @@ import java.util.stream.Collectors;
 public class RunController {
 
     private final PipelineHarness harness;
+    private final com.navneet.executespec.v2.rollout.HarnessVersionResolver harnessVersionResolver;
+    private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
     private final StateStore stateStore;
     private final BackgroundValidationService backgroundValidationService;
     private final RunMapper mapper;
@@ -72,6 +74,9 @@ public class RunController {
     private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
     private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
     private final com.navneet.executespec.agent.CostEstimator costEstimator;
+    private final com.navneet.executespec.v2.cost.V2RunCostTracker v2CostTracker;
+    private final com.navneet.executespec.v2.integration.V2DeferredActionGuard v2Guard;
+    private final com.navneet.executespec.harness.GateStore gateStore;
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
     private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
 
@@ -109,22 +114,42 @@ public class RunController {
         // pipeline thread re-loads and re-saves the run without ownership fields).
         String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
 
-        PipelineRun run = harness.submitRun(
-            req.userRequest(),
-            req.source() != null ? req.source() : "REST",
-            req.repoUrl(),
-            req.repoMode(),
-            githubPat,
-            githubOwner,
-            Boolean.TRUE.equals(req.skipApproval()),
-            Boolean.TRUE.equals(req.autoMerge()),
-            req.modelName(),
-            req.aiProvider(),
-            userDetails.getUser().getId(),
-            userDetails.getUser().getOrgId(),
-            req.projectId(),
-            executionMode
-        );
+        // Phase 11.A: consult HarnessVersionResolver and route V1 vs V2 pipeline.
+        // Both paths have identical submitRun signatures and return a populated
+        // PipelineRun synchronously — the frontend sees no difference in API behavior.
+        com.navneet.executespec.v2.rollout.HarnessVersion chosen = harnessVersionResolver.resolve();
+        log.info("POST /api/runs dispatch → harness={}", chosen);
+        PipelineRun run = (chosen == com.navneet.executespec.v2.rollout.HarnessVersion.V2)
+                ? v2Orchestrator.submitRun(
+                        req.userRequest(),
+                        req.source() != null ? req.source() : "REST",
+                        req.repoUrl(),
+                        req.repoMode(),
+                        githubPat,
+                        githubOwner,
+                        Boolean.TRUE.equals(req.skipApproval()),
+                        Boolean.TRUE.equals(req.autoMerge()),
+                        req.modelName(),
+                        req.aiProvider(),
+                        userDetails.getUser().getId(),
+                        userDetails.getUser().getOrgId(),
+                        req.projectId(),
+                        executionMode)
+                : harness.submitRun(
+                        req.userRequest(),
+                        req.source() != null ? req.source() : "REST",
+                        req.repoUrl(),
+                        req.repoMode(),
+                        githubPat,
+                        githubOwner,
+                        Boolean.TRUE.equals(req.skipApproval()),
+                        Boolean.TRUE.equals(req.autoMerge()),
+                        req.modelName(),
+                        req.aiProvider(),
+                        userDetails.getUser().getId(),
+                        userDetails.getUser().getOrgId(),
+                        req.projectId(),
+                        executionMode);
 
         // Run count already incremented atomically in assertAndIncrementRunCount above
         usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
@@ -203,6 +228,13 @@ public class RunController {
             return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", run.getActualCostUsd()));
         }
 
+        // V2 in-progress: live cost comes from V2RunCostTracker (V1's computeCostForRun
+        // reads agent_task token columns which V2 doesn't populate mid-run).
+        if ("v2".equals(run.getHarnessVersion())) {
+            double liveUsd = v2CostTracker.snapshot(runId).costUsd();
+            return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", liveUsd));
+        }
+
         double[] cached = costCache.compute(runId, (k, existing) -> {
             if (existing != null) {
                 boolean isTerminal = TERMINAL_STATUSES.contains(run.getStatus());
@@ -222,9 +254,10 @@ public class RunController {
             @PathVariable String runId,
             @RequestBody ApprovalRequest req,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
-        log.info("POST /api/runs/{}/approve — approved={}, creditsConfirmed={}, executionMode={}",
-                runId, req.approved(), req.creditsConfirmed(), req.executionMode());
+        PipelineRun approveRun = guard.requireRunAccess(runId, userDetails);
+        log.info("POST /api/runs/{}/approve — approved={}, creditsConfirmed={}, executionMode={}, harness={}",
+                runId, req.approved(), req.creditsConfirmed(), req.executionMode(),
+                approveRun.getHarnessVersion());
 
         // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
         if (req.approved() && req.creditsConfirmed() != null) {
@@ -254,6 +287,13 @@ public class RunController {
             stateStore.setApprovedExecutionMode(runId, "BATCH");
         }
 
+        // V2 runs: signal the GateStore directly — V2's orchestrator blocks in
+        // GateStore.awaitPlanGate() which completes instantly on the in-memory future.
+        if ("v2".equals(approveRun.getHarnessVersion())) {
+            gateStore.setPlanGate(runId, req.approved());
+            return ResponseEntity.ok().build();
+        }
+
         boolean resolved = harness.resolvePlanGate(runId, req.approved(),
             req.comment() != null ? req.comment() : "");
         if (resolved) return ResponseEntity.ok().build();
@@ -272,7 +312,7 @@ public class RunController {
             @PathVariable String runId,
             @RequestBody ClarificationRequest req,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "clarification-gate");
         log.info("POST /api/runs/{}/clarify — response length: {}", runId,
                 req.response() != null ? req.response().length() : 0);
         boolean resolved = harness.resolveClarificationGate(runId, req.response());
@@ -288,7 +328,7 @@ public class RunController {
             @PathVariable String runId,
             @RequestBody ApprovalRequest req,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "merge-gate");
         log.info("POST /api/runs/{}/merge — approved={}", runId, req.approved());
         boolean resolved = harness.resolveMergeGate(runId, req.approved(),
             req.comment() != null ? req.comment() : "");
@@ -309,6 +349,7 @@ public class RunController {
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         PipelineRun original = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(original, "retry-run");
         log.info("POST /api/runs/{}/retry", runId);
         if (!List.of("FAILED", "CANCELLED", "REJECTED", "PAUSED").contains(original.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -328,6 +369,7 @@ public class RunController {
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(run, "pause");
         log.info("POST /api/runs/{}/pause", runId);
         if (List.of("COMPLETE", "FAILED", "CANCELLED", "PAUSED").contains(run.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -348,6 +390,7 @@ public class RunController {
             @RequestBody EditAndRestartRequest body,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         PipelineRun paused = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(paused, "edit-and-restart");
         log.info("POST /api/runs/{}/edit-and-restart — newGoal: {}", runId, body.userRequest());
         if (!"PAUSED".equals(paused.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -369,6 +412,7 @@ public class RunController {
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(run, "resume");
         log.info("POST /api/runs/{}/resume", runId);
         if (!"PAUSED".equals(run.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -532,7 +576,7 @@ public class RunController {
             @PathVariable String runId,
             @PathVariable String taskId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "retry-task");
         log.info("POST /api/runs/{}/tasks/{}/retry", runId, taskId);
         try {
             harness.retryPartialTask(runId, taskId);
@@ -551,7 +595,7 @@ public class RunController {
     public ResponseEntity<Void> implementSuggestions(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "implement-suggestions");
         log.info("POST /api/runs/{}/implement-suggestions", runId);
         try {
             harness.implementSuggestions(runId);
@@ -571,7 +615,7 @@ public class RunController {
     public ResponseEntity<Void> reworkRun(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "rework");
         log.info("POST /api/runs/{}/rework", runId);
         try {
             harness.reworkRun(runId);
@@ -592,7 +636,7 @@ public class RunController {
     public ResponseEntity<Void> reopenMerge(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "reopen-merge");
         log.info("POST /api/runs/{}/reopen-merge", runId);
         try {
             harness.reopenMergeGate(runId);
@@ -613,7 +657,7 @@ public class RunController {
     public ResponseEntity<Void> retryValidation(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "retry-validation");
         log.info("POST /api/runs/{}/retry-validation", runId);
         boolean prepared = backgroundValidationService.prepareRetry(runId);
         if (!prepared) {
@@ -753,13 +797,23 @@ public class RunController {
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(runId, userDetails);
+        // V2 planner mandate (runtimeSurface=HTTP) writes openapi.yaml at the repo root;
+        // V1 ApiTestSuiteAgent writes api-docs/openapi.yaml. Try root first, fall back.
+        String[] candidates = { "openapi.yaml", "openapi.yml", "api-docs/openapi.yaml" };
         try {
-            String yaml = workspaceFileService.readFile(runId, "api-docs/openapi.yaml");
+            String yaml = null;
+            for (String path : candidates) {
+                try {
+                    yaml = workspaceFileService.readFile(runId, path);
+                    break;
+                } catch (java.nio.file.NoSuchFileException ignored) {
+                    // try next
+                }
+            }
+            if (yaml == null) return ResponseEntity.notFound().build();
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_TYPE, "application/yaml")
                 .body(yaml);
-        } catch (java.nio.file.NoSuchFileException e) {
-            return ResponseEntity.notFound().build();
         } catch (SecurityException e) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
         } catch (IOException e) {
@@ -804,6 +858,7 @@ public class RunController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
         PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        v2Guard.ensureNotV2(run, "edit-plan");
         if (!"AWAITING_APPROVAL".equals(run.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Plan can only be edited during the approval phase");

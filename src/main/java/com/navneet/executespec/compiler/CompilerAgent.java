@@ -54,6 +54,7 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Deprecated(since = "v2")
 public class CompilerAgent {
 
     private final ShellTool shellTool;
@@ -79,6 +80,7 @@ public class CompilerAgent {
      * after all workers finish.
      * Non-fatal: catches all exceptions and always returns a {@link CompileResult}.
      */
+    @Deprecated(since = "v2")
     public CompileResult runCompileAndFix(String runId) {
         Observation obs = Observation.createNotStarted("executespec.run.phase.compile", observationRegistry)
             .lowCardinalityKeyValue("run.id", runId != null ? runId : "unknown")
@@ -102,6 +104,7 @@ public class CompilerAgent {
 
     // ── Implementation ────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private CompileResult doCompileAndFix(String runId) throws IOException {
         if (!compilerProps.isEnabled())
             return CompileResult.skip();
@@ -160,6 +163,7 @@ public class CompilerAgent {
     /** Max files to include in a single compiler LLM pass. Remaining files fixed in subsequent retry passes. */
     private static final int MAX_COMPILER_FILES = 10;
 
+    @Deprecated(since = "v2")
     private void applyLlmFixes(String runId, String errors, String buildTool) throws IOException {
         String system = compilerPrompt.getContentAsString(StandardCharsets.UTF_8);
         // Scope enforcement: if many files have errors, prioritize foundational files
@@ -203,6 +207,7 @@ public class CompilerAgent {
         applyJsonFixes(runId, resp);
     }
 
+    @Deprecated(since = "v2")
     private void applyJsonFixes(String runId, String llmResponse) {
         try {
             String jsonArray = LlmResponseCleaner.extractJsonArray(llmResponse);
@@ -239,6 +244,7 @@ public class CompilerAgent {
      * Remaining files are fixed in subsequent retry passes once foundational fixes resolve
      * cascading errors.
      */
+    @Deprecated(since = "v2")
     private String scopeErrors(String errors, int maxFiles) {
         Pattern filePattern = Pattern.compile("([\\w/.-]+\\.(?:java|ts|js|tsx|jsx|py|go|rs))");
         Matcher m = filePattern.matcher(errors);
@@ -281,6 +287,7 @@ public class CompilerAgent {
      * 5 = test (test files)
      * 6 = other (everything else)
      */
+    @Deprecated(since = "v2")
     private static int filePriority(String path) {
         String lower = path.toLowerCase();
         if (lower.contains("/model/") || lower.contains("/entity/") || lower.contains("/dto/")) return 0;
@@ -292,6 +299,7 @@ public class CompilerAgent {
         return 6;
     }
 
+    @Deprecated(since = "v2")
     private String extractRelevantFiles(String runId, String errors) {
         Pattern p = Pattern.compile("([\\w/]+\\.(?:java|ts|js|py))");
         Matcher m = p.matcher(errors);
@@ -312,6 +320,7 @@ public class CompilerAgent {
      * Dynamic SSE error truncation limit based on how many files have errors.
      * Few files → show more context per file. Many files → keep it brief.
      */
+    @Deprecated(since = "v2")
     private int maxErrorCharsForSse(String errors) {
         int fileCount = countErrorFiles(errors);
         if (fileCount <= 3) return 2000;
@@ -320,6 +329,7 @@ public class CompilerAgent {
     }
 
     /** Counts unique source file paths mentioned in compile error output. */
+    @Deprecated(since = "v2")
     private int countErrorFiles(String errors) {
         Pattern filePattern = Pattern.compile("([\\w/.-]+\\.(?:java|ts|js|tsx|jsx|py|go|rs))");
         Matcher m = filePattern.matcher(errors);
@@ -337,6 +347,7 @@ public class CompilerAgent {
      *
      * @return null if check passed or was skipped; error summary string if still failing after 2 attempts
      */
+    @Deprecated(since = "v2")
     public String quickCompileAndFix(String runId) {
         if (!compilerProps.isEnabled()) return null;
 
@@ -396,6 +407,7 @@ public class CompilerAgent {
      * @param buildTool    e.g. "mvn", "npm", "python"
      * @return true if the LLM produced and applied a valid fix; false on LLM or parse failure
      */
+    @Deprecated(since = "v2")
     public boolean applyTargetedFix(String runId, List<String> ownedFiles,
                                      String instructions, String buildTool) {
         if (ownedFiles == null || ownedFiles.isEmpty() || instructions == null) return false;
@@ -457,6 +469,7 @@ public class CompilerAgent {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     public String detectBuildTool(String runId) {
         Path ws = Path.of(workspaceRoot, runId);
         if (Files.exists(ws.resolve("pom.xml")))
@@ -470,6 +483,7 @@ public class CompilerAgent {
         return null;
     }
 
+    @Deprecated(since = "v2")
     private String buildCommand(String tool) {
         return switch (tool) {
             case "mvn" -> "mvn compile -q -T 1C 2>&1";
@@ -485,6 +499,7 @@ public class CompilerAgent {
         };
     }
 
+    @Deprecated(since = "v2")
     private String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max) + "...[truncated]";
     }

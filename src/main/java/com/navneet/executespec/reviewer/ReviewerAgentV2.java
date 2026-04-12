@@ -72,6 +72,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class ReviewerAgentV2 {
 
     private final LlmRouter llmRouter;
@@ -104,6 +105,7 @@ public class ReviewerAgentV2 {
      * @param availableProviders providers the org has keys for
      * @return the final review report
      */
+    @Deprecated(since = "v2")
     public ReviewReportV2 review(PipelineRun run, List<AgentTask> tasks,
                                   String originalGoal, CompileResult compileResult,
                                   Set<LlmProvider> availableProviders) {
@@ -139,6 +141,7 @@ public class ReviewerAgentV2 {
         }
     }
 
+    @Deprecated(since = "v2")
     private ReviewReportV2 doReview(PipelineRun run, List<AgentTask> tasks,
                                      String originalGoal, CompileResult compileResult,
                                      Set<LlmProvider> availableProviders,
@@ -334,6 +337,7 @@ public class ReviewerAgentV2 {
      * Similar to WorkerAgent's loop but restricted to read-only tools (read_file, list_files)
      * with max 10 tool calls. Expects JSON array output matching ReviewIssue structure.
      */
+    @Deprecated(since = "v2")
     private List<ReviewIssue> executeInspection(PipelineRun run, Path workspacePath,
                                                   String reviewPrompt, ResolvedModel model) {
         String runId = run.getRunId();
@@ -410,6 +414,7 @@ public class ReviewerAgentV2 {
      *
      * @return the updated tool call count
      */
+    @Deprecated(since = "v2")
     private int processToolCalls(List<ToolCallRequest> toolCalls, int toolCallCount,
                                   String runId, List<Message> messages) {
         StringBuilder results = new StringBuilder();
@@ -443,6 +448,7 @@ public class ReviewerAgentV2 {
      *
      * @return the parsed list of issues, or null if the response was not valid JSON
      */
+    @Deprecated(since = "v2")
     private List<ReviewIssue> parseReviewResponse(String assistantText, int iteration,
                                                     List<Message> messages) {
         String trimmed = LlmResponseCleaner.stripMarkdownFences(assistantText);
@@ -491,6 +497,7 @@ public class ReviewerAgentV2 {
     /** Result of an auto-fix attempt, tracking both success and iterations consumed. */
     private record FixResult(boolean succeeded, int iterationsUsed) {}
 
+    @Deprecated(since = "v2")
     private FixResult attemptAutoFix(PipelineRun run, Path workspacePath,
                                       ReviewIssue issue, Set<LlmProvider> availableProviders) {
         String runId = run.getRunId();
@@ -562,6 +569,7 @@ public class ReviewerAgentV2 {
      * Create a transient AgentTask for the fix worker.
      * Sets up proper TaskDefinition JSON so WorkerAgent.execute() can process it.
      */
+    @Deprecated(since = "v2")
     private AgentTask createFixTask(PipelineRun run, ReviewIssue issue, ResolvedModel fixModel) {
         String fixPrompt = buildFixPrompt(issue);
 
@@ -599,6 +607,7 @@ public class ReviewerAgentV2 {
      * Parse XML tool calls from assistant text.
      * Pattern: {@code <tool_call>{"name":"...","args":{...}}</tool_call>}
      */
+    @Deprecated(since = "v2")
     private List<ToolCallRequest> parseToolCalls(String text) {
         if (text == null || text.isBlank()) return List.of();
         List<ToolCallRequest> calls = new ArrayList<>();
@@ -622,6 +631,7 @@ public class ReviewerAgentV2 {
     /**
      * Dispatch read-only tool calls. Only read_file and list_files are allowed.
      */
+    @Deprecated(since = "v2")
     private String dispatchReadOnlyTool(ToolCallRequest tc, String runId) {
         try {
             var args = mapper.readTree(tc.argsJson);
@@ -645,6 +655,7 @@ public class ReviewerAgentV2 {
     // PROMPT BUILDERS
     // ============================
 
+    @Deprecated(since = "v2")
     private String buildReviewPrompt(String originalGoal, String taskSummary, String fileTree,
                                       CompileResult compileResult) {
         String compileStatus;
@@ -693,6 +704,7 @@ public class ReviewerAgentV2 {
             """, originalGoal, taskSummary, compileStatus, fileTree);
     }
 
+    @Deprecated(since = "v2")
     private String buildFixPrompt(ReviewIssue issue) {
         return String.format("""
             === REVIEW FIX REQUEST ===
@@ -721,6 +733,7 @@ public class ReviewerAgentV2 {
     // HELPERS
     // ============================
 
+    @Deprecated(since = "v2")
     private String getFileTree(String runId) {
         try {
             return fileSystemTool.listFiles(runId, ".");
@@ -730,6 +743,7 @@ public class ReviewerAgentV2 {
         }
     }
 
+    @Deprecated(since = "v2")
     private String buildTaskSummary(List<AgentTask> tasks) {
         return tasks.stream()
                 .map(t -> String.format("- [%s] %s (complexity: %s, status: %s)",
@@ -740,6 +754,7 @@ public class ReviewerAgentV2 {
                 .collect(Collectors.joining("\n"));
     }
 
+    @Deprecated(since = "v2")
     private boolean checkReadmeUpdated(Path workspacePath) {
         try {
             Path readme = workspacePath.resolve("README.md");
@@ -749,11 +764,13 @@ public class ReviewerAgentV2 {
         }
     }
 
+    @Deprecated(since = "v2")
     private Language detectLanguageForFile(String filePath) {
         if (filePath == null) return null;
         return Language.fromPath(Path.of(filePath));
     }
 
+    @Deprecated(since = "v2")
     private String loadPrompt() {
         return promptAssembler.assemble("reviewer-v2.txt");
     }
@@ -762,6 +779,7 @@ public class ReviewerAgentV2 {
     // VERDICT LOGIC
     // ============================
 
+    @Deprecated(since = "v2")
     private ReviewVerdict determineVerdict(List<ReviewIssue> issues, boolean readmeUpdated,
                                             int criticalCount, int autoFixSucceeded) {
         // README missing is tracked as a CRITICAL issue (REV-README) and goes through
@@ -788,6 +806,7 @@ public class ReviewerAgentV2 {
         return ReviewVerdict.APPROVED;
     }
 
+    @Deprecated(since = "v2")
     private String buildSummary(ReviewVerdict verdict, int critical, int minor, int autoFixed) {
         return switch (verdict) {
             case APPROVED -> "Code review passed. No issues found.";

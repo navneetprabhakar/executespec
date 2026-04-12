@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "high",
+  "run_id": "5aedcea0-91c4-416c-b1e2-6b60bc5151aa",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T14:54:04.453440Z",
+  "completedAt": "2026-04-12T15:01:10.086010Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"overall\":\"FIXED_ISSUES\",\"generalPassSummary\":\"\",\"wiringPassSummary\":\"Created missing LibraryApplication.java with @SpringBootApplication. Verified all controllers, services, and repositories are in scannable packages and no @Autowired field injections were found. Project built successfully.\",\"totalLatencyMs\":30743,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.214267,
+  "est_low": 0.11015,
+  "est_high": 0.1927625,
+  "credits": 1,
+  "total_input": 569314,
+  "total_output": 17388,
+  "accuracy": 2,
+  "report_ok": true
+}

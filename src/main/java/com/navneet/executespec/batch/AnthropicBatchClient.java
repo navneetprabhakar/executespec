@@ -27,6 +27,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@Deprecated(since = "v2")
 public class AnthropicBatchClient implements LlmBatchClient {
 
     private static final String BASE_URL = "https://api.anthropic.com";
@@ -48,6 +49,7 @@ public class AnthropicBatchClient implements LlmBatchClient {
     private static final long[] SUBMIT_BACKOFF_MS = {1_000L, 4_000L, 16_000L};
 
     @Override
+    @Deprecated(since = "v2")
     public String submitBatch(String runId, List<BatchRequest> requests, String apiKey) {
         // Build the request body once — reused across retry attempts
         final String bodyJson;
@@ -151,6 +153,7 @@ public class AnthropicBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public BatchStatus checkStatus(String batchId, String apiKey) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -189,6 +192,7 @@ public class AnthropicBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public BatchResults getResults(String batchId, String apiKey) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -244,6 +248,7 @@ public class AnthropicBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public void cancelBatch(String batchId, String apiKey) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -261,6 +266,7 @@ public class AnthropicBatchClient implements LlmBatchClient {
         }
     }
 
+    @Deprecated(since = "v2")
     private static BatchStatus.State mapAnthropicState(String status) {
         return switch (status) {
             case "in_progress" -> BatchStatus.State.IN_PROGRESS;

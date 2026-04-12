@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "medium",
+  "run_id": "87bb9ece-c35b-4034-8b1f-d11784570924",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T14:53:54.486221Z",
+  "completedAt": "2026-04-12T14:56:43.690887Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"overall\":\"FIXED_ISSUES\",\"generalPassSummary\":\"Found 1 issue, fixed 1. Issues: PATCH /todos/:id did not validate for empty title strings, inconsistent with POST /todos.\",\"wiringPassSummary\":\"No wiring issues found in the Node.js project. All routes are defined and registered within index.js.\",\"totalLatencyMs\":16675,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.036551,
+  "est_low": 0.051699999999999996,
+  "est_high": 0.090475,
+  "credits": 1,
+  "total_input": 103026,
+  "total_output": 2257,
+  "accuracy": 100,
+  "report_ok": true
+}

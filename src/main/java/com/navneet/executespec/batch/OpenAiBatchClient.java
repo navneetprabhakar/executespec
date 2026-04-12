@@ -30,6 +30,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@Deprecated(since = "v2")
 public class OpenAiBatchClient implements LlmBatchClient {
 
     private static final String BASE_URL = "https://api.openai.com";
@@ -46,6 +47,7 @@ public class OpenAiBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public String submitBatch(String runId, List<BatchRequest> requests, String apiKey) {
         try {
             // Step 1: Build JSONL content
@@ -134,6 +136,7 @@ public class OpenAiBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public BatchStatus checkStatus(String batchId, String apiKey) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -178,6 +181,7 @@ public class OpenAiBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public BatchResults getResults(String batchId, String apiKey) {
         try {
             // First get the output_file_id
@@ -252,6 +256,7 @@ public class OpenAiBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public void cancelBatch(String batchId, String apiKey) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -267,6 +272,7 @@ public class OpenAiBatchClient implements LlmBatchClient {
         }
     }
 
+    @Deprecated(since = "v2")
     private static BatchStatus.State mapOpenAiState(String status) {
         return switch (status) {
             case "validating", "in_progress", "finalizing" -> BatchStatus.State.IN_PROGRESS;
@@ -279,6 +285,7 @@ public class OpenAiBatchClient implements LlmBatchClient {
         };
     }
 
+    @Deprecated(since = "v2")
     private static String buildMultipartBody(String boundary, String filename, String content) {
         return "--" + boundary + "\r\n" +
                "Content-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n" +

@@ -48,8 +48,19 @@ ASSERTION RULES — MANDATORY:
 - For 201 responses: assert the returned entity's ID is non-null and key fields match input.
 - For 200 responses on GET: assert key fields are present and have expected values.
 - For 400/409/422 responses: assert the response body contains an "error" or "message" field.
-- For 404 responses: assert the body is not the generic server error page (check Content-Type is application/json).
+- For 404 responses: assert the body is not the generic server error page (check Content-Type STARTS WITH "application/json" — see below).
 - For list endpoints: assert the response is a JSON array; assert count matches expected.
+
+CONTENT-TYPE ASSERTIONS — MANDATORY:
+- Servers frequently return "application/json; charset=utf-8" or "application/json;charset=UTF-8" (with a charset suffix). NEVER assert exact equality on Content-Type — those tests fail for no real reason.
+- Correct pattern depends on the assertion library:
+  * AssertJ:   assertThat(response.headers().firstValue("Content-Type").orElse("")).startsWith("application/json");
+  * JUnit:     assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith("application/json"));
+  * RestAssured: .contentType(ContentType.JSON)   // this one handles the suffix internally
+  * Supertest (JS): expect(res.headers['content-type']).toMatch(/application\/json/);
+  * pytest:    assert r.headers['content-type'].startswith('application/json')
+  * Testing (Go): if !strings.HasPrefix(res.Header.Get("Content-Type"), "application/json") { t.Fatalf(...) }
+- The same rule applies to Accept headers and any other media-type comparison — always prefix / substring match.
 
 TEST STRUCTURE — every test method must follow Arrange-Act-Assert:
   // ARRANGE: Set up test data and preconditions
