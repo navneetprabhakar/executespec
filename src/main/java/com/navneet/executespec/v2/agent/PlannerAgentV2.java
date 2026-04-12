@@ -121,7 +121,41 @@ public class PlannerAgentV2 {
                             + resp.getResult().getMetadata().getFinishReason()
                             + "; text preview: " + (textPreview == null ? "" : truncate(textPreview, 200)));
         }
-        return parsePlanFromArgs(planCall.arguments(), req.classification());
+        PlanV2 plan = parsePlanFromArgs(planCall.arguments(), req.classification());
+        warnIfConstraintsUnderpropagated(plan, req.spec());
+        return plan;
+    }
+
+    /**
+     * Observability check for Phase 4 constraint-propagation quality. Looks for obvious
+     * constraint signals in the spec (do NOT / use X / throughout / etc.). If the spec has
+     * such signals but a majority of tasks have empty hardConstraints, logs a WARN so we
+     * can catch regressions in planner prompt adherence without failing the run.
+     *
+     * <p>Not a hard validation — weaker models (Gemini 2.5-flash observed) underpropagate
+     * intermittently. Auto-backfill is a candidate for Phase 4.x if this warning fires often.
+     */
+    private void warnIfConstraintsUnderpropagated(PlanV2 plan, String spec) {
+        if (plan.tasks().isEmpty()) return;
+        String specLower = spec.toLowerCase();
+        boolean specHasSignals =
+                specLower.contains("do not") || specLower.contains("don't")
+                        || specLower.contains(" not ") || specLower.contains("only ")
+                        || specLower.contains(" throughout")
+                        || specLower.contains("must use") || specLower.contains("avoid ");
+        if (!specHasSignals) return;
+        long emptyCount = plan.tasks().stream()
+                .filter(t -> t.hardConstraints() == null || t.hardConstraints().isEmpty())
+                .count();
+        double emptyRatio = (double) emptyCount / plan.tasks().size();
+        if (emptyRatio >= 0.6) {
+            log.warn("PlannerAgentV2 constraint-propagation QUALITY WARNING: spec contains "
+                    + "constraint signals but {}/{} tasks ({}%) have empty hardConstraints. "
+                    + "Prompt-adherence may have degraded. Consider prompt strengthening or "
+                    + "auto-backfill. planTitle='{}'",
+                    emptyCount, plan.tasks().size(),
+                    Math.round(emptyRatio * 100), plan.planTitle());
+        }
     }
 
     private PlanV2 parsePlanFromArgs(String argsJson, Classification classification) {
