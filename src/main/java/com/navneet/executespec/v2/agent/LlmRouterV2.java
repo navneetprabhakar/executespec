@@ -74,8 +74,22 @@ public class LlmRouterV2 {
      */
     public ChatResponse call(LlmRequestV2 request) {
         List<ToolCallback> tools = toolRegistry.bind(request.context());
-        log.debug("LlmRouterV2 dispatching: provider={} model={} tools={} messages={}",
+        long start = System.currentTimeMillis();
+        log.info("LlmRouterV2 -> {} {} (tools={}, messages={})",
                 request.provider(), request.model(), tools.size(), request.messages().size());
+        try {
+            ChatResponse resp = dispatch(request, tools);
+            log.info("LlmRouterV2 <- {} {} ok in {}ms",
+                    request.provider(), request.model(), System.currentTimeMillis() - start);
+            return resp;
+        } catch (RuntimeException e) {
+            log.warn("LlmRouterV2 <- {} {} FAILED in {}ms: {}",
+                    request.provider(), request.model(), System.currentTimeMillis() - start, e.getMessage());
+            throw e;
+        }
+    }
+
+    private ChatResponse dispatch(LlmRequestV2 request, List<ToolCallback> tools) {
         return switch (request.provider().toLowerCase(Locale.ROOT)) {
             case "anthropic" -> callAnthropic(request, tools);
             case "openai" -> callOpenAi(request, tools);
