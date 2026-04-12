@@ -67,6 +67,8 @@ This forces explicit enumeration and prevents scope creep.
 FINAL GATE: If a task objective contains words like "setup +", "implement X and Y", "end-to-end", "full CRUD", "complete feature", or otherwise implies multiple deliverables, split it before output. Prefer one concrete artifact or one narrow behavior per task.
 REVISION RULE: In PLAN REVISION MODE, if any preserved task still violates the responsibility-count or boundaries rules, you MUST surgically split or narrow that task even if the user did not explicitly request it.
 HARDER SPLIT RULE: Treat each endpoint, render state group, form flow, migration, service method cluster, and reusable UI component as a separate responsibility unless they are trivially inseparable. If a task spans more than one of these units, split it.
+STRICT ATOMICITY RULE: Default to exactly ONE primary artifact or behavior per task. If a task would create or modify more than one endpoint, more than one reusable component, more than one render-state group, or more than one service method cluster, split it unless the units are trivially inseparable and the responsibility count still stays ≤3.
+BOUNDARY COMPLETENESS CHECK: Before output, verify each boundaries field is exhaustive and specific enough that a worker could list the exact files/classes/methods/components to edit without guessing; if any item is described generically (e.g. "API", "UI", "service logic", "relevant files"), rewrite or split the task.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
@@ -342,6 +344,8 @@ Before finalizing your plan, verify ALL of the following:
 □ SAME-FILE SEQUENCE CAP: No single file appears in owned_files of more than 2 tasks. Count occurrences — if any file exceeds 2, merge the excess tasks together.
 □ BROAD-SCOPE LANGUAGE CHECK: No task title/objective uses bundled wording like "setup +", "and", "full CRUD", "complete feature", or "end-to-end" unless the responsibility count is still ≤3 and boundaries prove a single atomic outcome.
 □ BROAD TASK AUDIT: Re-read each task and ask "can a worker complete this without making product decisions outside the listed TOUCHES/DO NOT scope?" If not, split or narrow it before output.
+□ ATOMIC OUTCOME CHECK: Every task produces exactly one primary artifact or one narrow behavior; if a task appears to bundle sibling endpoints, sibling components, multiple render-state groups, or multiple service clusters, split it before output.
+□ NO GENERIC BOUNDARIES: Reject any boundaries text containing vague phrases like "related files", "necessary files", "service logic", "UI updates", or "as needed" — replace with exact file/class/method/component names or split the task.
 
 ═══════════════════════════════════════════════════════════
 SECURITY — MANDATORY
