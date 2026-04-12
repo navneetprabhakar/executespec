@@ -60,6 +60,10 @@ reject the task design and split it. Document the count in the task's objective 
 ENFORCEMENT: Every task objective MUST include a responsibility count in parentheses at the end:
 "(Responsibility count: 1 file + 1 class = 2 total)" or "(Responsibility count: 2 files + 3 methods = 5 total — SPLIT REQUIRED)".
 If any task's count exceeds 3, the plan is invalid and must be redesigned before output.
+ADDITIONAL ENFORCEMENT: When writing boundaries, use this format:
+  "TOUCHES: [list every file, class, method, component]
+   DO NOT: [explicit negations — files not modified, classes not created, methods not implemented, components not rendered]"
+This forces explicit enumeration and prevents scope creep.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
@@ -269,7 +273,7 @@ markdown fences. Every task requires ALL fields listed below.
       "task_layer": "BACKEND",
       "title": "One line, imperative: Create X / Add Y / Implement Z",
       "objective": "Precise description with exact file paths, class names, method signatures. (Responsibility count: X files + Y classes + Z components = TOTAL)",
-      "boundaries": "Explicit list of what NOT to touch. Include: files not modified, classes not created, methods not implemented, components not rendered.",
+      "boundaries": "TOUCHES: [list every file, class, method, component touched]. DO NOT: [explicit negations — files not modified, classes not created, methods not implemented, components not rendered].",
       "output_format": "Exact description of completed files.",
       "acceptance_criteria": "Verifiable by file existence and content — no build commands.",
       "depends_on": [],
@@ -289,8 +293,7 @@ GOOD vs BAD — objective:
 
 GOOD vs BAD — boundaries:
   BAD:  "Do not modify other files"
-  GOOD: "Do NOT modify ItemService.java, ItemRepository.java, or any entity classes.
-         Do NOT create ItemDto (will be created in task X). Do NOT add authentication logic."
+  GOOD: "TOUCHES: ItemController.java, ItemService.java (read-only). DO NOT: modify ItemService.java, ItemRepository.java, or any entity classes. Do NOT create ItemDto (will be created in task X). Do NOT add authentication logic."
 
 GOOD vs BAD — acceptance_criteria:
   BAD:  "Code compiles and looks correct" / "mvn compile -q exits 0"
@@ -327,7 +330,7 @@ Before finalizing your plan, verify ALL of the following:
 □ SERVER BINDING: All server tasks instruct binding to 0.0.0.0.
 □ API URLs: All frontend tasks use relative API URLs (baseURL: '/api'), never absolute.
 □ ACCEPTANCE CRITERIA: Every task has concrete, file-verifiable criteria. No compile commands.
-□ BOUNDARIES: Every task has explicit boundaries listing files NOT modified, classes NOT created, methods NOT implemented.
+□ BOUNDARIES: Every task has explicit boundaries with TOUCHES and DO NOT sections listing files NOT modified, classes NOT created, methods NOT implemented.
 □ TASK COUNT: Total tasks ≤25. Merge trivially small tasks if approaching the limit.
 □ ROUTER ISOLATION: No route handler repeats the mount prefix (/api/users not /api/api/users).
 □ RESPONSIBILITY COUNT: Every task objective includes explicit responsibility count. If any task count exceeds 3, reject the design and split before output.
