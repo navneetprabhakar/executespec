@@ -132,6 +132,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Admin endpoints — SUPER_ADMIN only
                         .requestMatchers("/api/admin/**").hasRole("SUPER_ADMIN")
+                        // V2 Phase 0 native-tools test endpoint (no auth — temporary, removed once LlmRouterV2 lands)
+                        .requestMatchers("/api/v2/test/**").permitAll()
                         // All other API endpoints require authentication
                         .requestMatchers("/api/**").authenticated()
                         // Everything else (SPA routes) — permit
