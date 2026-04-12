@@ -1,11 +1,12 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-11
+> Last updated: 2026-04-12
 
 ## Architecture
 
-- **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.0
+- **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.4
+- **Harness V2 (in progress):** Sequential-first redesign on `feature/harness-v2`. New package tree `com.navneet.executespec.v2.*`. Native tool calling for all 3 providers (Anthropic, OpenAI, Gemini). See `docs/harness-v2-execution-plan.md`. **V2 naming convention: provider is `gemini` (V1 used `google`)**.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app

@@ -69,7 +69,9 @@ com.navneet.executespec.v2.smoketest/     — SmokeTestRunner, BuildCommandResol
 - Upgrade from 1.1.0 to the version that supports `GoogleGenAiChatOptions.toolCallbacks()` (target: latest 1.x or 2.x that has Gemini native tool calling)
 - Verify Anthropic and OpenAI tool calling still work on new version
 - Upgrade `AgentModelConfig`, `LlmRouter` (V1 stays working)
-- Test with a standalone API at `/api/v2/test/native-tools?provider={anthropic|openai|google}` that calls each provider with a single tool definition and asserts a structured response
+- Test with a standalone API at `/api/v2/test/native-tools?provider={anthropic|openai|gemini}` that calls each provider with a single tool definition and asserts a structured response
+
+> **Naming convention:** V2 uses `gemini` consistently as the provider name (instead of V1's `google`). The Spring AI library classes are still named `GoogleGenAi*` (we can't rename library code), but every V2-authored identifier — variable, switch case, config key, log tag, metric tag, REST parameter — uses `gemini`.
 
 **P0.2 Redis schema for context persistence**
 - Define key pattern: `v2:agent-ctx:{runId}:{taskId}` → JSON blob
@@ -126,7 +128,7 @@ com.navneet.executespec.v2.smoketest/     — SmokeTestRunner, BuildCommandResol
 - `internalToolExecutionEnabled(false)` — harness keeps loop control (needed for checkpointing and smoke tests)
 
 **P2.2 Failover strategy**
-- Same as V1 (Anthropic→[OpenAI, Google], etc.)
+- Same as V1 (Anthropic→[OpenAI, Gemini], etc.)
 - Stall escalation: WORKHORSE → PLANNING tier on iteration stall
 
 **Deliverable:** LlmRouterV2 with verified native tool calling on all three providers.
@@ -216,7 +218,7 @@ com.navneet.executespec.v2.smoketest/     — SmokeTestRunner, BuildCommandResol
 ### Phase 6 — V2 Batch Execution
 
 **P6.1 BatchClientRouterV2**
-- Same three providers (Anthropic, OpenAI, Google) with native batch APIs
+- Same three providers (Anthropic, OpenAI, Gemini) with native batch APIs
 - Reuses existing `LlmBatchClient` implementations (minor refactor to consume V2 tool schemas)
 
 **P6.2 BatchResumeServiceV2**
