@@ -3,6 +3,7 @@ package com.navneet.executespec.v2.agent;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import lombok.Builder;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.tool.ToolCallback;
 
 import java.util.List;
 
@@ -34,7 +35,8 @@ public record LlmRequestV2(
         List<Message> messages,
         ExecutionContext context,
         Double temperature,
-        Integer maxTokens) {
+        Integer maxTokens,
+        List<ToolCallback> toolsOverride) {
 
     public LlmRequestV2 {
         if (provider == null || provider.isBlank()) throw new IllegalArgumentException("provider required");
