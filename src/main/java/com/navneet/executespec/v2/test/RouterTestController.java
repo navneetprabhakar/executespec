@@ -98,6 +98,7 @@ public class RouterTestController {
 
     private Map<String, Object> probe(String provider, String model,
                                        List<Message> messages, ExecutionContext ctx) {
+        log.info("RouterTest probe START provider={} model={}", provider, model);
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("provider", provider);
         r.put("model", model);

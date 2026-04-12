@@ -16,9 +16,12 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,6 +54,10 @@ public class OpenAiNativeToolClient {
 
     private static final String DEFAULT_BASE_URL = "https://api.openai.com";
     private static final String CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
+    /** Connect timeout for the OpenAI HTTP call. */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    /** Read timeout for the OpenAI HTTP call. Generous because tool-emitting calls can be slow. */
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(120);
 
     private final ObjectMapper objectMapper;
 
@@ -74,10 +81,21 @@ public class OpenAiNativeToolClient {
             throw new IllegalStateException("OpenAI api-key not configured (set OPENAI_API_KEY)");
         }
         ObjectNode body = buildRequestBody(request);
-        log.debug("OpenAI native tool call: model={} tools={}", request.model(),
+        log.info("OpenAI wrapper POST {} model={} tools={}", baseUrl + CHAT_COMPLETIONS_PATH,
+                request.model(),
                 request.tools().stream().map(t -> t.getToolDefinition().name()).toList());
 
-        RestClient client = RestClient.builder().baseUrl(baseUrl).build();
+        // Use Java's HttpClient with explicit connect+read timeouts so a hung TCP
+        // connection or stalled body never blocks the harness loop indefinitely.
+        HttpClient jdkClient = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
+        factory.setReadTimeout(READ_TIMEOUT);
+        RestClient client = RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(factory)
+                .build();
         JsonNode response;
         try {
             response = client.post()
