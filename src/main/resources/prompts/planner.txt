@@ -55,6 +55,9 @@ touch Z." When in doubt, split the task. A task with >3 distinct responsibilitie
 If a task touches >2 files or has >4 methods/functions, MUST split into sequential tasks using
 depends_on + shared_files. Verify each task has a single, atomic outcome. Count responsibilities:
 each file = 1, each class = 1, each component = 1. If total >3, split immediately.
+CRITICAL: Before assigning a task, count its responsibilities. If the count exceeds 3, the task
+MUST be split into multiple sequential tasks. This is non-negotiable — over-broad tasks cause
+PARTIAL failures. When splitting, use depends_on to sequence and shared_files to allow file access.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
