@@ -7,6 +7,7 @@ import com.navneet.executespec.v2.agent.PlannerRequestV2;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
 import com.navneet.executespec.v2.harness.SequentialExecutorV2;
+import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.reviewer.ReviewerAgentV3;
 import com.navneet.executespec.v2.reviewer.ReviewerRequestV2;
 import com.navneet.executespec.v2.reviewer.ReviewerResult;
@@ -44,6 +45,7 @@ public class V2RunService {
     private final PlannerAgentV2 planner;
     private final SequentialExecutorV2 executor;
     private final ReviewerAgentV3 reviewer;
+    private final V2Metrics metrics;
 
     /** Dedicated thread pool for V2 pipeline execution — keeps runs off the request thread. */
     private final ExecutorService pool = Executors.newFixedThreadPool(4, new ThreadFactory() {
@@ -162,6 +164,14 @@ public class V2RunService {
             run.setFailureMessage("unexpected: " + unexpected.getMessage());
             run.transition(V2Run.Status.FAILED, "unexpected exception");
         } finally {
+            // Emit terminal-state metrics exactly once per run. Runs through here
+            // regardless of which transition path hit (success, plan-fail, exec-fail,
+            // review-fail, unexpected). Submission-to-terminal latency is measured
+            // from run.submittedAt() to now.
+            String finalOverall = run.status().name();
+            metrics.recordRunOutcome(finalOverall);
+            metrics.recordRunLatency(finalOverall,
+                    java.time.Duration.between(run.submittedAt(), java.time.Instant.now()));
             // Keep the workspace on disk — the caller (or a test harness) may want to
             // inspect artifacts. A future pass will upload to GCS on completion and
             // clean up. For Phase 9 baseline, we leak small temp dirs; acceptable trade.

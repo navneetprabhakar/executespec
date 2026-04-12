@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.v2.agent.WorkerAgentV2;
 import com.navneet.executespec.v2.agent.WorkerResult;
 import com.navneet.executespec.v2.agent.WorkerTaskRequest;
+import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.tool.BuildProjectTool;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import com.navneet.executespec.v2.tool.ToolResult;
@@ -51,8 +52,15 @@ public class ReviewerAgentV3 {
     private final WorkerAgentV2 worker;
     private final BuildProjectTool buildProjectTool;
     private final ObjectMapper objectMapper;
+    private final V2Metrics metrics;
 
     public ReviewerResult review(ReviewerRequestV2 req) {
+        ReviewerResult result = reviewImpl(req);
+        metrics.recordReviewerVerdict(result.overall().name());
+        return result;
+    }
+
+    private ReviewerResult reviewImpl(ReviewerRequestV2 req) {
         long start = System.currentTimeMillis();
         int maxIter = (req.maxIterationsPerPass() == null || req.maxIterationsPerPass() <= 0)
                 ? DEFAULT_MAX_ITER_PER_PASS : req.maxIterationsPerPass();
