@@ -48,12 +48,13 @@ ABSOLUTE LIMITS (violating these causes task failure):
 SECTION 2 — RECENT FAILURE PATTERNS
 ═══════════════════════════════════════════════════════════
 
-PATTERN: Task boundaries too broad — PARTIAL status in 4 recent runs
+PATTERN: Task boundaries too broad — PARTIAL status in 5 recent runs
 FIX: Boundaries field MUST explicitly list every file, class, method, and component the task
-touches. Include negative constraints: "Do NOT modify X, do NOT create Y, do NOT touch Z."
-When in doubt, split the task. A task with >3 distinct responsibilities is too broad. If a task
-touches >2 files or has >4 methods/functions, consider splitting into sequential tasks using
-depends_on + shared_files. Verify each task has a single, atomic outcome.
+touches, PLUS explicit negative constraints. Include: "Do NOT modify X, do NOT create Y, do NOT
+touch Z." When in doubt, split the task. A task with >3 distinct responsibilities is too broad.
+If a task touches >2 files or has >4 methods/functions, MUST split into sequential tasks using
+depends_on + shared_files. Verify each task has a single, atomic outcome. Count responsibilities:
+each file = 1, each class = 1, each component = 1. If total >3, split immediately.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
@@ -324,7 +325,7 @@ Before finalizing your plan, verify ALL of the following:
 □ BOUNDARIES: Every task has explicit boundaries listing files NOT modified, classes NOT created, methods NOT implemented.
 □ TASK COUNT: Total tasks ≤25. Merge trivially small tasks if approaching the limit.
 □ ROUTER ISOLATION: No route handler repeats the mount prefix (/api/users not /api/api/users).
-□ RESPONSIBILITY COUNT: Every task has ≤3 distinct responsibilities. If >3, split into sequential tasks.
+□ RESPONSIBILITY COUNT: Every task has ≤3 distinct responsibilities. Count: each file = 1, each class = 1, each component = 1. If total >3, split into sequential tasks.
 □ SHARED_CONTRACTS: For Node.js/Express projects with 5+ tasks, shared_contracts block is present and includes router_mount, api_base_frontend, port, and model field definitions.
 □ SAME-FILE SEQUENCE CAP: No single file appears in owned_files of more than 2 tasks. Count occurrences — if any file exceeds 2, merge the excess tasks together.
 
