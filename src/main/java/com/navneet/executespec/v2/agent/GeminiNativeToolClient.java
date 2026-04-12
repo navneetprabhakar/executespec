@@ -247,11 +247,24 @@ public class GeminiNativeToolClient {
             // Explicitly constrain Gemini to emit structured function calls only. Without
             // this, Gemini 2.5-flash sometimes emits Python code (e.g. "default_api.writeFile(...)")
             // as a function call attempt, which its own parser rejects as MALFORMED_FUNCTION_CALL
-            // and returns an empty candidate. Setting mode=AUTO with the tool list makes the
-            // validator strict about structured output.
+            // and returns an empty candidate.
+            //
+            // AUTO — model decides (text or function call). Works for multi-turn agents where
+            //   the model sometimes legitimately emits plain text.
+            // ANY  — model MUST emit a function call from allowedFunctionNames. Server rejects
+            //   any other response. Use when the caller expects exactly one function to fire
+            //   (e.g. planner's submitPlan); prevents gemini-2.5-flash's Python-code degradation.
             ObjectNode toolConfig = body.putObject("toolConfig");
             ObjectNode fcc = toolConfig.putObject("functionCallingConfig");
-            fcc.put("mode", "AUTO");
+            if (Boolean.TRUE.equals(request.forceToolCall())) {
+                fcc.put("mode", "ANY");
+                ArrayNode allowed = fcc.putArray("allowedFunctionNames");
+                for (ToolCallback tc : request.tools()) {
+                    allowed.add(tc.getToolDefinition().name());
+                }
+            } else {
+                fcc.put("mode", "AUTO");
+            }
         }
 
         ObjectNode gen = body.putObject("generationConfig");
@@ -363,6 +376,14 @@ public class GeminiNativeToolClient {
             List<ToolCallback> tools,
             Double temperature,
             Integer maxOutputTokens,
-            String apiKey) {
+            String apiKey,
+            /**
+             * If true, sets {@code toolConfig.functionCallingConfig.mode=ANY} with
+             * {@code allowedFunctionNames} set to the tool list — the API will reject any
+             * non-function-call response at the server, preventing gemini-2.5-flash's
+             * "emit Python code as a function call" degraded-performance failure mode.
+             * Use when the caller expects exactly one specific function to be called.
+             */
+            Boolean forceToolCall) {
     }
 }
