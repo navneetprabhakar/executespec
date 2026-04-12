@@ -1,0 +1,152 @@
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "html_todo",
+  "spec_type": "HTML",
+  "language": "HTML/JS",
+  "run_id": "4150b954-66cc-4f51-8cf6-907334a7451f",
+  "timestamp": "2026-04-12T00:36:59Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 61
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_java",
+  "spec_type": "FIBONACCI",
+  "language": "Java",
+  "run_id": "e629a536-10cd-44b9-b7e1-a2f797c40757",
+  "timestamp": "2026-04-12T00:37:38Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_python",
+  "spec_type": "FIBONACCI",
+  "language": "Python",
+  "run_id": "f03c10fd-2e2e-441a-92f4-07bbf666fcbf",
+  "timestamp": "2026-04-12T00:38:05Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 24
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
+{
+  "provider": "ANTHROPIC",
+  "spec_name": "fibonacci_go",
+  "spec_type": "FIBONACCI",
+  "language": "Go",
+  "run_id": "7d63c2ca-6cf6-4c65-b0d6-24ba9d832514",
+  "timestamp": "2026-04-12T00:38:44Z",
+  "status": "UNKNOWN",
+  "worker_model": "",
+  "failover_detected": false,
+  "time": {
+    "wall_seconds": 36
+  },
+  "cost": {
+    "actual_usd": "null",
+    "est_low": "null",
+    "est_high": "null",
+    "credits": "null",
+    "hard_cap": "null"
+  },
+  "efficiency": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "tasks_total": 0,
+    "tasks_done": 0,
+    "tasks_failed": 0,
+    "tasks_partial": 0
+  },
+  "accuracy": {
+    "score": "N/A",
+    "grade": "N/A",
+    "issues_total": 0,
+    "build_breakers": 0,
+    "review_failures": 0,
+    "report_status": "SKIPPED",
+    "issues": []
+  }
+}
