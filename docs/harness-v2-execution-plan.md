@@ -402,6 +402,17 @@ Documentation is a first-class deliverable of V2. The following must be updated 
 
 **Documentation phase scheduling:** documentation updates happen in-phase (not as a final catch-up) — each phase's PR must include the relevant doc updates before merge.
 
+### 8.7 Post-completion plan reconciliation
+
+Once V2 execution completes, this execution plan document (`docs/harness-v2-execution-plan.md`) itself must be updated to reflect actual outcomes:
+
+- Mark each phase as `✅ Completed` / `⚠️ Partially completed (with notes)` / `❌ Descoped` with commit/PR references
+- Capture deviations from the original plan: tasks that were added, removed, re-scoped, or re-sequenced mid-execution
+- Update Section 7 (Success Criteria) with actual measured numbers (accuracy, cost, time) from the post-cutover eval
+- Update Section 5 (Risks & Mitigations) — mark which risks materialized and how they were handled; add any unforeseen risks encountered
+- Rename document to `docs/harness-v2-completed.md` (or similar) and add a forward-pointing note in any remaining references
+- Archive the document as a historical record — future harness redesigns (V3+) reference it for lessons learned
+
 ---
 
 ## 9. Phase Ordering Summary
