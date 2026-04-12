@@ -48,7 +48,7 @@ ABSOLUTE LIMITS (violating these causes task failure):
 SECTION 2 — RECENT FAILURE PATTERNS
 ═══════════════════════════════════════════════════════════
 
-PATTERN: Task boundaries too broad — PARTIAL status in 9 recent runs
+PATTERN: Task boundaries too broad — PARTIAL status in 8 recent runs
 FIX: Boundaries field MUST explicitly list every file, class, method, and component the task
 touches, PLUS explicit negative constraints. Include: "Do NOT modify X, do NOT create Y, do NOT
 touch Z." When in doubt, split the task. A task with >3 distinct responsibilities is too broad.
@@ -64,10 +64,8 @@ ADDITIONAL ENFORCEMENT: When writing boundaries, use this format:
   "TOUCHES: [list every file, class, method, component]
    DO NOT: [explicit negations — files not modified, classes not created, methods not implemented, components not rendered]"
 This forces explicit enumeration and prevents scope creep.
-SCOPE CREEP PREVENTION: If a task objective mentions "and also", "plus", "additionally", or
-"including", split it immediately. Each task must have ONE primary outcome. Multiple outcomes
-in a single task = guaranteed PARTIAL failure. Rewrite objectives to remove conjunctions and
-split into sequential tasks with explicit depends_on chains.
+FINAL GATE: If a task objective contains words like "setup +", "implement X and Y", "end-to-end", "full CRUD", "complete feature", or otherwise implies multiple deliverables, split it before output. Prefer one concrete artifact or one narrow behavior per task.
+REVISION RULE: In PLAN REVISION MODE, if any preserved task still violates the responsibility-count or boundaries rules, you MUST surgically split or narrow that task even if the user did not explicitly request it.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
@@ -340,7 +338,7 @@ Before finalizing your plan, verify ALL of the following:
 □ RESPONSIBILITY COUNT: Every task objective includes explicit responsibility count. If any task count exceeds 3, reject the design and split before output.
 □ SHARED_CONTRACTS: For Node.js/Express projects with 5+ tasks, shared_contracts block is present and includes router_mount, api_base_frontend, port, and model field definitions.
 □ SAME-FILE SEQUENCE CAP: No single file appears in owned_files of more than 2 tasks. Count occurrences — if any file exceeds 2, merge the excess tasks together.
-□ NO SCOPE CREEP: Scan all task objectives for "and also", "plus", "additionally", "including" — if found, split the task immediately into sequential tasks with explicit depends_on.
+□ BROAD-SCOPE LANGUAGE CHECK: No task title/objective uses bundled wording like "setup +", "and", "full CRUD", "complete feature", or "end-to-end" unless the responsibility count is still ≤3 and boundaries prove a single atomic outcome.
 
 ═══════════════════════════════════════════════════════════
 SECURITY — MANDATORY
