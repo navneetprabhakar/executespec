@@ -8,6 +8,7 @@ import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.WorkerAgentV2;
 import com.navneet.executespec.v2.agent.WorkerResult;
 import com.navneet.executespec.v2.agent.WorkerTaskRequest;
+import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.tool.BuildProjectTool;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import com.navneet.executespec.v2.tool.ToolResult;
@@ -73,6 +74,7 @@ public class SequentialExecutorV2 {
     private final WorkerAgentV2 worker;
     private final BuildProjectTool buildProjectTool;
     private final ObjectMapper objectMapper;
+    private final V2Metrics metrics;
 
     public ExecutionResult execute(ExecutionRequest req) {
         long runStart = System.currentTimeMillis();
@@ -84,7 +86,11 @@ public class SequentialExecutorV2 {
                 req.enableSmokeTests());
 
         for (PlannedTaskV2 task : plan.tasks()) {
-            outcomes.add(executeOne(task, plan, req));
+            TaskOutcome outcome = executeOne(task, plan, req);
+            outcomes.add(outcome);
+            metrics.recordTaskStatus(outcome.status().name());
+            metrics.recordTaskLatency(outcome.status().name(),
+                    java.time.Duration.ofMillis(outcome.totalLatencyMs()));
         }
 
         ExecutionResult result = summarize(outcomes, System.currentTimeMillis() - runStart);
@@ -262,9 +268,12 @@ public class SequentialExecutorV2 {
         if (result instanceof ToolResult.Ok ok) {
             String content = ok.content();
             int exit = extractExitCode(content);
-            return new SmokeTestResult(exit == 0, exit, content, elapsed);
+            boolean passed = exit == 0;
+            metrics.recordSmokeTest(passed ? "pass" : "fail");
+            return new SmokeTestResult(passed, exit, content, elapsed);
         }
         // Tool Err — treat as smoke failure with a synthetic exit code
+        metrics.recordSmokeTest("fail");
         String msg = result instanceof ToolResult.Err err ? err.message() : "(unknown tool err)";
         return new SmokeTestResult(false, -1, "tool error: " + msg, elapsed);
     }

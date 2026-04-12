@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.v2.context.ContextStoreV2;
+import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.tool.CompleteTaskTool;
 import com.navneet.executespec.v2.tool.Tool;
 import com.navneet.executespec.v2.tool.ToolRegistryV2;
@@ -69,6 +70,7 @@ public class WorkerAgentV2 {
     private final ToolRegistryV2 toolRegistry;
     private final ObjectMapper objectMapper;
     private final ContextStoreV2 contextStore;
+    private final V2Metrics metrics;
 
     public WorkerResult run(WorkerTaskRequest req) {
         long start = System.currentTimeMillis();
@@ -101,6 +103,7 @@ public class WorkerAgentV2 {
                         .build());
             } catch (Exception e) {
                 log.error("WorkerAgentV2 router failure at iter={}", iter, e);
+                recordTerminal(WorkerResult.Outcome.ERROR, req, iter);
                 return errorResult(iter, toolsDispatched, toolLog, start,
                         "router error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             }
@@ -128,6 +131,7 @@ public class WorkerAgentV2 {
             // No tool calls → model is done (either text-only stop or stopped early).
             if (calls.isEmpty()) {
                 history.add(new AssistantMessage(assistantText));
+                recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
                 return WorkerResult.builder()
                         .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
                         .iterations(iter)
@@ -161,6 +165,7 @@ public class WorkerAgentV2 {
                     history.add(ToolResponseMessage.builder().responses(toolResponses).build());
                     // Successful completion — context is no longer needed for recovery.
                     contextStore.delete(req.context());
+                    recordTerminal(WorkerResult.Outcome.COMPLETED, req, iter);
                     return WorkerResult.builder()
                             .outcome(WorkerResult.Outcome.COMPLETED)
                             .iterations(iter)
@@ -171,6 +176,7 @@ public class WorkerAgentV2 {
                             .totalLatencyMs(System.currentTimeMillis() - start)
                             .build();
                 }
+                metrics.recordToolCall(tc.name());
                 String envelope = dispatchOne(tc, req);
                 toolResponses.add(new ToolResponseMessage.ToolResponse(
                         safeId(tc.id()), tc.name(), envelope));
@@ -188,6 +194,7 @@ public class WorkerAgentV2 {
 
         log.warn("WorkerAgentV2 ITERATION LIMIT run={} task={} iters={}",
                 req.context().runId(), req.context().taskId(), maxIter);
+        recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIter);
         return WorkerResult.builder()
                 .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
                 .iterations(maxIter)
@@ -196,6 +203,12 @@ public class WorkerAgentV2 {
                 .toolCallLog(toolLog)
                 .totalLatencyMs(System.currentTimeMillis() - start)
                 .build();
+    }
+
+    /** Emit worker outcome + iterations metrics at every terminal path. */
+    private void recordTerminal(WorkerResult.Outcome outcome, WorkerTaskRequest req, int iterations) {
+        metrics.recordWorkerOutcome(outcome.name(), req.provider(), req.model());
+        metrics.recordWorkerIterations(outcome.name(), req.provider(), req.model(), iterations);
     }
 
     private String dispatchOne(AssistantMessage.ToolCall tc, WorkerTaskRequest req) {
