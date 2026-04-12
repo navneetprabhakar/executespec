@@ -14,6 +14,6 @@
  *   <li>No SubtaskDecomposer, no FileLockTool, no PATH B XML parsing</li>
  * </ul>
  *
- * <p>See {@code docs/harness-v2-execution-plan.md} for the full plan.
+ * <p>See {@code docs/harness-v2-remaining-work.md} for open gaps.
  */
 package com.navneet.executespec.v2;

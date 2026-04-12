@@ -1378,6 +1378,8 @@ export interface ValidationReportData {
   isShared: boolean;
   shareUrl: string | null;
   generatedAfterImprovements: boolean;
+  accuracyScore?: number | null;
+  accuracyGrade?: string | null;
 }
 
 export interface SharedReportData {

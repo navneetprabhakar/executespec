@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "medium",
+  "run_id": "c13b6805-b4a5-41cd-873a-55a1f7102ed1",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T15:42:22.381503Z",
+  "completedAt": "2026-04-12T15:45:04.136272Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"overall\":\"FIXED_ISSUES\",\"generalPassSummary\":\"Found 1 issue, fixed 1. Issues: Added title validation to PATCH /todos/:id endpoint.\",\"wiringPassSummary\":\"No wiring issues found in the Node.js project. All routes in index.js are properly registered with the Express app.\",\"totalLatencyMs\":22103,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.038876,
+  "est_low": 0.051699999999999996,
+  "est_high": 0.090475,
+  "credits": 1,
+  "total_input": 109839,
+  "total_output": 2370,
+  "accuracy": 100,
+  "report_ok": true
+}

@@ -29,6 +29,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@Deprecated(since = "v2")
 public class GoogleBatchClient implements LlmBatchClient {
 
     private static final String BASE_URL = "https://generativelanguage.googleapis.com";
@@ -47,6 +48,7 @@ public class GoogleBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public String submitBatch(String runId, List<BatchRequest> requests, String apiKey) {
         try {
             if (requests.isEmpty()) {
@@ -68,6 +70,7 @@ public class GoogleBatchClient implements LlmBatchClient {
         }
     }
 
+    @Deprecated(since = "v2")
     private String submitInline(String runId, List<BatchRequest> requests, String model, String apiKey)
             throws Exception {
         ObjectNode body = objectMapper.createObjectNode();
@@ -138,6 +141,7 @@ public class GoogleBatchClient implements LlmBatchClient {
         return batchId;
     }
 
+    @Deprecated(since = "v2")
     private String submitFileBased(String runId, List<BatchRequest> requests, String model, String apiKey)
             throws Exception {
         // Build JSONL content — each line: {"key": "<customId>", "request": {generateContent body}}
@@ -233,6 +237,7 @@ public class GoogleBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public BatchStatus checkStatus(String batchId, String apiKey) {
         try {
             // Inline batches are immediately complete
@@ -275,6 +280,7 @@ public class GoogleBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public BatchResults getResults(String batchId, String apiKey) {
         try {
             // For inline batches, results were returned in the submit response
@@ -356,6 +362,7 @@ public class GoogleBatchClient implements LlmBatchClient {
         }
     }
 
+    @Deprecated(since = "v2")
     private BatchResults parseInlinedResponses(String batchId, JsonNode inlinedResponses) {
         List<BatchResult> results = new ArrayList<>();
         for (JsonNode entry : inlinedResponses) {
@@ -381,6 +388,7 @@ public class GoogleBatchClient implements LlmBatchClient {
     }
 
     @Override
+    @Deprecated(since = "v2")
     public void cancelBatch(String batchId, String apiKey) {
         try {
             if (batchId.startsWith("google-inline-")) return;
@@ -397,6 +405,7 @@ public class GoogleBatchClient implements LlmBatchClient {
         }
     }
 
+    @Deprecated(since = "v2")
     private static BatchStatus.State mapGoogleState(String state) {
         return switch (state) {
             case "JOB_STATE_PENDING"   -> BatchStatus.State.PENDING;

@@ -48,6 +48,7 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Deprecated(since = "v2")
 public class WorkerAgent {
 
     @Qualifier("workerModel")
@@ -161,6 +162,7 @@ public class WorkerAgent {
      *   <li>HIGH (25): complex files with many deps/methods, 10-15 reads + multiple writeFile attempts</li>
      * </ul>
      */
+    @Deprecated(since = "v2")
     private static int subtaskIterationLimit(String complexity) {
         return switch (complexity != null ? complexity.toUpperCase() : "MEDIUM") {
             case "LOW"  -> 15;
@@ -176,6 +178,7 @@ public class WorkerAgent {
     private static final int MAX_TOOL_CALLS_PER_RESPONSE_GEMINI   = 15;
     private static final int MAX_TOOL_CALLS_PER_RESPONSE_DEFAULT  = 30;
 
+    @Deprecated(since = "v2")
     private static int maxToolCallsPerResponse(String provider) {
         return "google".equalsIgnoreCase(provider) ? MAX_TOOL_CALLS_PER_RESPONSE_GEMINI
                                                    : MAX_TOOL_CALLS_PER_RESPONSE_DEFAULT;
@@ -197,6 +200,7 @@ public class WorkerAgent {
             "caused the truncation.\n\n" +
             "Start now: call writeFile with the skeleton version of the file you were working on.";
 
+    @Deprecated(since = "v2")
     public WorkerReport execute(AgentTask task, String runId) {
         String taskId = task.getTaskId();
         TaskDefinition taskDef = parseTask(task.getTaskJson());
@@ -381,6 +385,7 @@ public class WorkerAgent {
      * Initializes all execution state: workspace setup, provider/model resolution,
      * complexity override, and timing variables.
      */
+    @Deprecated(since = "v2")
     private TaskExecutionState initializeExecutionState(AgentTask task, TaskDefinition taskDef, String runId) {
         TaskExecutionState s = new TaskExecutionState();
         String taskId = task.getTaskId();
@@ -456,6 +461,7 @@ public class WorkerAgent {
     }
 
     /** Injects a progress checkpoint into the conversation if enough time has elapsed. */
+    @Deprecated(since = "v2")
     private void injectCheckpointIfDue(List<Message> messages, TaskDefinition taskDef,
                                        String taskId, TaskExecutionState state, long elapsedMinutes) {
         // ── Progress checkpoint: re-inject task context every N minutes ──
@@ -470,6 +476,7 @@ public class WorkerAgent {
      * Detects stall conditions (no file writes in N minutes) and either injects
      * skeleton recovery (if truncation-caused) or escalates the model.
      */
+    @Deprecated(since = "v2")
     private void handleStallDetection(List<Message> messages, String taskId,
                                       String runId, TaskExecutionState state) {
         // ── Stall detection: if no file writes in N minutes, escalate model ──
@@ -528,6 +535,7 @@ public class WorkerAgent {
     }
 
     /** Injects the completion urgency prompt when the task is approaching its time limit. */
+    @Deprecated(since = "v2")
     private void injectUrgencyIfNeeded(List<Message> messages, TaskDefinition taskDef,
                                        String taskId, TaskExecutionState state,
                                        long elapsedMinutes, long remainingMinutes) {
@@ -544,6 +552,7 @@ public class WorkerAgent {
      * Pre-call token estimation: compacts context early if projected usage exceeds threshold.
      * Returns the (possibly new) messages list.
      */
+    @Deprecated(since = "v2")
     private List<Message> handlePreCallCompaction(List<Message> messages, TaskDefinition taskDef,
                                                    String taskId, String runId, TaskExecutionState state) {
         if (!state.justCompacted && messages.size() > 30) {
@@ -573,6 +582,7 @@ public class WorkerAgent {
      * Trims degenerate (text + escalation) message pairs when the model is stuck in
      * a "I'll call X" / "NO DO IT" cycle after 5+ consecutive text-only responses.
      */
+    @Deprecated(since = "v2")
     private void trimDegenerateLoop(List<Message> messages, String taskId, TaskExecutionState state) {
         // tool_choice is already set to required/any, so the API will enforce
         // tool use — but the accumulated bad history can confuse the model.
@@ -595,6 +605,7 @@ public class WorkerAgent {
      * Mid-task cost enforcement: checks budget every 5 LLM calls.
      * @return true if budget exceeded and loop should break
      */
+    @Deprecated(since = "v2")
     private boolean checkMidTaskBudget(String taskId, String runId, TaskExecutionState state) {
         if (state.iteration % 5 == 0 && runCostBudgetService.isOverBudget(runId)) {
             String tier = runCostBudgetService.getRunTier(runId);
@@ -611,6 +622,7 @@ public class WorkerAgent {
     }
 
     /** Records token usage from an LLM response onto the state and observation. */
+    @Deprecated(since = "v2")
     private void recordTokenUsage(ChatResponse response, Observation iterObs,
                                   String taskId, TaskExecutionState state) {
         int inputTok = extractInputTokens(response);
@@ -653,6 +665,7 @@ public class WorkerAgent {
      * auto-continues or injects skeleton recovery.
      * @return true if the loop should {@code continue} to the next iteration
      */
+    @Deprecated(since = "v2")
     private boolean handleTruncationRecovery(ChatResponse response, String assistantText,
                                               List<Message> messages, String taskId,
                                               String runId, TaskExecutionState state) {
@@ -760,6 +773,7 @@ public class WorkerAgent {
      * PATH A: Dispatches native tool calls (OpenAI) and handles taskComplete validation.
      * @return a WorkerReport if the task is complete/failed, {@code null} if the loop should continue
      */
+    @Deprecated(since = "v2")
     private WorkerReport handleNativeToolCalls(AssistantMessage assistantMsg, List<Message> messages,
                                                 TaskDefinition taskDef, String taskId,
                                                 String runId, TaskExecutionState state,
@@ -872,6 +886,7 @@ public class WorkerAgent {
      * Validates a taskComplete tool call: checks for fabricated/partial completions.
      * @return a WorkerReport if the task is complete/failed, {@code null} to continue
      */
+    @Deprecated(since = "v2")
     private WorkerReport handleTaskComplete(AssistantMessage.ToolCall tc,
                                              List<ToolResponseMessage.ToolResponse> responses,
                                              String taskId, TaskExecutionState state,
@@ -940,6 +955,7 @@ public class WorkerAgent {
      *         a non-null WorkerReport if task is complete/failed,
      *         or {@code null} if no tool calls and no completion found (fall through)
      */
+    @Deprecated(since = "v2")
     private WorkerReport handlePromptBasedToolCalls(String assistantText, List<Message> messages,
                                                      TaskDefinition taskDef, AgentTask agentTask,
                                                      String taskId, String runId,
@@ -1059,6 +1075,7 @@ public class WorkerAgent {
      * Handles a PATH B completion report: validates against fabrication/partial claims.
      * @return {@link #CONTINUE_LOOP} for fabrication retry, or a final WorkerReport
      */
+    @Deprecated(since = "v2")
     private WorkerReport handlePathBCompletion(String assistantText, List<Message> messages,
                                                 TaskDefinition taskDef, AgentTask agentTask,
                                                 String taskId, String runId,
@@ -1119,6 +1136,7 @@ public class WorkerAgent {
     }
 
     /** Resets conversation context after a fabricated completion rejection. */
+    @Deprecated(since = "v2")
     private void injectFabricationRetryContext(List<Message> messages, TaskDefinition taskDef,
                                                AgentTask agentTask, String taskId, String runId,
                                                TaskExecutionState state, int claimedFileCount) {
@@ -1153,6 +1171,7 @@ public class WorkerAgent {
     }
 
     /** Checks whether the tool call count has hit the iteration limit. */
+    @Deprecated(since = "v2")
     private boolean checkIterationLimit(String taskId, TaskExecutionState state) {
         if (state.toolCallCount >= state.effectiveIterationLimit) {
             log.warn("[Worker {}] Hit {} iteration limit ({} tool calls) — forcing {}",
@@ -1170,6 +1189,7 @@ public class WorkerAgent {
      * wrote their file are promoted to COMPLETE — a subtask owns exactly one file,
      * so if it wrote it, the task succeeded regardless of remaining read budget.
      */
+    @Deprecated(since = "v2")
     private WorkerReport buildIterationLimitReport(String taskId, TaskExecutionState state) {
         String reason = "Terminated: exceeded " + state.effectiveIterationLimit + " tool-call iterations";
         if (state.isSubtask && state.totalFileWrites > 0) {
@@ -1195,6 +1215,7 @@ public class WorkerAgent {
      * Builds the continue prompt when the model produces no tool calls and no completion.
      * Escalates after consecutive non-JSON outputs.
      */
+    @Deprecated(since = "v2")
     private String buildContinuePrompt(String assistantText, String taskId, TaskExecutionState state) {
         // Log the unparsed output for diagnostics
         if (assistantText != null && !assistantText.isBlank()) {
@@ -1257,6 +1278,7 @@ public class WorkerAgent {
      * Handles budget monitoring after each iteration: compaction or hard-stop.
      * @return a WorkerReport if hard-stopped after failed compaction, {@code null} to continue
      */
+    @Deprecated(since = "v2")
     private WorkerReport handleBudgetMonitoring(List<Message> messages, TaskDefinition taskDef,
                                                  String taskId, String runId, TaskExecutionState state) {
         BudgetStatus budget = budgetMonitor.check(state.model, state.complexity, state.lastCallInputTokens);
@@ -1336,6 +1358,7 @@ public class WorkerAgent {
      * Attempts mid-task recovery after a provider failure by compacting the conversation
      * and switching to a fallback provider.
      */
+    @Deprecated(since = "v2")
     private void handleMidTaskRecovery(MidTaskProviderFailureException e,
                                        List<Message> messages, TaskDefinition taskDef,
                                        String taskId, String runId, TaskExecutionState state) {
@@ -1401,6 +1424,7 @@ public class WorkerAgent {
      *   <li>No dependency branch merging</li>
      * </ul>
      */
+    @Deprecated(since = "v2")
     public WorkerReport executeOnMainBranch(AgentTask task, String runId) {
         SKIP_WORKTREE.set(true);
         try {
@@ -1430,6 +1454,7 @@ public class WorkerAgent {
      * @param workDir the existing workspace directory to operate in
      * @return worker report for this subtask
      */
+    @Deprecated(since = "v2")
     public WorkerReport executeInWorkDir(AgentTask task, String runId, String workDir) {
         SKIP_WORKTREE.set(true);
         OVERRIDE_WORK_DIR.set(workDir);
@@ -1442,6 +1467,7 @@ public class WorkerAgent {
     }
 
     /** Stamps the final provider, model, and calibration data onto the report. */
+    @Deprecated(since = "v2")
     private static WorkerReport withProviderModel(WorkerReport report, String provider, String model,
                                                     boolean wasTruncated, int maxOutputTokens,
                                                     int totalOutputTokens, int iterationCount) {
@@ -1455,6 +1481,7 @@ public class WorkerAgent {
     }
 
     /** Overload for backward compat — no calibration data. */
+    @Deprecated(since = "v2")
     private static WorkerReport withProviderModel(WorkerReport report, String provider, String model) {
         report.setProvider(provider);
         report.setModel(model);
@@ -1472,6 +1499,7 @@ public class WorkerAgent {
      * @param model  the ResolvedModel from ModelResolver
      * @return the WorkerReport from execution
      */
+    @Deprecated(since = "v2")
     public WorkerReport executeWithModel(AgentTask task, String runId,
                                           com.navneet.executespec.router.ResolvedModel model) {
         log.info("Running task {} with model {} [{}]",
@@ -1482,6 +1510,7 @@ public class WorkerAgent {
 
     // ── XML Tool-Call Parsing & Dispatch ──────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private List<ParsedToolCall> parseXmlToolCalls(String text) {
         if (text == null || text.isBlank()) return List.of();
         List<ParsedToolCall> calls = new ArrayList<>();
@@ -1526,6 +1555,7 @@ public class WorkerAgent {
      * @param raw the raw text between {@code <tool_call>} and {@code </tool_call>}
      * @return a ParsedToolCall if extraction succeeds, null otherwise
      */
+    @Deprecated(since = "v2")
     private ParsedToolCall parseToolCallStructural(String raw) {
         if (raw == null || raw.isBlank()) return null;
 
@@ -1573,6 +1603,7 @@ public class WorkerAgent {
     }
 
     /** Extract a simple string field value from JSON-like text (no embedded quotes). */
+    @Deprecated(since = "v2")
     private String extractSimpleStringField(String text, String fieldName) {
         java.util.regex.Matcher m = Pattern.compile(
                 "\"" + fieldName + "\"\\s*:\\s*\"([^\"]+)\"").matcher(text);
@@ -1584,6 +1615,7 @@ public class WorkerAgent {
      * The content is everything between the opening quote after "content": and the last
      * proper closing boundary ("}}" or "} }") of the tool call JSON.
      */
+    @Deprecated(since = "v2")
     private String extractContentField(String text) {
         // Find "content" : "  (the start of the content value)
         java.util.regex.Matcher m = Pattern.compile("\"content\"\\s*:\\s*\"").matcher(text);
@@ -1630,6 +1662,7 @@ public class WorkerAgent {
      * Extract a field value that appears between the named field and the next known field.
      * Used for oldStr in editFile where the content may contain unescaped quotes.
      */
+    @Deprecated(since = "v2")
     private String extractFieldBetween(String text, String fieldName, String[] nextFields) {
         java.util.regex.Matcher m = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\"").matcher(text);
         if (!m.find()) return null;
@@ -1657,6 +1690,7 @@ public class WorkerAgent {
     }
 
     /** Extract the last string field (like newStr) — content runs to the closing `"}}`. */
+    @Deprecated(since = "v2")
     private String extractLastStringField(String text, String fieldName) {
         java.util.regex.Matcher m = Pattern.compile("\"" + fieldName + "\"\\s*:\\s*\"").matcher(text);
         if (!m.find()) return null;
@@ -1689,6 +1723,7 @@ public class WorkerAgent {
      *
      * Rejects objects that look like completion reports ("task_id" + "status" present).
      */
+    @Deprecated(since = "v2")
     private List<ParsedToolCall> parseJsonToolCalls(String text) {
         if (text == null || text.isBlank()) return List.of();
 
@@ -1728,6 +1763,7 @@ public class WorkerAgent {
     }
 
     /** Try to parse a JSON string as one or more tool calls. */
+    @Deprecated(since = "v2")
     private List<ParsedToolCall> tryParseJsonBlock(String json) {
         if (json == null || json.isBlank()) return List.of();
         String sanitized = escapeControlCharsInJsonStrings(json);
@@ -1750,6 +1786,7 @@ public class WorkerAgent {
     }
 
     /** Extract a balanced JSON object starting at position i, or null if not valid. */
+    @Deprecated(since = "v2")
     private String extractJsonObject(String text, int start) {
         if (start >= text.length() || text.charAt(start) != '{') return null;
         int depth = 0;
@@ -1771,6 +1808,7 @@ public class WorkerAgent {
     }
 
     /** Extract a ParsedToolCall from a JSON node, or null if it's not a tool call. */
+    @Deprecated(since = "v2")
     private ParsedToolCall extractToolCallFromNode(JsonNode node) {
         if (!node.isObject()) return null;
         // Reject completion reports — they have "task_id" + "status"
@@ -1788,6 +1826,7 @@ public class WorkerAgent {
      * This method walks the JSON text and escapes any raw control chars found inside
      * quoted strings, leaving structural whitespace (between keys/values) untouched.
      */
+    @Deprecated(since = "v2")
     static String escapeControlCharsInJsonStrings(String json) {
         StringBuilder sb = new StringBuilder(json.length() + 64);
         boolean inString = false;
@@ -1824,6 +1863,7 @@ public class WorkerAgent {
         return sb.toString();
     }
 
+    @Deprecated(since = "v2")
     private String dispatchTool(ParsedToolCall tc, String runId, String taskId) {
         try {
             JsonNode args = mapper.readTree(tc.argsJson());
@@ -1882,6 +1922,7 @@ public class WorkerAgent {
     }
 
     /** Returns true if the tool call is a file-writing operation (for progress tracking). */
+    @Deprecated(since = "v2")
     private boolean isFileWriteTool(String toolName) {
         return switch (toolName) {
             case "writeFile", "write_file", "editFile", "edit_file" -> true;
@@ -1890,6 +1931,7 @@ public class WorkerAgent {
     }
 
     /** Returns true if the tool is a read-only operation whose result can be cached within a task. */
+    @Deprecated(since = "v2")
     private static boolean isReadOnlyTool(String toolName) {
         return switch (toolName) {
             case "readFile", "read_file", "listFiles", "list_files",
@@ -1900,6 +1942,7 @@ public class WorkerAgent {
     }
 
     /** Builds a dedup key for read-only tool calls. Returns null for non-read-only or unparseable tools. */
+    @Deprecated(since = "v2")
     private String buildReadOnlyDedupKey(ParsedToolCall tc) {
         if (!isReadOnlyTool(tc.name())) return null;
         try {
@@ -1918,6 +1961,7 @@ public class WorkerAgent {
     }
 
     /** Extracts the "path" argument from a tool call's JSON args. */
+    @Deprecated(since = "v2")
     private String extractPathFromArgs(ParsedToolCall tc) {
         try {
             return mapper.readTree(tc.argsJson()).path("path").asText(null);
@@ -1927,12 +1971,14 @@ public class WorkerAgent {
     }
 
     /** Returns the parent directory of a file path, or "." for root-level files. */
+    @Deprecated(since = "v2")
     private static String parentDir(String path) {
         int lastSlash = path.lastIndexOf('/');
         return lastSlash > 0 ? path.substring(0, lastSlash) : ".";
     }
 
     /** Suggests the correct tool name for commonly hallucinated tool names. */
+    @Deprecated(since = "v2")
     private String suggestTool(String name) {
         if (name == null) return null;
         return switch (name.toLowerCase()) {
@@ -1956,6 +2002,7 @@ public class WorkerAgent {
      * Escalate to the next higher tier model within the run's selected provider.
      * WORKHORSE → PLANNING (the highest tier). Used when the worker stalls.
      */
+    @Deprecated(since = "v2")
     private String escalateModel(String currentModel, String runId) {
         try {
             var aiProvider = stateStore.findRun(runId)
@@ -1986,6 +2033,7 @@ public class WorkerAgent {
      * The tool args have the report fields directly; we inject task_id to match
      * the expected completion report format.
      */
+    @Deprecated(since = "v2")
     private String buildCompletionJsonFromToolCall(String argsJson, String taskId) {
         try {
             JsonNode args = mapper.readTree(argsJson);
@@ -2009,6 +2057,7 @@ public class WorkerAgent {
         }
     }
 
+    @Deprecated(since = "v2")
     private boolean looksLikeCompletionReport(String text, String expectedTaskId) {
         if (text == null || text.isBlank()) return false;
         String normalized = normalizeWorkerResponse(text);
@@ -2030,6 +2079,7 @@ public class WorkerAgent {
      * Handles provider-specific quirks: markdown fences, preamble text,
      * and XML tool_call wrappers (Gemini often wraps JSON in these).
      */
+    @Deprecated(since = "v2")
     static String normalizeWorkerResponse(String raw) {
         if (raw == null) return "";
         String response = raw.trim();
@@ -2071,12 +2121,14 @@ public class WorkerAgent {
      * Used to detect fabricated reports where the model says files_created/files_modified
      * are non-empty but never actually called writeFile/editFile.
      */
+    @Deprecated(since = "v2")
     private boolean reportClaimsFileChanges(String text) {
         if (text == null) return false;
         return hasNonEmptyArrayField(text, "files_created") ||
                hasNonEmptyArrayField(text, "files_modified");
     }
 
+    @Deprecated(since = "v2")
     private boolean hasNonEmptyArrayField(String text, String fieldName) {
         if (!text.contains("\"" + fieldName + "\"")) return false;
         // Non-empty = NOT [], NOT null
@@ -2093,6 +2145,7 @@ public class WorkerAgent {
      * Count total files claimed in completion report (files_created + files_modified).
      * Uses JSON parsing for accuracy. Returns 0 if parsing fails.
      */
+    @Deprecated(since = "v2")
     private int countClaimedFiles(String text) {
         try {
             String normalized = normalizeWorkerResponse(text);
@@ -2110,6 +2163,7 @@ public class WorkerAgent {
 
     // ── Compaction ────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private List<Message> compact(List<Message> messages,
             TaskDefinition task, String taskId, String runId,
             String[] effectiveProvider, String[] effectiveModel, String agentId,
@@ -2187,12 +2241,14 @@ public class WorkerAgent {
         return fresh;
     }
 
+    @Deprecated(since = "v2")
     private String rebuildFileContext(String runId) {
         return "Current src/ structure:\n" + fsTool.searchFiles(runId, "", "src");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private String buildInitialUserMessage(TaskDefinition task, AgentTask agentTask, String branchName, String runId) {
         // REWORK mode: apply ONLY the specific reviewer fixes — do not redo the whole task.
         // The harness injects reworkFeedback when a reviewer returned REWORK so the worker
@@ -2272,6 +2328,7 @@ public class WorkerAgent {
      * run-specific design system constraint block from ui_style config.
      * Returns null for non-frontend tasks.
      */
+    @Deprecated(since = "v2")
     private String buildFrontendBlock(TaskDefinition task, String runId) {
         // Check owned files for frontend extensions
         boolean hasUiFiles = task.getOwnedFiles() != null && task.getOwnedFiles().stream()
@@ -2329,6 +2386,7 @@ public class WorkerAgent {
         return sb.isEmpty() ? null : sb.toString();
     }
 
+    @Deprecated(since = "v2")
     private String buildProgressCheckpoint(TaskDefinition task, long elapsedMinutes, int totalMinutes) {
         long remainingMinutes = totalMinutes - elapsedMinutes;
         return """
@@ -2351,6 +2409,7 @@ public class WorkerAgent {
                 elapsedMinutes, remainingMinutes);
     }
 
+    @Deprecated(since = "v2")
     private String buildCompletionUrgencyPrompt(TaskDefinition task, long elapsedMinutes, int totalMinutes) {
         long remainingMinutes = totalMinutes - elapsedMinutes;
         return """
@@ -2377,6 +2436,7 @@ public class WorkerAgent {
      * without producing any writeFile output. Injected into the conversation to
      * break the read-loop pattern common with Gemini on simple subtasks.
      */
+    @Deprecated(since = "v2")
     private String buildSubtaskWriteNudge(TaskDefinition taskDef, int toolCallCount) {
         String ownedFile = (taskDef.getOwnedFiles() != null && !taskDef.getOwnedFiles().isEmpty())
                 ? taskDef.getOwnedFiles().getFirst() : "your assigned file";
@@ -2399,6 +2459,7 @@ public class WorkerAgent {
      * Rough token estimate for a message list. Uses 4 chars per token heuristic.
      * Not precise, but sufficient for pre-call compaction decisions.
      */
+    @Deprecated(since = "v2")
     private int estimateInputTokens(List<Message> messages) {
         int totalChars = 0;
         for (Message m : messages) {
@@ -2428,6 +2489,7 @@ public class WorkerAgent {
      * (not in text). {@code internalToolExecutionEnabled = false} keeps the outer loop
      * in control.
      */
+    @Deprecated(since = "v2")
     private LlmRouter.LlmResponse callModel(List<Message> messages,
             String provider, String model,
             String runId, String taskId, String agentId,
@@ -2583,6 +2645,7 @@ public class WorkerAgent {
         return result;
     }
 
+    @Deprecated(since = "v2")
     private WorkerReport parseCompletionReport(String raw, String taskId,
             int inputTokens, int outputTokens,
             int cacheReadTokens, int cacheWriteTokens) {
@@ -2621,6 +2684,7 @@ public class WorkerAgent {
      * Reads project_type from .agent-context/project.json in the workspace.
      * Returns null if file doesn't exist or can't be parsed.
      */
+    @Deprecated(since = "v2")
     private String readProjectType(String worktreePath) {
         try {
             java.nio.file.Path projectJson = java.nio.file.Path.of(worktreePath, ".agent-context", "project.json");
@@ -2637,6 +2701,7 @@ public class WorkerAgent {
         return null;
     }
 
+    @Deprecated(since = "v2")
     private TaskDefinition parseTask(String json) {
         try {
             return mapper.readValue(json, TaskDefinition.class);
@@ -2645,6 +2710,7 @@ public class WorkerAgent {
         }
     }
 
+    @Deprecated(since = "v2")
     private int extractInputTokens(ChatResponse response) {
         try {
             return response.getMetadata().getUsage().getPromptTokens().intValue();
@@ -2654,6 +2720,7 @@ public class WorkerAgent {
         }
     }
 
+    @Deprecated(since = "v2")
     private int extractOutputTokens(ChatResponse response) {
         try {
             return response.getMetadata().getUsage().getCompletionTokens().intValue();
@@ -2664,6 +2731,7 @@ public class WorkerAgent {
     }
 
     /** Anthropic cache_creation_input_tokens — billed at 1.25× input rate. */
+    @Deprecated(since = "v2")
     private int extractCacheWriteTokens(ChatResponse response) {
         try {
             Object val = response.getMetadata().get("cache_creation_input_tokens");
@@ -2674,6 +2742,7 @@ public class WorkerAgent {
     }
 
     /** Anthropic cache_read_input_tokens — billed at 0.10× input rate. */
+    @Deprecated(since = "v2")
     private int extractCacheReadTokens(ChatResponse response) {
         try {
             Object val = response.getMetadata().get("cache_read_input_tokens");
@@ -2683,6 +2752,7 @@ public class WorkerAgent {
         }
     }
 
+    @Deprecated(since = "v2")
     private String safeJson(Object obj) {
         try {
             return mapper.writeValueAsString(obj);
@@ -2701,6 +2771,7 @@ public class WorkerAgent {
     private static final int MAX_RESULT_CHARS_SHELL = 4_000; // run_command / run_build / run_tests (was 6k)
     private static final int MAX_RESULT_CHARS_DIFF = 3_000;  // git_diff (was 5k)
 
+    @Deprecated(since = "v2")
     private String truncateResult(String toolName, String result) {
         if (result == null)
             return result;
@@ -2725,6 +2796,7 @@ public class WorkerAgent {
     /** Provider-aware prompt loading via PromptAssembler; resolves {{include:...}} fragments.
      *  STYLING_SECTION is always empty here — per-task styling is injected via buildFrontendBlock()
      *  which loads from the UiStyleResolver design system (folder path in application.yml). */
+    @Deprecated(since = "v2")
     private String loadPrompt(String provider) {
         String providerFile = "worker-" + provider.toLowerCase() + ".txt";
         Resource providerPrompt = resourceLoader.getResource("classpath:prompts/" + providerFile);
@@ -2737,6 +2809,7 @@ public class WorkerAgent {
      * Called only on iteration 1 to avoid redundant DB writes.
      * STYLING_SECTION is always empty — styling is injected per task via buildFrontendBlock().
      */
+    @Deprecated(since = "v2")
     private String loadPromptAndTrack(String provider, String runId, String taskId) {
         String providerFile = "worker-" + provider.toLowerCase() + ".txt";
         Resource providerPrompt = resourceLoader.getResource("classpath:prompts/" + providerFile);
@@ -2754,6 +2827,7 @@ public class WorkerAgent {
     }
 
     /** Derive provider from model name via ModelRegistry; fall back to configured role provider. */
+    @Deprecated(since = "v2")
     private String resolveProvider(String model) {
         if (model == null) return props.getRoles().getWorker();
         String provider = modelRegistry.providerFor(model);
@@ -2767,6 +2841,7 @@ public class WorkerAgent {
      *   OpenAI:    "stop" (normal) vs "length" (truncated)
      *   Gemini:    "STOP" (normal) vs "MAX_TOKENS" (truncated)
      */
+    @Deprecated(since = "v2")
     private static boolean isTruncatedResponse(String finishReason) {
         if (finishReason == null) return false;
         return "max_tokens".equalsIgnoreCase(finishReason)
@@ -2778,6 +2853,7 @@ public class WorkerAgent {
      * Extracts Anthropic prompt-cache statistics from response metadata and returns
      * a human-readable note appended to the iteration log line.
      */
+    @Deprecated(since = "v2")
     private String buildCacheNote(ChatResponse response) {
         try {
             var meta = response.getMetadata();

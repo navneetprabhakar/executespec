@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "medium",
+  "run_id": "155c158e-e4ca-402e-914c-4c867530c97d",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T14:02:50.999974Z",
+  "completedAt": "2026-04-12T14:05:15.917587Z",
+  "tasks_total": 3,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildPassed\":true,\"totalLatencyMs\":35630,\"wiringPassSummary\":\"Wiring review complete. No wiring issues found. This is a simple Express.js to-do API with all routes (POST /todos, GET /todos, GET /todos/:id, PATCH /todos/:id, DELETE /todos/:id) properly registered with the app instance, middleware correctly configured, and all dependencies declared in package.json. The project builds successfully.\",\"generalPassSummary\":\"Found 1 issue, fixed 1. Issue: UUID generation used randomUUID from crypto module (Node 15.7.0+) but project specifies Node 14.0.0+ compatibility. Fixed by importing v4 from the uuid package already listed in dependencies.\",\"overall\":\"FIXED_ISSUES\",\"finalBuildExitCode\":0}",
+  "actual_cost": 0.109297,
+  "est_low": 0.38700000000000007,
+  "est_high": 0.6772500000000001,
+  "credits": 1,
+  "total_input": 31255,
+  "total_output": 9160,
+  "accuracy": null,
+  "report_ok": false
+}

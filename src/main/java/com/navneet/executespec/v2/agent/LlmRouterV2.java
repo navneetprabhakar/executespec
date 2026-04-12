@@ -1,11 +1,17 @@
 package com.navneet.executespec.v2.agent;
 
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.v2.cost.V2RunCostTracker;
 import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.tool.ToolRegistryV2;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
+import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
+import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
@@ -55,6 +61,8 @@ public class LlmRouterV2 {
     private final OpenAiNativeToolClient openAiNativeToolClient;
     private final GeminiNativeToolClient geminiNativeToolClient;
     private final V2Metrics metrics;
+    private final V2RunCostTracker costTracker;
+    private final SseBroadcaster broadcaster;
 
     // Auto-configured Spring AI bean for Anthropic (the one provider whose native
     // tool calling works correctly on Spring AI 1.1.4). OpenAI and Gemini both have
@@ -82,6 +90,11 @@ public class LlmRouterV2 {
             long elapsed = System.currentTimeMillis() - start;
             metrics.recordLlmLatency(request.provider(), request.model(), "ok",
                     java.time.Duration.ofMillis(elapsed));
+            String runId = request.context().runId();
+            costTracker.record(runId, request.provider(), request.model(), resp);
+            V2RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
+            broadcaster.emit(runId, RunEvent.tokenUsage(runId,
+                    snap.inputTokens(), snap.outputTokens()));
             log.info("LlmRouterV2 <- {} {} ok in {}ms",
                     request.provider(), request.model(), elapsed);
             return resp;
@@ -107,10 +120,30 @@ public class LlmRouterV2 {
 
     private ChatResponse callAnthropic(LlmRequestV2 r, List<ToolCallback> tools) {
         if (anthropicModel == null) throw new IllegalStateException("Anthropic model not configured");
+        // Prompt caching — must-have for cost control on multi-iteration tasks.
+        // Strategy CONVERSATION_HISTORY caches the system prompt, tool definitions,
+        // and messages up through the last-but-one in the history. Each subsequent
+        // iteration pays only for the tail delta. Cache reads are billed at 10% of
+        // the input rate, cache writes at 125% (break-even ~2 iters).
+        // Cache writes require ≥1024 tokens of cached content per Anthropic's API;
+        // Spring AI estimates via contentLengthFunction (defaults to a token-approximating
+        // function). Explicit min-content-length thresholds here ensure the resolver
+        // actually attaches cache_control blocks to SYSTEM + TOOL + long USER/ASSISTANT
+        // messages instead of silently skipping them. Verify activation via
+        // cacheWrite / cacheRead values > 0 on the V2RunCostTracker log lines.
+        AnthropicCacheOptions cache = AnthropicCacheOptions.builder()
+                .strategy(AnthropicCacheStrategy.CONVERSATION_HISTORY)
+                .contentLengthFunction(s -> s == null ? 0 : s.length() / 4)  // ~chars→tokens
+                .messageTypeMinContentLength(MessageType.SYSTEM, 256)
+                .messageTypeMinContentLength(MessageType.USER, 512)
+                .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
+                .messageTypeMinContentLength(MessageType.TOOL, 512)
+                .build();
         var b = AnthropicChatOptions.builder()
                 .model(r.model())
                 .temperature(r.temperature())
                 .toolCallbacks(tools)
+                .cacheOptions(cache)
                 .internalToolExecutionEnabled(false);
         if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
         return anthropicModel.call(new Prompt(r.messages(), b.build()));

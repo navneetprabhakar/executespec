@@ -5,6 +5,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.1.0] — 2026-04-12
+
+### Added
+
+#### Harness V2 — new sequential-first pipeline (production path behind V1's `/api/runs`)
+
+- **`V2RunOrchestrator`** — integration entry point. Persists runs to V1's `pipeline_run` / `agent_task` tables so `GET /api/runs/{id}` stays shape-compatible; only `harnessVersion` distinguishes V2 rows. Pipeline phases: PLANNING → (optional plan gate) → WORKING → REVIEWING → validation report + test generation → terminal. Dedicated `v2-orchestrator` thread pool so V1 and V2 back-pressure independently.
+- **Native tool calling for all three providers** — `LlmRouterV2` dispatches through Spring AI for Anthropic and through custom wrappers for OpenAI (`OpenAiNativeToolClient`) and Gemini (`GeminiNativeToolClient`) to work around Spring AI 1.1.4 regressions (OpenAI `extra_body` 400, Gemini multi-turn `Optional.get()` crash, Gemini 2.5+ `thoughtSignature` round-trip).
+- **Per-complexity tier-based model routing** — `SequentialExecutorV2.tierConfigFor()` resolves a model per task via `ModelResolver`: LOW → LIGHTWEIGHT, MEDIUM → WORKHORSE, HIGH → PLANNING. HIGH tasks on Anthropic upgrade to Sonnet, on OpenAI to gpt-5.4.
+- **Per-complexity iteration + max-token caps** — LOW=12 iters / 4k tokens, MEDIUM=22 / 8k, HIGH=35 / 16k.
+- **Anthropic prompt caching (`CONVERSATION_HISTORY`)** — `AnthropicCacheOptions` with explicit per-message-type `messageTypeMinContentLength` thresholds so cache_control blocks actually emit. Cache reads at 10% of input rate; typical 20-iter task saves ~70% on input tokens. OpenAI + Gemini rely on server-side automatic caching.
+- **Plan approval gate** — PRODUCTION runs pause at `AWAITING_APPROVAL` post-plan, emit `GATE_OPENED` SSE with credits + estimated cost, block on `GateStore.awaitPlanGate()`. PROTOTYPE and `skipApproval=true` runs bypass. `/api/runs/{id}/approve` signals `GateStore.setPlanGate()` directly for V2. Reject → run `CANCELLED`.
+- **Tier-aware cost tracking** — `V2RunCostTracker` records per-call tokens + cost (cache-aware), exposes live snapshot. Pre-plan `estimateRunTierAware()` sums per-task cost using each task's tier-resolved model. Phase-level token attribution (planner / worker / reviewer) via snapshot-diff populates `plannerInputTokens`, `reviewerInputTokens`, etc. on `PipelineRun` so the UI's "Token Usage by Model" panel reconciles. Writes a `run_cost_log` row at terminal.
+- **Workspace + artifacts** — workspace initialized via V1-shared `WorkspaceInitService.ensureRunWorkspace()`. `.agent-context/project.json` written with planner's `project_type` so `DevDockerfileGenerator` picks the right Dockerfile. Planner-authored `README.md` + orchestrator fallback run-meta README. Final `git add -A && git commit` so `/push-github` works.
+- **Design system wiring** — `UiStyleResolver` (reads 5000+ DESIGN.md files under `executespec.designs.root-path`) resolves a design block post-plan from `extractStyleHint(userRequest)` + `plan.projectType()`; block prepended to every worker task's system prompt.
+- **Run title** — `plan.planTitle` → `PipelineRun.runTitle`. Per-agent `*ActualModel` fields populated so the UI no longer shows "unknown".
+- **Reviewer (`ReviewerAgentV3`)** — two passes (general + wiring) post-execute, followed by a final build. Iteration-limit outcomes fall through to the final-build verdict (`CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES`) instead of being misreported as `REVIEW_FAILED`; only hard `ERROR` outcomes map to `REVIEW_FAILED`.
+- **Validation report + test generation** — post-review, synthesizes `ReviewReportV2` + `CompileResult` + `WorkerReport[]` from V2 state and invokes V1's `ValidationReportService.generateAndPersist()`. `TestGenOrchestrator.runTestGenPipeline()` runs next; `TestPreviewCoordinator` auto-starts preview for execution. OpenAI report calls reroute to Anthropic for the narrative generation only (V1 `LlmRouter` still trips the Spring AI 1.1.4 `extra_body` bug; V2 wrapper only fixes the main pipeline).
+- **Preview on V2** — `PreviewService` confirmed harness-agnostic. 501 guards removed from `/preview/start`, `/preview/rebuild`, `/preview/stop`, `/preview/exec` for V2 runs.
+- **SSE event stream** — `V2RunOrchestrator` emits `RUN_STATUS` on every phase + terminal `COMPLETE` + `broadcaster.complete(runId)`. `SequentialExecutorV2` emits `TASK_STATUS` at task start / terminal and persists the same value to `agent_task.status` so polled UI and SSE stream stay in lockstep. `LlmRouterV2` emits `TOKEN_USAGE` per successful dispatch. `PerkyMessenger` rotates encouraging `LOG` messages every 15s during PLANNING / WORKING / REVIEWING.
+- **Deferred-action 501 shim (`V2DeferredActionGuard`)** — retry / pause / resume / rework / reopen-merge / tasks/{t}/retry / implement-suggestions / retry-validation / edit-plan / clarify / merge / chat / apply / iterate / run-tests / apply-test-fixes return HTTP 501 for V2 runs with a feature-name payload for UI toasts. V1 runs unchanged.
+- **V1 classes annotated `@Deprecated(since = "v2")`** — 18 classes + 321 methods across `harness/` (PipelineHarness, SequentialTaskExecutor, TaskCompileSupervisor, SubtaskDecomposer, GapClosingService), `agent/` (WorkerAgent, PlannerAgent, LlmRouter, RequestTriageService), `compiler/CompilerAgent`, `reviewer/ReviewerAgentV2`, and the entire `batch/` package. Shared infrastructure is untouched.
+- **V2 eval harness** — `scripts/v2-eval.sh` submits 3 complexity bands × 3 providers (9 runs, PROTOTYPE mode), polls to terminal, fetches validation reports, emits machine-readable JSON + markdown comparison. Specs in `scripts/v2-eval-specs/{low,medium,high}.txt`; output in `scripts/v2-eval-results/`.
+
+### Changed
+
+- **Default harness** — runs routed via `harness.version` feature flag (`v1` | `v2` | `v2-canary`). V1 remains the default; flip the flag to put V2 in front of all traffic (UX unchanged — same endpoints, same UI).
+- **Run detail page** — nested scroll regions collapsed into one surface so the title bar + status icons scroll with the task list as a single unit.
+- **Live log reconnect** — `useSse` hook no longer clears the log buffer on same-run re-mount; entries survive status-flip re-renders and SSE reconnects.
+- **`RunEvent`** — new `tokenUsage(runId, in, out)` factory. `COST_UPDATE` reserved for terminal; per-call live stream emits `TOKEN_USAGE`.
+- **`PipelineRun.harnessVersion`** — new column (V76 migration) with default `'v1'`. `RunDetail` / `RunSummary` DTOs + `RunMapper` expose it so the frontend can show a V1/V2 badge.
+- **`harness.version` + `harness.v2.canary_percent`** — seeded by V77 migration.
+
+### Fixed
+
+- **Anthropic planner malformed tool payload recovery** — `PlannerAgentV2.salvageTasksFromBlob()` extracts the real tasks array when Anthropic occasionally emits `<parameter name="tasks">[...]` XML inline inside the `smokeTestStrategy` string. Empty-plan runs now fail cleanly with a descriptive reason instead of throwing from `ExecutionRequest.build()`.
+- **Task status stuck on PENDING in UI** — `SequentialExecutorV2.persistTaskStatus` updates `AgentTask.status` transactionally at task start and on every terminal path so polled clients see live progression.
+- **Reviewer false-failure on iteration cap** — see Reviewer entry above.
+- **Test generation target** — `TestGenOrchestrator` now receives the full serialized `PlanV2` JSON (previously received just the plan title, producing zero test tasks).
+- **Validation report `extra_body` error on OpenAI** — V2 swaps `run.aiProvider` to ANTHROPIC for the `ValidationReportService.generateAndPersist` call only, bypassing Spring AI 1.1.4's `extra_body` regression. Restored after the call.
+
+---
+
 ## [2.0.0] — 2026-04-10
 
 ### Added

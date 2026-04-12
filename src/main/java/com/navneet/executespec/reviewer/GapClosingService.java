@@ -45,6 +45,7 @@ import java.util.Set;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class GapClosingService {
 
     /** Maximum gap-closing iterations before giving up. */
@@ -80,6 +81,7 @@ public class GapClosingService {
      * @param reviewModel   the PLANNING-tier model to use for re-scoring
      * @return the final AccuracyReport after all gap-closing cycles
      */
+    @Deprecated(since = "v2")
     public AccuracyReport closeGaps(PipelineRun run, AccuracyReport initial,
                                     String originalGoal, List<ReviewIssue> existingIssues,
                                     ResolvedModel reviewModel) {
@@ -150,6 +152,7 @@ public class GapClosingService {
     // Gap extraction
     // ──────────────────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private List<GapItem> extractGaps(AccuracyReport report) {
         List<GapItem> gaps = new ArrayList<>();
 
@@ -184,6 +187,7 @@ public class GapClosingService {
     }
 
     /** Returns true for documentation-only gaps that don't affect the functional score. */
+    @Deprecated(since = "v2")
     private boolean isDocGap(String req) {
         if (req == null) return false;
         String lower = req.toLowerCase();
@@ -196,6 +200,7 @@ public class GapClosingService {
     // Task construction
     // ──────────────────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private List<AgentTask> buildGapTasks(List<GapItem> gaps, PipelineRun run, int cycle) {
         List<AgentTask> tasks = new ArrayList<>();
         for (int i = 0; i < gaps.size(); i++) {
@@ -229,6 +234,7 @@ public class GapClosingService {
         return tasks;
     }
 
+    @Deprecated(since = "v2")
     private TaskDefinition buildTaskDef(String taskId, String title, GapItem gap, PipelineRun run) {
         String specContext = truncate(run.getUserRequest(), 1_000);
         String objective = switch (gap.type()) {
@@ -271,6 +277,7 @@ public class GapClosingService {
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 
+    @Deprecated(since = "v2")
     private String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...";
