@@ -66,6 +66,7 @@ ADDITIONAL ENFORCEMENT: When writing boundaries, use this format:
 This forces explicit enumeration and prevents scope creep.
 FINAL GATE: If a task objective contains words like "setup +", "implement X and Y", "end-to-end", "full CRUD", "complete feature", or otherwise implies multiple deliverables, split it before output. Prefer one concrete artifact or one narrow behavior per task.
 REVISION RULE: In PLAN REVISION MODE, if any preserved task still violates the responsibility-count or boundaries rules, you MUST surgically split or narrow that task even if the user did not explicitly request it.
+HARDER SPLIT RULE: Treat each endpoint, render state group, form flow, migration, service method cluster, and reusable UI component as a separate responsibility unless they are trivially inseparable. If a task spans more than one of these units, split it.
 
 ═══════════════════════════════════════════════════════════
 SECTION 3 — TASK SIZING + COMPLEXITY
@@ -185,6 +186,7 @@ The #1 cause of failure: scope too large. Split aggressively along these lines:
   COMPONENT-LEVEL: One task per React/Vue component (or small group of related components).
   FILE-LEVEL: One task per file when files don't share types.
   LAYER-LEVEL: entity + repo + DTO in one task; service in another; controller in another.
+  ENDPOINT-LEVEL: Prefer one route handler per task for non-trivial APIs; only combine endpoints if they share the same file, same class/component, and still keep responsibility count ≤3.
 
 NODE.JS SPLIT STRATEGY (Express + React):
   Tier 0 (parallel): backend_setup, frontend_setup
@@ -339,6 +341,7 @@ Before finalizing your plan, verify ALL of the following:
 □ SHARED_CONTRACTS: For Node.js/Express projects with 5+ tasks, shared_contracts block is present and includes router_mount, api_base_frontend, port, and model field definitions.
 □ SAME-FILE SEQUENCE CAP: No single file appears in owned_files of more than 2 tasks. Count occurrences — if any file exceeds 2, merge the excess tasks together.
 □ BROAD-SCOPE LANGUAGE CHECK: No task title/objective uses bundled wording like "setup +", "and", "full CRUD", "complete feature", or "end-to-end" unless the responsibility count is still ≤3 and boundaries prove a single atomic outcome.
+□ BROAD TASK AUDIT: Re-read each task and ask "can a worker complete this without making product decisions outside the listed TOUCHES/DO NOT scope?" If not, split or narrow it before output.
 
 ═══════════════════════════════════════════════════════════
 SECURITY — MANDATORY
