@@ -1,11 +1,13 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-11
+> Last updated: 2026-04-12
 
 ## Architecture
 
-- **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.0
+- **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.4
+- **Harness V2 (in progress):** Sequential-first redesign on `feature/harness-v2`. New package tree `com.navneet.executespec.v2.*`. Native tool calling for all 3 providers (Anthropic, OpenAI, Gemini). See `docs/harness-v2-execution-plan.md`. **V2 naming convention: provider is `gemini` (V1 used `google`)**.
+- **V2 OpenAI native tool calling:** Spring AI 1.1.4 has a regression that adds `extra_body` to OpenAI requests whenever `toolCallbacks` is set, regardless of any other option (verified across `gpt-4o`, `gpt-4o-mini`, `gpt-5.4`, `gpt-5.4-mini`). OpenAI's API rejects this with `Unrecognized request argument supplied: extra_body`. **V2 bypasses Spring AI for OpenAI tool calls** via `com.navneet.executespec.v2.agent.OpenAiNativeToolClient` — direct `RestClient` POST to `/v1/chat/completions`, parses response into Spring AI's `ChatResponse` shape so downstream V2 code stays provider-agnostic. Anthropic + Gemini work fine on Spring AI 1.1.4 — wrapper is OpenAI-only.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app

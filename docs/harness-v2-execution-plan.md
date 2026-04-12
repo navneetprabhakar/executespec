@@ -69,7 +69,9 @@ com.navneet.executespec.v2.smoketest/     — SmokeTestRunner, BuildCommandResol
 - Upgrade from 1.1.0 to the version that supports `GoogleGenAiChatOptions.toolCallbacks()` (target: latest 1.x or 2.x that has Gemini native tool calling)
 - Verify Anthropic and OpenAI tool calling still work on new version
 - Upgrade `AgentModelConfig`, `LlmRouter` (V1 stays working)
-- Test with a standalone API at `/api/v2/test/native-tools?provider={anthropic|openai|google}` that calls each provider with a single tool definition and asserts a structured response
+- Test with a standalone API at `/api/v2/test/native-tools?provider={anthropic|openai|gemini}` that calls each provider with a single tool definition and asserts a structured response
+
+> **Naming convention:** V2 uses `gemini` consistently as the provider name (instead of V1's `google`). The Spring AI library classes are still named `GoogleGenAi*` (we can't rename library code), but every V2-authored identifier — variable, switch case, config key, log tag, metric tag, REST parameter — uses `gemini`.
 
 **P0.2 Redis schema for context persistence**
 - Define key pattern: `v2:agent-ctx:{runId}:{taskId}` → JSON blob
@@ -126,7 +128,7 @@ com.navneet.executespec.v2.smoketest/     — SmokeTestRunner, BuildCommandResol
 - `internalToolExecutionEnabled(false)` — harness keeps loop control (needed for checkpointing and smoke tests)
 
 **P2.2 Failover strategy**
-- Same as V1 (Anthropic→[OpenAI, Google], etc.)
+- Same as V1 (Anthropic→[OpenAI, Gemini], etc.)
 - Stall escalation: WORKHORSE → PLANNING tier on iteration stall
 
 **Deliverable:** LlmRouterV2 with verified native tool calling on all three providers.
@@ -216,7 +218,7 @@ com.navneet.executespec.v2.smoketest/     — SmokeTestRunner, BuildCommandResol
 ### Phase 6 — V2 Batch Execution
 
 **P6.1 BatchClientRouterV2**
-- Same three providers (Anthropic, OpenAI, Google) with native batch APIs
+- Same three providers (Anthropic, OpenAI, Gemini) with native batch APIs
 - Reuses existing `LlmBatchClient` implementations (minor refactor to consume V2 tool schemas)
 
 **P6.2 BatchResumeServiceV2**
@@ -303,6 +305,62 @@ com.navneet.executespec.v2.smoketest/     — SmokeTestRunner, BuildCommandResol
 - SQL views: `run_v1_stats` vs `run_v2_stats` for pricing analytics
 
 **Deliverable:** V2 observability stack + V1/V2 comparison dashboard.
+
+---
+
+### Phase 11 — Frontend Updates
+
+> **Sequencing:** Phase 11 is the **last phase** — runs after all backend phases (0–10) are complete. The feature flag must exist (Phase 9) and observability must be in place (Phase 10) before frontend work starts, so the UI can branch on `harness.version` and consume the new metrics for any in-app dashboards. Frontend lives in `frontend/` (React 18, Vite, TypeScript, Tailwind). All V2-specific components live in `frontend/src/components/v2/` and `frontend/src/pages/v2/` to match the backend isolation.
+
+**P11.1 Plan approval gate (V2)**
+- Component: `frontend/src/components/v2/PlanApprovalV2.tsx`
+- New plan JSON fields surfaced: `buildCommand`, `smokeTestStrategy` (build / preview-health / test-suite), `hardConstraints` per task
+- Per-task display: ownedFiles, dependencies, complexity badge, hard constraints (collapsed by default)
+- Cost estimate + batch-vs-realtime toggle (reused from V1)
+- "Show advanced" expander surfaces smokeTestStrategy choice; default hidden
+
+**P11.2 Run detail view (V2)**
+- Component: `frontend/src/components/v2/RunDetailV2.tsx`
+- Replaces V1's parallel TaskGraph (DAG layout) with a **linear sequential timeline** — tasks render top-to-bottom in execution order
+- Per-task row: status, duration, smoke test outcome badge (pass/fail/retry_success/warning), iteration count
+- Click a task → side panel with worker output stream, tool call log, smoke test stderr/stdout
+- Live SSE updates for new V2 event types (`TaskMergedEvent`, `SmokeTestEvent`, `TaskRetryEvent`)
+- No more subtask grouping (SubtaskDecomposer removed in V2)
+
+**P11.3 Validation report panel (V2)**
+- Update: `frontend/src/components/runs/ValidationReportPanel.tsx`
+- New section: **Smoke Test History** — table of `{taskId, attempt, passed, errorSummary?}` from the report's new `smokeTestHistory` field
+- Visual: green/red dots per attempt, expandable error details
+- No structural changes to existing report sections (accuracy, recommendations, etc.)
+
+**P11.4 Run cards / list views**
+- Update: run list rows show a small **V2 badge** when `run.harnessVersion === "v2"` (during canary rollout, helps identify which runs use which harness)
+- Filter: add "Harness version" filter to the runs list (V1 / V2 / All)
+
+**P11.5 Feature flag admin UI**
+- Update: `frontend/src/pages/AdminFeatureFlagsPage.tsx` (or equivalent)
+- Surface `harness.version` flag with the three values (v1 / v2 / v2-canary) and the canary percentage slider
+- Live preview: "X% of new runs will use V2"
+
+**P11.6 SSE event handler**
+- Update: `frontend/src/lib/sseClient.ts` (or equivalent)
+- Register handlers for new V2 event types
+- Map V1 event types → V2 equivalents where semantically identical (e.g., V1 `TaskComplete` and V2 `TaskMerged` both update task status)
+
+**P11.7 API client**
+- Update: `frontend/src/lib/api.ts`
+- Add types for new plan JSON fields, smoke test history, V2 event payloads
+- Routing: API client picks V1 vs V2 component based on `run.harnessVersion` returned in the `GET /api/runs/{id}` response
+
+**P11.8 Theming/visual continuity**
+- No theme overhaul — V2 reuses existing Tailwind tokens, color palette, component primitives
+- Differentiation is informational (badges, version indicators), not visual
+
+**P11.9 Routing**
+- React Router: `/runs/{id}` inspects `run.harnessVersion` and renders `RunDetailV1` or `RunDetailV2`
+- No URL-level versioning (cleaner UX — users don't need to know which harness ran their spec)
+
+**Deliverable:** Frontend supports both V1 and V2 runs simultaneously (during canary), with V2-specific UI for sequential timeline, smoke test outcomes, and new plan fields.
 
 ---
 
@@ -429,6 +487,7 @@ Phase 7  Reviewer (with wiring phase) + report updates
 Phase 8  Context persistence + crash recovery
 Phase 9  Feature flag rollout
 Phase 10 Observability + V1/V2 comparison
+Phase 11 Frontend updates (last — depends on flag + observability + all backend phases)
 ```
 
-Each phase is independently testable. Phases 1–4 have no external dependencies. Phases 5–8 depend on 1–4. Phases 9–10 are cross-cutting.
+Each phase is independently testable. Phases 1–4 have no external dependencies. Phases 5–8 depend on 1–4. Phases 9–10 are cross-cutting. Phase 11 (frontend) is the final phase — runs after all backend work is complete and stable.
