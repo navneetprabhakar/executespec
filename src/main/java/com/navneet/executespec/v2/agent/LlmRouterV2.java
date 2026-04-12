@@ -7,8 +7,6 @@ import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.google.genai.GoogleGenAiChatModel;
-import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -54,15 +52,14 @@ public class LlmRouterV2 {
 
     private final ToolRegistryV2 toolRegistry;
     private final OpenAiNativeToolClient openAiNativeToolClient;
+    private final GeminiNativeToolClient geminiNativeToolClient;
 
-    // Auto-configured Spring AI beans for the two providers we DO use Spring AI for.
+    // Auto-configured Spring AI bean for Anthropic (the one provider whose native
+    // tool calling works correctly on Spring AI 1.1.4). OpenAI and Gemini both have
+    // Spring AI 1.1.4 bugs and go through our own wrappers instead.
     @Autowired(required = false)
     @Qualifier("anthropicChatModel")
     private AnthropicChatModel anthropicModel;
-
-    @Autowired(required = false)
-    @Qualifier("googleGenAiChatModel")
-    private GoogleGenAiChatModel geminiModel;
 
     /**
      * Dispatch a single LLM call.
@@ -108,14 +105,16 @@ public class LlmRouterV2 {
     }
 
     private ChatResponse callGemini(LlmRequestV2 r, List<ToolCallback> tools) {
-        if (geminiModel == null) throw new IllegalStateException("Gemini model not configured");
-        var b = GoogleGenAiChatOptions.builder()
+        // Routes through GeminiNativeToolClient — direct REST POST, bypasses Spring AI
+        // 1.1.4's broken multi-turn response parsing (Optional.get() on empty Optional
+        // inside GoogleGenAiChatModel.responseCandidateToGeneration).
+        return geminiNativeToolClient.call(GeminiNativeToolClient.GeminiToolCallRequest.builder()
                 .model(r.model())
+                .messages(r.messages())
+                .tools(tools)
                 .temperature(r.temperature())
-                .toolCallbacks(tools)
-                .internalToolExecutionEnabled(false);
-        if (r.maxTokens() != null) b.maxOutputTokens(r.maxTokens());
-        return geminiModel.call(new Prompt(r.messages(), b.build()));
+                .maxOutputTokens(r.maxTokens())
+                .build());
     }
 
     private ChatResponse callOpenAi(LlmRequestV2 r, List<ToolCallback> tools) {
