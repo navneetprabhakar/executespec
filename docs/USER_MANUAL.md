@@ -66,7 +66,7 @@ To create a project:
 
 ## 2. AI Provider Setup
 
-ExecuteSpec routes all AI calls through one of three LLM providers: **Anthropic** (Claude), **OpenAI** (GPT), or **Google** (Gemini). Each provider is backed by a dedicated thread pool with priority queuing — your runs are never delayed by other providers' congestion.
+ExecuteSpec routes all AI calls through one of three LLM providers: **Anthropic** (Claude), **OpenAI** (GPT), or **Gemini** (Google AI Studio). Each provider is backed by a dedicated thread pool with priority queuing — your runs are never delayed by other providers' congestion.
 
 ### 2.1 Platform-Managed Keys (MANAGED mode)
 
@@ -445,7 +445,7 @@ The estimated cost is shown on the Plan Approval screen before you commit.
 
 ### 9.3 Batch Discount
 
-Choosing **Batch** execution at plan approval reduces the credit cost by **50%**. Batch execution uses provider batch APIs (Anthropic Message Batches, OpenAI Batch API, Google Batch Mode), which have lower per-token pricing.
+Choosing **Batch** execution at plan approval reduces the credit cost by **50%**. Batch execution uses provider batch APIs (Anthropic Message Batches, OpenAI Batch API, Gemini Batch Mode), which have lower per-token pricing.
 
 ### 9.4 Credit Refunds
 

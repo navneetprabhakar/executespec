@@ -23,7 +23,8 @@ public record ExecutionRequest(
         String model,
         ExecutionContext runContext,
         Integer maxIterationsPerTask,
-        Boolean enableSmokeTests) {
+        Boolean enableSmokeTests,
+        String designBlock) {
 
     public ExecutionRequest {
         if (plan == null) throw new IllegalArgumentException("plan required");

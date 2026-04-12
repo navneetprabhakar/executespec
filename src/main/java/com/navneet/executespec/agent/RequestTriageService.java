@@ -35,6 +35,7 @@ import java.util.stream.Stream;
 @Service
 @Slf4j
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class RequestTriageService {
 
     public enum TriageResult { SINGLE_SHOT, MEDIUM, MULTI_TASK }
@@ -92,6 +93,7 @@ public class RequestTriageService {
         ")"
     );
 
+    @Deprecated(since = "v2")
     public TriageResult classify(String userRequest, String runId, LlmProvider provider) {
         if (!triageEnabled) {
             log.info("[Triage] Disabled via config — defaulting to MULTI_TASK for run {}", runId);
@@ -162,6 +164,7 @@ public class RequestTriageService {
         }
     }
 
+    @Deprecated(since = "v2")
     private TriageClassification parseTriageResponse(String text, String runId) {
         try {
             // Strip markdown fences if present
@@ -191,6 +194,7 @@ public class RequestTriageService {
     }
 
     /** Best-effort file tree extraction from workspace/{runId}. Returns empty string if not available. */
+    @Deprecated(since = "v2")
     private String extractFileTree(String runId) {
         Path workspace = Path.of("workspace", runId);
         if (!Files.exists(workspace)) return "(workspace not yet created)";
@@ -208,6 +212,7 @@ public class RequestTriageService {
     }
 
     /** Detects framework names from a file listing string. */
+    @Deprecated(since = "v2")
     private String detectFrameworks(String fileTree) {
         List<String> found = new ArrayList<>();
         if (fileTree.contains("pom.xml")) found.add("Spring Boot (Maven)");

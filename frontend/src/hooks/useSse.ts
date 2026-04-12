@@ -22,21 +22,30 @@ export function useSse(runId: string | null) {
       return;
     }
 
-    clearEntries();
+    // Only clear the log buffer when switching to a different run. Remounting the
+    // hook for the SAME run (e.g. after a status flip re-renders RunDetail, or an
+    // SSE reconnect re-triggers the effect) should preserve the entries collected
+    // so far — otherwise the live log appears to vanish when a run completes.
+    const prevRunId = useSseStore.getState().currentRunId;
+    const isNewRun = prevRunId !== runId;
+    if (isNewRun) clearEntries();
     setRunId(runId);
     attemptRef.current = 0;
 
     // Pre-populate with historical messages so revisiting a completed run shows its log.
-    getMessages(runId).then((msgs) => {
-      msgs.forEach((msg, i) => {
-        addEntry({
-          id: `hist-${i}-${msg.sentAt}`,
-          type: 'LOG',
-          data: { message: `[${msg.fromAgent}] ${msg.contentSummary}`, payload: `[${msg.fromAgent}] ${msg.contentSummary}` },
-          timestamp: new Date(msg.sentAt).getTime(),
+    // Only do this for NEW run IDs so we don't double-prepend history on remount.
+    if (isNewRun) {
+      getMessages(runId).then((msgs) => {
+        msgs.forEach((msg, i) => {
+          addEntry({
+            id: `hist-${i}-${msg.sentAt}`,
+            type: 'LOG',
+            data: { message: `[${msg.fromAgent}] ${msg.contentSummary}`, payload: `[${msg.fromAgent}] ${msg.contentSummary}` },
+            timestamp: new Date(msg.sentAt).getTime(),
+          });
         });
-      });
-    }).catch(() => { /* non-fatal */ });
+      }).catch(() => { /* non-fatal */ });
+    }
 
     async function connect() {
       esRef.current?.close();

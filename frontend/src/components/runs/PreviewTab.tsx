@@ -380,6 +380,18 @@ export default function PreviewTab({ runId }: { runId: string }) {
               {status.url}
             </a>
           )}
+          {isRunning && status?.url && isBackendOnly && (
+            <a
+              href={`${status.url.replace(/\/$/, '')}/docs`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-accent-blue hover:underline mt-0.5"
+              title="Open Swagger UI / OpenAPI docs"
+            >
+              <ExternalLink className="h-3 w-3" />
+              View API Docs
+            </a>
+          )}
           {isRunning && status?.backendUrl && status?.frontendUrl && (
             <div className="flex items-center gap-3 mt-0.5 text-xs text-muted">
               <span>Backend: <span className="text-secondary">{status.backendUrl}</span></span>

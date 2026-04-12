@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "high",
+  "run_id": "e1a8fe6f-25ae-43b6-b024-5972124e972e",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-12T14:02:50.999973Z",
+  "completedAt": "2026-04-12T14:11:17.528467Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildPassed\":true,\"totalLatencyMs\":154032,\"wiringPassSummary\":\"Wiring review complete. No wiring issues found. All Spring Boot components are properly annotated (@RestController, @Service, @Repository, @ControllerAdvice, @Entity), all dependencies use constructor injection, component scanning is correctly configured with explicit scanBasePackages, and the project builds successfully.\",\"generalPassSummary\":\"\",\"overall\":\"FIXED_ISSUES\",\"finalBuildExitCode\":0}",
+  "actual_cost": 1.324444,
+  "est_low": 0.45350000000000007,
+  "est_high": 0.7936250000000001,
+  "credits": 1,
+  "total_input": 900005,
+  "total_output": 40923,
+  "accuracy": null,
+  "report_ok": false
+}

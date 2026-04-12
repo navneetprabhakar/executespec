@@ -31,6 +31,7 @@ public record PlanV2(
         String projectType,
         String buildCommand,
         SmokeTestStrategy smokeTestStrategy,
+        RuntimeSurface runtimeSurface,
         List<PlannedTaskV2> tasks,
         Classification classification) {
 
@@ -38,6 +39,7 @@ public record PlanV2(
         if (planTitle == null || planTitle.isBlank()) planTitle = "(untitled plan)";
         if (planSummary == null) planSummary = "";
         if (smokeTestStrategy == null) smokeTestStrategy = SmokeTestStrategy.BUILD;
+        if (runtimeSurface == null) runtimeSurface = RuntimeSurface.HTTP;
         if (tasks == null) tasks = List.of();
         if (classification == null) classification = Classification.MEDIUM;
     }
@@ -49,5 +51,42 @@ public record PlanV2(
         PREVIEW_HEALTH,
         /** Run the project's test suite. Most thorough, slowest. */
         TEST_SUITE
+    }
+
+    /**
+     * How the generated code is invoked at runtime. Drives:
+     * <ul>
+     *   <li>Test-generation strategy (HTTP → live endpoint probe, CLI → stdin/stdout
+     *       fixtures, LIBRARY → unit tests only).</li>
+     *   <li>Preview rendering (HTTP backend → show Swagger UI; CLI → show terminal
+     *       replay; LIBRARY → hide the preview tab).</li>
+     *   <li>Planner constraints (HTTP backend → require {@code openapi.yaml}).</li>
+     * </ul>
+     */
+    public enum RuntimeSurface {
+        /** Server accepting HTTP traffic (REST, GraphQL, gRPC-web, WebSocket). Default. */
+        HTTP,
+        /** Command-line program invoked via args / stdin, assertions against stdout + exit code. */
+        CLI,
+        /** Importable library / package — no standalone entry point. Unit-test surface only. */
+        LIBRARY,
+        /** Static HTML/JS frontend with no backend. */
+        STATIC_WEB
+    }
+
+    /**
+     * Returns true when the project is an HTTP backend that should ship an
+     * {@code openapi.yaml} spec + Swagger docs route. Used by the planner prompt
+     * validator and the preview-tab renderer.
+     */
+    public boolean requiresOpenApiSpec() {
+        if (runtimeSurface != RuntimeSurface.HTTP) return false;
+        if (projectType == null) return false;
+        String p = projectType.toLowerCase().replace('-', '_');
+        return p.contains("spring_boot")
+                || p.equals("node_backend")
+                || p.equals("python")
+                || p.equals("go")
+                || p.equals("rust");
     }
 }

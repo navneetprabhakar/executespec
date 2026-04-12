@@ -49,7 +49,7 @@ ExecuteSpec is a multi-agent autonomous coding system that transforms natural la
 - **Progressive merge:** Each task's branch is merged to main immediately after completion, enabling early conflict detection.
 - **GitHub integration:** Automatic branch creation (`executespec/{runId-short}`) and PR opening for existing-repo runs.
 - **Multi-tenant:** Organizations, projects, tiered access, and per-user/org API key management.
-- **Provider failover:** 3-provider fallback chains (Anthropic, Google Gemini, OpenAI) with health-based circuit breaker (Redis-backed, 5-failure threshold, 60s TTL recovery).
+- **Provider failover:** 3-provider fallback chains (Anthropic, Gemini, OpenAI) with health-based circuit breaker (Redis-backed, 5-failure threshold, 60s TTL recovery).
 - **Recovery:** Automatic detection and recovery of stuck tasks with configurable retry and model escalation.
 - **Multi-gateway billing:** Razorpay + Stripe via PaymentGatewayRouter with full payment audit trail.
 - **OAuth2 login:** Google and GitHub social login alongside JWT email/password authentication.
@@ -398,7 +398,7 @@ PostMergeOrchestrator.onMergeCompleted(event)
 
 Before calling the LLM, `PlannerAgent` inspects the user goal for async Python dependency patterns (`asyncpg`, `sqlalchemy[asyncio]`, `sqlalchemy.ext.asyncio`, `redis.asyncio`, `aioredis`). When detected, it injects a `<complexity_signal>` XML block into the planner prompt that:
 - Guides task decomposition: dedicated setup task for async DB engine + session factory, separate task for async Redis client
-- Warns about Google Gemini's weaker async Python support and recommends sync drivers if Google provider is selected
+- Warns about Gemini's weaker async Python support and recommends sync drivers if Gemini provider is selected
 
 This prevents the planner from under-scoping async Python setups, which were a common source of PARTIAL runs before this fix.
 

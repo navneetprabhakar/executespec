@@ -67,11 +67,19 @@ public class BuildProjectTool implements Tool {
             ProcessBuilder pb = new ProcessBuilder(List.of("/bin/sh", "-c", bc.command()));
             pb.directory(ctx.workspaceRoot().toFile());
             Map<String, String> env = pb.environment();
-            String path = env.get("PATH");
+            String inheritedPath = env.get("PATH");
             String home = env.get("HOME");
             String javaHome = env.get("JAVA_HOME");
             env.clear();
-            if (path != null) env.put("PATH", path);
+            // Augment PATH with common toolchain locations. On macOS/Linux the JVM's
+            // inherited PATH often omits Homebrew + /usr/local/bin, which made smoke
+            // tests fail with exit=127 (`npm: command not found`, `mvn: not found`)
+            // even though the code compiled fine outside the harness.
+            String extraPath = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+            String mergedPath = inheritedPath == null || inheritedPath.isBlank()
+                    ? extraPath
+                    : inheritedPath + ":" + extraPath;
+            env.put("PATH", mergedPath);
             if (home != null) env.put("HOME", home);
             if (javaHome != null) env.put("JAVA_HOME", javaHome);
             pb.redirectErrorStream(true);
