@@ -112,12 +112,19 @@ public class LlmRouterV2 {
         // Routes through GeminiNativeToolClient — direct REST POST, bypasses Spring AI
         // 1.1.4's broken multi-turn response parsing (Optional.get() on empty Optional
         // inside GoogleGenAiChatModel.responseCandidateToGeneration).
+        //
+        // When the caller supplied an explicit toolsOverride (e.g. the planner restricting
+        // to submitPlan only), force Gemini to ANY mode — the model MUST emit a function
+        // call. This prevents gemini-2.5-flash's "emit Python code as function call"
+        // degradation under heavy prompts that otherwise causes MALFORMED_FUNCTION_CALL.
+        boolean forceToolCall = r.toolsOverride() != null && !r.toolsOverride().isEmpty();
         return geminiNativeToolClient.call(GeminiNativeToolClient.GeminiToolCallRequest.builder()
                 .model(r.model())
                 .messages(r.messages())
                 .tools(tools)
                 .temperature(r.temperature())
                 .maxOutputTokens(r.maxTokens())
+                .forceToolCall(forceToolCall)
                 .build());
     }
 
