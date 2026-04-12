@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +59,7 @@ public class ContextStoreV2 {
     private StringRedisTemplate redis;
 
     private final ObjectMapper objectMapper;
+    private final V2Metrics metrics;
 
     /** Compose the Redis key for a given ExecutionContext. */
     public static String keyFor(String runId, String taskId) {
@@ -77,6 +79,7 @@ public class ContextStoreV2 {
         if (redis == null) {
             log.debug("ContextStoreV2 save SKIPPED (Redis not wired) run={} task={}",
                     ctx.runId(), ctx.taskId());
+            metrics.recordContextSave("skipped", 0);
             return 0;
         }
         try {
@@ -86,10 +89,12 @@ public class ContextStoreV2 {
             int size = json.getBytes(StandardCharsets.UTF_8).length;
             log.debug("ContextStoreV2 save OK run={} task={} iter={} bytes={}",
                     ctx.runId(), ctx.taskId(), iteration, size);
+            metrics.recordContextSave("ok", size);
             return size;
         } catch (Exception e) {
             log.warn("ContextStoreV2 save FAILED run={} task={} iter={}: {}",
                     ctx.runId(), ctx.taskId(), iteration, e.getMessage());
+            metrics.recordContextSave("failed", 0);
             return 0;
         }
     }

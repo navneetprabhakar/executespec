@@ -2,6 +2,7 @@ package com.navneet.executespec.v2.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.v2.observability.V2Metrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -46,12 +47,17 @@ public class PlannerAgentV2 {
 
     private final LlmRouterV2 router;
     private final ObjectMapper objectMapper;
+    private final V2Metrics metrics;
 
     public PlanV2 plan(PlannerRequestV2 req) {
-        if (req.classification() == Classification.SINGLE_SHOT) {
-            return synthesizeSingleShotPlan(req);
-        }
-        return plannerViaLlm(req);
+        long start = System.currentTimeMillis();
+        PlanV2 plan = (req.classification() == Classification.SINGLE_SHOT)
+                ? synthesizeSingleShotPlan(req)
+                : plannerViaLlm(req);
+        metrics.recordPlannerLatency(req.classification().name(), req.provider(), req.model(),
+                java.time.Duration.ofMillis(System.currentTimeMillis() - start));
+        metrics.recordPlannerTaskCount(req.classification().name(), plan.tasks().size());
+        return plan;
     }
 
     // ─── SINGLE_SHOT fast path ──────────────────────────────────────────────
