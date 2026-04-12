@@ -231,27 +231,55 @@ TASK COUNT GUIDELINES:
 INTERFACE CONTRACTS: When task B depends on task A's output, state the expected interface in B's
 objective. Example: "Create UserService using UserRepository.findByEmail(String email) from task A."
 
-CROSS-TASK CONTRACTS — MANDATORY for Node.js/Express projects with 5+ tasks:
-Add a top-level "shared_contracts" key listing:
-  1. The EXACT router mount path (e.g., app.use('/api', router)) so all route tasks know
-     their internal paths MUST NOT repeat '/api'.
-  2. The EXACT data model field names (so frontend and backend tasks use the same names).
-  3. The EXACT relative API base used by frontend (always '/api' — never 'http://localhost:...').
-  4. The server PORT env var and default value.
+CROSS-TASK CONTRACTS — MANDATORY for ALL languages when the plan has 3+ tasks that share
+data models, API contracts, or module interfaces:
 
-Example shared_contracts block (add to your JSON output for multi-task Express projects):
+This is the single most important section for multi-task accuracy. Workers write code in
+isolation and cannot see each other's output. shared_contracts is the only shared truth.
+Without it, field name mismatches and API path inconsistencies are guaranteed.
+
+For ALL project types with 3+ tasks, the shared_contracts block MUST include:
+  1. Shared data model field names and types (e.g. Expense.id is String not Long)
+  2. API endpoint paths and HTTP methods (exact paths workers must implement)
+  3. The server PORT and how it is configured
+  4. Any environment variable that multiple tasks need to agree on
+
+Additional per-language requirements:
+  Node.js/Express:
+    - The EXACT router mount path (e.g., app.use('/api', router)) — internal routes must NOT repeat '/api'
+    - The EXACT relative API base for frontend calls (always '/api' — never 'http://localhost:...')
+  Spring Boot:
+    - The base package (e.g., com.example.app) — ALL classes must be under this package
+    - The context path if non-default (/api prefix configured in application.yml)
+    - Entity field names and types (e.g., item.id is Long, item.name is String)
+  Python/FastAPI/Flask:
+    - The module root for imports (e.g., from app.models import X, not from models import X)
+    - Pydantic/dataclass field names and types used across multiple route files
+  Go:
+    - The module path from go.mod
+    - Struct field names shared between handler and service layers
+  Rust:
+    - The crate name and module structure (which modules are declared in lib.rs or main.rs)
+    - Struct field names used across multiple files
+
+Example shared_contracts block (adapt for your project type):
   "shared_contracts": {
     "router_mount": "app.use('/api', router) — internal routes must NOT start with /api",
     "api_base_frontend": "All frontend fetch calls use relative path: fetch('/api/...')",
     "port": "process.env.PORT || 3001",
     "models": {
-      "Expense": "{ id: string, title: string, amount: number, category: string, date: string, notes: string }"
-    }
+      "Expense": "{ id: string, title: string, amount: number, category: string, date: string }"
+    },
+    "endpoints": [
+      { "method": "GET",  "path": "/api/expenses" },
+      { "method": "POST", "path": "/api/expenses" },
+      { "method": "DELETE", "path": "/api/expenses/:id" }
+    ]
   }
 
 Workers read this from task-assignments.json before writing code. It eliminates router
-namespace bugs and data field inconsistencies without requiring workers to guess.
-For Java/Spring and Python projects: include the base package path and DTO field names instead.
+namespace bugs, field name mismatches, and cross-task import failures without requiring
+workers to guess.
 
 ═══════════════════════════════════════════════════════════
 SECTION 6 — OUTPUT FORMAT + EXAMPLES
@@ -275,7 +303,7 @@ markdown fences. Every task requires ALL fields listed below.
   },
   "tasks": [
     {
-      "task_id": "snake_case_identifier_max_30_chars",
+      "task_id": "snake_case_identifier_max_30_chars",  // RESERVED: never use "module_wiring" — injected by harness
       "task_layer": "BACKEND",
       "title": "One line, imperative: Create X / Add Y / Implement Z",
       "objective": "Precise description with exact file paths, class names, method signatures. (Responsibility count: X files + Y classes + Z components = TOTAL)",
@@ -340,7 +368,8 @@ Before finalizing your plan, verify ALL of the following:
 □ TASK COUNT: Total tasks ≤25. Merge trivially small tasks if approaching the limit.
 □ ROUTER ISOLATION: No route handler repeats the mount prefix (/api/users not /api/api/users).
 □ RESPONSIBILITY COUNT: Every task objective includes explicit responsibility count. If any task count exceeds 3, reject the design and split before output.
-□ SHARED_CONTRACTS: For Node.js/Express projects with 5+ tasks, shared_contracts block is present and includes router_mount, api_base_frontend, port, and model field definitions.
+□ SHARED_CONTRACTS: For ALL project types with 3+ tasks that share data models or API paths, shared_contracts block is present and includes endpoint paths, model field names/types, server port, and language-specific wiring details (router_mount for Express, base package for Spring, module root for Python, etc.).
+□ NO WIRING TASK: Do NOT create a task with task_id "module_wiring" or title containing "wire all modules" — this task is automatically injected by the harness post-processing for eligible plans. Creating it yourself will cause a duplicate.
 □ SAME-FILE SEQUENCE CAP: No single file appears in owned_files of more than 2 tasks. Count occurrences — if any file exceeds 2, merge the excess tasks together.
 □ BROAD-SCOPE LANGUAGE CHECK: No task title/objective uses bundled wording like "setup +", "and", "full CRUD", "complete feature", or "end-to-end" unless the responsibility count is still ≤3 and boundaries prove a single atomic outcome.
 □ BROAD TASK AUDIT: Re-read each task and ask "can a worker complete this without making product decisions outside the listed TOUCHES/DO NOT scope?" If not, split or narrow it before output.

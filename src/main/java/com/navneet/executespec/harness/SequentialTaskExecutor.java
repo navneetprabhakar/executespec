@@ -259,6 +259,20 @@ public class SequentialTaskExecutor {
                 }
             }
 
+            // Inter-tier progression stall check: warn user if spending fast but completing slowly.
+            // This is NOT a hard stop — emits a warning SSE so the user can cancel before hitting the ceiling.
+            if (runCostBudgetService.isProgressionStalled(runId, completed.size(), tasks.size())) {
+                String tier = runCostBudgetService.getRunTier(runId);
+                Double budget = runCostBudgetService.getBudget(runId);
+                double currentCost = runCostBudgetService.getCurrentCost(runId);
+                log.warn("[CostBudget] Run {} progression stalled: {}/{} tasks done at ${} spent — emitting warning",
+                        runId, completed.size(), tasks.size(), String.format("%.2f", currentCost));
+                sseBroadcaster.emit(runId, RunEvent.log(runId, "pipeline",
+                        String.format("⚠️ COST_STALL_WARNING: $%.2f spent but only %d/%d tasks complete. " +
+                                "Workers may be stuck in read loops. Consider cancelling to avoid further cost.",
+                                currentCost, completed.size(), tasks.size())));
+            }
+
             // Inter-tier cost budget check: stop before starting next tier if hard cap reached
             if (runCostBudgetService.isOverBudget(runId)) {
                 String tier = runCostBudgetService.getRunTier(runId);

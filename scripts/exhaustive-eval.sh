@@ -26,15 +26,20 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
 PASSWORD="${E2E_PASSWORD:-REDACTED_FOR_PUBLIC_RELEASE}"
-PROVIDERS="${PROVIDERS:-ANTHROPIC OPENAI}"
+PROVIDERS="${PROVIDERS:-ANTHROPIC OPENAI GOOGLE}"
 SKIP_REPORT="${SKIP_REPORT:-0}"
+# START_SPEC: if set, skip all specs before this one (allows resuming mid-suite)
+# Can be per-provider: "ANTHROPIC=backend_python OPENAI=fullstack_spring GOOGLE=backend_spring"
+START_SPEC="${START_SPEC:-}"
 
 POLL_INTERVAL=12        # seconds between status polls
 STUCK_THRESHOLD=900     # 15 min with no status change = stuck
 REPORT_WAIT=360         # 6 min max to wait for validation report
 
 RESULTS_DIR="scripts/exhaustive-eval-results"
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+# APPEND_TIMESTAMP: if set, reuse an existing run set (append to existing per-provider files)
+APPEND_TIMESTAMP="${APPEND_TIMESTAMP:-}"
+TIMESTAMP="${APPEND_TIMESTAMP:-$(date +%Y%m%d-%H%M%S)}"
 RESULTS_JSONL="$RESULTS_DIR/runs-$TIMESTAMP.jsonl"
 REPORT_MD="$RESULTS_DIR/critic-report-$TIMESTAMP.md"
 RESULTS_JSON="$RESULTS_DIR/eval-$TIMESTAMP.json"
@@ -416,16 +421,17 @@ poll_run() {
     local status
     status=$(jq -r '.status // ""' "$tmp" 2>/dev/null || echo "")
 
-    # Log on every status transition
+    # Log on every status transition — use >&2 so log lines don't pollute
+    # the stdout return value (caller captures stdout to get the tmp file path)
     if [[ "$status" != "$last_status" ]]; then
-      log "${DIM}[$provider/$spec_name]${NC} → ${BOLD}$status${NC} (${total_elapsed}s)"
+      log "${DIM}[$provider/$spec_name]${NC} → ${BOLD}$status${NC} (${total_elapsed}s)" >&2
       last_status="$status"
       last_change_elapsed=$total_elapsed
     fi
 
     case "$status" in
       COMPLETE|FAILED|PARTIAL)
-        echo "$tmp"   # return path to result file
+        echo "$tmp"   # return path to result file (only stdout output)
         return 0
         ;;
     esac
@@ -433,7 +439,7 @@ poll_run() {
     # Stuck detection: same non-terminal status for > STUCK_THRESHOLD seconds
     local since_change=$(( total_elapsed - last_change_elapsed ))
     if [[ $since_change -gt $STUCK_THRESHOLD && -n "$status" ]]; then
-      warn "[$provider/$spec_name] Stuck in '$status' for ${since_change}s → cancelling"
+      warn "[$provider/$spec_name] Stuck in '$status' for ${since_change}s → cancelling" >&2
       cancel_run "$run_id"
       printf '{"status":"TIMEOUT","stuck_in":"%s","runId":"%s"}' "$status" "$run_id" > "$tmp"
       echo "$tmp"
@@ -444,7 +450,7 @@ poll_run() {
     total_elapsed=$((total_elapsed + POLL_INTERVAL))
   done
 
-  warn "[$provider/$spec_name] Max timeout ${timeout}s reached → cancelling"
+  warn "[$provider/$spec_name] Max timeout ${timeout}s reached → cancelling" >&2
   cancel_run "$run_id"
   printf '{"status":"TIMEOUT","stuck_in":"unknown","runId":"%s"}' "$run_id" > "$tmp"
   echo "$tmp"
@@ -477,13 +483,16 @@ fetch_report() {
 # Detect if the run used a different provider than requested (failover)
 detect_failover() {
   local provider="$1" worker_model="$2"
-  if [[ "$provider" == "ANTHROPIC" && "$worker_model" == *"gpt"* ]]; then
-    echo "true"
-  elif [[ "$provider" == "OPENAI" && "$worker_model" == *"claude"* ]]; then
-    echo "true"
-  else
-    echo "false"
-  fi
+  case "$provider" in
+    ANTHROPIC)
+      [[ "$worker_model" == *"gpt"* || "$worker_model" == *"gemini"* ]] && echo "true" || echo "false" ;;
+    OPENAI)
+      [[ "$worker_model" == *"claude"* || "$worker_model" == *"gemini"* ]] && echo "true" || echo "false" ;;
+    GOOGLE)
+      [[ "$worker_model" == *"gpt"* || "$worker_model" == *"claude"* ]] && echo "true" || echo "false" ;;
+    *)
+      echo "false" ;;
+  esac
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -669,16 +678,34 @@ run_provider_suite() {
   local total="${#SPEC_ORDER[@]}"
   local idx=0
 
-  hdr "Provider Suite: $provider  ($total specs, sequential)"
+  # Resolve per-provider start spec from START_SPEC env
+  # Format: "ANTHROPIC=backend_python OPENAI=fullstack_spring" or just "backend_python" (all providers)
+  local start_spec=""
+  if [[ -n "$START_SPEC" ]]; then
+    if echo "$START_SPEC" | grep -q "${provider}="; then
+      start_spec=$(echo "$START_SPEC" | grep -o "${provider}=[^ ]*" | cut -d= -f2)
+    elif ! echo "$START_SPEC" | grep -q "="; then
+      start_spec="$START_SPEC"  # bare value applies to all providers
+    fi
+  fi
+
+  local skip=true
+  [[ -z "$start_spec" ]] && skip=false  # no start_spec = run everything
+
+  hdr "Provider Suite: $provider  ($total specs, sequential${start_spec:+ — resuming from $start_spec})"
 
   for spec_name in "${SPEC_ORDER[@]}"; do
     idx=$((idx + 1))
+    # Skip until we reach start_spec
+    if $skip; then
+      [[ "$spec_name" == "$start_spec" ]] && skip=false || continue
+    fi
     log "[$provider] ── Spec $idx/$total: $spec_name ──"
     run_single_spec "$provider" "$spec_name"
     sleep 3  # brief gap between runs
   done
 
-  ok "[$provider] Suite complete ($total specs)"
+  ok "[$provider] Suite complete"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1076,6 +1103,12 @@ PYEOF
 
 print_live_table() {
   local provider="$1"
+  print_live_table_file "$provider" "$RESULTS_JSONL"
+}
+
+# Variant that accepts an explicit JSONL file path (used during parallel runs)
+print_live_table_file() {
+  local provider="$1" jsonl_file="$2"
   echo ""
   hdr "Live Results — $provider"
   printf "${BOLD}  %-25s %-10s %-8s %-6s %-10s %-8s %-8s${NC}\n" \
@@ -1101,7 +1134,7 @@ print_live_table() {
 
     printf "  ${color}%-25s %-10s %-8s %-6s %-10s %-8s %-8s${NC}\n" \
       "$spec" "$status" "${ws}s" "$tt" "\$$cost" "$sc" "$gr"
-  done < "$RESULTS_JSONL"
+  done < "$jsonl_file"
   echo ""
 }
 
@@ -1114,23 +1147,54 @@ touch "$RESULTS_JSONL"
 
 total_specs="${#SPEC_ORDER[@]}"
 total_providers=$(echo "$PROVIDERS" | wc -w | tr -d ' ')
-est_hours=$(echo "scale=1; $total_specs * 18 * $total_providers / 3600" | bc 2>/dev/null || echo "~2")
+est_hours=$(echo "scale=1; $total_specs * 18 / 3600" | bc 2>/dev/null || echo "~1.3")
 
 hdr "ExecuteSpec — Exhaustive Provider Eval"
-echo -e "  Providers : ${BOLD}$PROVIDERS${NC}"
+echo -e "  Providers : ${BOLD}$PROVIDERS${NC}  (running in parallel)"
 echo -e "  Specs     : ${BOLD}$total_specs per provider${NC}  (1 HTML · 5 Fibonacci · 5 Full-stack · 5 Backend)"
 echo -e "  Total runs: ${BOLD}$(( total_specs * total_providers ))${NC}"
 echo -e "  UI style  : ${BOLD}$RANDOM_UI${NC}  (for HTML spec)"
-echo -e "  Est. time : ${BOLD}~${est_hours}h${NC}  (sequential per provider)"
+echo -e "  Est. time : ${BOLD}~${est_hours}h${NC}  (providers run in parallel, sequential within each)"
 echo -e "  Results   : ${BOLD}$RESULTS_JSONL${NC}"
 echo ""
 
 auth_login
 
+# ── Parallel provider execution ─────────────────────────────────────────────
+# Each provider writes to its own per-provider JSONL to avoid interleaving;
+# files are merged into RESULTS_JSONL after all providers finish.
+# Uses bash 3-compatible approach (no associative arrays).
+
+PROVIDER_PID_FILE="$RESULTS_DIR/pids-$TIMESTAMP.txt"
+> "$PROVIDER_PID_FILE"
+
 for PROVIDER in $PROVIDERS; do
-  run_provider_suite "$PROVIDER"
-  print_live_table "$PROVIDER"
+  prov_jsonl="$RESULTS_DIR/runs-$TIMESTAMP-${PROVIDER}.jsonl"
+  touch "$prov_jsonl"
+
+  # Run in subshell; override RESULTS_JSONL so appends go to provider file
+  (
+    RESULTS_JSONL="$prov_jsonl"
+    run_provider_suite "$PROVIDER"
+    print_live_table_file "$PROVIDER" "$prov_jsonl"
+  ) &
+  suite_pid=$!
+  echo "$PROVIDER $suite_pid $prov_jsonl" >> "$PROVIDER_PID_FILE"
+  log "Started $PROVIDER suite (PID $suite_pid)"
 done
+
+# Wait for all provider suites to finish
+while IFS=' ' read -r prov pid prov_file; do
+  wait "$pid" || warn "$prov suite exited non-zero"
+  ok "$prov suite done"
+done < "$PROVIDER_PID_FILE"
+
+# Merge per-provider JSONL files into the main results file
+log "Merging per-provider results into $RESULTS_JSONL …"
+while IFS=' ' read -r prov pid prov_file; do
+  cat "$prov_file" >> "$RESULTS_JSONL" 2>/dev/null || true
+done < "$PROVIDER_PID_FILE"
+rm -f "$PROVIDER_PID_FILE"
 
 echo ""
 generate_report
