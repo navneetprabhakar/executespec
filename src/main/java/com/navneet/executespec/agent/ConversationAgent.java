@@ -99,7 +99,15 @@ public class ConversationAgent {
      * @return the assistant's reply text
      */
     public String chat(PipelineRun run, List<ChatMessageRecord> history, String newMessage) {
-        ResolvedModel resolved = modelResolver.resolve("ConversationAgent", run.getAiProviderEnum());
+        // Spring AI 1.1.4 rejects OpenAI requests with an injected `extra_body` param
+        // (500+ char 400 error). V2's main pipeline bypasses Spring AI for OpenAI via
+        // OpenAiNativeToolClient, but LlmRouter used here still goes through Spring AI.
+        // Reroute OPENAI → ANTHROPIC for conversation so chat works on V2 runs.
+        com.navneet.executespec.router.LlmProvider chatProvider = run.getAiProviderEnum();
+        if (chatProvider == com.navneet.executespec.router.LlmProvider.OPENAI) {
+            chatProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
+        }
+        ResolvedModel resolved = modelResolver.resolve("ConversationAgent", chatProvider);
         String selectedModel = resolved.getModel();
         String selectedProvider = resolved.providerName();
         log.info("[ConversationAgent] run={} historySize={} model={} provider={}",
@@ -168,7 +176,15 @@ public class ConversationAgent {
      * @throws ApplySuggestionTooLargeException if the LLM generates >6 tasks
      */
     public TaskPlan generateSuggestionPlan(PipelineRun run, String suggestion) {
-        ResolvedModel resolved = modelResolver.resolve("ConversationAgent", run.getAiProviderEnum());
+        // Spring AI 1.1.4 rejects OpenAI requests with an injected `extra_body` param
+        // (500+ char 400 error). V2's main pipeline bypasses Spring AI for OpenAI via
+        // OpenAiNativeToolClient, but LlmRouter used here still goes through Spring AI.
+        // Reroute OPENAI → ANTHROPIC for conversation so chat works on V2 runs.
+        com.navneet.executespec.router.LlmProvider chatProvider = run.getAiProviderEnum();
+        if (chatProvider == com.navneet.executespec.router.LlmProvider.OPENAI) {
+            chatProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
+        }
+        ResolvedModel resolved = modelResolver.resolve("ConversationAgent", chatProvider);
         String selectedModel = resolved.getModel();
         String selectedProvider = resolved.providerName();
         log.info("[ConversationAgent] Generating suggestion plan for run={} model={}", run.getRunId(), selectedModel);

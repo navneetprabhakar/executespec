@@ -74,6 +74,10 @@ public class BuildCommandResolver {
             // ship only python3, bare `python` often exits 127 with "command not found".
             return Optional.of(build("python3 -m compileall -q .", 120, "inferred:python"));
         }
+        // Last-resort: loose .py files with no project manifest (e.g. single-shot "write fib.py").
+        if (hasAnyPythonFile(workspaceRoot)) {
+            return Optional.of(build("python3 -m compileall -q .", 60, "inferred:python-loose"));
+        }
         return Optional.empty();
     }
 
@@ -102,6 +106,15 @@ public class BuildCommandResolver {
 
     private static boolean exists(Path root, String relative) {
         return Files.exists(root.resolve(relative));
+    }
+
+    private static boolean hasAnyPythonFile(Path root) {
+        if (!Files.isDirectory(root)) return false;
+        try (var stream = Files.walk(root, 3)) {
+            return stream.anyMatch(p -> p.toString().endsWith(".py") && Files.isRegularFile(p));
+        } catch (java.io.IOException e) {
+            return false;
+        }
     }
 
     private static BuildCommand build(String command, int timeout, String source) {

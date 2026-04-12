@@ -70,15 +70,24 @@ public class ReviewerAgentV3 {
                 req.provider(), req.model(), req.skipWiringPass());
 
         // ── General pass ─────────────────────────────────────────────────────
+        // A pass that hits the iteration cap has typically done meaningful fixes
+        // before running out of turns — the workspace is still in a reasonable
+        // state. Only a hard ERROR outcome (LLM failure, tool dispatch crash)
+        // warrants REVIEW_FAILED. ITERATION_LIMIT_EXCEEDED and STOPPED_WITHOUT_COMPLETE
+        // fall through to the final build, whose exit code dictates the verdict.
         WorkerResult general = runPass(req, maxIter,
                 "reviewer-general", loadPrompt("prompts/v2/reviewer-general.md"));
-        if (general.outcome() != WorkerResult.Outcome.COMPLETED) {
-            log.warn("ReviewerAgentV3 general pass did not complete: {}", general.outcome());
+        if (general.outcome() == WorkerResult.Outcome.ERROR) {
+            log.warn("ReviewerAgentV3 general pass errored: {}", general.outcome());
             return ReviewerResult.builder()
                     .overall(ReviewerResult.Overall.REVIEW_FAILED)
                     .generalPassOutcome(general)
                     .totalLatencyMs(System.currentTimeMillis() - start)
                     .build();
+        }
+        if (general.outcome() != WorkerResult.Outcome.COMPLETED) {
+            log.warn("ReviewerAgentV3 general pass did not call completeTask ({}), "
+                    + "continuing to wiring pass with partial work", general.outcome());
         }
 
         // ── Wiring pass ──────────────────────────────────────────────────────
@@ -86,8 +95,8 @@ public class ReviewerAgentV3 {
         if (!req.skipWiringPass()) {
             wiring = runPass(req, maxIter,
                     "reviewer-wiring", loadPrompt("prompts/v2/reviewer-wiring.md"));
-            if (wiring.outcome() != WorkerResult.Outcome.COMPLETED) {
-                log.warn("ReviewerAgentV3 wiring pass did not complete: {}", wiring.outcome());
+            if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
+                log.warn("ReviewerAgentV3 wiring pass errored: {}", wiring.outcome());
                 return ReviewerResult.builder()
                         .overall(ReviewerResult.Overall.REVIEW_FAILED)
                         .generalPassOutcome(general)
@@ -95,6 +104,10 @@ public class ReviewerAgentV3 {
                         .wiringPassOutcome(wiring)
                         .totalLatencyMs(System.currentTimeMillis() - start)
                         .build();
+            }
+            if (wiring.outcome() != WorkerResult.Outcome.COMPLETED) {
+                log.warn("ReviewerAgentV3 wiring pass did not call completeTask ({}), "
+                        + "falling through to final build", wiring.outcome());
             }
         }
 

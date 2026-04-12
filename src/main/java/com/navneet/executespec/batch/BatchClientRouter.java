@@ -16,6 +16,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated(since = "v2")
 public class BatchClientRouter {
 
     private final AnthropicBatchClient anthropicBatchClient;
@@ -32,26 +33,31 @@ public class BatchClientRouter {
     @Value("${spring.ai.google.genai.api-key:}")
     private String systemGeminiKey;
 
+    @Deprecated(since = "v2")
     public String submitBatch(String runId, List<BatchRequest> requests, LlmProvider provider) {
         String apiKey = resolveKey(runId, provider);
         return clientFor(provider).submitBatch(runId, requests, apiKey);
     }
 
+    @Deprecated(since = "v2")
     public BatchStatus checkStatus(String batchId, String runId, LlmProvider provider) {
         String apiKey = resolveKey(runId, provider);
         return clientFor(provider).checkStatus(batchId, apiKey);
     }
 
+    @Deprecated(since = "v2")
     public BatchResults getResults(String batchId, String runId, LlmProvider provider) {
         String apiKey = resolveKey(runId, provider);
         return clientFor(provider).getResults(batchId, apiKey);
     }
 
+    @Deprecated(since = "v2")
     public void cancelBatch(String batchId, String runId, LlmProvider provider) {
         String apiKey = resolveKey(runId, provider);
         clientFor(provider).cancelBatch(batchId, apiKey);
     }
 
+    @Deprecated(since = "v2")
     private LlmBatchClient clientFor(LlmProvider provider) {
         return switch (provider) {
             case ANTHROPIC -> anthropicBatchClient;
@@ -64,6 +70,7 @@ public class BatchClientRouter {
      * Resolve the API key for a given run + provider.
      * Uses per-run keys from RunKeyStore if available, falls back to system keys.
      */
+    @Deprecated(since = "v2")
     private String resolveKey(String runId, LlmProvider provider) {
         ResolvedKeys keys = runKeyStore.get(runId);
         return switch (provider) {

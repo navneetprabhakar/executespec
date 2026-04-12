@@ -75,6 +75,7 @@ public class PlannerAgentV2 {
                 .planSummary(req.spec())
                 .projectType("unknown")
                 .smokeTestStrategy(PlanV2.SmokeTestStrategy.BUILD)
+                .runtimeSurface(PlanV2.RuntimeSurface.HTTP)
                 .classification(Classification.SINGLE_SHOT)
                 .tasks(List.of(task))
                 .build();
@@ -175,6 +176,22 @@ public class PlannerAgentV2 {
 
         List<PlannedTaskV2> tasks = new ArrayList<>();
         JsonNode tasksNode = root.path("tasks");
+
+        // Salvage path: Anthropic occasionally emits its internal
+        // <parameter name="..."> XML inline instead of a clean tool-call payload,
+        // which shoves the tasks array INSIDE the smokeTestStrategy string value
+        // and leaves the real "tasks" field missing. Detect and recover so the
+        // run doesn't fail outright.
+        if (!tasksNode.isArray()) {
+            String leakedBlob = root.path("smokeTestStrategy").asText("");
+            JsonNode salvaged = salvageTasksFromBlob(leakedBlob);
+            if (salvaged != null) {
+                log.warn("Planner: recovered tasks array from malformed smokeTestStrategy blob "
+                        + "({} tasks). Anthropic model went off-protocol.", salvaged.size());
+                tasksNode = salvaged;
+            }
+        }
+
         if (tasksNode.isArray()) {
             int idx = 0;
             for (JsonNode t : tasksNode) {
@@ -197,6 +214,15 @@ public class PlannerAgentV2 {
             smokeStrategy = PlanV2.SmokeTestStrategy.BUILD;
         }
 
+        // Parse runtimeSurface — default HTTP so legacy plans keep working.
+        PlanV2.RuntimeSurface runtimeSurface = PlanV2.RuntimeSurface.HTTP;
+        String surfaceStr = root.path("runtimeSurface").asText("HTTP");
+        try {
+            runtimeSurface = PlanV2.RuntimeSurface.valueOf(surfaceStr.trim().toUpperCase().replace('-', '_'));
+        } catch (IllegalArgumentException ignored) {
+            log.warn("Unknown runtimeSurface '{}', falling back to HTTP", surfaceStr);
+        }
+
         return PlanV2.builder()
                 .planTitle(root.path("planTitle").asText(null))
                 .planSummary(root.path("planSummary").asText(null))
@@ -204,9 +230,42 @@ public class PlannerAgentV2 {
                 .buildCommand(root.path("buildCommand").isNull()
                         ? null : root.path("buildCommand").asText(null))
                 .smokeTestStrategy(smokeStrategy)
+                .runtimeSurface(runtimeSurface)
                 .tasks(tasks)
                 .classification(classification)
                 .build();
+    }
+
+    /**
+     * Extracts a JSON array of tasks from a malformed Anthropic tool-call blob
+     * that shoved `<parameter name="tasks">[...]` XML inline inside another
+     * string field. Returns the parsed array node, or null if no recovery is possible.
+     */
+    private JsonNode salvageTasksFromBlob(String blob) {
+        if (blob == null || blob.isEmpty()) return null;
+        int marker = blob.indexOf("name=\"tasks\"");
+        if (marker < 0) return null;
+        int start = blob.indexOf('[', marker);
+        if (start < 0) return null;
+        int depth = 0;
+        int end = -1;
+        for (int i = start; i < blob.length(); i++) {
+            char c = blob.charAt(i);
+            if (c == '[') depth++;
+            else if (c == ']') {
+                depth--;
+                if (depth == 0) { end = i; break; }
+            }
+        }
+        if (end < 0) return null;
+        String arrayJson = blob.substring(start, end + 1);
+        try {
+            JsonNode node = objectMapper.readTree(arrayJson);
+            return node.isArray() ? node : null;
+        } catch (Exception e) {
+            log.warn("Planner: salvage parse failed: {}", e.getMessage());
+            return null;
+        }
     }
 
     private PlannedTaskV2 buildTask(JsonNode t, int seq) {
@@ -263,6 +322,10 @@ public class PlannerAgentV2 {
                             "smokeTestStrategy": {
                               "type": "string",
                               "description": "One of: BUILD, PREVIEW_HEALTH, TEST_SUITE"
+                            },
+                            "runtimeSurface": {
+                              "type": "string",
+                              "description": "How the code runs: HTTP (web server), CLI (console program), LIBRARY (importable package, no entry point), STATIC_WEB (frontend only). Default HTTP."
                             },
                             "tasks": {
                               "type": "array",
