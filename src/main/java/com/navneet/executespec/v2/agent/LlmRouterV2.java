@@ -1,5 +1,6 @@
 package com.navneet.executespec.v2.agent;
 
+import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.tool.ToolRegistryV2;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +54,7 @@ public class LlmRouterV2 {
     private final ToolRegistryV2 toolRegistry;
     private final OpenAiNativeToolClient openAiNativeToolClient;
     private final GeminiNativeToolClient geminiNativeToolClient;
+    private final V2Metrics metrics;
 
     // Auto-configured Spring AI bean for Anthropic (the one provider whose native
     // tool calling works correctly on Spring AI 1.1.4). OpenAI and Gemini both have
@@ -77,12 +79,18 @@ public class LlmRouterV2 {
                 request.provider(), request.model(), tools.size(), request.messages().size());
         try {
             ChatResponse resp = dispatch(request, tools);
+            long elapsed = System.currentTimeMillis() - start;
+            metrics.recordLlmLatency(request.provider(), request.model(), "ok",
+                    java.time.Duration.ofMillis(elapsed));
             log.info("LlmRouterV2 <- {} {} ok in {}ms",
-                    request.provider(), request.model(), System.currentTimeMillis() - start);
+                    request.provider(), request.model(), elapsed);
             return resp;
         } catch (RuntimeException e) {
+            long elapsed = System.currentTimeMillis() - start;
+            metrics.recordLlmLatency(request.provider(), request.model(), "failed",
+                    java.time.Duration.ofMillis(elapsed));
             log.warn("LlmRouterV2 <- {} {} FAILED in {}ms: {}",
-                    request.provider(), request.model(), System.currentTimeMillis() - start, e.getMessage());
+                    request.provider(), request.model(), elapsed, e.getMessage());
             throw e;
         }
     }
