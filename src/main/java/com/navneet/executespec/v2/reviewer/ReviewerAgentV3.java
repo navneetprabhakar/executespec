@@ -39,10 +39,10 @@ import java.nio.charset.StandardCharsets;
  * rather than reinventing it. This gives reviewer the same native tool calling, context
  * handling, and completeTask signaling for free.
  */
-@Service("v2ReviewerAgent")   // explicit name — V1 already has a reviewer class named ReviewerAgentV2
+@Service
 @Slf4j
 @RequiredArgsConstructor
-public class ReviewerAgentV2 {
+public class ReviewerAgentV3 {
 
     /** Default iteration cap per review pass. Smaller than worker's 40 because review
      *  passes are fundamentally inspection + targeted edits, not generation. */
@@ -57,7 +57,7 @@ public class ReviewerAgentV2 {
         int maxIter = (req.maxIterationsPerPass() == null || req.maxIterationsPerPass() <= 0)
                 ? DEFAULT_MAX_ITER_PER_PASS : req.maxIterationsPerPass();
 
-        log.info("ReviewerAgentV2 START run={} task={} provider={} model={} skipWiring={}",
+        log.info("ReviewerAgentV3 START run={} task={} provider={} model={} skipWiring={}",
                 req.context().runId(), req.context().taskId(),
                 req.provider(), req.model(), req.skipWiringPass());
 
@@ -65,7 +65,7 @@ public class ReviewerAgentV2 {
         WorkerResult general = runPass(req, maxIter,
                 "reviewer-general", loadPrompt("prompts/v2/reviewer-general.md"));
         if (general.outcome() != WorkerResult.Outcome.COMPLETED) {
-            log.warn("ReviewerAgentV2 general pass did not complete: {}", general.outcome());
+            log.warn("ReviewerAgentV3 general pass did not complete: {}", general.outcome());
             return ReviewerResult.builder()
                     .overall(ReviewerResult.Overall.REVIEW_FAILED)
                     .generalPassOutcome(general)
@@ -79,7 +79,7 @@ public class ReviewerAgentV2 {
             wiring = runPass(req, maxIter,
                     "reviewer-wiring", loadPrompt("prompts/v2/reviewer-wiring.md"));
             if (wiring.outcome() != WorkerResult.Outcome.COMPLETED) {
-                log.warn("ReviewerAgentV2 wiring pass did not complete: {}", wiring.outcome());
+                log.warn("ReviewerAgentV3 wiring pass did not complete: {}", wiring.outcome());
                 return ReviewerResult.builder()
                         .overall(ReviewerResult.Overall.REVIEW_FAILED)
                         .generalPassOutcome(general)
@@ -109,7 +109,7 @@ public class ReviewerAgentV2 {
 
         ReviewerResult.Overall overall = determineOverall(general, wiring, buildPassed);
         long elapsed = System.currentTimeMillis() - start;
-        log.info("ReviewerAgentV2 DONE run={} overall={} buildPassed={} elapsed={}ms",
+        log.info("ReviewerAgentV3 DONE run={} overall={} buildPassed={} elapsed={}ms",
                 req.context().runId(), overall, buildPassed, elapsed);
 
         return ReviewerResult.builder()
