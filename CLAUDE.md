@@ -1,48 +1,31 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-12
+> Last updated: 2026-04-13
 
 ## Architecture
 
 - **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.4
-- **Harness V2 (default):** Sequential-first redesign living in `com.navneet.executespec.v2.*`. Native tool calling for all 3 providers (Anthropic, OpenAI, Gemini). Feature-flag-routed behind V1's existing `/api/runs` endpoint via `HarnessVersionResolver` (flag `harness.version = v1 | v2 | v2-canary`). **V2 naming convention: provider is `gemini` (V1 used `google`)**. **V2 is now end-to-end: plan gate (PRODUCTION mode) → tier-routed sequential execution → reviewer → validation report + test generation → auto-preview**. See `docs/plans/harness-v2-remaining-work.md` for the open gap list (batch, startup-resume, UI-parity endpoints). V1 classes are annotated `@Deprecated(since = "v2")` across `harness/`, `agent/`, `compiler/`, `reviewer/`, `batch/` — shared infrastructure (StateStore, PipelineRun entity, CostEstimator, ApiKeyResolver, WorkspaceInitService, GitHubRepoService, ModelResolver) stays live.
-- **V2 current state (shipped):** integration orchestrator `com.navneet.executespec.v2.integration.V2RunOrchestrator` persists runs to V1's `pipeline_run` / `agent_task` tables (harness-agnostic read path for the UI). Features wired end-to-end:
-  - **Plan approval gate** — PRODUCTION mode pauses at `AWAITING_APPROVAL` post-plan, emits `GATE_OPENED` SSE with credits + estimated cost, blocks on V1's `GateStore.awaitPlanGate()`. PROTOTYPE / integration-triggered runs (`skipApproval=true`) bypass. Reject → run `CANCELLED`.
-  - **Tier-based model routing** — `SequentialExecutorV2.tierConfigFor()` resolves per-task model via `ModelResolver` by complexity: LOW→LIGHTWEIGHT, MEDIUM→WORKHORSE, HIGH→PLANNING. On Anthropic HIGH tasks route to Sonnet (was Haiku), OpenAI HIGH tasks route to gpt-5.4 (was gpt-5.4-mini). Quality-positive net change.
-  - **Per-complexity iteration + max-token caps** — LOW: 12 iters / 4k tokens; MEDIUM: 22 / 8k; HIGH: 35 / 16k. System prompt carries aggressive batching rules ("do NOT re-read files you just wrote", "call completeTask immediately when done").
-  - **Anthropic prompt caching** — `AnthropicCacheOptions.builder().strategy(CONVERSATION_HISTORY)` with explicit per-message-type `messageTypeMinContentLength` thresholds so cache_control blocks actually get emitted. OpenAI + Gemini auto-cache server-side. Verified via `V2RunCostTracker` `cacheWrite` / `cacheRead` counts on per-call log lines.
-  - **Cost tracking** — `V2RunCostTracker` records every `ChatResponse` from `LlmRouterV2`; tier-aware pre-plan `estimateRunTierAware()` populates `costEstimateLow / High / creditsCharged / hardCapUsd`. At terminate flushes `actualCostUsd`, `totalInputTokens / Output`, and writes `run_cost_log`. Phase-level token attribution (planner / worker / reviewer) via snapshot-diff so the UI "Token Usage by Model" panel reconciles.
-  - **Workspace + artifacts** — `<agent.workspace>/<runId>/` initialized via `WorkspaceInitService.ensureRunWorkspace()` (V1-shared). `.agent-context/project.json` written with planner's `project_type` so `DevDockerfileGenerator` picks the right preview Dockerfile. Planner-authored `README.md` + orchestrator fallback run-meta README. Final `git add -A && git commit` so `/push-github` works on V2 runs.
-  - **Design system** — `UiStyleResolver` (V1-shared, reads 5000+ DESIGN.md files under `executespec.designs.root-path`) is invoked post-plan; resolved design block prepended to every worker task's system prompt.
-  - **Run title** — `plan.planTitle` → `PipelineRun.runTitle`; planner also fills per-agent `plannerActualModel / reviewerActualModel` via snapshot-diff phase attribution so the UI shows real model names, not "unknown".
-  - **Reviewer** — `ReviewerAgentV3` (two sequential passes: general + wiring) runs post-execute; iteration-limit outcomes fall through to final-build verdict (`CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES`) instead of masquerading as `REVIEW_FAILED`.
-  - **Validation report + test generation** — post-review `V2RunOrchestrator.generateValidationReport()` assembles `ReportInput` from V2 types (synthesized `ReviewReportV2` + `CompileResult` + `WorkerReport[]`) and calls V1's `ValidationReportService.generateAndPersist()`. Then `testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson)` kicks off the same V1 test generation + `TestPreviewCoordinator` as V1 runs. OpenAI reroute: since the V1 `LlmRouter` path still trips the Spring AI 1.1.4 `extra_body` bug, V2 temporarily swaps `run.aiProvider` to ANTHROPIC for the narrative call only, then restores.
-  - **Preview** — `PreviewService` is harness-agnostic; preview endpoints (`start`, `rebuild`, `stop`, `exec`) unblocked for V2. `TestPreviewCoordinator.onTestsReady()` starts preview automatically when test gen completes.
-  - **SSE events** — `V2RunOrchestrator` emits `RUN_STATUS` on every phase transition + terminal `COMPLETE` + `broadcaster.complete(runId)`. `SequentialExecutorV2` emits `TASK_STATUS` (WORKING / COMPLETE / PARTIAL / FAILED) and persists the same value to `agent_task.status` so UI polling and SSE stay in lockstep. `LlmRouterV2` emits `TOKEN_USAGE` after each successful dispatch. `PerkyMessenger` emits rotating `LOG` events (12s initial delay, 15s interval) during PLANNING / WORKING / REVIEWING so the stream never idles.
-  - **V1-only flow 501-guarded for V2 via `V2DeferredActionGuard`:** retry / pause / resume / rework / reopen-merge / retry-task / implement-suggestions / retry-validation / edit-plan / clarify / merge / chat / apply / iterate / run-tests / apply-test-fixes. Approve endpoint is NOT guarded — V2 runs signal `GateStore.setPlanGate()` directly.
-- **V2 eval harness:** `scripts/v2-eval.sh` submits LOW / MEDIUM / HIGH specs × anthropic / openai / gemini (9 runs, PROTOTYPE mode), polls each to terminal, fetches validation reports, emits machine-readable JSON + a markdown comparison table to `scripts/v2-eval-results/v2-eval-<timestamp>.{json,md}`. Specs live in `scripts/v2-eval-specs/{low,medium,high}.txt`.
-- **V2 OpenAI native tool calling:** Spring AI 1.1.4 has a regression that adds `extra_body` to OpenAI requests whenever `toolCallbacks` is set, regardless of any other option (verified across `gpt-4o`, `gpt-4o-mini`, `gpt-5.4`, `gpt-5.4-mini`). OpenAI's API rejects this with `Unrecognized request argument supplied: extra_body`. **V2 bypasses Spring AI for OpenAI tool calls** via `com.navneet.executespec.v2.agent.OpenAiNativeToolClient` — direct `RestClient` POST to `/v1/chat/completions`, parses response into Spring AI's `ChatResponse` shape so downstream V2 code stays provider-agnostic. Anthropic + Gemini work fine on Spring AI 1.1.4 — wrapper is OpenAI-only.
-- **V2 tool layer (Phase 1):** Unified `Tool` contract in `com.navneet.executespec.v2.tool` (Tool / ToolResult sealed Ok|Err with ErrorKind taxonomy / ExecutionContext). 10 tools registered: `readFile` (with line-range), `writeFile` (NEW files only — errors if exists), `editFile` (multi-edit array), `listFiles` (recursive + glob), `searchFiles` (native, no shell subprocess), `shell` (reuses V1 ShellSandboxPolicy), `gitStatus`, `gitDiff`, `gitCommit`, `buildProject` (uses `BuildCommandResolver` — planner-declared > framework-inferred > no-op fallback). `ToolRegistryV2.bind(ExecutionContext)` returns Spring AI `ToolCallback`s with the context captured. No FileLockTool (V2 sequential).
-- **V2 LLM router (Phase 2/3 baseline):** `com.navneet.executespec.v2.agent.LlmRouterV2` — provider-agnostic `call(LlmRequestV2)` that routes to native tool calling for all 3 providers and binds tools via `ToolRegistryV2.bind(ctx)` automatically. Dispatch: anthropic → Spring AI native, **openai → `OpenAiNativeToolClient`** (bypasses Spring AI 1.1.4's `extra_body` bug), **gemini → `GeminiNativeToolClient`** (bypasses Spring AI 1.1.4's `Optional.get()` bug in multi-turn response parsing + handles Gemini 2.5+ thought-signature round-trip). `internalToolExecutionEnabled(false)` everywhere — harness keeps loop control. Multi-provider failover, ProviderHealthTracker circuit breaker, per-run API key resolution, tier-based model routing deferred to Phase 2.x / Phase 9 canary.
-- **V2 Gemini native tool calling:** `com.navneet.executespec.v2.agent.GeminiNativeToolClient` — direct REST POST to `/v1beta/models/{model}:generateContent`. Handles three Gemini-specific quirks: (1) schema sanitization — strips `additionalProperties` recursively (Gemini's schema validator rejects it); (2) `toolConfig.functionCallingConfig.mode=AUTO` to constrain structured output; (3) **thoughtSignature round-trip** via Caffeine cache keyed by synthetic tool-call ID (10k entries, 30-min TTL) — Gemini 2.5+ thinking models require each `functionCall` part to carry the `thoughtSignature` originally emitted with it, otherwise the API returns 400 "missing thought_signature" (3-preview) or silently degrades to Python-code emission → MALFORMED_FUNCTION_CALL (2.5-flash). Without the round-trip, multi-turn Gemini is broken on 2.5+. Spring AI's `AssistantMessage.ToolCall` record has no field for the signature, hence the out-of-band cache.
-- **V2 worker agent (Phase 3 baseline):** `com.navneet.executespec.v2.agent.WorkerAgentV2.run(WorkerTaskRequest) → WorkerResult` — sequential single-agent loop. For each iteration: call router → collect tool calls across all generations → if `completeTask` invoked, terminate with `COMPLETED` → else dispatch each tool through registry, append `ToolResponseMessage` to history, loop. Cap: 40 iterations default. Outcomes: `COMPLETED | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | ERROR`. **Native completion** via `CompleteTaskTool` (replaces V1's fragile JSON-prefix heuristic). Multi-turn message threading via Spring AI's `AssistantMessage` (with toolCalls) + `ToolResponseMessage`. `OpenAiNativeToolClient` extended to serialize all 4 message types (system/user/assistant+toolCalls/tool) to OpenAI's wire format. Hybrid context fill, 75% compaction, Redis persistence deferred to Phase 8.
-- **V2 planner (Phase 4):** `com.navneet.executespec.v2.agent.PlannerAgentV2.plan(PlannerRequestV2) → PlanV2` — produces a structured plan via a single restricted-tool LLM call. Technique: inline `submitPlan` `ToolCallback` whose input schema IS the plan schema; the model emits structured output directly via native tool calling (no JSON-in-text parsing). Planner extracts the tool-call arguments and parses them into `PlanV2`. `LlmRequestV2.toolsOverride` added so the router honors an explicit callback list instead of binding the full V2 tool set. `SINGLE_SHOT` classification bypasses the LLM entirely and synthesizes a 1-task plan from the spec (fast path for trivial requests). Task caps: SINGLE_SHOT=1, MEDIUM=4, MULTI_TASK=unlimited — enforced post-parse with truncation + warning if the model over-shoots. Plan schema new fields: `buildCommand` (optional explicit build command), `smokeTestStrategy` (`BUILD` | `PREVIEW_HEALTH` | `TEST_SUITE`), per-task `hardConstraints` array. Prompt template at `resources/prompts/v2/planner.md` with explicit CONSTRAINT PROPAGATION section. **Gemini-specific**: when `toolsOverride` is non-empty the router auto-sets `toolConfig.functionCallingConfig.mode=ANY` + `allowedFunctionNames=[...]` — prevents gemini-2.5-flash's Python-code degradation under heavy prompt load.
-- **V2 sequential executor (Phase 5):** `com.navneet.executespec.v2.harness.SequentialExecutorV2.execute(ExecutionRequest) → ExecutionResult` — runs a plan's tasks in order, one worker invocation per task. Per-task flow: compose system prompt (base + hardConstraints + touchesFiles hint) + user prompt (description) → `WorkerAgentV2.run()` → if worker didn't reach `COMPLETED` record `WORKER_FAILED` → else run `buildProject` smoke test via the plan's `buildCommand` → smoke passes → `SUCCESS` → smoke fails → ONE retry with build error injected into user prompt → retry succeeds → `SUCCESS_AFTER_RETRY` → retry fails → `COMPLETED_WITH_WARNING` and continue. Aggregate verdict: `ALL_SUCCESS | PARTIAL_WITH_WARNINGS | FAILED | ABORTED`. Rule-based failure handling only (LLM-tier `TaskSupervisorV2` deferred). No SSE events, no Redis context persistence, no cross-task sharing yet (Phase 8 owns context persistence).
-- **V2 reviewer (Phase 7):** `com.navneet.executespec.v2.reviewer.ReviewerAgentV3.review(ReviewerRequestV2) → ReviewerResult` (named V3 — V1 already owns both `ReviewerAgent` and `ReviewerAgentV2`; V3 continues the project-wide version sequence)
-- **V2 context persistence (Phase 8):** `com.navneet.executespec.v2.context.ContextStoreV2` — Redis-backed snapshot of worker history for crash recovery + retry-with-context. Key pattern `v2:agent-ctx:{runId}:{taskId}` with 24h TTL. Hand-rolled discriminated-union serialization (Spring AI's `Message` subclasses aren't trivially round-trippable via generic Jackson). Message types supported: system / user / assistant (with toolCalls) / tool (with responses). `WorkerAgentV2` wires in: saves every 5 iterations (best-effort — Redis failures log WARN but never propagate to fail the agent); deletes on `COMPLETED` (no leak); keeps snapshot on `STOPPED_WITHOUT_COMPLETE / ITERATION_LIMIT_EXCEEDED / ERROR` outcomes so a later recovery phase can replay. Full `StartupRunResumerV2` (boot-time recovery of IN_PROGRESS runs) deferred to Phase 9.x where V2 integrates with V1's Run entity.
-- **V2 observability (Phase 10):** `com.navneet.executespec.v2.observability.V2Metrics` — central Micrometer facade. Every V2 metric name is prefixed `executespec.v2.*` for clean side-by-side comparison with V1 meters. Metric catalog: `run.outcome` + `run.latency` (V2Run terminal state + elapsed), `planner.latency` + `planner.tasks` (classification/provider/model tagged), `task.status` + `task.latency` + `task.smoketest` (per-task outcomes from the executor), `worker.iterations` + `worker.outcome` + `worker.toolcall` (worker loop metrics tagged by outcome/provider/model/tool), `llm.latency` (per-provider dispatch tagged with ok/failed), `reviewer.verdict`, `context.save` + `context.save.bytes`. Instrumented sites: `WorkerAgentV2` (all 4 terminal paths + per-tool-call), `LlmRouterV2.call()` (wrapped dispatch with latency), `SequentialExecutorV2` (per-task outcome + smoke test result), `PlannerAgentV2.plan()` (wrapped with latency + task-count distribution), `ReviewerAgentV3.review()` (split into public wrapper + private impl so verdict records once), `ContextStoreV2.save()` (ok/skipped/failed + bytes), `V2RunService.executePipeline()` (finally-block emits run outcome + submission-to-terminal latency exactly once). Verification endpoint `/api/v2/test/metrics` dumps every `executespec.v2.*` meter with current measurements. Prometheus scrape at `/actuator/prometheus` remains canonical.
-- **V2 rollout & run API (Phase 9):** `com.navneet.executespec.v2.rollout.*` — feature-flag-driven routing + standalone V2 run submission API. `HarnessVersionResolver` consults feature flags `harness.version` (string: `v1` | `v2` | `v2-canary`; default `v1`) and `harness.v2.canary_percent` (int 0..100; default 0). Exposes `resolve()` (random per-call for canary splits) and `resolveForSeed(String)` (deterministic — same seed always produces same version so retries stay consistent). `V2RunService.submit(Request) → V2Run` runs the full Phase 4→5→7 pipeline (planner → executor → reviewer) on a background thread pool; run state tracked in `V2RunRegistry` (Caffeine, 10k-entry, 24h TTL). `/api/v2/runs` POST gated by resolver (403 if `harness.version` doesn't resolve to V2, unless `force:true`); `/api/v2/runs/{id}` GET returns status + plan summary + execution result + review result + status-transition log. Phase 9 baseline is in-memory only — no DB persistence of V2 runs, no billing/credit tracking, no SSE event stream. V1 `/api/runs` endpoint unchanged; unified routing ("flag check in V1's /api/runs") deferred to Phase 9.x after V2 proves out on internal canary. Verification endpoint `/api/v2/test/rollout` Monte-Carlo-tests the resolver split against the configured percentage. — post-execution code reviewer that runs after the executor completes. Two sequential review passes, each a narrowly-scoped `WorkerAgentV2` invocation with a different system prompt: (1) **general review** targets logic bugs, incomplete implementations, contract violations, obvious runtime failures — explicitly out of scope: style, naming, refactoring preferences; (2) **wiring review** is the project-type-aware specialized sub-phase (Rust `mod.rs`, TS barrels, Spring component-scan / controller registration, Express route registration, Python decorator registration, Go package imports). After both passes, runs the build command once more and emits a verdict: `CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED`. Implementation is a thin composition over `WorkerAgentV2` — reuses the agent loop, native tool calling, and `completeTask` signaling. Prompts: `resources/prompts/v2/reviewer-general.md`, `resources/prompts/v2/reviewer-wiring.md`. Default cap 30 iterations per pass (smaller than worker's 40 — review is inspection + targeted edits, not generation).
+- **Harness:** V2 is the default and only supported path for new runs (`com.navneet.executespec.v2.*`). V1 (`harness/`, `agent/`, `compiler/`, `reviewer/`, `batch/`) is frozen pending deletion — see [docs/plans/deprecation-removal-plan.md](docs/plans/deprecation-removal-plan.md) for the phased rollout. Shared infrastructure (StateStore, PipelineRun/AgentTask entities, CostEstimator, ApiKeyResolver, WorkspaceInitService, GitHubRepoService, ModelResolver, GateStore, UiStyleResolver) stays live under V2.
+- **V2 pipeline:** `V2RunOrchestrator` (entry) → `PlannerAgentV2` (plan as a `submitPlan` tool call) → plan gate (PRODUCTION pauses at AWAITING_APPROVAL, PROTOTYPE bypasses) → `SequentialExecutorV2` (tier-routed worker per task, one at a time) → `ReviewerAgentV3` (general + wiring passes) → validation report + test-gen kickoff → auto-preview. Runs persist to the shared `pipeline_run`/`agent_task` tables.
+- **V2 tools:** Unified `Tool` contract in `v2.tool` — `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `gitCommit`, `buildProject`, plus `completeTask` for native termination. `ToolRegistryV2.bind(ExecutionContext)` returns Spring AI `ToolCallback`s with run context captured. Sequential-by-design: no FileLockTool.
+- **V2 LLM router:** `LlmRouterV2.call(LlmRequestV2)` uses native tool calling for all 3 providers. Anthropic via Spring AI; OpenAI via `OpenAiNativeToolClient` (bypasses Spring AI 1.1.4's `extra_body` bug); Gemini via `GeminiNativeToolClient` (handles schema sanitization + thought-signature round-trip for 2.5+ models). Every call flows through `V2RunCostTracker` for token + cost accounting.
+- **V2 worker:** `WorkerAgentV2` — single-agent, multi-turn loop. Per-complexity caps: LOW=12 iters/4k tokens, MEDIUM=22/8k, HIGH=35/16k. Outcomes: COMPLETED | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | ERROR. Native completion via `CompleteTaskTool`. Conversation snapshots saved to Redis every 5 iterations via `ContextStoreV2` (24h TTL) for recovery.
+- **V2 planner:** `PlannerAgentV2` emits a structured plan via a restricted-tool `submitPlan` call (no JSON-in-text parsing). Schema includes `buildCommand`, `smokeTestStrategy` (BUILD | PREVIEW_HEALTH | TEST_SUITE), `runtimeSurface` (HTTP | CLI | LIBRARY | STATIC_WEB), per-task `hardConstraints`. Classification (SINGLE_SHOT | MEDIUM | MULTI_TASK) caps task count (1 / 4 / unlimited). `SINGLE_SHOT` bypasses the LLM and synthesises a 1-task plan.
+- **V2 sequential executor:** per task — compose system + user prompt → `WorkerAgentV2.run()` → if worker hit `completeTask`, run `buildProject` smoke test → pass=SUCCESS, fail=ONE retry with build error injected, retry fail=COMPLETED_WITH_WARNING. Aggregate: ALL_SUCCESS | PARTIAL_WITH_WARNINGS | FAILED | ABORTED. Per-task model tier: LOW→LIGHTWEIGHT, MEDIUM→WORKHORSE, HIGH→PLANNING.
+- **V2 reviewer:** `ReviewerAgentV3` — two `WorkerAgentV2`-backed passes (general + wiring), 30 iter cap each. Wiring pass is project-type-aware (Rust `mod.rs`, TS barrels, Spring component-scan, Express routes, Python decorators, Go imports). Final verdict: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. Iteration-limit outcomes fall through to final-build verdict rather than masquerading as REVIEW_FAILED.
+- **V2 cost + tokens:** `V2RunCostTracker` accumulates per-call usage + cost (Anthropic cache-aware). Phase-level attribution (planner / reviewer) persisted on `PipelineRun` via snapshot diffs; per-task worker tokens on `AgentTask` rows. Run totals are built atomically via `PipelineRunRepository.addTokens` calls from each phase — terminal `terminate()` no longer overwrites, only bumps up. Pre-plan `estimateRunTierAware()` populates `costEstimateLow/High`, `creditsCharged`, `hardCapUsd`.
+- **V2 observability:** `V2Metrics` — `executespec.v2.*` meters for run.outcome + run.latency, planner.latency + planner.tasks, task.status + task.latency + task.smoketest, worker.iterations + worker.outcome + worker.toolcall, llm.latency, reviewer.verdict, context.save + context.save.bytes. Dump endpoint `/api/v2/test/metrics`. Prometheus scrape at `/actuator/prometheus`.
+- **V2 recovery:** `StartupRunResumerV2` scans non-terminal V2 runs on boot (PLANNING/WORKING/REVIEWING/AWAITING_APPROVAL) and fails them cleanly with a clear reason + terminal SSE, so the UI surfaces the interruption instead of leaving runs stuck. Full replay (restore conversation history + resume at saved iteration) is a planned follow-up — see [docs/plans/harness-v2-remaining-work.md](docs/plans/harness-v2-remaining-work.md) Gap 2.
+- **V2 cancel:** `V2RunOrchestrator.cancel(runId)` is the V2 path for `DELETE /api/runs/{id}` — signals the plan gate, interrupts the pipeline future, writes CANCELLED status + terminal SSE.
+- **V2 eval harness:** `scripts/v2-eval.sh` submits LOW / MEDIUM / HIGH specs × anthropic / openai / gemini (9 runs, PROTOTYPE), polls each to terminal, emits machine-readable JSON + a markdown comparison to `scripts/v2-eval-results/v2-eval-<timestamp>.{json,md}`. Specs live in `scripts/v2-eval-specs/{low,medium,high}.txt`.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Multi-agent pipeline:** PipelineHarness → PlannerAgent → Plan Gate → (Real-time: SequentialTaskExecutor | Batch: BatchClientRouter → BatchPollService → BatchResumeService) → CompilerAgent → Auto-merge all tasks → **COMPLETE** → Auto-preview (5-min TTL) → Background validation thread: ReviewerAgentV2 (inspect + auto-fix) + TestGenOrchestrator + TestPreviewCoordinator (reuses preview) + ValidationReport
-- **Batch execution:** All 3 providers (Anthropic/OpenAI/Google) support batch APIs with 50% cost discount. User chooses real-time or batch at plan approval. Batch flow: QUEUED_BATCH → IN_PROGRESS_BATCH → BATCH_COMPLETE → auto-retry failed tasks in real-time → compile → COMPLETE. `BatchPollService` polls every 30s with `@SchedulerLock` (Redis). `BatchResumeService` parses results, writes files, resolves WORKHORSE model/provider for task attribution, publishes `BatchCompleteEvent`. PipelineHarness `onBatchComplete()` retries failed tasks via `SequentialTaskExecutor`, then resumes compile. Batch runs skip auto-preview; `TestPreviewCoordinator` publishes empty event to unblock validation report.
-- **Subtask decomposition:** Tasks with 2+ owned files are decomposed into per-file subtasks at execution time by `SubtaskDecomposer`. Each subtask produces exactly one `writeFile` call, eliminating fabrication. Subtasks tracked via `parentTaskId`/`subtaskIndex`/`subtaskTotal` on `AgentTask`.
+- **Batch execution:** Not yet re-implemented under V2. V1 batch (`batch/*`) is frozen; the V2 re-implementation is scoped in [docs/plans/v2-batch-execution-plan.md](docs/plans/v2-batch-execution-plan.md) and waits on deprecation P3.
 - **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
-- **LLM Router:** User-selected provider per project (Anthropic/Google/OpenAI). Default provider: OpenAI. YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Health-based failover via `ProviderHealthTracker` (Redis-backed circuit breaker, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
-- **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL, 24h max wait timeout. Merge is automatic (no manual gate).
-- **Progressive merge:** Each task merged to main immediately after completion (validation deferred to review phase)
+- **LLM Router:** V2 uses `LlmRouterV2` with native tool calling; YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
+- **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL, 24h max wait timeout. V2 auto-merges per task — no merge gate.
 - **Auth:** JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles. Force-logout via feature flag epoch-based JWT invalidation. JWT secret validated at startup in prod (`JwtSecretValidator`).
 - **Tiers:** FREE (5 runs/month, 1-credit specs only) → PRO (100/month) → ENTERPRISE (unlimited). Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`.
 - **Billing:** Multi-gateway via `PaymentGatewayRouter` (Razorpay + Stripe). Subscriptions, run top-up credits, invoicing with GST, payment audit trail. Cost-proportional credits: charged at plan approval (not submission), refunded on FAILURE. `run_cost_log` table tracks estimated vs actual cost for pricing analytics.
@@ -51,17 +34,17 @@
 - **Rate limiting:** Redis-backed per-tenant rate limiting via `RateLimitFilter`. Endpoint groups: AUTH, RUNS, WEBHOOK, READ, WRITE, PREVIEW, DEPLOY with per-tier limits.
 - **Observability:** Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP)
 - **Prompt architecture:** Composable fragment system via `PromptAssembler` (`@Service`). Shared rules stored in `prompts/fragments/*.md`, injected via `{{include:name}}` markers. Per-project-type scaffold templates in `prompts/scaffolds/*.md`, injected via `{{SCAFFOLD_TEMPLATE}}`. `assembleAndTrack()` computes SHA-256 prefix hash, saves row to `prompt_audit` table. Inline CSS removed from worker system prompts (`{{STYLING_SECTION}}` = empty string); actual design content arrives via `buildFrontendBlock()` → `UiStyleResolver` → filesystem folder in `application.yml`.
-- **Request triage:** Three-tier classification (`SINGLE_SHOT | MEDIUM | MULTI_TASK`) via `RequestTriageService`. Full-stack pattern safety check before LLM call. Workspace context (`file_tree`, `detected_frameworks`) injected into triage prompt. Structured JSON output `{"classification", "confidence", "reason"}`. Confidence < 0.7 → escalates to MULTI_TASK. MEDIUM → planner capped at 4 tasks.
+- **Request classification:** V2 folds triage into `PlannerAgentV2` — classification (SINGLE_SHOT | MEDIUM | MULTI_TASK) decides task caps (1 / 4 / unlimited) and whether to bypass the LLM (SINGLE_SHOT uses a synthesised 1-task plan).
 
 ## Code Conventions
 
 - **Base package:** `com.navneet.executespec`
-- **Layers:** controller → service → agent → llm (via LlmRouter)
+- **Layers:** controller → service → V2 agent → V2 tool → `LlmRouterV2`. V1 `LlmRouter` is still alive for legacy agents (test-gen, `AccuracyAssessmentService`, `ConversationAgent`) until those migrate — see deprecation plan P4.
 - **DTOs:** Java records where possible. Lombok `@Data`/`@Builder` for JPA entities.
 - **Dependency injection:** Constructor injection via Lombok `@RequiredArgsConstructor` (no `@Autowired` field injection)
 - **LLM prompts:** External files in `src/main/resources/prompts/*.txt` — never inline strings
-- **Worker tool format:** XML `<tool_call>` format with manual dispatch and runId injection (NOT Spring AI native tool calling). Self-play prevention: fabricated `<tool_result>` blocks stripped before parsing. XML-first parsing for PATH B (Anthropic/Google), JSON fallback.
-- **Completion detection:** Worker response must START with `{` (strict JSON check)
+- **Worker tool format:** Provider-native tool calling end-to-end via `LlmRouterV2`. Strict JSON schemas on every `v2/tool` entry. No XML `<tool_call>` parsing in V2 (that was a V1 idiom).
+- **Completion detection:** `CompleteTaskTool` — the worker calls it as a native tool to terminate the loop. No JSON-prefix heuristic.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
 - **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (currently V1–V73)
 - **Prompt assembly:** LLM prompts assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
@@ -69,7 +52,7 @@
 ## Patterns: MUST Follow
 
 - LLM calls go through `LlmRouter` — supports multi-provider fallback, per-run API key resolution, and tier-based model routing
-- Agent outputs validated by `CodeValidatorImpl` during review phase (CompilerAgent + ReviewerAgentV2), not per-task
+- Agent outputs validated by the post-execute `ReviewerAgentV3` (general + wiring passes) + a final `buildProject` smoke, not by per-task compilation
 - Structured logging with traceId/spanId via Micrometer context propagation (MDC auto-populated)
 - Constructor injection only via `@RequiredArgsConstructor`
 - Run ownership fields (`createdByUserId`, `orgId`, `projectId`) stamped BEFORE async pipeline thread starts (race condition fix)
@@ -237,39 +220,31 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 | Purpose | Path |
 |---------|------|
-| Pipeline orchestrator | `harness/PipelineHarness.java` |
-| Sequential task executor | `harness/SequentialTaskExecutor.java` |
-| Compile supervisor | `harness/TaskCompileSupervisor.java` (PASS/AUTO_FIX/RETRY_TASK/CONTINUE_WITH_WARNING) |
-| Supervision action enum | `harness/SupervisionAction.java` |
-| Supervision decision record | `harness/TaskCompileDecision.java` |
-| Subtask decomposer | `harness/SubtaskDecomposer.java` (multi-file → per-file subtask splitting) |
-| Run cost budget | `harness/RunCostBudgetService.java` (silent hard cap only, no progressive warnings) |
-| Cost estimator | `agent/CostEstimator.java` (per-run cost estimate + credit calculation) |
-| Cost estimate DTO | `agent/RunCostEstimate.java` (credits, hard cap, per-task breakdown) |
+| V2 run orchestrator | `v2/integration/V2RunOrchestrator.java` |
+| V2 sequential executor | `v2/harness/SequentialExecutorV2.java` |
+| V2 planner | `v2/agent/PlannerAgentV2.java` |
+| V2 worker | `v2/agent/WorkerAgentV2.java` |
+| V2 reviewer | `v2/reviewer/ReviewerAgentV3.java` |
+| V2 LLM router | `v2/agent/LlmRouterV2.java` + `OpenAiNativeToolClient` / `GeminiNativeToolClient` |
+| V2 tool registry | `v2/tool/ToolRegistryV2.java` + `v2/tool/*` (10 tools + `CompleteTaskTool`) |
+| V2 context store | `v2/context/ContextStoreV2.java` (Redis snapshot, 24h TTL) |
+| V2 cost tracker | `v2/cost/V2RunCostTracker.java` (per-call accumulator + cache-aware pricing) |
+| V2 startup resumer | `v2/recovery/StartupRunResumerV2.java` (fail-cleanly on boot) |
+| V2 CLI smoke runner | `v2/smoketest/CliSmokeRunner.java` |
+| V2 metrics | `v2/observability/V2Metrics.java` |
+| V1 legacy (deprecated) | `harness/PipelineHarness.java`, `agent/PlannerAgent.java`, `agent/WorkerAgent.java`, `batch/*`, `compiler/*`, `reviewer/ReviewerAgentV2.java` — pending deletion per `docs/plans/deprecation-removal-plan.md` |
+| Cost estimator (shared) | `agent/CostEstimator.java` (used by both V1 and V2 paths) |
 | Cost audit log | `billing/cost/RunCostLog.java`, `billing/cost/RunCostLogRepository.java` |
-| Batch client interface | `batch/LlmBatchClient.java` (submit, poll, get results, cancel) |
-| Batch client router | `batch/BatchClientRouter.java` (routes to Anthropic/OpenAI/Google batch client) |
-| Anthropic batch client | `batch/AnthropicBatchClient.java` (POST /v1/messages/batches) |
-| OpenAI batch client | `batch/OpenAiBatchClient.java` (JSONL file upload + batch create) |
-| Google batch client | `batch/GoogleBatchClient.java` (inline + file-based modes) |
-| Batch request builder | `batch/BatchRequestBuilder.java` (builds BatchRequests from TaskPlan) |
-| Batch poll service | `batch/BatchPollService.java` (@Scheduled 30s + @SchedulerLock) |
-| Batch resume service | `batch/BatchResumeService.java` (processes results, writes files, publishes event) |
 | Notification entity | `notification/Notification.java` |
 | Notification service | `notification/InAppNotificationService.java` |
 | Notification controller | `notification/NotificationController.java` (REST: GET/POST /api/notifications) |
 | Notification listener | `notification/RunCompletionNotifier.java` (creates notifications on run complete/fail) |
 | Design system config | `harness/DesignSystemProperties.java` |
 | UI style resolver | `harness/UiStyleResolver.java` (design loading, fuzzy match, 3-signal resolution) |
-| Worker agent | `agent/WorkerAgent.java` |
-| LLM router (multi-provider) | `agent/LlmRouter.java` |
 | Model resolver (matrix-based) | `router/ModelResolver.java` |
 | Model matrix config | `router/ModelMatrixProperties.java` |
 | Provider circuit breaker | `router/ProviderHealthTracker.java` (Redis-backed) |
 | State store | `state/StateStore.java` |
-| Code validator | `validator/CodeValidatorImpl.java` |
-| Compiler agent | `compiler/CompilerAgent.java` |
-| Reviewer agent | `reviewer/ReviewerAgentV2.java` |
 | Validation report | `report/ValidationReportService.java`, `report/ValidationReportGenerator.java` |
 | Report controller | `report/ValidationReportController.java` |
 | Report PDF | `report/ValidationReportPdfService.java` |
@@ -301,7 +276,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Rate limiting | `ratelimit/RateLimitFilter.java` |
 | Input sanitizer | `security/InputSanitizer.java` |
 | Code abuse scanner | `security/CodeAbuseScanner.java` |
-| Request triage | `agent/RequestTriageService.java` (3-tier: SINGLE_SHOT/MEDIUM/MULTI_TASK, workspace context injection) |
+| Request classification | Folded into `v2/agent/PlannerAgentV2.java` (`Classification: SINGLE_SHOT | MEDIUM | MULTI_TASK`) |
 | Prompt assembler | `agent/PromptAssembler.java` (fragment resolution, variable substitution, hash tracking) |
 | Prompt audit entity | `agent/PromptAudit.java`, `agent/PromptAuditRepository.java` |
 | Failure pattern service | `agent/FailurePatternService.java` (queries recent runs, returns markdown bullet list for planner) |
@@ -333,18 +308,20 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2, TaskCompileSupervisor | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| PLANNING | PlannerAgentV2 (HIGH tasks, reviewer) | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgentV2 (MEDIUM tasks), TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | WorkerAgentV2 (LOW tasks), ConversationAgent, ContextAgent, TestReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
-Default provider: OpenAI (user-selected per project). Failover order: Anthropic→[OpenAI, Google], Google→[OpenAI, Anthropic], OpenAI→[Google, Anthropic]. Stall escalation promotes WorkerAgent from WORKHORSE → PLANNING tier. See `application.yml` → `model-matrix:` for full configuration.
+Default provider: OpenAI (user-selected per project). Provider failover is available via `ProviderHealthTracker` (V1 router only — V2 `LlmRouterV2` is direct-dispatch with circuit-breaker metrics but no failover chain). See `application.yml` → `model-matrix:` for full configuration.
 
 ## Current State
 
 ### Working
-- Full pipeline: plan → approve → work (tiered parallel, progressive merge) → compile → auto-merge all → **COMPLETE** → auto-preview (5-min TTL) → background validation (review + test gen + test exec + report)
-- User-selected AI provider per project (Anthropic/Google/OpenAI) with YAML model matrix and health-based failover
-- 25-minute wall-clock worker time limit with stall detection and model escalation
+- Full V2 pipeline: plan (native `submitPlan` tool) → approve → sequential per-task worker (tier-routed) → reviewer (general + wiring) → **COMPLETE** → auto-preview (5-min TTL) → background validation (report + test gen + test exec)
+- V2 startup recovery: non-terminal V2 runs at boot are marked FAILED with a clear reason (replay is a planned follow-up)
+- V2 cancel: `DELETE /api/runs/{id}` on V2 runs interrupts the pipeline, signals the plan gate, writes CANCELLED + terminal SSE
+- V2 run-stats correctness: per-phase token persistence atomically increments run totals; `terminate()` only bumps up, never shrinks
+- User-selected AI provider per project (Anthropic/Gemini/OpenAI) with YAML model matrix
 - Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 5-min TTL, Caddy proxy with Cloudflare Origin Certificate)
 - JWT auth + OAuth2 (Google, GitHub) with RBAC, org management, project scoping
 - Multi-gateway billing via PaymentGatewayRouter (Razorpay + Stripe): subscriptions, run top-up credits, invoicing with GST
@@ -361,8 +338,7 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - GitHub branch + PR creation for existing-repo runs (branch `executespec/{runId-short}`, PR opened automatically)
 - Chat copilot + apply suggestion (chat/review improvements on same run)
 - Run archive feature
-- Request triage: three-tier (SINGLE_SHOT / MEDIUM / MULTI_TASK) with workspace context, confidence scoring, and full-stack safety pattern
-- Observability: Micrometer traces + custom metrics (30+ meters) + structured logging
+- Observability: Micrometer traces + V2 custom metrics (`executespec.v2.*`) + structured logging
 - Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
 - GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
 - Model evaluation framework (`eval/` package)
@@ -375,39 +351,29 @@ Default provider: OpenAI (user-selected per project). Failover order: Anthropic�
 - Scoped SSE tokens (5-min TTL, per-runId, prevents cross-run eavesdropping)
 - JWT secret startup validation (prod profile, blocks dev placeholder)
 - Tier-based deployment limits (enforces `max_deployments` from tier_config)
-- Silent hard cap cost enforcement (checks budget every 5 LLM calls in worker loop; ceiling = credits × $5 × 1.5; no progressive warnings — user approved cost upfront)
-- Batch execution: dual-option plan approval (real-time vs batch with 50% discount), all 3 LLM providers (Anthropic/OpenAI/Google), @Scheduled polling with @SchedulerLock, event-driven pipeline resume, auto-retry failed batch tasks in real-time, batch model/provider attribution, batch badge on run cards/details
+- Silent hard cap cost enforcement (ceiling = credits × $5 × 1.5; no progressive warnings — user approved cost upfront)
 - Manual test execution (Beta): POST /runs/{runId}/run-tests endpoint, "Run Tests" button in PreviewTab (requires preview RUNNING)
 - In-app notification system: JPA entity, REST API, NotificationBell in header, run completion/failure notifications
-- Caffeine TTL caches replacing unbounded ConcurrentHashMaps (LlmRouter, RunCostBudgetService)
 - Containerized test execution (Docker with --read-only, --cap-drop ALL, memory/CPU limits)
 - Env var whitelist for Docker subprocess (PATH, HOME, DOCKER_HOST only — no leaked secrets)
 - ServiceNow webhook HMAC verification
 - Actuator endpoint restriction (health+prometheus public, rest SUPER_ADMIN)
 - Design system integration: 54 company DESIGN.md files loaded from filesystem, 3-signal resolution (explicit hint > planner ui_style > project type heuristic), Caffeine cache (30min), token-budget truncation (2500 tokens), GCS-synced on deploy/boot
 - CSP `frame-src` directive for Cloud Run preview iframes
-- Subtask decomposition: multi-file tasks split into per-file subtasks (SubtaskDecomposer), tracked via parentTaskId/subtaskIndex/subtaskTotal
-- Self-play prevention: WorkerAgent strips fabricated `<tool_result>` blocks from LLM responses, uses XML-first parsing for PATH B providers (Anthropic/Google)
-- Task graph subtask grouping: frontend TaskGraph renders subtasks as smaller nodes grouped under parent with expand/collapse, progress bar, aggregate status
-- Prompt architecture remediation (19 issues): shared fragment system (`PromptAssembler`), scaffold templates, planner restructured to ≤3500 words with priority tiers, per-language complexity heuristics, prompt version tracking (SHA-256 hash → `prompt_audit`), failure pattern injection into planner, live API probe for test generation (`ApiProber`), API surface extraction for test planner (`ApiSurfaceExtractor`), conflict resolver structured JSON output with risk level, token cost awareness in worker prompts, self-review enforcement (post-commit `listFiles` required), command allowlist in `ProcessExecutor`
-- **TaskCompileSupervisor:** Per-task intelligent compile triage between merge and revert. Rule-based fast path classifies errors as CASCADING / STUB / FIXABLE / STRUCTURAL; PLANNING-tier LLM call for borderline cases. Actions: PASS (cascading noise, keep merge), AUTO_FIX (targeted `CompilerAgent.applyTargetedFix()` on owned files only), RETRY_TASK (re-run worker with targeted feedback), CONTINUE_WITH_WARNING (errors in non-owned files). Replaces the old "always revert + retry" logic that caused PARTIAL cascades. Metric: `executespec.supervisor.decision` tagged by action.
-- **Gap-closer reliability:** `GapClosingService` tracks attempted gap texts across cycles via `HashSet` — each gap gets at most 1 attempt, eliminating duplicate task records on multi-cycle runs. Gap task complexity upgraded LOW → MEDIUM so adaptive iteration cap uses the MEDIUM bucket (28 cold-start vs 20), giving gap tasks sufficient budget for codebase exploration before writing.
-- **WorkerAgent method chain fix:** `buildInitialUserMessage`, `handlePromptBasedToolCalls`, `handlePathBCompletion`, and `injectFabricationRetryContext` now correctly thread `AgentTask agentTask` as a separate parameter alongside `TaskDefinition taskDef`, fixing a compile error where `getParentTaskId()` was called on the wrong type.
+- Prompt architecture: shared fragment system (`PromptAssembler`), scaffold templates, prompt version tracking (SHA-256 hash → `prompt_audit`), failure pattern injection into planner, live API probe for test generation (`ApiProber`), API surface extraction for test planner (`ApiSurfaceExtractor`), command allowlist in `ProcessExecutor`
 - **FileViewer markdown preview:** `.md` files in the workspace viewer show a Preview/Source toggle. Preview mode renders via `MarkdownContent`; Source mode uses Monaco editor.
-- **UI gap task display:** Gap-closing tasks (`_gap_` taskId pattern) excluded from main task counters in RunDetail and RunDetailTabs. Shown collapsed in a "Gap fixes (background)" section, deduplicated by title.
-- **Provider eval script (4-dimension):** `scripts/test-providers.sh` measures cost, time, accuracy (from validation report), and efficiency (tokens, tasks) per provider. Outputs per-provider table + timestamped JSON results file.
+- **V2 eval matrix:** `scripts/v2-eval.sh` — LOW/MEDIUM/HIGH × anthropic/openai/gemini, produces JSON + markdown comparison under `scripts/v2-eval-results/`
 
 ### In Progress
 - Production deployment preparation
 
 ### Known Tech Debt
-- **Model matrix cost:** WORKHORSE tier for Anthropic is `claude-haiku-4-5-20251001` — consider whether Sonnet should be used for complex tasks
-- V3 migration type mismatch: `actual_cost_usd` must be `DOUBLE PRECISION` (not `DECIMAL(10,6)`)
-- Branch retry: `GitTool.createBranch()` catches RefAlreadyExistsException → checkout fallback
-- Gate lost on restart: approve() → if gate missing → auto-fail with message
-- StartupRunResumer disabled — users resume stuck runs manually via UI
-- Apply-to-run: `plan_version` duplicate key error on retry (incrementPlanVersion may not be working correctly)
-- `@Lazy @Autowired` on `PreviewService` in `TestPreviewCoordinator` — only field injection in codebase, needed to break circular dependency
-- Default provider is OpenAI but eval results show Anthropic (Haiku) and Google (Gemini) perform better — consider changing default
-- `context-agent.txt` outputs JSON patch array (`KEEP/UPDATE/ADD/REMOVE`) but `ContextAgent.java` still writes raw LLM response — Java-side patch application not yet implemented
-- **Validation report `status` field:** `ValidationReport` entity has no `status` field — `/api/runs/{id}/report` returns 404 when not ready and 200 with data when ready. Eval script and any consumers must detect presence via `accuracyScore != null`, not `status == "COMPLETE"`.
+- **V1 still in-tree** — 339 `@Deprecated(since="v2")` annotations across 18+ classes, pending phased deletion (see `docs/plans/deprecation-removal-plan.md`)
+- **V2 batch not implemented** — V1 `batch/*` is frozen; V2 re-implementation scoped in `docs/plans/v2-batch-execution-plan.md`, waits on deprecation P3
+- **V2 startup replay pending** — boot-time recovery currently marks interrupted runs FAILED; full conversation replay is planned (`docs/plans/harness-v2-remaining-work.md` Gap 2)
+- **Per-task worker tokens** equal-split across tasks in `distributeWorkerTokens`; run totals are correct but per-task attribution is approximate
+- **Gate lost on restart:** approve() → if gate missing → auto-fail with message
+- **Branch retry:** `GitTool.createBranch()` catches `RefAlreadyExistsException` → checkout fallback
+- **`@Lazy @Autowired`** on `PreviewService` in `TestPreviewCoordinator` — breaks circular dependency, only field injection in codebase
+- Default provider is OpenAI but eval results show Anthropic (Haiku) and Gemini perform better — consider changing default
+- **Validation report `status` field:** `ValidationReport` entity has no `status` field — `/api/runs/{id}/report` returns 404 when not ready and 200 with data when ready. Consumers detect presence via `accuracyScore != null`, not `status == "COMPLETE"`.
