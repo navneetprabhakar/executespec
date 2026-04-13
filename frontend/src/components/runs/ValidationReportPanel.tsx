@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Share2, Check, Shield, AlertTriangle, FileCode2, Download } from 'lucide-react';
 import { getValidationReport, shareValidationReport, downloadValidationReportPdf, type ValidationReportData, type ReportIssue } from '@/lib/api';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
+import ScoreCard from './ScoreCard';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
@@ -185,6 +186,9 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
                 )}
               </div>
             )}
+
+            {/* Pilot R6 — six-dimension score card */}
+            <ScoreCard report={report} />
 
             {/* Markdown report */}
             {report.reportMarkdown && (

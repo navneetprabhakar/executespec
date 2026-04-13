@@ -86,6 +86,16 @@ public class ValidationReport {
     @Column(name = "accuracy_json", columnDefinition = "TEXT")
     private String accuracyJson;
 
+    // ── Pilot R6: Multi-dimension review scoring (V83) ─────────────────────────────────────────
+
+    @Column(name = "code_quality_score")      private Integer codeQualityScore;
+    @Column(name = "test_coverage_score")     private Integer testCoverageScore;
+    @Column(name = "architecture_score")      private Integer architectureScore;
+    @Column(name = "security_score")          private Integer securityScore;
+    @Column(name = "performance_score")       private Integer performanceScore;
+    /** Weighted when the run provides a {@code figmaUrl}. Null otherwise. */
+    @Column(name = "design_compliance_score") private Integer designComplianceScore;
+
     // ──────────────────────────────────────────────────────────────────────────────────────────
 
     /** Preview URL captured at report generation time. Null if preview expired or was never started. */

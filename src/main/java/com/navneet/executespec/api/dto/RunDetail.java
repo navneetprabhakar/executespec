@@ -92,6 +92,12 @@ public class RunDetail {
     /** Which SCM provider was used for this run (GITHUB, BITBUCKET, or null for legacy runs). */
     String scmProvider;
 
+    /** Pilot R4 — JSON {@code AssessmentResult}. Null when no project context. */
+    String assessmentResult;
+
+    /** Pilot R7 — Figma URL captured at submission. */
+    String figmaUrl;
+
     /** Timestamp when the run was archived by the user. Null for active runs. */
     Instant archivedAt;
 

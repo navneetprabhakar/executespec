@@ -10,6 +10,7 @@ import com.navneet.executespec.report.model.ReportIssueDTO;
 import com.navneet.executespec.report.model.ValidationReportDTO;
 import com.navneet.executespec.report.model.ValidationReportShareDTO;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
+import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
@@ -37,6 +38,7 @@ public class ValidationReportService {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final StateStore stateStore;
+    private final ReviewScoringService reviewScoringService;
 
     /**
      * Main entry point — called after ReviewerAgent completes, before MergeGate.
@@ -91,6 +93,13 @@ public class ValidationReportService {
                 }
             }
 
+            // 3b. Pilot R6 — six-dimension score derived deterministically from
+            // accuracy + review issues. figmaUrl will flow in once Phase 5 adds
+            // the column on PipelineRun; until then designCompliance stays null.
+            String figmaUrl = input.run() != null ? input.run().getFigmaUrl() : null;
+            ReviewScoringService.Scores scores = reviewScoringService.score(
+                    input.run(), input.review(), accuracyReport, figmaUrl);
+
             // 4. Build and persist entity
             var report = ValidationReport.builder()
                 .id(UUID.randomUUID().toString())
@@ -109,6 +118,12 @@ public class ValidationReportService {
                 .accuracyScore(accuracyScore)
                 .accuracyGrade(accuracyGrade)
                 .accuracyJson(accuracyJson)
+                .codeQualityScore(scores.codeQuality())
+                .testCoverageScore(scores.testCoverage())
+                .architectureScore(scores.architecture())
+                .securityScore(scores.security())
+                .performanceScore(scores.performance())
+                .designComplianceScore(scores.designCompliance())
                 .previewUrl(input.previewUrl())
                 .status("COMPLETE")
                 .build();
@@ -393,6 +408,12 @@ public class ValidationReportService {
             entity.getAccuracyScore(),
             entity.getAccuracyGrade(),
             entity.getAccuracyJson(),
+            entity.getCodeQualityScore(),
+            entity.getTestCoverageScore(),
+            entity.getArchitectureScore(),
+            entity.getSecurityScore(),
+            entity.getPerformanceScore(),
+            entity.getDesignComplianceScore(),
             entity.getPreviewUrl()
         );
     }

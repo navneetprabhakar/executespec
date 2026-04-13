@@ -4,6 +4,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import java.util.List;
+import java.util.UUID;
+
 /**
  * POST /api/runs request body.
  *
@@ -39,5 +42,16 @@ public record RunRequest(
     String aiProvider,
     /** Optional project ID to associate this run with (org members only). */
     @Size(max = 36, message = "Project ID must not exceed 36 characters")
-    String projectId
+    String projectId,
+    /**
+     * Pilot v3.0 — repos selected from the project's linked catalogue. When
+     * present, the harness clones each repo into
+     * {@code workspace/<runId>/repos/<name>/}. When null or empty, falls back
+     * to the single-repo {@link #repoUrl} path. IDs must reference repos
+     * already linked to {@link #projectId}.
+     */
+    List<UUID> selectedRepoIds,
+    /** Pilot R7 — optional Figma URL, drives design-compliance scoring. */
+    @Size(max = 500, message = "Figma URL must not exceed 500 characters")
+    String figmaUrl
 ) {}

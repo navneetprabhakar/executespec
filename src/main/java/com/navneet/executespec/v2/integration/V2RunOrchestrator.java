@@ -32,6 +32,9 @@ import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.PlannerAgentV2;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.assessment.FeatureAssessmentService;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
 import com.navneet.executespec.v2.harness.SequentialExecutorV2;
@@ -114,6 +117,8 @@ public class V2RunOrchestrator {
     private final AccuracyAssessmentService accuracyAssessmentService;
     private final ModelResolver modelResolver;
     private final com.navneet.executespec.v2.smoketest.CliSmokeRunner cliSmokeRunner;
+    private final ProjectRepoService projectRepoService;
+    private final FeatureAssessmentService featureAssessmentService;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
@@ -141,6 +146,32 @@ public class V2RunOrchestrator {
                                   boolean autoMerge, String modelName, String aiProvider,
                                   String createdByUserId, String orgId, String projectId,
                                   String executionMode) {
+        return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
+                skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId,
+                projectId, executionMode, List.of());
+    }
+
+    /**
+     * Pilot v3.0 — overload that accepts project-scoped multi-repo selection.
+     * When {@code selectedRepoIds} is non-empty, the pipeline clones each linked
+     * repo into {@code workspace/<runId>/repos/<name>/} before planning.
+     */
+    public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
+                                  String githubPat, String githubOwner, boolean skipApproval,
+                                  boolean autoMerge, String modelName, String aiProvider,
+                                  String createdByUserId, String orgId, String projectId,
+                                  String executionMode, List<UUID> selectedRepoIds) {
+        return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
+                skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId,
+                projectId, executionMode, selectedRepoIds, null);
+    }
+
+    /** Pilot R7 — overload that accepts an optional Figma URL. */
+    public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
+                                  String githubPat, String githubOwner, boolean skipApproval,
+                                  boolean autoMerge, String modelName, String aiProvider,
+                                  String createdByUserId, String orgId, String projectId,
+                                  String executionMode, List<UUID> selectedRepoIds, String figmaUrl) {
         String runId = UUID.randomUUID().toString();
         String provider = normalizeProvider(aiProvider);
         String model = modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
@@ -168,6 +199,8 @@ public class V2RunOrchestrator {
                 .startedAt(Instant.now())
                 .totalInputTokens(0)
                 .totalOutputTokens(0)
+                .figmaUrl(figmaUrl)
+                .selectedRepoIds(serializeRepoIds(selectedRepoIds))
                 .build();
         run = runRepo.save(run);
 
@@ -181,10 +214,14 @@ public class V2RunOrchestrator {
         final String modelFinal = model;
         final boolean skipApprovalFinal = skipApproval;
         final String executionModeFinal = executionMode != null ? executionMode : "PRODUCTION";
+        final String projectIdFinal = projectId;
+        final List<UUID> selectedRepoIdsFinal = selectedRepoIds != null ? selectedRepoIds : List.of();
+        final String githubPatFinal = githubPat;
         Future<?> future = pool.submit(() -> {
             try {
                 runPipeline(runIdFinal, providerFinal, modelFinal, userRequest,
-                        skipApprovalFinal, executionModeFinal);
+                        skipApprovalFinal, executionModeFinal,
+                        projectIdFinal, selectedRepoIdsFinal, githubPatFinal);
             } finally {
                 activeRuns.remove(runIdFinal);
             }
@@ -197,6 +234,13 @@ public class V2RunOrchestrator {
 
     private void runPipeline(String runId, String provider, String model, String userRequest,
                               boolean skipApproval, String executionMode) {
+        runPipeline(runId, provider, model, userRequest, skipApproval, executionMode,
+                null, List.of(), null);
+    }
+
+    private void runPipeline(String runId, String provider, String model, String userRequest,
+                              boolean skipApproval, String executionMode,
+                              String projectId, List<UUID> selectedRepoIds, String githubPat) {
         Instant startedAt = Instant.now();
         Path workspace = null;
         String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -210,9 +254,50 @@ public class V2RunOrchestrator {
             // and an initial empty commit. This is required for `/push-github` to work against
             // V2 runs: the endpoint assumes the workspace already has git history.
             workspaceInit.ensureRunWorkspace(runId);
+
+            // Pilot v3.0 — clone any project-linked repos the user selected for this run
+            // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
+            // fails we log and continue so the run can at least try to plan against what
+            // was fetched.
+            if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
+                try {
+                    List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
+                    List<WorkspaceInitService.RepoToClone> toClone = repos.stream()
+                            .map(r -> new WorkspaceInitService.RepoToClone(
+                                    r.getGithubRepoFullName(),
+                                    "https://github.com/" + r.getGithubRepoFullName()))
+                            .toList();
+                    workspaceInit.cloneMultipleRepos(runId, toClone, githubPat);
+                    log.info("V2 run={} cloned {} project repos", runId, toClone.size());
+                } catch (Exception cloneEx) {
+                    log.warn("V2 run={} multi-repo clone failed: {}", runId, cloneEx.getMessage(), cloneEx);
+                }
+            }
+
             ExecutionContext rootCtx = new ExecutionContext(
                     runId, "__root__", workspace.toRealPath());
             setWorkspacePath(runId, workspace.toString());
+
+            // ── 0b. Pilot R4: feature assessment ─────────────────────────────
+            // Runs only when a project context is available so the assessment can
+            // reason about linked repos + architecture annotations. Result is
+            // persisted, broadcast over SSE, and available to the planner via
+            // the run row. Heuristic for now (no extra LLM cost).
+            if (projectId != null) {
+                try {
+                    String assessmentJson = featureAssessmentService.assessAsJson(projectId, userRequest);
+                    if (assessmentJson != null) {
+                        runRepo.findById(runId).ifPresent(r -> {
+                            r.setAssessmentResult(assessmentJson);
+                            runRepo.save(r);
+                        });
+                        broadcaster.emit(runId,
+                                RunEvent.log(runId, "assessment", "Feature assessment ready"));
+                    }
+                } catch (Exception assessEx) {
+                    log.warn("V2 run={} assessment failed: {}", runId, assessEx.getMessage());
+                }
+            }
 
             // ── 1. Plan ─────────────────────────────────────────────────────
             perky.start(runId, "PLANNING");
@@ -1128,6 +1213,17 @@ public class V2RunOrchestrator {
             case "openai" -> "gpt-5.4-mini";
             default -> "claude-haiku-4-5-20251001";
         };
+    }
+
+    /** Serialise repo IDs to a compact JSON array string, or null when empty. */
+    private static String serializeRepoIds(List<UUID> ids) {
+        if (ids == null || ids.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append('"').append(ids.get(i).toString()).append('"');
+        }
+        return sb.append(']').toString();
     }
 
     private static String shortMsg(Exception e) {
