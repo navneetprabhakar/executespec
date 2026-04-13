@@ -86,17 +86,17 @@
 | `getRun(id)` | GET | `/runs/{id}` | | `RunDetail` |
 | `createRun(body)` | POST | `/runs` | `{userRequest, executionMode?, skipApproval?, autoMerge?, modelName?, aiProvider?, projectId?, repoMode?, repoUrl?}` | `{runId}` |
 | `approveRun(id, approved)` | POST | `/runs/{id}/approve` | `{approved}` | |
-| `clarifyRun(id, response)` | POST | `/runs/{id}/clarify` | `{response}` | |
-| `mergeRun(id, approved)` | POST | `/runs/{id}/merge` | `{approved}` | |
+| `clarifyRun(id, response)` | POST | `/runs/{id}/clarify` | `{response}` | **410 Gone** (V2) |
+| `mergeRun(id, approved)` | POST | `/runs/{id}/merge` | `{approved}` | **410 Gone** (V2 auto-merges) |
 | `cancelRun(id)` | DELETE | `/runs/{id}` | | |
 | `retryTask(runId, taskId)` | POST | `/runs/{runId}/tasks/{taskId}/retry` | | |
-| `retryRun(runId)` | POST | `/runs/{runId}/retry` | | `RunSummary` |
-| `reopenMergeGate(runId)` | POST | `/runs/{runId}/reopen-merge` | | |
-| `implementSuggestions(runId)` | POST | `/runs/{runId}/implement-suggestions` | | |
-| `reworkRun(runId)` | POST | `/runs/{runId}/rework` | | |
-| `pauseRun(runId)` | POST | `/runs/{runId}/pause` | | |
-| `editAndRestartRun(runId, userRequest)` | POST | `/runs/{runId}/edit-and-restart` | `{userRequest}` | `RunSummary` |
-| `resumeRun(runId)` | POST | `/runs/{runId}/resume` | | |
+| `retryRun(runId)` | POST | `/runs/{runId}/retry` | | **410 Gone** (V2 — submit fresh run) |
+| `reopenMergeGate(runId)` | POST | `/runs/{runId}/reopen-merge` | | **410 Gone** (V2) |
+| `implementSuggestions(runId)` | POST | `/runs/{runId}/implement-suggestions` | | **410 Gone** (V2) |
+| `reworkRun(runId)` | POST | `/runs/{runId}/rework` | | **410 Gone** (V2) |
+| `pauseRun(runId)` | POST | `/runs/{runId}/pause` | | **410 Gone** (V2) |
+| `editAndRestartRun(runId, userRequest)` | POST | `/runs/{runId}/edit-and-restart` | `{userRequest}` | **410 Gone** (V2) |
+| `resumeRun(runId)` | POST | `/runs/{runId}/resume` | | **410 Gone** (V2) |
 | `editRunPlan(runId, feedback)` | POST | `/runs/{runId}/edit-plan` | `{feedback}` | `{status, version}` |
 | `getPlanVersions(runId)` | GET | `/runs/{runId}/plan-versions` | | `any[]` |
 | `updateRunProject(runId, projectId)` | PATCH | `/runs/{runId}/project` | `{projectId}` | `RunSummary` |

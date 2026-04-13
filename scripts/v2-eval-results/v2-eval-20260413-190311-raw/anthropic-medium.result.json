@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "medium",
+  "run_id": "eb74cda1-4f87-443a-ba34-978aaa2b751e",
+  "status": "PARTIAL",
+  "harness": "v2",
+  "startedAt": "2026-04-13T13:34:12.992896Z",
+  "completedAt": "2026-04-13T13:37:45.959645Z",
+  "tasks_total": 4,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"totalLatencyMs\":76102,\"wiringPassSummary\":\"Wiring review complete. No wiring issues found. This is a simple Express.js application with all routes (POST/GET/PATCH/DELETE /todos endpoints) properly registered with the app, middleware correctly configured, and server startup properly implemented. The project builds successfully and has valid Node.js syntax.\",\"generalPassSummary\":\"\",\"overall\":\"FIXED_ISSUES\",\"finalBuildExitCode\":0,\"finalBuildPassed\":true}",
+  "actual_cost": 0.125388,
+  "est_low": 0.14650000000000002,
+  "est_high": 0.256375,
+  "credits": 1,
+  "total_input": 31698,
+  "total_output": 18738,
+  "accuracy": 97,
+  "report_ok": true
+}

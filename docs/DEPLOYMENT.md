@@ -2121,8 +2121,7 @@ AGENT_PROVIDER_POOLS_GOOGLE_MAX_CONCURRENT=10
 
 | Key Pattern | Purpose | TTL |
 |------------|---------|-----|
-| `gate:plan:{runId}` | Plan approval gate | 2h |
-| `gate:merge:{runId}` | Merge gate (legacy) | 2h |
+| `gate:plan:{runId}` | Plan approval gate | 4h |
 | `rks:{runId}:{provider}` | Encrypted API key per provider | 2h |
 | `sse:channel:{runId}` | Pub/Sub channel for SSE | Duration of run |
 | `sse:replay:{runId}` | SSE replay log (list, 200 entries) | 30min after run completes |
