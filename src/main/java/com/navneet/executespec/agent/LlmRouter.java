@@ -58,10 +58,20 @@ import static com.navneet.executespec.config.CustomMetricsConfig.*;
  * 4. TASK_BOUNDARY mode, mid-task: NO fallback — throw MidTaskProviderFailureException
  * 5. Fallback stays within the same capability tier
  */
+/**
+ * Shared multi-provider LLM router used by non-tool-calling agents
+ * (AccuracyAssessmentService, TestPlannerAgent, TestWorkerAgent,
+ * TestReportGenerator, ApiTestSuiteAgent, ConversationAgent, ContextAgent,
+ * ValidationReportGenerator, ConflictResolverAgent, PromptOptimiserAgent,
+ * eval stack).
+ *
+ * <p>V2 tool-calling agents use {@code LlmRouterV2} in {@code com.navneet.executespec.v2.agent}.
+ * This router handles provider failover, circuit breaking, and API-key resolution
+ * for text-completion callers that do not need native tool calling.
+ */
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@Deprecated(since = "v2")
 public class LlmRouter {
 
     public enum FallbackMode { IMMEDIATE, TASK_BOUNDARY, NO_FALLBACK }
@@ -96,7 +106,7 @@ public class LlmRouter {
     /**
      * Call the model with provider fallback according to the guardrail rules.
      */
-    @Deprecated(since = "v2")
+    
     public LlmResponse callWithFallbackTracked(String primaryProvider, String primaryModel,
                                                Prompt prompt, String runId, String agentId,
                                                FallbackMode mode, int iteration, boolean justCompacted) {
@@ -292,7 +302,7 @@ public class LlmRouter {
     /**
      * Convenience wrapper for callers that only need the ChatResponse (IMMEDIATE mode agents).
      */
-    @Deprecated(since = "v2")
+    
     public ChatResponse callWithFallback(String primaryProvider, String primaryModel,
                                          Prompt prompt, String runId, String agentId,
                                          FallbackMode mode, int iteration, boolean justCompacted) {
@@ -309,7 +319,7 @@ public class LlmRouter {
      * @param prompt    the prompt to send
      * @return response with provider/model metadata
      */
-    @Deprecated(since = "v2")
+    
     public LlmResponse callDirect(String provider, String model, Prompt prompt) {
         Instant start = Instant.now();
         ChatResponse response = callWithModelOptions(provider, model, prompt, "eval-system");
@@ -326,13 +336,13 @@ public class LlmRouter {
     /**
      * Records token usage counters and observation keys (best-effort, never throws).
      */
-    @Deprecated(since = "v2")
+    
     private void recordTokenMetrics(ChatResponse response, String provider, String model,
                                     Observation obs) {
         recordTokenMetrics(response, provider, model, obs, null, null, null);
     }
 
-    @Deprecated(since = "v2")
+    
     private void recordTokenMetrics(ChatResponse response, String provider, String model,
                                     Observation obs, String agentId, Duration callDuration, Boolean success) {
         try {
@@ -372,7 +382,7 @@ public class LlmRouter {
     }
 
     /** Maps agent name to tier label for SLO tagging. */
-    @Deprecated(since = "v2")
+    
     private static String resolveAgentTier(String agentId) {
         if (agentId == null) return "UNKNOWN";
         return switch (agentId.toLowerCase()) {
@@ -403,7 +413,7 @@ public class LlmRouter {
      */
     private static final long[] RATE_LIMIT_BACKOFF_DELAYS_MS = {15_000, 30_000, 60_000, 120_000};
 
-    @Deprecated(since = "v2")
+    
     private LlmResponse handleRetryAfterSleep(String eventKey, String eventDescription, long ignoredSleepMs,
                                                String provider, String model, Prompt prompt,
                                                String runId, String agentId, int iteration,
@@ -467,7 +477,7 @@ public class LlmRouter {
      * dynamically-built ChatModel if the user/org has provided their own key;
      * otherwise falls through to the system singleton bean.
      */
-    @Deprecated(since = "v2")
+    
     private ChatResponse callWithModelOptions(String provider, String model, Prompt prompt, String runId) {
         List<ToolCallback> toolCallbacks = List.of();
         Boolean internalToolExec = null;
@@ -555,7 +565,7 @@ public class LlmRouter {
      * If the resolved keys contain a user/org-level key, a fresh model instance is created
      * with that key; otherwise the system singleton bean is used.
      */
-    @Deprecated(since = "v2")
+    
     private org.springframework.ai.chat.model.ChatModel resolveModel(String provider, ResolvedKeys keys) {
         return switch (provider.toLowerCase()) {
             case "anthropic" -> {
@@ -610,7 +620,7 @@ public class LlmRouter {
 
     // ── Per-request model builders ─────────────────────────────────────────────
 
-    @Deprecated(since = "v2")
+    
     private AnthropicChatModel buildAnthropicModel(String apiKey) {
         AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
         return AnthropicChatModel.builder()
@@ -621,7 +631,7 @@ public class LlmRouter {
                 .build();
     }
 
-    @Deprecated(since = "v2")
+    
     private OpenAiChatModel buildOpenAiModel(String apiKey) {
         OpenAiApi api = OpenAiApi.builder().apiKey(apiKey).build();
         return OpenAiChatModel.builder()
@@ -632,7 +642,7 @@ public class LlmRouter {
                 .build();
     }
 
-    @Deprecated(since = "v2")
+    
     private GoogleGenAiChatModel buildGeminiModel(String apiKey) {
         Client client = Client.builder().apiKey(apiKey).build();
         return GoogleGenAiChatModel.builder()
@@ -643,7 +653,7 @@ public class LlmRouter {
                 .build();
     }
 
-    @Deprecated(since = "v2")
+    
     private RetryTemplate getRetryTemplate() {
         try {
             return ctx.getBean(RetryTemplate.class);
@@ -652,7 +662,7 @@ public class LlmRouter {
         }
     }
 
-    @Deprecated(since = "v2")
+    
     private ObservationRegistry getObservationRegistry() {
         try {
             return ctx.getBean(ObservationRegistry.class);
@@ -663,13 +673,13 @@ public class LlmRouter {
 
     // ── Chain helpers ───────────────────────────────────────────────────────────
 
-    @Deprecated(since = "v2")
+    
     private List<String[]> resolveChain(String model) {
         List<String[]> chain = modelRegistry.fallbackChainFor(model);
         return chain != null && !chain.isEmpty() ? chain : modelRegistry.fallbackChainForTier("CAPABLE");
     }
 
-    @Deprecated(since = "v2")
+    
     private int findIndexInChain(List<String[]> chain, String provider) {
         for (int i = 0; i < chain.size(); i++) {
             if (chain.get(i)[0].equalsIgnoreCase(provider)) return i;
@@ -680,7 +690,7 @@ public class LlmRouter {
     // ── Provider string → enum mapping ─────────────────────────────────────────
 
     /** Maps the chain provider string ("anthropic", "google", "openai") to LlmProvider enum. */
-    @Deprecated(since = "v2")
+    
     private static LlmProvider toLlmProvider(String provider) {
         return switch (provider.toLowerCase()) {
             case "google" -> LlmProvider.GOOGLE;
@@ -692,14 +702,14 @@ public class LlmRouter {
 
     // ── Rate-limit / overload detection ────────────────────────────────────────
 
-    @Deprecated(since = "v2")
+    
     private boolean isPerMinuteRateLimit(Exception e) {
         if (e == null) return false;
         String msg = e.getMessage();
         return msg != null && msg.contains("per minute");
     }
 
-    @Deprecated(since = "v2")
+    
     private boolean isOverloaded(Exception e) {
         if (e == null) return false;
         String msg = e.getMessage();
@@ -713,7 +723,7 @@ public class LlmRouter {
      * 5xx HTTP errors, Google "Failed to generate content", connection resets, timeouts.
      * These failures are NOT the caller's fault and often resolve within seconds.
      */
-    @Deprecated(since = "v2")
+    
     private boolean isTransientServerError(Exception e) {
         if (e == null) return false;
         String msg = e.getMessage();
@@ -735,7 +745,7 @@ public class LlmRouter {
      * Returns true for fatal client-side errors that should NOT be retried.
      * Retrying would just produce the same error (wrong key, malformed request, etc.).
      */
-    @Deprecated(since = "v2")
+    
     private boolean isFatalClientError(Exception e) {
         if (e == null) return false;
         String msg = e.getMessage();
@@ -754,7 +764,7 @@ public class LlmRouter {
     // ── Call counter lifecycle ─────────────────────────────────────────────────
 
     /** Call when a run completes (success or failure) to free memory. */
-    @Deprecated(since = "v2")
+    
     public void clearRunCallCounter(String runId) {
         if (runId != null) {
             runCallCounters.invalidate(runId);
@@ -764,7 +774,7 @@ public class LlmRouter {
     }
 
     /** Get current LLM call count for a run (for observability). */
-    @Deprecated(since = "v2")
+    
     public int getRunCallCount(String runId) {
         AtomicInteger counter = runCallCounters.getIfPresent(runId);
         return counter != null ? counter.get() : 0;
@@ -773,7 +783,7 @@ public class LlmRouter {
     // ── FREE tier model lock ──────────────────────────────────────────────────
 
     /** Register the user's subscription tier for a run. Called by PipelineHarness at run start. */
-    @Deprecated(since = "v2")
+    
     public void setRunUserTier(String runId, String userTier) {
         if (runId != null && userTier != null) {
             runUserTierCache.put(runId, userTier.toUpperCase());
@@ -781,7 +791,7 @@ public class LlmRouter {
     }
 
     /** Returns the cached user tier for a run, or null if not set. */
-    @Deprecated(since = "v2")
+    
     public String getRunUserTier(String runId) {
         return runId != null ? runUserTierCache.getIfPresent(runId) : null;
     }
