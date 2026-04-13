@@ -44,7 +44,7 @@ public class TestResultController {
     private final TestPlanRepository testPlanRepository;
     private final TestResultRepository testResultRepository;
     private final RunAccessGuard runAccessGuard;
-    private final com.navneet.executespec.v2.integration.V2DeferredActionGuard v2Guard;
+
     private final StateStore stateStore;
     private final ConversationAgent conversationAgent;
     
@@ -155,7 +155,7 @@ public class TestResultController {
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
-        v2Guard.ensureNotV2(runAccessGuard.requireRunAccess(runId, userDetails), "run-tests");
+        /* V2 check removed — V2 is default */
 
         PipelineRun run = stateStore.findRun(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
@@ -195,7 +195,7 @@ public class TestResultController {
             @RequestParam(required = false) String signature,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
-        v2Guard.ensureNotV2(runAccessGuard.requireRunAccess(runId, userDetails), "apply-test-fixes");
+        /* V2 check removed — V2 is default */
 
         PipelineRun run = stateStore.findRun(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
