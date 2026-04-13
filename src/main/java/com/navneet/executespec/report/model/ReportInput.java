@@ -1,7 +1,7 @@
 package com.navneet.executespec.report.model;
 
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.compiler.CompileResult;
+import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;

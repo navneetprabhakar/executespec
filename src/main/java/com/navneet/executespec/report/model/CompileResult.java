@@ -1,7 +1,13 @@
-package com.navneet.executespec.compiler;
+package com.navneet.executespec.report.model;
 
 /**
- * Outcome of a CompilerAgent compile-and-fix cycle.
+ * Outcome of a compile / smoke-test pass.
+ *
+ * <p>Kept as a data carrier inside {@link ReportInput} so the validation
+ * report can describe a final build attempt. Moved here after the V1
+ * {@code compiler/} package was deleted in deprecation P3 — the new V2 smoke
+ * path uses {@code buildProject} tool results which are translated into this
+ * shape when building a {@code ReportInput}.
  *
  * @param passed       true when compile exited 0 (or was skipped)
  * @param skipped      true when no build tool was detected in the workspace

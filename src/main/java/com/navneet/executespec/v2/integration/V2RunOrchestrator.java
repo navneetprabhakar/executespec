@@ -5,7 +5,7 @@ import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.compiler.CompileResult;
+import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.UiStyleResolver;
 import com.navneet.executespec.harness.WorkspaceInitService;

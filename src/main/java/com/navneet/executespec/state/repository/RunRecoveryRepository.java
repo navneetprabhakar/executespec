@@ -1,6 +1,5 @@
 package com.navneet.executespec.state.repository;
 
-import com.navneet.executespec.recovery.StuckClassification;
 import com.navneet.executespec.state.entity.RunRecovery;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -21,7 +20,7 @@ public interface RunRecoveryRepository extends JpaRepository<RunRecovery, String
     @Query("SELECT r FROM RunRecovery r WHERE r.classification IN :classifications " +
            "AND r.originalRunId IN :runIds")
     List<RunRecovery> findByClassificationIn(
-        @Param("classifications") List<StuckClassification> classifications,
+        @Param("classifications") List<String> classifications,
         @Param("runIds") List<String> runIds
     );
 }

@@ -558,7 +558,7 @@ public class RunController {
         List<RecoveryResponse> response = recoveries.stream()
             .map(r -> new RecoveryResponse(
                 r.getId(), r.getOriginalRunId(), r.getRestartRunId(),
-                r.getStuckTaskId(), r.getClassification().name(),
+                r.getStuckTaskId(), r.getClassification(),
                 r.getClassificationDetail(), r.getActionTaken(),
                 r.getRecoveredAt(), r.getRestartCreatedAt()
             ))

@@ -1,8 +1,6 @@
 package com.navneet.executespec.reviewer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmOutputParser;
-import com.navneet.executespec.agent.LlmResponseCleaner;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
@@ -55,7 +53,19 @@ public class AccuracyAssessmentService {
     private final FileSystemTool fileSystemTool;
     private final StateStore stateStore;
     private final ObjectMapper mapper;
-    private final LlmOutputParser outputParser;
+
+    /** Strip leading/trailing markdown code fences from an LLM response.
+     *  Inlined from the deleted V1 LlmResponseCleaner. */
+    private static String stripMarkdownFences(String s) {
+        if (s == null) return "";
+        String t = s.trim();
+        if (t.startsWith("```")) {
+            int nl = t.indexOf('\n');
+            if (nl > 0) t = t.substring(nl + 1);
+            if (t.endsWith("```")) t = t.substring(0, t.length() - 3);
+        }
+        return t.trim();
+    }
 
     private static final String SYSTEM_PROMPT = """
             You are a specification adherence auditor. Your ONLY job is to compare the ORIGINAL USER SPECIFICATION
@@ -173,7 +183,7 @@ public class AccuracyAssessmentService {
             }
 
             // Try to parse the accuracy report
-            String cleaned = LlmResponseCleaner.stripMarkdownFences(text).trim();
+            String cleaned = stripMarkdownFences(text).trim();
             if (!cleaned.startsWith("{")) {
                 // Try to extract JSON object
                 int start = cleaned.indexOf('{');
@@ -199,7 +209,7 @@ public class AccuracyAssessmentService {
                             opts != null ? new Prompt(messages, opts) : new Prompt(messages),
                             runId, "accuracy-assessment-retry", LlmRouter.FallbackMode.IMMEDIATE, 1, false);
                     String retryText = retryLr.response().getResult().getOutput().getText();
-                    String retryCleaned = LlmResponseCleaner.stripMarkdownFences(retryText).trim();
+                    String retryCleaned = stripMarkdownFences(retryText).trim();
                     report = mapper.readValue(retryCleaned, AccuracyReport.class);
                 } catch (Exception e2) {
                     log.warn("[AccuracyAssessment] Retry parse also failed: {}", e2.getMessage());
