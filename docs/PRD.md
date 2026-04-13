@@ -1,9 +1,16 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 4.1
-> **Last Updated:** 2026-04-04
-> **Status:** Production (v1.1.0)
+> **Version:** 4.2
+> **Last Updated:** 2026-04-13
+> **Status:** Production (v2.0.0, V2-only harness)
 > **Author:** Navneet Prabhakar
+
+> **⚠️ Implementation note (2026-04-13).** Product requirements below are
+> harness-agnostic and remain accurate. Internal references to V1 pipeline
+> stages (compile, merge gate, clarification gate, batch execution, subtask
+> decomposition) describe the previous architecture; under V2 these are
+> replaced by sequential per-task execution + smoke test + reviewer.
+> Operational truth lives in [`CLAUDE.md`](../CLAUDE.md).
 
 ---
 

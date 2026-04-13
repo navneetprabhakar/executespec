@@ -210,15 +210,17 @@ Click **Approve** to start execution. Credits are charged at approval. If you re
 
 ### 4.4 Task Execution
 
-Each task runs in an isolated git worktree. The **WorkerAgent**:
-1. Reads relevant files from the workspace
-2. Generates code using the configured LLM provider
-3. Writes files to the workspace (strictly within the workspace boundary)
-4. Commits the changes
+Tasks run **sequentially**, one at a time, in the order the planner emitted them. For each task, a single **WorkerAgentV2** loop:
+1. Reads the task's description + any hard constraints injected by the planner
+2. Invokes the LLM via native tool calling (Anthropic / OpenAI / Gemini)
+3. Calls file tools (`readFile`, `writeFile`, `editFile`, `shell`, `gitCommit`, etc.) as needed
+4. Ends the task by invoking the `completeTask` tool
 
-Multi-file tasks are automatically decomposed into per-file **subtasks**, each producing exactly one file write, to prevent fabricated outputs.
+Iteration caps per complexity: **LOW 12 iters / 4k tokens**, **MEDIUM 22 / 8k**, **HIGH 35 / 16k**.
 
-After each task, changes are **progressively merged** to the main branch — later tasks always see the output of earlier tasks. A fast syntax check runs immediately after each merge to catch breaking changes early.
+Each task ends with a **smoke test** — the project's build command (Maven / Gradle / npm / cargo / go / python compileall) is invoked via the `buildProject` tool. If the smoke test fails, the worker gets one retry with the build error injected. If the retry also fails, the task is marked `COMPLETED_WITH_WARNING` and the run continues — the post-execute reviewer takes another pass.
+
+V2 does not use subtask decomposition or progressive merge; each task writes to the main branch directly and the next task sees the result.
 
 **Task execution limits:**
 - 25-minute wall-clock time limit per task
@@ -267,7 +269,7 @@ Within a run, each task has its own status:
 | Task Status | Meaning |
 |------------|---------|
 | `PENDING` | Waiting to execute |
-| `WORKING` | WorkerAgent executing |
+| `WORKING` | Worker executing tasks sequentially |
 | `COMPLETE` | Task finished and merged |
 | `FAILED` | Task failed after all retries |
 | `BLOCKED` | A dependency task failed; this task was skipped |
@@ -679,7 +681,7 @@ Content-Type: application/json
 }
 ```
 
-For batch execution, use `"executionMode": "BATCH"`.
+Batch execution is not yet available under V2 — `executionMode` accepts only `REALTIME` (or may be omitted). The V2 batch re-implementation is tracked in `docs/plans/v2-batch-execution-plan.md`.
 
 **Cancel run:**
 ```http

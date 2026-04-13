@@ -2,6 +2,15 @@
 
 > **User journey diagrams** for every major feature flow, rendered with Mermaid.
 
+> **⚠️ V2-only as of 2026-04-13.** Diagrams below referencing `PipelineHarness`,
+> `CompilerAgent`, `ReviewerAgentV2`, `SubtaskDecomposer`, batch flows
+> (`QUEUED_BATCH` → `BATCH_COMPLETE`), or merge / clarification gates describe
+> the retired V1 pipeline. The current V2 flow is:
+> **PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → COMPLETE** (no batch,
+> no compile, no merge gate, no clarification gate). See
+> [`docs/user-journeys.md`](user-journeys.md) and [`CLAUDE.md`](../CLAUDE.md)
+> for the canonical V2 flow.
+
 ---
 
 ## Table of Contents
