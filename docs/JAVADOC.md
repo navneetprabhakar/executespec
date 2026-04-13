@@ -4,6 +4,17 @@
 **Last Updated:** 2026-04-04
 **Stack:** Java 21, Spring Boot 3.3.0, Spring AI 1.1.0, PostgreSQL, Redis, JGit 6.9.0
 
+> **⚠️ Historical reference — V1 architecture.**
+> This document describes the original V1 harness (`PipelineHarness`, `WorkerAgent`,
+> `CompilerAgent`, `ReviewerAgentV2`, `batch/*`). V1 is frozen pending deletion
+> per [docs/plans/deprecation-removal-plan.md](plans/deprecation-removal-plan.md).
+>
+> **Canonical architecture lives in [CLAUDE.md](../CLAUDE.md).** Start there for
+> current V2 internals (`V2RunOrchestrator`, `PlannerAgentV2`, `WorkerAgentV2`,
+> `SequentialExecutorV2`, `ReviewerAgentV3`, `LlmRouterV2`, `ToolRegistryV2`).
+>
+> A full rewrite of this file will happen as part of the deprecation plan.
+
 ---
 
 ## Table of Contents

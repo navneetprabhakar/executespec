@@ -225,15 +225,17 @@ After each task, changes are **progressively merged** to the main branch — lat
 - Stall detection: if no file writes occur for 5 minutes, the model is escalated from WORKHORSE to PLANNING tier
 - 3 retry attempts per task with error feedback
 
-### 4.5 Compilation
+### 4.5 Smoke test (per task)
 
-After all tasks complete, the **CompilerAgent** runs a full build:
-- Java: `mvn compile`
-- TypeScript/React: `npx tsc --noEmit`
-- Python: `python3 -m py_compile`
+After each task's worker finishes, V2 runs the project's build command as a smoke test (`buildProject` tool):
+- Java/Maven: `mvn -q -DskipTests compile`
+- Java/Gradle: `./gradlew -q assemble -x test` (or bare `gradle` if no wrapper)
+- TypeScript/Node: `npm run build --if-present`
+- Python: `python3 -m compileall -q .`
+- Rust: `cargo build --quiet`
 - Go: `go build ./...`
 
-On failure, the CompilerAgent attempts up to 3 fix rounds before marking the run as PARTIAL.
+If the smoke test fails, the worker retries once with the build error injected into the user prompt. If that retry also fails, the task is marked `COMPLETED_WITH_WARNING` and the run continues. The post-execute **reviewer** (see §5.1) will take another pass.
 
 ### 4.6 Plan Approval in Detail
 
@@ -251,13 +253,9 @@ The plan approval gate supports:
 | `QUEUED` | Waiting for a provider pool slot | None — automatic |
 | `PLANNING` | PlannerAgent is decomposing your request | None — wait |
 | `AWAITING_APPROVAL` | Plan is ready; waiting for your approval | **Approve or reject** the plan |
-| `QUEUED_BATCH` | Batch tasks submitted to provider batch API | None — wait for batch results (typically hours) |
-| `IN_PROGRESS_BATCH` | Provider is processing batch tasks | None — wait |
-| `BATCH_COMPLETE` | Batch results received; processing results | None — automatic |
 | `WORKING` | Tasks are executing | None — watch the live task graph |
-| `COMPILING` | CompilerAgent validating the build | None — wait |
-| `MERGING` | Task branches being merged to main | None — automatic |
-| `COMPLETE` | All tasks merged; preview starting | Use the preview, check the validation report |
+| `REVIEWING` | Reviewer running general + wiring passes | None — wait |
+| `COMPLETE` | Execution + review done; preview starting | Use the preview, check the validation report |
 | `PARTIAL` | Some tasks succeeded; others failed | Review failed tasks; optionally retry |
 | `FAILED` | Run could not be completed | Check the failure reason; retry or adjust spec |
 | `PAUSED` | Run manually paused | Resume when ready |
@@ -337,11 +335,10 @@ After a run reaches `COMPLETE`, ExecuteSpec performs background validation in a 
 
 ### 7.1 Validation Phases
 
-1. **Code Review (ReviewerAgentV2)**
-   - Two-phase agentic review: inspect → identify issues → auto-fix
-   - Issues classified as CRITICAL, MEDIUM, or LOW severity
-   - Auto-fix attempts up to 8 issues, 2 attempts per issue
-   - Result: PASSED / PASSED_WITH_FIXES / NEEDS_ATTENTION / FAILED
+1. **Code Review (ReviewerAgentV3)**
+   - Two agentic passes — a general review (logic bugs, incomplete implementations, contract violations) and a project-type-aware wiring review (controller registration, barrel exports, module wiring, etc.)
+   - After both passes, the build is re-run
+   - Result: CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED
 
 2. **Test Generation (TestGenOrchestrator)**
    - Generates a test plan based on your spec and the generated code
