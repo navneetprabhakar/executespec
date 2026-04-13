@@ -12,6 +12,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -55,6 +56,14 @@ public class StartupRunResumerV2 {
     private static final List<String> RESUMABLE_STATUSES =
             List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL");
 
+    /** Hard cap on resume attempts per run. Once exceeded the run is
+     *  permanently FAILED; the user can submit a fresh run instead. */
+    private static final int MAX_RESUME_ATTEMPTS = 3;
+
+    /** Runs older than this at boot time are considered abandoned rather
+     *  than interrupted — we fail them cleanly instead of attempting resume. */
+    private static final Duration STALE_CUTOFF = Duration.ofHours(6);
+
     private final PipelineRunRepository runRepo;
     private final SseBroadcaster broadcaster;
 
@@ -84,39 +93,66 @@ public class StartupRunResumerV2 {
                 candidates.size());
 
         int awaitingApproval = 0;
-        int failed = 0;
+        int failedInterrupted = 0;
+        int failedCapped = 0;
+        int failedStale = 0;
+        Instant cutoff = Instant.now().minus(STALE_CUTOFF);
         for (PipelineRun run : candidates) {
             String status = run.getStatus();
             if ("AWAITING_APPROVAL".equals(status)) {
                 // User-facing gate; no orchestrator thread required to unblock.
-                // Just log so we have visibility.
                 log.info("StartupRunResumerV2: run={} AWAITING_APPROVAL — left as-is",
                         run.getRunId());
                 awaitingApproval++;
                 continue;
             }
-            markFailed(run, status);
-            failed++;
+
+            int attempts = run.getResumeAttempts() == null ? 0 : run.getResumeAttempts();
+            if (attempts >= MAX_RESUME_ATTEMPTS) {
+                markFailed(run, status,
+                        "Resume attempt limit (" + MAX_RESUME_ATTEMPTS + ") reached. "
+                                + "Please submit a fresh run.");
+                failedCapped++;
+                continue;
+            }
+
+            Instant startedAt = run.getStartedAt();
+            if (startedAt != null && startedAt.isBefore(cutoff)) {
+                // Abandoned — too old to replay meaningfully. Fail without consuming
+                // an attempt so the counter only reflects real resume attempts.
+                markFailed(run, status,
+                        "Run exceeded " + STALE_CUTOFF.toHours() + "h since start; "
+                                + "considered stale rather than interrupted.");
+                failedStale++;
+                continue;
+            }
+
+            // Count this as a resume attempt even in Phase 1 (fail-cleanly) so
+            // repeated deploy-interrupt cycles trip the cap and don't thrash.
+            run.setResumeAttempts(attempts + 1);
+            markFailed(run, status,
+                    "Interrupted during " + status
+                            + " (JVM restart / deploy). Please retry the run. "
+                            + "Resume attempts used: " + (attempts + 1) + "/" + MAX_RESUME_ATTEMPTS);
+            failedInterrupted++;
         }
-        log.warn("StartupRunResumerV2: recovery complete — awaiting-approval={} failed={}",
-                awaitingApproval, failed);
+        log.warn("StartupRunResumerV2: recovery complete — awaiting-approval={} "
+                        + "interrupted={} cap-exceeded={} stale={}",
+                awaitingApproval, failedInterrupted, failedCapped, failedStale);
     }
 
-    private void markFailed(PipelineRun run, String previousStatus) {
+    private void markFailed(PipelineRun run, String previousStatus, String reason) {
         String runId = run.getRunId();
-        String reason = "Interrupted during " + previousStatus
-                + " (JVM restart / deploy). Please retry the run.";
         run.setStatus("FAILED");
         run.setFailureReason(reason);
         run.setCompletedAt(Instant.now());
         runRepo.save(run);
-        log.warn("StartupRunResumerV2: run={} prev={} → FAILED (reason: interrupted)",
-                runId, previousStatus);
+        log.warn("StartupRunResumerV2: run={} prev={} → FAILED ({})",
+                runId, previousStatus, reason);
         try {
             broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
             broadcaster.complete(runId);
         } catch (Exception e) {
-            // SSE emit is best-effort — the DB write is the source of truth.
             log.debug("StartupRunResumerV2: SSE emit failed for run={}: {}",
                     runId, e.getMessage());
         }
