@@ -533,7 +533,14 @@ public class RunController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(runId, userDetails);
         log.info("DELETE /api/runs/{}", runId);
-        boolean cancelled = harness.cancelRun(runId);
+        // Route to V2 orchestrator for V2 runs; keep V1 harness path for legacy.
+        var run = stateStore.findRun(runId).orElse(null);
+        boolean cancelled;
+        if (run != null && "v2".equalsIgnoreCase(run.getHarnessVersion())) {
+            cancelled = v2Orchestrator.cancel(runId);
+        } else {
+            cancelled = harness.cancelRun(runId);
+        }
         return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
     }
 
