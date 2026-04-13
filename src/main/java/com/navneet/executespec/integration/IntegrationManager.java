@@ -1,7 +1,7 @@
 package com.navneet.executespec.integration;
 
-import com.navneet.executespec.harness.PipelineHarness;
 import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.v2.integration.V2RunOrchestrator;
 import com.navneet.executespec.state.entity.IntegrationEventLog;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -34,19 +34,42 @@ public class IntegrationManager {
     private final IntegrationRunRepository integrationRunRepo;
     private final IntegrationEventLogRepository eventLogRepo;
     private final StateStore stateStore;
-    private final PipelineHarness harness;
+    private final V2RunOrchestrator v2Orchestrator;
 
     public IntegrationManager(
             List<InboundAdapter> inbound,
             IntegrationRunRepository integrationRunRepo,
             IntegrationEventLogRepository eventLogRepo,
             StateStore stateStore,
-            PipelineHarness harness) {
+            V2RunOrchestrator v2Orchestrator) {
         this.inboundAdapters  = inbound.stream().collect(toMap(InboundAdapter::sourceType, a -> a));
         this.integrationRunRepo = integrationRunRepo;
         this.eventLogRepo = eventLogRepo;
         this.stateStore = stateStore;
-        this.harness = harness;
+        this.v2Orchestrator = v2Orchestrator;
+    }
+
+    /**
+     * Submit an integration-triggered run. Integration runs bypass the plan-
+     * approval gate (skipApproval=true when signalled) and have no repo/github
+     * config — they're webhook-driven.
+     */
+    private PipelineRun submitIntegrationRun(String userRequest, String sourceType, boolean skipApproval) {
+        return v2Orchestrator.submitRun(
+                userRequest,
+                sourceType,
+                /* repoUrl */ null,
+                /* repoMode */ "NONE",
+                /* githubPat */ null,
+                /* githubOwner */ null,
+                skipApproval,
+                /* autoMerge */ true,
+                /* modelName */ null,
+                /* aiProvider */ null,
+                /* userId */ null,
+                /* orgId */ null,
+                /* projectId */ null,
+                "PROTOTYPE");
     }
 
     // ── Inbound ───────────────────────────────────────────────────────────────
@@ -76,7 +99,7 @@ public class IntegrationManager {
         saveEventLog(sourceType, eventId);
 
         String userRequest = buildUserRequest(event);
-        PipelineRun run = harness.submitIntegrationRun(userRequest, sourceType, event.skipApproval());
+        PipelineRun run = submitIntegrationRun(userRequest, sourceType, event.skipApproval());
 
         IntegrationRun ir = IntegrationRun.builder()
                 .runId(run.getRunId())
@@ -97,7 +120,7 @@ public class IntegrationManager {
      */
     public String submitEvent(IntegrationEvent event) {
         String userRequest = buildUserRequest(event);
-        PipelineRun run = harness.submitIntegrationRun(userRequest, event.sourceType(), event.skipApproval());
+        PipelineRun run = submitIntegrationRun(userRequest, event.sourceType(), event.skipApproval());
 
         IntegrationRun ir = IntegrationRun.builder()
                 .runId(run.getRunId())

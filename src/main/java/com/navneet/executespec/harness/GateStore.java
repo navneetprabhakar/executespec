@@ -66,10 +66,9 @@ public class GateStore {
                 .register(meterRegistry);
     }
 
-    // In-memory write-through maps — instant same-instance resolution
-    private final ConcurrentHashMap<String, CompletableFuture<Boolean>>        planFutures  = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, CompletableFuture<MergeDecision>>  mergeFutures = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, CompletableFuture<String>>         clarificationFutures = new ConcurrentHashMap<>();
+    // In-memory write-through map — instant same-instance resolution.
+    // V1 merge + clarification gates retired; V2 only uses the plan gate.
+    private final ConcurrentHashMap<String, CompletableFuture<Boolean>> planFutures = new ConcurrentHashMap<>();
 
     // ── Signal (write-through: in-memory + Redis) ────────────────────────────────
 
@@ -102,38 +101,6 @@ public class GateStore {
         if (future != null) {
             future.complete(approved);
             log.debug("[GateStore] Plan gate resolved via in-memory future for run {}: {}", runId, approved);
-        }
-    }
-
-    /**
-     * Signals the merge-approval gate for a run.
-     * Completes the in-memory future (instant for same-instance) and writes to Redis
-     * (cross-instance fallback for MIG).
-     */
-    public void setMergeGate(String runId, MergeDecision decision) {
-        // Redis (cross-instance signal)
-        try {
-            redis.opsForValue().set(mergeKey(runId), decision.name(), GATE_TTL);
-        } catch (Exception ex) {
-            log.warn("[GateStore] Redis write failed for merge gate run={}: {}", runId, ex.getMessage());
-            redisFailureCounter.increment();
-        }
-        // DB (durable fallback)
-        try {
-            String key = mergeKey(runId);
-            GateRecord rec = gateRepository.findById(key)
-                    .orElse(GateRecord.pending(key, runId, "MERGE"));
-            rec.setStatus(decision.name());
-            rec.setResolvedAt(Instant.now());
-            gateRepository.save(rec);
-        } catch (Exception ex) {
-            log.warn("[GateStore] DB write failed for merge gate run={}: {}", runId, ex.getMessage());
-        }
-        // In-memory (instant same-instance)
-        CompletableFuture<MergeDecision> future = mergeFutures.remove(runId);
-        if (future != null) {
-            future.complete(decision);
-            log.debug("[GateStore] Merge gate resolved via in-memory future for run {}: {}", runId, decision);
         }
     }
 
@@ -198,171 +165,6 @@ public class GateStore {
         throw new InterruptedException("Plan gate timed out after " + MAX_GATE_WAIT.toHours() + "h for run " + runId);
     }
 
-    /**
-     * Blocks the calling (pipeline) thread until the merge-approval gate is signaled.
-     * Registers an in-memory future for instant same-instance notification, with periodic
-     * Redis polling as a cross-instance fallback.
-     */
-    public MergeDecision awaitMergeGate(String runId) throws InterruptedException {
-        CompletableFuture<MergeDecision> future = mergeFutures.computeIfAbsent(runId, k -> new CompletableFuture<>());
-        log.debug("[GateStore] Awaiting merge gate for run {} (in-memory + Redis fallback)", runId);
-
-        long deadline = System.currentTimeMillis() + MAX_GATE_WAIT.toMillis();
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                MergeDecision decision = future.get(POLL_MS, TimeUnit.MILLISECONDS);
-                mergeFutures.remove(runId);
-                redis.delete(mergeKey(runId)); // Clean up Redis key (written before future was completed)
-                log.debug("[GateStore] Merge gate resolved via in-memory for run {}: {}", runId, decision);
-                return decision;
-            } catch (TimeoutException e) {
-                String val = null;
-                try {
-                    val = redis.opsForValue().getAndDelete(mergeKey(runId));
-                } catch (RedisConnectionFailureException redisEx) {
-                    log.warn("[GateStore] Redis unavailable during merge gate poll for run {}, checking DB", runId);
-                    redisFailureCounter.increment();
-                    try {
-                        GateRecord rec = gateRepository.findById(mergeKey(runId)).orElse(null);
-                        if (rec != null && rec.isResolved()) {
-                            MergeDecision decision = MergeDecision.valueOf(rec.getStatus());
-                            mergeFutures.remove(runId);
-                            dbFallbackCounter.increment();
-                            log.info("[GateStore] Merge gate resolved via DB fallback for run {}: {}", runId, decision);
-                            return decision;
-                        }
-                    } catch (Exception dbEx) {
-                        log.warn("[GateStore] DB fallback also failed for merge gate run={}: {}", runId, dbEx.getMessage());
-                    }
-                }
-                if (val != null) {
-                    MergeDecision decision = MergeDecision.valueOf(val);
-                    mergeFutures.remove(runId);
-                    log.debug("[GateStore] Merge gate resolved via Redis for run {}: {}", runId, decision);
-                    return decision;
-                }
-            } catch (ExecutionException | CancellationException e) {
-                mergeFutures.remove(runId);
-                throw new InterruptedException("Merge gate failed for run " + runId + ": " + e.getMessage());
-            }
-            if (Thread.currentThread().isInterrupted()) {
-                mergeFutures.remove(runId);
-                throw new InterruptedException("Merge gate interrupted for run " + runId);
-            }
-        }
-        mergeFutures.remove(runId);
-        throw new InterruptedException("Merge gate timed out after " + MAX_GATE_WAIT.toHours() + "h for run " + runId);
-    }
-
-    // ── Fallback (gate-loss detection after server restart) ──────────────────────
-
-    /**
-     * Atomically checks and consumes a merge gate key if it is still pending in Redis.
-     * Used by the gate-loss fallback in {@code PipelineHarness.resolveMergeGate()}:
-     * after a server restart, in-memory futures are lost and no thread is polling Redis.
-     * This method detects and consumes the orphaned key so a recovery thread can handle it.
-     *
-     * @return the orphaned {@link MergeDecision}, or {@code null} if no key was pending
-     */
-    public MergeDecision consumeMergeGateIfPending(String runId) {
-        try {
-            String val = redis.opsForValue().getAndDelete(mergeKey(runId));
-            if (val != null) {
-                log.info("[GateStore] Consumed orphaned merge gate for run {}: {}", runId, val);
-                return MergeDecision.valueOf(val);
-            }
-        } catch (RedisConnectionFailureException ex) {
-            log.warn("[GateStore] Redis unavailable in consumeMergeGateIfPending for run {}, checking DB", runId);
-            redisFailureCounter.increment();
-            try {
-                GateRecord rec = gateRepository.findById(mergeKey(runId)).orElse(null);
-                if (rec != null && rec.isResolved()) {
-                    dbFallbackCounter.increment();
-                    log.info("[GateStore] Consumed orphaned merge gate via DB for run {}: {}", runId, rec.getStatus());
-                    return MergeDecision.valueOf(rec.getStatus());
-                }
-            } catch (Exception dbEx) {
-                log.warn("[GateStore] DB fallback failed in consumeMergeGateIfPending run={}: {}", runId, dbEx.getMessage());
-            }
-        }
-        return null;
-    }
-
-    // ── Context Clarification gate ─────────────────────────────────────────────
-
-    /**
-     * Signals the context-clarification gate for a run.
-     * The response string contains the user's clarification text (e.g., a JIRA key or Confluence URL).
-     */
-    public void setClarificationGate(String runId, String response) {
-        try {
-            redis.opsForValue().set(clarificationKey(runId), response != null ? response : "", GATE_TTL);
-        } catch (Exception ex) {
-            log.warn("[GateStore] Redis write failed for clarification gate run={}: {}", runId, ex.getMessage());
-            redisFailureCounter.increment();
-        }
-        // DB persistence (clarification text stored as status)
-        try {
-            String key = clarificationKey(runId);
-            GateRecord rec = gateRepository.findById(key)
-                    .orElse(GateRecord.pending(key, runId, "CLARIFICATION"));
-            rec.setStatus(response != null && !response.isBlank() ? "RESOLVED" : "SKIPPED");
-            rec.setComment(response);
-            rec.setResolvedAt(Instant.now());
-            gateRepository.save(rec);
-        } catch (Exception ex) {
-            log.warn("[GateStore] DB write failed for clarification gate run={}: {}", runId, ex.getMessage());
-        }
-        CompletableFuture<String> future = clarificationFutures.remove(runId);
-        if (future != null) {
-            future.complete(response);
-            log.debug("[GateStore] Clarification gate resolved via in-memory future for run {}", runId);
-        }
-    }
-
-    /**
-     * Blocks the calling (pipeline) thread until the clarification gate is signaled.
-     * Returns the user's clarification response string (may be empty if user skipped).
-     */
-    public String awaitClarificationGate(String runId) throws InterruptedException {
-        CompletableFuture<String> future = clarificationFutures.computeIfAbsent(runId, k -> new CompletableFuture<>());
-        log.debug("[GateStore] Awaiting clarification gate for run {} (in-memory + Redis fallback)", runId);
-
-        long deadline = System.currentTimeMillis() + MAX_GATE_WAIT.toMillis();
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                String response = future.get(POLL_MS, TimeUnit.MILLISECONDS);
-                clarificationFutures.remove(runId);
-                redis.delete(clarificationKey(runId));
-                log.debug("[GateStore] Clarification gate resolved via in-memory for run {}", runId);
-                return response;
-            } catch (TimeoutException e) {
-                String val = redis.opsForValue().getAndDelete(clarificationKey(runId));
-                if (val != null) {
-                    clarificationFutures.remove(runId);
-                    log.debug("[GateStore] Clarification gate resolved via Redis for run {}", runId);
-                    return val;
-                }
-            } catch (ExecutionException | CancellationException e) {
-                clarificationFutures.remove(runId);
-                throw new InterruptedException("Clarification gate failed for run " + runId + ": " + e.getMessage());
-            }
-            if (Thread.currentThread().isInterrupted()) {
-                clarificationFutures.remove(runId);
-                throw new InterruptedException("Clarification gate interrupted for run " + runId);
-            }
-        }
-        clarificationFutures.remove(runId);
-        throw new InterruptedException("Clarification gate timed out after " + MAX_GATE_WAIT.toHours() + "h for run " + runId);
-    }
-
-    /** Removes the clarification gate key and in-memory future for a run (idempotent). */
-    public void clearClarificationGate(String runId) {
-        CompletableFuture<String> f = clarificationFutures.remove(runId);
-        if (f != null) f.cancel(false);
-        redis.delete(clarificationKey(runId));
-    }
-
     // ── Cleanup (on run cancellation / hard failure) ─────────────────────────────
 
     /** Removes the plan gate key and in-memory future for a run (idempotent). */
@@ -372,16 +174,7 @@ public class GateStore {
         redis.delete(planKey(runId));
     }
 
-    /** Removes the merge gate key and in-memory future for a run (idempotent). */
-    public void clearMergeGate(String runId) {
-        CompletableFuture<MergeDecision> f = mergeFutures.remove(runId);
-        if (f != null) f.cancel(false);
-        redis.delete(mergeKey(runId));
-    }
-
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
-    private static String planKey(String runId)           { return "gate:plan:"          + runId; }
-    private static String mergeKey(String runId)          { return "gate:merge:"         + runId; }
-    private static String clarificationKey(String runId)  { return "gate:clarification:" + runId; }
+    private static String planKey(String runId) { return "gate:plan:" + runId; }
 }

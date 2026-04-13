@@ -1,6 +1,5 @@
 package com.navneet.executespec.optimiser;
 
-import com.navneet.executespec.recovery.StuckClassification;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -39,7 +38,7 @@ public class PromptPatternAnalyser {
         List<String> workerPatterns = new ArrayList<>();
 
         long loopCount = recoveryRepository.findByClassificationIn(
-            List.of(StuckClassification.LLM_LOOP), runIds
+            java.util.List.of("LLM_LOOP"), runIds
         ).size();
         if (loopCount >= props.getPatternMinOccurrences()) {
             workerPatterns.add("LLM_LOOP detected " + loopCount +
