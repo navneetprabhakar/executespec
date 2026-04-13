@@ -369,6 +369,13 @@ Default provider: OpenAI (user-selected per project). Provider failover is avail
 
 ### Known Tech Debt
 - **V2 batch not implemented** — V2 re-implementation scoped in `docs/plans/v2-batch-execution-plan.md`; V1 batch already deleted, dependency unblocked.
-- **V2 startup replay pending** — boot-time recovery currently marks interrupted WORKING/REVIEWING runs FAILED; full conversation replay is planned (`docs/plans/harness-v2-remaining-work.md` Gap 2). AWAITING_APPROVAL runs are now re-wired by the approve endpoint on restart (see orchestrator `resumeAfterApproval`).
-- **Branch retry:** `GitTool.createBranch()` has a `findRef` pre-check + `RefAlreadyExistsException` catch as belt-and-suspenders for a JGit ref-DB race after thread interrupt. Not strictly tech debt — documented for auditors.
-- **Intermediate smoke-test false negatives:** multi-task BUILD plans used to mark T1 PARTIAL when `npm run build` failed on a scaffold that later tasks would complete. Fixed — `SequentialExecutorV2` now skips smoke on non-final tasks for multi-task plans; only the final task + reviewer final build are authoritative.
+- **V2 startup replay (WORKING/REVIEWING) pending** — boot-time recovery marks interrupted WORKING/REVIEWING runs FAILED; full conversation replay is planned (`docs/plans/harness-v2-remaining-work.md` Gap 2). AWAITING_APPROVAL runs: the approve endpoint now detects the no-thread case and fails cleanly with 409, avoiding silent hangs.
+
+### Recently Resolved (2026-04-13, branch `feature/v2-next`)
+- ~~**Intermediate smoke-test false negatives**~~ — multi-task BUILD plans used to mark intermediate tasks PARTIAL when the scaffold couldn't build yet. `SequentialExecutorV2` now skips smoke on non-final tasks for multi-task plans; only the final task + reviewer final build are authoritative.
+- ~~**Per-task worker tokens equal-split**~~ — `V2RunCostTracker` now keeps a per-task accumulator keyed by `runId|taskId`; `LlmRouterV2` passes the task id on every dispatch; `distributeWorkerTokens` uses real per-task snapshots with equal-split only for the residual.
+- ~~**Gate lost on restart**~~ — `GateStore.isPlanGateWaiting()` lets the approve endpoint detect when the pipeline thread is gone (server restart during AWAITING_APPROVAL) and fail cleanly with 409 instead of hanging.
+- ~~**`@Lazy @Autowired` on `PreviewService`**~~ — `TestPreviewCoordinator` now injects `ObjectProvider<PreviewService>` via the constructor, matching the rest of the codebase.
+- ~~**ValidationReport `status` field**~~ — added `status` column (PENDING / COMPLETE / FAILED) via V80; service writes `COMPLETE` on successful persistence. Consumers no longer have to infer status from `accuracyScore != null`.
+- ~~**Default provider OpenAI**~~ — `application.yml` already defaults to `anthropic` (legacy note dropped).
+- ~~**`GitTool.createBranch()` catch-and-recover**~~ — inspected; the `findRef` pre-check + `RefAlreadyExistsException` catch is intentional belt-and-suspenders for a JGit ref-DB race after thread interrupt. Not debt; kept as-is.
