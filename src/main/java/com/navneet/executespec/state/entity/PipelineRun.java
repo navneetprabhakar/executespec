@@ -37,6 +37,16 @@ public class PipelineRun {
     @lombok.Builder.Default
     private String harnessVersion = "v1";
 
+    /**
+     * Count of boot-time resume attempts for this run (incremented by
+     * {@code StartupRunResumerV2}). Capped at 3 in code — past the cap a run
+     * is permanently FAILED with reason "resume limit reached". Prevents
+     * infinite resume loops across repeated deploys.
+     */
+    @Column(name = "resume_attempts")
+    @lombok.Builder.Default
+    private Integer resumeAttempts = 0;
+
     @Column(columnDefinition = "TEXT")
     private String planJson;            // full TaskPlan JSON from planner
 
