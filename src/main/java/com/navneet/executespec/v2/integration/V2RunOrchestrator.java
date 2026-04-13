@@ -52,8 +52,11 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 
 /**
@@ -114,6 +117,9 @@ public class V2RunOrchestrator {
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
+    /** runId → in-flight pipeline future; used by {@link #cancel(String)}. */
+    private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
+
     private final ExecutorService pool = Executors.newFixedThreadPool(4, new ThreadFactory() {
         private int n = 0;
         @Override public Thread newThread(Runnable r) {
@@ -175,8 +181,15 @@ public class V2RunOrchestrator {
         final String modelFinal = model;
         final boolean skipApprovalFinal = skipApproval;
         final String executionModeFinal = executionMode != null ? executionMode : "PRODUCTION";
-        pool.submit(() -> runPipeline(runIdFinal, providerFinal, modelFinal, userRequest,
-                skipApprovalFinal, executionModeFinal));
+        Future<?> future = pool.submit(() -> {
+            try {
+                runPipeline(runIdFinal, providerFinal, modelFinal, userRequest,
+                        skipApprovalFinal, executionModeFinal);
+            } finally {
+                activeRuns.remove(runIdFinal);
+            }
+        });
+        activeRuns.put(runIdFinal, future);
         return run;
     }
 
@@ -495,6 +508,57 @@ public class V2RunOrchestrator {
         } catch (Exception e) {
             log.warn("V2RunOrchestrator run={} final commit failed: {}", runId, e.getMessage());
         }
+    }
+
+    /**
+     * User-initiated cancel. Marks the run CANCELLED, signals the plan gate
+     * (so an awaiting pipeline thread wakes up and exits), and interrupts the
+     * background pipeline future if still live. Idempotent — re-calling on an
+     * already-terminal run is a no-op and returns false.
+     *
+     * @return true if the run was cancellable (non-terminal status); false if
+     *         unknown run, or already terminal.
+     */
+    public boolean cancel(String runId) {
+        var opt = runRepo.findById(runId);
+        if (opt.isEmpty()) return false;
+        var run = opt.get();
+        String status = run.getStatus();
+        if (isTerminal(status)) return false;
+
+        log.info("V2RunOrchestrator cancel: run={} prev={}", runId, status);
+
+        // Wake a thread blocked on the plan gate (reject path).
+        try {
+            gateStore.setPlanGate(runId, false);
+        } catch (Exception e) {
+            log.debug("cancel: plan gate signal failed (likely no gate open): {}", e.getMessage());
+        }
+
+        // Persist + SSE so the UI reflects the cancel immediately, even if the
+        // pipeline thread hasn't unwound yet.
+        run.setStatus("CANCELLED");
+        run.setCompletedAt(Instant.now());
+        if (run.getFailureReason() == null) {
+            run.setFailureReason("Cancelled by user from status " + status);
+        }
+        runRepo.save(run);
+        broadcaster.emit(runId, RunEvent.runStatus(runId, "CANCELLED"));
+        broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
+        broadcaster.complete(runId);
+        metrics.recordRunOutcome("CANCELLED");
+
+        // Interrupt the pipeline thread as a backstop. The pipeline itself is
+        // not cancellation-aware at every step, so it may continue briefly —
+        // but its terminal writes are no-ops because the run is already terminal.
+        Future<?> future = activeRuns.remove(runId);
+        if (future != null) future.cancel(true);
+        return true;
+    }
+
+    private static boolean isTerminal(String status) {
+        return "COMPLETE".equals(status) || "FAILED".equals(status)
+                || "CANCELLED".equals(status) || "PARTIAL".equals(status);
     }
 
     private void updateStatus(String runId, String newStatus) {
