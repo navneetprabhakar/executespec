@@ -995,31 +995,48 @@ public class V2RunOrchestrator {
      * {@link AgentTask} rows so the per-task token columns — which the UI reads
      * when rendering task-level breakdowns — are populated.
      *
-     * <p>Simple equal split: each task gets {@code total / taskCount} tokens.
-     * Exact per-task attribution would require threading the tracker through
-     * {@link SequentialExecutorV2} (future work); the equal split is good
-     * enough for the cost widget's sum to reconcile, which is what users see.
+     * <p>Per-task tokens come from {@link V2RunCostTracker#snapshotTask}, which
+     * is populated by {@link com.navneet.executespec.v2.agent.LlmRouterV2} on
+     * every dispatch using the task-scoped {@code ExecutionContext}. Falls back
+     * to an equal split for any task whose snapshot is empty (e.g. the worker
+     * errored before issuing an LLM call).
      */
     private void distributeWorkerTokens(String runId, ExecutionResult execResult,
                                          int totalIn, int totalOut,
                                          String providerUpper, String model) {
         int n = execResult.perTask().size();
         if (n == 0) return;
-        // Increment run totals once with the aggregate worker-phase tokens.
-        // Per-task values below are a display-only equal split (tracked in the
-        // known-issue list); the run-level total is the real accumulation.
+        // Increment run totals once with the aggregate worker-phase tokens —
+        // this is the source of truth for run-level counters.
         if (totalIn > 0 || totalOut > 0) {
             try { runRepo.addTokens(runId, totalIn, totalOut); }
             catch (Exception e) { log.warn("distributeWorkerTokens addTokens failed run={}: {}", runId, e.getMessage()); }
         }
-        int perIn  = totalIn  / n;
-        int perOut = totalOut / n;
-        String prefix = runId.substring(0, 8) + "_";
+        // Sum per-task snapshots. Anything unaccounted for (gap between
+        // tracker total and worker-phase delta — e.g. tool-only retries that
+        // never hit the LLM) is divided equally as a fallback so the per-task
+        // columns still reconcile to the run total.
+        String idPrefix = runId.substring(0, 8) + "_";
+        int sumIn = 0, sumOut = 0;
+        java.util.Map<String, int[]> realPerTask = new java.util.HashMap<>();
         for (var outcome : execResult.perTask()) {
-            String taskId = prefix + outcome.taskId();
-            taskRepo.findById(taskId).ifPresent(t -> {
-                t.setInputTokens(perIn);
-                t.setOutputTokens(perOut);
+            V2RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
+            realPerTask.put(outcome.taskId(), new int[]{ s.inputTokens(), s.outputTokens() });
+            sumIn  += s.inputTokens();
+            sumOut += s.outputTokens();
+        }
+        int residualIn  = Math.max(0, totalIn  - sumIn);
+        int residualOut = Math.max(0, totalOut - sumOut);
+        int residualPerTaskIn  = residualIn  / n;
+        int residualPerTaskOut = residualOut / n;
+        for (var outcome : execResult.perTask()) {
+            String taskRowId = idPrefix + outcome.taskId();
+            int[] real = realPerTask.get(outcome.taskId());
+            int finalIn  = real[0] + residualPerTaskIn;
+            int finalOut = real[1] + residualPerTaskOut;
+            taskRepo.findById(taskRowId).ifPresent(t -> {
+                t.setInputTokens(finalIn);
+                t.setOutputTokens(finalOut);
                 t.setProvider(providerUpper);
                 t.setModel(model);
                 taskRepo.save(t);

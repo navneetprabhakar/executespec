@@ -368,12 +368,7 @@ Default provider: OpenAI (user-selected per project). Provider failover is avail
 - Production deployment preparation
 
 ### Known Tech Debt
-- **V1 still in-tree** — 339 `@Deprecated(since="v2")` annotations across 18+ classes, pending phased deletion (see `docs/plans/deprecation-removal-plan.md`)
-- **V2 batch not implemented** — V1 `batch/*` is frozen; V2 re-implementation scoped in `docs/plans/v2-batch-execution-plan.md`, waits on deprecation P3
-- **V2 startup replay pending** — boot-time recovery currently marks interrupted runs FAILED; full conversation replay is planned (`docs/plans/harness-v2-remaining-work.md` Gap 2)
-- **Per-task worker tokens** equal-split across tasks in `distributeWorkerTokens`; run totals are correct but per-task attribution is approximate
-- **Gate lost on restart:** approve() → if gate missing → auto-fail with message
-- **Branch retry:** `GitTool.createBranch()` catches `RefAlreadyExistsException` → checkout fallback
-- **`@Lazy @Autowired`** on `PreviewService` in `TestPreviewCoordinator` — breaks circular dependency, only field injection in codebase
-- Default provider is OpenAI but eval results show Anthropic (Haiku) and Gemini perform better — consider changing default
-- **Validation report `status` field:** `ValidationReport` entity has no `status` field — `/api/runs/{id}/report` returns 404 when not ready and 200 with data when ready. Consumers detect presence via `accuracyScore != null`, not `status == "COMPLETE"`.
+- **V2 batch not implemented** — V2 re-implementation scoped in `docs/plans/v2-batch-execution-plan.md`; V1 batch already deleted, dependency unblocked.
+- **V2 startup replay pending** — boot-time recovery currently marks interrupted WORKING/REVIEWING runs FAILED; full conversation replay is planned (`docs/plans/harness-v2-remaining-work.md` Gap 2). AWAITING_APPROVAL runs are now re-wired by the approve endpoint on restart (see orchestrator `resumeAfterApproval`).
+- **Branch retry:** `GitTool.createBranch()` has a `findRef` pre-check + `RefAlreadyExistsException` catch as belt-and-suspenders for a JGit ref-DB race after thread interrupt. Not strictly tech debt — documented for auditors.
+- **Intermediate smoke-test false negatives:** multi-task BUILD plans used to mark T1 PARTIAL when `npm run build` failed on a scaffold that later tasks would complete. Fixed — `SequentialExecutorV2` now skips smoke on non-final tasks for multi-task plans; only the final task + reviewer final build are authoritative.

@@ -91,7 +91,8 @@ public class LlmRouterV2 {
             metrics.recordLlmLatency(request.provider(), request.model(), "ok",
                     java.time.Duration.ofMillis(elapsed));
             String runId = request.context().runId();
-            costTracker.record(runId, request.provider(), request.model(), resp);
+            String taskId = request.context().taskId();
+            costTracker.record(runId, taskId, request.provider(), request.model(), resp);
             V2RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
             broadcaster.emit(runId, RunEvent.tokenUsage(runId,
                     snap.inputTokens(), snap.outputTokens()));
