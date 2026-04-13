@@ -219,6 +219,10 @@ export interface RunDetail extends RunSummary {
   scmPrUrl?: string | null;
   /** SCM provider that created the PR: 'GITHUB' | 'BITBUCKET'. Null for legacy runs. */
   scmProvider?: string | null;
+  /** Pilot R4 — JSON {summary, complexity, filesAffected, newFiles, risks, crossRepoDeps, repoFullNames}. */
+  assessmentResult?: string | null;
+  /** Pilot R7 — Figma URL captured at submission. */
+  figmaUrl?: string | null;
   /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
   approvedExecutionMode?: string | null;
   /** Batch credits (with 50% discount). Null if batch not available. */
@@ -397,6 +401,10 @@ export const createRun = (body: {
   projectId?: string;
   repoMode?: string | null;
   repoUrl?: string | null;
+  /** Pilot v3.0 — project-linked repo IDs to clone into workspace/<runId>/repos/<name>/. */
+  selectedRepoIds?: string[];
+  /** Pilot R7 — Figma URL passed through to planner + scoring. */
+  figmaUrl?: string;
 }) =>
   req<{ runId: string }>('/runs', { method: 'POST', body: JSON.stringify(body) });
 
@@ -1130,6 +1138,10 @@ export interface ProjectDto {
   status: string;
   aiProvider: string;
   createdAt: string;
+  /** Pilot R5 — git workflow defaults. */
+  branchNamingPattern?: string | null;
+  targetBranch?: string | null;
+  defaultReviewers?: string | null;
 }
 
 export interface ProjectMemberDto {
@@ -1142,6 +1154,8 @@ export interface ProjectMemberDto {
 }
 
 export const getProjects = () => req<ProjectDto[]>('/projects');
+
+export const getProject = (id: string) => req<ProjectDto>(`/projects/${id}`);
 
 export const createProject = (body: { name: string; description?: string; aiProvider?: string }) =>
   req<ProjectDto>('/projects', { method: 'POST', body: JSON.stringify(body) });
@@ -1380,6 +1394,13 @@ export interface ValidationReportData {
   generatedAfterImprovements: boolean;
   accuracyScore?: number | null;
   accuracyGrade?: string | null;
+  /** Pilot R6 — per-dimension scores (nullable for runs before V83). */
+  codeQualityScore?: number | null;
+  testCoverageScore?: number | null;
+  architectureScore?: number | null;
+  securityScore?: number | null;
+  performanceScore?: number | null;
+  designComplianceScore?: number | null;
 }
 
 export interface SharedReportData {
@@ -1686,3 +1707,100 @@ export const markAllNotificationsRead = () =>
 /** Fetch a short-lived scoped SSE token for a specific run. */
 export const getSseToken = (runId: string) =>
   req<{ token: string }>(`/runs/${runId}/sse-token`);
+
+// ── Pilot v3.0: Project workspace, repos, architecture, scoring ───────────
+import type {
+  ProjectDashboardDTO,
+  ProjectRepo,
+  ProjectRepoLink,
+  ArchitectureDoc,
+  ScoreEntry,
+  LinkRepoRequest,
+  RepoScope,
+} from '@/types/project';
+
+// Project dashboard
+export const getProjectDashboard = (projectId: string) =>
+  req<ProjectDashboardDTO>(`/projects/${projectId}/dashboard`);
+
+export const getProjectScores = (projectId: string) =>
+  req<ScoreEntry[]>(`/projects/${projectId}/scores`);
+
+// Repos — lifecycle (scoped ORG | USER)
+export const listRepos = (scope: RepoScope | 'ALL' = 'ALL') =>
+  req<ProjectRepo[]>(`/repos?scope=${scope}`);
+
+export const createRepo = (data: LinkRepoRequest) =>
+  req<ProjectRepo>('/repos', { method: 'POST', body: JSON.stringify(data) });
+
+export const deleteRepo = (repoId: string) =>
+  req<void>(`/repos/${repoId}`, { method: 'DELETE' });
+
+export const syncRepo = (repoId: string) =>
+  req<ProjectRepo>(`/repos/${repoId}/sync`, { method: 'POST' });
+
+// Repos — project link
+export const getProjectRepos = (projectId: string) =>
+  req<ProjectRepoLink[]>(`/projects/${projectId}/repos`);
+
+export const linkProjectRepo = (projectId: string, repoId: string) =>
+  req<ProjectRepoLink>(`/projects/${projectId}/repos/${repoId}`, { method: 'POST' });
+
+export const unlinkProjectRepo = (projectId: string, repoId: string) =>
+  req<void>(`/projects/${projectId}/repos/${repoId}`, { method: 'DELETE' });
+
+export const updateRepoRelationships = (
+  projectId: string,
+  repoId: string,
+  relationships: string[],
+) =>
+  req<ProjectRepoLink>(`/projects/${projectId}/repos/${repoId}/relationships`, {
+    method: 'PUT',
+    body: JSON.stringify({ relationships }),
+  });
+
+// Architecture docs (R3)
+export const generateArchitecture = (projectId: string) =>
+  req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, { method: 'POST' });
+
+export const getArchitectureDoc = (projectId: string) =>
+  req<ArchitectureDoc>(`/projects/${projectId}/architecture`);
+
+export const getArchitectureVersions = (projectId: string) =>
+  req<ArchitectureDoc[]>(`/projects/${projectId}/architecture/versions`);
+
+export const annotateArchitecture = (projectId: string, annotation: string) =>
+  req<ArchitectureDoc>(`/projects/${projectId}/architecture/annotate`, {
+    method: 'PUT',
+    body: JSON.stringify({ annotation }),
+  });
+
+export const getRepoCodeMap = (projectId: string, repoId: string) =>
+  req<{ content: string }>(`/projects/${projectId}/repos/${repoId}/codemap`);
+
+// PR list for a run (R5)
+export const getRunPrs = (runId: string) =>
+  req<import('@/types/project').PrSummary[]>(`/runs/${runId}/prs`);
+
+// Architecture staleness (deferral #4)
+export interface RepoStaleness {
+  repoFullName: string;
+  generatedFromSha: string | null;
+  currentSha: string | null;
+  stale: boolean;
+}
+export interface StalenessReport {
+  stale: boolean;
+  staleCount: number;
+  totalCount: number;
+  repos: RepoStaleness[];
+}
+export const getArchitectureStaleness = (projectId: string) =>
+  req<StalenessReport>(`/projects/${projectId}/architecture/staleness`);
+
+// Assessment approval (R4)
+export const approveAssessment = (runId: string, constraints?: string[]) =>
+  req<void>(`/runs/${runId}/approve-assessment`, {
+    method: 'POST',
+    body: JSON.stringify({ constraints: constraints ?? [] }),
+  });

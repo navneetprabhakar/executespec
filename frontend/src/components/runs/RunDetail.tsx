@@ -6,6 +6,7 @@ import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
 import ValidationReportPanel from './ValidationReportPanel';
+import AssessmentPanel from './AssessmentPanel';
 import TestProgressTracker from './TestProgressTracker';
 import TestReportPanel from './TestReportPanel';
 import { RunTimeline } from '@/components/run/RunTimeline';
@@ -347,6 +348,13 @@ export default function RunDetail() {
                   {activeRun.sourceRunId?.slice(0, 12)}
                 </button>
               </span>
+            </div>
+          )}
+
+          {/* Pilot R4 — feature assessment, shown above the plan-approval gate. */}
+          {activeRun.status === 'AWAITING_APPROVAL' && activeRun.assessmentResult && (
+            <div className="flex-shrink-0 px-4 pt-3">
+              <AssessmentPanel raw={activeRun.assessmentResult} />
             </div>
           )}
 

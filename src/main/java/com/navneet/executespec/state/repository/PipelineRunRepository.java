@@ -120,6 +120,15 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     @Query("SELECT r.projectId, COUNT(r), COALESCE(SUM(r.totalInputTokens + r.totalOutputTokens),0) FROM PipelineRun r WHERE r.createdByUserId = :uid AND r.startedAt BETWEEN :s AND :e AND r.projectId IS NOT NULL GROUP BY r.projectId ORDER BY COUNT(r) DESC")
     List<Object[]> projectBreakdownByUser(@Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
 
+    // ── Pilot R1 project dashboard ────────────────────────────────────────────
+
+    long countByProjectIdAndStatus(String projectId, String status);
+
+    long countByProjectId(String projectId);
+
+    @Query("SELECT r FROM PipelineRun r WHERE r.projectId = :pid ORDER BY r.startedAt DESC")
+    List<PipelineRun> findByProjectIdOrderByStartedAtDesc(@Param("pid") String projectId, Pageable pageable);
+
     // ── Run title backfill ────────────────────────────────────────────────────
 
     /** Finds runs that have a plan but no run_title yet (for one-time backfill on startup). */

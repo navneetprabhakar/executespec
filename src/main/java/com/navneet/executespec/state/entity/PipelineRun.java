@@ -397,4 +397,17 @@ public class PipelineRun {
         return deletedAt != null;
     }
 
+    // ── Pilot R4 / R7 ────────────────────────────────────────────────────────
+
+    /** JSON output of {@code FeatureAssessmentService}. Null until ASSESSING phase runs. */
+    @Column(name = "assessment_result", columnDefinition = "jsonb")
+    private String assessmentResult;
+
+    /** Optional Figma URL passed at submission. Drives the design-compliance scorer. */
+    @Column(name = "figma_url", length = 500)
+    private String figmaUrl;
+
+    /** Pilot v3.0 — JSON array of project_repo IDs cloned for this run, used by multi-repo push. */
+    @Column(name = "selected_repo_ids", columnDefinition = "jsonb")
+    private String selectedRepoIds;
 }

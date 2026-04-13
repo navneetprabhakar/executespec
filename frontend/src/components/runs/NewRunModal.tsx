@@ -5,7 +5,8 @@ import { AlertCircle, ArrowLeft, ChevronDown, Github, Loader2, Rocket, Send, Spa
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore, type NewRunConfig } from '@/stores/useUiStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { conversationChat, ConversationMessage } from '@/lib/api';
+import { conversationChat, ConversationMessage, getProjectRepos } from '@/lib/api';
+import type { ProjectRepoLink } from '@/types/project';
 import { cn } from '@/lib/utils';
 import ProjectSelector from '@/components/auth/ProjectSelector';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
@@ -40,6 +41,11 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
   type RepoChoice = 'NONE' | 'NEW' | 'EXISTING';
   const [repoChoice, setRepoChoice] = useState<RepoChoice>(initialConfig?.repoMode ?? 'NONE');
   const [repoUrl, setRepoUrl] = useState(initialConfig?.repoUrl ?? '');
+
+  // ── pilot v3.0: project-linked multi-repo selection ──────────────────────
+  const [projectRepos, setProjectRepos] = useState<ProjectRepoLink[]>([]);
+  const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
+  const [figmaUrl, setFigmaUrl] = useState('');
 
   // ── chat mode state ───────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>('compose');
@@ -76,6 +82,19 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Pilot v3.0 — pull linked repos for the selected project
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectRepos([]);
+      setSelectedRepoIds([]);
+      return;
+    }
+    getProjectRepos(selectedProjectId)
+      .then((links) => setProjectRepos(links))
+      .catch(() => setProjectRepos([]));
+    setSelectedRepoIds([]);
+  }, [selectedProjectId]);
 
   // ── enter chat mode: seed with the user's current goal ───────────────────
   const enterChat = async () => {
@@ -178,6 +197,8 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
         ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
         ...(repoMode ? { repoMode } : {}),
         ...(repoChoice === 'EXISTING' && repoUrl.trim() ? { repoUrl: repoUrl.trim() } : {}),
+        ...(selectedRepoIds.length > 0 ? { selectedRepoIds } : {}),
+        ...(figmaUrl.trim() ? { figmaUrl: figmaUrl.trim() } : {}),
       });
       addToast({ type: 'success', message: `Run launched: ${runId.slice(0, 8)}` });
       navigate('/');
@@ -286,6 +307,60 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                 onChange={setSelectedProjectId}
               />
             )}
+
+            {/* Pilot v3.0 — multi-repo selection from project catalogue */}
+            {selectedProjectId && projectRepos.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-xs text-muted">Project repositories</label>
+                <div className="space-y-1 max-h-40 overflow-y-auto border border-[var(--border-default)] rounded-sm p-2">
+                  {projectRepos.map((link) => {
+                    const checked = selectedRepoIds.includes(link.repoId);
+                    return (
+                      <label
+                        key={link.repoId}
+                        className="flex items-center gap-2 text-sm cursor-pointer py-0.5"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setSelectedRepoIds((prev) =>
+                              e.target.checked
+                                ? [...prev, link.repoId]
+                                : prev.filter((id) => id !== link.repoId),
+                            );
+                          }}
+                          className="accent-accent-blue"
+                        />
+                        <span className="font-mono text-xs">{link.repo.githubRepoFullName}</span>
+                        <span className="text-[10px] text-muted">({link.repo.scope})</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {selectedRepoIds.length > 0 && (
+                  <p className="text-[11px] text-muted">
+                    {selectedRepoIds.length} repo{selectedRepoIds.length > 1 ? 's' : ''} will be cloned into{' '}
+                    <code>workspace/&lt;runId&gt;/repos/</code>.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Pilot R7 — Figma URL (optional) */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted">Figma URL (optional)</label>
+              <input
+                type="url"
+                value={figmaUrl}
+                onChange={(e) => setFigmaUrl(e.target.value)}
+                placeholder="https://www.figma.com/file/..."
+                className="w-full px-3 py-1.5 text-sm border border-[var(--border-default)] rounded-sm bg-transparent focus:outline-none focus:border-accent-blue/50"
+              />
+              <p className="text-[11px] text-muted">
+                When provided, drives the design-compliance score on the validation report.
+              </p>
+            </div>
 
             {/* Build My Spec button */}
             <button

@@ -175,6 +175,8 @@ public class RunMapper {
             .githubPrUrl(r.getGithubPrUrl())
             .scmPrUrl(r.getScmPrUrl())
             .scmProvider(r.getScmProvider())
+            .assessmentResult(r.getAssessmentResult())
+            .figmaUrl(r.getFigmaUrl())
             .archivedAt(r.getArchivedAt())
             .approvedExecutionMode(r.getApprovedExecutionMode())
             .batchCredits(r.getBatchCredits())
