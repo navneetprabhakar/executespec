@@ -263,7 +263,28 @@ public class RunController {
         }
 
         // V2 orchestrator blocks on GateStore.awaitPlanGate() which completes
-        // instantly on the in-memory future.
+        // instantly on the in-memory future. If no future exists (server
+        // restarted while run was AWAITING_APPROVAL), the pipeline thread is
+        // gone — signalling the gate would write Redis/DB without anything
+        // reading them, leaving the run silently stuck. Detect that case and
+        // fail the run cleanly so the user gets an actionable message.
+        if (!gateStore.isPlanGateWaiting(runId)) {
+            log.warn("POST /api/runs/{}/approve — no pipeline thread waiting; "
+                    + "run was interrupted during AWAITING_APPROVAL. Failing cleanly.", runId);
+            // Still persist the gate decision (DB+Redis) — the audit record is
+            // useful — then mark the run FAILED with a retry-able reason.
+            gateStore.setPlanGate(runId, req.approved());
+            stateStore.findRun(runId).ifPresent(r -> {
+                r.setStatus("FAILED");
+                r.setFailureReason("Approval received after server restart — pipeline "
+                        + "thread was lost. Please submit a new run.");
+                r.setCompletedAt(Instant.now());
+                stateStore.saveRun(r);
+            });
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Approval received but the pipeline was interrupted by a restart. "
+                    + "Please submit a new run.");
+        }
         gateStore.setPlanGate(runId, req.approved());
         return ResponseEntity.ok().build();
     }

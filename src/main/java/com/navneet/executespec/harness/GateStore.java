@@ -167,6 +167,13 @@ public class GateStore {
 
     // ── Cleanup (on run cancellation / hard failure) ─────────────────────────────
 
+    /** True if a pipeline thread is currently waiting on this run's plan gate
+     *  on THIS instance. Used by the approve endpoint to detect the
+     *  "server restarted, no thread waiting" case and trigger a continuation. */
+    public boolean isPlanGateWaiting(String runId) {
+        return runId != null && planFutures.containsKey(runId);
+    }
+
     /** Removes the plan gate key and in-memory future for a run (idempotent). */
     public void clearPlanGate(String runId) {
         CompletableFuture<Boolean> f = planFutures.remove(runId);

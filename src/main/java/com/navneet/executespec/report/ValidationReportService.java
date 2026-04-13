@@ -110,6 +110,7 @@ public class ValidationReportService {
                 .accuracyGrade(accuracyGrade)
                 .accuracyJson(accuracyJson)
                 .previewUrl(input.previewUrl())
+                .status("COMPLETE")
                 .build();
 
             // Accumulate report tokens into run total for billing accuracy
