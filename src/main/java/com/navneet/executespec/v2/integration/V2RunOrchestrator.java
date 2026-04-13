@@ -577,9 +577,24 @@ public class V2RunOrchestrator {
             if ("FAILED".equals(finalStatus) && r.getFailureReason() == null) {
                 r.setFailureReason(note);
             }
-            r.setActualCostUsd(cost.costUsd());
-            r.setTotalInputTokens(cost.inputTokens());
-            r.setTotalOutputTokens(cost.outputTokens());
+            // Only overwrite actualCostUsd with a positive tracker reading; an empty
+            // snapshot (e.g. tracker evicted across a deploy boundary) must not
+            // clobber a previously-persisted cost.
+            if (cost.costUsd() > 0d) {
+                r.setActualCostUsd(cost.costUsd());
+            } else if (r.getActualCostUsd() == null) {
+                r.setActualCostUsd(0d);  // never leave NULL on a terminal run
+            }
+            // Do NOT overwrite totalInputTokens / totalOutputTokens here. Per-phase
+            // persistence (persistPhaseTokens + distributeWorkerTokens) increments
+            // the run totals atomically via addTokens() — that path is the source of
+            // truth. If the tracker snapshot has bigger numbers for some reason
+            // (e.g. V1 test-gen hasn't incremented yet), prefer it; else keep what's
+            // already persisted. Never shrink the persisted total.
+            int persistedIn  = r.getTotalInputTokens()  == null ? 0 : r.getTotalInputTokens();
+            int persistedOut = r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens();
+            if (cost.inputTokens()  > persistedIn)  r.setTotalInputTokens(cost.inputTokens());
+            if (cost.outputTokens() > persistedOut) r.setTotalOutputTokens(cost.outputTokens());
             runRepo.save(r);
             writeRunCostLog(r, cost);
         });
@@ -895,6 +910,13 @@ public class V2RunOrchestrator {
             }
             runRepo.save(r);
         });
+        // Also increment the run totals atomically so the "Run Stats" panel
+        // reflects cumulative token usage even if the in-memory tracker
+        // snapshot is later lost (deploy restart, accumulator eviction, etc.).
+        if (inTok > 0 || outTok > 0) {
+            try { runRepo.addTokens(runId, inTok, outTok); }
+            catch (Exception e) { log.warn("persistPhaseTokens addTokens failed run={}: {}", runId, e.getMessage()); }
+        }
     }
 
     /**
@@ -912,6 +934,13 @@ public class V2RunOrchestrator {
                                          String providerUpper, String model) {
         int n = execResult.perTask().size();
         if (n == 0) return;
+        // Increment run totals once with the aggregate worker-phase tokens.
+        // Per-task values below are a display-only equal split (tracked in the
+        // known-issue list); the run-level total is the real accumulation.
+        if (totalIn > 0 || totalOut > 0) {
+            try { runRepo.addTokens(runId, totalIn, totalOut); }
+            catch (Exception e) { log.warn("distributeWorkerTokens addTokens failed run={}: {}", runId, e.getMessage()); }
+        }
         int perIn  = totalIn  / n;
         int perOut = totalOut / n;
         String prefix = runId.substring(0, 8) + "_";

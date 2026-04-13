@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "low",
+  "run_id": "cd1f7a22-779e-4b5f-a9c6-41cf6487bc4e",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-13T00:49:31.402094Z",
+  "completedAt": "2026-04-13T00:50:04.691821Z",
+  "tasks_total": 1,
+  "tasks_done": 1,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildPassed\":true,\"totalLatencyMs\":15730,\"wiringPassSummary\":\"No wiring issues found in the single-file Python project. The `fib.py` script is self-contained and correctly wired.\",\"generalPassSummary\":\"no in-scope issues found\",\"overall\":\"CLEAN\",\"finalBuildExitCode\":0}",
+  "actual_cost": 0.009362,
+  "est_low": 0.0246,
+  "est_high": 0.04305,
+  "credits": 1,
+  "total_input": 25221,
+  "total_output": 718,
+  "accuracy": 100,
+  "report_ok": true
+}
