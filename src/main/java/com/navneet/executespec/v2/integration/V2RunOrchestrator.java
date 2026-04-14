@@ -32,9 +32,12 @@ import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.PlannerAgentV2;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
+import com.navneet.executespec.v2.agent.SpecClassifier;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.assessment.FeatureAssessmentService;
+import com.navneet.executespec.codeintel.RunCodeMapService;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
 import com.navneet.executespec.v2.harness.SequentialExecutorV2;
@@ -92,6 +95,10 @@ import java.util.concurrent.ThreadFactory;
 public class V2RunOrchestrator {
 
     /** Default V2 task classification — MEDIUM produces ≤ 4 tasks, good balance for most specs. */
+    /**
+     * Fallback only — live classification flows through {@link com.navneet.executespec.v2.agent.SpecClassifier}
+     * which picks SINGLE_SHOT / MEDIUM / MULTI_TASK from the spec itself (bug #3 fix).
+     */
     private static final Classification DEFAULT_CLASSIFICATION = Classification.MEDIUM;
 
     /** Default provider when the request doesn't specify one. Matches V1 default. */
@@ -119,6 +126,8 @@ public class V2RunOrchestrator {
     private final com.navneet.executespec.v2.smoketest.CliSmokeRunner cliSmokeRunner;
     private final ProjectRepoService projectRepoService;
     private final FeatureAssessmentService featureAssessmentService;
+    private final RunCodeMapService runCodeMapService;
+    private final AppUserRepository appUserRepository;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
@@ -278,7 +287,35 @@ public class V2RunOrchestrator {
                     runId, "__root__", workspace.toRealPath());
             setWorkspacePath(runId, workspace.toString());
 
-            // ── 0b. Pilot R4: feature assessment ─────────────────────────────
+            // ── 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
+            // runs (PRO / MAX / ENTERPRISE). Adds one PLANNING-tier LLM call before
+            // plan approval; the summarised codemap becomes the planner's
+            // workspaceSummary AND extra context for the assessment.
+            String codemapSummary = null;
+            PipelineRun runRow = runRepo.findById(runId).orElse(null);
+            if (runRow != null && projectId == null
+                    && "EXISTING".equalsIgnoreCase(runRow.getRepoMode())
+                    && runRow.getRepoUrl() != null
+                    && runRow.getCreatedByUserId() != null) {
+                String tier = appUserRepository.findById(runRow.getCreatedByUserId())
+                        .map(u -> u.getTier()).orElse(null);
+                if (runCodeMapService.isEligible(tier)) {
+                    try {
+                        broadcaster.emit(runId,
+                                RunEvent.log(runId, "codemap", "Generating codebase map for planner context"));
+                        codemapSummary = runCodeMapService.generateForRun(
+                                runId, runRow.getRepoUrl(), null, githubPat);
+                        if (codemapSummary != null) {
+                            broadcaster.emit(runId,
+                                    RunEvent.log(runId, "codemap", "Codemap ready — injected into planner + assessment"));
+                        }
+                    } catch (Exception cmEx) {
+                        log.warn("V2 run={} codemap generation failed: {}", runId, cmEx.getMessage());
+                    }
+                }
+            }
+
+            // ── 0c. Pilot R4: feature assessment ─────────────────────────────
             // Runs only when a project context is available so the assessment can
             // reason about linked repos + architecture annotations. Result is
             // persisted, broadcast over SSE, and available to the planner via
@@ -303,13 +340,18 @@ public class V2RunOrchestrator {
             perky.start(runId, "PLANNING");
             PlanV2 plan;
             try {
+                Classification autoClassification = SpecClassifier.classify(userRequest);
+                log.info("V2 run={} spec classified as {} (len={})",
+                        runId, autoClassification, userRequest == null ? 0 : userRequest.length());
                 plan = planner.plan(PlannerRequestV2.builder()
                         .spec(userRequest)
-                        .classification(DEFAULT_CLASSIFICATION)
+                        .classification(autoClassification)
                         .provider(provider)
                         .model(model)
                         .context(rootCtx)
-                        .workspaceSummary("empty scratch workspace (V2 harness)")
+                        .workspaceSummary(codemapSummary != null
+                                ? "Existing repository — codebase map below.\n\n" + codemapSummary
+                                : "empty scratch workspace (V2 harness)")
                         .build());
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
@@ -728,7 +770,13 @@ public class V2RunOrchestrator {
     private void terminate(String runId, String finalStatus, String note, Instant startedAt) {
         V2RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
         runRepo.findById(runId).ifPresent(r -> {
-            r.setStatus(finalStatus);
+            // Preserve CANCELLED if the user cancelled mid-flight. The pipeline thread
+            // may call terminate(...) after cancel() has already written CANCELLED;
+            // without this guard the late write clobbers the user-initiated status
+            // (e.g. clinic run 6d23d5b5 showed PARTIAL despite a successful cancel).
+            if (!"CANCELLED".equals(r.getStatus())) {
+                r.setStatus(finalStatus);
+            }
             r.setCompletedAt(Instant.now());
             if ("FAILED".equals(finalStatus) && r.getFailureReason() == null) {
                 r.setFailureReason(note);

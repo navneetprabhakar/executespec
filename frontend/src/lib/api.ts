@@ -223,6 +223,11 @@ export interface RunDetail extends RunSummary {
   assessmentResult?: string | null;
   /** Pilot R7 — Figma URL captured at submission. */
   figmaUrl?: string | null;
+  /** Codemap stats for paid existing-repo runs (null when not generated). */
+  codemapFileCount?: number | null;
+  codemapRouteCount?: number | null;
+  codemapInputTokens?: number | null;
+  codemapOutputTokens?: number | null;
   /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
   approvedExecutionMode?: string | null;
   /** Batch credits (with 50% discount). Null if batch not available. */

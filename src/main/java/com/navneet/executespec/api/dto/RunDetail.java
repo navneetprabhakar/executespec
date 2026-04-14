@@ -98,6 +98,12 @@ public class RunDetail {
     /** Pilot R7 — Figma URL captured at submission. */
     String figmaUrl;
 
+    /** Codemap stats for paid existing-repo runs (null when not generated). */
+    Integer codemapFileCount;
+    Integer codemapRouteCount;
+    Integer codemapInputTokens;
+    Integer codemapOutputTokens;
+
     /** Timestamp when the run was archived by the user. Null for active runs. */
     Instant archivedAt;
 
