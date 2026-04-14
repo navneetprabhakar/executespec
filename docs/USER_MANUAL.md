@@ -1,7 +1,7 @@
 # ExecuteSpec — User Manual
 
-> **Version**: 3.0.0 (pilot)
-> **Date**: 2026-04-13
+> **Version**: 2.1.1
+> **Date**: 2026-04-14
 > **Audience**: Developers, Product Managers, Tech Leads
 
 > **Pilot v3.0 quick links**

@@ -1,8 +1,25 @@
 # ExecuteSpec -- Complete System Documentation
 
-**Version:** 28f343a (dev)
-**Last Updated:** 2026-04-04
-**Stack:** Java 21, Spring Boot 3.3.0, Spring AI 1.1.0, PostgreSQL, Redis, JGit 6.9.0
+**Version:** v2.1.1 (2026-04-14)
+**Last Updated:** 2026-04-14
+**Stack:** Java 21, Spring Boot 3.3, Spring AI 1.1.4, PostgreSQL, Redis, JGit 6.9.0
+
+> **Pilot v3.0 additions (v2.1.1)** — the package list below predates V2 and
+> the pilot-v3 layer. Current canonical architecture lives in
+> [CLAUDE.md](../CLAUDE.md); new packages to be aware of:
+> - `com.navneet.executespec.project` — dual-scope `ProjectRepo` registry,
+>   `ProjectRepoLink` join, project dashboard, PR records + GitHub webhook,
+>   stack detection + scheduled refresh.
+> - `com.navneet.executespec.codeintel` — `ProjectCodeMap`,
+>   `ProjectArchitectureDoc`, `StalenessService`, `RunCodeMapService`
+>   (paid-tier codemap-on-clone).
+> - `com.navneet.executespec.assessment` — pre-plan `FeatureAssessmentService`
+>   (heuristic + LLM-gated via `assessment.llm.enabled` flag).
+> - `com.navneet.executespec.scoring` — `ReviewScoringService`
+>   (six-dimension deterministic scoring), `TestCoverageRescorer`.
+> - `com.navneet.executespec.v2.agent.SpecClassifier` — deterministic
+>   SINGLE_SHOT / MEDIUM / MULTI_TASK picker from spec text.
+> - New migrations V81–V87 documented in CHANGELOG [2.1.1].
 
 > **⚠️ Historical reference — V1 architecture.**
 > This document describes the original V1 harness (`PipelineHarness`, `WorkerAgent`,

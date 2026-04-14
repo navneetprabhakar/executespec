@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-13 (pilot v3.0 shipped — see commit 6bbfde9b)
+> Last updated: 2026-04-14 (v2.1.1 — pilot v3.0 + bug sweep)
 
 ## Architecture
 
