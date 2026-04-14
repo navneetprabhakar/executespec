@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.2.0] — 2026-04-14
+
+Project Memory — a compressed per-run ledger + periodic compacted snapshot injected into `PlannerAgentV2` so subsequent runs in the same project can build on prior patterns, decisions, and debt instead of starting stateless.
+
+### Added
+
+- **`project_run_ledger`** (V88) — append-only, one row per completed project-scoped run. Stores a caveman-English digest (~60 tokens) of goal / changes / decisions / debt produced by `RunLedgerAgent` at LIGHTWEIGHT tier.
+- **`project_memory_snapshot`** (V88) — versioned, rewritten every 10 runs by `MemoryCompactionService` so token cost stays bounded as projects grow past 50 runs.
+- **`RunLedgerAgent`** — post-complete hook in `V2RunOrchestrator`; idempotent by `runId`, non-fatal on failure. Triggers compaction at `runNumber ≥ 20 && runNumber % 10 == 0`.
+- **`MemoryCompactionService`** — re-squashes older entries into the snapshot; marks compacted entries via `compacted_into` FK to preserve provenance.
+- **`ProjectMemoryProvider`** — builds the planner context block (snapshot + last 10 uncompacted entries). Reported `MemoryStats` feed the dashboard.
+- **Planner injection** — `PlannerRequestV2.projectMemory` wired into `{{PROJECT_MEMORY}}` marker in `prompts/v2/planner.md`. Empty for first-run projects.
+- **API** — `GET /api/projects/{id}/memory`, `GET /api/projects/{id}/memory/ledger` via `ProjectMemoryController`.
+- **Frontend** — Memory tab added to `ProjectDashboardPage`; `ProjectMemoryPanel` renders token-budget bar, stats tiles, compacted history, and recent-run entries.
+- **Config** — `RunLedgerAgent: LIGHTWEIGHT` added to the model matrix in `application.yml`.
+
+### Migrations
+
+- **V88** `project_memory.sql` — `project_run_ledger` + `project_memory_snapshot` with RLS policies matching V67.
+
+### Notes
+
+- Memory generation is a silent background concern — no SSE events, no user-visible failure modes. If the LLM call fails or the project has no id, the run terminates normally.
+- Scaling: 1–10 runs → raw entries (~1k tokens); 10–50 → snapshot + last 10 (~4k); 50–200 → re-squashed snapshot (~6k); RAG deferred to post-pilot.
+
+---
+
 ## [2.1.1] — 2026-04-14
 
 Pilot v3.0 — project workspace layer on top of V2 — plus a bug sweep surfaced

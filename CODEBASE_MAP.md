@@ -1,7 +1,21 @@
 # ExecuteSpec Codebase Map
 
 > Quick reference: every class → one-line purpose. Keep updated.
-> Last updated: 2026-04-09
+> Last updated: 2026-04-14 (v2.2.0 — project memory)
+>
+> **Project memory (`memory/`, v2.2.0):** `RunLedgerAgent` (post-complete, LIGHTWEIGHT tier) → `project_run_ledger`; `MemoryCompactionService` rewrites `project_memory_snapshot` every 10 runs (starting R20); `ProjectMemoryProvider.buildPlannerContext(projectId)` injects `{{PROJECT_MEMORY}}` into `PlannerAgentV2`. `ProjectMemoryController` at `/api/projects/{id}/memory[/ledger]`. Frontend: Memory tab on `ProjectDashboardPage` → `ProjectMemoryPanel`. Migration V88.
+>
+> **Note:** V2 is the default pipeline. Live V2 packages: `v2/integration/V2RunOrchestrator`, `v2/agent/PlannerAgentV2` + `WorkerAgentV2` + `LlmRouterV2`, `v2/harness/SequentialExecutorV2`, `v2/reviewer/ReviewerAgentV3`, `v2/tool/*`, `v2/context/ContextStoreV2`, `v2/cost/V2RunCostTracker`, `v2/recovery/StartupRunResumerV2`, `v2/observability/V2Metrics`. Most V1 packages below (`agent/PlannerAgent`+`WorkerAgent`, `harness/PipelineHarness`, `compiler/`, `reviewer/ReviewerAgentV2`, `batch/`) have been deleted per [docs/plans/deprecation-removal-plan.md](docs/plans/deprecation-removal-plan.md). Shared infra (StateStore, CostEstimator, GateStore, UiStyleResolver, WorkspaceInitService, ModelResolver, ApiKeyResolver) stays live under V2.
+>
+> **Pilot v3.0 (2026-04-14):**
+> - `project/` — `ProjectRepoService/Controller`, `ProjectDashboardController`, `ProjectScoresController`, `entity/ProjectRepo` (ORG/USER scope), `entity/ProjectRepoLink`, `service/StackDetector`, `service/StackRefreshJob` (`@Scheduled` + `@SchedulerLock`), `pr/PullRequestRecord` + `Service` + `GitHubWebhookController` + `PullRequestController`
+> - `codeintel/` — `CodeMapGenerator`, `ArchitectureDocGenerator`, `ProjectArchitectureService`+`Controller`, `StalenessService` (Caffeine 5-min), `RunCodeMapService` (paid-tier per-run codemap)
+> - `assessment/` — `FeatureAssessmentService` (heuristic + LLM via `assessment.llm.enabled` flag), `AssessmentResult`
+> - `scoring/` — `ReviewScoringService` (6 dims), `TestCoverageRescorer` (post-test event listener)
+> - `integration/scm/ScmPushService.pushMultiRepo` + `tool/GitTool.commitAndPushSubdir` — multi-repo PR + cross-link
+> - `harness/WorkspaceInitService.cloneMultipleRepos` — clones into `workspace/<runId>/repos/<name>/`
+> - Migrations V81–V87
+> - Frontend: `pages/project/ProjectDashboardPage`, `components/project/*`, `components/runs/AssessmentPanel` + `ScoreCard`
 
 ## Java (com.navneet.executespec.*)
 

@@ -7,14 +7,16 @@ import ArchitectureViewer from '@/components/project/ArchitectureViewer';
 import ProjectTaskList from '@/components/project/ProjectTaskList';
 import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
+import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
 
-type TabKey = 'overview' | 'tasks' | 'repos' | 'architecture' | 'team';
+type TabKey = 'overview' | 'tasks' | 'repos' | 'architecture' | 'memory' | 'team';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'tasks', label: 'Tasks' },
   { key: 'repos', label: 'Repos' },
   { key: 'architecture', label: 'Architecture' },
+  { key: 'memory', label: 'Memory' },
   { key: 'team', label: 'Team' },
 ];
 
@@ -104,6 +106,7 @@ export default function ProjectDashboardPage() {
         {tab === 'tasks' && <ProjectTaskList tasks={dashboard?.recentTasks ?? []} />}
         {tab === 'repos' && <ProjectRepoManager projectId={projectId} />}
         {tab === 'architecture' && <ArchitectureViewer projectId={projectId} />}
+        {tab === 'memory' && projectId && <ProjectMemoryPanel projectId={projectId} />}
         {tab === 'team' && (
           <div className="text-gray-500 text-sm">
             Team management is available via the existing Project members page.

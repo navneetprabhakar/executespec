@@ -207,6 +207,7 @@ model-matrix:
     ApiTestSuiteAgent: WORKHORSE
     ConflictResolverAgent: WORKHORSE
     ContextAgent: LIGHTWEIGHT
+    RunLedgerAgent: LIGHTWEIGHT
     ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT

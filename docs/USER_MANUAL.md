@@ -1,6 +1,6 @@
 # ExecuteSpec — User Manual
 
-> **Version**: 2.1.1
+> **Version**: 2.2.0
 > **Date**: 2026-04-14
 > **Audience**: Developers, Product Managers, Tech Leads
 
