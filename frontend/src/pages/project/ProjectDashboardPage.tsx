@@ -11,9 +11,10 @@ import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
 import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
 import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
+import ProjectChatPanel from '@/components/project/ProjectChatPanel';
 import { cn } from '@/lib/utils';
 
-type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'memory' | 'team';
+type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'memory' | 'chat' | 'team';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -23,6 +24,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'repos', label: 'Repos' },
   { key: 'architecture', label: 'Architecture' },
   { key: 'memory', label: 'Memory' },
+  { key: 'chat', label: 'Chat' },
   { key: 'team', label: 'Team' },
 ];
 
@@ -160,6 +162,7 @@ export default function ProjectDashboardPage() {
         {tab === 'repos' && <ProjectRepoManager projectId={projectId} />}
         {tab === 'architecture' && <ArchitectureViewer projectId={projectId} />}
         {tab === 'memory' && <ProjectMemoryPanel projectId={projectId} />}
+        {tab === 'chat' && <ProjectChatPanel projectId={projectId} />}
         {tab === 'team' && (
           <div className="text-[11px] text-muted">
             Team management is available via the existing Project members page.

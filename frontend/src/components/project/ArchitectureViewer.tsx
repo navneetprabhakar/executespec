@@ -115,11 +115,11 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
 
       {shown && (
         <>
-          <div className="border rounded-lg p-4 bg-white shadow-sm prose prose-sm max-w-none">
+          <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 prose prose-sm prose-invert max-w-none">
             <MarkdownContent content={shown.content} />
           </div>
 
-          <div className="border rounded-lg p-4 bg-white shadow-sm">
+          <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium">Annotations</h3>
               {!editingAnnotation && (
