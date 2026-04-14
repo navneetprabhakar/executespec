@@ -1,8 +1,12 @@
 # ExecuteSpec — User Manual
 
-> **Version**: 2.0.0
-> **Date**: 2026-04-10
+> **Version**: 3.0.0 (pilot)
+> **Date**: 2026-04-13
 > **Audience**: Developers, Product Managers, Tech Leads
+
+> **Pilot v3.0 quick links**
+> - [Project workspace walkthrough](#13-pilot-v30--project-workspace) — one-time setup, multi-repo runs, architecture doc, scoring
+> - Plan + journey detail: [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md), [`docs/user-journeys.md`](user-journeys.md)
 
 ---
 
@@ -824,3 +828,107 @@ DELETE /api/users/me/data
 ```
 
 Anonymizes personal data fields on your account, soft-deletes all associated runs, and removes your API keys from the platform. This action is irreversible.
+
+---
+
+## 13. Pilot v3.0 — Project workspace
+
+> Released in commit `6bbfde9b`. Backwards compatible: legacy single-shot
+> projectless runs continue to work unchanged.
+
+### 13.1 One-time project setup (per ORG_ADMIN)
+
+1. Open `/projects/:projectId/dashboard`. The header shows the project name,
+   description, and provider chip.
+2. **Repos tab → Add repository.**
+   - **Create new** for a fresh registration: choose scope (`ORG` = shared
+     across the org, `USER` = personal) and type `owner/repo`. Stack is
+     auto-detected from the file tree (Spring Boot, Vite, FastAPI, Go,
+     Rust, Ruby/Rails, PHP).
+   - **Pick existing** to attach a repo someone already created in your org.
+3. Tag relationships on each repo card ("calls api-server", "depends on
+   shared-models"). These flow into the architecture doc.
+4. **Architecture tab → Generate.** Builds a per-repo codemap (top-level
+   layout, routes, models) and a project-wide architecture document. Versioned;
+   you can browse older versions from the dropdown.
+5. Add free-text annotations ("auth handled by external Keycloak", "money
+   path uses BigDecimal"). The pre-plan assessment + planner read these.
+
+### 13.2 Submitting a multi-repo run
+
+1. Click **New Run**.
+2. Pick the project. The modal swaps the single-repo URL field for
+   **checkboxes of every linked repo**. Tick the ones to clone.
+3. (Optional) paste a **Figma URL** to enable design-compliance scoring.
+4. Submit. The orchestrator clones each selected repo into
+   `workspace/<runId>/repos/<name>/` so workers can read/edit across all of
+   them in the same run.
+
+### 13.3 Pre-plan assessment
+
+Before planning, the system runs a **feature assessment** and broadcasts an
+SSE log entry. The `AssessmentPanel` appears above the plan-approval gate,
+showing:
+
+- **Complexity** chip (S / M / L)
+- **Repos in scope**
+- **Cross-repo dependencies** derived from architecture annotations
+- **Risks** detected from request keywords (auth, payment, schema, destructive)
+
+When the `assessment.llm.enabled` feature flag is on (off by default), the
+assessment is upgraded to an LLM-backed call that also returns
+`filesAffected` and `newFiles` — which files are likely to change before you
+approve credits. Any LLM failure silently degrades to the heuristic so you
+never wait on assessment.
+
+### 13.4 PR workflow
+
+When the run completes and a push is configured:
+
+- Each cloned subdirectory with worker changes gets its own branch
+  (`Project.branchNamingPattern` template, defaults to
+  `executespec/{runId}/{description}`).
+- A PR opens against `Project.targetBranch` (or each repo's actual default
+  branch as fallback).
+- Reviewers from `Project.defaultReviewers` are auto-requested.
+- All sibling PRs are cross-linked in their bodies for easy navigation.
+- The **PR list** in the run detail sidebar shows every PR with a colored
+  status chip (OPEN / MERGED / CLOSED). Status flips automatically when the
+  GitHub webhook fires.
+
+### 13.5 Validation report — six-dimension scoring
+
+Every completed run's validation report now opens with a `ScoreCard` showing:
+
+- Overall accuracy (0–100, A–F grade)
+- **Code quality** — derived from review issue count + severity
+- **Test coverage** — from the accuracy report's coverage level
+- **Architecture** — from spec-mismatch / cross-task / logic issues
+- **Security** — from security-categorised issues
+- **Performance** — from deployability / performance-flagged issues
+- **Design compliance** — only when the run included a Figma URL
+
+Bars are colour-coded ≥80 green / 60–79 yellow / <60 red. The trend chart on
+the dashboard plots the overall + four key dimensions across every completed
+run in the project.
+
+### 13.6 Dashboard
+
+`/projects/:projectId/dashboard` shows:
+
+- **Metric tiles** — active / completed / failed runs + average accuracy.
+- **Overview tab** — recent runs (with per-run score), recent PRs (with
+  status chips + merge-rate stat), score trend chart.
+- **Tasks / Repos / Architecture / Team tabs** — deeper drill-downs.
+- **Architecture tab** displays an amber **"Stale — N/M repos ahead"** badge
+  whenever the underlying repos have moved past the SHA the codemap was
+  generated from. Click Regenerate to refresh.
+
+### 13.7 Operational toggles
+
+| Setting | Where | Default | Purpose |
+|---|---|---|---|
+| `github.webhook.secret` | env / config | (unset) | Required to accept GitHub PR webhooks |
+| `assessment.llm.enabled` | feature flags table | `false` | When `true`, FeatureAssessmentService uses Anthropic instead of the heuristic |
+| `StackRefreshJob` | `@Scheduled` | daily 03:00 | Refreshes detected_stack + last_synced_sha for every project_repo |
+

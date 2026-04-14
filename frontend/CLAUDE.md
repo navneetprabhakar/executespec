@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-13 (post-V1-deprecation, V2-only backend)
+> Last updated: 2026-04-13 (pilot v3.0 shipped — see commit 6bbfde9b)
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
@@ -11,9 +11,11 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **`admin/`** (6): AdminPage, AdminInviteModal, FeatureFlagsPage, GrantRunsModal, OrgAdminDashboard, PricingManager
 - **`auth/`** (7): LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage, AuthCallbackPage, AcceptInvitePage
 - **`org/`** (2): OrgProjectsPage, OrgSettingsPage
+- **`project/`** (1, pilot v3.0): ProjectDashboardPage — route `/projects/:projectId/dashboard`. 5 tabs (Overview / Tasks / Repos / Architecture / Team). Reads `useProjectStore`.
 
 ### Components (`src/components/`)
-- **`runs/`** — RunDetail, RunDetailTabs (batch badge), RunCard (batch badge), RunList, RunConversation, NewRunModal, TaskCard, TaskGraph (subtask grouping), PreviewTab ("Run Tests" button, Beta), LiveLog, ValidationReportPanel, TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary
+- **`runs/`** — RunDetail, RunDetailTabs (batch badge + per-run PR list), RunCard (batch badge), RunList, RunConversation, NewRunModal (now: project-linked multi-repo select + Figma URL), TaskCard, TaskGraph (subtask grouping), PreviewTab ("Run Tests" button, Beta), LiveLog, ValidationReportPanel (now: ScoreCard at top), TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary, **AssessmentPanel** (pilot R4 — appears above the plan-approval gate when `RunDetail.assessmentResult` is set), **ScoreCard** (pilot R6 — 6 colored progress bars + overall accuracy)
+- **`project/`** (pilot v3.0) — ProjectRepoManager, RepoCard (scope chip), AddRepoModal (Pick existing / Create new), RepoRelationshipEditor, StackBadge, ArchitectureViewer (markdown + version dropdown + amber stale badge driven by `getArchitectureStaleness`), ProjectTaskList, ProjectPrList, ProjectScoreTrend (recharts LineChart, overall + per-dimension)
 - **`run/`** — FileTree, FileViewer (RunTimeline removed — V2 has no COMPILING/MERGING/AWAITING_MERGE phases)
 - **`layout/`** — AppLayout, Header, Sidebar, CommandPalette, NotificationBell, NotificationPanel
 - **`dashboard/`** — ActivityFeed, AgentCommGraph, DateRangeFilter, MetricCard, ModelComparisonChart, TokenBubbleChart, UserRunsChart
@@ -48,10 +50,14 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
 ### Stores (`src/stores/` — Zustand)
 - `useAuthStore.ts` — Auth state, JWT token management
-- `useRunStore.ts` — Run list and active run state
+- `useRunStore.ts` — Run list and active run state. `createRun` now accepts `selectedRepoIds` + `figmaUrl`.
 - `useSseStore.ts` — SSE connection state and event buffering
 - `useMetricsStore.ts` — Dashboard metrics and analytics data
 - `useUiStore.ts` — UI preferences, sidebar state, modals
+- `useProjectStore.ts` — pilot v3.0: per-project dashboard, repos, architecture doc, score trend. Exposed actions: `fetchDashboard`, `fetchRepos`, `fetchAvailableRepos`, `fetchArchitectureDoc`, `fetchScoreTrend`, `reset`.
+
+### Types (`src/types/`)
+- `project.ts` — pilot v3.0: `ProjectRepo`, `ProjectRepoLink`, `RepoScope`, `StackInfo`, `ProjectDashboardDTO`, `ScoreEntry`, `PrSummary`, `TaskSummary`, `ArchitectureDoc`, `AssessmentResult`, `LinkRepoRequest`.
 
 ## Key Components
 - **RunDetail.tsx** — Main run view with Vibe View toggle. Shows gate banners (with credit count for multi-credit runs), task list, review, report, cost estimate. Plan approval sends `creditsConfirmed` to prevent stale approvals (409 on mismatch). Completed-run review banner surfaces the validation-report `accuracyScore` (colored by threshold: ≥90 green, ≥75 amber, else red); V1 `recommendation`/`recommendationCompat` fields no longer rendered. Batch UI (`batchAvailable`, dual-option cards, IN_PROGRESS_BATCH/QUEUED_BATCH progress) is still wired on the client but V2 backend does not produce batch runs yet — re-activates once the V2 batch plan ships.

@@ -542,3 +542,40 @@ No API calls. UI state (sidebar, modals).
 | Files making API calls | ~28 |
 | SSE event types handled | 5 (RUN_STATUS, TASK_STATUS, GATE_OPENED, COMPLETE, RUN_RESTARTED, BUDGET_EXCEEDED) |
 | Utility lib files (no API) | 5 (telemetry, techDetect, vibeNarrative, monacoSetup, monacoGeistTheme) |
+
+---
+
+## Pilot v3.0 — Project workspace endpoints
+
+| Endpoint | Frontend caller | Component / store |
+|---|---|---|
+| `GET /api/projects/{id}` | `getProject` | `ProjectDashboardPage` (header) |
+| `GET /api/projects/{id}/dashboard` | `getProjectDashboard` | `useProjectStore.fetchDashboard` → metric tiles + Overview tab |
+| `GET /api/projects/{id}/scores` | `getProjectScores` | `useProjectStore.fetchScoreTrend` → `ProjectScoreTrend` (recharts) |
+| `POST /api/repos` | `createRepo` | `AddRepoModal` (Create-new tab) |
+| `GET /api/repos?scope=ORG\|USER\|ALL` | `listRepos` | `AddRepoModal` (Pick-existing tab) |
+| `POST /api/repos/{repoId}/sync` | `syncRepo` | `ProjectRepoManager` (RepoCard sync button) |
+| `DELETE /api/repos/{repoId}` | `deleteRepo` | (planned admin UI; not yet wired) |
+| `GET /api/projects/{id}/repos` | `getProjectRepos` | `useProjectStore.fetchRepos`, `NewRunModal` multi-select |
+| `POST /api/projects/{id}/repos/{repoId}` | `linkProjectRepo` | `AddRepoModal.link` |
+| `DELETE /api/projects/{id}/repos/{repoId}` | `unlinkProjectRepo` | `ProjectRepoManager.handleUnlink` |
+| `PUT /api/projects/{id}/repos/{repoId}/relationships` | `updateRepoRelationships` | `RepoCard` editor |
+| `POST /api/projects/{id}/architecture/generate` | `generateArchitecture` | `ArchitectureViewer.generate` |
+| `GET /api/projects/{id}/architecture` | `getArchitectureDoc` | `ArchitectureViewer.refresh` |
+| `GET /api/projects/{id}/architecture/versions` | `getArchitectureVersions` | `ArchitectureViewer` version dropdown |
+| `PUT /api/projects/{id}/architecture/annotate` | `annotateArchitecture` | `ArchitectureViewer.saveAnnotation` |
+| `GET /api/projects/{id}/architecture/staleness` | `getArchitectureStaleness` | `ArchitectureViewer` amber stale badge |
+| `GET /api/projects/{id}/repos/{repoId}/codemap` | `getRepoCodeMap` | (planned `CodeMapPanel`; endpoint live) |
+| `GET /api/runs/{id}/prs` | `getRunPrs` | `RunDetailTabs.RunPrList` |
+| `POST /api/runs` extends | `createRun` | now accepts `selectedRepoIds[]` and `figmaUrl` |
+
+### New types (`src/types/project.ts`)
+`ProjectRepo`, `ProjectRepoLink`, `RepoScope`, `StackInfo`, `ProjectDashboardDTO`,
+`ScoreEntry`, `PrSummary`, `TaskSummary`, `ArchitectureDoc`, `AssessmentResult`,
+`LinkRepoRequest`. Plus `StalenessReport` / `RepoStaleness` exported from
+`src/lib/api.ts`.
+
+### Backend-only endpoint
+`POST /webhooks/github` (HMAC SHA-256 verified; secret in `github.webhook.secret`)
+— not called from the frontend; configured per-repo in GitHub settings.
+
