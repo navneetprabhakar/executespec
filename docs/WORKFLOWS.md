@@ -10,6 +10,22 @@
 > no compile, no merge gate, no clarification gate). See
 > [`docs/user-journeys.md`](user-journeys.md) and [`CLAUDE.md`](../CLAUDE.md)
 > for the canonical V2 flow.
+>
+> **Pilot v3.0 amend (commit `6bbfde9b`).** Project-scoped runs add two
+> non-blocking steps to the flow:
+>
+> 1. **Workspace clone** — when `selected_repo_ids` is non-empty,
+>    `WorkspaceInitService.cloneMultipleRepos` lands each linked repo at
+>    `workspace/<runId>/repos/<name>/`.
+> 2. **Pre-plan assessment** — `FeatureAssessmentService` runs between clone
+>    and PLANNING, persists JSON to `pipeline_run.assessment_result`, and
+>    emits an SSE `LOG assessment` event. The result is shown in the
+>    `AssessmentPanel` above the plan-approval gate. No new gate is added.
+>
+> On push, `ScmPushService.pushMultiRepo` opens one PR per dirty subdirectory
+> (writing `pull_request_record` rows with `repo_id` populated) and patches
+> each PR body with sibling URLs. Webhook-driven status updates flow through
+> `GitHubWebhookController`.
 
 ---
 

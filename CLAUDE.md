@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-13
+> Last updated: 2026-04-13 (pilot v3.0 shipped — see commit 6bbfde9b)
 
 ## Architecture
 
@@ -19,6 +19,7 @@
 - **V2 recovery:** `StartupRunResumerV2` scans non-terminal V2 runs on boot (PLANNING/WORKING/REVIEWING/AWAITING_APPROVAL) and fails them cleanly with a clear reason + terminal SSE, so the UI surfaces the interruption instead of leaving runs stuck. Full replay (restore conversation history + resume at saved iteration) is a planned follow-up — see [docs/plans/harness-v2-remaining-work.md](docs/plans/harness-v2-remaining-work.md) Gap 2.
 - **V2 cancel:** `V2RunOrchestrator.cancel(runId)` is the V2 path for `DELETE /api/runs/{id}` — signals the plan gate, interrupts the pipeline future, writes CANCELLED status + terminal SSE.
 - **V2 eval harness:** `scripts/v2-eval.sh` submits LOW / MEDIUM / HIGH specs × anthropic / openai / gemini (9 runs, PROTOTYPE), polls each to terminal, emits machine-readable JSON + a markdown comparison to `scripts/v2-eval-results/v2-eval-<timestamp>.{json,md}`. Specs live in `scripts/v2-eval-specs/{low,medium,high}.txt`.
+- **Pilot v3.0 — project workspace (`project/`, `codeintel/`, `assessment/`, `scoring/`):** Project becomes the unit of organization. New `ProjectDashboardController` aggregates active/completed/failed counts + score trend. Dual-scope `ProjectRepo` registry (ORG = shared, USER = personal) joined to projects via `project_repo_link`; multi-repo selection in `NewRunModal` clones each into `workspace/<runId>/repos/<name>/` via `WorkspaceInitService.cloneMultipleRepos`. `ProjectArchitectureService` versions per-repo `ProjectCodeMap` + project-wide `ProjectArchitectureDoc`; `StalenessService` (Caffeine 5-min cache) drives the dashboard's STALE flag using stored generation SHAs. `FeatureAssessmentService` runs before planner (heuristic by default; LLM-backed when `assessment.llm.enabled` flag is on); the `AssessmentPanel` surfaces complexity + risks + cross-repo deps above the plan-approval gate. `ScmPushService.pushMultiRepo` handles per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`; PRs persisted to `pull_request_record` (R5), webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `ReviewScoringService` derives 6 dimensions (code quality / test coverage / architecture / security / performance / design compliance) from review issues + accuracy report — no extra LLM call. `ScoreCard` at top of `ValidationReportPanel`. Optional Figma URL on `RunRequest` drives design-compliance scoring. `StackRefreshJob` (`@Scheduled` daily 03:00, `@SchedulerLock`) refreshes `detected_stack` + `last_synced_sha` org-wide.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
 - **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
@@ -151,6 +152,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET | `/api/runs/{id}/events` | SSE event stream (scoped token) |
 | GET | `/api/runs/{id}/sse-token` | Get scoped SSE token (5-min TTL) |
 | POST | `/api/runs/{id}/run-tests` | Manually trigger test execution (Beta, requires preview RUNNING) |
+| GET | `/api/runs/{id}/prs` | Pilot R5 — list PRs opened by this run with status |
 
 ### Validation Report
 | Method | Path | Description |
@@ -166,7 +168,28 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker) |
 | DELETE | `/api/runs/{id}/preview/stop` | Stop preview |
 | POST | `/api/runs/{id}/deploy` | Deploy to Cloud Run (permanent) |
-| POST | `/api/runs/{id}/push-github` | Push to GitHub (creates branch + PR) |
+| POST | `/api/runs/{id}/push-github` | Push to GitHub (single-repo path; multi-repo branches into `ScmPushService.pushMultiRepo`) |
+
+### Pilot v3.0 — Project workspace
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/projects/{id}/dashboard` | Aggregated metrics, recent runs/PRs, arch-doc status (NONE/GENERATED/STALE) |
+| GET | `/api/projects/{id}/scores` | Score trend feed for the dashboard chart |
+| POST | `/api/repos` | Create repo at chosen scope (ORG requires ORG_ADMIN) |
+| GET | `/api/repos?scope=ORG\|USER\|ALL` | List repos visible to caller |
+| POST | `/api/repos/{repoId}/sync` | Re-detect stack + refresh `last_synced_sha` |
+| DELETE | `/api/repos/{repoId}` | Delete repo (must not be linked to any project) |
+| GET | `/api/projects/{id}/repos` | List repos linked to this project |
+| POST | `/api/projects/{id}/repos/{repoId}` | Link an existing repo to the project |
+| DELETE | `/api/projects/{id}/repos/{repoId}` | Unlink (repo itself survives) |
+| PUT | `/api/projects/{id}/repos/{repoId}/relationships` | Update relationship tags |
+| POST | `/api/projects/{id}/architecture/generate` | Regenerate codemaps + arch doc (versioned) |
+| GET | `/api/projects/{id}/architecture` | Latest arch doc |
+| GET | `/api/projects/{id}/architecture/versions` | All versions |
+| PUT | `/api/projects/{id}/architecture/annotate` | Save user annotations on the latest doc |
+| GET | `/api/projects/{id}/architecture/staleness` | Per-repo SHA drift report (5-min cached) |
+| GET | `/api/projects/{id}/repos/{repoId}/codemap` | Latest codemap for a single repo |
+| POST | `/webhooks/github` | GitHub PR webhook (HMAC SHA-256 verified, secret via `github.webhook.secret`) |
 
 ### Auth & Org
 | Method | Path | Description |
@@ -294,7 +317,17 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
 | Test execution service | `testgen/TestExecutionService.java` |
 | Test result controller | `testgen/TestResultController.java` (apply-test-fixes, run-tests) |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V73; V72=prompt_audit, V73=plan_effectiveness) |
+| Project workspace | `project/service/ProjectRepoService.java`, `project/controller/ProjectRepoController.java`, `project/dashboard/ProjectDashboardController.java`, `project/scores/ProjectScoresController.java` |
+| Project repo entities | `project/entity/ProjectRepo.java` (ORG/USER scope), `project/entity/ProjectRepoLink.java` |
+| PR records + webhook | `project/pr/PullRequestRecord.java`, `project/pr/PullRequestRecordService.java`, `project/pr/GitHubWebhookController.java`, `project/pr/PullRequestController.java` |
+| Stack detection | `project/service/StackDetector.java`, `project/service/StackRefreshJob.java` (`@Scheduled` + `@SchedulerLock`) |
+| Codebase intelligence | `codeintel/CodeMapGenerator.java`, `codeintel/ArchitectureDocGenerator.java`, `codeintel/ProjectArchitectureService.java`, `codeintel/ProjectArchitectureController.java`, `codeintel/StalenessService.java` |
+| Feature assessment | `assessment/FeatureAssessmentService.java` (heuristic + LLM via `assessment.llm.enabled` flag), `assessment/AssessmentResult.java` |
+| Review scoring | `scoring/ReviewScoringService.java` (6 dimensions, deterministic heuristic from existing review data) |
+| Multi-repo push | `integration/scm/ScmPushService.pushMultiRepo`, `tool/GitTool.commitAndPushSubdir` |
+| Workspace multi-repo | `harness/WorkspaceInitService.cloneMultipleRepos` |
+| Dashboard frontend | `frontend/src/pages/project/ProjectDashboardPage.tsx`, `frontend/src/components/project/*` |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V86; V81=project settings + repo registry, V82=pull_request_record, V83=validation_report scores, V84=codebase intelligence, V85=assessment_result + figma_url, V86=pipeline_run.selected_repo_ids) |
 | LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
@@ -363,6 +396,7 @@ Default provider: OpenAI (user-selected per project). Provider failover is avail
 - Prompt architecture: shared fragment system (`PromptAssembler`), scaffold templates, prompt version tracking (SHA-256 hash → `prompt_audit`), failure pattern injection into planner, live API probe for test generation (`ApiProber`), API surface extraction for test planner (`ApiSurfaceExtractor`), command allowlist in `ProcessExecutor`
 - **FileViewer markdown preview:** `.md` files in the workspace viewer show a Preview/Source toggle. Preview mode renders via `MarkdownContent`; Source mode uses Monaco editor.
 - **V2 eval matrix:** `scripts/v2-eval.sh` — LOW/MEDIUM/HIGH × anthropic/openai/gemini, produces JSON + markdown comparison under `scripts/v2-eval-results/`
+- **Pilot v3.0 — project workspace** (commit `6bbfde9b`): project dashboard with metrics + score trend + recent runs/PRs; ORG/USER scoped repo registry with multi-repo selection in NewRunModal; per-repo codemaps + versioned project architecture doc with annotations + STALE detection; pre-plan feature assessment (heuristic by default; LLM-backed when `assessment.llm.enabled` flag is on); 6-dimension review scoring on validation report; per-run PR list with GitHub webhook for merge status; multi-repo PR creation with cross-linking; daily `StackRefreshJob` keeps `detected_stack` + `last_synced_sha` fresh; optional Figma URL drives design-compliance scoring.
 
 ### In Progress
 - Production deployment preparation
@@ -379,3 +413,4 @@ Default provider: OpenAI (user-selected per project). Provider failover is avail
 - ~~**ValidationReport `status` field**~~ — added `status` column (PENDING / COMPLETE / FAILED) via V80; service writes `COMPLETE` on successful persistence. Consumers no longer have to infer status from `accuracyScore != null`.
 - ~~**Default provider OpenAI**~~ — `application.yml` already defaults to `anthropic` (legacy note dropped).
 - ~~**`GitTool.createBranch()` catch-and-recover**~~ — inspected; the `findRef` pre-check + `RefAlreadyExistsException` catch is intentional belt-and-suspenders for a JGit ref-DB race after thread interrupt. Not debt; kept as-is.
+- ~~**Pilot v3.0 four deferrals**~~ — repo SHA tracking, multi-repo PR creation, scheduled stack refresh + version field, and LLM-backed assessment all shipped in commit `6bbfde9b`.
