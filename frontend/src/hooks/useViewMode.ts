@@ -3,7 +3,7 @@ import { useUiStore } from '../stores/useUiStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { updateViewMode as apiUpdateViewMode } from '../lib/api';
 
-type ViewMode = 'vibe' | 'pro';
+type ViewMode = 'vibe' | 'pro' | 'project';
 type Tier = 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE';
 
 export function useViewMode() {
@@ -36,12 +36,16 @@ export function useViewMode() {
 
   const isVibe = viewMode === 'vibe';
   const isPro = viewMode === 'pro';
+  const isProject = viewMode === 'project';
+  const canUseProjectMode = tier === 'ENTERPRISE' || tier === 'MAX';
 
   return {
     viewMode,
     setViewMode,
     isVibe,
     isPro,
+    isProject,
+    canUseProjectMode,
     tier,
 
     // ── Feature visibility flags ────────────────────────────────────────────

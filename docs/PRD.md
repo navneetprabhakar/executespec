@@ -1,8 +1,8 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 4.4
-> **Last Updated:** 2026-04-14 (pilot v3.0 + bug sweep → v2.1.1)
-> **Status:** Production (v2.1.1 — V2 harness + pilot v3.0 project workspace layer)
+> **Version:** 4.7
+> **Last Updated:** 2026-04-14 (project shell + launch → v2.4.0)
+> **Status:** Production (v2.4.0 — V2 harness + pilot v3.0 project workspace + project memory + execution view + project shell)
 > **Author:** Navneet Prabhakar
 
 > **⚠️ Implementation note (2026-04-13).** Product requirements below are

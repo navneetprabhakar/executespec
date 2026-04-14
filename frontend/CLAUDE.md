@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-13 (pilot v3.0 shipped — see commit 6bbfde9b)
+> Last updated: 2026-04-14 (v2.4.0 — Project Shell + Launch: `ExecutionSetup` adds new-repo sub-form + dry-run; `SolutionSection` replaces `SolutionCard` with per-attempt history linking to `RunDetailPage`; `ProjectLaunchesList` + `ProjectPrRollup` tabs on `ProjectDashboardPage`; types extended with `NewRepoSpec` + `Scaffold` + `SolutionRun` + `PrRollupEntry` + `ProjectOverview`; ENTERPRISE + MAX premium gate)
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
@@ -15,7 +15,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
 ### Components (`src/components/`)
 - **`runs/`** — RunDetail, RunDetailTabs (batch badge + per-run PR list), RunCard (batch badge), RunList, RunConversation, NewRunModal (now: project-linked multi-repo select + Figma URL), TaskCard, TaskGraph (subtask grouping), PreviewTab ("Run Tests" button, Beta), LiveLog, ValidationReportPanel (now: ScoreCard at top), TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary, **AssessmentPanel** (pilot R4 — appears above the plan-approval gate when `RunDetail.assessmentResult` is set), **ScoreCard** (pilot R6 — 6 colored progress bars + overall accuracy)
-- **`project/`** (pilot v3.0) — ProjectRepoManager, RepoCard (scope chip), AddRepoModal (Pick existing / Create new), RepoRelationshipEditor, StackBadge, ArchitectureViewer (markdown + version dropdown + amber stale badge driven by `getArchitectureStaleness`), ProjectTaskList, ProjectPrList, ProjectScoreTrend (recharts LineChart, overall + per-dimension)
+- **`project/`** (pilot v3.0 + v2.2.0) — ProjectRepoManager, RepoCard (scope chip), AddRepoModal (Pick existing / Create new), RepoRelationshipEditor, StackBadge, ArchitectureViewer (markdown + version dropdown + amber stale badge driven by `getArchitectureStaleness`), ProjectTaskList, ProjectPrList, ProjectScoreTrend (recharts LineChart, overall + per-dimension), **ProjectMemoryPanel** (v2.2.0 — token-budget bar, compacted-history expandable, recent-run caveman-English entries; driven by `getProjectMemory`)
 - **`run/`** — FileTree, FileViewer (RunTimeline removed — V2 has no COMPILING/MERGING/AWAITING_MERGE phases)
 - **`layout/`** — AppLayout, Header, Sidebar, CommandPalette, NotificationBell, NotificationPanel
 - **`dashboard/`** — ActivityFeed, AgentCommGraph, DateRangeFilter, MetricCard, ModelComparisonChart, TokenBubbleChart, UserRunsChart

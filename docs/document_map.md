@@ -1,7 +1,7 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-14 (v2.1.1 — pilot v3.0)
+> Last updated: 2026-04-14 (v2.4.0 — project shell + launch flow)
 >
 > New pilot-v3.0 docs to know about:
 > - [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md) — full recap of

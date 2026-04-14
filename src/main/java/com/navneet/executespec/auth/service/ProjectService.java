@@ -116,6 +116,7 @@ public class ProjectService {
 
     @Transactional
     public void addMember(String projectId, String userId, String role, String actorId) {
+        requireProjectAdmin(projectId, actorId);
         if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
             String effectiveRole = role != null ? role : "PROJECT_DEVELOPER";
             projectMemberRepo.save(ProjectMember.builder()
@@ -137,9 +138,19 @@ public class ProjectService {
 
     @Transactional
     public void removeMember(String projectId, String userId, String actorId) {
-        if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found in project");
+        requireProjectAdmin(projectId, actorId);
+        ProjectMember target = projectMemberRepo.findByProjectIdAndUserId(projectId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found in project"));
+
+        // Last-admin guard — prevent locking the project out of management.
+        if ("PROJECT_ADMIN".equals(target.getProjectRole())) {
+            int adminCount = projectMemberRepo.countByProjectIdAndProjectRole(projectId, "PROJECT_ADMIN");
+            if (adminCount <= 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Cannot remove the only project admin — add another admin first.");
+            }
         }
+
         projectMemberRepo.deleteByProjectIdAndUserId(projectId, userId);
 
         Project project = projectRepo.findById(projectId).orElse(null);
@@ -149,6 +160,15 @@ public class ProjectService {
                 .orgId(project != null ? project.getOrgId() : null).actorId(actorId)
                 .oldValue("{\"userId\":\"" + userId + "\"}")
                 .build());
+    }
+
+    /** Throws 403 unless the actor is a PROJECT_ADMIN on this project. */
+    private void requireProjectAdmin(String projectId, String actorId) {
+        ProjectMember m = projectMemberRepo.findByProjectIdAndUserId(projectId, actorId).orElse(null);
+        if (m == null || !"PROJECT_ADMIN".equals(m.getProjectRole())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only project admins can add or remove project members.");
+        }
     }
 
     @Transactional
