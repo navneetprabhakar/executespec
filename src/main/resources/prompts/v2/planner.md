@@ -77,4 +77,6 @@ The plan schema:
 - Classification: {{CLASSIFICATION}} (max tasks: {{MAX_TASKS}})
 - Workspace state: {{WORKSPACE_SUMMARY}}
 
+{{PROJECT_MEMORY}}
+
 Now call `submitPlan` with your plan.

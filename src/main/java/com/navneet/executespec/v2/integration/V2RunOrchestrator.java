@@ -128,6 +128,8 @@ public class V2RunOrchestrator {
     private final FeatureAssessmentService featureAssessmentService;
     private final RunCodeMapService runCodeMapService;
     private final AppUserRepository appUserRepository;
+    private final com.navneet.executespec.memory.ProjectMemoryProvider projectMemoryProvider;
+    private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
@@ -343,6 +345,9 @@ public class V2RunOrchestrator {
                 Classification autoClassification = SpecClassifier.classify(userRequest);
                 log.info("V2 run={} spec classified as {} (len={})",
                         runId, autoClassification, userRequest == null ? 0 : userRequest.length());
+                String projectMemory = projectId != null
+                        ? projectMemoryProvider.buildPlannerContext(projectId)
+                        : "";
                 plan = planner.plan(PlannerRequestV2.builder()
                         .spec(userRequest)
                         .classification(autoClassification)
@@ -352,6 +357,7 @@ public class V2RunOrchestrator {
                         .workspaceSummary(codemapSummary != null
                                 ? "Existing repository — codebase map below.\n\n" + codemapSummary
                                 : "empty scratch workspace (V2 harness)")
+                        .projectMemory(projectMemory)
                         .build());
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
@@ -497,7 +503,17 @@ public class V2RunOrchestrator {
             // ── 6. Final workspace commit so `/push-github` has refs to push ─
             commitWorkspaceOutputs(runId, workspace);
 
-            // ── 6. Terminal status mapping ─────────────────────────────────
+            // ── 6b. Project memory: append compressed ledger entry for project-scoped runs.
+            // Non-fatal — any failure is swallowed inside the agent.
+            if (projectId != null) {
+                try {
+                    runLedgerAgent.generateLedgerEntry(runId);
+                } catch (Exception memEx) {
+                    log.warn("V2 run={} project-memory ledger failed: {}", runId, memEx.getMessage());
+                }
+            }
+
+            // ── 7. Terminal status mapping ─────────────────────────────────
             String finalStatus = mapOverallToV1Status(execResult.overall());
             terminate(runId, finalStatus,
                     "overall=" + execResult.overall()

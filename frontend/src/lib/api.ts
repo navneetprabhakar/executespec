@@ -893,7 +893,7 @@ export interface AuthUser {
   bitbucketWorkspace?: string | null;
   bitbucketRepoSlug?: string | null;
   // UI preference
-  viewMode?: 'vibe' | 'pro';
+  viewMode?: 'vibe' | 'pro' | 'project';
 }
 
 export interface LoginResponse {
@@ -983,7 +983,7 @@ export const validateBitbucket = (username: string, appPassword: string, workspa
   });
 
 /** Updates the user's UI view mode preference ('vibe' or 'pro'). */
-export const updateViewMode = (viewMode: 'vibe' | 'pro') =>
+export const updateViewMode = (viewMode: 'vibe' | 'pro' | 'project') =>
   req<AuthUser>('/auth/settings/view-mode', {
     method: 'PUT',
     body: JSON.stringify({ viewMode }),
@@ -1802,6 +1802,34 @@ export interface StalenessReport {
 }
 export const getArchitectureStaleness = (projectId: string) =>
   req<StalenessReport>(`/projects/${projectId}/architecture/staleness`);
+
+// ── Project Memory (v2.2.0) ──────────────────────────────────────────────
+export interface MemoryStats {
+  totalRuns: number;
+  snapshotVersion: number;
+  snapshotCoversUpTo: number;
+  recentEntryCount: number;
+  currentTokens: number;
+  tokenBudget: number;
+}
+export interface RunLedgerEntry {
+  id: string;
+  runId: string;
+  runNumber: number;
+  entry: string;
+  tokenCount: number | null;
+  compactedInto: string | null;
+  createdAt: string;
+}
+export interface ProjectMemoryResponse {
+  fullContext: string;
+  stats: MemoryStats;
+  recentEntries: RunLedgerEntry[];
+}
+export const getProjectMemory = (projectId: string) =>
+  req<ProjectMemoryResponse>(`/projects/${projectId}/memory`);
+export const getProjectLedger = (projectId: string) =>
+  req<RunLedgerEntry[]>(`/projects/${projectId}/memory/ledger`);
 
 // Assessment approval (R4)
 export const approveAssessment = (runId: string, constraints?: string[]) =>
