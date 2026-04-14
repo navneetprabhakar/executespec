@@ -109,8 +109,11 @@ public class SequentialExecutorV2 {
                 req.runContext().runId(), plan.tasks().size(), req.provider(), req.model(),
                 req.enableSmokeTests());
 
-        for (PlannedTaskV2 task : plan.tasks()) {
-            TaskOutcome outcome = executeOne(task, plan, req);
+        int taskCount = plan.tasks().size();
+        for (int i = 0; i < taskCount; i++) {
+            PlannedTaskV2 task = plan.tasks().get(i);
+            boolean isFinalTask = (i == taskCount - 1);
+            TaskOutcome outcome = executeOne(task, plan, req, isFinalTask);
             outcomes.add(outcome);
             metrics.recordTaskStatus(outcome.status().name());
             metrics.recordTaskLatency(outcome.status().name(),
@@ -125,7 +128,7 @@ public class SequentialExecutorV2 {
         return result;
     }
 
-    private TaskOutcome executeOne(PlannedTaskV2 task, PlanV2 plan, ExecutionRequest req) {
+    private TaskOutcome executeOne(PlannedTaskV2 task, PlanV2 plan, ExecutionRequest req, boolean isFinalTask) {
         long taskStart = System.currentTimeMillis();
         ExecutionContext taskCtx = new ExecutionContext(
                 req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
@@ -194,6 +197,27 @@ public class SequentialExecutorV2 {
 
         if (!req.enableSmokeTests()) {
             log.info("Executor task={} SUCCESS (smoke tests disabled)", task.id());
+            persistTaskStatus(runId, task.id(), "COMPLETE");
+            broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+            return TaskOutcome.builder()
+                    .taskId(task.id()).taskTitle(task.title())
+                    .status(TaskOutcome.Status.SUCCESS)
+                    .workerOutcome(primary)
+                    .totalLatencyMs(System.currentTimeMillis() - taskStart)
+                    .toolCallsDispatched(primary.toolCallsDispatched())
+                    .build();
+        }
+
+        // Skip per-task smoke for non-final tasks in multi-task plans:
+        // intermediate tasks (T1 scaffold, T2 partial wiring, ...) cannot
+        // possibly satisfy a full project build because later tasks haven't
+        // landed yet. The reviewer's final build at the end of the run is
+        // the authoritative gate. This eliminates false-negative PARTIAL
+        // statuses on tasks whose code is later wired up correctly.
+        boolean multiTask = plan.tasks().size() > 1;
+        if (multiTask && !isFinalTask) {
+            log.info("Executor task={} SUCCESS (intermediate smoke skipped — multi-task plan, final task + reviewer are authoritative)",
+                    task.id());
             persistTaskStatus(runId, task.id(), "COMPLETE");
             broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
             return TaskOutcome.builder()

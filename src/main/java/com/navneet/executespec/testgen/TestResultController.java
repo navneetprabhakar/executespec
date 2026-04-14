@@ -7,7 +7,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewStatus;
-import com.navneet.executespec.harness.PipelineHarness;
+
 import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.state.ApplySource;
 import com.navneet.executespec.state.StateStore;
@@ -44,10 +44,10 @@ public class TestResultController {
     private final TestPlanRepository testPlanRepository;
     private final TestResultRepository testResultRepository;
     private final RunAccessGuard runAccessGuard;
-    private final com.navneet.executespec.v2.integration.V2DeferredActionGuard v2Guard;
+
     private final StateStore stateStore;
     private final ConversationAgent conversationAgent;
-    private final PipelineHarness harness;
+    
     private final TestPreviewCoordinator testPreviewCoordinator;
 
     /** Lazy to break circular dependency: PreviewService → TestPreviewCoordinator → PreviewService */
@@ -155,7 +155,7 @@ public class TestResultController {
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
-        v2Guard.ensureNotV2(runAccessGuard.requireRunAccess(runId, userDetails), "run-tests");
+        /* V2 check removed — V2 is default */
 
         PipelineRun run = stateStore.findRun(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
@@ -195,7 +195,7 @@ public class TestResultController {
             @RequestParam(required = false) String signature,
             @AuthenticationPrincipal AppUserDetails userDetails) {
 
-        v2Guard.ensureNotV2(runAccessGuard.requireRunAccess(runId, userDetails), "apply-test-fixes");
+        /* V2 check removed — V2 is default */
 
         PipelineRun run = stateStore.findRun(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
@@ -262,14 +262,12 @@ public class TestResultController {
         List<AgentTask> newTasks = stateStore.appendSuggestionTasks(runId, miniPlan, applyIndex, ApplySource.REVIEW);
         stateStore.incrementApplySuggestionCount(runId);
 
+        @SuppressWarnings("unused")
         List<String> newTaskIds = newTasks.stream().map(AgentTask::getTaskId).toList();
-        harness.executeApplySuggestion(runId, newTaskIds);
-
-        log.info("[ApplyTestFixes] run={} failedTests={} tasks={}", runId, failedResults.size(), newTasks.size());
-
-        return ResponseEntity.accepted().body(Map.of(
-                "taskCount", newTasks.size(),
-                "failedTests", failedResults.size()
-        ));
+        log.info("[ApplyTestFixes] run={} failedTests={} tasks={} — V2 apply-suggestion not yet implemented",
+                runId, failedResults.size(), newTasks.size());
+        throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.GONE,
+                "apply-test-fixes not yet supported in V2");
     }
 }

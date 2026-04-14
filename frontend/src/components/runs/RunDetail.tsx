@@ -6,6 +6,7 @@ import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
 import RunDetailTabs from './RunDetailTabs';
 import ValidationReportPanel from './ValidationReportPanel';
+import AssessmentPanel from './AssessmentPanel';
 import TestProgressTracker from './TestProgressTracker';
 import TestReportPanel from './TestReportPanel';
 import { RunTimeline } from '@/components/run/RunTimeline';
@@ -320,9 +321,18 @@ export default function RunDetail() {
             <div className="flex items-start gap-2.5 min-w-0">
               <GlowDot status={activeRun.status} className="mt-1 flex-shrink-0" />
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-mono text-xs text-secondary">{activeRun.runId.slice(0, 16)}</p>
                   <StatusBadge status={activeRun.status} />
+                  {/* Final-build chip — disambiguates PARTIAL-but-delivered runs. */}
+                  {finalBuildPassed(activeRun) && activeRun.status === 'PARTIAL' && (
+                    <span
+                      className="text-[10px] uppercase tracking-wide bg-green-500/10 text-green-500 px-1.5 py-0.5 rounded"
+                      title="Reviewer's final build passed — intermediate PARTIAL chips were from per-task smoke tests, not the delivered code"
+                    >
+                      ✓ final build passed
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted mt-0.5 line-clamp-1">
                   {describeRunStatus(activeRun.status, activeRun.tasks, activeRun.failureReason, activeRun.executionMode)}
@@ -347,6 +357,26 @@ export default function RunDetail() {
                   {activeRun.sourceRunId?.slice(0, 12)}
                 </button>
               </span>
+            </div>
+          )}
+
+          {/* Pilot R4 — feature assessment, shown above the plan-approval gate. */}
+          {activeRun.status === 'AWAITING_APPROVAL' && activeRun.assessmentResult && (
+            <div className="flex-shrink-0 px-4 pt-3">
+              <AssessmentPanel raw={activeRun.assessmentResult} />
+            </div>
+          )}
+
+          {/* Codemap stats — paid existing-repo runs only */}
+          {activeRun.codemapFileCount != null && activeRun.codemapFileCount > 0 && (
+            <div className="flex-shrink-0 px-4 pt-2 text-xs text-muted">
+              Codemap pulled — {activeRun.codemapFileCount} files,{' '}
+              {activeRun.codemapRouteCount ?? 0} routes
+              {activeRun.codemapInputTokens != null && activeRun.codemapOutputTokens != null && (
+                <>
+                  {' '}({(activeRun.codemapInputTokens + activeRun.codemapOutputTokens).toLocaleString()} tokens)
+                </>
+              )}
             </div>
           )}
 
@@ -815,6 +845,21 @@ export default function RunDetail() {
 }
 
 // ── Mobile-friendly collapsible reports section ──────────────────────────
+
+/**
+ * Returns true when the reviewer's final-build passed. Used to show a green
+ * "final build passed" chip on PARTIAL runs — reviewJson carries the truth
+ * even when the per-task smoke-test aggregation reported PARTIAL.
+ */
+function finalBuildPassed(run: { reviewJson?: string | null }): boolean {
+  if (!run.reviewJson) return false;
+  try {
+    const r = JSON.parse(run.reviewJson);
+    return r?.finalBuildPassed === true || r?.finalBuildExitCode === 0;
+  } catch {
+    return false;
+  }
+}
 
 function MobileCollapsibleReports({ runId, status }: { runId: string; status: string }) {
   const isMobile = useIsMobile();

@@ -62,6 +62,13 @@ public class ValidationReport {
     @Builder.Default
     private boolean generatedAfterImprovements = false;
 
+    /** Lifecycle marker: PENDING while generation is in flight, COMPLETE when
+     *  the report is readable, FAILED if generation errored out. Default
+     *  COMPLETE so backfilled rows (V80 migration) render correctly. */
+    @Column(name = "status", nullable = false, length = 20)
+    @Builder.Default
+    private String status = "COMPLETE";
+
     // ── Phase 3: Accuracy assessment fields (V74) ──────────────────────────────────────────────
 
     /** Spec adherence score 0-100 from AccuracyAssessmentService. Null if assessment was skipped. */
@@ -78,6 +85,16 @@ public class ValidationReport {
      */
     @Column(name = "accuracy_json", columnDefinition = "TEXT")
     private String accuracyJson;
+
+    // ── Pilot R6: Multi-dimension review scoring (V83) ─────────────────────────────────────────
+
+    @Column(name = "code_quality_score")      private Integer codeQualityScore;
+    @Column(name = "test_coverage_score")     private Integer testCoverageScore;
+    @Column(name = "architecture_score")      private Integer architectureScore;
+    @Column(name = "security_score")          private Integer securityScore;
+    @Column(name = "performance_score")       private Integer performanceScore;
+    /** Weighted when the run provides a {@code figmaUrl}. Null otherwise. */
+    @Column(name = "design_compliance_score") private Integer designComplianceScore;
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
 

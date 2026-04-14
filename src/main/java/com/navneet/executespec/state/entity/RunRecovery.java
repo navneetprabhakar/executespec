@@ -1,6 +1,5 @@
 package com.navneet.executespec.state.entity;
 
-import com.navneet.executespec.recovery.StuckClassification;
 import com.navneet.executespec.tenant.TenantInterceptor;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -35,9 +34,9 @@ public class RunRecovery {
     @Column(name = "stuck_task_id")
     private String stuckTaskId;           // null if entire run was killed
 
-    @Enumerated(EnumType.STRING)
+    /** Classification string — was {@code StuckClassification} enum in V1. */
     @Column(nullable = false)
-    private StuckClassification classification;
+    private String classification;
 
     @Column(name = "classification_detail", columnDefinition = "TEXT")
     private String classificationDetail;

@@ -62,9 +62,21 @@ public class V2RunCostTracker {
     private static final double USD_PER_CREDIT = 5.0;
 
     private final Map<String, Accumulator> byRun = new ConcurrentHashMap<>();
+    /** Per-task accumulator, keyed by {@code runId|taskId}. Populated when the
+     *  router is given a task-scoped {@code ExecutionContext}; consumed by the
+     *  orchestrator to write real per-task token columns to {@code agent_task}
+     *  instead of the old equal-split approximation. */
+    private final Map<String, Accumulator> byRunTask = new ConcurrentHashMap<>();
 
     /** Records a single ChatResponse's token usage + cost against {@code runId}. */
     public void record(String runId, String provider, String model, ChatResponse response) {
+        record(runId, null, provider, model, response);
+    }
+
+    /** Task-scoped variant — also accumulates into a per-task bucket keyed by
+     *  {@code runId|taskId}. {@code taskId} may be null for non-task calls
+     *  (planner, reviewer); behaviour matches the legacy two-arg variant. */
+    public void record(String runId, String taskId, String provider, String model, ChatResponse response) {
         if (runId == null || response == null) return;
 
         Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
@@ -98,6 +110,16 @@ public class V2RunCostTracker {
         acc.costMicros.addAndGet((long) Math.round(callCost * 1_000_000d));
         acc.calls.incrementAndGet();
 
+        if (taskId != null && !taskId.isBlank()) {
+            Accumulator taskAcc = byRunTask.computeIfAbsent(runId + "|" + taskId, k -> new Accumulator());
+            taskAcc.inputTokens.addAndGet(inTok);
+            taskAcc.outputTokens.addAndGet(outTok);
+            taskAcc.cacheWriteTokens.addAndGet(cacheWrite);
+            taskAcc.cacheReadTokens.addAndGet(cacheRead);
+            taskAcc.costMicros.addAndGet((long) Math.round(callCost * 1_000_000d));
+            taskAcc.calls.incrementAndGet();
+        }
+
         // Per-call diagnostic so we can tell at-a-glance whether a provider is
         // under-reporting tokens. Look for zero in/out on OpenAI → usage parse issue;
         // big deltas between Anthropic and OpenAI on same spec → cache-write
@@ -118,9 +140,20 @@ public class V2RunCostTracker {
         return acc.toSnapshot();
     }
 
-    /** Returns the final snapshot and clears the per-run entry. */
+    /** Per-task snapshot, or zero-init if the tracker never saw task-scoped calls. */
+    public Snapshot snapshotTask(String runId, String taskId) {
+        if (runId == null || taskId == null) return new Snapshot(0, 0, 0, 0, 0.0, 0);
+        Accumulator acc = byRunTask.get(runId + "|" + taskId);
+        return acc == null ? new Snapshot(0, 0, 0, 0, 0.0, 0) : acc.toSnapshot();
+    }
+
+    /** Returns the final snapshot and clears the per-run entry (plus any per-task entries). */
     public Snapshot finalizeRun(String runId) {
         Accumulator acc = byRun.remove(runId);
+        if (runId != null) {
+            String prefix = runId + "|";
+            byRunTask.keySet().removeIf(k -> k.startsWith(prefix));
+        }
         return acc == null ? new Snapshot(0, 0, 0, 0, 0.0, 0) : acc.toSnapshot();
     }
 

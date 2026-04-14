@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "low",
+  "run_id": "9f1fa98f-30b2-4b54-9d32-72e29dd21fa3",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-13T13:33:12.161023Z",
+  "completedAt": "2026-04-13T13:34:12.209269Z",
+  "tasks_total": 1,
+  "tasks_done": 1,
+  "tasks_failed": 0,
+  "review": "{\"totalLatencyMs\":37133,\"wiringPassSummary\":\"Wiring review complete. This is a simple Python project with a single fib.py file containing a fibonacci function and a main entry point. No wiring issues found - the module is self-contained, properly structured, and builds successfully. No Flask/FastAPI/Express routes, middleware, or external dependencies requiring registration.\",\"generalPassSummary\":\"no in-scope issues found\",\"overall\":\"CLEAN\",\"finalBuildExitCode\":0,\"finalBuildPassed\":true}",
+  "actual_cost": 0.082997,
+  "est_low": 0.0795,
+  "est_high": 0.139125,
+  "credits": 1,
+  "total_input": 66382,
+  "total_output": 3323,
+  "accuracy": 100,
+  "report_ok": true
+}

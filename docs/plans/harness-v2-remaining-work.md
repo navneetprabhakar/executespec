@@ -2,7 +2,7 @@
 
 > Consolidated from `harness-v2-execution-plan.md`, `harness-v2-ui-parity-plan.md`,
 > and `harness-analysis-part3-competitors.md` (all deleted 2026-04-13).
-> V2 is production-default. This doc only tracks what is still incomplete.
+> V2 is the only harness — V1 deleted in deprecation P3 (2026-04-13).
 
 ## Status snapshot
 
@@ -15,11 +15,14 @@
 | SequentialExecutorV2 (per-task tier routing, smoke test, retry) | ✅ done |
 | ReviewerAgentV3 (general + wiring passes) | ✅ done |
 | ContextStoreV2 (Redis persistence, per-task) | ✅ done |
-| HarnessVersionResolver + flag routing | ✅ done |
 | V2Metrics observability | ✅ done |
 | V2RunOrchestrator + V1-table persistence (UI parity) | ✅ done |
-| V2RunCostTracker + per-phase attribution | ✅ done |
-| V2DeferredActionGuard (501 shim for V1-only endpoints) | ✅ done |
+| V2RunCostTracker + per-phase attribution + run-stats fix | ✅ done |
+| StartupRunResumerV2 fail-cleanly + resume_attempts cap + 6h stale cutoff | ✅ done (Phase 1.5) |
+| V2 cancel via `DELETE /api/runs/{id}` | ✅ done |
+| ScmPushService extracted from V1 harness | ✅ done |
+| **V1 harness deletion (deprecation P1–P6)** | ✅ done 2026-04-13 |
+| HarnessVersionResolver + V2DeferredActionGuard | retired with V1 |
 
 ## Gap 1 — Phase 6: batch execution in V2
 
@@ -27,48 +30,50 @@
 
 **Plan:** see [v2-batch-execution-plan.md](v2-batch-execution-plan.md).
 
-**Sequencing constraint:** waits on deprecation P1 (V1 `batch/*` deletion). Implementing V2 batch before that creates duplicate poll services competing for the same Shedlock key.
+**Sequencing constraint:** ✅ unblocked — V1 `batch/*` deleted in deprecation P3 (2026-04-13). Ready to start P0 probe.
 
 **Acceptance:**
 - Batch-mode approval on a V2 run runs worker-tasks through the 3 provider batch APIs.
 - Reviewer / test-gen / preview stay realtime.
 - Eval matrix (`scripts/v2-eval.sh --mode batch`) matches realtime accuracy within 5%, at ~50% of the realtime credit cost.
 
-## Gap 2 — Startup resume for V2 runs
+## Gap 2 — Startup resume for V2 runs (full replay)
 
-**Status:** not implemented. A JVM crash mid-run leaves the run stuck in its last persisted status.
+**Status:** Phase 1.5 shipped (fail-cleanly + resume_attempts cap of 3 + 6h stale cutoff). Full conversation replay still pending.
 
-**What's needed:** `StartupRunResumerV2` — boot-time scan of `PipelineRun` rows where `harness_version = 'v2'` and `status ∈ {PLANNING, WORKING, REVIEWING, AWAITING_APPROVAL}`. For each:
-- If `AWAITING_APPROVAL`: re-signal the gate (same as V1 behaviour).
-- If `WORKING` or `REVIEWING`: load the latest `v2:agent-ctx:{runId}:{taskId}` snapshot from Redis; resume `WorkerAgentV2` at the saved iteration. If the snapshot is missing (TTL expired), mark the run `FAILED` with a clear reason.
+**Phase 1 (shipped):** boot-time scan marks non-terminal V2 runs FAILED with a clear reason + terminal SSE so the UI surfaces the interruption.
 
-**Acceptance:** kill the JVM mid-run, restart, run reaches a terminal state without user intervention. Add an integration test that uses a `TestJvmStopSignal` to simulate crash.
+**Phase 1.5 (shipped 2026-04-13):** `pipeline_run.resume_attempts` column + 3-attempt cap + 6h stale cutoff prevent infinite resume loops across deploys.
 
-**Estimated size:** ~400 LOC + migration.
+**Phase 2 (pending — full replay):** for `WORKING` / `REVIEWING` runs with a fresh Redis snapshot, load `v2:agent-ctx:{runId}:{taskId}` and resume `WorkerAgentV2` at the saved iteration instead of failing.
 
-## Gap 3 — UI parity deferred endpoints
+**Acceptance:** kill the JVM mid-run, restart, run reaches a terminal state without user intervention. Integration test that simulates JVM stop.
 
-**Status:** `V2DeferredActionGuard` returns 501 for the endpoints below. Each is either deferred by design or blocked on another gap.
+**Estimated size:** ~400 LOC for Phase 2.
+
+## Gap 3 — Endpoints returning 410 Gone in V2
+
+After deprecation P2 the following endpoints return **HTTP 410 Gone** (was 501 via the retired `V2DeferredActionGuard`). Each is either deferred by design or blocked on another gap.
 
 | Endpoint | Status | Unblock by |
 |---|---|---|
-| `POST /runs/{id}/retry` (full-run) | 501 | Gap 2 (startup resume); same mechanism |
-| `POST /runs/{id}/pause` + `resume` | 501 | Gap 2 |
-| `POST /runs/{id}/rework` | 501 | V2 plan-iteration flow (not yet specced) |
-| `POST /runs/{id}/reopen-merge` | 501 | V2 has auto-merge only — verify this endpoint is still needed or can be removed |
-| `POST /runs/{id}/tasks/{taskId}/retry` | 501 | Wire to `SequentialExecutorV2.executeOne(task)` |
-| `POST /runs/{id}/implement-suggestions` | 501 | V2 chat/iterate flow (separate spec) |
-| `POST /runs/{id}/retry-validation` | 501 | Wire to `V2RunOrchestrator.generateValidationReport` |
-| `POST /runs/{id}/edit-plan` | 501 | Needs planner re-entry — defer until after batch |
-| `POST /runs/{id}/clarify` + `chat` + `apply` + `iterate` | 501 | V2 ConversationAgent integration (scope-TBD) |
-| `POST /runs/{id}/run-tests` + `apply-test-fixes` | 501 for V2 | Wire once V2 test-gen is fully plumbed through `TestGenOrchestrator` |
-| `POST /runs/{id}/merge` | 501 for V2 | V2 auto-merges — confirm the endpoint can be removed for V2 entirely |
+| `POST /runs/{id}/retry` (full-run) | 410 | Gap 2 Phase 2 (full replay) |
+| `POST /runs/{id}/pause` + `resume` | 410 | Gap 2 Phase 2 |
+| `POST /runs/{id}/rework` | 410 | V2 plan-iteration flow (not yet specced) |
+| `POST /runs/{id}/reopen-merge` | 410 | Permanent — V2 auto-merges |
+| `POST /runs/{id}/tasks/{taskId}/retry` | ✅ wired baseline (`V2RunOrchestrator.retryTask`) | Full replay arrives with Gap 2 Phase 2 |
+| `POST /runs/{id}/implement-suggestions` | 410 | V2 chat/iterate flow (separate spec) |
+| `POST /runs/{id}/retry-validation` | ✅ wired (`V2RunOrchestrator.retryValidation`) | — |
+| `POST /runs/{id}/edit-plan` | 410 | Needs planner re-entry — defer until after batch |
+| `POST /runs/{id}/clarify` + `chat` + `apply` + `iterate` | 410 | V2 ConversationAgent integration (scope-TBD) |
+| `POST /runs/{id}/run-tests` + `apply-test-fixes` | 410 for V2 | Wire once V2 test-gen is fully plumbed through `TestGenOrchestrator` |
+| `POST /runs/{id}/merge` | 410 — permanent | V2 auto-merges; endpoint can be removed from frontend |
+| `POST /api/feasibility` | 410 — permanent | Use plan-approval estimate instead |
 
 **Recommended order:**
-1. Gap 2 (startup resume) unblocks 5 of the above.
-2. Per-task retry is a one-liner — quick win.
-3. Re-open-merge and merge endpoints: delete rather than wire (V2 has no separate merge gate).
-4. Chat / iterate / edit-plan / rework / clarify: separate design doc; out of scope for V2 parity.
+1. Gap 2 Phase 2 (full replay) unblocks `retry` / `pause` / `resume`.
+2. `merge` / `reopen-merge` / `feasibility` / `clarify`: remove from frontend; permanent 410.
+3. Chat / iterate / edit-plan / rework / implement-suggestions: separate design doc; out of scope for V2 parity.
 
 ## Principles this architecture commits to
 

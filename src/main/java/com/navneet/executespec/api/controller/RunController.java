@@ -13,8 +13,7 @@ import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
-import com.navneet.executespec.harness.BackgroundValidationService;
-import com.navneet.executespec.harness.PipelineHarness;
+import com.navneet.executespec.integration.scm.ScmPushService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -53,11 +52,9 @@ import java.util.stream.Collectors;
 @Slf4j
 public class RunController {
 
-    private final PipelineHarness harness;
-    private final com.navneet.executespec.v2.rollout.HarnessVersionResolver harnessVersionResolver;
     private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
+    private final ScmPushService scmPushService;
     private final StateStore stateStore;
-    private final BackgroundValidationService backgroundValidationService;
     private final RunMapper mapper;
     private final RunRecoveryRepository recoveryRepository;
     private final WorkspaceExportService workspaceExportService;
@@ -70,12 +67,10 @@ public class RunController {
     private final RunAccessGuard guard;
     private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
     private final com.navneet.executespec.state.repository.PlanVersionRepository planVersionRepo;
-    private final com.navneet.executespec.agent.PlannerAgent plannerAgent;
     private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
     private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
     private final com.navneet.executespec.agent.CostEstimator costEstimator;
     private final com.navneet.executespec.v2.cost.V2RunCostTracker v2CostTracker;
-    private final com.navneet.executespec.v2.integration.V2DeferredActionGuard v2Guard;
     private final com.navneet.executespec.harness.GateStore gateStore;
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
     private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
@@ -114,42 +109,24 @@ public class RunController {
         // pipeline thread re-loads and re-saves the run without ownership fields).
         String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
 
-        // Phase 11.A: consult HarnessVersionResolver and route V1 vs V2 pipeline.
-        // Both paths have identical submitRun signatures and return a populated
-        // PipelineRun synchronously — the frontend sees no difference in API behavior.
-        com.navneet.executespec.v2.rollout.HarnessVersion chosen = harnessVersionResolver.resolve();
-        log.info("POST /api/runs dispatch → harness={}", chosen);
-        PipelineRun run = (chosen == com.navneet.executespec.v2.rollout.HarnessVersion.V2)
-                ? v2Orchestrator.submitRun(
-                        req.userRequest(),
-                        req.source() != null ? req.source() : "REST",
-                        req.repoUrl(),
-                        req.repoMode(),
-                        githubPat,
-                        githubOwner,
-                        Boolean.TRUE.equals(req.skipApproval()),
-                        Boolean.TRUE.equals(req.autoMerge()),
-                        req.modelName(),
-                        req.aiProvider(),
-                        userDetails.getUser().getId(),
-                        userDetails.getUser().getOrgId(),
-                        req.projectId(),
-                        executionMode)
-                : harness.submitRun(
-                        req.userRequest(),
-                        req.source() != null ? req.source() : "REST",
-                        req.repoUrl(),
-                        req.repoMode(),
-                        githubPat,
-                        githubOwner,
-                        Boolean.TRUE.equals(req.skipApproval()),
-                        Boolean.TRUE.equals(req.autoMerge()),
-                        req.modelName(),
-                        req.aiProvider(),
-                        userDetails.getUser().getId(),
-                        userDetails.getUser().getOrgId(),
-                        req.projectId(),
-                        executionMode);
+        // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
+        PipelineRun run = v2Orchestrator.submitRun(
+                req.userRequest(),
+                req.source() != null ? req.source() : "REST",
+                req.repoUrl(),
+                req.repoMode(),
+                githubPat,
+                githubOwner,
+                Boolean.TRUE.equals(req.skipApproval()),
+                Boolean.TRUE.equals(req.autoMerge()),
+                req.modelName(),
+                req.aiProvider(),
+                userDetails.getUser().getId(),
+                userDetails.getUser().getOrgId(),
+                req.projectId(),
+                executionMode,
+                req.selectedRepoIds(),
+                req.figmaUrl());
 
         // Run count already incremented atomically in assertAndIncrementRunCount above
         usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
@@ -287,139 +264,96 @@ public class RunController {
             stateStore.setApprovedExecutionMode(runId, "BATCH");
         }
 
-        // V2 runs: signal the GateStore directly — V2's orchestrator blocks in
-        // GateStore.awaitPlanGate() which completes instantly on the in-memory future.
-        if ("v2".equals(approveRun.getHarnessVersion())) {
+        // V2 orchestrator blocks on GateStore.awaitPlanGate() which completes
+        // instantly on the in-memory future. If no future exists (server
+        // restarted while run was AWAITING_APPROVAL), the pipeline thread is
+        // gone — signalling the gate would write Redis/DB without anything
+        // reading them, leaving the run silently stuck. Detect that case and
+        // fail the run cleanly so the user gets an actionable message.
+        if (!gateStore.isPlanGateWaiting(runId)) {
+            log.warn("POST /api/runs/{}/approve — no pipeline thread waiting; "
+                    + "run was interrupted during AWAITING_APPROVAL. Failing cleanly.", runId);
+            // Still persist the gate decision (DB+Redis) — the audit record is
+            // useful — then mark the run FAILED with a retry-able reason.
             gateStore.setPlanGate(runId, req.approved());
-            return ResponseEntity.ok().build();
+            stateStore.findRun(runId).ifPresent(r -> {
+                r.setStatus("FAILED");
+                r.setFailureReason("Approval received after server restart — pipeline "
+                        + "thread was lost. Please submit a new run.");
+                r.setCompletedAt(Instant.now());
+                stateStore.saveRun(r);
+            });
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Approval received but the pipeline was interrupted by a restart. "
+                    + "Please submit a new run.");
         }
-
-        boolean resolved = harness.resolvePlanGate(runId, req.approved(),
-            req.comment() != null ? req.comment() : "");
-        if (resolved) return ResponseEntity.ok().build();
-        // Gate was lost (server restart). If the harness auto-failed the run, return 409
-        // so the UI can show a helpful "resubmit" message rather than a generic 404.
-        boolean stuckFailed = stateStore.findRun(runId)
-            .map(r -> "FAILED".equals(r.getStatus())).orElse(false);
-        return stuckFailed
-            ? ResponseEntity.<Void>status(HttpStatus.CONFLICT).build()
-            : ResponseEntity.<Void>notFound().build();
+        gateStore.setPlanGate(runId, req.approved());
+        return ResponseEntity.ok().build();
     }
 
-    /** Resolve the context-clarification gate — user provides JIRA key, Confluence URL, etc. */
+    // V2 has no clarification gate, merge gate, reopen-merge, pause/resume, or
+    // in-place rework — those were V1-specific concepts. Endpoints that no
+    // longer apply are returned 410 Gone so existing frontend callers get a
+    // clear signal rather than 404/500.
+
+    public record ClarificationRequest(String response) {}
+    public record EditAndRestartRequest(String userRequest) {}
+
     @PostMapping("/{runId}/clarify")
     public ResponseEntity<Void> clarifyContext(
             @PathVariable String runId,
             @RequestBody ClarificationRequest req,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "clarification-gate");
-        log.info("POST /api/runs/{}/clarify — response length: {}", runId,
-                req.response() != null ? req.response().length() : 0);
-        boolean resolved = harness.resolveClarificationGate(runId, req.response());
-        if (resolved) return ResponseEntity.ok().build();
-        return ResponseEntity.notFound().build();
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Clarification gate removed in V2 — this endpoint is no longer supported.");
     }
 
-    public record ClarificationRequest(String response) {}
-
-    /** Approve or reject the merge-approval gate. */
     @PostMapping("/{runId}/merge")
     public ResponseEntity<Void> approveMerge(
             @PathVariable String runId,
             @RequestBody ApprovalRequest req,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "merge-gate");
-        log.info("POST /api/runs/{}/merge — approved={}", runId, req.approved());
-        boolean resolved = harness.resolveMergeGate(runId, req.approved(),
-            req.comment() != null ? req.comment() : "");
-        if (resolved) return ResponseEntity.ok().build();
-        boolean stuckFailed = stateStore.findRun(runId)
-            .map(r -> "FAILED".equals(r.getStatus())).orElse(false);
-        return stuckFailed
-            ? ResponseEntity.<Void>status(HttpStatus.CONFLICT).build()
-            : ResponseEntity.<Void>notFound().build();
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "V2 auto-merges; explicit merge gate removed.");
     }
 
-    /**
-     * Retry a failed or cancelled run by resubmitting the same goal as a fresh run.
-     * Returns 202 Accepted with the new run's summary in the body.
-     */
     @PostMapping("/{runId}/retry")
-    public ResponseEntity<RunSummary> retryRun(
+    public ResponseEntity<Void> retryRun(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        PipelineRun original = guard.requireRunAccess(runId, userDetails);
-        v2Guard.ensureNotV2(original, "retry-run");
-        log.info("POST /api/runs/{}/retry", runId);
-        if (!List.of("FAILED", "CANCELLED", "REJECTED", "PAUSED").contains(original.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Only FAILED, CANCELLED, REJECTED or PAUSED runs can be retried");
-        }
-        String newRunId = harness.restartRun(original);
-        PipelineRun newRun = stateStore.findRun(newRunId).orElseThrow();
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(newRun));
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Run retry not yet supported in V2 — submit a fresh run instead.");
     }
 
-    /**
-     * Pause a running pipeline. Cancels in-flight workers and gates,
-     * sets status to PAUSED for later goal editing and restart.
-     */
     @PostMapping("/{runId}/pause")
     public ResponseEntity<Void> pauseRun(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        PipelineRun run = guard.requireRunAccess(runId, userDetails);
-        v2Guard.ensureNotV2(run, "pause");
-        log.info("POST /api/runs/{}/pause", runId);
-        if (List.of("COMPLETE", "FAILED", "CANCELLED", "PAUSED").contains(run.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Cannot pause a " + run.getStatus() + " run");
-        }
-        boolean paused = harness.pauseRun(runId);
-        return paused ? ResponseEntity.ok().build() : ResponseEntity.status(HttpStatus.CONFLICT).build();
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Pause/resume not yet supported in V2.");
     }
 
-    /**
-     * Edit the goal of a PAUSED run and restart it as a brand-new pipeline run.
-     * The new run links back via sourceRunId, and the paused run's failureReason is updated
-     * with a forward link to the new run.
-     */
     @PostMapping("/{runId}/edit-and-restart")
-    public ResponseEntity<RunSummary> editAndRestart(
+    public ResponseEntity<Void> editAndRestart(
             @PathVariable String runId,
             @RequestBody EditAndRestartRequest body,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        PipelineRun paused = guard.requireRunAccess(runId, userDetails);
-        v2Guard.ensureNotV2(paused, "edit-and-restart");
-        log.info("POST /api/runs/{}/edit-and-restart — newGoal: {}", runId, body.userRequest());
-        if (!"PAUSED".equals(paused.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Only PAUSED runs can be edited and restarted (current: " + paused.getStatus() + ")");
-        }
-        PipelineRun newRun = harness.restartWithNewGoal(paused, body.userRequest());
-        return ResponseEntity.status(HttpStatus.CREATED).body(mapper.toSummary(newRun));
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Edit-and-restart not supported in V2 — submit a fresh run.");
     }
 
-    public record EditAndRestartRequest(String userRequest) {}
-
-    /**
-     * Resume a PAUSED run — continues the same run from the worker phase,
-     * preserving completed tasks and re-running incomplete ones.
-     * Returns 200 on success, 409 if the run is not in PAUSED state.
-     */
     @PostMapping("/{runId}/resume")
     public ResponseEntity<Void> resumeRun(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        PipelineRun run = guard.requireRunAccess(runId, userDetails);
-        v2Guard.ensureNotV2(run, "resume");
-        log.info("POST /api/runs/{}/resume", runId);
-        if (!"PAUSED".equals(run.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Only PAUSED runs can be resumed (current: " + run.getStatus() + ")");
-        }
-        boolean resumed = harness.resumeRun(runId);
-        return resumed ? ResponseEntity.ok().build() : ResponseEntity.status(HttpStatus.CONFLICT).build();
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Pause/resume not yet supported in V2.");
     }
 
     /**
@@ -452,7 +386,7 @@ public class RunController {
             run.setGithubOwner(userDetails.getUser().getGithubOwner());
         }
         stateStore.save(run);
-        harness.pushToGitHubManual(run);
+        scmPushService.push(run);
         return ResponseEntity.ok(Map.of(
             "status", "pushed",
             "repoUrl", run.getRepoUrl() != null ? run.getRepoUrl() : ""));
@@ -497,7 +431,7 @@ public class RunController {
         }
 
         stateStore.save(run);
-        harness.pushToScmManual(run);
+        scmPushService.push(run);
 
         // Reload to pick up PR URL set during push
         PipelineRun updated = stateStore.findRun(runId).orElse(run);
@@ -533,7 +467,7 @@ public class RunController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(runId, userDetails);
         log.info("DELETE /api/runs/{}", runId);
-        boolean cancelled = harness.cancelRun(runId);
+        boolean cancelled = v2Orchestrator.cancel(runId);
         return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
     }
 
@@ -576,10 +510,10 @@ public class RunController {
             @PathVariable String runId,
             @PathVariable String taskId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "retry-task");
+        guard.requireRunAccess(runId, userDetails);
         log.info("POST /api/runs/{}/tasks/{}/retry", runId, taskId);
         try {
-            harness.retryPartialTask(runId, taskId);
+            v2Orchestrator.retryTask(runId, taskId);
             return ResponseEntity.accepted().build();
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
@@ -588,64 +522,31 @@ public class RunController {
         }
     }
 
-    /**
-     * Implements post-merge suggestions (MEDIUM/LOW reviewer issues) for a run.
-     */
     @PostMapping("/{runId}/implement-suggestions")
     public ResponseEntity<Void> implementSuggestions(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "implement-suggestions");
-        log.info("POST /api/runs/{}/implement-suggestions", runId);
-        try {
-            harness.implementSuggestions(runId);
-            return ResponseEntity.accepted().build();
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (IllegalStateException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
-        }
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Implement-suggestions not yet supported in V2.");
     }
 
-    /**
-     * User-triggered rework: re-runs the tasks flagged by the reviewer with
-     * remediation feedback injected, then re-reviews and re-opens the gate.
-     */
     @PostMapping("/{runId}/rework")
     public ResponseEntity<Void> reworkRun(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "rework");
-        log.info("POST /api/runs/{}/rework", runId);
-        try {
-            harness.reworkRun(runId);
-            return ResponseEntity.accepted().build();
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (IllegalStateException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
-        }
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Rework not yet supported in V2.");
     }
 
-    /**
-     * Re-runs the reviewer and re-opens the merge gate for a PARTIAL run where all
-     * worker tasks are COMPLETE (e.g., after "Merge declined").
-     * Returns 202 Accepted immediately; reviewer + gate run asynchronously.
-     */
     @PostMapping("/{runId}/reopen-merge")
     public ResponseEntity<Void> reopenMerge(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "reopen-merge");
-        log.info("POST /api/runs/{}/reopen-merge", runId);
-        try {
-            harness.reopenMergeGate(runId);
-            return ResponseEntity.accepted().build();
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (IllegalStateException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
-        }
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "V2 auto-merges; merge gate / reopen-merge removed.");
     }
 
     /**
@@ -657,15 +558,16 @@ public class RunController {
     public ResponseEntity<Void> retryValidation(
             @PathVariable String runId,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-        v2Guard.ensureNotV2(guard.requireRunAccess(runId, userDetails), "retry-validation");
+        guard.requireRunAccess(runId, userDetails);
         log.info("POST /api/runs/{}/retry-validation", runId);
-        boolean prepared = backgroundValidationService.prepareRetry(runId);
-        if (!prepared) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Validation cannot be retried — either not failed, already running, or max attempts reached.");
+        try {
+            v2Orchestrator.retryValidation(runId);
+            return ResponseEntity.accepted().build();
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
-        harness.retryBackgroundValidation(runId);
-        return ResponseEntity.accepted().build();
     }
 
     /** Get recovery history for a run. */
@@ -679,7 +581,7 @@ public class RunController {
         List<RecoveryResponse> response = recoveries.stream()
             .map(r -> new RecoveryResponse(
                 r.getId(), r.getOriginalRunId(), r.getRestartRunId(),
-                r.getStuckTaskId(), r.getClassification().name(),
+                r.getStuckTaskId(), r.getClassification(),
                 r.getClassificationDetail(), r.getActionTaken(),
                 r.getRecoveredAt(), r.getRestartCreatedAt()
             ))
@@ -856,44 +758,9 @@ public class RunController {
             @PathVariable String runId,
             @RequestBody com.navneet.executespec.api.dto.EditPlanRequest req,
             @AuthenticationPrincipal AppUserDetails userDetails) {
-
-        PipelineRun run = guard.requireRunAccess(runId, userDetails);
-        v2Guard.ensureNotV2(run, "edit-plan");
-        if (!"AWAITING_APPROVAL".equals(run.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Plan can only be edited during the approval phase");
-        }
-
-        if (req.feedback() == null || req.feedback().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Feedback is required");
-        }
-
-        // Re-plan with feedback
-        com.navneet.executespec.agent.model.TaskPlan newPlan = plannerAgent.replanWithFeedback(
-            run.getUserRequest(), run.getPlanJson(), req.feedback(), runId);
-
-        // Increment version first, then save — avoids duplicate key on (run_id, version)
-        stateStore.incrementPlanVersion(runId);
-        stateStore.savePlanVersion(runId, "USER_EDIT", userDetails.getUser().getId());
-
-        // Delete old tasks, save new plan + tasks
-        stateStore.recreateTasksFromPlan(runId, newPlan);
-
-        // Audit
-        activityAuditService.record(com.navneet.executespec.auth.entity.ActivityAudit.builder()
-            .eventType("PLAN_EDITED")
-            .entityType("RUN")
-            .entityId(runId)
-            .actorId(userDetails.getUser().getId())
-            .metadata("Feedback: " + req.feedback().substring(0, Math.min(req.feedback().length(), 500)))
-            .build());
-
-        // Emit SSE event so frontend refreshes
-        broadcaster.emit(runId, com.navneet.executespec.sse.RunEvent.log(runId, "harness",
-            "Plan edited by user — tasks regenerated"));
-
-        return ResponseEntity.ok(Map.of("status", "plan_updated", "runId", runId,
-            "version", run.getPlanVersion() + 1));
+        guard.requireRunAccess(runId, userDetails);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "In-place plan editing not yet supported in V2 — reject the plan and submit a fresh run with refined spec.");
     }
 
     // ── Task Execution Graph ──────────────────────────────────────────────────
