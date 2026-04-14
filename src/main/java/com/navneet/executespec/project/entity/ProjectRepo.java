@@ -56,6 +56,7 @@ public class ProjectRepo {
 
     /** JSON-serialised {@code StackInfo} ({language, framework, version}) or null. */
     @Column(name = "detected_stack", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String detectedStack;
 
     @Column(name = "created_at", nullable = false)

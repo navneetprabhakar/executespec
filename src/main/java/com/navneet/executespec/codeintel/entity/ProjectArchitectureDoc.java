@@ -36,6 +36,7 @@ public class ProjectArchitectureDoc {
 
     /** JSON map {repoFullName: sha} captured at generation time. */
     @Column(name = "generated_from_shas", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String generatedFromShas;
 
     @Column(name = "generated_at", nullable = false)

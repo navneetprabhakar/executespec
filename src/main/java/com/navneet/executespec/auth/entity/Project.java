@@ -63,5 +63,6 @@ public class Project {
 
     /** Pilot R5 — JSON array of GitHub usernames to request review from by default. */
     @Column(name = "default_reviewers", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String defaultReviewers;
 }

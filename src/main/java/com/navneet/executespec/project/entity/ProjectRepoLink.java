@@ -33,6 +33,7 @@ public class ProjectRepoLink {
 
     /** JSON array of relationship strings; null if unset. */
     @Column(name = "relationships", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String relationships;
 
     @Column(name = "linked_at", nullable = false)

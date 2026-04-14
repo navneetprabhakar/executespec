@@ -401,6 +401,7 @@ public class PipelineRun {
 
     /** JSON output of {@code FeatureAssessmentService}. Null until ASSESSING phase runs. */
     @Column(name = "assessment_result", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String assessmentResult;
 
     /** Optional Figma URL passed at submission. Drives the design-compliance scorer. */
@@ -409,5 +410,6 @@ public class PipelineRun {
 
     /** Pilot v3.0 — JSON array of project_repo IDs cloned for this run, used by multi-repo push. */
     @Column(name = "selected_repo_ids", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String selectedRepoIds;
 }
