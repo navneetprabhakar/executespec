@@ -25,6 +25,9 @@ import AuthCallbackPage from '@/pages/auth/AuthCallbackPage';
 import OrgSettingsPage from '@/pages/org/OrgSettingsPage';
 import OrgProjectsPage from '@/pages/org/OrgProjectsPage';
 
+// Project pages (pilot v3.0)
+import ProjectDashboardPage from '@/pages/project/ProjectDashboardPage';
+
 // Admin pages
 import AdminPage from '@/pages/admin/AdminPage';
 import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
@@ -98,6 +101,7 @@ export default function App() {
           {/* Org pages */}
           <Route path="org/settings" element={<OrgSettingsPage />} />
           <Route path="org/projects" element={<OrgProjectsPage />} />
+          <Route path="projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
 
           {/* Admin */}
           <Route path="admin" element={<AdminPage />} />

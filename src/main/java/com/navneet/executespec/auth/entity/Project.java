@@ -50,4 +50,19 @@ public class Project {
     @Column(name = "updated_at", nullable = false)
     @Builder.Default
     private Instant updatedAt = Instant.now();
+
+    /** Pilot R5 — branch name template used when pushing run output to GitHub. */
+    @Column(name = "branch_naming_pattern")
+    @Builder.Default
+    private String branchNamingPattern = "executespec/{runId}/{description}";
+
+    /** Pilot R5 — default target branch for PRs created from this project. */
+    @Column(name = "target_branch")
+    @Builder.Default
+    private String targetBranch = "main";
+
+    /** Pilot R5 — JSON array of GitHub usernames to request review from by default. */
+    @Column(name = "default_reviewers", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    private String defaultReviewers;
 }

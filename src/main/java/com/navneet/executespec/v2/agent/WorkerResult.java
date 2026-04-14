@@ -33,6 +33,8 @@ public record WorkerResult(
         /** Iteration cap hit before completeTask was called. */
         ITERATION_LIMIT_EXCEEDED,
         /** LLM router or tool dispatch threw an unrecoverable exception. */
-        ERROR
+        ERROR,
+        /** Run hit its hard cap mid-task; worker stopped cleanly. */
+        BUDGET_EXCEEDED
     }
 }

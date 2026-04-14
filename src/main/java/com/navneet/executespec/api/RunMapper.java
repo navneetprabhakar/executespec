@@ -8,8 +8,8 @@ import com.navneet.executespec.api.dto.TaskSummary;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
-import com.navneet.executespec.harness.BackgroundValidationService;
-import com.navneet.executespec.harness.entity.BackgroundValidation;
+import com.navneet.executespec.codeintel.entity.RunCodeMap;
+import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
@@ -28,8 +28,8 @@ public class RunMapper {
     private final ProjectRepository projectRepository;
     private final AppUserRepository appUserRepository;
     private final TestPlanRepository testPlanRepository;
+    private final RunCodeMapRepository runCodeMapRepository;
     private final ObjectMapper objectMapper;
-    private final BackgroundValidationService backgroundValidationService;
 
     public RunSummary toSummary(PipelineRun r) {
         return new RunSummary(
@@ -134,6 +134,9 @@ public class RunMapper {
                 .map(ir -> new RunDetail.IntegrationSource(ir.getSourceType(), ir.getSourceId(), ir.getSourceUrl()))
                 .orElse(null);
 
+        // Codemap stats — single lookup, four nullable fields out
+        RunCodeMap codemap = runCodeMapRepository.findByRunId(r.getRunId()).orElse(null);
+
         return RunDetail.builder()
             .runId(r.getRunId())
             .status(r.getStatus())
@@ -178,6 +181,12 @@ public class RunMapper {
             .githubPrUrl(r.getGithubPrUrl())
             .scmPrUrl(r.getScmPrUrl())
             .scmProvider(r.getScmProvider())
+            .assessmentResult(r.getAssessmentResult())
+            .figmaUrl(r.getFigmaUrl())
+            .codemapFileCount(codemap != null ? codemap.getFileCount() : null)
+            .codemapRouteCount(codemap != null ? codemap.getRouteCount() : null)
+            .codemapInputTokens(codemap != null ? codemap.getInputTokens() : null)
+            .codemapOutputTokens(codemap != null ? codemap.getOutputTokens() : null)
             .archivedAt(r.getArchivedAt())
             .approvedExecutionMode(r.getApprovedExecutionMode())
             .batchCredits(r.getBatchCredits())
@@ -190,10 +199,10 @@ public class RunMapper {
             .isRetry(r.getSourceRunId() != null)
             .sourceRunId(r.getSourceRunId())
             .runRetryCount(r.getRunRetryCount())
-            .validationStatus(backgroundValidationService.find(r.getRunId())
-                    .map(BackgroundValidation::getStatus).orElse(null))
-            .validationPhase(backgroundValidationService.find(r.getRunId())
-                    .map(BackgroundValidation::getCurrentPhase).orElse(null))
+            // Validation status/phase tracking retired with V1 BackgroundValidationService.
+            // V2 runs expose validation state through the validation report itself.
+            .validationStatus(null)
+            .validationPhase(null)
             .build();
     }
 

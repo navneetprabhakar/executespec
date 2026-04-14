@@ -35,7 +35,6 @@ import java.util.Map;
 @Slf4j
 public class V2RunController {
 
-    private final HarnessVersionResolver resolver;
     private final V2RunService runService;
 
     @PostMapping
@@ -48,20 +47,7 @@ public class V2RunController {
                     Map.of("error", "provider and model are required"));
         }
 
-        // Gate: honor the feature-flag-configured routing. `force=true` in the request
-        // body bypasses the flag for internal testing — still records the bypass in logs.
-        HarnessVersion chosen = resolver.resolve();
-        if (chosen != HarnessVersion.V2 && !Boolean.TRUE.equals(body.force())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
-                    "error", "V2 routing not enabled for this run",
-                    "currentHarnessVersion", resolver.currentFlagValue(),
-                    "hint", "set harness.version=v2 or use force=true to bypass for testing"));
-        }
-        if (Boolean.TRUE.equals(body.force()) && chosen != HarnessVersion.V2) {
-            log.warn("V2RunController FORCE-BYPASS active (flag={}). Caller is intentionally "
-                    + "submitting to V2 despite flag.", resolver.currentFlagValue());
-        }
-
+        // V2 is the only harness — no routing gate.
         Classification classification = body.classification() != null
                 ? Classification.valueOf(body.classification().toUpperCase())
                 : Classification.MEDIUM;
@@ -82,7 +68,6 @@ public class V2RunController {
         resp.put("status", run.status().name());
         resp.put("submittedAt", run.submittedAt().toString());
         resp.put("harnessVersion", "v2");
-        resp.put("routingMode", resolver.currentFlagValue());
         return ResponseEntity.accepted().body(resp);
     }
 

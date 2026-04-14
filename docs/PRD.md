@@ -1,9 +1,23 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 4.1
-> **Last Updated:** 2026-04-04
-> **Status:** Production (v1.1.0)
+> **Version:** 4.4
+> **Last Updated:** 2026-04-14 (pilot v3.0 + bug sweep → v2.1.1)
+> **Status:** Production (v2.1.1 — V2 harness + pilot v3.0 project workspace layer)
 > **Author:** Navneet Prabhakar
+
+> **⚠️ Implementation note (2026-04-13).** Product requirements below are
+> harness-agnostic and remain accurate. Internal references to V1 pipeline
+> stages (compile, merge gate, clarification gate, batch execution, subtask
+> decomposition) describe the previous architecture; under V2 these are
+> replaced by sequential per-task execution + smoke test + reviewer.
+> Operational truth lives in [`CLAUDE.md`](../CLAUDE.md).
+>
+> **Pilot v3.0 (commit `6bbfde9b`)** adds a project workspace layer on top of
+> V2: every run can target a Project, which carries a catalogue of GitHub repos
+> (ORG-shared or USER-personal), a versioned architecture document, and a
+> trended quality scorecard. New product capabilities introduced under this
+> release are summarised in
+> [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md) (R1–R7).
 
 ---
 

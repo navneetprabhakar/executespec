@@ -197,13 +197,13 @@ model-matrix:
     model: gpt-5.4-mini
 
   agent-tier-map:
-    PlannerAgent: PLANNING
-    ReviewerAgentV2: PLANNING
-    TaskCompileSupervisor: PLANNING
+    # V2 agents
+    PlannerAgentV2: PLANNING
+    ReviewerAgentV3: PLANNING
+    WorkerAgentV2: WORKHORSE
+    # Shared non-tool-calling agents (use LlmRouter)
     TestPlannerAgent: WORKHORSE
-    WorkerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
-    CompilerAgent: WORKHORSE
     ApiTestSuiteAgent: WORKHORSE
     ConflictResolverAgent: WORKHORSE
     ContextAgent: LIGHTWEIGHT
@@ -211,7 +211,6 @@ model-matrix:
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT
     ValidationReportGenerator: WORKHORSE
-    RequestTriageService: LIGHTWEIGHT
   failover-order:
     anthropic:
       - openai

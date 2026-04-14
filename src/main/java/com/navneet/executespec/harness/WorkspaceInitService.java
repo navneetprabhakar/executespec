@@ -232,6 +232,44 @@ public class WorkspaceInitService {
             targetRunId, sourceRunId, trackedFiles.size());
     }
 
+    /**
+     * Pilot v3.0 — clones a set of project-linked repos into per-repo subdirectories
+     * under the run workspace. Each repo lands at
+     * {@code <workspace>/<runId>/repos/<repoName>/} where {@code repoName} is the
+     * segment after the last {@code /} of {@link RepoToClone#fullName()}.
+     *
+     * <p>Idempotent per-repo: skips clones whose target already contains a {@code .git}.
+     * Call {@link #ensureRunWorkspace(String)} first to make sure the outer workspace
+     * git repo exists.
+     */
+    public void cloneMultipleRepos(String runId, List<RepoToClone> repos, String pat) throws Exception {
+        if (repos == null || repos.isEmpty()) return;
+        Path workspace = runWorkspacePath(runId);
+        Path reposRoot = workspace.resolve("repos");
+        Files.createDirectories(reposRoot);
+
+        for (RepoToClone r : repos) {
+            String dirName = r.fullName().contains("/")
+                    ? r.fullName().substring(r.fullName().indexOf('/') + 1)
+                    : r.fullName();
+            Path target = reposRoot.resolve(dirName);
+            if (Files.isDirectory(target.resolve(".git"))) {
+                log.debug("Repo {} already cloned for run {}", r.fullName(), runId);
+                continue;
+            }
+            String httpsUrl = r.cloneUrl() != null ? r.cloneUrl()
+                    : "https://github.com/" + r.fullName();
+            String authUrl = (pat != null && !pat.isBlank())
+                    ? httpsUrl.replace("https://", "https://oauth2:" + pat + "@")
+                    : httpsUrl;
+            log.info("Cloning {} into {} for run {}", r.fullName(), target, runId);
+            runGitStrict(reposRoot, "git", "clone", authUrl, target.toString());
+        }
+    }
+
+    /** Minimal record describing a repo to clone for {@link #cloneMultipleRepos}. */
+    public record RepoToClone(String fullName, String cloneUrl) {}
+
     /** Returns the absolute, normalised path to the per-run workspace directory. */
     public Path runWorkspacePath(String runId) {
         return Path.of(props.getWorkspace(), runId).toAbsolutePath().normalize();

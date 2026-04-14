@@ -1,7 +1,17 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-10
+> Last updated: 2026-04-14 (v2.1.1 — pilot v3.0)
+>
+> New pilot-v3.0 docs to know about:
+> - [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md) — full recap of
+>   the project-workspace / multi-repo / codebase-intel / assessment /
+>   scoring / PR-webhook / codemap-on-clone release.
+> - `USER_MANUAL.md` §13 — user-facing walkthrough for project-scoped runs.
+> - `frontend-api-usage.md` — new "Pilot v3.0 — Project workspace endpoints"
+>   table lists every new endpoint with its frontend caller.
+> - `DEPLOYMENT.md` — ops additions: `GITHUB_WEBHOOK_SECRET`,
+>   `assessment.llm.enabled` feature flag, `StackRefreshJob` cron.
 
 ---
 

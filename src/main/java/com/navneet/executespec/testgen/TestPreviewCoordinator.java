@@ -13,9 +13,8 @@ import io.micrometer.context.ContextSnapshotFactory;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -46,9 +45,15 @@ public class TestPreviewCoordinator {
     private final AppUserRepository appUserRepository;
     private final StateStore stateStore;
 
-    /** Lazy to break circular dependency: PreviewService → TestPreviewCoordinator → PreviewService */
-    @Lazy @Autowired
-    private PreviewService previewService;
+    /** ObjectProvider breaks the circular dependency
+     *  (PreviewService → TestPreviewCoordinator → PreviewService) without the
+     *  `@Lazy @Autowired` field-injection anti-pattern. The provider resolves
+     *  the bean on-demand at call sites, so instantiation order doesn't deadlock. */
+    private final ObjectProvider<PreviewService> previewServiceProvider;
+
+    private PreviewService previewService() {
+        return previewServiceProvider.getObject();
+    }
 
     private final ConcurrentHashMap<String, CoordinationState> stateMap = new ConcurrentHashMap<>();
 
@@ -112,7 +117,7 @@ public class TestPreviewCoordinator {
     private void startPreviewForTests(String runId) {
         // Check if a preview is already running (auto-started by PipelineHarness after COMPLETE).
         // If so, reuse it instead of starting a duplicate.
-        var existingSession = previewService.getStatus(runId);
+        var existingSession = previewService().getStatus(runId);
         if (existingSession != null && existingSession.status() == PreviewStatus.RUNNING) {
             log.info("[TestCoord] Reusing existing preview for run {} at {}", runId, existingSession.url());
             onPreviewReady(runId, existingSession.url());
@@ -123,7 +128,7 @@ public class TestPreviewCoordinator {
         Thread.ofVirtual().name("test-preview-" + runId).start(snapshot.wrap(() -> {
             try {
                 // Re-check after thread start (preview may have become ready in the meantime)
-                var session = previewService.getStatus(runId);
+                var session = previewService().getStatus(runId);
                 if (session != null && session.status() == PreviewStatus.RUNNING) {
                     log.info("[TestCoord] Preview became ready for run {} at {} (reusing)", runId, session.url());
                     onPreviewReady(runId, session.url());
@@ -147,7 +152,7 @@ public class TestPreviewCoordinator {
                 log.info("[TestCoord] Starting preview for run {} (tests ready, starting preview for execution)", runId);
                 broadcaster.emit(runId, RunEvent.log(runId, null,
                         "Tests generated — starting preview for test execution..."));
-                previewService.start(runId, user);
+                previewService().start(runId, user);
                 // PreviewService will call onPreviewReady() when ready → triggers tryExecute()
             } catch (Exception e) {
                 log.warn("[TestCoord] Failed to start preview for run {}: {}", runId, e.getMessage());
