@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-**v2.3.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into tasks, executes them sequentially with tier-routed LLM worker agents, validates, reviews, ships a PR, and remembers what was built. **v2.3.0 adds the Execution View** — a cross-repo workbench (ENTERPRISE-only, feature-flag gated) that decomposes a requirement into ordered single-repo solutions and drives each through its own V2 pipeline run.
+**v2.4.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into tasks, executes them sequentially with tier-routed LLM worker agents, validates, reviews, ships a PR, and remembers what was built. **v2.4.0** adds project-level Launch flow on top of the Execution View — Launches can spin up brand-new repos, solutions track multi-attempt run history, and the project dashboard rolls up Launches + PRs across the org. Premium feature: ENTERPRISE + MAX tiers.
 
 **Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind · GCP
 

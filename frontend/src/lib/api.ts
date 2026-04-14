@@ -893,7 +893,7 @@ export interface AuthUser {
   bitbucketWorkspace?: string | null;
   bitbucketRepoSlug?: string | null;
   // UI preference
-  viewMode?: 'vibe' | 'pro';
+  viewMode?: 'vibe' | 'pro' | 'project';
 }
 
 export interface LoginResponse {
@@ -983,7 +983,7 @@ export const validateBitbucket = (username: string, appPassword: string, workspa
   });
 
 /** Updates the user's UI view mode preference ('vibe' or 'pro'). */
-export const updateViewMode = (viewMode: 'vibe' | 'pro') =>
+export const updateViewMode = (viewMode: 'vibe' | 'pro' | 'project') =>
   req<AuthUser>('/auth/settings/view-mode', {
     method: 'PUT',
     body: JSON.stringify({ viewMode }),

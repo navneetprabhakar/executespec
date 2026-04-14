@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useExecutionStore } from '@/stores/useExecutionStore';
-import SolutionCard from './SolutionCard';
+import SolutionSection from './SolutionSection';
 import SolutionLogStream from './SolutionLogStream';
 import FailureDecisionModal from './FailureDecisionModal';
 
@@ -37,7 +37,9 @@ export default function ExecutionMonitor({ executionId }: { executionId: string 
       </div>
 
       <div className="space-y-1.5">
-        {solutions.map((s) => <SolutionCard key={s.id} solution={s} />)}
+        {solutions.map((s) => (
+          <SolutionSection key={s.id} executionId={executionId} solution={s} />
+        ))}
       </div>
 
       {showLogs && <SolutionLogStream />}

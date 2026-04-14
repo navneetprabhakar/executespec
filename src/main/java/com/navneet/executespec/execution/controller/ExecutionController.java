@@ -16,8 +16,10 @@ import com.navneet.executespec.execution.dto.ExecutionArchApprovalRequest;
 import com.navneet.executespec.execution.dto.ExecutionRunDto;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.entity.ExecutionSolution;
+import com.navneet.executespec.execution.entity.ExecutionSolutionRun;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRepository;
+import com.navneet.executespec.execution.repository.ExecutionSolutionRunRepository;
 import com.navneet.executespec.execution.service.ExecutionOrchestrator;
 import com.navneet.executespec.execution.service.ExecutionPlannerService;
 import com.navneet.executespec.execution.service.SolutionExecutionService;
@@ -56,6 +58,7 @@ public class ExecutionController {
     private final FeatureFlagService featureFlags;
     private final ExecutionRunRepository execRunRepo;
     private final ExecutionSolutionRepository solutionRepo;
+    private final ExecutionSolutionRunRepository solutionRunRepo;
     private final ProjectRepository projectRepo;
     private final OrgRepository orgRepo;
     private final TierConfigRepository tierConfigRepo;
@@ -177,6 +180,21 @@ public class ExecutionController {
         ExecutionRun run = requireRunAccess(id, user);
         orchestrator.abortExecution(run);
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/api/executions/{id}/solutions/{solutionId}/runs")
+    public ResponseEntity<java.util.List<ExecutionSolutionRun>> solutionRuns(
+            @PathVariable String id,
+            @PathVariable String solutionId,
+            @AuthenticationPrincipal AppUserDetails principal) {
+        AppUser user = requireFeatureEnabled(principal);
+        ExecutionRun run = requireRunAccess(id, user);
+        ExecutionSolution sol = solutionRepo.findById(solutionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "solution"));
+        if (!sol.getExecutionRun().getId().equals(run.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "solution does not belong to run");
+        }
+        return ResponseEntity.ok(solutionRunRepo.findBySolutionIdOrderByAttemptNumberAsc(solutionId));
     }
 
     @GetMapping("/api/executions/{id}/report")

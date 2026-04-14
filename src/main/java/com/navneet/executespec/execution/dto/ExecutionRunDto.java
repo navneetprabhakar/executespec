@@ -23,6 +23,8 @@ public record ExecutionRunDto(
         Long totalActualTokens,
         BigDecimal totalCostUsd,
         boolean jiraEnabled,
+        String confluenceUrl,
+        String figmaUrl,
         List<SolutionDto> solutions,
         Instant createdAt,
         Instant updatedAt) {
@@ -36,7 +38,7 @@ public record ExecutionRunDto(
                 r.getUnifiedArchDoc(), r.getArchApprovedAt(),
                 r.getExecutionPlan(), r.getPlanApprovedAt(),
                 r.getTotalEstimatedTokens(), r.getTotalActualTokens(), r.getTotalCostUsd(),
-                r.isJiraEnabled(),
+                r.isJiraEnabled(), r.getConfluenceUrl(), r.getFigmaUrl(),
                 mapped, r.getCreatedAt(), r.getUpdatedAt());
     }
 

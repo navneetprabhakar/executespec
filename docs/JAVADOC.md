@@ -1,6 +1,8 @@
 # ExecuteSpec -- Complete System Documentation
 
-**Version:** v2.3.0 (2026-04-14)
+**Version:** v2.4.0 (2026-04-14)
+
+> **Project Shell + Launch (v2.4.0)** — adds `ProjectLaunchController` + `ScaffoldController` + `ExecutionSolutionRun` entity + `ProjectRepoService.createAndLinkNewRepo`. ExecutionView gate widened to ENTERPRISE + MAX. New-repo creation supported as part of a Launch via `NewRepoSpec`. Multi-run solutions persist per-attempt history. Migration V90.
 
 > **Execution View (v2.3.0)** — new package `execution/` hosts `ExecutionController`, orchestrator / planner / solution-executor / branch / cross-repo-context / incremental-codemap services, pure-logic `SolutionDependencyResolver` + `FileConflictDetector`, entities `ExecutionRun` / `ExecutionSolution` / `ExecutionSolutionRepo` / `ExecutionContextHandover`, and `ExecutionEventTypes`. Bridges to `V2RunOrchestrator` per solution. Feature-flag + ENTERPRISE-tier gated. Migration V89.
 >
@@ -23,7 +25,7 @@
 >   (six-dimension deterministic scoring), `TestCoverageRescorer`.
 > - `com.navneet.executespec.v2.agent.SpecClassifier` — deterministic
 >   SINGLE_SHOT / MEDIUM / MULTI_TASK picker from spec text.
-> - New migrations V81–V89 documented in CHANGELOG [2.1.1] + [2.2.0] + [2.3.0].
+> - New migrations V81–V90 documented in CHANGELOG [2.1.1] + [2.2.0] + [2.3.0] + [2.4.0].
 
 > **⚠️ Historical reference — V1 architecture.**
 > This document describes the original V1 harness (`PipelineHarness`, `WorkerAgent`,

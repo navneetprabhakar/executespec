@@ -2,9 +2,11 @@ package com.navneet.executespec.execution.service;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.execution.dto.CreateExecutionRequest;
+import com.navneet.executespec.execution.dto.NewRepoSpec;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.entity.ExecutionSolution;
 import com.navneet.executespec.execution.entity.ExecutionSolutionRepo;
@@ -13,6 +15,7 @@ import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +44,8 @@ public class ExecutionOrchestrator {
     private final ExecutionSolutionRepository solutionRepo;
     private final ProjectArchitectureService archService;
     private final ProjectRepoRepository projectRepoRepo;
+    private final ProjectRepoService projectRepoService;
+    private final AppUserRepository appUserRepo;
     private final SolutionDependencyResolver depResolver;
     private final SolutionExecutionService solutionExecService;
     private final ExecutionBranchService branchService;
@@ -49,15 +54,72 @@ public class ExecutionOrchestrator {
     // ── Creation ───────────────────────────────────────────────────────────
 
     public ExecutionRun createExecution(Project project, AppUser user, CreateExecutionRequest req) {
+        // Pre-create any brand-new repos before we persist the ExecutionRun —
+        // failures here abort the Launch synchronously so the user can retry.
+        java.util.List<String> newRepoNotes = new java.util.ArrayList<>();
+        java.util.List<String> effectiveRepoIds =
+                req.repoIds() == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(req.repoIds());
+
+        if (req.newRepos() != null) {
+            String pat = appUserRepo.findById(user.getId())
+                    .map(u -> u.getGithubPat()).orElse(null);
+            for (NewRepoSpec spec : req.newRepos()) {
+                if (spec == null || spec.name() == null || spec.name().isBlank()) continue;
+                ProjectRepo created = projectRepoService.createAndLinkNewRepo(
+                        project.getId(), spec.name(), spec.description(),
+                        spec.githubOwner(), spec.visibility(), pat,
+                        user.getId(), project.getOrgId());
+                effectiveRepoIds.add(created.getId().toString());
+                newRepoNotes.add("- " + created.getGithubRepoFullName()
+                        + " (" + (spec.techHint() == null ? "unspecified" : spec.techHint()) + ")"
+                        + (spec.description() == null ? "" : " — " + spec.description()));
+            }
+        }
+
         ExecutionRun run = ExecutionRun.builder()
                 .projectId(project.getId())
                 .orgId(project.getOrgId())
                 .createdBy(user.getId())
                 .status("SETUP")
-                .requirement(req.requirement())
+                .requirement(composeRequirement(
+                        req.requirement(), newRepoNotes,
+                        req.confluenceUrl(), req.figmaUrl()))
                 .jiraEnabled(Boolean.TRUE.equals(req.jiraEnabled()))
+                .confluenceUrl(blankToNull(req.confluenceUrl()))
+                .figmaUrl(blankToNull(req.figmaUrl()))
+                .aiProvider(resolveProvider(req.aiProvider(), project))
                 .build();
         return runRepo.save(run);
+    }
+
+    private String composeRequirement(String requirement,
+                                      java.util.List<String> newRepoNotes,
+                                      String confluenceUrl,
+                                      String figmaUrl) {
+        StringBuilder sb = new StringBuilder(requirement == null ? "" : requirement);
+        if (newRepoNotes != null && !newRepoNotes.isEmpty()) {
+            sb.append("\n\nNEW REPOS IN THIS LAUNCH (must be scaffolded as first solution per repo):\n");
+            for (String note : newRepoNotes) sb.append(note).append("\n");
+        }
+        String cleanConfluence = blankToNull(confluenceUrl);
+        String cleanFigma = blankToNull(figmaUrl);
+        if (cleanConfluence != null || cleanFigma != null) {
+            sb.append("\n\nADDITIONAL CONTEXT:\n");
+            if (cleanConfluence != null) sb.append("- Confluence spec: ").append(cleanConfluence).append("\n");
+            if (cleanFigma != null)      sb.append("- Figma design:    ").append(cleanFigma).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    /** Override wins; otherwise fall back to project's default. */
+    private String resolveProvider(String override, Project project) {
+        String clean = blankToNull(override);
+        if (clean != null) return clean.toUpperCase();
+        return project.getAiProvider() != null ? project.getAiProvider().name() : null;
     }
 
     // ── Phase 2: analysis ─────────────────────────────────────────────────
