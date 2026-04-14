@@ -35,22 +35,22 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
   }, [link.relationships]);
 
   return (
-    <div className="border rounded-lg bg-white p-4 shadow-sm">
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-sm truncate">{repo.githubRepoFullName}</span>
+            <span className="font-mono text-[11px] truncate text-primary">{repo.githubRepoFullName}</span>
             <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${
+              className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] ${
                 repo.scope === 'ORG'
-                  ? 'bg-purple-50 text-purple-700'
-                  : 'bg-amber-50 text-amber-700'
+                  ? 'bg-accent-blue/10 text-accent-blue'
+                  : 'bg-accent-amber/10 text-accent-amber'
               }`}
             >
               {repo.scope}
             </span>
           </div>
-          <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+          <div className="mt-1 flex items-center gap-2 text-[10px] text-muted">
             <StackBadge stack={stack} />
             <span>branch: {repo.defaultBranch}</span>
             {repo.lastSyncedSha && (
@@ -58,23 +58,23 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
             )}
           </div>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-1.5 shrink-0">
           <button
             onClick={() => onSync(repo.id)}
-            className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+            className="text-[10px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
           >
             Sync
           </button>
           <button
             onClick={() => onUnlink(repo.id)}
-            className="text-xs px-2 py-1 border rounded hover:bg-red-50 text-red-600 border-red-200"
+            className="text-[10px] px-2 py-0.5 rounded-sm border border-accent-red/40 text-accent-red hover:bg-accent-red/10"
           >
             Unlink
           </button>
         </div>
       </div>
 
-      <div className="mt-3">
+      <div className="mt-2">
         {editing ? (
           <RepoRelationshipEditor
             initial={relationships}
@@ -85,21 +85,21 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
             onCancel={() => setEditing(false)}
           />
         ) : (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {relationships.length === 0 && (
-              <span className="text-xs text-gray-400">no relationships</span>
+              <span className="text-[10px] text-muted">no relationships</span>
             )}
             {relationships.map((r) => (
               <span
                 key={r}
-                className="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs"
+                className="inline-flex items-center rounded-sm bg-[var(--gray-200)] px-1.5 py-0.5 text-[10px] text-secondary"
               >
                 {r}
               </span>
             ))}
             <button
               onClick={() => setEditing(true)}
-              className="text-xs text-blue-600 hover:underline"
+              className="text-[10px] text-accent-blue hover:underline"
             >
               edit
             </button>
