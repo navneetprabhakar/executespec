@@ -91,7 +91,8 @@ public class PlannerAgentV2 {
                         req.classification().maxTasks() == Integer.MAX_VALUE
                                 ? "unlimited" : String.valueOf(req.classification().maxTasks()))
                 .replace("{{WORKSPACE_SUMMARY}}",
-                        req.workspaceSummary() == null ? "(no summary)" : req.workspaceSummary());
+                        req.workspaceSummary() == null ? "(no summary)" : req.workspaceSummary())
+                .replace("{{PROJECT_MEMORY}}", renderProjectMemoryBlock(req.projectMemory()));
 
         List<Message> messages = List.of(
                 new SystemMessage(systemPrompt),
@@ -363,6 +364,21 @@ public class PlannerAgentV2 {
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────────
+
+    private String renderProjectMemoryBlock(String projectMemory) {
+        if (projectMemory == null || projectMemory.isBlank()) return "";
+        return """
+                # Project Memory
+
+                This run is part of an ongoing project. Below is accumulated context from
+                previous runs — architecture decisions, patterns, and known debt. USE THIS to:
+                - avoid re-implementing existing features
+                - follow established patterns and conventions
+                - build on existing code, not alongside it
+                - address known debt when relevant
+
+                """ + projectMemory;
+    }
 
     private String loadPrompt() {
         try {

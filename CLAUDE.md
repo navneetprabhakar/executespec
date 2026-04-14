@@ -1,7 +1,7 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-14 (v2.1.1 — pilot v3.0 + bug sweep)
+> Last updated: 2026-04-14 (v2.2.0 — project memory)
 
 ## Architecture
 
@@ -19,6 +19,7 @@
 - **V2 recovery:** `StartupRunResumerV2` scans non-terminal V2 runs on boot (PLANNING/WORKING/REVIEWING/AWAITING_APPROVAL) and fails them cleanly with a clear reason + terminal SSE, so the UI surfaces the interruption instead of leaving runs stuck. Full replay (restore conversation history + resume at saved iteration) is a planned follow-up — see [docs/plans/harness-v2-remaining-work.md](docs/plans/harness-v2-remaining-work.md) Gap 2.
 - **V2 cancel:** `V2RunOrchestrator.cancel(runId)` is the V2 path for `DELETE /api/runs/{id}` — signals the plan gate, interrupts the pipeline future, writes CANCELLED status + terminal SSE.
 - **V2 eval harness:** `scripts/v2-eval.sh` submits LOW / MEDIUM / HIGH specs × anthropic / openai / gemini (9 runs, PROTOTYPE), polls each to terminal, emits machine-readable JSON + a markdown comparison to `scripts/v2-eval-results/v2-eval-<timestamp>.{json,md}`. Specs live in `scripts/v2-eval-specs/{low,medium,high}.txt`.
+- **Project memory (`memory/`, v2.2.0):** Every completed project-scoped run appends a caveman-English digest to `project_run_ledger` via `RunLedgerAgent` (LIGHTWEIGHT tier, post-`generateValidationReport`, non-fatal). `MemoryCompactionService` rewrites a versioned `project_memory_snapshot` every 10 runs (starting at R20), keeping planner context bounded regardless of project age. `ProjectMemoryProvider.buildPlannerContext(projectId)` feeds `{{PROJECT_MEMORY}}` into `PlannerAgentV2`'s prompt so new runs know what was built, what patterns were set, and what debt was left. Surfaced to the UI via `GET /api/projects/{id}/memory` + Memory tab on the project dashboard (`ProjectMemoryPanel`). Migration V88.
 - **Pilot v3.0 — project workspace (`project/`, `codeintel/`, `assessment/`, `scoring/`):** Project becomes the unit of organization. New `ProjectDashboardController` aggregates active/completed/failed counts + score trend. Dual-scope `ProjectRepo` registry (ORG = shared, USER = personal) joined to projects via `project_repo_link`; multi-repo selection in `NewRunModal` clones each into `workspace/<runId>/repos/<name>/` via `WorkspaceInitService.cloneMultipleRepos`. `ProjectArchitectureService` versions per-repo `ProjectCodeMap` + project-wide `ProjectArchitectureDoc`; `StalenessService` (Caffeine 5-min cache) drives the dashboard's STALE flag using stored generation SHAs. `FeatureAssessmentService` runs before planner (heuristic by default; LLM-backed when `assessment.llm.enabled` flag is on); the `AssessmentPanel` surfaces complexity + risks + cross-repo deps above the plan-approval gate. `ScmPushService.pushMultiRepo` handles per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`; PRs persisted to `pull_request_record` (R5), webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `ReviewScoringService` derives 6 dimensions (code quality / test coverage / architecture / security / performance / design compliance) from review issues + accuracy report — no extra LLM call. `ScoreCard` at top of `ValidationReportPanel`. Optional Figma URL on `RunRequest` drives design-compliance scoring. `StackRefreshJob` (`@Scheduled` daily 03:00, `@SchedulerLock`) refreshes `detected_stack` + `last_synced_sha` org-wide.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
 - **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
@@ -174,6 +175,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/projects/{id}/dashboard` | Aggregated metrics, recent runs/PRs, arch-doc status (NONE/GENERATED/STALE) |
+| GET | `/api/projects/{id}/memory` | Project memory — compacted snapshot + last 10 uncompacted entries + stats (v2.2.0) |
+| GET | `/api/projects/{id}/memory/ledger` | Full append-only ledger for a project (v2.2.0) |
 | GET | `/api/projects/{id}/scores` | Score trend feed for the dashboard chart |
 | POST | `/api/repos` | Create repo at chosen scope (ORG requires ORG_ADMIN) |
 | GET | `/api/repos?scope=ORG\|USER\|ALL` | List repos visible to caller |
@@ -327,7 +330,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Multi-repo push | `integration/scm/ScmPushService.pushMultiRepo`, `tool/GitTool.commitAndPushSubdir` |
 | Workspace multi-repo | `harness/WorkspaceInitService.cloneMultipleRepos` |
 | Dashboard frontend | `frontend/src/pages/project/ProjectDashboardPage.tsx`, `frontend/src/components/project/*` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V86; V81=project settings + repo registry, V82=pull_request_record, V83=validation_report scores, V84=codebase intelligence, V85=assessment_result + figma_url, V86=pipeline_run.selected_repo_ids) |
+| Project memory | `memory/RunLedgerAgent.java`, `memory/MemoryCompactionService.java`, `memory/ProjectMemoryProvider.java`, `memory/ProjectMemoryController.java`, `memory/entity/ProjectRunLedger.java`, `memory/entity/ProjectMemorySnapshot.java` |
+| DB migrations | `resources/db/migration/V*.sql` (V1–V88; V81=project settings + repo registry, V82=pull_request_record, V83=validation_report scores, V84=codebase intelligence, V85=assessment_result + figma_url, V86=pipeline_run.selected_repo_ids, V87=run_code_map, V88=project memory) |
 | LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
