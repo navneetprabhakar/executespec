@@ -16,7 +16,7 @@ export interface NewRunConfig {
   repoUrl?: string;
 }
 
-type ViewMode = 'vibe' | 'pro';
+type ViewMode = 'vibe' | 'pro' | 'project';
 
 interface UiStore {
   sidebarExpanded: boolean;

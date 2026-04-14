@@ -4,10 +4,12 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.entity.ExecutionSolution;
 import com.navneet.executespec.execution.entity.ExecutionSolutionRepo;
+import com.navneet.executespec.execution.entity.ExecutionSolutionRun;
 import com.navneet.executespec.execution.event.ExecutionEventTypes;
 import com.navneet.executespec.execution.model.ExecutionDecision;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRepository;
+import com.navneet.executespec.execution.repository.ExecutionSolutionRunRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -56,6 +58,7 @@ public class SolutionExecutionService {
     private final ExecutionJiraSync jiraSync;
     private final ExecutionRunRepository runRepo;
     private final ExecutionSolutionRepository solutionRepo;
+    private final ExecutionSolutionRunRepository solutionRunRepo;
     private final ProjectRepoRepository projectRepoRepo;
     private final PipelineRunRepository pipelineRunRepo;
     private final AppUserRepository appUserRepo;
@@ -76,10 +79,19 @@ public class SolutionExecutionService {
         emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_RUNNING, solution.getId());
 
         String pipelineRunId;
+        ExecutionSolutionRun attempt;
         try {
             pipelineRunId = submitV2Run(solution, run);
             solution.setPipelineRunId(pipelineRunId);
             solutionRepo.save(solution);
+
+            int attemptNumber = solutionRunRepo.countBySolutionId(solution.getId()) + 1;
+            attempt = ExecutionSolutionRun.builder()
+                    .solutionId(solution.getId())
+                    .pipelineRunId(pipelineRunId)
+                    .attemptNumber(attemptNumber)
+                    .build();
+            attempt = solutionRunRepo.save(attempt);
         } catch (Exception e) {
             handleFailure(run, solution, "RUNNING", "V2 submit failed: " + shortMsg(e));
             return;
@@ -88,9 +100,11 @@ public class SolutionExecutionService {
         // Poll V2 terminal status.
         String terminal = pollUntilTerminal(pipelineRunId);
         if (terminal == null) {
+            recordAttemptTerminal(attempt, "TIMEOUT", null);
             handleFailure(run, solution, "RUNNING", "V2 run timed out after 2h");
             return;
         }
+        recordAttemptTerminal(attempt, terminal, pipelineRunId);
 
         switch (terminal) {
             case "COMPLETE" -> onV2Complete(run, solution);
@@ -287,6 +301,22 @@ public class SolutionExecutionService {
     private void emit(String executionRunId, String type, String payload) {
         broadcaster.emit("exec:" + executionRunId,
                 new RunEvent(type, executionRunId, payload, null, Instant.now()));
+    }
+
+    private void recordAttemptTerminal(ExecutionSolutionRun attempt, String terminal, String pipelineRunId) {
+        if (attempt == null) return;
+        attempt.setTerminalStatus(terminal);
+        attempt.setCompletedAt(Instant.now());
+        if (pipelineRunId != null) {
+            pipelineRunRepo.findById(pipelineRunId).ifPresent(pr -> {
+                attempt.setInputTokens(pr.getTotalInputTokens() == null ? 0L : pr.getTotalInputTokens().longValue());
+                attempt.setOutputTokens(pr.getTotalOutputTokens() == null ? 0L : pr.getTotalOutputTokens().longValue());
+                if (pr.getActualCostUsd() != null) {
+                    attempt.setCostUsd(java.math.BigDecimal.valueOf(pr.getActualCostUsd()));
+                }
+            });
+        }
+        solutionRunRepo.save(attempt);
     }
 
     private String shortMsg(Throwable e) {

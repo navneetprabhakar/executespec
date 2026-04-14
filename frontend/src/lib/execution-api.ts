@@ -4,6 +4,11 @@ import type {
   CreateExecutionRequest,
   ArchApprovalRequest,
   DecisionRequest,
+  Scaffold,
+  SolutionRun,
+  PrRollupEntry,
+  ProjectOverview,
+  ValidateOwnerResult,
 } from '../types/execution';
 
 export const executionApi = {
@@ -56,4 +61,27 @@ export const executionApi = {
 
   getSseToken: (id: string) =>
     req<{ token: string }>(`/executions/${id}/sse-token`),
+
+  // v2.4.0 additions
+  listScaffolds: () => req<Scaffold[]>(`/scaffolds`),
+
+  listSolutionRuns: (id: string, solutionId: string) =>
+    req<SolutionRun[]>(`/executions/${id}/solutions/${solutionId}/runs`),
+
+  listProjectLaunches: (projectId: string, page = 0, size = 20) =>
+    req<{ content: ExecutionRunDto[]; totalElements: number }>(
+      `/projects/${projectId}/launches?page=${page}&size=${size}`,
+    ),
+
+  listProjectPrs: (projectId: string) =>
+    req<PrRollupEntry[]>(`/projects/${projectId}/prs`),
+
+  projectOverview: (projectId: string) =>
+    req<ProjectOverview>(`/projects/${projectId}/overview`),
+
+  validateOwner: (projectId: string, githubOwner: string) =>
+    req<ValidateOwnerResult>(`/projects/${projectId}/launches/validate-repo-access`, {
+      method: 'POST',
+      body: JSON.stringify({ githubOwner }),
+    }),
 };

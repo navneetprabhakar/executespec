@@ -1,7 +1,9 @@
 # ExecuteSpec Codebase Map
 
 > Quick reference: every class → one-line purpose. Keep updated.
-> Last updated: 2026-04-14 (v2.3.0 — execution view)
+> Last updated: 2026-04-14 (v2.4.0 — project shell + launch flow)
+>
+> **v2.4.0 additions (Project Shell + Launch):** `ProjectLaunchController` (project-level rollup endpoints), `ScaffoldController` (`/api/scaffolds`), `ExecutionSolutionRun` entity + repo (multi-attempt history), `ProjectRepoService.createAndLinkNewRepo` (new-repo-at-Launch), enhanced `ExecutionSetup` with new-repo sub-form + dry-run modal + owner validation, `SolutionSection` (replaces flat `SolutionCard` with expandable per-attempt history linking to `RunDetailPage`), `ProjectLaunchesList` + `ProjectPrRollup` tabs on `ProjectDashboardPage`. Migration V90.
 >
 > **Execution View (`execution/`, v2.3.0):** `ExecutionOrchestrator` + `ExecutionPlannerService` + `SolutionExecutionService` + `ExecutionBranchService` + `CrossRepoContextService` + `IncrementalCodeMapService`; entities `ExecutionRun`/`ExecutionSolution`/`ExecutionSolutionRepo`/`ExecutionContextHandover`; pure logic `SolutionDependencyResolver` + `FileConflictDetector`. REST at `/api/projects/{id}/executions` + `/api/executions/{id}/...`. Feature-flag gated (`execution.view.enabled`) + ENTERPRISE-tier gated. Frontend: Execution View page + 13 components under `components/execution/`. Migration V89.
 >

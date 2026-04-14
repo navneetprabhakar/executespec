@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-14 (v2.3.0 — execution view: `pages/execution/ExecutionViewPage` + `components/execution/*` + `stores/useExecutionStore` + `hooks/useExecutionSse` + `lib/execution-api` + "New Execution" button on `ProjectDashboardPage`)
+> Last updated: 2026-04-14 (v2.4.0 — Project Shell + Launch: `ExecutionSetup` adds new-repo sub-form + dry-run; `SolutionSection` replaces `SolutionCard` with per-attempt history linking to `RunDetailPage`; `ProjectLaunchesList` + `ProjectPrRollup` tabs on `ProjectDashboardPage`; types extended with `NewRepoSpec` + `Scaffold` + `SolutionRun` + `PrRollupEntry` + `ProjectOverview`; ENTERPRISE + MAX premium gate)
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 

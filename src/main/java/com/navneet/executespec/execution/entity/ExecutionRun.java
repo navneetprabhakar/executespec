@@ -33,6 +33,20 @@ public class ExecutionRun {
     @Builder.Default
     private boolean jiraEnabled = false;
 
+    /** Optional Confluence doc URL captured at Launch time; appended to the
+     *  planner's requirement context. */
+    @Column(name = "confluence_url", length = 500)
+    private String confluenceUrl;
+
+    /** Optional Figma URL captured at Launch time; appended to the planner's
+     *  requirement context. Drives design-compliance scoring where supported. */
+    @Column(name = "figma_url", length = 500)
+    private String figmaUrl;
+
+    /** Override of the project's default AI provider. Null = use project default. */
+    @Column(name = "ai_provider", length = 20)
+    private String aiProvider;
+
     @Column(nullable = false, length = 30)
     private String status;
 

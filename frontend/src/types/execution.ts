@@ -68,6 +68,8 @@ export interface ExecutionRunDto {
   totalActualTokens: number;
   totalCostUsd: number;
   jiraEnabled: boolean;
+  confluenceUrl: string | null;
+  figmaUrl: string | null;
   solutions: SolutionDto[];
   createdAt: string;
   updatedAt: string;
@@ -105,10 +107,66 @@ export interface ExecutionPlan {
   totalEstimatedCostUsd: number;
 }
 
+export interface NewRepoSpec {
+  name: string;
+  description?: string;
+  techHint: string;
+  githubOwner: string;
+  visibility: 'private' | 'public';
+}
+
+export interface Scaffold {
+  key: string;
+  label: string;
+  language: string;
+}
+
+export interface SolutionRun {
+  id: string;
+  solutionId: string;
+  pipelineRunId: string;
+  attemptNumber: number;
+  terminalStatus: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface PrRollupEntry {
+  prUrl: string;
+  prNumber: number | null;
+  repoFullName: string | null;
+  status: string;
+  launchId: string;
+  createdAt: string | null;
+}
+
+export interface ProjectOverview {
+  activeLaunches: number;
+  completedLaunches: number;
+  failedLaunches: number;
+  totalActualTokens: number;
+  totalCostUsd: number;
+  prCount: number;
+  recentPrOpen: number;
+  recentPrMerged: number;
+}
+
+export interface ValidateOwnerResult {
+  canCreate: boolean;
+  reason: string;
+}
+
 export interface CreateExecutionRequest {
   requirement: string;
   repoIds: string[];
+  newRepos?: NewRepoSpec[];
   jiraEnabled?: boolean;
+  confluenceUrl?: string;
+  figmaUrl?: string;
+  aiProvider?: string;
 }
 
 export interface ArchApprovalRequest {

@@ -5,6 +5,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.4.0] — 2026-04-14
+
+Project-level rollup, Launch entry-point inside the project, multi-run solutions, and new-repo creation as part of a Launch. Premium feature: ENTERPRISE + MAX tiers (the latter joins the Execution View tier gate).
+
+### Added
+
+- **MAX tier joins the Execution View gate** — `tier_config.execution_view_enabled` now true for both ENTERPRISE and MAX. Premium positioning.
+- **Multi-run solutions** — new `execution_solution_run` table captures every V2 dispatch (initial + retries + manual fixes) under a solution. The solution's `pipelineRunId` becomes the "latest" pointer; full history lives in the join. SolutionExecutionService writes a row per attempt with terminal status + token usage.
+- **New-repo creation as part of a Launch** — `CreateExecutionRequest.newRepos` accepts a `NewRepoSpec` array (`name`, `description`, `techHint`, `githubOwner`, `visibility`). `ExecutionOrchestrator.createExecution` calls `ProjectRepoService.createAndLinkNewRepo` per spec — creates the GitHub repo, registers a `ProjectRepo`, links to the project — then unions the new IDs into the Launch. Failures abort the Launch synchronously.
+- **Scaffold taxonomy** — `GET /api/scaffolds` returns the dropdown options that match `prompts/scaffolds/*.md`.
+- **Pre-flight GitHub access check** — `POST /api/projects/{id}/launches/validate-repo-access` validates the user's PAT against the target owner before the Launch commits.
+- **Project-level aggregation endpoints**:
+  - `GET /api/projects/{id}/launches` — paginated list of executions for the project.
+  - `GET /api/projects/{id}/prs` — cross-launch PR rollup grouped by launch.
+  - `GET /api/projects/{id}/overview` — active/completed/failed launch counts, total tokens + cost, PR counts.
+- **Solution runs endpoint** — `GET /api/executions/{id}/solutions/{solutionId}/runs` returns the per-attempt history for a solution.
+
+### Frontend
+
+- **`ExecutionSetup` (Launch flow) refresh:**
+  - "Create new repo" sub-form with tech-hint dropdown (fed from `/api/scaffolds`), private-by-default visibility, and on-blur GitHub-owner validation against the pre-flight endpoint.
+  - Live "Mode preview" line that tells the user what they're about to do (`1 existing + 1 new → 2-solution execution`).
+  - Dry-run confirmation modal listing repos to be created and the planned shape before commit.
+  - JIRA toggle + multi-existing-repo selection retained.
+- **`SolutionSection` replaces the flat `SolutionCard`** — collapsible per-solution panel with header rollup (status, tokens, PR, JIRA) and an expanded body listing all `ExecutionSolutionRun` attempts with deep-links into the existing `RunDetailPage` so the full per-run UX is preserved without duplication.
+- **`ProjectDashboardPage` gains Launches + Pull Requests tabs** — `ProjectLaunchesList` shows all launches with status, solution progress, and JIRA badge; `ProjectPrRollup` groups PRs by launch with merged/open status badges.
+- **Launch entry point** — "New Execution" → "Launch" rename in the dashboard header (kept on the existing button rather than restructuring sidebar in this round).
+
+### Schema
+
+- **V90** `project_shell_launch.sql`:
+  - Sets `tier_config.execution_view_enabled = TRUE` for ENTERPRISE and MAX.
+  - Creates `execution_solution_run` (PK, solution FK, pipeline_run_id, attempt_number unique per solution, terminal_status, token + cost columns, RLS via parent run org).
+
+### Known deferrals
+
+- Full sidebar restructure (orthogonal "Projects" navigation mode that flips the entire shell) — folded into existing `ProjectDashboardPage` tabs in this round; dedicated `ProjectShell` deferred to v2.4.x.
+- Project Settings tab with "Create new repo outside Launch" — backend method `createAndLinkNewRepo` exists and is reused by Launch; standalone Settings UI deferred.
+- Standalone runs view filtered by project — runs page already supports `?projectId=` filter; project tab pointing to it not yet wired.
+
+### Operational notes
+
+- `execution.view.enabled` feature flag still **off** by default. Flip per ENTERPRISE/MAX rollout.
+- Org admins must populate `Org.jira_project_key` (V89) before JIRA sync engages — already documented in v2.3.0.
+
+---
+
 ## [2.3.0] — 2026-04-14
 
 Execution View — a project-level workbench that decomposes a cross-repo requirement into ordered solutions, drives each solution through a V2 pipeline run, and bundles the results into per-repo pull requests. ENTERPRISE-only, gated by the `execution.view.enabled` feature flag.

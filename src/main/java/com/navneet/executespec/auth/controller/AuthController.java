@@ -285,8 +285,9 @@ public class AuthController {
             @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestBody ViewModeRequest req) {
         String mode = req.viewMode() != null ? req.viewMode().strip().toLowerCase() : "vibe";
-        if (!"vibe".equals(mode) && !"pro".equals(mode)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "viewMode must be 'vibe' or 'pro'");
+        if (!"vibe".equals(mode) && !"pro".equals(mode) && !"project".equals(mode)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "viewMode must be 'vibe' | 'pro' | 'project'");
         }
         AppUser user = userDetails.getUser();
         user.setViewMode(mode);

@@ -5,5 +5,9 @@ import java.util.List;
 public record CreateExecutionRequest(
         String requirement,
         List<String> repoIds,
-        Boolean jiraEnabled) {
+        List<NewRepoSpec> newRepos,
+        Boolean jiraEnabled,
+        String confluenceUrl,
+        String figmaUrl,
+        String aiProvider) {
 }
