@@ -1,7 +1,9 @@
 # ExecuteSpec Codebase Map
 
 > Quick reference: every class → one-line purpose. Keep updated.
-> Last updated: 2026-04-14 (v2.2.0 — project memory)
+> Last updated: 2026-04-14 (v2.3.0 — execution view)
+>
+> **Execution View (`execution/`, v2.3.0):** `ExecutionOrchestrator` + `ExecutionPlannerService` + `SolutionExecutionService` + `ExecutionBranchService` + `CrossRepoContextService` + `IncrementalCodeMapService`; entities `ExecutionRun`/`ExecutionSolution`/`ExecutionSolutionRepo`/`ExecutionContextHandover`; pure logic `SolutionDependencyResolver` + `FileConflictDetector`. REST at `/api/projects/{id}/executions` + `/api/executions/{id}/...`. Feature-flag gated (`execution.view.enabled`) + ENTERPRISE-tier gated. Frontend: Execution View page + 13 components under `components/execution/`. Migration V89.
 >
 > **Project memory (`memory/`, v2.2.0):** `RunLedgerAgent` (post-complete, LIGHTWEIGHT tier) → `project_run_ledger`; `MemoryCompactionService` rewrites `project_memory_snapshot` every 10 runs (starting R20); `ProjectMemoryProvider.buildPlannerContext(projectId)` injects `{{PROJECT_MEMORY}}` into `PlannerAgentV2`. `ProjectMemoryController` at `/api/projects/{id}/memory[/ledger]`. Frontend: Memory tab on `ProjectDashboardPage` → `ProjectMemoryPanel`. Migration V88.
 >

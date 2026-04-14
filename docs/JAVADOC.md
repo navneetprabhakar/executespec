@@ -1,8 +1,10 @@
 # ExecuteSpec -- Complete System Documentation
 
-**Version:** v2.2.0 (2026-04-14)
+**Version:** v2.3.0 (2026-04-14)
 
-> **Project memory (v2.2.0)** — new package `memory/` hosts `RunLedgerAgent`, `MemoryCompactionService`, `ProjectMemoryProvider`, `ProjectMemoryController` plus entities `ProjectRunLedger` / `ProjectMemorySnapshot`. Wired into `V2RunOrchestrator` post-complete and into `PlannerAgentV2` via `PlannerRequestV2.projectMemory`. Migration V88.
+> **Execution View (v2.3.0)** — new package `execution/` hosts `ExecutionController`, orchestrator / planner / solution-executor / branch / cross-repo-context / incremental-codemap services, pure-logic `SolutionDependencyResolver` + `FileConflictDetector`, entities `ExecutionRun` / `ExecutionSolution` / `ExecutionSolutionRepo` / `ExecutionContextHandover`, and `ExecutionEventTypes`. Bridges to `V2RunOrchestrator` per solution. Feature-flag + ENTERPRISE-tier gated. Migration V89.
+>
+> **Project memory (v2.2.0)** — package `memory/` hosts `RunLedgerAgent`, `MemoryCompactionService`, `ProjectMemoryProvider`, `ProjectMemoryController` plus entities `ProjectRunLedger` / `ProjectMemorySnapshot`. Wired into `V2RunOrchestrator` post-complete and into `PlannerAgentV2` via `PlannerRequestV2.projectMemory`. Migration V88.
 **Last Updated:** 2026-04-14
 **Stack:** Java 21, Spring Boot 3.3, Spring AI 1.1.4, PostgreSQL, Redis, JGit 6.9.0
 
@@ -21,7 +23,7 @@
 >   (six-dimension deterministic scoring), `TestCoverageRescorer`.
 > - `com.navneet.executespec.v2.agent.SpecClassifier` — deterministic
 >   SINGLE_SHOT / MEDIUM / MULTI_TASK picker from spec text.
-> - New migrations V81–V88 documented in CHANGELOG [2.1.1] + [2.2.0].
+> - New migrations V81–V89 documented in CHANGELOG [2.1.1] + [2.2.0] + [2.3.0].
 
 > **⚠️ Historical reference — V1 architecture.**
 > This document describes the original V1 harness (`PipelineHarness`, `WorkerAgent`,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore } from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
 import ProjectRepoManager from '@/components/project/ProjectRepoManager';
@@ -51,11 +51,14 @@ export default function ProjectDashboardPage() {
             <p className="text-sm text-gray-500 mt-0.5">{project.description}</p>
           )}
         </div>
-        {project && (
-          <span className="text-xs text-gray-500">
-            {project.status} · {project.aiProvider}
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {project && (
+            <span className="text-xs text-gray-500">
+              {project.status} · {project.aiProvider}
+            </span>
+          )}
+          <NewExecutionButton projectId={projectId!} />
+        </div>
       </header>
 
       {loading && <div className="text-gray-500">Loading…</div>}
@@ -123,5 +126,18 @@ function MetricTile({ label, value }: { label: string; value: string | number })
       <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
       <div className="text-2xl font-semibold mt-1">{value}</div>
     </div>
+  );
+}
+
+function NewExecutionButton({ projectId }: { projectId: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      onClick={() => navigate(`/projects/${projectId}/executions/new`)}
+      className="text-xs rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue px-2.5 py-1"
+      title="Start a cross-repo execution (ENTERPRISE only — gated by execution.view.enabled flag)"
+    >
+      New Execution
+    </button>
   );
 }
