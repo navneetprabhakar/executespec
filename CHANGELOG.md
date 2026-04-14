@@ -5,6 +5,143 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.1.1] — 2026-04-14
+
+Pilot v3.0 — project workspace layer on top of V2 — plus a bug sweep surfaced
+by the first customer test runs.
+
+### Added
+
+#### Project workspace (R1)
+- `ProjectDashboardPage` at `/projects/:projectId/dashboard` with metric tiles
+  (active / completed / failed runs + average accuracy), per-project score
+  trend chart (recharts), recent runs + recent PRs tabs, and deep-drill tabs
+  for Tasks / Repos / Architecture / Team.
+- `ProjectDashboardController` (`GET /api/projects/{id}/dashboard`) aggregates
+  counts + recent activity + arch-doc status (NONE / GENERATED / STALE).
+- `ProjectScoresController` (`GET /api/projects/{id}/scores`) returns the
+  full score history for the trend chart.
+- `Project` entity gains `branchNamingPattern`, `targetBranch`,
+  `defaultReviewers` (V81) — used by the R5 multi-repo push path.
+
+#### Multi-repo projects (R2)
+- `ProjectRepo` dual-scope registry (`ORG` = shared across org, `USER` =
+  personal) + `ProjectRepoLink` join table (V81). Linking rules: ORG
+  repo must match the project's org; USER repo must be owned by the linker.
+- `ProjectRepoController` — `/api/repos` for lifecycle, `/api/projects/{id}/repos/{repoId}` for link management.
+- `WorkspaceInitService.cloneMultipleRepos` clones every selected repo into
+  `workspace/<runId>/repos/<name>/`. Per-repo failures don't block siblings.
+- `RunRequest.selectedRepoIds` + `PipelineRun.selectedRepoIds` (V86) persist
+  the selection for the post-run push path.
+- `NewRunModal` replaces the single-repo URL input with a multi-select when
+  the project has linked repos.
+
+#### Codebase intelligence (R3)
+- `ProjectCodeMap` (per-repo) + `ProjectArchitectureDoc` (project-wide,
+  versioned, annotatable) persisted via V84.
+- `CodeMapGenerator` deterministic scan: file-tree layout + route regex
+  extraction (Spring / Express / FastAPI) + model detection by filename.
+- `ArchitectureDocGenerator` composes per-repo codemaps + annotations
+  into a single markdown doc. Annotations flow into the assessment prompt.
+- `StalenessService` (Caffeine 5-min cache) compares stored
+  `generated_from_shas` against current HEAD SHAs — powers the amber
+  "N/M repos ahead" badge on `ArchitectureViewer`.
+
+#### Feature assessment (R4)
+- `FeatureAssessmentService` runs before the planner and produces an
+  `AssessmentResult`. Heuristic by default; LLM-backed (Anthropic) when
+  the `assessment.llm.enabled` feature flag is on. Silent heuristic
+  fallback on any LLM failure.
+- `AssessmentPanel` surfaces the assessment above the plan-approval gate.
+
+#### Git workflow (R5)
+- `pull_request_record` table (V82) — one row per PR opened by the
+  platform. Indexed by `(repo_full_name, pr_number)`.
+- `PullRequestRecordService` writes rows on creation; new
+  `GitHubWebhookController` at `POST /webhooks/github` verifies
+  `X-Hub-Signature-256` (HMAC SHA-256, constant-time) and flips status on
+  `pull_request.closed` events.
+- `ScmPushService` now reads `Project.branchNamingPattern` /
+  `targetBranch` / `defaultReviewers`, and the new `pushMultiRepo` path
+  handles per-subdirectory push + per-repo PR + cross-linking via the new
+  `GitHubRepoService.updatePullRequestBody`.
+- `PullRequestController` — `GET /api/runs/{id}/prs`. Rendered by
+  `RunPrList` in the run detail sidebar.
+
+#### Multi-dimension review scoring (R6)
+- `ReviewScoringService` derives six dimensions (code quality, test
+  coverage, architecture, security, performance, design compliance) from
+  existing review data — no extra LLM call. Columns added via V83.
+- `ScoreCard` at the top of `ValidationReportPanel`: coloured bars
+  (≥80 green / 60–79 yellow / <60 red).
+
+#### Figma URL (R7)
+- `RunRequest.figmaUrl` + `pipeline_run.figma_url` (V85). Drives
+  `designComplianceScore` and is passed to the planner prompt. New URL
+  input on `NewRunModal`.
+
+#### Codemap-on-clone (PRO / MAX / ENTERPRISE)
+- `run_code_map` (V87) + `RunCodeMapService`. For existing-repo runs on
+  paid tiers: scans repo's file tree + routes, Anthropic compresses to
+  ≤3000-token brief, persists raw + summary + file/route counts + tokens.
+  Summary becomes the planner's `workspaceSummary`. FREE tier excluded.
+- Stats surfaced as "Codemap pulled — N files, K routes (T tokens)"
+  above the plan-approval gate on `RunDetail`.
+
+#### Stack detection + drift
+- `StackDetector` infers `{language, framework, version}` from root
+  marker files; version regex-extracted from `pom.xml` / `package.json` /
+  `pyproject.toml`.
+- `StackRefreshJob` (`@Scheduled` daily 03:00 with `@SchedulerLock`)
+  refreshes `detected_stack` + `last_synced_sha` for every
+  `project_repo` not refreshed in the last 20h. Counters:
+  `executespec.stack.refresh.{changed,unchanged,failed}`.
+- `ProjectArchitectureService` captures per-repo SHAs via the new
+  `GitHubRepoService.getBranchHeadSha` helper.
+
+### Fixed
+
+- **Cancel wrote PARTIAL instead of CANCELLED.** `V2RunOrchestrator.terminate`
+  now preserves a user-initiated CANCELLED status when the pipeline thread
+  races past the cancel write.
+- **Hard cap not enforced mid-task.** `WorkerAgentV2` loads
+  `pipeline_run.hardCapUsd` at task start and checks cost every 3 iterations.
+  On breach the loop exits cleanly with the new
+  `WorkerResult.Outcome.BUDGET_EXCEEDED`.
+- **Planner under-classified long specs.** Hardcoded
+  `DEFAULT_CLASSIFICATION=MEDIUM` replaced with `SpecClassifier` (length +
+  bullet count + distinct domain keywords + comprehensive markers → picks
+  `SINGLE_SHOT` / `MEDIUM` / `MULTI_TASK` dynamically).
+- **`testCoverageScore` stuck at 20.** New `TestCoverageRescorer`
+  listens for `TestExecutionCompletedEvent` and re-derives the score
+  from actual test execution results.
+- **Hibernate schema-validation refused to boot.** V86 adds
+  `pipeline_run.selected_repo_ids`. Six entity fields now carry
+  `@JdbcTypeCode(SqlTypes.JSON)` so `String → jsonb` binding works.
+- **PARTIAL + A looked like failure.** Green "✓ final build passed"
+  chip next to the status on PARTIAL runs whose reviewer's final build
+  passed.
+
+### Migrations
+
+- **V81** — `project_repo` (ORG|USER) + `project_repo_link` + `project`
+  workflow columns
+- **V82** — `pull_request_record`
+- **V83** — `validation_report` six score columns
+- **V84** — `project_code_map` + `project_architecture_doc`
+- **V85** — `pipeline_run.assessment_result` + `figma_url`
+- **V86** — `pipeline_run.selected_repo_ids`
+- **V87** — `run_code_map`
+
+### Operational notes
+
+- **New env var:** `GITHUB_WEBHOOK_SECRET` required for `/webhooks/github`
+  (returns 401 when unset).
+- **New feature flag:** `assessment.llm.enabled` (default off).
+- **New scheduled job:** `StackRefreshJob` — uses existing `shedlock` table.
+
+---
+
 ## [2.1.0] — 2026-04-12
 
 ### Added
