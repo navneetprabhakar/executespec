@@ -324,6 +324,44 @@ public class GitHubRepoService {
     }
 
     /**
+     * Pilot v3.0 — fetch the HEAD SHA of a given branch for drift detection.
+     * Returns {@code null} on any failure (missing PAT, unauthorised, repo moved)
+     * so callers can treat the repo as "unknown" without throwing.
+     */
+    public String getBranchHeadSha(String repoUrl, String branch, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return null;
+        String[] ownerRepo = extractOwnerRepo(repoUrl);
+        if (ownerRepo == null) return null;
+        String effectiveBranch = (branch == null || branch.isBlank()) ? "main" : branch;
+
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
+                            + "/commits/" + effectiveBranch))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                String body = response.body();
+                int idx = body.indexOf("\"sha\":");
+                if (idx >= 0) {
+                    int start = body.indexOf("\"", idx + 6) + 1;
+                    int end = body.indexOf("\"", start);
+                    return body.substring(start, end);
+                }
+            }
+            log.warn("[GitHubRepoService] getBranchHeadSha {} status {}", repoUrl, response.statusCode());
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] getBranchHeadSha error: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /**
      * Creates a pull request on a GitHub repository.
      *
      * @param repoUrl     HTTPS clone URL
@@ -386,6 +424,78 @@ public class GitHubRepoService {
             log.warn("[GitHubRepoService] Error creating PR: {}", e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * Pilot v3.0 — patch a PR's body. Used for cross-linking PRs created by
+     * the same multi-repo run. Best-effort: logs and continues on failure.
+     */
+    public void updatePullRequestBody(String repoUrl, int prNumber, String newBody, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return;
+        String[] ownerRepo = extractOwnerRepo(repoUrl);
+        if (ownerRepo == null) return;
+        String safeBody = newBody == null ? ""
+                : newBody.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
+        String body = "{\"body\":\"" + safeBody + "\"}";
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
+                            + "/pulls/" + prNumber))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 300) {
+                log.warn("[GitHubRepoService] updatePullRequestBody PR#{} status {}",
+                        prNumber, response.statusCode());
+            }
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] updatePullRequestBody error: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Pilot R5 — request reviewers on an existing PR via
+     * {@code POST /repos/{owner}/{repo}/pulls/{number}/requested_reviewers}.
+     * Best-effort: logs on failure but never throws.
+     */
+    public void requestReviewers(String repoUrl, int prNumber, java.util.List<String> reviewers, String overridePat) {
+        if (reviewers == null || reviewers.isEmpty()) return;
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return;
+        String[] ownerRepo = extractOwnerRepo(repoUrl);
+        if (ownerRepo == null) return;
+
+        StringBuilder arr = new StringBuilder("[");
+        for (int i = 0; i < reviewers.size(); i++) {
+            if (i > 0) arr.append(',');
+            arr.append('"').append(reviewers.get(i).replace("\"", "")).append('"');
+        }
+        arr.append(']');
+        String body = "{\"reviewers\":" + arr + "}";
+
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
+                            + "/pulls/" + prNumber + "/requested_reviewers"))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 300) {
+                log.warn("[GitHubRepoService] requestReviewers PR#{} status {} — {}",
+                        prNumber, response.statusCode(), response.body());
+            }
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] requestReviewers error: {}", e.getMessage());
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

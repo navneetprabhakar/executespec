@@ -619,6 +619,61 @@ public class GitTool {
     }
 
     /**
+     * Pilot v3.0 — for multi-repo runs. Each cloned subdirectory under
+     * {@code workspace/<runId>/repos/<name>} is its own git repo. Stages +
+     * commits + creates a branch + force-pushes. Returns OK with the branch
+     * name on success, OK with "CLEAN" if no changes, ERR otherwise.
+     */
+    public ToolResult commitAndPushSubdir(String runId, String subPath, String remoteUrl,
+                                          String pat, String branchName, String commitMessage) {
+        try {
+            String repoDir = Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
+
+            ProcessBuilder status = new ProcessBuilder("git", "-C", repoDir, "status", "--porcelain");
+            status.redirectErrorStream(true);
+            Process ps = status.start();
+            String statusOut = new String(ps.getInputStream().readAllBytes());
+            int statusExit = ps.waitFor();
+            if (statusExit != 0) return ToolResult.err("status failed: " + statusOut);
+            if (statusOut.isBlank()) return ToolResult.ok("CLEAN");
+
+            runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
+            runQuietly(repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
+            runQuietly(repoDir, "git", "-C", repoDir, "config", "user.name", "ExecuteSpec Agent");
+
+            ProcessBuilder commit = new ProcessBuilder("git", "-C", repoDir,
+                    "commit", "--allow-empty", "-m", commitMessage);
+            commit.redirectErrorStream(true);
+            Process pc = commit.start();
+            String commitOut = new String(pc.getInputStream().readAllBytes());
+            int commitExit = pc.waitFor();
+            if (commitExit != 0) return ToolResult.err("commit failed: " + commitOut);
+
+            runQuietly(repoDir, "git", "-C", repoDir, "checkout", "-B", branchName);
+            String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
+            ProcessBuilder push = new ProcessBuilder("git", "-C", repoDir,
+                    "push", authUrl, branchName, "--force");
+            push.redirectErrorStream(true);
+            Process pp = push.start();
+            String pushOut = new String(pp.getInputStream().readAllBytes());
+            int pushExit = pp.waitFor();
+            if (pushExit != 0) return ToolResult.err("push failed: " + pushOut);
+            return ToolResult.ok(branchName);
+        } catch (Exception e) {
+            log.warn("[GitTool] commitAndPushSubdir failed: {}", e.getMessage());
+            return ToolResult.err("subdir push failed: " + e.getMessage());
+        }
+    }
+
+    private static void runQuietly(String dir, String... cmd) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(cmd).directory(new java.io.File(dir));
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
+        p.getInputStream().readAllBytes();
+        p.waitFor();
+    }
+
+    /**
      * Push workspace to a Bitbucket branch using Basic auth (username:appPassword).
      * Mirrors {@link #pushToBranch} but uses Bitbucket credential format.
      *

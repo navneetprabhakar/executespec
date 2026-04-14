@@ -37,6 +37,16 @@ public class PipelineRun {
     @lombok.Builder.Default
     private String harnessVersion = "v1";
 
+    /**
+     * Count of boot-time resume attempts for this run (incremented by
+     * {@code StartupRunResumerV2}). Capped at 3 in code — past the cap a run
+     * is permanently FAILED with reason "resume limit reached". Prevents
+     * infinite resume loops across repeated deploys.
+     */
+    @Column(name = "resume_attempts")
+    @lombok.Builder.Default
+    private Integer resumeAttempts = 0;
+
     @Column(columnDefinition = "TEXT")
     private String planJson;            // full TaskPlan JSON from planner
 
@@ -387,4 +397,19 @@ public class PipelineRun {
         return deletedAt != null;
     }
 
+    // ── Pilot R4 / R7 ────────────────────────────────────────────────────────
+
+    /** JSON output of {@code FeatureAssessmentService}. Null until ASSESSING phase runs. */
+    @Column(name = "assessment_result", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    private String assessmentResult;
+
+    /** Optional Figma URL passed at submission. Drives the design-compliance scorer. */
+    @Column(name = "figma_url", length = 500)
+    private String figmaUrl;
+
+    /** Pilot v3.0 — JSON array of project_repo IDs cloned for this run, used by multi-repo push. */
+    @Column(name = "selected_repo_ids", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    private String selectedRepoIds;
 }

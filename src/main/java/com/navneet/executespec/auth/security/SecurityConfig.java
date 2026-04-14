@@ -121,6 +121,8 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/**").hasRole("SUPER_ADMIN")
                         // Integration webhooks (external — secured by signature, not JWT)
                         .requestMatchers("/api/integrations/*/webhook").permitAll()
+                        // Pilot R5 — GitHub PR webhook (HMAC SHA-256 verified in controller)
+                        .requestMatchers(HttpMethod.POST, "/webhooks/github").permitAll()
                         // Slack OAuth callback (external redirect — no JWT)
                         .requestMatchers("/api/integrations/slack/oauth/callback").permitAll()
                         // SSE streaming (authenticated via ?token= query param)

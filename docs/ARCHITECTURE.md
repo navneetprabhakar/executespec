@@ -1,9 +1,23 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 4.0
-> **Date**: 2026-04-10
-> **App Version**: v2.0.0
+> **Version**: 4.3
+> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 + bug sweep 2026-04-14
+> **App Version**: v2.1.1
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
+
+> **⚠️ V2-only as of 2026-04-13.** The V1 harness (`PipelineHarness`, `WorkerAgent`,
+> `CompilerAgent`, `ReviewerAgentV2`, `batch/*`, `SubtaskDecomposer`, progressive
+> merge, clarification / merge gates) has been deleted. Sections below that
+> describe those concepts are historical.
+> **Canonical current architecture:** [`CLAUDE.md`](../CLAUDE.md).
+> **Open gaps:** [`docs/plans/harness-v2-remaining-work.md`](plans/harness-v2-remaining-work.md).
+> **Pilot v3.0 (commit `6bbfde9b`):** project workspace layer added on top of V2 — see
+> [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md). Key additions: dual-scope
+> `ProjectRepo` registry, multi-repo workspace clone + per-repo PR creation,
+> per-repo `ProjectCodeMap` + project-wide `ProjectArchitectureDoc` with SHA-based
+> staleness, pre-plan `FeatureAssessmentService` (heuristic by default; LLM-backed
+> behind feature flag), 6-dimension `ReviewScoringService`, GitHub PR webhook,
+> daily `StackRefreshJob`, optional Figma URL on the run.
 
 ---
 
