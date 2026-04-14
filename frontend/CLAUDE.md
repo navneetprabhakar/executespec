@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-14 (v2.2.0 — project memory: Memory tab on ProjectDashboardPage + `ProjectMemoryPanel`)
+> Last updated: 2026-04-14 (v2.3.0 — execution view: `pages/execution/ExecutionViewPage` + `components/execution/*` + `stores/useExecutionStore` + `hooks/useExecutionSse` + `lib/execution-api` + "New Execution" button on `ProjectDashboardPage`)
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 

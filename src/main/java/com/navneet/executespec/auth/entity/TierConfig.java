@@ -80,4 +80,8 @@ public class TierConfig {
     /** Data retention period in days. null = system default (30). FREE=30, PRO=90, ENTERPRISE=365. */
     @Column(name = "retention_days")
     private Integer retentionDays;
+
+    /** Whether this tier unlocks the multi-repo Execution View. ENTERPRISE=true, others=false. */
+    @Column(name = "execution_view_enabled", nullable = false)
+    private boolean executionViewEnabled = false;
 }

@@ -5,6 +5,77 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.3.0] — 2026-04-14
+
+Execution View — a project-level workbench that decomposes a cross-repo requirement into ordered solutions, drives each solution through a V2 pipeline run, and bundles the results into per-repo pull requests. ENTERPRISE-only, gated by the `execution.view.enabled` feature flag.
+
+### Added
+
+- **Backend package `execution/`:**
+  - Entities + JPA repos: `ExecutionRun`, `ExecutionSolution`, `ExecutionSolutionRepo`, `ExecutionContextHandover`, plus the `execution_solution_dependency` DAG edge table.
+  - `SolutionDependencyResolver` — topological layering + blocked-downstream detection; pure logic.
+  - `FileConflictDetector` — cross-references predicted target files across solutions.
+  - `ExecutionOrchestrator` — drives setup → ANALYSING → ARCH_REVIEW → PLANNING → EXECUTING → COMPLETE/ABORTED; delegates arch analysis to `ProjectArchitectureService`.
+  - `ExecutionPlannerService` — LLM-backed decomposition via `execution_planner.txt`; persists plan + individual solutions with dependency edges.
+  - `SolutionExecutionService` — bridges a single solution to `V2RunOrchestrator.submitRun(...)` (skipApproval, skipGate); tracks tags via `ExecutionBranchService`.
+  - `ExecutionBranchService` — `exec/<runId>` branch + per-solution start/end markers; opens final per-repo PRs through `GitHubRepoService` + `PullRequestRecordService`.
+  - `CrossRepoContextService` — layer 1 interface-contract handover persisted to `execution_context_handover`; layers 2/3 (diff codemap + test anchors) wired but deferred.
+  - `IncrementalCodeMapService` — wraps `CodeMapGenerator` for post-solution codemap refresh.
+  - `ExecutionController` — 10 REST endpoints + `/sse-token` + `/events` SSE; feature-flag + tier-gated; org-scoped via `AppUser.orgId` vs `Project.orgId`.
+  - `ExecutionEventTypes` — SCREAMING_SNAKE_CASE SSE constants (`EXEC_*`).
+- **Backend plumbing:**
+  - Migration V89 — `execution_run` + `execution_solution` + `execution_solution_dependency` + `execution_solution_repo` + `execution_context_handover`, indexes, V67-style RLS policies.
+  - Feature flag `execution.view.enabled` (default `false`).
+  - `tier_config.execution_view_enabled` boolean column (ENTERPRISE seed = TRUE).
+  - `TierConfig.executionViewEnabled` field wired through the entity.
+- **Prompts:** `prompts/execution_planner.txt` (the decomposition prompt; embeds `{{PROJECT_MEMORY}}` from v2.2.0).
+- **Frontend:**
+  - Types: `frontend/src/types/execution.ts`.
+  - API client: `frontend/src/lib/execution-api.ts`.
+  - Zustand store: `frontend/src/stores/useExecutionStore.ts`.
+  - SSE hook: `frontend/src/hooks/useExecutionSse.ts`.
+  - Page: `frontend/src/pages/execution/ExecutionViewPage.tsx`.
+  - Components (in `components/execution/`): `ExecutionStepper`, `ExecutionSetup`, `ExecutionAnalysis`, `ArchReviewGate`, `ExecutionPlanReview`, `DependencyGraph`, `ConflictWarning`, `ExecutionMonitor`, `SolutionCard`, `SolutionLogStream`, `FailureDecisionModal`, `ExecutionComplete`, `ExecutionReportPanel`.
+  - Routes: `/projects/:projectId/executions/new`, `/projects/:projectId/executions/:executionId`.
+  - Entry point: "New Execution" button on `ProjectDashboardPage` (dashboard-level, tier-gated server-side).
+
+### Migrations
+
+- **V89** `execution_view.sql`.
+
+### Production-grade additions
+
+- **V2 completion polling** — `SolutionExecutionService` now blocks a virtual thread polling `PipelineRunRepository` every 10s (2h cap) and maps V2 terminal status to the solution lifecycle:
+  - V2 `COMPLETE` → solution `DONE`, actual tokens + cost copied from the V2 run, handover contracts written, JIRA transitioned to `Done`.
+  - V2 `PARTIAL` → retry up to `max_retries`, with a JIRA comment per retry; final failure transitions to `Blocked`.
+  - V2 `FAILED` / `CANCELLED` / timeout → solution `FAILED`, run `PAUSED`, JIRA transitioned to `Blocked`, `EXEC_PAUSED_FOR_DECISION` emitted.
+- **JIRA sync (enterprise-level integration)** — new `ExecutionJiraSync` service uses the org's existing JIRA credentials (`Org.jira_base_url` / `email` / `api_token`) plus a new `Org.jira_project_key` column. Toggle per run via `ExecutionRun.jiraEnabled` (UI checkbox on `ExecutionSetup`). Lifecycle:
+  - Solution start (first attempt only) → create JIRA ticket, persist `solution.jira_ticket_id`.
+  - Retry / manual decision → comment on ticket.
+  - Solution done / skipped → comment + transition to `Done`.
+  - Solution failed → comment + transition to `Blocked`.
+  - JIRA sync is best-effort: all failures are logged + swallowed, never fail the run.
+- **Enriched final PR body** — per-repo PR now bundles a markdown summary table (status / tokens / PR / JIRA per solution), a call-out for any failed solutions with phase + reason, and overall stats. Replaces the old one-liner-per-solution body.
+
+### Schema additions (V89)
+
+- `execution_run.jira_enabled BOOLEAN NOT NULL DEFAULT FALSE`.
+- `org.jira_project_key VARCHAR(64)` — enterprise-level default project key used by Execution View JIRA sync.
+
+### Known deferrals
+
+- True per-solution workspace handoff (sharing the execution branch between V2 runs) is not yet plumbed — each solution still creates a fresh V2 workspace and relies on the handover contract text for context. Shared workspace is a follow-up.
+- `CrossRepoContextService` layers 2 (diff codemap) and 3 (test anchors) exist as stubs; layer 1 (interface contracts) is live.
+- Git tag / revert operations (rollback of a failed solution's commit range) — tag names are still tracked in `execution_solution.git_tag_start/end` as metadata, but actual `git tag` / `git revert` execution is deferred.
+
+### Operational notes
+
+- Feature flag `execution.view.enabled` is **off** by default. Flip it on for ENTERPRISE canary tenants once a project has its first arch doc generated.
+- Tier gating is enforced server-side via `TierConfig.executionViewEnabled` + `AppUser.orgId → Org.tier` lookup.
+- SSE channel key is `exec:{executionRunId}` to avoid collisions with per-run events. Scoped SSE tokens carry `scope=sse, runId=exec:{id}` and are validated by `JwtUtil.validateSseToken`.
+
+---
+
 ## [2.2.0] — 2026-04-14
 
 Project Memory — a compressed per-run ledger + periodic compacted snapshot injected into `PlannerAgentV2` so subsequent runs in the same project can build on prior patterns, decisions, and debt instead of starting stateless.

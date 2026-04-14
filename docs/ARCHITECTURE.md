@@ -1,8 +1,8 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 4.4
-> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14
-> **App Version**: v2.2.0
+> **Version**: 4.5
+> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14
+> **App Version**: v2.3.0
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 > **⚠️ V2-only as of 2026-04-13.** The V1 harness (`PipelineHarness`, `WorkerAgent`,
