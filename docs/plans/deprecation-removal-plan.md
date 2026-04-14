@@ -1,14 +1,18 @@
 # Deprecation Removal — V1 Harness Retirement
 
-> Status: draft for review (2026-04-13).
-> Dependency: all other plans in `docs/plans/` should land **before** this; in particular
-> `v2-batch-execution-plan.md` explicitly waits on P3 of this doc.
+> **Status: ✅ shipped 2026-04-13** (commits `e3930414` P1 → `062310b2` P5/P6).
+> All six phases landed on `feature/v2-next`. Test suite green: 205/205 (Chaos
+> test still requires Docker; environmental). V2 batch implementation (separate
+> plan) is now unblocked.
+>
+> Original plan retained below for archaeology — section text refers to the
+> pre-execution state.
 
-## Goal
+## Goal (achieved)
 
-Delete every V1 class annotated `@Deprecated(since = "v2")` and the dead code paths they anchor. End state: one harness (V2), one runtime, one LLM router. No `V1Foo` / `V2Foo` duality.
+Delete every V1 class annotated `@Deprecated(since = "v2")` and the dead code paths they anchor. End state: one harness (V2), one runtime, one LLM router for non-tool-calling agents (LlmRouter retained without deprecation marker).
 
-Current footprint:
+Original footprint:
 - **339** `@Deprecated(since = "v2")` call-site/member annotations across **18+ classes**.
 - `RunController` alone holds **19** `harness.*` calls into `PipelineHarness`.
 - `LlmRouter` (V1, deprecated) still has **~10 live callers** across V1 agents that must be migrated before deletion.
@@ -67,7 +71,24 @@ Current footprint:
 
 ## Phased execution
 
-### P0 — Prerequisites (no code change; just confirm)
+> **All phases shipped on 2026-04-13.** Marker `✅` on each. Per-phase commits:
+> - P1 docs sweep — `e3930414`
+> - P2 RunController rewire — `be944a42`
+> - P3 V1 deletion — `154169d9` (~20k LOC removed)
+> - P4 LlmRouter @Deprecated removal + rollout gate retired — `9ce8dbb5`
+> - P5/P6 schema cleanup + tests — `062310b2`
+>
+> Notable departures from the original plan:
+> - **LlmRouter not deleted** in P4. With 11 non-tool-calling callers (testgen
+>   stack, accuracy assessor, conversation, context, validation report, eval),
+>   migrating each to `LlmRouterV2` (which requires `ExecutionContext`) was
+>   judged higher risk than keeping `LlmRouter` as the shared text-completion
+>   router. `@Deprecated(since="v2")` removed instead. V2 tool-calling agents
+>   continue to use `LlmRouterV2`.
+> - **`pipeline_run.harness_version` column kept** rather than dropped in P5 —
+>   useful audit signal; new rows are always `"v2"`.
+
+### ✅ P0 — Prerequisites (no code change; just confirm)
 
 - [ ] `v2-batch-execution-plan.md` probe (P0 of that plan) completed — proves native-tool-calling in batch APIs works.
 - [ ] `StartupRunResumerV2` designed (Gap 2); interface agreed.
@@ -75,7 +96,7 @@ Current footprint:
 
 Deliverable: sign-off memo in this file's changelog. No code.
 
-### P1 — Docs sweep (1 PR, zero-risk)
+### ✅ P1 — Docs sweep (1 PR, zero-risk)
 
 Scope: flip every doc that still presents V1 as a supported path.
 
@@ -87,7 +108,7 @@ Scope: flip every doc that still presents V1 as a supported path.
 
 Estimated size: ~200 lines changed.
 
-### P2 — Rewire `RunController` (1 PR, medium-high risk)
+### ✅ P2 — Rewire `RunController` (1 PR, medium-high risk)
 
 `RunController` has 19 `harness.*` calls. Each needs a resolution:
 
@@ -116,7 +137,7 @@ Side tasks:
 
 Estimated size: ~400 lines net. Blast radius: high — this is the HTTP surface.
 
-### P3 — Delete V1 harness + agents + batch + compiler (1 PR, medium risk after P2)
+### ✅ P3 — Delete V1 harness + agents + batch + compiler (1 PR, medium risk after P2)
 
 Only safe once P2 has committed and eval is still green.
 
@@ -131,7 +152,7 @@ Steps:
 
 Estimated size: ~10,000 lines deleted, ~400 added. Largest phase by raw LOC.
 
-### P4 — Migrate V1 `LlmRouter` callers to `LlmRouterV2` (1 PR, high risk)
+### ✅ P4 — Migrate V1 `LlmRouter` callers to `LlmRouterV2` (1 PR, high risk)
 
 After P3, `LlmRouter` (V1) still exists because non-harness agents depend on it. List (from grep, excluding V1 dirs already deleted):
 
@@ -162,7 +183,7 @@ After all callers migrate:
 
 Estimated size: ~600 lines changed across ~12 files. Risk is that the eval judge + some test agents depend on V1's prompt-cleanup logic.
 
-### P5 — Schema + prompt + config cleanup (1 PR, low risk)
+### ✅ P5 — Schema + prompt + config cleanup (1 PR, low risk)
 
 - Flyway migration `V80__drop_harness_version.sql`: drop `pipeline_run.harness_version` column.
 - Remove `harness.version` + `harness.v2.canary_percent` flag seeds (migration + `application.yml`).
@@ -174,7 +195,7 @@ Estimated size: ~600 lines changed across ~12 files. Risk is that the eval judge
 
 Estimated size: ~150 lines.
 
-### P6 — Post-cleanup verification (no code, just gates)
+### ✅ P6 — Post-cleanup verification (no code, just gates)
 
 - Run full `scripts/v2-eval.sh --concurrency 3` matrix. Must match pre-removal accuracy within ±2%.
 - Run a random sample of production-style runs end-to-end. Confirm SSE, cost, preview, push-to-github all still work.

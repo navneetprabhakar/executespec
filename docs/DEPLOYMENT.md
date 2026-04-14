@@ -2121,8 +2121,7 @@ AGENT_PROVIDER_POOLS_GOOGLE_MAX_CONCURRENT=10
 
 | Key Pattern | Purpose | TTL |
 |------------|---------|-----|
-| `gate:plan:{runId}` | Plan approval gate | 2h |
-| `gate:merge:{runId}` | Merge gate (legacy) | 2h |
+| `gate:plan:{runId}` | Plan approval gate | 4h |
 | `rks:{runId}:{provider}` | Encrypted API key per provider | 2h |
 | `sse:channel:{runId}` | Pub/Sub channel for SSE | Duration of run |
 | `sse:replay:{runId}` | SSE replay log (list, 200 entries) | 30min after run completes |
@@ -2133,3 +2132,49 @@ AGENT_PROVIDER_POOLS_GOOGLE_MAX_CONCURRENT=10
 | `pp:{provider}:queue` | Provider pool queue (list) | Duration of run |
 | `provider:degrade-queue` | Degradation queue for all-down scenario | 24h |
 | `scheduler-lock:{taskName}` | ShedLock distributed scheduler lock | Varies by job |
+
+---
+
+## Pilot v3.0 — Operational additions
+
+### Required env / config
+
+| Variable | Required for | Default | Notes |
+|---|---|---|---|
+| `GITHUB_WEBHOOK_SECRET` | PR status auto-update | (unset) | HMAC SHA-256 secret. When unset, `/webhooks/github` returns 401 for every request. Configure the same secret on each linked GitHub repo. |
+
+### Feature flags (DB-backed, admin-toggleable)
+
+| Key | Default | Effect when `true` |
+|---|---|---|
+| `assessment.llm.enabled` | `false` | `FeatureAssessmentService` calls Anthropic with arch doc + codemaps + user request before plan approval. Falls back to heuristic on any failure. Adds 1 PLANNING-tier LLM call per project run. |
+
+Set via existing endpoint: `POST /api/feature-flags/assessment.llm.enabled`
+body `{"value": "true"}` (SUPER_ADMIN only).
+
+### New scheduled jobs
+
+| Job | Schedule | Lock | Purpose |
+|---|---|---|---|
+| `StackRefreshJob` | daily 03:00 (`cron = "0 0 3 * * *"`) | ShedLock 55m | Re-runs `StackDetector.detect` + `getBranchHeadSha` for every `project_repo` row not refreshed in the last 20h. Paces 200ms between API hits. Counters: `executespec.stack.refresh.{changed,unchanged,failed}`. |
+
+### New webhooks to register externally
+
+| Provider | Path | Events | Secret |
+|---|---|---|---|
+| GitHub | `POST /webhooks/github` | `pull_request` (specifically `closed` action) | `GITHUB_WEBHOOK_SECRET` |
+
+### New Redis keys
+
+| Key | Purpose | TTL |
+|---|---|---|
+| (in-process Caffeine, not Redis) `StalenessService` cache | per-project SHA-drift report | 5min |
+
+### Migrations
+
+V81–V86 ship with pilot v3.0. None require downtime; all are pure
+`ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS`. V86 specifically
+adds `pipeline_run.selected_repo_ids` — without it, Hibernate schema
+validation will fail on boot for any deployment that pulled the entity
+update before the migration was applied.
+

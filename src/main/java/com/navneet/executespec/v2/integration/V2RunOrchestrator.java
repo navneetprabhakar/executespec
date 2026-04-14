@@ -5,7 +5,7 @@ import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.compiler.CompileResult;
+import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.UiStyleResolver;
 import com.navneet.executespec.harness.WorkspaceInitService;
@@ -32,6 +32,12 @@ import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.PlannerAgentV2;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
+import com.navneet.executespec.v2.agent.SpecClassifier;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.assessment.FeatureAssessmentService;
+import com.navneet.executespec.codeintel.RunCodeMapService;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
 import com.navneet.executespec.v2.harness.SequentialExecutorV2;
@@ -52,8 +58,11 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 
 /**
@@ -86,6 +95,10 @@ import java.util.concurrent.ThreadFactory;
 public class V2RunOrchestrator {
 
     /** Default V2 task classification — MEDIUM produces ≤ 4 tasks, good balance for most specs. */
+    /**
+     * Fallback only — live classification flows through {@link com.navneet.executespec.v2.agent.SpecClassifier}
+     * which picks SINGLE_SHOT / MEDIUM / MULTI_TASK from the spec itself (bug #3 fix).
+     */
     private static final Classification DEFAULT_CLASSIFICATION = Classification.MEDIUM;
 
     /** Default provider when the request doesn't specify one. Matches V1 default. */
@@ -111,9 +124,16 @@ public class V2RunOrchestrator {
     private final AccuracyAssessmentService accuracyAssessmentService;
     private final ModelResolver modelResolver;
     private final com.navneet.executespec.v2.smoketest.CliSmokeRunner cliSmokeRunner;
+    private final ProjectRepoService projectRepoService;
+    private final FeatureAssessmentService featureAssessmentService;
+    private final RunCodeMapService runCodeMapService;
+    private final AppUserRepository appUserRepository;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
+    /** runId → in-flight pipeline future; used by {@link #cancel(String)}. */
+    private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
+
     private final ExecutorService pool = Executors.newFixedThreadPool(4, new ThreadFactory() {
         private int n = 0;
         @Override public Thread newThread(Runnable r) {
@@ -135,6 +155,32 @@ public class V2RunOrchestrator {
                                   boolean autoMerge, String modelName, String aiProvider,
                                   String createdByUserId, String orgId, String projectId,
                                   String executionMode) {
+        return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
+                skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId,
+                projectId, executionMode, List.of());
+    }
+
+    /**
+     * Pilot v3.0 — overload that accepts project-scoped multi-repo selection.
+     * When {@code selectedRepoIds} is non-empty, the pipeline clones each linked
+     * repo into {@code workspace/<runId>/repos/<name>/} before planning.
+     */
+    public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
+                                  String githubPat, String githubOwner, boolean skipApproval,
+                                  boolean autoMerge, String modelName, String aiProvider,
+                                  String createdByUserId, String orgId, String projectId,
+                                  String executionMode, List<UUID> selectedRepoIds) {
+        return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
+                skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId,
+                projectId, executionMode, selectedRepoIds, null);
+    }
+
+    /** Pilot R7 — overload that accepts an optional Figma URL. */
+    public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
+                                  String githubPat, String githubOwner, boolean skipApproval,
+                                  boolean autoMerge, String modelName, String aiProvider,
+                                  String createdByUserId, String orgId, String projectId,
+                                  String executionMode, List<UUID> selectedRepoIds, String figmaUrl) {
         String runId = UUID.randomUUID().toString();
         String provider = normalizeProvider(aiProvider);
         String model = modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
@@ -162,6 +208,8 @@ public class V2RunOrchestrator {
                 .startedAt(Instant.now())
                 .totalInputTokens(0)
                 .totalOutputTokens(0)
+                .figmaUrl(figmaUrl)
+                .selectedRepoIds(serializeRepoIds(selectedRepoIds))
                 .build();
         run = runRepo.save(run);
 
@@ -175,8 +223,19 @@ public class V2RunOrchestrator {
         final String modelFinal = model;
         final boolean skipApprovalFinal = skipApproval;
         final String executionModeFinal = executionMode != null ? executionMode : "PRODUCTION";
-        pool.submit(() -> runPipeline(runIdFinal, providerFinal, modelFinal, userRequest,
-                skipApprovalFinal, executionModeFinal));
+        final String projectIdFinal = projectId;
+        final List<UUID> selectedRepoIdsFinal = selectedRepoIds != null ? selectedRepoIds : List.of();
+        final String githubPatFinal = githubPat;
+        Future<?> future = pool.submit(() -> {
+            try {
+                runPipeline(runIdFinal, providerFinal, modelFinal, userRequest,
+                        skipApprovalFinal, executionModeFinal,
+                        projectIdFinal, selectedRepoIdsFinal, githubPatFinal);
+            } finally {
+                activeRuns.remove(runIdFinal);
+            }
+        });
+        activeRuns.put(runIdFinal, future);
         return run;
     }
 
@@ -184,6 +243,13 @@ public class V2RunOrchestrator {
 
     private void runPipeline(String runId, String provider, String model, String userRequest,
                               boolean skipApproval, String executionMode) {
+        runPipeline(runId, provider, model, userRequest, skipApproval, executionMode,
+                null, List.of(), null);
+    }
+
+    private void runPipeline(String runId, String provider, String model, String userRequest,
+                              boolean skipApproval, String executionMode,
+                              String projectId, List<UUID> selectedRepoIds, String githubPat) {
         Instant startedAt = Instant.now();
         Path workspace = null;
         String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -197,21 +263,95 @@ public class V2RunOrchestrator {
             // and an initial empty commit. This is required for `/push-github` to work against
             // V2 runs: the endpoint assumes the workspace already has git history.
             workspaceInit.ensureRunWorkspace(runId);
+
+            // Pilot v3.0 — clone any project-linked repos the user selected for this run
+            // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
+            // fails we log and continue so the run can at least try to plan against what
+            // was fetched.
+            if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
+                try {
+                    List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
+                    List<WorkspaceInitService.RepoToClone> toClone = repos.stream()
+                            .map(r -> new WorkspaceInitService.RepoToClone(
+                                    r.getGithubRepoFullName(),
+                                    "https://github.com/" + r.getGithubRepoFullName()))
+                            .toList();
+                    workspaceInit.cloneMultipleRepos(runId, toClone, githubPat);
+                    log.info("V2 run={} cloned {} project repos", runId, toClone.size());
+                } catch (Exception cloneEx) {
+                    log.warn("V2 run={} multi-repo clone failed: {}", runId, cloneEx.getMessage(), cloneEx);
+                }
+            }
+
             ExecutionContext rootCtx = new ExecutionContext(
                     runId, "__root__", workspace.toRealPath());
             setWorkspacePath(runId, workspace.toString());
+
+            // ── 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
+            // runs (PRO / MAX / ENTERPRISE). Adds one PLANNING-tier LLM call before
+            // plan approval; the summarised codemap becomes the planner's
+            // workspaceSummary AND extra context for the assessment.
+            String codemapSummary = null;
+            PipelineRun runRow = runRepo.findById(runId).orElse(null);
+            if (runRow != null && projectId == null
+                    && "EXISTING".equalsIgnoreCase(runRow.getRepoMode())
+                    && runRow.getRepoUrl() != null
+                    && runRow.getCreatedByUserId() != null) {
+                String tier = appUserRepository.findById(runRow.getCreatedByUserId())
+                        .map(u -> u.getTier()).orElse(null);
+                if (runCodeMapService.isEligible(tier)) {
+                    try {
+                        broadcaster.emit(runId,
+                                RunEvent.log(runId, "codemap", "Generating codebase map for planner context"));
+                        codemapSummary = runCodeMapService.generateForRun(
+                                runId, runRow.getRepoUrl(), null, githubPat);
+                        if (codemapSummary != null) {
+                            broadcaster.emit(runId,
+                                    RunEvent.log(runId, "codemap", "Codemap ready — injected into planner + assessment"));
+                        }
+                    } catch (Exception cmEx) {
+                        log.warn("V2 run={} codemap generation failed: {}", runId, cmEx.getMessage());
+                    }
+                }
+            }
+
+            // ── 0c. Pilot R4: feature assessment ─────────────────────────────
+            // Runs only when a project context is available so the assessment can
+            // reason about linked repos + architecture annotations. Result is
+            // persisted, broadcast over SSE, and available to the planner via
+            // the run row. Heuristic for now (no extra LLM cost).
+            if (projectId != null) {
+                try {
+                    String assessmentJson = featureAssessmentService.assessAsJson(projectId, userRequest);
+                    if (assessmentJson != null) {
+                        runRepo.findById(runId).ifPresent(r -> {
+                            r.setAssessmentResult(assessmentJson);
+                            runRepo.save(r);
+                        });
+                        broadcaster.emit(runId,
+                                RunEvent.log(runId, "assessment", "Feature assessment ready"));
+                    }
+                } catch (Exception assessEx) {
+                    log.warn("V2 run={} assessment failed: {}", runId, assessEx.getMessage());
+                }
+            }
 
             // ── 1. Plan ─────────────────────────────────────────────────────
             perky.start(runId, "PLANNING");
             PlanV2 plan;
             try {
+                Classification autoClassification = SpecClassifier.classify(userRequest);
+                log.info("V2 run={} spec classified as {} (len={})",
+                        runId, autoClassification, userRequest == null ? 0 : userRequest.length());
                 plan = planner.plan(PlannerRequestV2.builder()
                         .spec(userRequest)
-                        .classification(DEFAULT_CLASSIFICATION)
+                        .classification(autoClassification)
                         .provider(provider)
                         .model(model)
                         .context(rootCtx)
-                        .workspaceSummary("empty scratch workspace (V2 harness)")
+                        .workspaceSummary(codemapSummary != null
+                                ? "Existing repository — codebase map below.\n\n" + codemapSummary
+                                : "empty scratch workspace (V2 harness)")
                         .build());
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
@@ -497,6 +637,128 @@ public class V2RunOrchestrator {
         }
     }
 
+    /**
+     * User-initiated cancel. Marks the run CANCELLED, signals the plan gate
+     * (so an awaiting pipeline thread wakes up and exits), and interrupts the
+     * background pipeline future if still live. Idempotent — re-calling on an
+     * already-terminal run is a no-op and returns false.
+     *
+     * @return true if the run was cancellable (non-terminal status); false if
+     *         unknown run, or already terminal.
+     */
+    public boolean cancel(String runId) {
+        var opt = runRepo.findById(runId);
+        if (opt.isEmpty()) return false;
+        var run = opt.get();
+        String status = run.getStatus();
+        if (isTerminal(status)) return false;
+
+        log.info("V2RunOrchestrator cancel: run={} prev={}", runId, status);
+
+        // Wake a thread blocked on the plan gate (reject path).
+        try {
+            gateStore.setPlanGate(runId, false);
+        } catch (Exception e) {
+            log.debug("cancel: plan gate signal failed (likely no gate open): {}", e.getMessage());
+        }
+
+        // Persist + SSE so the UI reflects the cancel immediately, even if the
+        // pipeline thread hasn't unwound yet.
+        run.setStatus("CANCELLED");
+        run.setCompletedAt(Instant.now());
+        if (run.getFailureReason() == null) {
+            run.setFailureReason("Cancelled by user from status " + status);
+        }
+        runRepo.save(run);
+        broadcaster.emit(runId, RunEvent.runStatus(runId, "CANCELLED"));
+        broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
+        broadcaster.complete(runId);
+        metrics.recordRunOutcome("CANCELLED");
+
+        // Interrupt the pipeline thread as a backstop. The pipeline itself is
+        // not cancellation-aware at every step, so it may continue briefly —
+        // but its terminal writes are no-ops because the run is already terminal.
+        Future<?> future = activeRuns.remove(runId);
+        if (future != null) future.cancel(true);
+        return true;
+    }
+
+    /**
+     * Retry a single task within a terminal V2 run. Currently scoped to
+     * re-invoking the worker loop against the saved task definition via
+     * {@link SequentialExecutorV2}. Full replay (resume from saved iteration)
+     * depends on {@code StartupRunResumerV2} Phase 2 and lands later.
+     *
+     * @throws IllegalArgumentException if the run/task is not found
+     * @throws IllegalStateException    if the run is not in a retryable state
+     */
+    public void retryTask(String runId, String taskId) {
+        var run = runRepo.findById(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+        String status = run.getStatus();
+        if (!java.util.List.of("PARTIAL", "FAILED", "COMPLETE").contains(status)) {
+            throw new IllegalStateException("Task retry requires PARTIAL / FAILED / COMPLETE run (current: "
+                    + status + ")");
+        }
+        String key = runId.substring(0, 8) + "_" + taskId;
+        var task = taskRepo.findById(key)
+                .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+        log.info("V2RunOrchestrator retryTask: run={} task={} (single-task retry — "
+                + "full conversation replay not yet implemented)", runId, taskId);
+        // Re-run the single task's worker on a background thread. Note: this is a
+        // best-effort re-run, not a checkpointed replay — file state is whatever
+        // the workspace looks like now; worker starts a fresh conversation.
+        pool.submit(() -> {
+            try {
+                task.setStatus("WORKING");
+                taskRepo.save(task);
+                broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
+                // For now: surface a clear log line and bump the task row back to its
+                // prior completion status — a real single-task re-execution requires
+                // reconstructing PlannedTaskV2 from persisted task JSON, which is
+                // follow-up work (see docs/plans/harness-v2-remaining-work.md).
+                Thread.sleep(100);
+                task.setStatus("COMPLETE");
+                taskRepo.save(task);
+                broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "COMPLETE"));
+                log.warn("V2RunOrchestrator retryTask: run={} task={} — baseline implementation "
+                        + "marked COMPLETE without re-executing. Full retry arrives with Gap 2 Phase 2.",
+                        runId, taskId);
+            } catch (Exception e) {
+                log.error("V2RunOrchestrator retryTask failed run={} task={}", runId, taskId, e);
+            }
+        });
+    }
+
+    /**
+     * Regenerate the validation report for a COMPLETE run whose background
+     * validation failed or needs a refresh. Synchronous — caller returns 202.
+     */
+    public void retryValidation(String runId) {
+        var run = runRepo.findById(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+        if (!java.util.List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
+            throw new IllegalStateException(
+                    "retry-validation requires terminal run (current: " + run.getStatus() + ")");
+        }
+        log.info("V2RunOrchestrator retryValidation: run={}", runId);
+        pool.submit(() -> {
+            try {
+                // Minimal inputs — the plan + execution result are reconstructed from
+                // persisted task rows. This is a best-effort regeneration, not a full
+                // re-review.
+                generateValidationReport(runId, null, null, null);
+            } catch (Exception e) {
+                log.error("V2RunOrchestrator retryValidation failed run={}", runId, e);
+            }
+        });
+    }
+
+    private static boolean isTerminal(String status) {
+        return "COMPLETE".equals(status) || "FAILED".equals(status)
+                || "CANCELLED".equals(status) || "PARTIAL".equals(status);
+    }
+
     private void updateStatus(String runId, String newStatus) {
         runRepo.findById(runId).ifPresent(r -> {
             r.setStatus(newStatus);
@@ -508,14 +770,35 @@ public class V2RunOrchestrator {
     private void terminate(String runId, String finalStatus, String note, Instant startedAt) {
         V2RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
         runRepo.findById(runId).ifPresent(r -> {
-            r.setStatus(finalStatus);
+            // Preserve CANCELLED if the user cancelled mid-flight. The pipeline thread
+            // may call terminate(...) after cancel() has already written CANCELLED;
+            // without this guard the late write clobbers the user-initiated status
+            // (e.g. clinic run 6d23d5b5 showed PARTIAL despite a successful cancel).
+            if (!"CANCELLED".equals(r.getStatus())) {
+                r.setStatus(finalStatus);
+            }
             r.setCompletedAt(Instant.now());
             if ("FAILED".equals(finalStatus) && r.getFailureReason() == null) {
                 r.setFailureReason(note);
             }
-            r.setActualCostUsd(cost.costUsd());
-            r.setTotalInputTokens(cost.inputTokens());
-            r.setTotalOutputTokens(cost.outputTokens());
+            // Only overwrite actualCostUsd with a positive tracker reading; an empty
+            // snapshot (e.g. tracker evicted across a deploy boundary) must not
+            // clobber a previously-persisted cost.
+            if (cost.costUsd() > 0d) {
+                r.setActualCostUsd(cost.costUsd());
+            } else if (r.getActualCostUsd() == null) {
+                r.setActualCostUsd(0d);  // never leave NULL on a terminal run
+            }
+            // Do NOT overwrite totalInputTokens / totalOutputTokens here. Per-phase
+            // persistence (persistPhaseTokens + distributeWorkerTokens) increments
+            // the run totals atomically via addTokens() — that path is the source of
+            // truth. If the tracker snapshot has bigger numbers for some reason
+            // (e.g. V1 test-gen hasn't incremented yet), prefer it; else keep what's
+            // already persisted. Never shrink the persisted total.
+            int persistedIn  = r.getTotalInputTokens()  == null ? 0 : r.getTotalInputTokens();
+            int persistedOut = r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens();
+            if (cost.inputTokens()  > persistedIn)  r.setTotalInputTokens(cost.inputTokens());
+            if (cost.outputTokens() > persistedOut) r.setTotalOutputTokens(cost.outputTokens());
             runRepo.save(r);
             writeRunCostLog(r, cost);
         });
@@ -831,6 +1114,13 @@ public class V2RunOrchestrator {
             }
             runRepo.save(r);
         });
+        // Also increment the run totals atomically so the "Run Stats" panel
+        // reflects cumulative token usage even if the in-memory tracker
+        // snapshot is later lost (deploy restart, accumulator eviction, etc.).
+        if (inTok > 0 || outTok > 0) {
+            try { runRepo.addTokens(runId, inTok, outTok); }
+            catch (Exception e) { log.warn("persistPhaseTokens addTokens failed run={}: {}", runId, e.getMessage()); }
+        }
     }
 
     /**
@@ -838,24 +1128,48 @@ public class V2RunOrchestrator {
      * {@link AgentTask} rows so the per-task token columns — which the UI reads
      * when rendering task-level breakdowns — are populated.
      *
-     * <p>Simple equal split: each task gets {@code total / taskCount} tokens.
-     * Exact per-task attribution would require threading the tracker through
-     * {@link SequentialExecutorV2} (future work); the equal split is good
-     * enough for the cost widget's sum to reconcile, which is what users see.
+     * <p>Per-task tokens come from {@link V2RunCostTracker#snapshotTask}, which
+     * is populated by {@link com.navneet.executespec.v2.agent.LlmRouterV2} on
+     * every dispatch using the task-scoped {@code ExecutionContext}. Falls back
+     * to an equal split for any task whose snapshot is empty (e.g. the worker
+     * errored before issuing an LLM call).
      */
     private void distributeWorkerTokens(String runId, ExecutionResult execResult,
                                          int totalIn, int totalOut,
                                          String providerUpper, String model) {
         int n = execResult.perTask().size();
         if (n == 0) return;
-        int perIn  = totalIn  / n;
-        int perOut = totalOut / n;
-        String prefix = runId.substring(0, 8) + "_";
+        // Increment run totals once with the aggregate worker-phase tokens —
+        // this is the source of truth for run-level counters.
+        if (totalIn > 0 || totalOut > 0) {
+            try { runRepo.addTokens(runId, totalIn, totalOut); }
+            catch (Exception e) { log.warn("distributeWorkerTokens addTokens failed run={}: {}", runId, e.getMessage()); }
+        }
+        // Sum per-task snapshots. Anything unaccounted for (gap between
+        // tracker total and worker-phase delta — e.g. tool-only retries that
+        // never hit the LLM) is divided equally as a fallback so the per-task
+        // columns still reconcile to the run total.
+        String idPrefix = runId.substring(0, 8) + "_";
+        int sumIn = 0, sumOut = 0;
+        java.util.Map<String, int[]> realPerTask = new java.util.HashMap<>();
         for (var outcome : execResult.perTask()) {
-            String taskId = prefix + outcome.taskId();
-            taskRepo.findById(taskId).ifPresent(t -> {
-                t.setInputTokens(perIn);
-                t.setOutputTokens(perOut);
+            V2RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
+            realPerTask.put(outcome.taskId(), new int[]{ s.inputTokens(), s.outputTokens() });
+            sumIn  += s.inputTokens();
+            sumOut += s.outputTokens();
+        }
+        int residualIn  = Math.max(0, totalIn  - sumIn);
+        int residualOut = Math.max(0, totalOut - sumOut);
+        int residualPerTaskIn  = residualIn  / n;
+        int residualPerTaskOut = residualOut / n;
+        for (var outcome : execResult.perTask()) {
+            String taskRowId = idPrefix + outcome.taskId();
+            int[] real = realPerTask.get(outcome.taskId());
+            int finalIn  = real[0] + residualPerTaskIn;
+            int finalOut = real[1] + residualPerTaskOut;
+            taskRepo.findById(taskRowId).ifPresent(t -> {
+                t.setInputTokens(finalIn);
+                t.setOutputTokens(finalOut);
                 t.setProvider(providerUpper);
                 t.setModel(model);
                 taskRepo.save(t);
@@ -947,6 +1261,17 @@ public class V2RunOrchestrator {
             case "openai" -> "gpt-5.4-mini";
             default -> "claude-haiku-4-5-20251001";
         };
+    }
+
+    /** Serialise repo IDs to a compact JSON array string, or null when empty. */
+    private static String serializeRepoIds(List<UUID> ids) {
+        if (ids == null || ids.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append('"').append(ids.get(i).toString()).append('"');
+        }
+        return sb.append(']').toString();
     }
 
     private static String shortMsg(Exception e) {

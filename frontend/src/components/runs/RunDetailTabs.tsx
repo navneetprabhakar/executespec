@@ -13,7 +13,9 @@ import {
   getTestPlan, getTestGraph,
   getLiveCost,
   getTaskGraph,
+  getRunPrs,
 } from '@/lib/api';
+import type { PrSummary } from '@/types/project';
 import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto, TestGraphData, TaskGraphNode } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
@@ -843,24 +845,8 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         </p>
       </div>
 
-      {/* SCM PR link (GitHub or Bitbucket) */}
-      {(run.scmPrUrl || run.githubPrUrl) && (
-        <div className="pt-2 border-t border-[var(--border-default)]">
-          <p className="text-xs text-muted">Pull Request</p>
-          <a
-            href={run.scmPrUrl || run.githubPrUrl!}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-accent-blue hover:underline mt-0.5 inline-flex items-center gap-1.5 font-mono break-all"
-          >
-            {(run.scmPrUrl || run.githubPrUrl!).replace('https://github.com/', '').replace('https://bitbucket.org/', '')}
-            <Maximize2 className="h-3 w-3 flex-shrink-0" />
-          </a>
-          {run.scmProvider === 'BITBUCKET' && (
-            <span className="ml-2 text-[10px] text-muted uppercase tracking-wider">Bitbucket</span>
-          )}
-        </div>
-      )}
+      {/* Pull requests — pilot R5 list (falls back to legacy single link). */}
+      <RunPrList run={run} />
 
       {/* Goal — the user's original request (markdown rendered) */}
       {run.userRequest && (
@@ -2059,3 +2045,70 @@ function GraphNode({ node }: { node: { id: string; label: string; type: string; 
   );
 }
 
+
+// ─── Pilot R5: Pull request list ────────────────────────────────────────────
+function RunPrList({ run }: { run: RunDetail }) {
+  const [prs, setPrs] = useState<PrSummary[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRunPrs(run.runId)
+      .then((list) => {
+        if (!cancelled) {
+          setPrs(list);
+          setLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [run.runId, run.status]);
+
+  // Fallback: legacy runs without PullRequestRecord rows still surface the single PR link.
+  const legacyUrl = run.scmPrUrl || run.githubPrUrl || null;
+  if (!loaded) return null;
+  if (prs.length === 0 && !legacyUrl) return null;
+
+  return (
+    <div className="pt-2 border-t border-[var(--border-default)]">
+      <p className="text-xs text-muted mb-1">Pull requests</p>
+      {prs.length > 0 ? (
+        <ul className="space-y-1">
+          {prs.map((pr) => (
+            <li key={`${pr.repoFullName}-${pr.prNumber}`} className="flex items-center gap-2 text-sm">
+              <span className={cn(
+                'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide',
+                pr.status === 'MERGED' && 'bg-purple-500/10 text-purple-500',
+                pr.status === 'OPEN' && 'bg-blue-500/10 text-blue-500',
+                pr.status === 'CLOSED' && 'bg-red-500/10 text-red-500',
+              )}>
+                {pr.status}
+              </span>
+              <a
+                href={pr.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-accent-blue hover:underline break-all"
+              >
+                {pr.repoFullName}#{pr.prNumber}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : legacyUrl ? (
+        <a
+          href={legacyUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-accent-blue hover:underline font-mono break-all"
+        >
+          {legacyUrl.replace('https://github.com/', '').replace('https://bitbucket.org/', '')}
+        </a>
+      ) : null}
+    </div>
+  );
+}

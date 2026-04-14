@@ -1,6 +1,7 @@
 # V2 Batch Execution — Design & Execution Plan
 
-> Status: draft for review (2026-04-13). Owner: next session. Depends on: deprecation-removal Phase P3 (V1 `batch/*` deletion).
+> Status: ready to execute (2026-04-13).
+> **Sequencing dependency unblocked** — V1 `batch/*` was deleted in deprecation-removal P3 (commit `154169d9`, 2026-04-13). P0 probe + P1 scaffolding can start immediately.
 
 ## Goal
 

@@ -71,6 +71,11 @@ public class WorkerAgentV2 {
     private final ObjectMapper objectMapper;
     private final ContextStoreV2 contextStore;
     private final V2Metrics metrics;
+    private final com.navneet.executespec.v2.cost.V2RunCostTracker costTracker;
+    private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepository;
+
+    /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
+    static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
 
     public WorkerResult run(WorkerTaskRequest req) {
         long start = System.currentTimeMillis();
@@ -90,7 +95,28 @@ public class WorkerAgentV2 {
                 req.context().runId(), req.context().taskId(),
                 req.provider(), req.model(), maxIter);
 
+        // Bug #2 fix — load the run's hard cap once so the loop can stop
+        // itself if cost blows past it mid-task. Null cap = no enforcement.
+        final String runId = req.context().runId();
+        final Double hardCapUsd = pipelineRunRepository.findById(runId)
+                .map(r -> r.getHardCapUsd())
+                .orElse(null);
+
         for (int iter = 1; iter <= maxIter; iter++) {
+            if (hardCapUsd != null && hardCapUsd > 0
+                    && (iter == 1 || iter % BUDGET_CHECK_EVERY_N_ITERATIONS == 0)) {
+                double spent = costTracker.snapshot(runId).costUsd();
+                if (spent >= hardCapUsd) {
+                    log.warn("WorkerAgentV2 BUDGET_EXCEEDED run={} task={} iter={} spent=${} cap=${}",
+                            runId, req.context().taskId(), iter,
+                            String.format("%.4f", spent), String.format("%.4f", hardCapUsd));
+                    recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
+                    return errorResult(iter, toolsDispatched, toolLog, start,
+                            "hard cap $" + String.format("%.2f", hardCapUsd) + " exceeded mid-task (spent $"
+                                    + String.format("%.2f", spent) + ")");
+                }
+            }
+
             ChatResponse resp;
             try {
                 resp = router.call(LlmRequestV2.builder()

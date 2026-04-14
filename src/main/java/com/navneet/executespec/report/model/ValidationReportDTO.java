@@ -28,6 +28,13 @@ public record ValidationReportDTO(
     Integer accuracyScore,     // 0-100 spec adherence score
     String accuracyGrade,      // A/B/C/D/F
     String accuracyJson,       // full AccuracyReport JSON for frontend detail view
+    // Pilot R6 — multi-dimension scores (nullable for runs before V83).
+    Integer codeQualityScore,
+    Integer testCoverageScore,
+    Integer architectureScore,
+    Integer securityScore,
+    Integer performanceScore,
+    Integer designComplianceScore,
     // Preview URL at time of report generation (nullable — batch runs and expired previews won't have this)
     String previewUrl
 ) {}
