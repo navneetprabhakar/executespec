@@ -5,6 +5,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.5.1] — 2026-04-15
+
+Hardening pass after v2.5.0 E2E. One systemic fix (OSIV) replaces a round of whack-a-mole lazy-init patches; several small fixes + UX additions keep the Launch / post-merge loop unblocked.
+
+### Added
+
+- **PR refresh + post-merge cascade** — `POST /api/projects/{id}/prs/refresh` polls GitHub for every non-terminal PR opened by the project, flips status on `merged` true. Any OPEN → MERGED transition fires `PostMergeCascadeService`: invalidates `StalenessService`, regenerates architecture + codemaps, emits a notification. `ProjectPrRollup` gains a Refresh button + last-result chip.
+- **Branch override on `/analyse`** — `POST /api/projects/{id}/analyse?branch=<name>` applies one branch to every linked repo's codemap regen. Empty falls back to each repo's default. Architecture tab has a new branch input next to Regenerate.
+- **Run sync from a branch** — `POST /api/runs/{id}/sync?branch=<name>` hard-resets the workspace (single-repo or every `repos/<name>/` subdir) to `origin/<branch>`. Branch omitted → per-repo default via `git symbolic-ref origin/HEAD`. Gated on terminal status. `InlineRunDetail` adds a compact branch + Sync button.
+- **Architecture diff UI** — "Diff vs v{N-1}" button on the Architecture tab renders a GitHub-style LCS line diff of `architecture.md`.
+- **Launch Cancel + Resume** — `ExecutionViewPage` header shows a persistent Cancel button on every non-terminal step; `ExecutionMonitor` adds Resume next to Abort, which calls `POST /api/executions/{id}/resume` to re-trigger `executeApprovedPlan` on the existing run. Removes the need to redo Setup / Analysis / Arch review / Plan when execution hangs.
+
+### Fixed
+
+- **Lazy-init across the execution + project controllers** — `spring.jpa.open-in-view` was explicitly set to `false`, so every DTO mapper that walked a lazy collection (`ExecutionSolution.dependencies`, `ExecutionRun` proxy, etc.) threw `LazyInitializationException`. Flipped to `true` (the Spring default). Kills four distinct crashes (getExecution, approvePlan, decide, resume) in one shot. `findWithDependenciesByExecutionRun_Id…` eager-fetch kept as belt + braces.
+- **`/analyse` used the system GitHub PAT** (env `GITHUB_PAT`), not the caller's user PAT. Private repos returned 404 → empty file tree → every codemap was the same 69-byte "Files: 0" placeholder. `ProjectArchitectureController` now threads `AppUserDetails.githubPat` through `ProjectArchitectureService.generate(projectId, branch, pat)`.
+- **Launch arch compile used the system PAT too** — `ExecutionOrchestrator.triggerAnalysis` now loads the creator's PAT via `AppUserRepository`.
+- **Launch dispatch silently ran on OpenAI** — `SolutionExecutionService.submitSolutionRun` passed null for both `modelName` and `aiProvider`, so `V2RunOrchestrator.normalizeProvider` defaulted to `openai + gpt-5.4-mini`. Now passes `ExecutionRun.aiProvider` (the project's choice).
+- **Planner repo mappings were always null** — the LLM returns a repo name or short-name in the `repoId` field, not a UUID. `UUID.fromString` threw → `repoId=null` → no clone fired → worker wrote into scratch dirs → retry storm (maxRetries=3 per solution). `ExecutionPlannerService.persistPlan` now falls back to a case-insensitive match against `ProjectRepo.githubRepoFullName` / short-name when the UUID parse fails.
+- **`listRepoFiles` / `readRepoFile` hardcoded `main`** — repos with a non-`main` default branch returned an empty tree. Both endpoints now accept a `branch` parameter; `CodeMapGenerator` threads `ProjectRepo.defaultBranch`.
+- **ExecutionSetup showed repo UUIDs** — the store returns `ProjectRepoLink` wrappers but the component read `r.githubRepoFullName` directly. Reads `r.repo.githubRepoFullName` with a flat-shape fallback + shows the scope chip.
+- **`ProjectWorkspaceService.java` was untracked in git** — the `.gitignore` `workspace/` rule was unanchored and matched the Java package. `.gitignore` now anchors to the repo root (`/workspace/`) and the file is in the index.
+- **`EmbeddingService` "No EmbeddingModel bean"** — Spring AI 1.1.4 only auto-registers the model when a chat-side property triggers it; unreliable. Rewrote as a direct REST call against `/v1/embeddings` using the same `spring.ai.openai.api-key` everything else uses.
+
+### Schema
+
+- **V96** `auto_push_default_on.sql` — upsert `project.runs.auto-push = true` on `PLATFORM` scope.
+- **V97** `auto_push_fix_scope.sql` — corrects V96's invalid `GLOBAL` scope to `PLATFORM` (the enum is `PLATFORM | ORG`).
+- **V98** `execution_relax_id_lengths.sql` — widens every VARCHAR(36) id + fk across `execution_run` / `execution_solution` / `execution_solution_run` / `execution_solution_repo` / `execution_context_handover` to VARCHAR(64). Drops + recreates the three `tenant_isolation` RLS policies that reference the altered columns. Admin user IDs exceed 36 chars; same class as V94 (`project_chat_message`).
+
+### Ops
+
+- `spring.jpa.open-in-view: true` added with an explaining comment.
+- `V2RunOrchestrator` now injects `StalenessService` + `ProjectArchitectureService` + `ProjectBriefService` + `RetrievalService`; pre-execution staleness refresh + post-success invalidate moved to explicit calls.
+
+---
+
 ## [2.5.0] — 2026-04-15
 
 Per-project workspace, codemap + architecture as physical markdown, RAG over user-uploaded docs, auto-push on, and a GitHub-style architecture diff. Backlog: vector spill (snapshot > 12K), OCR / rerank / semantic chunking.

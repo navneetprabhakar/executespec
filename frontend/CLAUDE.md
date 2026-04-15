@@ -1,6 +1,8 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-15 (v2.5.0 — Project Workspace + RAG: `ProjectDashboardPage` gains a Docs tab driven by new `ProjectDocumentsPanel` (drag-drop upload, async status, delete); Overview tab gains a Project Summary panel + Analyse button (`getProjectSummary` / `analyseProject`); `ArchitectureViewer` gets a "Diff vs v{N-1}" button + LCS line-diff renderer; `text-[12]` body rows on Project components normalised to `text-[11]` to match Run/Pro view density; new API helpers `listProjectDocuments` / `uploadProjectDocument` / `deleteProjectDocument`)
+> Last updated: 2026-04-15 (v2.5.1 — PR refresh button (`ProjectPrRollup`), Architecture diff + branch input (`ArchitectureViewer`), Run Sync from branch (`InlineRunDetail`), persistent Cancel on Launch header + Resume button on `ExecutionMonitor`, `ExecutionSetup` shows repo githubRepoFullName instead of UUID, new API helpers `refreshProjectPrs` / `analyseProject(branch)` / `syncRun` / `executionApi.resume`)
+>
+> v2.5.0 (Project Workspace + RAG): `ProjectDashboardPage` gains a Docs tab driven by new `ProjectDocumentsPanel` (drag-drop upload, async status, delete); Overview tab gains a Project Summary panel + Analyse button (`getProjectSummary` / `analyseProject`); `ArchitectureViewer` gets a "Diff vs v{N-1}" button + LCS line-diff renderer; `text-[12]` body rows on Project components normalised to `text-[11]` to match Run/Pro view density; new API helpers `listProjectDocuments` / `uploadProjectDocument` / `deleteProjectDocument`)
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
