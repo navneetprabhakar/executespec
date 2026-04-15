@@ -10,6 +10,26 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
   const me = useAuthStore((s) => s.user);
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+
+  const handleResetAll = async () => {
+    if (resetting) return;
+    setResetting(true);
+    setResetMsg(null);
+    try {
+      // "Reset workspace" for the project = re-pull every repo + regenerate
+      // codemaps + architecture so the next Launch starts from current origin HEAD.
+      // `analyseProject` already does all of that in one call.
+      await api.analyseProject(projectId);
+      setResetMsg('Workspace refreshed — codemaps & architecture regenerated.');
+      await fetchRepos(projectId);
+    } catch (e) {
+      setResetMsg(`Reset failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setResetting(false);
+    }
+  };
 
   useEffect(() => {
     fetchRepos(projectId);
@@ -56,14 +76,27 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Linked repositories</h2>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          + Add repository
-        </button>
+        <div className="flex items-center gap-2">
+          {repos.length > 0 && (
+            <button
+              onClick={handleResetAll}
+              disabled={resetting}
+              title="Pull current origin HEAD for every linked repo + regenerate codemaps and architecture"
+              className="text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
+            >
+              {resetting ? 'Refreshing…' : 'Reset workspace'}
+            </button>
+          )}
+          <button
+            onClick={() => setShowAdd(true)}
+            className="text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            + Add repository
+          </button>
+        </div>
       </div>
 
+      {resetMsg && <div className="text-[11px] text-muted">{resetMsg}</div>}
       {error && <div className="text-sm text-red-600">{error}</div>}
 
       {repos.length === 0 && (
@@ -80,6 +113,7 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
               onUnlink={handleUnlink}
               onSync={handleSync}
               onUpdateRelationships={handleUpdateRel}
+              onRefresh={() => fetchRepos(projectId)}
             />
           </div>
         ))}

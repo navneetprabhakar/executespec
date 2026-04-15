@@ -31,6 +31,16 @@ public class GitHubRepoService {
     @Value("${agent.github.default-owner:owner}")
     private String defaultOwner;
 
+    /** Callback URL that GitHub will POST to — should match the handler route
+     *  in {@code GitHubWebhookController}. Optional: null disables auto-provisioning. */
+    @Value("${github.webhook.callback-url:}")
+    private String webhookCallbackUrl;
+
+    /** HMAC shared secret for webhook signature verification (same value the
+     *  handler reads via {@code github.webhook.secret}). */
+    @Value("${github.webhook.secret:}")
+    private String webhookSecret;
+
     private static final String[] ADJECTIVES = {
         "swift", "bright", "calm", "bold", "keen", "neat", "warm", "cool", "fair", "vast",
         "rapid", "crisp", "lunar", "solar", "prime", "agile", "vivid", "lucid", "sonic", "amber"
@@ -111,6 +121,61 @@ public class GitHubRepoService {
         // All retries exhausted
         String fallbackName = baseName + "-" + ThreadLocalRandom.current().nextInt(10, 100);
         return "https://github.com/" + effectiveOwner + "/" + fallbackName + ".git";
+    }
+
+    /**
+     * Install a {@code pull_request} webhook on the given repo so the
+     * {@link com.navneet.executespec.project.pr.GitHubWebhookController} receives
+     * merge events. Best-effort: logs a warning and returns {@code false} on any
+     * failure (no PAT, no callback URL, network error, 422 duplicate, 404 missing
+     * admin) so the caller can continue linking the repo either way.
+     *
+     * <p>Requires {@code github.webhook.callback-url} + {@code github.webhook.secret}
+     * to be configured; otherwise this short-circuits to {@code false}.
+     *
+     * @param repoFullName  e.g. "owner/repo"
+     * @param overridePat   caller's PAT (must have {@code admin:repo_hook})
+     * @return              {@code true} on 201 Created, else {@code false}
+     */
+    public boolean installWebhook(String repoFullName, String overridePat) {
+        if (webhookCallbackUrl == null || webhookCallbackUrl.isBlank()
+                || webhookSecret == null || webhookSecret.isBlank()) {
+            log.debug("[GitHubRepoService] Webhook auto-provision disabled — callback/secret not set");
+            return false;
+        }
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return false;
+        if (repoFullName == null || !repoFullName.contains("/")) return false;
+
+        String body = """
+                {"name":"web","active":true,"events":["pull_request"],"config":{"url":"%s","content_type":"json","secret":"%s","insecure_ssl":"0"}}"""
+                .formatted(webhookCallbackUrl, webhookSecret.replace("\"", "\\\""));
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/hooks"))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() == 201) {
+                log.info("[GitHubRepoService] Installed PR webhook on {}", repoFullName);
+                return true;
+            }
+            // 422 = duplicate hook (already installed) — treat as success so the repo flag flips.
+            if (res.statusCode() == 422 && res.body() != null && res.body().contains("already exists")) {
+                log.info("[GitHubRepoService] PR webhook already exists on {} — treating as installed", repoFullName);
+                return true;
+            }
+            log.warn("[GitHubRepoService] Webhook install on {} returned {}: {}",
+                    repoFullName, res.statusCode(), res.body());
+            return false;
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] Webhook install on {} failed: {}", repoFullName, e.getMessage());
+            return false;
+        }
     }
 
     /**

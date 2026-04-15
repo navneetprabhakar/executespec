@@ -99,6 +99,12 @@ public class SequentialExecutorV2 {
     private final SseBroadcaster broadcaster;
     private final AgentTaskRepository taskRepo;
     private final ModelResolver modelResolver;
+    private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
+
+    /** Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the
+     *  planner's budget (k=3, 1500) so per-task cost stays bounded across many tasks. */
+    private static final int WORKER_RAG_K = 2;
+    private static final int WORKER_RAG_TOKEN_CAP = 800;
 
     public ExecutionResult execute(ExecutionRequest req) {
         long runStart = System.currentTimeMillis();
@@ -133,7 +139,8 @@ public class SequentialExecutorV2 {
         ExecutionContext taskCtx = new ExecutionContext(
                 req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
 
-        String systemPrompt = composeSystemPrompt(task, req.designBlock());
+        String refDocs = fetchReferenceDocs(req.projectId(), task);
+        String systemPrompt = composeSystemPrompt(task, req.designBlock(), refDocs);
         String userPrompt = composeUserPrompt(task, null);
 
         log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -387,7 +394,7 @@ public class SequentialExecutorV2 {
 
     // ─── prompt composition ─────────────────────────────────────────────────
 
-    private String composeSystemPrompt(PlannedTaskV2 task, String designBlock) {
+    private String composeSystemPrompt(PlannedTaskV2 task, String designBlock, String refDocs) {
         StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
         if (!task.hardConstraints().isEmpty()) {
             sb.append("\n\nHARD CONSTRAINTS for this task (MUST follow):\n");
@@ -402,7 +409,37 @@ public class SequentialExecutorV2 {
         if (designBlock != null && !designBlock.isBlank()) {
             sb.append("\n\n").append(designBlock);
         }
+        if (refDocs != null && !refDocs.isBlank()) {
+            // Worker-time RAG (v2.5.2): relevant snippets from uploaded project docs.
+            // Planner already injects its own {{REFERENCE_DOCS}} block during plan
+            // synthesis; this is a narrower, task-scoped retrieval that keeps
+            // detail constraints (field names, API contracts, limits) in front of
+            // the worker while it writes code.
+            sb.append("\n\n--- REFERENCE DOCS (task-relevant excerpts) ---\n")
+              .append(refDocs)
+              .append("\n--- END REFERENCE DOCS ---\n");
+        }
         return sb.toString();
+    }
+
+    /**
+     * Task-scoped RAG retrieval. Uses the task description as the query; empty
+     * string on any failure (retrieval errors never fail the run). Returns the
+     * raw markdown from {@code RetrievalService} ready for prompt inclusion.
+     */
+    private String fetchReferenceDocs(String projectId, PlannedTaskV2 task) {
+        if (projectId == null || projectId.isBlank()) return "";
+        String query = task.description() == null || task.description().isBlank()
+                ? task.title() : task.description();
+        if (query == null || query.isBlank()) return "";
+        try {
+            String docs = retrievalService.retrieve(projectId, query, WORKER_RAG_K, WORKER_RAG_TOKEN_CAP);
+            return docs == null ? "" : docs;
+        } catch (Exception e) {
+            log.debug("fetchReferenceDocs failed for project={} task={}: {}",
+                    projectId, task.id(), e.getMessage());
+            return "";
+        }
     }
 
     private String composeUserPrompt(PlannedTaskV2 task, String previousBuildError) {

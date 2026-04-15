@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, ExternalLink, Github, RefreshCw, Upload, Loader2, GitBranch } from 'lucide-react';
-import { getFiles, pushToGitHub, syncRun, type RunDetail } from '@/lib/api';
+import { getFiles, pushToGitHub, syncRun, syncRunToOriginal, type RunDetail } from '@/lib/api';
 import ValidationReportPanel from '@/components/runs/ValidationReportPanel';
 import { CodeTab } from '@/components/runs/RunDetailTabs';
 import { cn } from '@/lib/utils';
@@ -33,6 +33,7 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
   const [syncing, setSyncing] = useState(false);
   const [syncBranch, setSyncBranch] = useState('');
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [resettingOriginal, setResettingOriginal] = useState(false);
 
   const doRefresh = async () => {
     if (!onRefresh || refreshing) return;
@@ -55,6 +56,21 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
       setSyncStatus(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const doResetToOriginal = async () => {
+    if (resettingOriginal || !terminal) return;
+    setResettingOriginal(true);
+    setSyncStatus(null);
+    try {
+      const r = await syncRunToOriginal(run.runId);
+      setSyncStatus(`Reset to run state: ${r.details.join(', ')}`);
+      if (onRefresh) await onRefresh();
+    } catch (e) {
+      setSyncStatus(`Reset failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setResettingOriginal(false);
     }
   };
 
@@ -115,6 +131,16 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
                   {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Sync'}
                 </button>
               </div>
+            )}
+            {terminal && (
+              <button
+                onClick={doResetToOriginal}
+                disabled={resettingOriginal}
+                title="Reset workspace to the exact commit SHAs this run cloned at start (v2.5.2+)"
+                className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-muted hover:text-primary disabled:opacity-50"
+              >
+                {resettingOriginal ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Reset to run state'}
+              </button>
             )}
             {onRefresh && (
               <button

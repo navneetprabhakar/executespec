@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Manages per-run workspace lifecycle.
@@ -27,6 +28,7 @@ public class WorkspaceInitService {
 
     private final AgentProperties props;
     private final WorkspaceRestoreService restoreService;
+    private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
 
     /**
      * Creates and initialises a fresh, isolated workspace for {@code runId}.
@@ -264,11 +266,70 @@ public class WorkspaceInitService {
                     : httpsUrl;
             log.info("Cloning {} into {} for run {}", r.fullName(), target, runId);
             runGitStrict(reposRoot, "git", "clone", authUrl, target.toString());
+            persistCloneSnapshot(runId, r, target);
         }
     }
 
-    /** Minimal record describing a repo to clone for {@link #cloneMultipleRepos}. */
-    public record RepoToClone(String fullName, String cloneUrl) {}
+    /**
+     * Captures {@code git rev-parse HEAD} in the newly cloned repo and writes a
+     * {@link com.navneet.executespec.state.entity.RunRepoSnapshot} row. Non-fatal
+     * on failure — snapshot is only used by the reset-to-original flow; a missing
+     * row means that flow won't be available for this repo but the run proceeds.
+     */
+    private void persistCloneSnapshot(String runId, RepoToClone r, Path target) {
+        try {
+            String sha = captureHeadSha(target);
+            if (sha == null || sha.isBlank()) {
+                log.warn("Snapshot skipped for run {} repo {} — empty SHA", runId, r.fullName());
+                return;
+            }
+            String branch = r.branch() == null || r.branch().isBlank() ? "main" : r.branch();
+            com.navneet.executespec.state.entity.RunRepoSnapshot snap =
+                    com.navneet.executespec.state.entity.RunRepoSnapshot.builder()
+                            .runId(runId)
+                            .repoId(r.repoId())
+                            .repoFullName(r.fullName())
+                            .branch(branch)
+                            .commitSha(sha)
+                            .build();
+            snapshotRepo.save(snap);
+            log.debug("Snapshot saved run={} repo={} branch={} sha={}", runId, r.fullName(), branch, sha);
+        } catch (Exception e) {
+            log.warn("persistCloneSnapshot failed run={} repo={}: {}", runId, r.fullName(), e.getMessage());
+        }
+    }
+
+    private String captureHeadSha(Path repoDir) throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("git", "rev-parse", "HEAD").directory(repoDir.toFile());
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes()).trim();
+        int exit = p.waitFor();
+        if (exit != 0) {
+            log.warn("git rev-parse HEAD exit {} in {}: {}", exit, repoDir, out);
+            return null;
+        }
+        return out;
+    }
+
+    /**
+     * Minimal record describing a repo to clone for {@link #cloneMultipleRepos}.
+     *
+     * @param fullName   e.g. "owner/repo"
+     * @param cloneUrl   HTTPS clone URL (null → derived from fullName)
+     * @param repoId     optional — persisted into {@code run_repo_snapshot.repo_id}
+     *                   when present, so the "reset to original" path can match
+     *                   back to the caller's {@code ProjectRepo}. Null is valid
+     *                   (snapshot still captures fullName + sha).
+     * @param branch     optional — the branch being cloned (used only as the
+     *                   {@code run_repo_snapshot.branch} value for display).
+     *                   When null we fall back to {@code "main"}.
+     */
+    public record RepoToClone(String fullName, String cloneUrl, UUID repoId, String branch) {
+        public RepoToClone(String fullName, String cloneUrl) {
+            this(fullName, cloneUrl, null, null);
+        }
+    }
 
     /** Returns the absolute, normalised path to the per-run workspace directory. */
     public Path runWorkspacePath(String runId) {
