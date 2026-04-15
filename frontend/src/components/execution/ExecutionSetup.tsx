@@ -5,6 +5,7 @@ import { useExecutionStore } from '@/stores/useExecutionStore';
 import { executionApi } from '@/lib/execution-api';
 import { getProject, estimateRun, type LaunchEstimate } from '@/lib/api';
 import TemplatePicker from './TemplatePicker';
+import StalenessWarning from './StalenessWarning';
 import type { NewRepoSpec, Scaffold } from '@/types/execution';
 
 const PROVIDERS = [
@@ -164,6 +165,11 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
             </div>
           )}
         </div>
+        {selected.size > 0 && (
+          <div className="mt-2">
+            <StalenessWarning projectId={projectId} selectedRepoIds={Array.from(selected)} />
+          </div>
+        )}
       </div>
 
       <div>

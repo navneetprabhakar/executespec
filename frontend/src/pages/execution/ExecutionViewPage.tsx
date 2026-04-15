@@ -75,7 +75,7 @@ export default function ExecutionViewPage() {
           )}
         </div>
         <div className="flex items-center gap-3">
-          <ExecutionStepper status={status} />
+          <ExecutionStepper status={status} activeSince={executionRun?.updatedAt} />
           {executionId && !['COMPLETE', 'ABORTED', 'SETUP'].includes(status) && (
             <CancelLaunchButton executionId={executionId} projectId={projectId} />
           )}
