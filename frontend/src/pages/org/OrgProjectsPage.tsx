@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ChevronDown, ChevronUp, FolderOpen, FolderArchive,
-  Users, Plus, X, Eye, AlertCircle, Cpu,
+  Users, Plus, X, Eye, AlertCircle, Cpu, LayoutDashboard,
 } from 'lucide-react';
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useRunStore } from '@/stores/useRunStore';
@@ -418,15 +418,25 @@ export default function OrgProjectsPage() {
             Group runs into projects and control team access.
           </p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
+        <div className="flex items-center gap-2">
+          <Link
+            to="/projects"
+            title="Project dashboard"
+            className="flex items-center gap-2 px-4 py-2 rounded-sm border border-[var(--border-default)] text-sm text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors"
           >
-            <Plus className="h-4 w-4" />
-            New Project
-          </button>
-        )}
+            <LayoutDashboard className="h-4 w-4" />
+            Dashboard
+          </Link>
+          {isAdmin && (
+            <button
+              onClick={() => setShowCreate((v) => !v)}
+              className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              New Project
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Create form (collapsible) */}
