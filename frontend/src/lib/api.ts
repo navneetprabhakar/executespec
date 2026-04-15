@@ -1822,6 +1822,27 @@ export const createOrgSpecTemplate = (
 export const deleteSpecTemplate = (projectId: string, templateId: string) =>
   req<void>(`/projects/${projectId}/templates/${templateId}`, { method: 'DELETE' });
 
+// v2.5.5 (UX-4.2) — architecture diff source-file correlation.
+// The text diff of architecture.md stays client-side (LCS); this call
+// returns per-repo added/modified/removed/renamed files between the two
+// versions by hitting GitHub's compare API against the SHAs captured at
+// generate-time on each ProjectArchitectureDoc row.
+export interface ArchChangedFile {
+  filename: string;
+  status: string;        // added | modified | removed | renamed
+  additions: number;
+  deletions: number;
+}
+export interface ArchDiffReport {
+  fromVersion: number;
+  toVersion: number;
+  perRepo: { repoFullName: string; files: ArchChangedFile[] }[];
+  totalFiles: number;
+}
+export const getArchitectureDiff = (projectId: string, from: number, to: number) =>
+  req<ArchDiffReport>(
+    `/projects/${projectId}/architecture/diff?from=${from}&to=${to}`);
+
 // v2.5.2 — Tech Debt rollup for Project Overview. All DB-derived, no LLM.
 export interface TechDebtReport {
   issuesByCategory: Record<string, number>;
