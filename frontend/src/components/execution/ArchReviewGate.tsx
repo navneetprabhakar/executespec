@@ -1,11 +1,14 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { useExecutionStore } from '@/stores/useExecutionStore';
 
 export default function ArchReviewGate({ executionId }: { executionId: string }) {
-  const { executionRun, approveArch, generatePlan } = useExecutionStore();
+  const { executionRun, approveArch, generatePlan, abort } = useExecutionStore();
   const [annotations, setAnnotations] = useState('');
   const [approved, setApproved] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const navigate = useNavigate();
 
   const doc = executionRun?.unifiedArchDoc ?? '(no architecture doc generated yet)';
 
@@ -24,12 +27,29 @@ export default function ArchReviewGate({ executionId }: { executionId: string })
             placeholder="Optional: add corrections or highlights the planner should respect"
             className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px] font-mono"
           />
-          <button
-            onClick={async () => { await approveArch(executionId, annotations); setApproved(true); }}
-            className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-[12px]"
-          >
-            Approve & continue
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => { await approveArch(executionId, annotations); setApproved(true); }}
+              className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-[12px]"
+            >
+              Approve & continue
+            </button>
+            <button
+              disabled={cancelling}
+              onClick={async () => {
+                if (!confirm('Cancel this execution? Progress will be discarded.')) return;
+                setCancelling(true);
+                try {
+                  await abort(executionId);
+                  const pid = executionRun?.projectId;
+                  if (pid) navigate(`/projects/${pid}/dashboard`);
+                } finally { setCancelling(false); }
+              }}
+              className="rounded-sm border border-[var(--border-default)] text-muted hover:text-accent-red px-3 py-1.5 text-[12px] disabled:opacity-50"
+            >
+              {cancelling ? 'Cancelling…' : 'Cancel'}
+            </button>
+          </div>
         </>
       ) : (
         <button
