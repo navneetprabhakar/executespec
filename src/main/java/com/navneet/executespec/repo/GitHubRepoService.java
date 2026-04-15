@@ -161,17 +161,23 @@ public class GitHubRepoService {
      * @return sorted list of relative file paths, or empty list on failure
      */
     public List<String> listRepoFiles(String repoUrl, String overridePat) {
+        return listRepoFiles(repoUrl, null, overridePat);
+    }
+
+    /** Variant that respects a non-default branch (avoids the hardcoded {@code main}). */
+    public List<String> listRepoFiles(String repoUrl, String branch, String overridePat) {
         String effectivePat = resolve(overridePat, pat);
         if (effectivePat == null || effectivePat.isBlank()) return List.of();
 
         String[] ownerRepo = extractOwnerRepo(repoUrl);
         if (ownerRepo == null) return List.of();
 
+        String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
         try {
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
-                            + "/git/trees/main?recursive=1"))
+                            + "/git/trees/" + effectiveBranch + "?recursive=1"))
                     .header("Authorization", "Bearer " + effectivePat)
                     .header("Accept", "application/vnd.github+json")
                     .GET()
@@ -200,17 +206,22 @@ public class GitHubRepoService {
      * @return file content as string, or error message on failure
      */
     public String readRepoFile(String repoUrl, String relativePath, String overridePat) {
+        return readRepoFile(repoUrl, relativePath, null, overridePat);
+    }
+
+    public String readRepoFile(String repoUrl, String relativePath, String branch, String overridePat) {
         String effectivePat = resolve(overridePat, pat);
         if (effectivePat == null || effectivePat.isBlank()) return "// No GitHub PAT configured";
 
         String[] ownerRepo = extractOwnerRepo(repoUrl);
         if (ownerRepo == null) return "// Invalid repo URL";
 
+        String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
         try {
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
-                            + "/contents/" + relativePath + "?ref=main"))
+                            + "/contents/" + relativePath + "?ref=" + effectiveBranch))
                     .header("Authorization", "Bearer " + effectivePat)
                     .header("Accept", "application/vnd.github+json")
                     .GET()
@@ -609,7 +620,7 @@ public class GitHubRepoService {
 
     /** Snapshot of a PR for dashboard rendering (title, body, stats, truncated diff). */
     public record PullRequestSnapshot(
-            String title, String body, String state,
+            String title, String body, String state, boolean merged,
             int additions, int deletions, int changedFiles,
             String headBranch, String baseBranch,
             String diffPreview) {}
@@ -660,6 +671,7 @@ public class GitHubRepoService {
                     meta.path("title").asText(""),
                     meta.path("body").asText(""),
                     meta.path("state").asText("open"),
+                    meta.path("merged").asBoolean(false),
                     meta.path("additions").asInt(0),
                     meta.path("deletions").asInt(0),
                     meta.path("changed_files").asInt(0),

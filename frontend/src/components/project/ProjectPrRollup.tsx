@@ -1,26 +1,69 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { executionApi } from '@/lib/execution-api';
 import type { PrRollupEntry } from '@/types/execution';
-import { getPullRequestSnapshot, type PullRequestSnapshot } from '@/lib/api';
+import { getPullRequestSnapshot, refreshProjectPrs, type PullRequestSnapshot } from '@/lib/api';
 import DiffView from '@/components/shared/DiffView';
 import { cn } from '@/lib/utils';
 
 export default function ProjectPrRollup({ projectId }: { projectId: string }) {
   const [prs, setPrs] = useState<PrRollupEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = () =>
     executionApi.listProjectPrs(projectId)
         .then(setPrs)
         .catch((e: any) => setError(e?.message ?? 'Failed to load PRs'));
-  }, [projectId]);
+
+  useEffect(() => { load(); }, [projectId]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const r = await refreshProjectPrs(projectId);
+      setLastRefresh(r.newlyMerged > 0
+        ? `${r.newlyMerged} merged · ${r.updated}/${r.checked} updated`
+        : `${r.updated}/${r.checked} updated`);
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? 'Refresh failed');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   if (error) return <div className="text-[11px] text-accent-red">{error}</div>;
   if (prs == null) return <div className="text-[11px] text-muted">Loading PRs…</div>;
+
+  const header = (
+    <div className="flex items-center justify-between mb-2">
+      <h3 className="text-[11px] font-medium text-secondary">Pull requests</h3>
+      <div className="flex items-center gap-2">
+        {lastRefresh && <span className="text-[10px] text-muted">{lastRefresh}</span>}
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+          title="Poll GitHub for latest PR status; auto-analyse on any new merge"
+        >
+          {refreshing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
+
   if (prs.length === 0) {
-    return <div className="text-[11px] text-muted">No pull requests yet.</div>;
+    return (
+      <div>
+        {header}
+        <div className="text-[11px] text-muted">No pull requests yet.</div>
+      </div>
+    );
   }
 
   const launchEntries = prs.filter((p) => !p.repoFullName);
@@ -33,6 +76,7 @@ export default function ProjectPrRollup({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-4">
+      {header}
       {Object.entries(byLaunch).map(([launchId, group]) => (
         <PrGroup key={`launch-${launchId}`} label="Launch"
           idShort={launchId.substring(0, 8)}
