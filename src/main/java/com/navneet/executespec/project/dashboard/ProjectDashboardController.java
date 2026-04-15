@@ -34,6 +34,9 @@ public class ProjectDashboardController {
     private final PullRequestRecordRepository prRepo;
     private final ProjectArchitectureService archService;
     private final StalenessService stalenessService;
+    private final com.navneet.executespec.project.service.WorkspaceHealthService workspaceHealthService;
+    private final com.navneet.executespec.project.pr.PostMergeCascadeService postMergeCascadeService;
+    private final com.navneet.executespec.project.estimation.EstimationService estimationService;
 
     public record TaskSummary(
             String taskId, String runId, String name, String status,
@@ -125,6 +128,50 @@ public class ProjectDashboardController {
                 (int) active, (int) completed, (int) failed,
                 avgScore, totalTokens, totalCost,
                 recentTasks, recentPrs, archStatus, archVersion));
+    }
+
+    /**
+     * v2.5.2 — per-repo workspace health rollup for the Project Overview tab.
+     * Uses the caller's PAT for origin-SHA lookups; cached 10 min in Redis.
+     */
+    @GetMapping("/api/projects/{projectId}/workspace-health")
+    public ResponseEntity<com.navneet.executespec.project.service.WorkspaceHealthService.Report>
+            workspaceHealth(
+                    @PathVariable String projectId,
+                    @org.springframework.security.core.annotation.AuthenticationPrincipal
+                            com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        String userId = userDetails == null ? null : userDetails.getUser().getId();
+        return ResponseEntity.ok(workspaceHealthService.report(projectId, userId));
+    }
+
+    /**
+     * v2.5.2 — read the transient post-merge banner marker. Returns 200 with
+     * {@code null} body when no banner is active.
+     */
+    @GetMapping("/api/projects/{projectId}/post-merge-bar")
+    public ResponseEntity<com.navneet.executespec.project.pr.PostMergeCascadeService.PostMergeBar>
+            postMergeBar(@PathVariable String projectId) {
+        return ResponseEntity.ok(postMergeCascadeService.readPostMergeBar(projectId));
+    }
+
+    /**
+     * v2.5.2 — pre-submit Launch estimate. Non-LLM heuristic derived from prior
+     * project runs; safe to call on every keystroke (debounced on the client).
+     */
+    @GetMapping("/api/projects/{projectId}/estimate")
+    public ResponseEntity<com.navneet.executespec.project.estimation.EstimationService.Estimate>
+            estimate(
+                    @PathVariable String projectId,
+                    @org.springframework.web.bind.annotation.RequestParam(
+                            value = "requirement", required = false) String requirement) {
+        return ResponseEntity.ok(estimationService.estimate(projectId, requirement));
+    }
+
+    /** v2.5.2 — dismiss the post-merge banner (user clicked the CTA or X). */
+    @org.springframework.web.bind.annotation.DeleteMapping("/api/projects/{projectId}/post-merge-bar")
+    public ResponseEntity<Void> dismissPostMergeBar(@PathVariable String projectId) {
+        postMergeCascadeService.dismissPostMergeBar(projectId);
+        return ResponseEntity.noContent().build();
     }
 
     private static Integer latestScoreForRun(List<ValidationReport> reports, String runId) {

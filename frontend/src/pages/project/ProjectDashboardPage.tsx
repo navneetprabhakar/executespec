@@ -7,6 +7,8 @@ import ProjectRepoManager from '@/components/project/ProjectRepoManager';
 import ArchitectureViewer from '@/components/project/ArchitectureViewer';
 import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
+import WorkspaceHealthPanel from '@/components/project/WorkspaceHealthPanel';
+import PostMergeBar from '@/components/project/PostMergeBar';
 import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
 import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
@@ -110,7 +112,7 @@ export default function ProjectDashboardPage() {
     if (!projectId) return null;
     switch (tab) {
       case 'overview':
-        return <OverviewContent dashboard={dashboard} scoreTrend={scoreTrend} />;
+        return <OverviewContent projectId={projectId} dashboard={dashboard} scoreTrend={scoreTrend} />;
       case 'launches':
         return <ProjectLaunchesList projectId={projectId} />;
       case 'prs':
@@ -173,6 +175,8 @@ export default function ProjectDashboardPage() {
           <ArrowLeft className="h-3 w-3" />
           Projects
         </Link>
+
+        {projectId && <PostMergeBar projectId={projectId} />}
 
         <header className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex items-center gap-2">
@@ -259,13 +263,13 @@ export default function ProjectDashboardPage() {
 }
 
 function OverviewContent({
-  dashboard, scoreTrend,
-}: { dashboard: any; scoreTrend: any }) {
+  projectId, dashboard, scoreTrend,
+}: { projectId?: string; dashboard: any; scoreTrend: any }) {
   const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
-  const projectId = dashboard?.projectId ?? dashboard?.id;
   return (
     <div className="space-y-4 max-w-3xl">
       {projectId && <ProjectSummaryPanel projectId={projectId} />}
+      {projectId && <WorkspaceHealthPanel projectId={projectId} />}
       <div className="space-y-2">
         <h3 className="text-[11px] font-medium text-secondary">Recent submissions</h3>
         <ExecutionsPanel tasks={tasks} />
