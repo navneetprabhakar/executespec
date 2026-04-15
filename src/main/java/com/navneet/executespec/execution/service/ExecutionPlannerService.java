@@ -185,6 +185,25 @@ public class ExecutionPlannerService {
             UUID repoUuid;
             try { repoUuid = UUID.fromString(spec.repoId()); }
             catch (Exception ex) { repoUuid = null; }
+            // Fallback: LLMs frequently return the repo name or short-name in the
+            // repoId field instead of a UUID. Match against the project's linked
+            // repos so the clone + push paths still fire.
+            if (repoUuid == null) {
+                String needle = (spec.repoName() != null && !spec.repoName().isBlank())
+                        ? spec.repoName() : spec.repoId();
+                if (needle != null && !needle.isBlank()) {
+                    String n = needle.toLowerCase();
+                    repoUuid = projectRepoRepo.findAll().stream()
+                            .filter(r -> {
+                                String full = r.getGithubRepoFullName() == null ? "" : r.getGithubRepoFullName().toLowerCase();
+                                String shortName = full.contains("/") ? full.substring(full.indexOf('/') + 1) : full;
+                                return full.equals(n) || shortName.equals(n) || shortName.contains(n) || n.contains(shortName);
+                            })
+                            .findFirst()
+                            .map(r -> r.getId())
+                            .orElse(null);
+                }
+            }
             ExecutionSolutionRepo repoMap = ExecutionSolutionRepo.builder()
                     .solution(sol)
                     .repoId(repoUuid)
