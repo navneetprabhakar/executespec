@@ -136,6 +136,7 @@ public class V2RunOrchestrator {
     private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
     private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+    private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
@@ -190,7 +191,7 @@ public class V2RunOrchestrator {
                                   String createdByUserId, String orgId, String projectId,
                                   String executionMode, List<UUID> selectedRepoIds, String figmaUrl) {
         String runId = UUID.randomUUID().toString();
-        String provider = normalizeProvider(aiProvider);
+        String provider = normalizeProvider(aiProvider, projectId, runId);
         String model = modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
 
         PipelineRun run = PipelineRun.builder()
@@ -1322,11 +1323,37 @@ public class V2RunOrchestrator {
         };
     }
 
-    private static String normalizeProvider(String aiProvider) {
-        if (aiProvider == null || aiProvider.isBlank()) return DEFAULT_PROVIDER;
-        String lower = aiProvider.toLowerCase();
-        // V1 uses "google" — V2 uses "gemini". Map transparently.
-        return "google".equals(lower) ? "gemini" : lower;
+    /**
+     * Resolve the effective provider string for a run.
+     *
+     * Order of precedence:
+     *  1. Request-supplied {@code aiProvider} (lowercased, "google"→"gemini").
+     *  2. Project's default {@code ai_provider} (when {@code projectId} is set).
+     *  3. Platform default ({@link #DEFAULT_PROVIDER} = "openai").
+     *
+     * Levels 2/3 log a WARN so missing provider values surface in ops rather
+     * than silently defaulting. Legacy {@link com.navneet.executespec.execution.entity.ExecutionRun}
+     * rows pre-dating V92 hit level 2; the V99 backfill closes that gap for new rows.
+     */
+    private String normalizeProvider(String aiProvider, String projectId, String runId) {
+        if (aiProvider != null && !aiProvider.isBlank()) {
+            String lower = aiProvider.toLowerCase();
+            return "google".equals(lower) ? "gemini" : lower;
+        }
+        if (projectId != null) {
+            String projectProvider = projectRepository.findById(projectId)
+                    .map(p -> p.getAiProvider() == null ? null : p.getAiProvider().name())
+                    .orElse(null);
+            if (projectProvider != null && !projectProvider.isBlank()) {
+                log.warn("normalizeProvider: null aiProvider on runId={} — falling back to project default {}",
+                        runId, projectProvider);
+                String lower = projectProvider.toLowerCase();
+                return "google".equals(lower) ? "gemini" : lower;
+            }
+        }
+        log.warn("normalizeProvider: no provider resolvable for runId={} projectId={} — defaulting to {}",
+                runId, projectId, DEFAULT_PROVIDER);
+        return DEFAULT_PROVIDER;
     }
 
     private static String defaultModelFor(String provider) {
