@@ -47,16 +47,22 @@ public class ProjectArchitectureService {
      */
     @Transactional
     public ProjectArchitectureDoc generate(String projectId) {
-        return generate(projectId, null);
+        return generate(projectId, null, null);
+    }
+
+    @Transactional
+    public ProjectArchitectureDoc generate(String projectId, String branchOverride) {
+        return generate(projectId, branchOverride, null);
     }
 
     /**
      * Regenerate codemaps for every linked repo using the supplied branch
      * (falls back to each repo's default when {@code branchOverride} is null
-     * or blank).
+     * or blank) and the supplied PAT (falls back to the system PAT when
+     * {@code patOverride} is null).
      */
     @Transactional
-    public ProjectArchitectureDoc generate(String projectId, String branchOverride) {
+    public ProjectArchitectureDoc generate(String projectId, String branchOverride, String patOverride) {
         List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
         if (links.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -72,7 +78,7 @@ public class ProjectArchitectureService {
             if (repo == null) continue;
             String effectiveBranch = hasOverride ? branchOverride : repo.getDefaultBranch();
             CodeMapGenerator.Result result = codeMapGenerator.generateWithSha(
-                    repo.getGithubRepoFullName(), effectiveBranch, null);
+                    repo.getGithubRepoFullName(), effectiveBranch, patOverride);
             int nextVersion = codeMapRepo
                     .findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId())
                     .map(c -> c.getVersion() + 1)

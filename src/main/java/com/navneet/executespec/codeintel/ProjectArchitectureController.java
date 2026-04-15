@@ -40,8 +40,12 @@ public class ProjectArchitectureController {
     }
 
     @PostMapping("/api/projects/{projectId}/architecture/generate")
-    public ResponseEntity<ArchDocDto> generate(@PathVariable String projectId) {
-        ProjectArchitectureDoc doc = service.generate(projectId);
+    public ResponseEntity<ArchDocDto> generate(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.navneet.executespec.auth.security.AppUserDetails userDetails,
+            @PathVariable String projectId) {
+        String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+        ProjectArchitectureDoc doc = service.generate(projectId, null, pat);
         stalenessService.invalidate(projectId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
     }
@@ -49,9 +53,12 @@ public class ProjectArchitectureController {
     /** Alias + preferred entry: regenerates codemaps + architecture + summary on disk. */
     @PostMapping("/api/projects/{projectId}/analyse")
     public ResponseEntity<ArchDocDto> analyse(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.navneet.executespec.auth.security.AppUserDetails userDetails,
             @PathVariable String projectId,
             @org.springframework.web.bind.annotation.RequestParam(value = "branch", required = false) String branch) {
-        ProjectArchitectureDoc doc = service.generate(projectId, branch);
+        String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+        ProjectArchitectureDoc doc = service.generate(projectId, branch, pat);
         stalenessService.invalidate(projectId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
     }
