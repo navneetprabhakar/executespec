@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, ExternalLink, Github, RefreshCw, Upload, Loader2 } from 'lucide-react';
-import { getFiles, pushToGitHub, type RunDetail } from '@/lib/api';
+import { ChevronDown, ChevronRight, ExternalLink, Github, RefreshCw, Upload, Loader2, GitBranch } from 'lucide-react';
+import { getFiles, pushToGitHub, syncRun, type RunDetail } from '@/lib/api';
 import ValidationReportPanel from '@/components/runs/ValidationReportPanel';
 import { CodeTab } from '@/components/runs/RunDetailTabs';
 import { cn } from '@/lib/utils';
@@ -30,6 +30,9 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
   const [refreshing, setRefreshing] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushStatus, setPushStatus] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncBranch, setSyncBranch] = useState('');
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
   const doRefresh = async () => {
     if (!onRefresh || refreshing) return;
@@ -39,6 +42,21 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
 
   const terminal = ['COMPLETE', 'PARTIAL'].includes(run.status);
   const alreadyPushed = !!(run.scmPrUrl || run.githubPrUrl);
+
+  const doSync = async () => {
+    if (syncing || !terminal) return;
+    setSyncing(true);
+    setSyncStatus(null);
+    try {
+      const r = await syncRun(run.runId, syncBranch.trim() || undefined);
+      setSyncStatus(`Synced ${r.reposSynced} repo${r.reposSynced === 1 ? '' : 's'} — ${r.details.join(', ')}`);
+      if (onRefresh) await onRefresh();
+    } catch (e) {
+      setSyncStatus(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const doPush = async () => {
     if (pushing || alreadyPushed) return;
@@ -77,6 +95,27 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
                 {pushing ? 'Pushing…' : 'Push & open PR'}
               </button>
             )}
+            {terminal && (
+              <div className="inline-flex items-center gap-1 text-[10px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-1 py-0.5">
+                <GitBranch className="h-3 w-3 text-muted" />
+                <input
+                  type="text"
+                  placeholder="branch"
+                  value={syncBranch}
+                  onChange={(e) => setSyncBranch(e.target.value)}
+                  className="w-20 bg-transparent text-[10px] font-mono text-primary placeholder-muted focus:outline-none"
+                  title="Branch to sync this run's workspace from. Empty = each repo's default."
+                />
+                <button
+                  onClick={doSync}
+                  disabled={syncing}
+                  title="Hard-reset workspace from origin/<branch> — re-review against post-merge code"
+                  className="inline-flex items-center gap-1 text-accent-blue hover:text-accent-blue/80 disabled:opacity-50"
+                >
+                  {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Sync'}
+                </button>
+              </div>
+            )}
             {onRefresh && (
               <button
                 onClick={doRefresh}
@@ -97,6 +136,9 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
           {run.actualCostUsd != null && <Stat label="Cost" value={`$${run.actualCostUsd.toFixed(4)}`} />}
           {run.aiProvider && <Stat label="Provider" value={run.aiProvider} />}
         </div>
+        {syncStatus && (
+          <div className="text-[10px] text-muted">{syncStatus}</div>
+        )}
         {pushStatus && (
           <div className={cn(
             'text-[10px]',

@@ -1778,8 +1778,16 @@ export const generateArchitecture = (projectId: string) =>
   req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, { method: 'POST' });
 
 // Project workspace analyse (regenerates codemaps + architecture.md + summary.md on disk)
-export const analyseProject = (projectId: string) =>
-  req<ArchitectureDoc>(`/projects/${projectId}/analyse`, { method: 'POST' });
+export const analyseProject = (projectId: string, branch?: string) =>
+  req<ArchitectureDoc>(
+    `/projects/${projectId}/analyse${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
+    { method: 'POST' });
+
+// Sync a terminal run's workspace from a branch (post-merge re-review).
+export const syncRun = (runId: string, branch?: string) =>
+  req<{ status: string; reposSynced: number; details: string[] }>(
+    `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
+    { method: 'POST' });
 
 export const getProjectSummary = (projectId: string) =>
   req<{ content: string }>(`/projects/${projectId}/summary`);

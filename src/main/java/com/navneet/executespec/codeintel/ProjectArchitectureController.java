@@ -48,8 +48,10 @@ public class ProjectArchitectureController {
 
     /** Alias + preferred entry: regenerates codemaps + architecture + summary on disk. */
     @PostMapping("/api/projects/{projectId}/analyse")
-    public ResponseEntity<ArchDocDto> analyse(@PathVariable String projectId) {
-        ProjectArchitectureDoc doc = service.generate(projectId);
+    public ResponseEntity<ArchDocDto> analyse(
+            @PathVariable String projectId,
+            @org.springframework.web.bind.annotation.RequestParam(value = "branch", required = false) String branch) {
+        ProjectArchitectureDoc doc = service.generate(projectId, branch);
         stalenessService.invalidate(projectId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
     }
