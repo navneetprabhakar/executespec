@@ -179,6 +179,20 @@ public class ExecutionController {
         return ResponseEntity.accepted().build();
     }
 
+    /**
+     * Re-kick execution from the Plan step without requiring the user to redo
+     * Setup / Analysis / Arch review. Used when a run hangs in EXECUTING or
+     * AWAITING_ARCH_REVIEW because of a transient server error.
+     */
+    @PostMapping("/api/executions/{id}/resume")
+    public ResponseEntity<Void> resume(
+            @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
+        AppUser user = requireFeatureEnabled(principal);
+        ExecutionRun run = requireRunAccess(id, user);
+        orchestrator.executeApprovedPlan(run.getId());
+        return ResponseEntity.ok().build();
+    }
+
     @PostMapping("/api/executions/{id}/abort")
     public ResponseEntity<Void> abort(
             @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
