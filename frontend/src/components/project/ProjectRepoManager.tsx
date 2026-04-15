@@ -4,32 +4,16 @@ import { useProjectStore } from '@/stores/useProjectStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import RepoCard from './RepoCard';
 import AddRepoModal from './AddRepoModal';
+import ResetWorkspaceSheet from './ResetWorkspaceSheet';
 
 export default function ProjectRepoManager({ projectId }: { projectId: string }) {
   const { repos, fetchRepos, error } = useProjectStore();
   const me = useAuthStore((s) => s.user);
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [resetting, setResetting] = useState(false);
-  const [resetMsg, setResetMsg] = useState<string | null>(null);
-
-  const handleResetAll = async () => {
-    if (resetting) return;
-    setResetting(true);
-    setResetMsg(null);
-    try {
-      // "Reset workspace" for the project = re-pull every repo + regenerate
-      // codemaps + architecture so the next Launch starts from current origin HEAD.
-      // `analyseProject` already does all of that in one call.
-      await api.analyseProject(projectId);
-      setResetMsg('Workspace refreshed — codemaps & architecture regenerated.');
-      await fetchRepos(projectId);
-    } catch (e) {
-      setResetMsg(`Reset failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setResetting(false);
-    }
-  };
+  // v2.5.3 (UX-4.1 polish): reset now goes through a confirmation sheet
+  // that previews per-repo SHA movement before running analyse.
+  const [showResetSheet, setShowResetSheet] = useState(false);
 
   useEffect(() => {
     fetchRepos(projectId);
@@ -79,12 +63,11 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
         <div className="flex items-center gap-2">
           {repos.length > 0 && (
             <button
-              onClick={handleResetAll}
-              disabled={resetting}
-              title="Pull current origin HEAD for every linked repo + regenerate codemaps and architecture"
-              className="text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
+              onClick={() => setShowResetSheet(true)}
+              title="Preview SHA movement per repo, then pull origin HEAD + regenerate codemaps/architecture"
+              className="text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted hover:text-primary"
             >
-              {resetting ? 'Refreshing…' : 'Reset workspace'}
+              Reset workspace…
             </button>
           )}
           <button
@@ -96,7 +79,6 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
         </div>
       </div>
 
-      {resetMsg && <div className="text-[11px] text-muted">{resetMsg}</div>}
       {error && <div className="text-sm text-red-600">{error}</div>}
 
       {repos.length === 0 && (
@@ -118,6 +100,14 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
           </div>
         ))}
       </div>
+
+      {showResetSheet && (
+        <ResetWorkspaceSheet
+          projectId={projectId}
+          onClose={() => setShowResetSheet(false)}
+          onDone={() => fetchRepos(projectId)}
+        />
+      )}
 
       {showAdd && (
         <AddRepoModal

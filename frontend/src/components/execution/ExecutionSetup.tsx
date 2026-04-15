@@ -37,17 +37,20 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
   const [ownerChecks, setOwnerChecks] = useState<Record<number, string>>({});
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimate, setEstimate] = useState<LaunchEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
 
   // Debounced heuristic estimate — no LLM call; reads DB project history only.
   useEffect(() => {
     if (requirement.trim().length < 50) {
       setEstimate(null);
+      setEstimating(false);
       return;
     }
+    setEstimating(true);
     const handle = setTimeout(() => {
       estimateRun(projectId, requirement.trim())
-        .then(setEstimate)
-        .catch(() => setEstimate(null));
+        .then((r) => { setEstimate(r); setEstimating(false); })
+        .catch(() => { setEstimate(null); setEstimating(false); });
     }, 1500);
     return () => clearTimeout(handle);
   }, [projectId, requirement]);
@@ -254,12 +257,23 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
           className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px] font-mono"
           placeholder="Describe the cross-repo change in plain English…"
         />
-        {estimate && (
+        {estimating && !estimate && (
+          <div className="mt-1 inline-flex items-center gap-2 text-[10px] text-muted bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-2 py-0.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted animate-pulse" />
+            <span className="font-mono">estimating…</span>
+          </div>
+        )}
+        {estimate && !estimating && (
           <div className="mt-1 inline-flex items-center gap-2 text-[10px] text-muted bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-2 py-0.5">
             <span>~{estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh} tasks</span>
             <span>·</span>
             <span>~${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}</span>
-            <span className="text-[9px]">({estimate.basis})</span>
+            <span
+              className="text-[9px]"
+              title="Heuristic from historical run data. Actual cost depends on plan complexity."
+            >
+              ({estimate.basis})
+            </span>
           </div>
         )}
       </div>
