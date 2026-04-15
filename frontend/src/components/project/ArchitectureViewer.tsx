@@ -16,6 +16,7 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
   const [error, setError] = useState<string | null>(null);
   const [annotationDraft, setAnnotationDraft] = useState('');
   const [editingAnnotation, setEditingAnnotation] = useState(false);
+  const [branchOverride, setBranchOverride] = useState('');
 
   const refresh = async () => {
     setLoading(true);
@@ -43,7 +44,7 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
     setBusy(true);
     setError(null);
     try {
-      await api.generateArchitecture(projectId);
+      await api.analyseProject(projectId, branchOverride.trim() || undefined);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Generation failed');
@@ -111,6 +112,14 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
             {diffOpen ? 'Hide diff' : `Diff vs v${previous.version}`}
           </button>
         )}
+        <input
+          type="text"
+          placeholder="branch (default)"
+          value={branchOverride}
+          onChange={(e) => setBranchOverride(e.target.value)}
+          className="w-32 text-[10px] font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-1.5 py-0.5 focus:outline-none focus:border-accent-blue"
+          title="Optional branch override (applies to all linked repos). Leave empty for each repo's default."
+        />
         <button
           onClick={generate}
           disabled={busy}

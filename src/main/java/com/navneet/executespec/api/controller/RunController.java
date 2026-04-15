@@ -66,6 +66,7 @@ public class RunController {
     private final RunVisibilitySpec runVisibilitySpec;
     private final RunAccessGuard guard;
     private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
+    private final com.navneet.executespec.run.sync.RunSyncService runSyncService;
     private final com.navneet.executespec.state.repository.PlanVersionRepository planVersionRepo;
     private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
     private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
@@ -399,6 +400,34 @@ public class RunController {
      * - Else if user has GitHub PAT → pushes to GitHub, creates PR
      * - If neither → returns 400
      */
+    /**
+     * Refresh the run's workspace from a branch on origin (typically used
+     * after a PR is merged externally so the user can re-run review/tests
+     * against the post-merge code without restarting the whole pipeline).
+     * Multi-repo runs sync every {@code repos/<name>/} subdirectory to the
+     * same branch; missing or unknown branch names fall back to that repo's
+     * own default branch.
+     *
+     * <p>Hard-resets the workspace — uncommitted local edits are wiped.
+     * Only allowed on terminal runs.
+     */
+    @PostMapping("/{runId}/sync")
+    public ResponseEntity<Map<String, Object>> syncRun(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable String runId,
+            @RequestParam(value = "branch", required = false) String branch) {
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        if (!List.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED").contains(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Run sync requires a terminal status (current: " + run.getStatus() + ")");
+        }
+        var outcome = runSyncService.sync(runId, branch);
+        return ResponseEntity.ok(Map.of(
+                "status", "synced",
+                "reposSynced", outcome.reposSynced(),
+                "details", outcome.details()));
+    }
+
     @PostMapping("/{runId}/push-scm")
     public ResponseEntity<Map<String, String>> pushToScm(
             @AuthenticationPrincipal AppUserDetails userDetails,
