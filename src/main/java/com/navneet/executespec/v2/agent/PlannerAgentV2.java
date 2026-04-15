@@ -106,7 +106,9 @@ public class PlannerAgentV2 {
                                 ? "unlimited" : String.valueOf(req.classification().maxTasks()))
                 .replace("{{WORKSPACE_SUMMARY}}",
                         req.workspaceSummary() == null ? "(no summary)" : req.workspaceSummary())
-                .replace("{{PROJECT_MEMORY}}", renderProjectMemoryBlock(req.projectMemory()));
+                .replace("{{PROJECT_MEMORY}}", renderProjectMemoryBlock(req.projectMemory()))
+                .replace("{{PROJECT_BRIEF}}", req.projectBrief() == null ? "" : req.projectBrief())
+                .replace("{{REFERENCE_DOCS}}", req.referenceDocs() == null ? "" : req.referenceDocs());
 
         List<Message> messages = List.of(
                 new SystemMessage(systemPrompt),

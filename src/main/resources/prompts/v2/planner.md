@@ -98,4 +98,8 @@ The plan schema:
 
 {{PROJECT_MEMORY}}
 
+{{PROJECT_BRIEF}}
+
+{{REFERENCE_DOCS}}
+
 Now call `submitPlan` with your plan.

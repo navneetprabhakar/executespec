@@ -11,12 +11,13 @@ import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
 import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
 import ProjectChatPanel from '@/components/project/ProjectChatPanel';
+import ProjectDocumentsPanel from '@/components/project/ProjectDocumentsPanel';
 import InlineRunDetail from '@/components/project/InlineRunDetail';
 import { cn } from '@/lib/utils';
 import type { TaskSummary } from '@/types/project';
 import type { RunDetail } from '@/lib/api';
 
-type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'memory' | 'chat' | 'team';
+type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'docs' | 'memory' | 'chat' | 'team';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -25,6 +26,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'tasks', label: 'Tasks' },
   { key: 'repos', label: 'Repos' },
   { key: 'architecture', label: 'Architecture' },
+  { key: 'docs', label: 'Docs' },
   { key: 'memory', label: 'Memory' },
   { key: 'chat', label: 'Chat' },
   { key: 'team', label: 'Team' },
@@ -125,6 +127,8 @@ export default function ProjectDashboardPage() {
         return <ProjectRepoManager projectId={projectId} />;
       case 'architecture':
         return <ArchitectureViewer projectId={projectId} />;
+      case 'docs':
+        return <ProjectDocumentsPanel projectId={projectId} />;
       case 'memory':
         return <ProjectMemoryPanel projectId={projectId} />;
       case 'chat':
@@ -258,8 +262,10 @@ function OverviewContent({
   dashboard, scoreTrend,
 }: { dashboard: any; scoreTrend: any }) {
   const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
+  const projectId = dashboard?.projectId ?? dashboard?.id;
   return (
     <div className="space-y-4 max-w-3xl">
+      {projectId && <ProjectSummaryPanel projectId={projectId} />}
       <div className="space-y-2">
         <h3 className="text-[11px] font-medium text-secondary">Recent submissions</h3>
         <ExecutionsPanel tasks={tasks} />
@@ -272,6 +278,54 @@ function OverviewContent({
         <h3 className="text-[11px] font-medium text-secondary mb-2">Score trend</h3>
         <ProjectScoreTrend scores={scoreTrend} />
       </div>
+    </div>
+  );
+}
+
+function ProjectSummaryPanel({ projectId }: { projectId: string }) {
+  const [content, setContent] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () => {
+    setLoading(true);
+    api.getProjectSummary(projectId)
+      .then((r) => setContent(r.content || ''))
+      .catch(() => setContent(''))
+      .finally(() => setLoading(false));
+  };
+  useEffect(refresh, [projectId]);
+
+  const analyse = async () => {
+    setBusy(true);
+    try {
+      await api.analyseProject(projectId);
+      refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[11px] font-medium text-secondary">Project summary</h3>
+        <button
+          onClick={analyse}
+          disabled={busy}
+          className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+          title="Regenerate codemaps + architecture + summary"
+        >
+          {busy ? 'Analysing…' : 'Analyse'}
+        </button>
+      </div>
+      {loading ? (
+        <div className="text-[11px] text-muted">Loading…</div>
+      ) : content ? (
+        <p className="text-[12px] leading-relaxed text-secondary whitespace-pre-wrap">{content}</p>
+      ) : (
+        <p className="text-[11px] text-muted">No summary yet — click Analyse to generate one.</p>
+      )}
     </div>
   );
 }

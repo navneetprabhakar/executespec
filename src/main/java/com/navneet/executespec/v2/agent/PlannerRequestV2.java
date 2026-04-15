@@ -28,7 +28,9 @@ public record PlannerRequestV2(
         String model,
         ExecutionContext context,
         String workspaceSummary,
-        String projectMemory) {
+        String projectMemory,
+        String projectBrief,
+        String referenceDocs) {
 
     public PlannerRequestV2 {
         if (spec == null || spec.isBlank()) throw new IllegalArgumentException("spec required");

@@ -1,6 +1,9 @@
 package com.navneet.executespec.v2.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -19,10 +22,14 @@ import java.util.List;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class ReadFileTool implements Tool {
 
     /** Truncation cap applied to full-file reads. Range reads are not truncated. */
     static final int MAX_RESULT_CHARS = 5_000;
+
+    private final ProjectWorkspaceService projectWorkspace;
+    private final PipelineRunRepository pipelineRunRepo;
 
     @Override
     public String name() {
@@ -74,6 +81,34 @@ public class ReadFileTool implements Tool {
         if (start != null && end != null && start > end) {
             return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS,
                     "startLine (" + start + ") > endLine (" + end + ")");
+        }
+        // project: prefix — read from the per-project workspace instead of the run workspace.
+        if (path.startsWith("project:")) {
+            String rel = path.substring("project:".length());
+            String projectId = pipelineRunRepo.findById(ctx.runId())
+                    .map(r -> r.getProjectId())
+                    .orElse(null);
+            if (projectId == null || projectId.isBlank()) {
+                return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS,
+                        "project workspace not available for this run");
+            }
+            try {
+                String content = projectWorkspace.readFile(projectId, rel).orElse(null);
+                if (content == null) {
+                    return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "file not found: " + path);
+                }
+                if (content.length() > MAX_RESULT_CHARS) {
+                    int tail = Math.min(1_500, MAX_RESULT_CHARS / 4);
+                    int head = MAX_RESULT_CHARS - tail;
+                    int omitted = content.length() - MAX_RESULT_CHARS;
+                    content = content.substring(0, head)
+                            + "\n...[" + omitted + " chars omitted]...\n"
+                            + content.substring(content.length() - tail);
+                }
+                return ToolResult.ok(content);
+            } catch (IllegalArgumentException iae) {
+                return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, iae.getMessage());
+            }
         }
         try {
             Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);

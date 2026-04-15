@@ -19,6 +19,7 @@ public class ProjectArchitectureController {
 
     private final ProjectArchitectureService service;
     private final StalenessService stalenessService;
+    private final com.navneet.executespec.project.workspace.ProjectWorkspaceService workspace;
 
     public record ArchDocDto(
             UUID id,
@@ -43,6 +44,20 @@ public class ProjectArchitectureController {
         ProjectArchitectureDoc doc = service.generate(projectId);
         stalenessService.invalidate(projectId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
+    }
+
+    /** Alias + preferred entry: regenerates codemaps + architecture + summary on disk. */
+    @PostMapping("/api/projects/{projectId}/analyse")
+    public ResponseEntity<ArchDocDto> analyse(@PathVariable String projectId) {
+        ProjectArchitectureDoc doc = service.generate(projectId);
+        stalenessService.invalidate(projectId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
+    }
+
+    @GetMapping("/api/projects/{projectId}/summary")
+    public ResponseEntity<Map<String, String>> summary(@PathVariable String projectId) {
+        String content = workspace.readFile(projectId, "summary.md").orElse("");
+        return ResponseEntity.ok(Map.of("content", content));
     }
 
     @GetMapping("/api/projects/{projectId}/architecture/staleness")

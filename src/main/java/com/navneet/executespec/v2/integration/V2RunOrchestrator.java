@@ -129,6 +129,10 @@ public class V2RunOrchestrator {
     private final RunCodeMapService runCodeMapService;
     private final AppUserRepository appUserRepository;
     private final com.navneet.executespec.memory.ProjectMemoryProvider projectMemoryProvider;
+    private final com.navneet.executespec.codeintel.ProjectBriefService projectBriefService;
+    private final com.navneet.executespec.codeintel.StalenessService stalenessService;
+    private final com.navneet.executespec.codeintel.ProjectArchitectureService projectArchitectureService;
+    private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
     private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
     private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
@@ -350,6 +354,26 @@ public class V2RunOrchestrator {
                 String projectMemory = projectId != null
                         ? projectMemoryProvider.buildPlannerContext(projectId)
                         : "";
+                if (projectId != null) {
+                    try {
+                        var staleness = stalenessService.report(projectId);
+                        if (staleness != null && staleness.stale()) {
+                            log.info("V2 run={} project={} has {} stale codemap(s); regenerating before planner",
+                                    runId, projectId, staleness.staleCount());
+                            projectArchitectureService.generate(projectId);
+                            stalenessService.invalidate(projectId);
+                        }
+                    } catch (Exception e) {
+                        log.warn("V2 run={} pre-execution staleness refresh failed (continuing): {}",
+                                runId, e.getMessage());
+                    }
+                }
+                String projectBrief = projectId != null
+                        ? projectBriefService.buildBrief(projectId)
+                        : "";
+                String referenceDocs = projectId != null
+                        ? retrievalService.retrieve(projectId, userRequest)
+                        : "";
                 String multiRepoSummary = buildMultiRepoSummary(projectId, selectedRepoIds);
                 String summary;
                 if (multiRepoSummary != null) {
@@ -367,6 +391,8 @@ public class V2RunOrchestrator {
                         .context(rootCtx)
                         .workspaceSummary(summary)
                         .projectMemory(projectMemory)
+                        .projectBrief(projectBrief)
+                        .referenceDocs(referenceDocs)
                         .build());
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
@@ -520,6 +546,11 @@ public class V2RunOrchestrator {
                 } catch (Exception memEx) {
                     log.warn("V2 run={} project-memory ledger failed: {}", runId, memEx.getMessage());
                 }
+                // Invalidate staleness cache so the next run's lazy refresh picks up
+                // the changes from this run (codemap regen happens at next plan time).
+                try {
+                    stalenessService.invalidate(projectId);
+                } catch (Exception ignore) {}
             }
 
             // ── 7. Terminal status mapping ─────────────────────────────────
