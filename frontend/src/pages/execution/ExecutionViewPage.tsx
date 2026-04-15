@@ -73,7 +73,12 @@ export default function ExecutionViewPage() {
             </span>
           )}
         </div>
-        <ExecutionStepper status={status} />
+        <div className="flex items-center gap-3">
+          <ExecutionStepper status={status} />
+          {executionId && !['COMPLETE', 'ABORTED', 'SETUP'].includes(status) && (
+            <CancelLaunchButton executionId={executionId} projectId={projectId} />
+          )}
+        </div>
       </header>
 
       {/* Next-step hint */}
@@ -119,5 +124,28 @@ export default function ExecutionViewPage() {
       </div>
     </div>
     </div>
+  );
+}
+
+function CancelLaunchButton({ executionId, projectId }: { executionId: string; projectId?: string }) {
+  const { abort } = useExecutionStore();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      disabled={busy}
+      onClick={async () => {
+        if (!confirm('Cancel this Launch? Progress will be discarded.')) return;
+        setBusy(true);
+        try {
+          await abort(executionId);
+          if (projectId) navigate(`/projects/${projectId}/dashboard`);
+        } finally { setBusy(false); }
+      }}
+      className="rounded-sm border border-[var(--border-default)] text-[11px] text-muted hover:text-accent-red hover:border-accent-red/50 px-2 py-1 disabled:opacity-50"
+      title="Abort this Launch"
+    >
+      {busy ? 'Cancelling…' : 'Cancel'}
+    </button>
   );
 }
