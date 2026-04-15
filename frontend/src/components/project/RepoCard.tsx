@@ -2,17 +2,34 @@ import { useMemo, useState } from 'react';
 import type { ProjectRepoLink, StackInfo } from '@/types/project';
 import StackBadge from './StackBadge';
 import RepoRelationshipEditor from './RepoRelationshipEditor';
+import { installRepoWebhook } from '@/lib/api';
 
 interface Props {
   link: ProjectRepoLink;
   onUnlink: (repoId: string) => void;
   onSync: (repoId: string) => void;
   onUpdateRelationships: (repoId: string, relationships: string[]) => void;
+  onRefresh?: () => void | Promise<void>;
 }
 
-export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships }: Props) {
+export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships, onRefresh }: Props) {
   const { repo } = link;
   const [editing, setEditing] = useState(false);
+  const [installingHook, setInstallingHook] = useState(false);
+
+  const doInstallHook = async () => {
+    if (installingHook) return;
+    setInstallingHook(true);
+    try {
+      const r = await installRepoWebhook(repo.id);
+      if (!r.installed && r.reason) alert(r.reason);
+      if (onRefresh) await onRefresh();
+    } catch (e) {
+      alert(`Webhook install failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setInstallingHook(false);
+    }
+  };
 
   const stack = useMemo<StackInfo | null>(() => {
     if (!repo.detectedStack) return null;
@@ -56,6 +73,18 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
             {repo.lastSyncedSha && (
               <span>· last sync {repo.lastSyncedSha.slice(0, 7)}</span>
             )}
+            <span
+              className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${
+                repo.webhookInstalled
+                  ? 'bg-emerald-500/10 text-emerald-400'
+                  : 'bg-accent-amber/10 text-accent-amber'
+              }`}
+              title={repo.webhookInstalled
+                ? 'Webhook installed — PR merges trigger post-merge cascade'
+                : 'Webhook not installed — merges will not auto-refresh architecture/memory'}
+            >
+              {repo.webhookInstalled ? 'webhook ✓' : 'webhook missing'}
+            </span>
           </div>
         </div>
         <div className="flex gap-1.5 shrink-0">
@@ -65,6 +94,16 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
           >
             Sync
           </button>
+          {!repo.webhookInstalled && (
+            <button
+              onClick={doInstallHook}
+              disabled={installingHook}
+              title="Install a pull_request webhook using your GitHub PAT (requires admin:repo_hook)"
+              className="text-[10px] px-2 py-0.5 rounded-sm border border-accent-amber/40 text-accent-amber hover:bg-accent-amber/10 disabled:opacity-50"
+            >
+              {installingHook ? 'Installing…' : 'Install webhook'}
+            </button>
+          )}
           <button
             onClick={() => onUnlink(repo.id)}
             className="text-[10px] px-2 py-0.5 rounded-sm border border-accent-red/40 text-accent-red hover:bg-accent-red/10"

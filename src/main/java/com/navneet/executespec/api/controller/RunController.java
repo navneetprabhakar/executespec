@@ -428,6 +428,29 @@ public class RunController {
                 "details", outcome.details()));
     }
 
+    /**
+     * v2.5.2 — reset every cloned repo in the workspace back to the exact commit
+     * SHA captured at run start (from {@code run_repo_snapshot}). Distinct from
+     * {@code POST /sync} which resets to current origin HEAD of the chosen branch.
+     *
+     * <p>Returns 409 when the run predates v2.5.2 and has no snapshot rows.
+     */
+    @PostMapping("/{runId}/sync/original")
+    public ResponseEntity<Map<String, Object>> syncRunToOriginal(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable String runId) {
+        PipelineRun run = guard.requireRunAccess(runId, userDetails);
+        if (!List.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED").contains(run.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Run sync requires a terminal status (current: " + run.getStatus() + ")");
+        }
+        var outcome = runSyncService.syncToOriginalCommit(runId);
+        return ResponseEntity.ok(Map.of(
+                "status", "synced",
+                "reposSynced", outcome.reposSynced(),
+                "details", outcome.details()));
+    }
+
     @PostMapping("/{runId}/push-scm")
     public ResponseEntity<Map<String, String>> pushToScm(
             @AuthenticationPrincipal AppUserDetails userDetails,

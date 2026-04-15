@@ -26,8 +26,61 @@ import java.util.List;
 public class RunSyncService {
 
     private final WorkspaceInitService workspaceInit;
+    private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
 
     public record SyncOutcome(int reposSynced, List<String> details) {}
+
+    /**
+     * Reset each repo in a run workspace back to the exact commit SHA it was
+     * cloned from at run start. Relies on {@code run_repo_snapshot} rows written
+     * by {@link WorkspaceInitService#cloneMultipleRepos}. Pre-v2.5.2 runs have
+     * no snapshots and can't be reset-to-original — caller gets an empty
+     * {@code details} list, {@code reposSynced=0}.
+     *
+     * <p>Safe only on terminal runs — API layer enforces that invariant.
+     */
+    public SyncOutcome syncToOriginalCommit(String runId) {
+        Path runRoot = workspaceInit.runWorkspacePath(runId);
+        if (!Files.isDirectory(runRoot)) {
+            throw new IllegalStateException("Run workspace not found: " + runRoot);
+        }
+        List<com.navneet.executespec.state.entity.RunRepoSnapshot> snaps =
+                snapshotRepo.findByRunId(runId);
+        if (snaps.isEmpty()) {
+            return new SyncOutcome(0, List.of("no snapshot — run predates v2.5.2"));
+        }
+        List<String> details = new ArrayList<>();
+        int synced = 0;
+        // Multi-repo workspaces have repos/<name>/ subdirectories; single-repo
+        // runs use the root. Snapshot.repoFullName's short name maps to the
+        // subdirectory name used by cloneMultipleRepos.
+        for (var snap : snaps) {
+            String shortName = snap.getRepoFullName().contains("/")
+                    ? snap.getRepoFullName().substring(snap.getRepoFullName().indexOf('/') + 1)
+                    : snap.getRepoFullName();
+            Path repoRoot = runRoot.resolve("repos").resolve(shortName);
+            if (!Files.isDirectory(repoRoot.resolve(".git"))) {
+                // Fall back to the run root for legacy single-repo layouts.
+                if (Files.isDirectory(runRoot.resolve(".git"))) repoRoot = runRoot;
+                else {
+                    details.add(shortName + " MISSING (no .git found)");
+                    continue;
+                }
+            }
+            try {
+                runGit(repoRoot, "git", "fetch", "origin");
+                runGit(repoRoot, "git", "reset", "--hard", snap.getCommitSha());
+                synced++;
+                String sha7 = snap.getCommitSha().length() > 7 ? snap.getCommitSha().substring(0, 7) : snap.getCommitSha();
+                details.add(shortName + " <- " + sha7 + " (original)");
+                log.info("RunSync(original): run={} repo={} reset to {}", runId, shortName, snap.getCommitSha());
+            } catch (Exception e) {
+                details.add(shortName + " FAILED: " + e.getMessage());
+                log.warn("RunSync(original): run={} repo={} failed: {}", runId, shortName, e.getMessage());
+            }
+        }
+        return new SyncOutcome(synced, details);
+    }
 
     public SyncOutcome sync(String runId, String branchOverride) {
         Path runRoot = workspaceInit.runWorkspacePath(runId);

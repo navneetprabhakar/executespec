@@ -1789,6 +1789,18 @@ export const syncRun = (runId: string, branch?: string) =>
     `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
     { method: 'POST' });
 
+// v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
+export const installRepoWebhook = (repoId: string) =>
+  req<{ installed: boolean; reason?: string }>(
+    `/repos/${repoId}/webhook`, { method: 'POST' });
+
+// v2.5.2 — reset workspace to the exact commit SHAs captured at run start.
+// Returns { reposSynced: 0, details: ["no snapshot — run predates v2.5.2"] }
+// for runs clone before the snapshot rollout.
+export const syncRunToOriginal = (runId: string) =>
+  req<{ status: string; reposSynced: number; details: string[] }>(
+    `/runs/${runId}/sync/original`, { method: 'POST' });
+
 export const getProjectSummary = (projectId: string) =>
   req<{ content: string }>(`/projects/${projectId}/summary`);
 

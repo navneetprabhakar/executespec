@@ -54,6 +54,12 @@ public class ProjectRepo {
     @Column(name = "last_synced_sha", length = 40)
     private String lastSyncedSha;
 
+    /** v2.5.2 — whether a PR webhook has been installed on this GitHub repo.
+     *  Flipped true by {@code installWebhook} in {@code ProjectRepoService}. */
+    @Column(name = "webhook_installed", nullable = false)
+    @Builder.Default
+    private boolean webhookInstalled = false;
+
     /** JSON-serialised {@code StackInfo} ({language, framework, version}) or null. */
     @Column(name = "detected_stack", columnDefinition = "jsonb")
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)

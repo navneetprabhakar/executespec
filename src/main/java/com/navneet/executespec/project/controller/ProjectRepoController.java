@@ -79,6 +79,23 @@ public class ProjectRepoController {
                 isOrgAdmin(userDetails)));
     }
 
+    /**
+     * v2.5.2 — install the PR webhook on this repo using the caller's PAT.
+     * Returns {@code {installed: true}} on success or {@code {installed: false, reason}}
+     * when install failed (no PAT admin, network, etc.).
+     */
+    @PostMapping("/api/repos/{repoId}/webhook")
+    public ResponseEntity<java.util.Map<String, Object>> installRepoWebhook(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable UUID repoId) {
+        var u = userDetails.getUser();
+        boolean ok = service.installWebhook(repoId, u.getGithubPat(), u.getId(), u.getOrgId());
+        return ResponseEntity.ok(ok
+                ? java.util.Map.of("installed", true)
+                : java.util.Map.of("installed", false,
+                        "reason", "GitHub API rejected webhook install — check PAT has admin:repo_hook"));
+    }
+
     @DeleteMapping("/api/repos/{repoId}")
     public ResponseEntity<Void> deleteRepo(
             @AuthenticationPrincipal AppUserDetails userDetails,

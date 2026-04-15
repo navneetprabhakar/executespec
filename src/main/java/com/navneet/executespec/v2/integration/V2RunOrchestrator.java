@@ -283,7 +283,9 @@ public class V2RunOrchestrator {
                     List<WorkspaceInitService.RepoToClone> toClone = repos.stream()
                             .map(r -> new WorkspaceInitService.RepoToClone(
                                     r.getGithubRepoFullName(),
-                                    "https://github.com/" + r.getGithubRepoFullName()))
+                                    "https://github.com/" + r.getGithubRepoFullName(),
+                                    r.getId(),
+                                    r.getDefaultBranch()))
                             .toList();
                     workspaceInit.cloneMultipleRepos(runId, toClone, githubPat);
                     log.info("V2 run={} cloned {} project repos", runId, toClone.size());
@@ -464,6 +466,7 @@ public class V2RunOrchestrator {
                         .maxIterationsPerTask(null)  // per-complexity caps applied in SequentialExecutorV2
                         .enableSmokeTests(true)
                         .designBlock(designBlock)
+                        .projectId(projectId)
                         .build());
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} executor failed", runId, e);
