@@ -82,11 +82,17 @@ public class ExecutionController {
     }
 
     @GetMapping("/api/executions/{id}")
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public ResponseEntity<ExecutionRunDto> getExecution(
             @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
         AppUser user = requireFeatureEnabled(principal);
         ExecutionRun run = requireRunAccess(id, user);
         var solutions = solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(id);
+        // Force-init the lazy dependencies collection before the session closes
+        // so SolutionDto.from can walk it without a LazyInitializationException.
+        solutions.forEach(s -> {
+            if (s.getDependencies() != null) s.getDependencies().size();
+        });
         return ResponseEntity.ok(ExecutionRunDto.from(run, solutions));
     }
 
