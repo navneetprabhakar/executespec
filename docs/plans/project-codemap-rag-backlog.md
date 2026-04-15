@@ -2,6 +2,14 @@
 
 > Items deliberately deferred from the v2.5.0 pilot. Ordered by probable pickup.
 
+## 0. Worker prompt doc injection (NEW — discovered in v2.5.0 E2E)
+
+**Trigger:** End-to-end test of HostelMgmt v3. Spec said "apply the late fee policy from the project documents". The chat answer correctly cited `₹500 / ₹1500 / warden review` from the uploaded doc — but the worker stubbed `LateFeePolicy.calculate() → BigDecimal.ZERO`. Reason: retrieval is wired into `PlannerAgentV2` and `ProjectChatService` only. The per-task description created by the planner doesn't always carry the doc content forward, so the worker writes code without seeing it.
+
+**Fix:** in `WorkerAgentV2` (or `SequentialExecutorV2`'s task prompt assembly), call `retrievalService.retrieve(projectId, taskDescription)` and prepend a `## REFERENCE DOCS` block to the worker system prompt — same pattern as the planner.
+
+**Why deferred:** ~30-line change but needs careful eval (token cost per task, prompt-length budget). Worker tier is WORKHORSE so cost is non-trivial when retrieval fires for every task in a multi-task plan. Consider gating: only retrieve when project has at least 1 READY doc AND task complexity ≥ MEDIUM.
+
 ## 1. Memory overflow → vector spill (P3.4, deferred)
 
 **Trigger:** `ProjectMemoryProvider.MAX_MEMORY_TOKENS` was bumped from 8K → 12K.
