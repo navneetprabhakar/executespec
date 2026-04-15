@@ -1777,6 +1777,45 @@ export const updateRepoRelationships = (
 export const generateArchitecture = (projectId: string) =>
   req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, { method: 'POST' });
 
+// Project workspace analyse (regenerates codemaps + architecture.md + summary.md on disk)
+export const analyseProject = (projectId: string) =>
+  req<ArchitectureDoc>(`/projects/${projectId}/analyse`, { method: 'POST' });
+
+export const getProjectSummary = (projectId: string) =>
+  req<{ content: string }>(`/projects/${projectId}/summary`);
+
+// Project documents (RAG)
+export interface ProjectDocumentRow {
+  id: string;
+  projectId: string;
+  pathRelative: string;
+  filename: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  status: 'UPLOADED' | 'EXTRACTING' | 'EMBEDDING' | 'READY' | 'FAILED';
+  failureReason: string | null;
+  createdAt: string;
+}
+
+export const listProjectDocuments = (projectId: string) =>
+  req<ProjectDocumentRow[]>(`/projects/${projectId}/documents`);
+
+export const uploadProjectDocument = async (projectId: string, file: File): Promise<ProjectDocumentRow> => {
+  const form = new FormData();
+  form.append('file', file);
+  const token = localStorage.getItem('token');
+  const res = await fetch(`/api/projects/${projectId}/documents`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  return res.json();
+};
+
+export const deleteProjectDocument = (projectId: string, documentId: string) =>
+  req<{ status: string }>(`/projects/${projectId}/documents/${documentId}`, { method: 'DELETE' });
+
 export const getArchitectureDoc = (projectId: string) =>
   req<ArchitectureDoc>(`/projects/${projectId}/architecture`);
 

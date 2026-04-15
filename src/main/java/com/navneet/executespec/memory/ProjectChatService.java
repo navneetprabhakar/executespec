@@ -49,6 +49,7 @@ public class ProjectChatService {
     private final ProjectChatMessageRepository chatRepo;
     private final ProjectMemoryProvider memoryProvider;
     private final ProjectArchitectureService archService;
+    private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
     private final ModelResolver modelResolver;
     private final LlmRouterV2 router;
 
@@ -198,10 +199,24 @@ public class ProjectChatService {
             }
         } catch (Exception ignored) { /* arch is optional */ }
 
+        List<ProjectChatMessage> prior = chatRepo.findByProjectIdOrderByCreatedAtAsc(project.getId());
+        // Use the most recent user turn as the retrieval query so REFERENCE DOCS
+        // are picked relative to whatever the user just asked.
+        String retrievalQuery = prior.stream()
+                .filter(m -> "USER".equals(m.getRole()))
+                .reduce((a, b) -> b)
+                .map(ProjectChatMessage::getContent)
+                .orElse("");
+        if (!retrievalQuery.isBlank()) {
+            try {
+                String refs = retrievalService.retrieve(project.getId(), retrievalQuery);
+                if (refs != null && !refs.isBlank()) sys.append(refs).append("\n");
+            } catch (Exception ignored) {}
+        }
+
         List<Message> messages = new ArrayList<>();
         messages.add(new SystemMessage(sys.toString()));
 
-        List<ProjectChatMessage> prior = chatRepo.findByProjectIdOrderByCreatedAtAsc(project.getId());
         int from = Math.max(0, prior.size() - HISTORY_WINDOW);
         for (int i = from; i < prior.size(); i++) {
             ProjectChatMessage m = prior.get(i);

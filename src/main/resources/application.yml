@@ -210,6 +210,7 @@ model-matrix:
     RunLedgerAgent: LIGHTWEIGHT
     RunTitleSummarizer: LIGHTWEIGHT
     ProjectChatCompiler: LIGHTWEIGHT
+    ProjectBriefService: LIGHTWEIGHT
     ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT
