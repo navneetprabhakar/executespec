@@ -150,9 +150,9 @@ public class ProjectDashboardController {
      * {@code null} body when no banner is active.
      */
     @GetMapping("/api/projects/{projectId}/post-merge-bar")
-    public ResponseEntity<com.navneet.executespec.project.pr.PostMergeCascadeService.PostMergeBar>
+    public ResponseEntity<List<com.navneet.executespec.project.pr.PostMergeCascadeService.PostMergeBar>>
             postMergeBar(@PathVariable String projectId) {
-        return ResponseEntity.ok(postMergeCascadeService.readPostMergeBar(projectId));
+        return ResponseEntity.ok(postMergeCascadeService.readPostMergeBars(projectId));
     }
 
     /**
@@ -185,7 +185,7 @@ public class ProjectDashboardController {
     /** v2.5.2 — dismiss the post-merge banner (user clicked the CTA or X). */
     @org.springframework.web.bind.annotation.DeleteMapping("/api/projects/{projectId}/post-merge-bar")
     public ResponseEntity<Void> dismissPostMergeBar(@PathVariable String projectId) {
-        postMergeCascadeService.dismissPostMergeBar(projectId);
+        postMergeCascadeService.dismissPostMergeBars(projectId);
         return ResponseEntity.noContent().build();
     }
 

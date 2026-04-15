@@ -1855,7 +1855,7 @@ export interface PostMergeBar {
   mergedAt: string | null;
 }
 export const getPostMergeBar = (projectId: string) =>
-  req<PostMergeBar | null>(`/projects/${projectId}/post-merge-bar`);
+  req<PostMergeBar[]>(`/projects/${projectId}/post-merge-bar`);
 export const dismissPostMergeBar = (projectId: string) =>
   req<void>(`/projects/${projectId}/post-merge-bar`, { method: 'DELETE' });
 

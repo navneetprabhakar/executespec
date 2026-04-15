@@ -51,6 +51,8 @@ public class PostMergeCascadeService {
 
     static final String POST_MERGE_KEY_PREFIX = "project:post-merge:";
     static final java.time.Duration POST_MERGE_TTL = java.time.Duration.ofMinutes(10);
+    /** Max banners kept in the Redis list before older entries are trimmed away. */
+    static final int POST_MERGE_MAX_BANNERS = 3;
 
     public void onMerged(PullRequestRecord record) {
         if (record == null) return;
@@ -84,39 +86,48 @@ public class PostMergeCascadeService {
     }
 
     /**
-     * Writes the PostMergeBar marker to Redis so the dashboard can render a
-     * "Continue building" banner next time the user lands on it. Absent key =
-     * no banner; TTL keeps the banner from going stale after the user has
-     * already seen it.
+     * Push a PostMergeBar entry onto the Redis list so the dashboard can render
+     * a "Continue building" banner next time the user lands on it. The list is
+     * capped at {@value #POST_MERGE_MAX_BANNERS} — rapid-fire merges get
+     * stacked up to that limit; older entries are trimmed. TTL refreshed on
+     * every push so the window slides with activity.
      */
     private void writePostMergeBar(PullRequestRecord record, String projectId) throws Exception {
         String key = POST_MERGE_KEY_PREFIX + projectId;
         String mergedAt = record.getMergedAt() == null ? null : record.getMergedAt().toString();
         PostMergeBar bar = new PostMergeBar(record.getRepoFullName(), record.getPrNumber(), mergedAt);
-        redis.opsForValue().set(key, objectMapper.writeValueAsString(bar), POST_MERGE_TTL);
+        String payload = objectMapper.writeValueAsString(bar);
+        redis.opsForList().leftPush(key, payload);
+        redis.opsForList().trim(key, 0, POST_MERGE_MAX_BANNERS - 1);
+        redis.expire(key, POST_MERGE_TTL);
     }
 
-    /** Read + consume the marker — called by the controller. Returns null when
-     *  absent. We intentionally do NOT delete on read; the TTL handles cleanup
-     *  and the user can refresh the page to re-see the banner within its window. */
-    public PostMergeBar readPostMergeBar(String projectId) {
+    /** Read all live banner entries, newest first. Returns an empty list when
+     *  no marker is active. The TTL handles cleanup; we intentionally do NOT
+     *  consume on read so reloads within the window keep showing the banner. */
+    public List<PostMergeBar> readPostMergeBars(String projectId) {
         try {
-            String cached = redis.opsForValue().get(POST_MERGE_KEY_PREFIX + projectId);
-            if (cached == null) return null;
-            return objectMapper.readValue(cached, PostMergeBar.class);
+            List<String> cached = redis.opsForList()
+                    .range(POST_MERGE_KEY_PREFIX + projectId, 0, -1);
+            if (cached == null || cached.isEmpty()) return List.of();
+            List<PostMergeBar> out = new java.util.ArrayList<>(cached.size());
+            for (String s : cached) {
+                try { out.add(objectMapper.readValue(s, PostMergeBar.class)); }
+                catch (Exception ignore) {}
+            }
+            return out;
         } catch (Exception e) {
-            log.debug("readPostMergeBar failed for {}: {}", projectId, e.getMessage());
-            return null;
+            log.debug("readPostMergeBars failed for {}: {}", projectId, e.getMessage());
+            return List.of();
         }
     }
 
-    /** Dismiss the marker — called by the controller when the user clicks
-     *  "Start next requirement" or explicitly dismisses the banner. */
-    public void dismissPostMergeBar(String projectId) {
+    /** Dismiss every banner for a project — called when the user clicks the X. */
+    public void dismissPostMergeBars(String projectId) {
         try {
             redis.delete(POST_MERGE_KEY_PREFIX + projectId);
         } catch (Exception e) {
-            log.debug("dismissPostMergeBar failed for {}: {}", projectId, e.getMessage());
+            log.debug("dismissPostMergeBars failed for {}: {}", projectId, e.getMessage());
         }
     }
 
