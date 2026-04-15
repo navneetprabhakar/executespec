@@ -135,7 +135,12 @@ public class ExecutionOrchestrator {
         try {
             // Delegate to the pilot v3.0 architecture service which already
             // handles per-repo codemap generation + unified doc synthesis.
-            ProjectArchitectureDoc doc = archService.generate(run.getProjectId());
+            // Pass the creator's PAT so private repo trees resolve (system
+            // GITHUB_PAT env isn't always scoped on user repos).
+            String pat = appUserRepo.findById(run.getCreatedBy())
+                    .map(u -> u.getGithubPat())
+                    .orElse(null);
+            ProjectArchitectureDoc doc = archService.generate(run.getProjectId(), null, pat);
             run.setUnifiedArchDoc(doc == null ? null : doc.getContent());
             run.setStatus("ARCH_REVIEW");
             runRepo.save(run);
