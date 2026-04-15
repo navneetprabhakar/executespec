@@ -5,6 +5,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.5.0] — 2026-04-15
+
+Per-project workspace, codemap + architecture as physical markdown, RAG over user-uploaded docs, auto-push on, and a GitHub-style architecture diff. Backlog: vector spill (snapshot > 12K), OCR / rerank / semantic chunking.
+
+### Added
+
+- **`ProjectWorkspaceService`** owns `workspace/projects/<projectId>/` (codemaps/, architecture.md, summary.md, docs/, .git). Atomic writes via os-level rename + Redis-backed per-project lock. Path-traversal guards.
+- **`ProjectArchitectureService`** now persists each codemap + architecture.md + summary.md to disk on every `generate()`. DB blobs remain authoritative — disk is a local cache.
+- **`ProjectBriefService`** — LIGHTWEIGHT-tier LLM call summarises the architecture doc into 2–4 sentences; `buildBrief()` returns an ~800-token block injected into the planner system prompt as `{{PROJECT_BRIEF}}`.
+- **`POST /api/projects/{id}/analyse`** — preferred entry for codemap + architecture + summary regeneration; alias of the legacy `/architecture/generate`.
+- **`GET /api/projects/{id}/summary`** — returns `summary.md` for the Overview tab.
+- **Pre-execution lazy refresh** — `V2RunOrchestrator` checks `StalenessService` before planning; regenerates codemaps for any stale repo so the planner always sees the latest layout. Post-success: invalidates the staleness cache.
+- **`readFile project:` prefix** — V2 worker tool resolves `project:architecture.md`, `project:codemaps/<repo>.md`, `project:summary.md` from the project workspace. DB-authoritative fallback when disk cache is missing (VM-churn safe).
+- **RAG pipeline** — Tika `DocumentExtractor` + 500-token / 50-token-overlap `ChunkingService` (code-fence aware) + Spring AI OpenAI `EmbeddingService` (text-embedding-3-small, batch 100, retry-once) + JDBC `ChunkStore` over `pgvector`.
+- **`ProjectDocumentService`** + **`/api/projects/{id}/documents`** — upload / list / delete with async indexing (UPLOADED → EXTRACTING → EMBEDDING → READY/FAILED). 10 MB cap.
+- **`RetrievalService`** — always-on `retrieve(projectId, query, k=3, cap=1500 tokens)` returns a compact `## REFERENCE DOCS` markdown block. Wired into `PlannerAgentV2` (`{{REFERENCE_DOCS}}`) and `ProjectChatService` (uses last user turn as query).
+- **Architecture diff UI** — `Diff vs v{N-1}` button on the Architecture tab renders an LCS line-diff GitHub-style.
+- **Auto-push flag flipped ON** — V96 + V97 set `project.runs.auto-push = true` on the `PLATFORM` scope; every successful project-scoped V2 run opens PRs automatically.
+- **Memory token budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8 000 → 12 000 (vector spill-over deferred to backlog).
+
+### Frontend
+
+- **Project Overview tab** gains a Project Summary panel + Analyse button (regenerates codemaps + architecture.md + summary.md).
+- **Project Docs tab** — drag-and-drop upload, per-doc status with polling, delete.
+- **Architecture tab** — Diff button + LCS line-diff renderer.
+- **Font parity** — `text-[12]` body rows on Project components normalised to `text-[11]` to match Run/Pro view density (`InlineRunDetail`, `ArchitectureViewer`, `ProjectMemoryPanel`, `ProjectLaunchesList`, `ProjectPrRollup`, `ProjectDocumentsPanel`, dashboard executions list, summary panel).
+
+### Schema
+
+- **V95** `pgvector_project_documents.sql`: `CREATE EXTENSION vector` + `project_document` (status enum, sha256, deleted_at, project_id+path UNIQUE) + `project_document_chunk` (vector(1536), ivfflat cosine index).
+- **V96** `auto_push_default_on.sql`: upsert `project.runs.auto-push = true`.
+- **V97** `auto_push_fix_scope.sql`: corrects V96's `scope='GLOBAL'` (not in enum) to `'PLATFORM'`.
+
+### Dependencies
+
+- Apache Tika 2.9.2 (`tika-core` + `tika-parsers-standard-package`) for PDF / DOCX / HTML extraction.
+
+### Backlog (deferred)
+
+- Memory snapshot vector spill once a project crosses the 12 K snapshot ceiling.
+- OCR for scanned PDFs, rerank pass over top-K, semantic (heading-aware) chunking.
+
+See [docs/plans/project-codemap-rag-backlog.md](docs/plans/project-codemap-rag-backlog.md) for the full design notes.
+
+---
+
 ## [2.4.0] — 2026-04-14
 
 Project-level rollup, Launch entry-point inside the project, multi-run solutions, and new-repo creation as part of a Launch. Premium feature: ENTERPRISE + MAX tiers (the latter joins the Execution View tier gate).
