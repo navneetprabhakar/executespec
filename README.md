@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-**v2.5.0** · Multi-agent autonomous coding system. Decomposes natural-language goals into tasks, executes them sequentially with tier-routed LLM worker agents, validates, reviews, ships a PR, and remembers what was built. **v2.5.0** adds a per-project workspace with codemaps + architecture.md + summary.md as physical markdown, pgvector-backed RAG over user-uploaded docs, always-on retrieval injected into the planner + chat, a GitHub-style architecture diff, and auto-push of successful project runs. Premium feature: ENTERPRISE + MAX tiers.
+**v2.5.1** · Multi-agent autonomous coding system. Decomposes natural-language goals into tasks, executes them sequentially with tier-routed LLM worker agents, validates, reviews, ships a PR, and remembers what was built. **v2.5.0** adds a per-project workspace with codemaps + architecture.md + summary.md as physical markdown, pgvector-backed RAG over user-uploaded docs, always-on retrieval injected into the planner + chat, a GitHub-style architecture diff, and auto-push of successful project runs. Premium feature: ENTERPRISE + MAX tiers.
 
 **Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind · GCP
 
