@@ -4,6 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -181,6 +184,54 @@ public class GitHubRepoService {
      * @param overridePat   caller's PAT (must have {@code admin:repo_hook})
      * @return              {@code true} on 201 Created, else {@code false}
      */
+    /**
+     * v2.5.5 (UX-4.2) — list files changed between two commits via GitHub's
+     * compare API. Returns one {@link ChangedFile} per file (added / modified /
+     * removed / renamed) or empty on failure. No pagination — the compare
+     * endpoint caps at 300 files per response which is plenty for an arch
+     * diff. Uses the caller's PAT for private-repo access.
+     */
+    public List<ChangedFile> compareCommits(String repoFullName, String baseSha, String headSha, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (repoFullName == null || baseSha == null || headSha == null) return List.of();
+        if (baseSha.equals(headSha)) return List.of();
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest.Builder b = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName
+                            + "/compare/" + baseSha + "..." + headSha))
+                    .header("Accept", "application/vnd.github+json")
+                    .GET();
+            if (effectivePat != null && !effectivePat.isBlank()) {
+                b.header("Authorization", "Bearer " + effectivePat);
+            }
+            HttpResponse<String> res = client.send(b.build(), HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() != 200) {
+                log.warn("[GitHubRepoService] compareCommits {}/{}...{} returned {}",
+                        repoFullName, baseSha, headSha, res.statusCode());
+                return List.of();
+            }
+            JsonNode root = new ObjectMapper().readTree(res.body());
+            JsonNode files = root.path("files");
+            if (!files.isArray()) return List.of();
+            List<ChangedFile> out = new ArrayList<>(files.size());
+            for (JsonNode f : files) {
+                out.add(new ChangedFile(
+                        f.path("filename").asText(""),
+                        f.path("status").asText("modified"),
+                        f.path("additions").asInt(0),
+                        f.path("deletions").asInt(0)));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] compareCommits {}: {}", repoFullName, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** GitHub compare API file entry — status is one of added/modified/removed/renamed. */
+    public record ChangedFile(String filename, String status, int additions, int deletions) {}
+
     public boolean installWebhook(String repoFullName, String overridePat) {
         if (webhookCallbackUrl == null || webhookCallbackUrl.isBlank()
                 || webhookSecret == null || webhookSecret.isBlank()) {

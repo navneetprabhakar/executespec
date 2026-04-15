@@ -146,8 +146,12 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
       )}
 
       {shown && diffOpen && previous && (
-        <ArchDiffBlock oldText={previous.content} newText={shown.content}
-                      oldV={previous.version} newV={shown.version} />
+        <>
+          <ArchDiffBlock oldText={previous.content} newText={shown.content}
+                        oldV={previous.version} newV={shown.version} />
+          <ArchSourceChanges projectId={projectId}
+                            fromVersion={previous.version} toVersion={shown.version} />
+        </>
       )}
 
       {shown && !diffOpen && (
@@ -274,4 +278,98 @@ function diffLines(a: string[], b: string[]): DiffRow[] {
   while (i < n) out.push({ kind: 'del', text: a[i++] });
   while (j < m) out.push({ kind: 'add', text: b[j++] });
   return out;
+}
+
+/**
+ * v2.5.5 (UX-4.2) — source-file changes section that sits below the text diff.
+ * Hits the diff endpoint which calls GitHub's compare API against each repo's
+ * SHAs captured at the two architecture-doc versions. Empty/silent when the
+ * call fails (private repo without PAT, SHA missing, etc.) so it never breaks
+ * the primary text-diff view.
+ */
+function ArchSourceChanges({ projectId, fromVersion, toVersion }:
+    { projectId: string; fromVersion: number; toVersion: number }) {
+  const [report, setReport] = useState<import('@/lib/api').ArchDiffReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    api.getArchitectureDiff(projectId, fromVersion, toVersion)
+      .then((r) => { if (alive) setReport(r); })
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [projectId, fromVersion, toVersion]);
+
+  if (loading) {
+    return (
+      <div className="text-[11px] text-muted rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2">
+        Loading source file changes…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="text-[10px] text-muted rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2">
+        Source changes unavailable ({error}).
+      </div>
+    );
+  }
+  if (!report || report.totalFiles === 0) {
+    return (
+      <div className="text-[10px] text-muted rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2">
+        No source file changes between v{fromVersion} and v{toVersion}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2 space-y-2">
+      <div className="text-[10px] uppercase tracking-wide text-muted">
+        Source file changes · {report.totalFiles} file{report.totalFiles === 1 ? '' : 's'}
+      </div>
+      {report.perRepo.map((rp) => {
+        const added = rp.files.filter((f) => f.status === 'added');
+        const modified = rp.files.filter((f) => f.status === 'modified');
+        const removed = rp.files.filter((f) => f.status === 'removed');
+        const renamed = rp.files.filter((f) => f.status === 'renamed');
+        return (
+          <div key={rp.repoFullName} className="space-y-1">
+            <div className="text-[11px] font-mono text-primary">{rp.repoFullName}</div>
+            <FileGroup label="Added" files={added} tone="text-emerald-400" />
+            <FileGroup label="Modified" files={modified} tone="text-accent-amber" />
+            <FileGroup label="Removed" files={removed} tone="text-accent-red" />
+            <FileGroup label="Renamed" files={renamed} tone="text-accent-blue" />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FileGroup({ label, files, tone }:
+    { label: string; files: { filename: string; additions: number; deletions: number }[]; tone: string }) {
+  if (files.length === 0) return null;
+  return (
+    <div>
+      <div className={`text-[10px] ${tone}`}>{label} ({files.length})</div>
+      <ul className="pl-2 space-y-0.5">
+        {files.map((f) => (
+          <li key={f.filename} className="text-[10px] font-mono text-muted flex items-center gap-2">
+            <span className="truncate flex-1">{f.filename}</span>
+            {(f.additions > 0 || f.deletions > 0) && (
+              <span className="shrink-0">
+                <span className="text-emerald-400">+{f.additions}</span>
+                {' '}
+                <span className="text-accent-red">-{f.deletions}</span>
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
