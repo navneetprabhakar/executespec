@@ -133,11 +133,15 @@ public class SolutionExecutionService {
         String githubPat = appUserRepo.findById(run.getCreatedBy())
                 .map(u -> u.getGithubPat()).orElse(null);
 
+        // Use the Launch's aiProvider so the worker runs on the provider the user
+        // picked (project default or explicit override). Without this the
+        // orchestrator normalises null -> openai + gpt-5.4-mini, silently
+        // overriding the Anthropic choice on the project.
         PipelineRun pipelineRun = v2Orchestrator.submitRun(
                 fullRequest, "EXECUTION_VIEW", repoUrl, repoUrl != null ? "EXISTING" : "NEW",
-                githubPat, null, true, true, null, null,
+                githubPat, null, true, true, null, run.getAiProvider(),
                 run.getCreatedBy(), run.getOrgId(), run.getProjectId(), "PRODUCTION",
-                repoId == null ? List.of() : List.of(repoId));
+                repoId == null ? List.of() : List.of(repoId), null);
         return pipelineRun.getRunId();
     }
 
