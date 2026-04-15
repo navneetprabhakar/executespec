@@ -28,11 +28,12 @@ application-local.yaml
 *.env
 credentials.json
 
-# Workspace (agent-generated files)
-workspace/
+# Workspace (agent-generated files) — anchor to repo root so we don't
+# shadow the src/.../project/workspace/ Java package.
+/workspace/
+/workspace/*
 workspace-e2e/
 workspace-e2e/*
-workspace/*
 workspace-test/
 workspace-test/*
 test-workspace-e2e/
