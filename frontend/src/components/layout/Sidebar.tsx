@@ -165,11 +165,20 @@ export default function Sidebar() {
         {/* Projects section */}
         {isOrgMember && projects.length > 0 && expanded && (
           <>
-            <div className="px-2.5 pt-5 pb-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted whitespace-nowrap">
+            <NavLink
+              to="/org/projects"
+              title="Manage projects"
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center justify-between px-2.5 pt-5 pb-1.5 hover:text-primary',
+                  isActive ? 'text-primary' : 'text-muted',
+                )
+              }
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-widest whitespace-nowrap">
                 Projects
               </span>
-            </div>
+            </NavLink>
             {projects.map((project) => {
               const isActive = projectFilter === project.id;
               return (

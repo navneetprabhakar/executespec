@@ -29,7 +29,7 @@ export default function ViewModeToggle() {
         onClick={() => {
           if (!canUseProjectMode) return;
           setViewMode('project');
-          navigate('/projects');
+          navigate('/org/projects');
         }}
         disabled={!canUseProjectMode}
         title={canUseProjectMode
