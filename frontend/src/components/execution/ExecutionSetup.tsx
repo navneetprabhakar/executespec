@@ -126,12 +126,18 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
         </div>
         <div className="space-y-1.5">
           {(repos ?? []).map((r: any) => {
-            const rid = r.id ?? r.repoId;
-            const name = r.githubRepoFullName ?? r.repoName ?? rid;
+            // Store returns ProjectRepoLink ({repo: {...}, repoId, projectId}); fall back to
+            // flat shapes for robustness.
+            const rid = r.repo?.id ?? r.repoId ?? r.id;
+            const name = r.repo?.githubRepoFullName ?? r.githubRepoFullName ?? r.repoName ?? rid;
+            const scope = r.repo?.scope;
             return (
               <label key={rid} className="flex items-center gap-2 text-[12px]">
                 <input type="checkbox" checked={selected.has(rid)} onChange={() => toggle(rid)} />
-                <span>{name}</span>
+                <span className="font-mono">{name}</span>
+                {scope && (
+                  <span className="text-[10px] uppercase tracking-wide text-muted">{scope}</span>
+                )}
               </label>
             );
           })}
