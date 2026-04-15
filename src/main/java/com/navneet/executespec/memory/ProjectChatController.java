@@ -55,6 +55,20 @@ public class ProjectChatController {
         return ResponseEntity.ok(reply);
     }
 
+    /**
+     * Distil the current chat history into a single-paragraph execution spec
+     * ready to submit as a new project run. Does NOT submit — returns the spec
+     * so the user can review / edit before launching.
+     */
+    @PostMapping("/compile")
+    public ResponseEntity<java.util.Map<String, String>> compile(
+            @AuthenticationPrincipal AppUserDetails principal,
+            @PathVariable String projectId) {
+        requireChatAccess(principal, projectId);
+        String spec = chatService.compileToSpec(projectId);
+        return ResponseEntity.ok(java.util.Map.of("spec", spec));
+    }
+
     private AppUser requireChatAccess(AppUserDetails principal, String projectId) {
         if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
         AppUser user = principal.getUser();

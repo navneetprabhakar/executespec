@@ -67,8 +67,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
     try {
       const user = await api.authMe();
+      // 'project' is session-local — never a login default. If the server
+      // has it persisted from an older session, reset to 'pro' immediately
+      // so the toggle + view don't disagree.
+      if (user.viewMode === 'project') {
+        user.viewMode = 'pro';
+        api.updateViewMode('pro').catch(() => {});
+      }
       set({ user, isAuthenticated: true });
-      // Sync view mode from server preference
       if (user.viewMode) {
         useUiStore.getState().setViewMode(user.viewMode);
       }

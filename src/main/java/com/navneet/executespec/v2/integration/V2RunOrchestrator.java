@@ -130,6 +130,8 @@ public class V2RunOrchestrator {
     private final AppUserRepository appUserRepository;
     private final com.navneet.executespec.memory.ProjectMemoryProvider projectMemoryProvider;
     private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
+    private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
+    private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
@@ -348,15 +350,22 @@ public class V2RunOrchestrator {
                 String projectMemory = projectId != null
                         ? projectMemoryProvider.buildPlannerContext(projectId)
                         : "";
+                String multiRepoSummary = buildMultiRepoSummary(projectId, selectedRepoIds);
+                String summary;
+                if (multiRepoSummary != null) {
+                    summary = multiRepoSummary;
+                } else if (codemapSummary != null) {
+                    summary = "Existing repository — codebase map below.\n\n" + codemapSummary;
+                } else {
+                    summary = "empty scratch workspace (V2 harness)";
+                }
                 plan = planner.plan(PlannerRequestV2.builder()
                         .spec(userRequest)
                         .classification(autoClassification)
                         .provider(provider)
                         .model(model)
                         .context(rootCtx)
-                        .workspaceSummary(codemapSummary != null
-                                ? "Existing repository — codebase map below.\n\n" + codemapSummary
-                                : "empty scratch workspace (V2 harness)")
+                        .workspaceSummary(summary)
                         .projectMemory(projectMemory)
                         .build());
             } catch (Exception e) {
@@ -522,6 +531,25 @@ public class V2RunOrchestrator {
             log.info("V2RunOrchestrator run={} {} exec={} review={}",
                     runId, finalStatus, execResult.overall(),
                     reviewResult == null ? "n/a" : reviewResult.overall());
+
+            // ── 7b. Auto-push project runs on success ──────────────────────
+            // Project-scoped runs that reach COMPLETE/PARTIAL get pushed to GitHub
+            // automatically (gated by `project.runs.auto-push` feature flag). Manual
+            // "Push & open PR" still works for non-project runs and as a re-push.
+            if (projectId != null
+                    && ("COMPLETE".equals(finalStatus) || "PARTIAL".equals(finalStatus))
+                    && featureFlagService.isEnabled("project.runs.auto-push")) {
+                try {
+                    PipelineRun fresh = runRepo.findById(runId).orElse(null);
+                    if (fresh != null) {
+                        scmPushService.push(fresh);
+                        log.info("V2 run={} auto-pushed to SCM", runId);
+                    }
+                } catch (Exception pushEx) {
+                    log.warn("V2 run={} auto-push failed (manual push still works): {}",
+                            runId, pushEx.getMessage());
+                }
+            }
         } catch (Exception unexpected) {
             log.error("V2RunOrchestrator run={} unexpected failure", runId, unexpected);
             terminate(runId, "FAILED", "unexpected: " + shortMsg(unexpected), startedAt);
@@ -1288,6 +1316,46 @@ public class V2RunOrchestrator {
             sb.append('"').append(ids.get(i).toString()).append('"');
         }
         return sb.append(']').toString();
+    }
+
+    /**
+     * Builds a workspaceSummary that tells the planner (and by extension the
+     * worker) exactly where each selected repo is cloned, so generated files
+     * land inside {@code repos/<name>/} — not at the workspace root. Without
+     * this the worker treats the workspace as an empty scratch dir and writes
+     * to the root, producing runs that finish COMPLETE but open no PRs
+     * (nothing to push from each {@code repos/<name>/} subdir).
+     */
+    private String buildMultiRepoSummary(String projectId, List<UUID> selectedRepoIds) {
+        if (projectId == null || selectedRepoIds == null || selectedRepoIds.isEmpty()) return null;
+        List<ProjectRepo> repos;
+        try {
+            repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
+        } catch (Exception e) {
+            return null;
+        }
+        if (repos.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder(
+                "MULTI-REPO PROJECT WORKSPACE.\n\n"
+                + "Each selected repo is cloned into its own subdirectory under `repos/`.\n"
+                + "All file paths you create or edit MUST live inside the matching `repos/<name>/`\n"
+                + "subdirectory — never at the workspace root. Only one PR per repo is opened,\n"
+                + "based on the diff inside that subdirectory.\n\n"
+                + "Repos available for this run:\n");
+        for (ProjectRepo r : repos) {
+            String name = lastPathSegment(r.getGithubRepoFullName());
+            sb.append("- `repos/").append(name).append("/` → github.com/")
+              .append(r.getGithubRepoFullName())
+              .append(" (default branch: ").append(r.getDefaultBranch() == null ? "main" : r.getDefaultBranch())
+              .append(")\n");
+        }
+        return sb.toString();
+    }
+
+    private static String lastPathSegment(String fullName) {
+        if (fullName == null) return "repo";
+        int slash = fullName.lastIndexOf('/');
+        return slash < 0 ? fullName : fullName.substring(slash + 1);
     }
 
     private static String shortMsg(Exception e) {

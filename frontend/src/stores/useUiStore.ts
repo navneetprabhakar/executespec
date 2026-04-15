@@ -60,7 +60,13 @@ export const useUiStore = create<UiStore>((set) => ({
   runListCollapsed: false,
   runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
   copilotMaximized: false,
-  viewMode: (localStorage.getItem('es:viewMode') as ViewMode) || 'vibe',
+  viewMode: ((): ViewMode => {
+    const saved = localStorage.getItem('es:viewMode') as ViewMode | null;
+    // 'project' is a deliberate opt-in — never persist as the default session mode.
+    // On login (fresh session), land on 'pro'; respect saved 'vibe' or 'pro' only.
+    if (saved === 'vibe' || saved === 'pro') return saved;
+    return 'pro';
+  })(),
 
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
   setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),

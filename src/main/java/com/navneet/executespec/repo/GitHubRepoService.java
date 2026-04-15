@@ -604,6 +604,132 @@ public class GitHubRepoService {
         return paths;
     }
 
+    /** Lightweight DTO for {@link #listOwnerRepos(String, String)}. */
+    public record RemoteRepo(String fullName, String defaultBranch, boolean isPrivate) {}
+
+    /** Snapshot of a PR for dashboard rendering (title, body, stats, truncated diff). */
+    public record PullRequestSnapshot(
+            String title, String body, String state,
+            int additions, int deletions, int changedFiles,
+            String headBranch, String baseBranch,
+            String diffPreview) {}
+
+    /**
+     * Fetches a PR + its diff (truncated) for inline dashboard rendering.
+     * Returns {@code null} on any failure — caller should degrade to link-only.
+     */
+    public PullRequestSnapshot getPullRequestSnapshot(String repoFullName, int prNumber,
+                                                       String overridePat, int diffMaxChars) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return null;
+        if (repoFullName == null || repoFullName.isBlank()) return null;
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+
+            // PR metadata (JSON)
+            HttpRequest metaReq = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET().build();
+            HttpResponse<String> metaResp = client.send(metaReq, HttpResponse.BodyHandlers.ofString());
+            if (metaResp.statusCode() != 200) {
+                log.warn("[GitHubRepoService] PR snapshot {} #{} meta status={}",
+                        repoFullName, prNumber, metaResp.statusCode());
+                return null;
+            }
+            com.fasterxml.jackson.databind.ObjectMapper mapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode meta = mapper.readTree(metaResp.body());
+
+            // PR diff (text)
+            HttpRequest diffReq = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github.v3.diff")
+                    .GET().build();
+            HttpResponse<String> diffResp = client.send(diffReq, HttpResponse.BodyHandlers.ofString());
+            String diff = diffResp.statusCode() == 200 ? diffResp.body() : "";
+            String truncated = diff;
+            if (diffMaxChars > 0 && diff.length() > diffMaxChars) {
+                truncated = diff.substring(0, diffMaxChars)
+                        + "\n\n… (truncated, " + (diff.length() - diffMaxChars) + " more chars)";
+            }
+
+            return new PullRequestSnapshot(
+                    meta.path("title").asText(""),
+                    meta.path("body").asText(""),
+                    meta.path("state").asText("open"),
+                    meta.path("additions").asInt(0),
+                    meta.path("deletions").asInt(0),
+                    meta.path("changed_files").asInt(0),
+                    meta.path("head").path("ref").asText(""),
+                    meta.path("base").path("ref").asText(""),
+                    truncated);
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] PR snapshot error {} #{}: {}", repoFullName, prNumber, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Lists repos visible to the supplied PAT. Pulls up to 200 results across two
+     * pages of {@code /user/repos} (covers private + collaborator + org-member repos
+     * the token can see). If {@code ownerFilter} is non-blank, results are filtered
+     * to that owner only — useful when the PAT can see many orgs but the user only
+     * wants to register repos from one of them.
+     */
+    public List<RemoteRepo> listOwnerRepos(String ownerFilter, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return List.of();
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        List<RemoteRepo> out = new ArrayList<>();
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            for (int page = 1; page <= 2; page++) {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create("https://api.github.com/user/repos"
+                                + "?affiliation=owner,collaborator,organization_member"
+                                + "&per_page=100&page=" + page))
+                        .header("Authorization", "Bearer " + effectivePat)
+                        .header("Accept", "application/vnd.github+json")
+                        .GET()
+                        .build();
+                HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) {
+                    log.warn("[GitHubRepoService] /user/repos page {} returned {}: {}",
+                            page, resp.statusCode(), truncate(resp.body(), 200));
+                    break;
+                }
+                com.fasterxml.jackson.databind.JsonNode arr = mapper.readTree(resp.body());
+                if (!arr.isArray() || arr.isEmpty()) break;
+                for (com.fasterxml.jackson.databind.JsonNode node : arr) {
+                    String full = node.path("full_name").asText(null);
+                    if (full == null) continue;
+                    if (ownerFilter != null && !ownerFilter.isBlank()
+                            && !full.toLowerCase().startsWith(ownerFilter.toLowerCase() + "/")) {
+                        continue;
+                    }
+                    out.add(new RemoteRepo(
+                            full,
+                            node.path("default_branch").asText("main"),
+                            node.path("private").asBoolean(false)));
+                }
+                if (arr.size() < 100) break;   // last page
+            }
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] listOwnerRepos failed: {}", e.getMessage());
+        }
+        out.sort((a, b) -> a.fullName().compareToIgnoreCase(b.fullName()));
+        return out;
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
+
     /**
      * Decodes the base64 "content" field from a GitHub Contents API response.
      * The GitHub API returns content in base64 with newlines every 60 chars.

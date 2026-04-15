@@ -39,13 +39,31 @@ public class MemoryCompactionService {
     private final ProjectRunLedgerRepository ledgerRepo;
     private final ProjectMemorySnapshotRepository snapshotRepo;
 
+    /**
+     * Force-compact every uncompacted ledger entry for a project, regardless of
+     * how many runs have completed. Exposed via the Memory tab's Compact button
+     * so users can trigger snapshot generation on demand (handy for demos +
+     * testing without driving 20+ runs). Returns the new snapshot version, or
+     * 0 if nothing needed compacting.
+     */
+    @Transactional
+    public int compactNow(String projectId, String orgId) {
+        List<ProjectRunLedger> entries = ledgerRepo.findUncompactedBeforeRunNumber(
+                projectId, Integer.MAX_VALUE);
+        return doCompact(projectId, orgId, entries);
+    }
+
     @Transactional
     public void compactIfNeeded(String projectId, int currentRunNumber, String orgId) {
         int cutoff = currentRunNumber - 10;
         List<ProjectRunLedger> entries = ledgerRepo.findUncompactedBeforeRunNumber(projectId, cutoff);
+        doCompact(projectId, orgId, entries);
+    }
+
+    private int doCompact(String projectId, String orgId, List<ProjectRunLedger> entries) {
         if (entries.isEmpty()) {
-            log.debug("MemoryCompactionService: no uncompacted entries before R{} for project {}", cutoff, projectId);
-            return;
+            log.debug("MemoryCompactionService: no uncompacted entries for project {}", projectId);
+            return 0;
         }
 
         try {
@@ -67,7 +85,7 @@ public class MemoryCompactionService {
             String compacted = callLightweightLlm(filled, projectId);
             if (compacted == null || compacted.isBlank()) {
                 log.warn("MemoryCompactionService: empty LLM response for project {}", projectId);
-                return;
+                return 0;
             }
 
             int fromRun = existing.map(ProjectMemorySnapshot::getCoversRunsFrom)
@@ -93,8 +111,10 @@ public class MemoryCompactionService {
 
             log.info("MemoryCompactionService: compacted {} entries (R{}-R{}) into v{} for project {}",
                     entries.size(), fromRun, toRun, newVersion, projectId);
+            return newVersion;
         } catch (Exception e) {
             log.warn("MemoryCompactionService failed for project {}: {}", projectId, e.getMessage(), e);
+            return 0;
         }
     }
 

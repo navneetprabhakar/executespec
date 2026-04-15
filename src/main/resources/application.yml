@@ -208,6 +208,8 @@ model-matrix:
     ConflictResolverAgent: WORKHORSE
     ContextAgent: LIGHTWEIGHT
     RunLedgerAgent: LIGHTWEIGHT
+    RunTitleSummarizer: LIGHTWEIGHT
+    ProjectChatCompiler: LIGHTWEIGHT
     ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT

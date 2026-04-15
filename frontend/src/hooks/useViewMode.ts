@@ -12,8 +12,16 @@ export function useViewMode() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
 
-  // Prefer the server-stored viewMode when the user is authenticated
-  const viewMode: ViewMode = user?.viewMode ?? uiViewMode;
+  // 'project' is session-local — never persisted / never the login default.
+  // On login we read user.viewMode from the server but coerce any stored
+  // 'project' back to 'pro' so the toggle and the view agree. The local
+  // uiViewMode wins when the user explicitly enters project mode this session.
+  const rawViewMode: ViewMode = (uiViewMode === 'project')
+    ? 'project'
+    : (user?.viewMode && user.viewMode !== 'project')
+      ? user.viewMode as ViewMode
+      : (uiViewMode === 'vibe' ? 'vibe' : 'pro');
+  const viewMode: ViewMode = rawViewMode;
   const tier: Tier = user?.tier ?? 'FREE';
 
   const setViewMode = useCallback(
@@ -21,11 +29,10 @@ export function useViewMode() {
       // Always update local UI store for instant feedback
       setUiViewMode(mode);
 
-      // Persist to backend if authenticated
-      if (user) {
+      // Persist vibe/pro to backend; project is opt-in per session only.
+      if (user && mode !== 'project') {
         setUser({ ...user, viewMode: mode });
         apiUpdateViewMode(mode).catch(() => {
-          // Revert on failure
           setUser({ ...user, viewMode: viewMode });
           setUiViewMode(viewMode);
         });
