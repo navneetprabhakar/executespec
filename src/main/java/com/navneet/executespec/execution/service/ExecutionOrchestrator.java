@@ -176,7 +176,6 @@ public class ExecutionOrchestrator {
     }
 
     @Async
-    @org.springframework.transaction.annotation.Transactional
     public void executeApprovedPlan(String executionRunId) {
         ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
         if (run == null) return;
@@ -184,10 +183,11 @@ public class ExecutionOrchestrator {
         runRepo.save(run);
         emit(run.getId(), ExecutionEventTypes.EXEC_STARTED, null);
 
-        List<ExecutionSolution> all = solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(executionRunId);
-        // Force-init dependencies while the session is open so the resolver + any
-        // downstream readers can walk the Set without a LazyInitializationException.
-        all.forEach(s -> { if (s.getDependencies() != null) s.getDependencies().size(); });
+        // Eager-fetch dependencies so SolutionDependencyResolver can walk the Set
+        // without a LazyInitializationException — works regardless of whether
+        // the caller path is proxied (avoids the @Transactional-self-invocation trap).
+        List<ExecutionSolution> all = solutionRepo
+                .findWithDependenciesByExecutionRun_IdOrderBySequenceNumberAsc(executionRunId);
         List<List<ExecutionSolution>> layers;
         try {
             layers = depResolver.resolveExecutionOrder(all);
