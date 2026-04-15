@@ -23,7 +23,7 @@ public class ProjectMemoryProvider {
     private final ProjectRunLedgerRepository ledgerRepo;
     private final ProjectMemorySnapshotRepository snapshotRepo;
 
-    private static final int MAX_MEMORY_TOKENS = 8000;
+    private static final int MAX_MEMORY_TOKENS = 12000;
 
     /** Renders the full memory context (snapshot + last 10 entries). Empty if no history. */
     public String buildPlannerContext(String projectId) {

@@ -322,7 +322,7 @@ function ProjectSummaryPanel({ projectId }: { projectId: string }) {
       {loading ? (
         <div className="text-[11px] text-muted">Loading…</div>
       ) : content ? (
-        <p className="text-[12px] leading-relaxed text-secondary whitespace-pre-wrap">{content}</p>
+        <p className="text-[11px] leading-relaxed text-secondary whitespace-pre-wrap">{content}</p>
       ) : (
         <p className="text-[11px] text-muted">No summary yet — click Analyse to generate one.</p>
       )}
@@ -345,7 +345,7 @@ function ExecutionsPanel({ tasks }: { tasks: TaskSummary[] }) {
           >
             <div className="flex items-center gap-2">
               <span className={cn('text-[10px] font-mono tabular-nums', statusColor)}>{t.status}</span>
-              <span className="text-[12px] text-primary truncate flex-1">{t.name || t.runId.slice(0, 8)}</span>
+              <span className="text-[11px] text-primary truncate flex-1">{t.name || t.runId.slice(0, 8)}</span>
               <span className={cn('text-[11px] font-mono tabular-nums', scoreColor(t.score))}>
                 {t.score != null ? `${t.score}/100` : '—'}
               </span>

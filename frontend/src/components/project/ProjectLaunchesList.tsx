@@ -24,7 +24,7 @@ export default function ProjectLaunchesList({ projectId }: { projectId: string }
   if (error) return <div className="text-[11px] text-accent-red">{error}</div>;
   if (launches == null) return <div className="text-[11px] text-muted">Loading launches…</div>;
   if (launches.length === 0) {
-    return <div className="text-[12px] text-muted">No launches yet. Click "Launch" to start a cross-repo run.</div>;
+    return <div className="text-[11px] text-muted">No launches yet. Click "Launch" to start a cross-repo run.</div>;
   }
 
   return (
@@ -36,7 +36,7 @@ export default function ProjectLaunchesList({ projectId }: { projectId: string }
           <Link
             key={l.id}
             to={`/projects/${projectId}/executions/${l.id}`}
-            className="flex items-center gap-2 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-[12px] hover:bg-[var(--gray-200)]"
+            className="flex items-center gap-2 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-[11px] hover:bg-[var(--gray-200)]"
           >
             <span className={`text-[10px] px-1.5 py-0.5 rounded border ${color}`}>{l.status}</span>
             <span className="font-mono text-[10px] text-muted">{l.id.substring(0, 8)}</span>

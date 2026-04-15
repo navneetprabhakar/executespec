@@ -20,7 +20,7 @@ export default function ProjectPrRollup({ projectId }: { projectId: string }) {
   if (error) return <div className="text-[11px] text-accent-red">{error}</div>;
   if (prs == null) return <div className="text-[11px] text-muted">Loading PRs…</div>;
   if (prs.length === 0) {
-    return <div className="text-[12px] text-muted">No pull requests yet.</div>;
+    return <div className="text-[11px] text-muted">No pull requests yet.</div>;
   }
 
   const launchEntries = prs.filter((p) => !p.repoFullName);
@@ -138,7 +138,7 @@ function PrPreview({ snap }: { snap: PullRequestSnapshot }) {
   return (
     <div className="space-y-2">
       {snap.title && (
-        <div className="text-[12px] text-primary font-medium">{snap.title}</div>
+        <div className="text-[11px] text-primary font-medium">{snap.title}</div>
       )}
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted font-mono">
         <span>branch: <span className="text-secondary">{snap.headBranch}</span> → <span className="text-secondary">{snap.baseBranch}</span></span>

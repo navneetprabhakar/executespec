@@ -104,7 +104,7 @@ export default function ProjectDocumentsPanel({ projectId }: { projectId: string
           >
             <FileText className="h-3.5 w-3.5 text-muted" />
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] text-primary truncate">{d.filename ?? d.pathRelative}</div>
+              <div className="text-[11px] text-primary truncate">{d.filename ?? d.pathRelative}</div>
               <div className="text-[10px] text-muted font-mono mt-0.5">
                 {(d.sizeBytes ?? 0) > 0 ? `${Math.ceil((d.sizeBytes ?? 0) / 1024)} kB · ` : ''}
                 {new Date(d.createdAt).toLocaleString()}
