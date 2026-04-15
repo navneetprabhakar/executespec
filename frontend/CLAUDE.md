@@ -1,6 +1,6 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-14 (v2.4.0 — Project Shell + Launch: `ExecutionSetup` adds new-repo sub-form + dry-run; `SolutionSection` replaces `SolutionCard` with per-attempt history linking to `RunDetailPage`; `ProjectLaunchesList` + `ProjectPrRollup` tabs on `ProjectDashboardPage`; types extended with `NewRepoSpec` + `Scaffold` + `SolutionRun` + `PrRollupEntry` + `ProjectOverview`; ENTERPRISE + MAX premium gate)
+> Last updated: 2026-04-15 (v2.5.0 — Project Workspace + RAG: `ProjectDashboardPage` gains a Docs tab driven by new `ProjectDocumentsPanel` (drag-drop upload, async status, delete); Overview tab gains a Project Summary panel + Analyse button (`getProjectSummary` / `analyseProject`); `ArchitectureViewer` gets a "Diff vs v{N-1}" button + LCS line-diff renderer; `text-[12]` body rows on Project components normalised to `text-[11]` to match Run/Pro view density; new API helpers `listProjectDocuments` / `uploadProjectDocument` / `deleteProjectDocument`)
 
 React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
