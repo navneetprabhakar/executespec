@@ -238,9 +238,14 @@ public class SolutionExecutionService {
         emit(run.getId(), ExecutionEventTypes.EXEC_PAUSED_FOR_DECISION, solution.getId());
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public void processDecision(ExecutionSolution solution, String action) {
         if (action == null) return;
+        // Re-attach within the new transaction so lazy associations (executionRun)
+        // resolve cleanly instead of throwing LazyInitializationException.
+        solution = solutionRepo.findById(solution.getId()).orElse(solution);
         ExecutionRun run = solution.getExecutionRun();
+        if (run != null) run.getId(); // force-init proxy
         switch (action.toUpperCase()) {
             case ExecutionDecision.SKIP -> {
                 solution.setStatus("SKIPPED");
