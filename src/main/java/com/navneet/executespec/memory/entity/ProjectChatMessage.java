@@ -15,16 +15,16 @@ import java.util.UUID;
 public class ProjectChatMessage {
 
     @Id
-    @Column(length = 36)
+    @Column(length = 64)
     private String id;
 
-    @Column(name = "project_id", nullable = false, length = 36)
+    @Column(name = "project_id", nullable = false, length = 64)
     private String projectId;
 
-    @Column(name = "org_id", nullable = false, length = 36)
+    @Column(name = "org_id", nullable = false, length = 64)
     private String orgId;
 
-    @Column(name = "user_id", nullable = false, length = 36)
+    @Column(name = "user_id", nullable = false, length = 64)
     private String userId;
 
     /** USER | ASSISTANT */

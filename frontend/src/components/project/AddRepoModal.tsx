@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { X, Lock, RefreshCw } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { ProjectRepo, RepoScope } from '@/types/project';
+import type { GitHubRemoteRepo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -21,21 +22,53 @@ export default function AddRepoModal({
 }: Props) {
   const [tab, setTab] = useState<'pick' | 'create'>('pick');
   const [available, setAvailable] = useState<ProjectRepo[]>([]);
+  const [remote, setRemote] = useState<GitHubRemoteRepo[]>([]);
+  const [filter, setFilter] = useState('');
+  const [ownerOverride, setOwnerOverride] = useState('');
   const [loading, setLoading] = useState(false);
+  const [refreshingRemote, setRefreshingRemote] = useState(false);
+  const [linkingFullName, setLinkingFullName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [scope, setScope] = useState<RepoScope>('USER');
   const [fullName, setFullName] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
 
-  useEffect(() => {
+  const loadAll = async (owner?: string) => {
     setLoading(true);
-    api
-      .listRepos('ALL')
-      .then(setAvailable)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
+    setError(null);
+    try {
+      const [registered, fromGitHub] = await Promise.all([
+        api.listRepos('ALL'),
+        api.listGitHubRepos(owner).catch((e) => {
+          setError(`GitHub: ${e instanceof Error ? e.message : String(e)}`);
+          return [] as GitHubRemoteRepo[];
+        }),
+      ]);
+      setAvailable(registered);
+      setRemote(fromGitHub);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshRemote = async () => {
+    setRefreshingRemote(true);
+    setError(null);
+    try {
+      const fromGitHub = await api.listGitHubRepos(ownerOverride.trim() || undefined);
+      setRemote(fromGitHub);
+    } catch (e) {
+      setError(`GitHub: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRefreshingRemote(false);
+    }
+  };
 
   const link = async (repoId: string) => {
     try {
@@ -63,7 +96,68 @@ export default function AddRepoModal({
     }
   };
 
-  const pickable = available.filter((r) => !alreadyLinkedRepoIds.has(r.id));
+  const linkRemote = async (r: GitHubRemoteRepo) => {
+    setError(null);
+    setLinkingFullName(r.fullName);
+    try {
+      // Reuse an existing registration if present, otherwise register at USER scope
+      // (default — least privilege; ORG scope must be done explicitly via Create new).
+      const existing = available.find(
+        (a) => a.githubRepoFullName.toLowerCase() === r.fullName.toLowerCase(),
+      );
+      const repoId = existing?.id ?? (
+        await api.createRepo({
+          scope: 'USER',
+          githubRepoFullName: r.fullName,
+          defaultBranch: r.defaultBranch || 'main',
+        })
+      ).id;
+      await api.linkProjectRepo(projectId, repoId);
+      onLinked();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to link repo');
+    } finally {
+      setLinkingFullName(null);
+    }
+  };
+
+  // Merge view: registered repos + remote GitHub repos, excluding already-linked
+  type PickRow =
+    | { kind: 'registered'; repo: ProjectRepo }
+    | { kind: 'remote'; repo: GitHubRemoteRepo };
+
+  const linkedFullNames = useMemo(() => {
+    const names = new Set<string>();
+    available.forEach((a) => {
+      if (alreadyLinkedRepoIds.has(a.id)) names.add(a.githubRepoFullName.toLowerCase());
+    });
+    return names;
+  }, [available, alreadyLinkedRepoIds]);
+
+  const rows: PickRow[] = useMemo(() => {
+    const seen = new Set<string>();
+    const out: PickRow[] = [];
+    for (const a of available) {
+      if (alreadyLinkedRepoIds.has(a.id)) continue;
+      const key = a.githubRepoFullName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: 'registered', repo: a });
+    }
+    for (const r of remote) {
+      const key = r.fullName.toLowerCase();
+      if (seen.has(key) || linkedFullNames.has(key)) continue;
+      seen.add(key);
+      out.push({ kind: 'remote', repo: r });
+    }
+    const f = filter.trim().toLowerCase();
+    if (!f) return out;
+    return out.filter((row) => {
+      const name = row.kind === 'registered' ? row.repo.githubRepoFullName : row.repo.fullName;
+      return name.toLowerCase().includes(f);
+    });
+  }, [available, remote, alreadyLinkedRepoIds, linkedFullNames, filter]);
 
   return (
     <div
@@ -105,30 +199,76 @@ export default function AddRepoModal({
         {error && <div className="mb-2 text-[11px] text-accent-red">{error}</div>}
 
         {tab === 'pick' && (
-          <div className="max-h-80 overflow-y-auto space-y-1.5">
-            {loading && <div className="text-[11px] text-muted">Loading…</div>}
-            {!loading && pickable.length === 0 && (
-              <div className="text-[11px] text-muted">
-                No available repos. Switch to "Create new" to register one.
-              </div>
-            )}
-            {pickable.map((r) => (
-              <div
-                key={r.id}
-                className="flex items-center justify-between rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2.5 py-1.5"
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter…"
+                className="flex-1 px-2 py-1 text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
+              />
+              <input
+                type="text"
+                value={ownerOverride}
+                onChange={(e) => setOwnerOverride(e.target.value)}
+                placeholder="owner / org"
+                className="w-28 px-2 py-1 text-[11px] font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
+                title="Override the owner used for the GitHub query (defaults to your saved owner)"
+              />
+              <button
+                onClick={refreshRemote}
+                disabled={refreshingRemote}
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
+                title="Re-fetch repos from GitHub using your saved PAT"
               >
-                <div className="min-w-0">
-                  <div className="font-mono text-[11px] truncate text-primary">{r.githubRepoFullName}</div>
-                  <div className="text-[10px] text-muted">scope: {r.scope}</div>
+                <RefreshCw className={cn('h-3 w-3', refreshingRemote && 'animate-spin')} />
+                Refresh
+              </button>
+            </div>
+            <div className="max-h-80 overflow-y-auto space-y-1.5">
+              {loading && <div className="text-[11px] text-muted">Loading…</div>}
+              {!loading && rows.length === 0 && (
+                <div className="text-[11px] text-muted">
+                  No repos visible. Set a GitHub PAT + owner under Settings → GitHub, then Refresh. Or switch to "Create new" to register a repo by name.
                 </div>
-                <button
-                  onClick={() => link(r.id)}
-                  className="text-[11px] px-2 py-0.5 border border-accent-blue text-accent-blue rounded-sm hover:bg-accent-blue/10"
-                >
-                  Link
-                </button>
-              </div>
-            ))}
+              )}
+              {rows.map((row) => {
+                const name = row.kind === 'registered' ? row.repo.githubRepoFullName : row.repo.fullName;
+                const isPrivate = row.kind === 'remote' ? row.repo.isPrivate : false;
+                const branch = row.kind === 'registered' ? row.repo.defaultBranch : row.repo.defaultBranch;
+                const busy = linkingFullName === name;
+                return (
+                  <div
+                    key={`${row.kind}:${name}`}
+                    className="flex items-center justify-between rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 flex items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="font-mono text-[11px] truncate text-primary flex items-center gap-1">
+                          {name}
+                          {isPrivate && <Lock className="h-2.5 w-2.5 text-muted" />}
+                        </div>
+                        <div className="text-[10px] text-muted">
+                          {row.kind === 'registered'
+                            ? `registered · ${row.repo.scope} · branch: ${branch}`
+                            : `from GitHub · branch: ${branch}`}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() =>
+                        row.kind === 'registered' ? link(row.repo.id) : linkRemote(row.repo)
+                      }
+                      disabled={busy}
+                      className="text-[11px] px-2 py-0.5 border border-accent-blue text-accent-blue rounded-sm hover:bg-accent-blue/10 disabled:opacity-50"
+                    >
+                      {busy ? '…' : 'Link'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

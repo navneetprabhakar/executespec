@@ -1643,7 +1643,7 @@ function IDEFileViewer({
 
 // ── Code tab ──────────────────────────────────────────────────────────────────
 
-function CodeTab({
+export function CodeTab({
   runId,
   files,
   filesLoading,

@@ -27,21 +27,23 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [runCache, setRunCache] = useState<Record<string, RunDetail | 'loading' | 'error'>>({});
 
+  const loadRun = async (runId: string) => {
+    setRunCache((c) => ({ ...c, [runId]: 'loading' }));
+    try {
+      const run = await getRun(runId);
+      setRunCache((c) => ({ ...c, [runId]: run }));
+    } catch {
+      setRunCache((c) => ({ ...c, [runId]: 'error' }));
+    }
+  };
+
   const toggle = async (runId: string) => {
     if (expandedRunId === runId) {
       setExpandedRunId(null);
       return;
     }
     setExpandedRunId(runId);
-    if (!runCache[runId]) {
-      setRunCache((c) => ({ ...c, [runId]: 'loading' }));
-      try {
-        const run = await getRun(runId);
-        setRunCache((c) => ({ ...c, [runId]: run }));
-      } catch {
-        setRunCache((c) => ({ ...c, [runId]: 'error' }));
-      }
-    }
+    if (!runCache[runId]) await loadRun(runId);
   };
 
   if (!tasks || tasks.length === 0) {
@@ -91,7 +93,7 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
                       {detail === 'loading' && <span className="text-[11px] text-muted">Loading run…</span>}
                       {detail === 'error' && <span className="text-[11px] text-accent-red">Failed to load run.</span>}
                       {detail && detail !== 'loading' && detail !== 'error' && (
-                        <InlineRunDetail run={detail} />
+                        <InlineRunDetail run={detail} onRefresh={() => loadRun(t.runId)} />
                       )}
                     </td>
                   </tr>

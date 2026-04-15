@@ -56,6 +56,8 @@ public class ProjectDashboardController {
             int completedRuns,
             int failedRuns,
             double avgScore,
+            long totalTokens,
+            double totalCostUsd,
             List<TaskSummary> recentTasks,
             List<PrSummaryDto> recentPrs,
             String architectureDocStatus,
@@ -71,6 +73,18 @@ public class ProjectDashboardController {
 
         List<PipelineRun> recentRuns = runRepo.findByProjectIdOrderByStartedAtDesc(
                 projectId, PageRequest.of(0, 10));
+
+        // Project-wide token + cost totals (across all runs, not just recent).
+        List<PipelineRun> allRuns = runRepo.findByProjectIdOrderByStartedAtDesc(
+                projectId, PageRequest.of(0, 2000));
+        long totalTokens = allRuns.stream()
+                .mapToLong(r -> (r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens())
+                              + (r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens()))
+                .sum();
+        double totalCost = allRuns.stream()
+                .filter(r -> r.getActualCostUsd() != null)
+                .mapToDouble(PipelineRun::getActualCostUsd)
+                .sum();
 
         List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
         double avgScore = reports.stream()
@@ -109,7 +123,8 @@ public class ProjectDashboardController {
 
         return ResponseEntity.ok(new DashboardDto(
                 (int) active, (int) completed, (int) failed,
-                avgScore, recentTasks, recentPrs, archStatus, archVersion));
+                avgScore, totalTokens, totalCost,
+                recentTasks, recentPrs, archStatus, archVersion));
     }
 
     private static Integer latestScoreForRun(List<ValidationReport> reports, String runId) {

@@ -6,6 +6,8 @@ import com.navneet.executespec.project.dto.ProjectRepoDto;
 import com.navneet.executespec.project.dto.ProjectRepoLinkDto;
 import com.navneet.executespec.project.dto.UpdateRelationshipsRequest;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.GitHubRepoService.RemoteRepo;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -25,6 +27,22 @@ import java.util.UUID;
 public class ProjectRepoController {
 
     private final ProjectRepoService service;
+    private final GitHubRepoService gitHub;
+
+    /**
+     * Lists every repo the caller's GitHub PAT can see (owned + collaborator +
+     * org-member). Optionally filtered by {@code owner}. Returns lightweight
+     * snapshots so the AddRepoModal "Pick existing" tab can show the real GitHub
+     * catalogue, not just repos already registered in our DB.
+     */
+    @GetMapping("/api/repos/github")
+    public ResponseEntity<List<RemoteRepo>> listGitHubRepos(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestParam(value = "owner", required = false) String owner) {
+        var u = userDetails.getUser();
+        String effectiveOwner = (owner != null && !owner.isBlank()) ? owner : u.getGithubOwner();
+        return ResponseEntity.ok(gitHub.listOwnerRepos(effectiveOwner, u.getGithubPat()));
+    }
 
     /* ── Lifecycle ── */
 

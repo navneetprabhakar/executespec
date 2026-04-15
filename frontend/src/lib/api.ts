@@ -1735,6 +1735,15 @@ export const getProjectScores = (projectId: string) =>
 export const listRepos = (scope: RepoScope | 'ALL' = 'ALL') =>
   req<ProjectRepo[]>(`/repos?scope=${scope}`);
 
+export interface GitHubRemoteRepo {
+  fullName: string;
+  defaultBranch: string;
+  isPrivate: boolean;
+}
+
+export const listGitHubRepos = (owner?: string) =>
+  req<GitHubRemoteRepo[]>(`/repos/github${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`);
+
 export const createRepo = (data: LinkRepoRequest) =>
   req<ProjectRepo>('/repos', { method: 'POST', body: JSON.stringify(data) });
 
@@ -1830,6 +1839,32 @@ export const getProjectMemory = (projectId: string) =>
   req<ProjectMemoryResponse>(`/projects/${projectId}/memory`);
 export const getProjectLedger = (projectId: string) =>
   req<RunLedgerEntry[]>(`/projects/${projectId}/memory/ledger`);
+
+export const compactProjectMemory = (projectId: string) =>
+  req<{ snapshotVersion: number; compacted: boolean }>(
+    `/projects/${projectId}/memory/compact`,
+    { method: 'POST' },
+  );
+
+export interface PullRequestSnapshot {
+  title: string;
+  body: string;
+  state: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  headBranch: string;
+  baseBranch: string;
+  diffPreview: string;
+}
+
+export const getPullRequestSnapshot = (repoFullName: string, prNumber: number, maxChars = 4000) =>
+  req<PullRequestSnapshot>(
+    `/prs/snapshot?repo=${encodeURIComponent(repoFullName)}&number=${prNumber}&maxChars=${maxChars}`,
+  );
+
+export const compileProjectChatToSpec = (projectId: string) =>
+  req<{ spec: string }>(`/projects/${projectId}/chat/compile`, { method: 'POST' });
 
 // Assessment approval (R4)
 export const approveAssessment = (runId: string, constraints?: string[]) =>

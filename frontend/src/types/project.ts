@@ -70,6 +70,8 @@ export interface ProjectDashboardDTO {
   completedRuns: number;
   failedRuns: number;
   avgScore: number;
+  totalTokens: number;
+  totalCostUsd: number;
   recentTasks: TaskSummary[];
   recentPrs: PrSummary[];
   architectureDocStatus: 'NONE' | 'GENERATED' | 'STALE';

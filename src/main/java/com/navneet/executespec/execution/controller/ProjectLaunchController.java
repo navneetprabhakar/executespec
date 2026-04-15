@@ -50,6 +50,8 @@ public class ProjectLaunchController {
     private final AppUserRepository appUserRepo;
     private final TierConfigRepository tierConfigRepo;
     private final RestTemplate integrationRestTemplate;
+    private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
+    private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRepo;
 
     // ── Launches list ─────────────────────────────────────────────────────
 
@@ -86,10 +88,11 @@ public class ProjectLaunchController {
         AppUser user = requireFeatureEnabled(principal);
         requireProjectAccess(projectId, user);
 
-        // All launches for this project → gather their solutions' PRs.
+        List<PrRollupEntry> out = new ArrayList<>();
+
+        // Launches (ExecutionRun → ExecutionSolution.prUrl)
         Page<ExecutionRun> allRuns = execRunRepo.findByProjectIdAndDeletedAtIsNullOrderByCreatedAtDesc(
                 projectId, PageRequest.of(0, 500));
-        List<PrRollupEntry> out = new ArrayList<>();
         for (ExecutionRun r : allRuns.getContent()) {
             List<ExecutionSolution> sols = solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(r.getId());
             for (ExecutionSolution s : sols) {
@@ -99,6 +102,22 @@ public class ProjectLaunchController {
                         s.getPrStatus() == null ? "OPEN" : s.getPrStatus(),
                         r.getId(),
                         s.getCompletedAt() == null ? null : s.getCompletedAt().toString()));
+            }
+        }
+
+        // Regular project-scoped runs (PipelineRun → PullRequestRecord)
+        var pipelineRuns = pipelineRunRepo.findByProjectIdOrderByStartedAtDesc(
+                projectId, PageRequest.of(0, 500));
+        for (var pr : pipelineRuns) {
+            var records = prRepo.findByRunIdOrderByCreatedAtAsc(pr.getRunId());
+            for (var rec : records) {
+                out.add(new PrRollupEntry(
+                        rec.getPrUrl(),
+                        rec.getPrNumber(),
+                        rec.getRepoFullName(),
+                        rec.getStatus() == null ? "OPEN" : rec.getStatus().name(),
+                        pr.getRunId(),
+                        rec.getCreatedAt() == null ? null : rec.getCreatedAt().toString()));
             }
         }
         return ResponseEntity.ok(out);

@@ -15,6 +15,8 @@ public class ProjectMemoryController {
 
     private final ProjectMemoryProvider memoryProvider;
     private final ProjectRunLedgerRepository ledgerRepo;
+    private final MemoryCompactionService compactionService;
+    private final com.navneet.executespec.auth.repository.ProjectRepository projectRepo;
 
     @GetMapping
     public ResponseEntity<ProjectMemoryResponse> getMemory(@PathVariable String projectId) {
@@ -28,6 +30,18 @@ public class ProjectMemoryController {
     @GetMapping("/ledger")
     public ResponseEntity<List<ProjectRunLedger>> getLedger(@PathVariable String projectId) {
         return ResponseEntity.ok(ledgerRepo.findByProjectIdOrderByRunNumberDesc(projectId));
+    }
+
+    /** Force-compact all uncompacted ledger entries into a new snapshot. */
+    @PostMapping("/compact")
+    public ResponseEntity<java.util.Map<String, Object>> compact(@PathVariable String projectId) {
+        String orgId = projectRepo.findById(projectId)
+                .map(com.navneet.executespec.auth.entity.Project::getOrgId)
+                .orElse(null);
+        int version = compactionService.compactNow(projectId, orgId);
+        return ResponseEntity.ok(java.util.Map.of(
+                "snapshotVersion", version,
+                "compacted", version > 0));
     }
 
     public record ProjectMemoryResponse(

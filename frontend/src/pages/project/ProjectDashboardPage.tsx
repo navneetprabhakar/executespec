@@ -1,18 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, FolderGit2, Rocket } from 'lucide-react';
 import { useProjectStore } from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
 import ProjectRepoManager from '@/components/project/ProjectRepoManager';
 import ArchitectureViewer from '@/components/project/ArchitectureViewer';
-import ProjectTaskList from '@/components/project/ProjectTaskList';
 import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
 import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
 import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
 import ProjectChatPanel from '@/components/project/ProjectChatPanel';
+import InlineRunDetail from '@/components/project/InlineRunDetail';
 import { cn } from '@/lib/utils';
+import type { TaskSummary } from '@/types/project';
+import type { RunDetail } from '@/lib/api';
 
 type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'memory' | 'chat' | 'team';
 
@@ -28,11 +30,31 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'team', label: 'Team' },
 ];
 
+const STATUS_COLOR: Record<string, string> = {
+  COMPLETE:   'text-emerald-400',
+  PARTIAL:    'text-accent-amber',
+  FAILED:     'text-accent-red',
+  CANCELLED:  'text-accent-red',
+  RUNNING:    'text-accent-blue',
+  PLANNING:   'text-accent-blue',
+  WORKING:    'text-accent-blue',
+  REVIEWING:  'text-accent-blue',
+};
+
+function scoreColor(score: number | null | undefined): string {
+  if (score == null) return 'text-muted';
+  if (score >= 90) return 'text-emerald-400';
+  if (score >= 75) return 'text-accent-amber';
+  return 'text-accent-red';
+}
+
 export default function ProjectDashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [tab, setTab] = useState<TabKey>('overview');
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [projectLookup, setProjectLookup] = useState<'pending' | 'found' | 'missing'>('pending');
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runCache, setRunCache] = useState<Record<string, RunDetail | 'loading' | 'error'>>({});
   const {
     dashboard, scoreTrend, loading, error,
     fetchDashboard, fetchScoreTrend, reset,
@@ -50,8 +72,71 @@ export default function ProjectDashboardPage() {
       reset();
       setProject(null);
       setProjectLookup('pending');
+      setSelectedRunId(null);
+      setRunCache({});
     };
   }, [projectId, fetchDashboard, fetchScoreTrend, reset]);
+
+  const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
+
+  // Auto-select first run so the right pane is never empty when runs exist
+  useEffect(() => {
+    if (!selectedRunId && tasks.length > 0) {
+      setSelectedRunId(tasks[0].runId);
+    }
+  }, [tasks, selectedRunId]);
+
+  const loadRun = async (runId: string) => {
+    setRunCache((c) => ({ ...c, [runId]: 'loading' }));
+    try {
+      const run = await api.getRun(runId);
+      setRunCache((c) => ({ ...c, [runId]: run }));
+    } catch {
+      setRunCache((c) => ({ ...c, [runId]: 'error' }));
+    }
+  };
+
+  useEffect(() => {
+    if (selectedRunId && !runCache[selectedRunId]) void loadRun(selectedRunId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRunId]);
+
+  const selectedDetail = selectedRunId ? runCache[selectedRunId] : undefined;
+  const showLeftList = tab !== 'chat';  // chat takes full pane
+
+  const currentContent = useMemo(() => {
+    if (!projectId) return null;
+    switch (tab) {
+      case 'overview':
+        return <OverviewContent dashboard={dashboard} scoreTrend={scoreTrend} />;
+      case 'launches':
+        return <ProjectLaunchesList projectId={projectId} />;
+      case 'prs':
+        return <ProjectPrRollup projectId={projectId} />;
+      case 'tasks':
+        return selectedDetail === 'loading'
+          ? <div className="text-[11px] text-muted p-3">Loading run…</div>
+          : selectedDetail === 'error'
+          ? <div className="text-[11px] text-accent-red p-3">Failed to load run.</div>
+          : selectedDetail
+          ? <InlineRunDetail run={selectedDetail} onRefresh={() => selectedRunId ? loadRun(selectedRunId) : Promise.resolve()} />
+          : <div className="text-[11px] text-muted p-3">Select a run on the left.</div>;
+      case 'repos':
+        return <ProjectRepoManager projectId={projectId} />;
+      case 'architecture':
+        return <ArchitectureViewer projectId={projectId} />;
+      case 'memory':
+        return <ProjectMemoryPanel projectId={projectId} />;
+      case 'chat':
+        return <ProjectChatPanel projectId={projectId} />;
+      case 'team':
+        return (
+          <div className="text-[11px] text-muted p-3">
+            Team management is available via the existing Project members page.
+          </div>
+        );
+    }
+  }, [projectId, tab, dashboard, scoreTrend, selectedDetail, selectedRunId]);
 
   if (!projectId) {
     return (
@@ -77,108 +162,208 @@ export default function ProjectDashboardPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-    <div className="mx-auto max-w-6xl p-4 space-y-3">
-      <Link to="/projects" className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-accent-blue transition-colors">
-        <ArrowLeft className="h-3 w-3" />
-        Projects
-      </Link>
+    <div className="h-full flex flex-col">
+      {/* Top chrome: back link + header + metrics + tabs */}
+      <div className="border-b border-[var(--border-default)] px-4 pt-3 pb-2 space-y-2.5 flex-shrink-0">
+        <Link to="/projects" className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-accent-blue transition-colors">
+          <ArrowLeft className="h-3 w-3" />
+          Projects
+        </Link>
 
-      {/* Header */}
-      <header className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex items-center gap-2">
-          <FolderGit2 className="h-4 w-4 text-accent-blue flex-shrink-0" />
-          <h1 className="text-[14px] font-medium text-primary truncate">
-            {project?.name ?? 'Project'}
-          </h1>
-          {project?.status && (
-            <span className="text-[10px] font-mono uppercase tracking-wide text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
-              {project.status}
-            </span>
-          )}
-          {project?.aiProvider && (
-            <span className="text-[10px] font-mono text-muted">{project.aiProvider}</span>
-          )}
-        </div>
-        <NewExecutionButton projectId={projectId} />
-      </header>
-      {project?.description && (
-        <p className="text-[11px] text-muted -mt-1">{project.description}</p>
-      )}
-
-      {loading && <div className="text-[11px] text-muted">Loading…</div>}
-      {error && <div className="text-[11px] text-accent-red">{error}</div>}
-
-      {/* Metric tiles */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <MetricTile label="Active runs"  value={dashboard?.activeRuns ?? '—'}  accent="text-accent-blue" />
-        <MetricTile label="Completed"    value={dashboard?.completedRuns ?? '—'} accent="text-emerald-400" />
-        <MetricTile label="Failed"       value={dashboard?.failedRuns ?? '—'}   accent="text-accent-red" />
-        <MetricTile
-          label="Avg score"
-          value={dashboard?.avgScore != null ? `${Math.round(dashboard.avgScore)}/100` : '—'}
-          accent={scoreAccent(dashboard?.avgScore)}
-        />
-      </section>
-
-      {/* Tabs */}
-      <nav className="flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
-              tab === t.key
-                ? 'border-accent-blue text-primary'
-                : 'border-transparent text-muted hover:text-secondary',
+        <header className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex items-center gap-2">
+            <FolderGit2 className="h-4 w-4 text-accent-blue flex-shrink-0" />
+            <h1 className="text-[14px] font-medium text-primary truncate">
+              {project?.name ?? 'Project'}
+            </h1>
+            {project?.status && (
+              <span className="text-[10px] font-mono uppercase tracking-wide text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
+                {project.status}
+              </span>
             )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+            {project?.aiProvider && (
+              <span className="text-[10px] font-mono text-muted">{project.aiProvider}</span>
+            )}
+          </div>
+          <NewExecutionButton projectId={projectId} />
+        </header>
+        {project?.description && (
+          <p className="text-[11px] text-muted">{project.description}</p>
+        )}
 
-      {/* Body */}
-      <section className="text-[12px]">
-        {tab === 'overview' && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <h3 className="text-[11px] font-medium text-secondary">Recent runs</h3>
-              <ProjectTaskList tasks={dashboard?.recentTasks ?? []} />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-[11px] font-medium text-secondary">Recent pull requests</h3>
-              <ProjectPrList prs={dashboard?.recentPrs ?? []} />
-            </div>
-            <div>
-              <ProjectScoreTrend scores={scoreTrend} />
-            </div>
-          </div>
+        {loading && <div className="text-[11px] text-muted">Loading…</div>}
+        {error && <div className="text-[11px] text-accent-red">{error}</div>}
+
+        {/* Metric tiles: +tokens +cost */}
+        <section className="grid grid-cols-3 md:grid-cols-6 gap-2">
+          <MetricTile label="Active"    value={dashboard?.activeRuns ?? '—'}    accent="text-accent-blue" />
+          <MetricTile label="Completed" value={dashboard?.completedRuns ?? '—'} accent="text-emerald-400" />
+          <MetricTile label="Failed"    value={dashboard?.failedRuns ?? '—'}    accent="text-accent-red" />
+          <MetricTile
+            label="Avg score"
+            value={dashboard?.avgScore != null && dashboard.avgScore > 0 ? `${Math.round(dashboard.avgScore)}` : '—'}
+            accent={scoreAccent(dashboard?.avgScore)}
+          />
+          <MetricTile
+            label="Tokens"
+            value={dashboard?.totalTokens != null && dashboard.totalTokens > 0 ? formatK(dashboard.totalTokens) : '—'}
+          />
+          <MetricTile
+            label="Cost"
+            value={dashboard?.totalCostUsd != null && dashboard.totalCostUsd > 0 ? `$${dashboard.totalCostUsd.toFixed(2)}` : '—'}
+          />
+        </section>
+
+        <nav className="flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto -mx-4 px-4">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                'px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
+                tab === t.key
+                  ? 'border-accent-blue text-primary'
+                  : 'border-transparent text-muted hover:text-secondary',
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Body: left runs list (own scroll) + right tab content (own scroll, InlineRunDetail flows freely inside). */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {showLeftList && (
+          <aside className="w-[320px] flex-shrink-0 border-r border-[var(--border-default)] overflow-y-auto">
+            <RunsSidebar
+              tasks={tasks}
+              selectedRunId={selectedRunId}
+              onSelect={(id) => {
+                setSelectedRunId(id);
+                if (tab !== 'tasks') setTab('tasks');
+              }}
+            />
+          </aside>
         )}
-        {tab === 'launches' && <ProjectLaunchesList projectId={projectId} />}
-        {tab === 'prs' && <ProjectPrRollup projectId={projectId} />}
-        {tab === 'tasks' && <ProjectTaskList tasks={dashboard?.recentTasks ?? []} />}
-        {tab === 'repos' && <ProjectRepoManager projectId={projectId} />}
-        {tab === 'architecture' && <ArchitectureViewer projectId={projectId} />}
-        {tab === 'memory' && <ProjectMemoryPanel projectId={projectId} />}
-        {tab === 'chat' && <ProjectChatPanel projectId={projectId} />}
-        {tab === 'team' && (
-          <div className="text-[11px] text-muted">
-            Team management is available via the existing Project members page.
-          </div>
-        )}
-      </section>
+        <main className="flex-1 min-w-0 overflow-y-auto p-4">
+          {currentContent}
+        </main>
+      </div>
     </div>
+  );
+}
+
+function OverviewContent({
+  dashboard, scoreTrend,
+}: { dashboard: any; scoreTrend: any }) {
+  const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="space-y-2">
+        <h3 className="text-[11px] font-medium text-secondary">Recent submissions</h3>
+        <ExecutionsPanel tasks={tasks} />
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-[11px] font-medium text-secondary">Recent pull requests</h3>
+        <ProjectPrList prs={dashboard?.recentPrs ?? []} />
+      </div>
+      <div>
+        <h3 className="text-[11px] font-medium text-secondary mb-2">Score trend</h3>
+        <ProjectScoreTrend scores={scoreTrend} />
+      </div>
+    </div>
+  );
+}
+
+function ExecutionsPanel({ tasks }: { tasks: TaskSummary[] }) {
+  if (tasks.length === 0) {
+    return <div className="text-[11px] text-muted">Nothing submitted yet. Click "Launch" to kick off a cross-repo execution.</div>;
+  }
+  return (
+    <ul className="space-y-1">
+      {tasks.slice(0, 8).map((t) => {
+        const statusColor = STATUS_COLOR[t.status] ?? 'text-muted';
+        return (
+          <li
+            key={t.taskId}
+            className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2"
+          >
+            <div className="flex items-center gap-2">
+              <span className={cn('text-[10px] font-mono tabular-nums', statusColor)}>{t.status}</span>
+              <span className="text-[12px] text-primary truncate flex-1">{t.name || t.runId.slice(0, 8)}</span>
+              <span className={cn('text-[11px] font-mono tabular-nums', scoreColor(t.score))}>
+                {t.score != null ? `${t.score}/100` : '—'}
+              </span>
+            </div>
+            <div className="text-[10px] text-muted font-mono mt-0.5">
+              {t.runId.slice(0, 8)} · {t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function RunsSidebar({
+  tasks, selectedRunId, onSelect,
+}: {
+  tasks: TaskSummary[];
+  selectedRunId: string | null;
+  onSelect: (runId: string) => void;
+}) {
+  if (tasks.length === 0) {
+    return <div className="text-[11px] text-muted p-3">No runs yet.</div>;
+  }
+  return (
+    <div>
+      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-muted border-b border-[var(--border-default)]">
+        Runs ({tasks.length})
+      </div>
+      <ul>
+        {tasks.map((t) => {
+          const statusColor = STATUS_COLOR[t.status] ?? 'text-muted';
+          const selected = t.runId === selectedRunId;
+          return (
+            <li
+              key={t.taskId}
+              onClick={() => onSelect(t.runId)}
+              className={cn(
+                'border-b border-[var(--border-default)] px-3 py-2 cursor-pointer transition-colors',
+                selected ? 'bg-accent-blue/10' : 'hover:bg-[var(--gray-200)]',
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className={cn('text-[9px] font-mono tabular-nums', statusColor)}>
+                  {t.status}
+                </span>
+                <span className={cn('text-[10px] font-mono tabular-nums', scoreColor(t.score))}>
+                  {t.score != null ? t.score : '—'}
+                </span>
+              </div>
+              <div className={cn(
+                'text-[12px] truncate mt-0.5',
+                selected ? 'text-primary' : 'text-secondary',
+              )}>
+                {t.name || t.runId.slice(0, 8)}
+              </div>
+              <div className="text-[10px] text-muted font-mono mt-0.5">
+                {t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
 
 function MetricTile({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2.5">
-      <div className="text-[11px] font-medium text-secondary">{label}</div>
-      <div className={cn('text-2xl font-semibold tabular-nums mt-1', accent ?? 'text-primary')}>
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2.5 py-2">
+      <div className="text-[10px] font-medium text-secondary uppercase tracking-wide">{label}</div>
+      <div className={cn('text-lg font-semibold tabular-nums mt-0.5', accent ?? 'text-primary')}>
         {value}
       </div>
     </div>
@@ -190,6 +375,12 @@ function scoreAccent(score: number | null | undefined): string {
   if (score >= 90) return 'text-emerald-400';
   if (score >= 75) return 'text-accent-amber';
   return 'text-accent-red';
+}
+
+function formatK(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 function NewExecutionButton({ projectId }: { projectId: string }) {

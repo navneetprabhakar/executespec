@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { getProjectMemory, type ProjectMemoryResponse } from '@/lib/api';
+import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { compactProjectMemory, getProjectMemory, type ProjectMemoryResponse } from '@/lib/api';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
+import { cn } from '@/lib/utils';
 
 interface Props {
   projectId: string;
@@ -10,6 +12,18 @@ export default function ProjectMemoryPanel({ projectId }: Props) {
   const [memory, setMemory] = useState<ProjectMemoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [compacting, setCompacting] = useState(false);
+  const [compactStatus, setCompactStatus] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await getProjectMemory(projectId);
+      setMemory(res);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load memory');
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -20,6 +34,23 @@ export default function ProjectMemoryPanel({ projectId }: Props) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [projectId]);
+
+  const handleCompact = async () => {
+    if (compacting) return;
+    setCompacting(true);
+    setCompactStatus(null);
+    try {
+      const res = await compactProjectMemory(projectId);
+      setCompactStatus(res.compacted
+        ? `Compacted → snapshot v${res.snapshotVersion}`
+        : 'Nothing to compact');
+      await load();
+    } catch (e) {
+      setCompactStatus(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCompacting(false);
+    }
+  };
 
   if (loading) {
     return <div className="animate-pulse h-48 bg-[var(--gray-100)] rounded-md" />;
@@ -41,6 +72,43 @@ export default function ProjectMemoryPanel({ projectId }: Props) {
 
   return (
     <div className="space-y-5 text-[12px]">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] text-muted">
+          {compactStatus && (
+            <span className={cn(
+              compactStatus.startsWith('Failed') ? 'text-accent-red' : 'text-emerald-400',
+            )}>
+              {compactStatus}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={load}
+            title="Refresh memory"
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Refresh
+          </button>
+          <button
+            onClick={handleCompact}
+            disabled={compacting || memory.stats.recentEntryCount === 0}
+            title="Force-compact all uncompacted ledger entries into a new snapshot"
+            className={cn(
+              'inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border',
+              compacting || memory.stats.recentEntryCount === 0
+                ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
+                : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
+            )}
+          >
+            {compacting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            Compact
+          </button>
+        </div>
+      </div>
+
       {/* Budget bar */}
       <div>
         <div className="flex items-center justify-between text-[11px] text-secondary mb-1">

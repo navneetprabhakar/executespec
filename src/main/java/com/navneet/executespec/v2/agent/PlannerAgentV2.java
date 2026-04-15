@@ -48,6 +48,7 @@ public class PlannerAgentV2 {
     private final LlmRouterV2 router;
     private final ObjectMapper objectMapper;
     private final V2Metrics metrics;
+    private final RunTitleSummarizer titleSummarizer;
 
     public PlanV2 plan(PlannerRequestV2 req) {
         long start = System.currentTimeMillis();
@@ -63,15 +64,28 @@ public class PlannerAgentV2 {
     // ─── SINGLE_SHOT fast path ──────────────────────────────────────────────
 
     private PlanV2 synthesizeSingleShotPlan(PlannerRequestV2 req) {
-        log.info("PlannerAgentV2 SINGLE_SHOT synthesize (no LLM call): spec={}chars", req.spec().length());
+        log.info("PlannerAgentV2 SINGLE_SHOT synthesize (LIGHTWEIGHT title call only): spec={}chars", req.spec().length());
+        // LIGHTWEIGHT-tier title summarizer; falls back to deterministic cleanTitle.
+        com.navneet.executespec.router.LlmProvider provider = resolveProviderForTitle(req.provider());
+        String runId = req.context() != null ? req.context().runId() : null;
+        String summarized = titleSummarizer.summarize(req.spec(), provider, runId);
+        String title = (summarized != null && !summarized.isBlank())
+                ? summarized
+                : cleanTitle(req.spec(), 70);
+        String description = req.spec()
+                + "\n\nAlso include unit tests for any new public function, endpoint, "
+                + "or module this task adds. If a test framework already exists in the "
+                + "workspace (Jest/Vitest, pytest, Go *_test.go, JUnit), extend it; "
+                + "otherwise scaffold a minimal test file with at least one happy-path "
+                + "test + one error case.";
         PlannedTaskV2 task = PlannedTaskV2.builder()
                 .id("T1")
-                .title(truncate(req.spec(), 80))
-                .description(req.spec())
+                .title(title)
+                .description(description)
                 .complexity(PlannedTaskV2.Complexity.LOW)
                 .build();
         return PlanV2.builder()
-                .planTitle("Single-shot: " + truncate(req.spec(), 60))
+                .planTitle(title)
                 .planSummary(req.spec())
                 .projectType("unknown")
                 .smokeTestStrategy(PlanV2.SmokeTestStrategy.BUILD)
@@ -388,8 +402,44 @@ public class PlannerAgentV2 {
         }
     }
 
+    private static com.navneet.executespec.router.LlmProvider resolveProviderForTitle(String providerName) {
+        if (providerName == null || providerName.isBlank()) return null;
+        try {
+            return com.navneet.executespec.router.LlmProvider.valueOf(providerName.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
+
+    /**
+     * Produces a concise, title-cased run name from a free-form spec. Used by
+     * the SINGLE_SHOT path so project-view tables show readable titles instead
+     * of raw "Single-shot: ..." echoes.
+     */
+    private static String cleanTitle(String spec, int max) {
+        if (spec == null || spec.isBlank()) return "Untitled run";
+        String s = spec.trim().replaceAll("\\s+", " ");
+        // First sentence / first line (whichever is shorter) — avoids pulling in
+        // bullet lists or multi-paragraph rambles.
+        int dot = s.indexOf('.');
+        int nl  = s.indexOf('\n');
+        int cut = -1;
+        if (dot > 0) cut = dot;
+        if (nl > 0 && (cut < 0 || nl < cut)) cut = nl;
+        if (cut > 0) s = s.substring(0, cut).trim();
+        // Capitalise first letter so "add /x endpoint" → "Add /x endpoint".
+        if (!s.isEmpty() && Character.isLowerCase(s.charAt(0))) {
+            s = Character.toUpperCase(s.charAt(0)) + s.substring(1);
+        }
+        // Trim trailing punctuation.
+        while (!s.isEmpty() && ",;:.".indexOf(s.charAt(s.length() - 1)) >= 0) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return s.length() <= max ? s : s.substring(0, max - 1).trim() + "…";
     }
 }

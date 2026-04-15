@@ -56,6 +56,74 @@ public class ProjectChatService {
         return chatRepo.findByProjectIdOrderByCreatedAtAsc(projectId);
     }
 
+    /**
+     * Distils the project chat history into a single-paragraph execution spec
+     * ready to submit as a new project run. Uses the LIGHTWEIGHT tier + falls
+     * back to a deterministic concatenation if the LLM call errors.
+     */
+    public String compileToSpec(String projectId) {
+        List<ProjectChatMessage> messages = chatRepo.findByProjectIdOrderByCreatedAtAsc(projectId);
+        if (messages.isEmpty()) return "";
+        Project project = projectRepo.findById(projectId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
+
+        StringBuilder transcript = new StringBuilder();
+        int from = Math.max(0, messages.size() - 30);
+        for (int i = from; i < messages.size(); i++) {
+            ProjectChatMessage m = messages.get(i);
+            transcript.append(m.getRole()).append(": ").append(m.getContent()).append("\n\n");
+        }
+
+        String system =
+                "You are compiling a project chat transcript into a single concrete " +
+                "execution spec the ExecuteSpec planner will consume.\n\n" +
+                "Rules:\n" +
+                "- Produce 1-2 paragraphs, imperative voice, no bullet lists.\n" +
+                "- Keep ONLY what the user has decided to build. Drop background " +
+                "explanations, trade-off discussion, and anything the user rejected.\n" +
+                "- Preserve concrete specifics: endpoint names, file paths, libraries, " +
+                "acceptance criteria.\n" +
+                "- If multiple features were discussed, focus on the most recently " +
+                "agreed-on one unless the user explicitly asked to bundle them.\n" +
+                "- Output the spec ONLY — no markdown heading, no preamble, no trailing " +
+                "commentary.";
+
+        try {
+            LlmProvider provider = project.getAiProvider() != null
+                    ? project.getAiProvider() : LlmProvider.OPENAI;
+            ResolvedModel resolved = modelResolver.resolve(
+                    "ProjectChatCompiler", provider, AgentTier.LIGHTWEIGHT);
+            ExecutionContext ctx = new ExecutionContext(
+                    "chat-compile-" + projectId, "__project_chat_compile__",
+                    java.nio.file.Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
+            ChatResponse resp = router.call(LlmRequestV2.builder()
+                    .provider(resolved.getActualProvider().name().toLowerCase())
+                    .model(resolved.getModel())
+                    .messages(List.of(
+                            new SystemMessage(system),
+                            new UserMessage("Transcript:\n\n" + transcript)))
+                    .context(ctx)
+                    .temperature(0.2)
+                    .maxTokens(800)
+                    .toolsOverride(java.util.Collections.emptyList())
+                    .build());
+            String out = resp.getResult().getOutput().getText();
+            if (out != null && !out.isBlank()) return out.trim();
+        } catch (Exception e) {
+            log.warn("compileToSpec LLM failed for project {}: {}", projectId, e.getMessage());
+        }
+        // Deterministic fallback — concatenate the last user message + last assistant.
+        ProjectChatMessage lastUser = null, lastAsst = null;
+        for (ProjectChatMessage m : messages) {
+            if ("USER".equals(m.getRole())) lastUser = m;
+            else lastAsst = m;
+        }
+        StringBuilder fb = new StringBuilder();
+        if (lastUser != null) fb.append(lastUser.getContent().trim());
+        if (lastAsst != null) fb.append("\n\nAssistant's take: ").append(lastAsst.getContent().trim());
+        return fb.toString();
+    }
+
     @Transactional
     public ProjectChatMessage send(String projectId, String orgId, String userId, String userText) {
         Project project = projectRepo.findById(projectId)
