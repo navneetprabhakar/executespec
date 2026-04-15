@@ -38,6 +38,19 @@ public class PostMergeCascadeService {
     private final PipelineRunRepository pipelineRunRepo;
     private final ProjectRepoLinkRepository linkRepo;
     private final ProjectRepoRepository repoRepo;
+    private final org.springframework.data.redis.core.StringRedisTemplate redis;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    /**
+     * Transient marker so the project dashboard can render a "Continue building
+     * on the merged code" banner when the user next lands there. Polled by
+     * {@code GET /api/projects/{id}/post-merge-bar}; lives 10 min.
+     */
+    public record PostMergeBar(
+            String repoFullName, Integer prNumber, String mergedAt) {}
+
+    static final String POST_MERGE_KEY_PREFIX = "project:post-merge:";
+    static final java.time.Duration POST_MERGE_TTL = java.time.Duration.ofMinutes(10);
 
     public void onMerged(PullRequestRecord record) {
         if (record == null) return;
@@ -62,6 +75,48 @@ public class PostMergeCascadeService {
             notifyOwner(record, projectId);
         } catch (Exception e) {
             log.warn("PostMergeCascade: notification failed for {}: {}", projectId, e.getMessage());
+        }
+        try {
+            writePostMergeBar(record, projectId);
+        } catch (Exception e) {
+            log.warn("PostMergeCascade: bar write failed for {}: {}", projectId, e.getMessage());
+        }
+    }
+
+    /**
+     * Writes the PostMergeBar marker to Redis so the dashboard can render a
+     * "Continue building" banner next time the user lands on it. Absent key =
+     * no banner; TTL keeps the banner from going stale after the user has
+     * already seen it.
+     */
+    private void writePostMergeBar(PullRequestRecord record, String projectId) throws Exception {
+        String key = POST_MERGE_KEY_PREFIX + projectId;
+        String mergedAt = record.getMergedAt() == null ? null : record.getMergedAt().toString();
+        PostMergeBar bar = new PostMergeBar(record.getRepoFullName(), record.getPrNumber(), mergedAt);
+        redis.opsForValue().set(key, objectMapper.writeValueAsString(bar), POST_MERGE_TTL);
+    }
+
+    /** Read + consume the marker — called by the controller. Returns null when
+     *  absent. We intentionally do NOT delete on read; the TTL handles cleanup
+     *  and the user can refresh the page to re-see the banner within its window. */
+    public PostMergeBar readPostMergeBar(String projectId) {
+        try {
+            String cached = redis.opsForValue().get(POST_MERGE_KEY_PREFIX + projectId);
+            if (cached == null) return null;
+            return objectMapper.readValue(cached, PostMergeBar.class);
+        } catch (Exception e) {
+            log.debug("readPostMergeBar failed for {}: {}", projectId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Dismiss the marker — called by the controller when the user clicks
+     *  "Start next requirement" or explicitly dismisses the banner. */
+    public void dismissPostMergeBar(String projectId) {
+        try {
+            redis.delete(POST_MERGE_KEY_PREFIX + projectId);
+        } catch (Exception e) {
+            log.debug("dismissPostMergeBar failed for {}: {}", projectId, e.getMessage());
         }
     }
 

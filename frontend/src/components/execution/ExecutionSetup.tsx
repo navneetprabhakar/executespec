@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useExecutionStore } from '@/stores/useExecutionStore';
 import { executionApi } from '@/lib/execution-api';
-import { getProject } from '@/lib/api';
+import { getProject, estimateRun, type LaunchEstimate } from '@/lib/api';
 import type { NewRepoSpec, Scaffold } from '@/types/execution';
 
 const PROVIDERS = [
@@ -34,6 +34,21 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
   const [scaffolds, setScaffolds] = useState<Scaffold[]>([]);
   const [ownerChecks, setOwnerChecks] = useState<Record<number, string>>({});
   const [showConfirm, setShowConfirm] = useState(false);
+  const [estimate, setEstimate] = useState<LaunchEstimate | null>(null);
+
+  // Debounced heuristic estimate — no LLM call; reads DB project history only.
+  useEffect(() => {
+    if (requirement.trim().length < 50) {
+      setEstimate(null);
+      return;
+    }
+    const handle = setTimeout(() => {
+      estimateRun(projectId, requirement.trim())
+        .then(setEstimate)
+        .catch(() => setEstimate(null));
+    }, 1500);
+    return () => clearTimeout(handle);
+  }, [projectId, requirement]);
 
   useEffect(() => { fetchRepos(projectId); }, [projectId, fetchRepos]);
   useEffect(() => {
@@ -225,6 +240,14 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
           className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px] font-mono"
           placeholder="Describe the cross-repo change in plain English…"
         />
+        {estimate && (
+          <div className="mt-1 inline-flex items-center gap-2 text-[10px] text-muted bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-2 py-0.5">
+            <span>~{estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh} tasks</span>
+            <span>·</span>
+            <span>~${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}</span>
+            <span className="text-[9px]">({estimate.basis})</span>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">

@@ -63,12 +63,12 @@ public class ProjectLaunchController {
             @AuthenticationPrincipal AppUserDetails principal) {
         AppUser user = requireFeatureEnabled(principal);
         requireProjectAccess(projectId, user);
-        Page<ExecutionRun> runs = execRunRepo.findByProjectIdAndDeletedAtIsNullOrderByCreatedAtDesc(
+        // v2.5.2 — use @EntityGraph-backed finder so solutions + repoMappings
+        // come back in the same query chain, avoiding the per-row solution
+        // fetch that caused N+1 on the Launches list.
+        Page<ExecutionRun> runs = execRunRepo.findListByProjectId(
                 projectId, PageRequest.of(page, size));
-        return ResponseEntity.ok(runs.map(r -> {
-            var sols = solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(r.getId());
-            return ExecutionRunDto.from(r, sols);
-        }));
+        return ResponseEntity.ok(runs.map(r -> ExecutionRunDto.from(r, r.getSolutions())));
     }
 
     // ── PR rollup (cross-launch) ──────────────────────────────────────────
@@ -91,10 +91,10 @@ public class ProjectLaunchController {
         List<PrRollupEntry> out = new ArrayList<>();
 
         // Launches (ExecutionRun → ExecutionSolution.prUrl)
-        Page<ExecutionRun> allRuns = execRunRepo.findByProjectIdAndDeletedAtIsNullOrderByCreatedAtDesc(
+        Page<ExecutionRun> allRuns = execRunRepo.findListByProjectId(
                 projectId, PageRequest.of(0, 500));
         for (ExecutionRun r : allRuns.getContent()) {
-            List<ExecutionSolution> sols = solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(r.getId());
+            List<ExecutionSolution> sols = r.getSolutions() == null ? List.of() : r.getSolutions();
             for (ExecutionSolution s : sols) {
                 if (s.getPrUrl() == null) continue;
                 out.add(new PrRollupEntry(

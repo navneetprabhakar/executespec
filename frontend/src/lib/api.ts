@@ -1789,6 +1789,49 @@ export const syncRun = (runId: string, branch?: string) =>
     `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
     { method: 'POST' });
 
+// v2.5.2 — heuristic pre-submit Launch estimate (no LLM call).
+export interface LaunchEstimate {
+  estimatedTasksLow: number;
+  estimatedTasksHigh: number;
+  estimatedCostLow: number;
+  estimatedCostHigh: number;
+  basis: string;
+}
+export const estimateRun = (projectId: string, requirement: string) =>
+  req<LaunchEstimate>(
+    `/projects/${projectId}/estimate?requirement=${encodeURIComponent(requirement)}`);
+
+// v2.5.2 — "Continue building" banner after a PR merge. Absent (null body)
+// means no banner; entry lives 10 min in Redis post-merge.
+export interface PostMergeBar {
+  repoFullName: string;
+  prNumber: number;
+  mergedAt: string | null;
+}
+export const getPostMergeBar = (projectId: string) =>
+  req<PostMergeBar | null>(`/projects/${projectId}/post-merge-bar`);
+export const dismissPostMergeBar = (projectId: string) =>
+  req<void>(`/projects/${projectId}/post-merge-bar`, { method: 'DELETE' });
+
+// v2.5.2 — per-repo workspace health for the Project Overview tab.
+export interface RepoHealth {
+  repoId: string;
+  repoName: string;
+  defaultBranch: string;
+  lastCodeMapSha: string | null;
+  currentOriginSha: string | null;
+  isStale: boolean;
+  webhookInstalled: boolean;
+  openPrCount: number;
+  lastAnalysedAt: string | null;
+}
+export interface WorkspaceHealthReport {
+  repos: RepoHealth[];
+  lastRefreshedAt: string;
+}
+export const getWorkspaceHealth = (projectId: string) =>
+  req<WorkspaceHealthReport>(`/projects/${projectId}/workspace-health`);
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
