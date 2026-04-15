@@ -15,6 +15,8 @@ export function useExecutionSse(executionId: string | null) {
     updateSolutionStatus,
     updateAnalysisProgress,
     appendSolutionLog,
+    applyCompensationUpdate,
+    setCompensationDone,
   } = useExecutionStore();
 
   useEffect(() => {
@@ -109,6 +111,16 @@ export function useExecutionSse(executionId: string | null) {
           updateStatus('EXECUTING');
           fetchExecution(executionId!);
           break;
+        case 'EXEC_COMPENSATION_UPDATE':
+          if (evt.payload) {
+            try { applyCompensationUpdate(JSON.parse(evt.payload)); } catch { /* ignore */ }
+          }
+          break;
+        case 'EXEC_COMPENSATION_DONE':
+          if (evt.payload) {
+            try { setCompensationDone(JSON.parse(evt.payload)); } catch { /* ignore */ }
+          }
+          break;
       }
     }
 
@@ -117,5 +129,5 @@ export function useExecutionSse(executionId: string | null) {
       cancelled = true;
       esRef.current?.close();
     };
-  }, [executionId, fetchExecution, updateStatus, updateSolutionStatus, updateAnalysisProgress, appendSolutionLog]);
+  }, [executionId, fetchExecution, updateStatus, updateSolutionStatus, updateAnalysisProgress, appendSolutionLog, applyCompensationUpdate, setCompensationDone]);
 }

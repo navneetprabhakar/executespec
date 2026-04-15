@@ -124,6 +124,50 @@ public class GitHubRepoService {
     }
 
     /**
+     * v2.5.2 (Phase 2.3) — close a PR via PATCH. Idempotent: a PR already
+     * closed/merged returns {@code true}. Best-effort on network/auth failure.
+     *
+     * @param repoFullName  e.g. "owner/repo"
+     * @param prNumber      pull-request number (not the API URL id)
+     * @param overridePat   caller's PAT (must have repo:write)
+     * @return true on 200 or 422 (already closed); false otherwise
+     */
+    public boolean closePullRequest(String repoFullName, int prNumber, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return false;
+        if (repoFullName == null || !repoFullName.contains("/")) return false;
+
+        String body = "{\"state\":\"closed\"}";
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() == 200) {
+                log.info("[GitHubRepoService] Closed PR {}#{}", repoFullName, prNumber);
+                return true;
+            }
+            // 422 = state transition rejected (already closed/merged) — treat as success.
+            if (res.statusCode() == 422) {
+                log.info("[GitHubRepoService] PR {}#{} already in terminal state", repoFullName, prNumber);
+                return true;
+            }
+            log.warn("[GitHubRepoService] closePullRequest {}#{} returned {}: {}",
+                    repoFullName, prNumber, res.statusCode(), res.body());
+            return false;
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] closePullRequest {}#{} failed: {}",
+                    repoFullName, prNumber, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Install a {@code pull_request} webhook on the given repo so the
      * {@link com.navneet.executespec.project.pr.GitHubWebhookController} receives
      * merge events. Best-effort: logs a warning and returns {@code false} on any

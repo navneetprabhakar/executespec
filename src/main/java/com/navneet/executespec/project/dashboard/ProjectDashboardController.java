@@ -37,6 +37,7 @@ public class ProjectDashboardController {
     private final com.navneet.executespec.project.service.WorkspaceHealthService workspaceHealthService;
     private final com.navneet.executespec.project.pr.PostMergeCascadeService postMergeCascadeService;
     private final com.navneet.executespec.project.estimation.EstimationService estimationService;
+    private final com.navneet.executespec.project.techdebt.TechDebtService techDebtService;
 
     public record TaskSummary(
             String taskId, String runId, String name, String status,
@@ -165,6 +166,20 @@ public class ProjectDashboardController {
                     @org.springframework.web.bind.annotation.RequestParam(
                             value = "requirement", required = false) String requirement) {
         return ResponseEntity.ok(estimationService.estimate(projectId, requirement));
+    }
+
+    /**
+     * v2.5.2 — Tech Debt rollup: issues-by-category/severity, top-5 file hotspots,
+     * dimension-score trend. All derived from existing ValidationReport rows; no
+     * LLM call. {@code since} filters to the last N days (default: all history).
+     */
+    @GetMapping("/api/projects/{projectId}/tech-debt")
+    public ResponseEntity<com.navneet.executespec.project.techdebt.TechDebtService.Report>
+            techDebt(
+                    @PathVariable String projectId,
+                    @org.springframework.web.bind.annotation.RequestParam(
+                            value = "since", required = false) Integer since) {
+        return ResponseEntity.ok(techDebtService.build(projectId, since));
     }
 
     /** v2.5.2 — dismiss the post-merge banner (user clicked the CTA or X). */

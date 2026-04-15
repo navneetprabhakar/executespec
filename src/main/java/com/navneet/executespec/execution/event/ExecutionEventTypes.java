@@ -34,4 +34,11 @@ public final class ExecutionEventTypes {
     public static final String EXEC_FINAL_PR_CREATED = "EXEC_FINAL_PR_CREATED";
     public static final String EXEC_COMPLETE         = "EXEC_COMPLETE";
     public static final String EXEC_ABORTED          = "EXEC_ABORTED";
+
+    // v2.5.2 (Phase 2.3) — cancel rollback compensations.
+    /** Per-step compensation update during cancel cleanup. payload = JSON
+     *  {type, repo, prNumber?, status: PENDING|RUNNING|COMPLETE|FAILED, message?}. */
+    public static final String EXEC_COMPENSATION_UPDATE = "EXEC_COMPENSATION_UPDATE";
+    /** All compensations have terminated (COMPLETE or FAILED). */
+    public static final String EXEC_COMPENSATION_DONE   = "EXEC_COMPENSATION_DONE";
 }

@@ -50,6 +50,7 @@ public class ExecutionOrchestrator {
     private final SolutionExecutionService solutionExecService;
     private final ExecutionBranchService branchService;
     private final SseBroadcaster broadcaster;
+    private final com.navneet.executespec.repo.GitHubRepoService gitHub;
 
     // ── Creation ───────────────────────────────────────────────────────────
 
@@ -240,10 +241,83 @@ public class ExecutionOrchestrator {
         emit(run.getId(), ExecutionEventTypes.EXEC_COMPLETE, null);
     }
 
+    /**
+     * v2.5.2 (Phase 2.3) — abort + best-effort cleanup. Steps:
+     * <ol>
+     *   <li>Flip status to ABORTED + emit EXEC_ABORTED so the UI can swap views.</li>
+     *   <li>For every solution with a {@code prUrl}, attempt to close the PR via
+     *       GitHub. Each attempt emits an EXEC_COMPENSATION_UPDATE event so the
+     *       cancel panel can render live progress.</li>
+     *   <li>Final EXEC_COMPENSATION_DONE summarises the run.</li>
+     * </ol>
+     *
+     * <p>Failures during cleanup do NOT roll back the abort — the user already
+     * asked for it to stop. Failed compensations surface as
+     * {@code status:"FAILED"} payloads with a deep-link the user can act on.
+     */
     public void abortExecution(ExecutionRun run) {
         run.setStatus("ABORTED");
         runRepo.save(run);
         emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, null);
+        runCompensations(run);
+    }
+
+    private void runCompensations(ExecutionRun run) {
+        AppUser owner = run.getCreatedBy() == null ? null
+                : appUserRepo.findById(run.getCreatedBy()).orElse(null);
+        String pat = owner == null ? null : owner.getGithubPat();
+
+        List<ExecutionSolution> solutions = solutionRepo
+                .findByExecutionRun_IdOrderBySequenceNumberAsc(run.getId());
+        int total = 0, done = 0, failed = 0;
+        for (ExecutionSolution s : solutions) {
+            if (s.getPrUrl() == null || s.getPrNumber() == null) continue;
+            String repoFullName = extractRepoFullNameFromPrUrl(s.getPrUrl());
+            if (repoFullName == null) continue;
+            total++;
+            emitCompensation(run.getId(), "PR_CLOSE", repoFullName, s.getPrNumber(), "RUNNING", null);
+            boolean ok;
+            try {
+                ok = gitHub.closePullRequest(repoFullName, s.getPrNumber(), pat);
+            } catch (Exception e) {
+                ok = false;
+                log.warn("Compensation PR_CLOSE failed for {}#{}: {}",
+                        repoFullName, s.getPrNumber(), e.getMessage());
+            }
+            if (ok) {
+                done++;
+                emitCompensation(run.getId(), "PR_CLOSE", repoFullName, s.getPrNumber(), "COMPLETE", null);
+            } else {
+                failed++;
+                emitCompensation(run.getId(), "PR_CLOSE", repoFullName, s.getPrNumber(), "FAILED",
+                        "Could not close PR — close manually on GitHub.");
+            }
+        }
+        emit(run.getId(), ExecutionEventTypes.EXEC_COMPENSATION_DONE,
+                "{\"total\":" + total + ",\"completed\":" + done + ",\"failed\":" + failed + "}");
+    }
+
+    private void emitCompensation(String runId, String type, String repo, Integer prNumber,
+                                   String status, String message) {
+        StringBuilder sb = new StringBuilder("{");
+        sb.append("\"type\":\"").append(type).append("\",");
+        sb.append("\"repo\":\"").append(repo).append("\",");
+        if (prNumber != null) sb.append("\"prNumber\":").append(prNumber).append(",");
+        sb.append("\"status\":\"").append(status).append("\"");
+        if (message != null) sb.append(",\"message\":\"").append(message.replace("\"", "\\\"")).append("\"");
+        sb.append("}");
+        emit(runId, ExecutionEventTypes.EXEC_COMPENSATION_UPDATE, sb.toString());
+    }
+
+    private static String extractRepoFullNameFromPrUrl(String prUrl) {
+        // Format: https://github.com/<owner>/<repo>/pull/<n>
+        if (prUrl == null) return null;
+        int host = prUrl.indexOf("github.com/");
+        if (host < 0) return null;
+        String tail = prUrl.substring(host + "github.com/".length());
+        int pullIdx = tail.indexOf("/pull/");
+        if (pullIdx < 0) return null;
+        return tail.substring(0, pullIdx);
     }
 
     public Map<String, Object> buildReport(ExecutionRun run) {

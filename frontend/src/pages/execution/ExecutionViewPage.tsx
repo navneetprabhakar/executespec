@@ -10,6 +10,7 @@ import ExecutionAnalysis from '@/components/execution/ExecutionAnalysis';
 import ArchReviewGate from '@/components/execution/ArchReviewGate';
 import ExecutionPlanReview from '@/components/execution/ExecutionPlanReview';
 import ExecutionMonitor from '@/components/execution/ExecutionMonitor';
+import CancellationPanel from '@/components/execution/CancellationPanel';
 import ExecutionComplete from '@/components/execution/ExecutionComplete';
 import ExecutionReportPanel from '@/components/execution/ExecutionReportPanel';
 import type { ExecutionRunStatus } from '@/types/execution';
@@ -115,6 +116,7 @@ export default function ExecutionViewPage() {
             )}
             {(status === 'COMPLETE' || status === 'ABORTED') && (
               <>
+                {status === 'ABORTED' && <CancellationPanel />}
                 <ExecutionComplete />
                 {executionId && <ExecutionReportPanel executionId={executionId} />}
               </>

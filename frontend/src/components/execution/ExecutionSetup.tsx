@@ -4,6 +4,7 @@ import { useProjectStore } from '@/stores/useProjectStore';
 import { useExecutionStore } from '@/stores/useExecutionStore';
 import { executionApi } from '@/lib/execution-api';
 import { getProject, estimateRun, type LaunchEstimate } from '@/lib/api';
+import TemplatePicker from './TemplatePicker';
 import type { NewRepoSpec, Scaffold } from '@/types/execution';
 
 const PROVIDERS = [
@@ -232,7 +233,14 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
       </div>
 
       <div>
-        <h3 className="text-[12px] font-medium text-primary mb-2">Requirement</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[12px] font-medium text-primary">Requirement</h3>
+          <TemplatePicker
+            projectId={projectId}
+            currentRequirement={requirement}
+            onPick={(text) => setRequirement(text)}
+          />
+        </div>
         <textarea
           value={requirement}
           onChange={(e) => setRequirement(e.target.value)}

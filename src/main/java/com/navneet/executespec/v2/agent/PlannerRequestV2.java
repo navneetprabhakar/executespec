@@ -30,7 +30,12 @@ public record PlannerRequestV2(
         String workspaceSummary,
         String projectMemory,
         String projectBrief,
-        String referenceDocs) {
+        String referenceDocs,
+        /**
+         * v2.5.2 (Phase 4.3) — when true, planner emits test tasks first with
+         * implementation tasks declaring dependsOn the test ids.
+         */
+        boolean tddMode) {
 
     public PlannerRequestV2 {
         if (spec == null || spec.isBlank()) throw new IllegalArgumentException("spec required");
