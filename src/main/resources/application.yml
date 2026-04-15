@@ -36,7 +36,13 @@ spring:
       validation-timeout: 3000       # 3s — quick validation for health checks
       leak-detection-threshold: 60000 # 60s — log warning if connection held > 1 min
   jpa:
-    open-in-view: false
+    # Keep the Hibernate session open for the full HTTP request. Required by the
+    # execution + project view controllers, which walk lazy collections
+    # (ExecutionSolution.dependencies, ExecutionRun proxies, etc.) in the
+    # response mapping layer. Tradeoff: DB connection held for the request's
+    # duration and potential for N+1 queries; acceptable given our traffic
+    # profile and already-amortised LLM call costs per request.
+    open-in-view: true
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: validate        # Hibernate only validates — Flyway manages all schema
