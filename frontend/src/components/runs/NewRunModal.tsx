@@ -46,6 +46,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
   const [projectRepos, setProjectRepos] = useState<ProjectRepoLink[]>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
   const [figmaUrl, setFigmaUrl] = useState('');
+  const [tddMode, setTddMode] = useState(false);
 
   // ── chat mode state ───────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>('compose');
@@ -199,6 +200,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
         ...(repoChoice === 'EXISTING' && repoUrl.trim() ? { repoUrl: repoUrl.trim() } : {}),
         ...(selectedRepoIds.length > 0 ? { selectedRepoIds } : {}),
         ...(figmaUrl.trim() ? { figmaUrl: figmaUrl.trim() } : {}),
+        ...(tddMode ? { tddMode: true } : {}),
       });
       addToast({ type: 'success', message: `Run launched: ${runId.slice(0, 8)}` });
       navigate('/');
@@ -361,6 +363,20 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                 When provided, drives the design-compliance score on the validation report.
               </p>
             </div>
+
+            {/* v2.5.2 (Phase 4.3) — TDD Mode toggle */}
+            <label className="flex items-start gap-2 text-xs text-muted cursor-pointer">
+              <input
+                type="checkbox"
+                checked={tddMode}
+                onChange={(e) => setTddMode(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="text-secondary">TDD mode</span> — generate failing tests
+                first, then implementation. Slower but higher accuracy on logic-heavy specs.
+              </span>
+            </label>
 
             {/* Build My Spec button */}
             <button

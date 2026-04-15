@@ -190,6 +190,19 @@ public class V2RunOrchestrator {
                                   boolean autoMerge, String modelName, String aiProvider,
                                   String createdByUserId, String orgId, String projectId,
                                   String executionMode, List<UUID> selectedRepoIds, String figmaUrl) {
+        return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
+                skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId,
+                projectId, executionMode, selectedRepoIds, figmaUrl, false);
+    }
+
+    /** v2.5.2 (Phase 4.3) — adds {@code tddMode}: when true the planner emits
+     *  test tasks first with implementation tasks declaring dependsOn them. */
+    public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
+                                  String githubPat, String githubOwner, boolean skipApproval,
+                                  boolean autoMerge, String modelName, String aiProvider,
+                                  String createdByUserId, String orgId, String projectId,
+                                  String executionMode, List<UUID> selectedRepoIds, String figmaUrl,
+                                  boolean tddMode) {
         String runId = UUID.randomUUID().toString();
         String provider = normalizeProvider(aiProvider, projectId, runId);
         String model = modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
@@ -235,11 +248,12 @@ public class V2RunOrchestrator {
         final String projectIdFinal = projectId;
         final List<UUID> selectedRepoIdsFinal = selectedRepoIds != null ? selectedRepoIds : List.of();
         final String githubPatFinal = githubPat;
+        final boolean tddModeFinal = tddMode;
         Future<?> future = pool.submit(() -> {
             try {
                 runPipeline(runIdFinal, providerFinal, modelFinal, userRequest,
                         skipApprovalFinal, executionModeFinal,
-                        projectIdFinal, selectedRepoIdsFinal, githubPatFinal);
+                        projectIdFinal, selectedRepoIdsFinal, githubPatFinal, tddModeFinal);
             } finally {
                 activeRuns.remove(runIdFinal);
             }
@@ -253,12 +267,20 @@ public class V2RunOrchestrator {
     private void runPipeline(String runId, String provider, String model, String userRequest,
                               boolean skipApproval, String executionMode) {
         runPipeline(runId, provider, model, userRequest, skipApproval, executionMode,
-                null, List.of(), null);
+                null, List.of(), null, false);
     }
 
     private void runPipeline(String runId, String provider, String model, String userRequest,
                               boolean skipApproval, String executionMode,
                               String projectId, List<UUID> selectedRepoIds, String githubPat) {
+        runPipeline(runId, provider, model, userRequest, skipApproval, executionMode,
+                projectId, selectedRepoIds, githubPat, false);
+    }
+
+    private void runPipeline(String runId, String provider, String model, String userRequest,
+                              boolean skipApproval, String executionMode,
+                              String projectId, List<UUID> selectedRepoIds, String githubPat,
+                              boolean tddMode) {
         Instant startedAt = Instant.now();
         Path workspace = null;
         String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -396,6 +418,7 @@ public class V2RunOrchestrator {
                         .projectMemory(projectMemory)
                         .projectBrief(projectBrief)
                         .referenceDocs(referenceDocs)
+                        .tddMode(tddMode)
                         .build());
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);

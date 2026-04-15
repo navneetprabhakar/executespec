@@ -9,6 +9,7 @@ import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
 import WorkspaceHealthPanel from '@/components/project/WorkspaceHealthPanel';
 import PostMergeBar from '@/components/project/PostMergeBar';
+import TechDebtPanel from '@/components/project/TechDebtPanel';
 import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
 import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
@@ -270,6 +271,7 @@ function OverviewContent({
     <div className="space-y-4 max-w-3xl">
       {projectId && <ProjectSummaryPanel projectId={projectId} />}
       {projectId && <WorkspaceHealthPanel projectId={projectId} />}
+      {projectId && <TechDebtPanel projectId={projectId} />}
       <div className="space-y-2">
         <h3 className="text-[11px] font-medium text-secondary">Recent submissions</h3>
         <ExecutionsPanel tasks={tasks} />

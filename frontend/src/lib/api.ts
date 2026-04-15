@@ -410,6 +410,8 @@ export const createRun = (body: {
   selectedRepoIds?: string[];
   /** Pilot R7 — Figma URL passed through to planner + scoring. */
   figmaUrl?: string;
+  /** v2.5.2 (Phase 4.3) — when true, planner emits test tasks first. */
+  tddMode?: boolean;
 }) =>
   req<{ runId: string }>('/runs', { method: 'POST', body: JSON.stringify(body) });
 
@@ -1788,6 +1790,50 @@ export const syncRun = (runId: string, branch?: string) =>
   req<{ status: string; reposSynced: number; details: string[] }>(
     `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
     { method: 'POST' });
+
+// v2.5.2 — Spec templates (Phase 4.2 / UX-2.3).
+export interface SpecTemplate {
+  id: string;
+  ownerType: 'PROJECT' | 'ORG';
+  ownerId: string;
+  name: string;
+  description: string | null;
+  requirementTemplate: string;
+  createdAt: string;
+}
+export const listSpecTemplates = (projectId: string) =>
+  req<SpecTemplate[]>(`/projects/${projectId}/templates`);
+export const createProjectSpecTemplate = (
+  projectId: string,
+  body: { name: string; description?: string; requirementTemplate: string },
+) =>
+  req<SpecTemplate>(`/projects/${projectId}/templates`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+export const createOrgSpecTemplate = (
+  orgId: string,
+  body: { name: string; description?: string; requirementTemplate: string },
+) =>
+  req<SpecTemplate>(`/orgs/${orgId}/templates`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+export const deleteSpecTemplate = (projectId: string, templateId: string) =>
+  req<void>(`/projects/${projectId}/templates/${templateId}`, { method: 'DELETE' });
+
+// v2.5.2 — Tech Debt rollup for Project Overview. All DB-derived, no LLM.
+export interface TechDebtReport {
+  issuesByCategory: Record<string, number>;
+  issuesBySeverity: Record<string, number>;
+  topFiles: { filePath: string; issueCount: number }[];
+  scoreTrend: { dimension: string; score: number; at: string }[];
+  averageAccuracyScore: number;
+  totalRunsAnalyzed: number;
+}
+export const getTechDebt = (projectId: string, sinceDays?: number) =>
+  req<TechDebtReport>(
+    `/projects/${projectId}/tech-debt${sinceDays ? `?since=${sinceDays}` : ''}`);
 
 // v2.5.2 — heuristic pre-submit Launch estimate (no LLM call).
 export interface LaunchEstimate {

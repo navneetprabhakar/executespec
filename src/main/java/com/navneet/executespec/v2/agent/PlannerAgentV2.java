@@ -108,7 +108,8 @@ public class PlannerAgentV2 {
                         req.workspaceSummary() == null ? "(no summary)" : req.workspaceSummary())
                 .replace("{{PROJECT_MEMORY}}", renderProjectMemoryBlock(req.projectMemory()))
                 .replace("{{PROJECT_BRIEF}}", req.projectBrief() == null ? "" : req.projectBrief())
-                .replace("{{REFERENCE_DOCS}}", req.referenceDocs() == null ? "" : req.referenceDocs());
+                .replace("{{REFERENCE_DOCS}}", req.referenceDocs() == null ? "" : req.referenceDocs())
+                .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()));
 
         List<Message> messages = List.of(
                 new SystemMessage(systemPrompt),
@@ -380,6 +381,28 @@ public class PlannerAgentV2 {
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * v2.5.2 (Phase 4.3) — when TDD mode is on, prepend an instruction block
+     * telling the planner to lead with test tasks. Empty string when off.
+     */
+    private String renderTddBlock(boolean tddMode) {
+        if (!tddMode) return "";
+        return """
+                # TDD MODE — tests first
+
+                Generate test tasks BEFORE implementation tasks. Specifically:
+                - The first task group must be one or more tasks that write FAILING
+                  tests for the feature being built (one test task per logical
+                  unit — service / endpoint / component).
+                - Every subsequent implementation task must declare `dependsOn`
+                  the relevant test task ids so the executor runs tests first.
+                - Tests must be committed files (not inline strings); the worker
+                  uses writeFile to create them.
+                - This is slower but materially higher accuracy on logic-heavy
+                  specs. Do NOT skip this directive when TDD mode is on.
+                """;
+    }
 
     private String renderProjectMemoryBlock(String projectMemory) {
         if (projectMemory == null || projectMemory.isBlank()) return "";

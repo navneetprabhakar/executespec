@@ -102,4 +102,6 @@ The plan schema:
 
 {{REFERENCE_DOCS}}
 
+{{TDD_MODE_BLOCK}}
+
 Now call `submitPlan` with your plan.
