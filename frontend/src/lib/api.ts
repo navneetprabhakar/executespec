@@ -1816,6 +1816,11 @@ export const uploadProjectDocument = async (projectId: string, file: File): Prom
 export const deleteProjectDocument = (projectId: string, documentId: string) =>
   req<{ status: string }>(`/projects/${projectId}/documents/${documentId}`, { method: 'DELETE' });
 
+// PR refresh — polls GitHub for the latest state of every project PR.
+export const refreshProjectPrs = (projectId: string) =>
+  req<{ checked: number; updated: number; newlyMerged: number }>(
+    `/projects/${projectId}/prs/refresh`, { method: 'POST' });
+
 export const getArchitectureDoc = (projectId: string) =>
   req<ArchitectureDoc>(`/projects/${projectId}/architecture`);
 

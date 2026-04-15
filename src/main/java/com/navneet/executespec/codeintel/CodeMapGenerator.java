@@ -34,13 +34,17 @@ public class CodeMapGenerator {
 
     public Result generateWithSha(String repoFullName, String defaultBranch, String pat) {
         String sha = github.getBranchHeadSha("https://github.com/" + repoFullName, defaultBranch, pat);
-        return new Result(generate(repoFullName, pat), sha);
+        return new Result(generate(repoFullName, defaultBranch, pat), sha);
     }
 
     public String generate(String repoFullName, String pat) {
+        return generate(repoFullName, null, pat);
+    }
+
+    public String generate(String repoFullName, String defaultBranch, String pat) {
         List<String> files;
         try {
-            files = github.listRepoFiles("https://github.com/" + repoFullName, pat);
+            files = github.listRepoFiles("https://github.com/" + repoFullName, defaultBranch, pat);
         } catch (Exception e) {
             log.warn("CodeMapGenerator list-files failed for {}: {}", repoFullName, e.getMessage());
             files = List.of();
@@ -61,7 +65,7 @@ public class CodeMapGenerator {
         md.append("\n");
 
         // Routes — scan a small set of likely files; full-text scan would be too expensive.
-        List<String> routes = scanRoutes(repoFullName, files, pat);
+        List<String> routes = scanRoutes(repoFullName, defaultBranch, files, pat);
         if (!routes.isEmpty()) {
             md.append("## Routes\n\n");
             routes.stream().limit(40).forEach(r -> md.append("- `").append(r).append("`\n"));
@@ -83,7 +87,7 @@ public class CodeMapGenerator {
         return md.toString();
     }
 
-    private List<String> scanRoutes(String repoFullName, List<String> files, String pat) {
+    private List<String> scanRoutes(String repoFullName, String branch, List<String> files, String pat) {
         List<String> out = new ArrayList<>();
         // Pull at most 12 plausible route files to keep API calls bounded.
         files.stream()
@@ -94,7 +98,7 @@ public class CodeMapGenerator {
                     String content;
                     try {
                         content = github.readRepoFile(
-                                "https://github.com/" + repoFullName, path, pat);
+                                "https://github.com/" + repoFullName, path, branch, pat);
                     } catch (Exception e) {
                         return;
                     }
