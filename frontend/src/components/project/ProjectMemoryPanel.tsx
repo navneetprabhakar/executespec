@@ -71,7 +71,7 @@ export default function ProjectMemoryPanel({ projectId }: Props) {
   const snapshotBlock = memory.fullContext.split('## RECENT RUNS')[0] ?? '';
 
   return (
-    <div className="space-y-5 text-[12px]">
+    <div className="space-y-5 text-[11px]">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-2">
         <div className="text-[11px] text-muted">

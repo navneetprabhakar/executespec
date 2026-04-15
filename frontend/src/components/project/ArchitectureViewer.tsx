@@ -66,9 +66,13 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
   const shown = selectedVersion != null
     ? versions.find((v) => v.version === selectedVersion) ?? doc
     : doc;
+  const [diffOpen, setDiffOpen] = useState(false);
+  const previous = shown
+    ? versions.find((v) => v.version === ((shown.version ?? 0) - 1))
+    : undefined;
 
   return (
-    <div className="space-y-3 text-[12px]">
+    <div className="space-y-3 text-[11px]">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
@@ -98,6 +102,15 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
             </select>
           )}
         </div>
+        {shown && previous && (
+          <button
+            onClick={() => setDiffOpen((o) => !o)}
+            className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40"
+            title={`Compare v${shown.version} against v${previous.version}`}
+          >
+            {diffOpen ? 'Hide diff' : `Diff vs v${previous.version}`}
+          </button>
+        )}
         <button
           onClick={generate}
           disabled={busy}
@@ -123,7 +136,12 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
         </div>
       )}
 
-      {shown && (
+      {shown && diffOpen && previous && (
+        <ArchDiffBlock oldText={previous.content} newText={shown.content}
+                      oldV={previous.version} newV={shown.version} />
+      )}
+
+      {shown && !diffOpen && (
         <>
           {/* Doc body */}
           <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 prose prose-sm prose-invert max-w-none
@@ -191,4 +209,60 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
       )}
     </div>
   );
+}
+
+/** Minimal line-diff (LCS-based) rendered GitHub-style. */
+function ArchDiffBlock({ oldText, newText, oldV, newV }:
+    { oldText: string; newText: string; oldV: number; newV: number }) {
+  const rows = diffLines(oldText.split('\n'), newText.split('\n'));
+  const adds = rows.filter((r) => r.kind === 'add').length;
+  const dels = rows.filter((r) => r.kind === 'del').length;
+  return (
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
+      <div className="px-3 py-1.5 bg-[var(--gray-200)] border-b border-[var(--border-default)] text-[10px] font-mono flex items-center gap-3">
+        <span className="text-secondary">v{oldV} → v{newV}</span>
+        <span className="text-emerald-400">+{adds}</span>
+        <span className="text-accent-red">-{dels}</span>
+      </div>
+      <pre className="text-[11px] font-mono leading-relaxed overflow-x-auto m-0">
+        {rows.map((r, i) => (
+          <div
+            key={i}
+            className={
+              r.kind === 'add' ? 'bg-emerald-500/10 text-emerald-300 px-3' :
+              r.kind === 'del' ? 'bg-red-500/10 text-red-300 px-3' :
+              'text-secondary px-3'
+            }
+          >
+            <span className="inline-block w-4 select-none text-muted">
+              {r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ' '}
+            </span>
+            {r.text || '\u00A0'}
+          </div>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+type DiffRow = { kind: 'add' | 'del' | 'ctx'; text: string };
+
+function diffLines(a: string[], b: string[]): DiffRow[] {
+  const n = a.length, m = b.length;
+  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const out: DiffRow[] = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out.push({ kind: 'ctx', text: a[i] }); i++; j++; }
+    else if (lcs[i + 1][j] >= lcs[i][j + 1]) { out.push({ kind: 'del', text: a[i++] }); }
+    else { out.push({ kind: 'add', text: b[j++] }); }
+  }
+  while (i < n) out.push({ kind: 'del', text: a[i++] });
+  while (j < m) out.push({ kind: 'add', text: b[j++] });
+  return out;
 }

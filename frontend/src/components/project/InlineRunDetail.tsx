@@ -63,7 +63,7 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <div className="text-[10px] uppercase tracking-wide text-muted">Request</div>
-            <p className="text-[12px] text-primary whitespace-pre-wrap">{run.userRequest}</p>
+            <p className="text-[11px] text-primary whitespace-pre-wrap">{run.userRequest}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {terminal && !alreadyPushed && (
