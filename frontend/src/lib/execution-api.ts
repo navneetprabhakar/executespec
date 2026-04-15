@@ -54,6 +54,9 @@ export const executionApi = {
   abort: (id: string) =>
     req<void>(`/executions/${id}/abort`, { method: 'POST' }),
 
+  resume: (id: string) =>
+    req<void>(`/executions/${id}/resume`, { method: 'POST' }),
+
   getReport: (id: string) =>
     req<{ markdown: string; status: string; solutionCount: number }>(
       `/executions/${id}/report`,
