@@ -38,6 +38,7 @@ public class ProjectArchitectureService {
     private final CodeMapGenerator codeMapGenerator;
     private final ArchitectureDocGenerator archDocGenerator;
     private final ProjectWorkspaceService workspace;
+    private final com.navneet.executespec.project.workspace.ProjectWorkspaceWarmer workspaceWarmer;
     private final ProjectBriefService briefService;
     private final ObjectMapper objectMapper;
 
@@ -118,6 +119,11 @@ public class ProjectArchitectureService {
 
         // Also persist to the project workspace (codemaps/*.md, architecture.md, summary.md).
         persistToWorkspace(projectId, codeMaps, repoFullNames, archMarkdown);
+
+        // Async warm the disk cache on this node too — generate() runs inside a
+        // transaction, so we schedule the warm via the self-proxy (@Async bean)
+        // which picks up the committed DB state.
+        workspaceWarmer.warmDiskCache(projectId);
         return doc;
     }
 

@@ -21,11 +21,11 @@ export default function SolutionCard({ solution }: { solution: SolutionDto }) {
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)]">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left text-[12px]"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm"
       >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <span className={cn('text-[10px] px-1.5 py-0.5 rounded border', color)}>{solution.status}</span>
-        <span className="font-mono text-[10px] text-muted">S{solution.sequenceNumber}</span>
+        <span className={cn('text-[11px] px-1.5 py-0.5 rounded border', color)}>{solution.status}</span>
+        <span className="font-mono text-[11px] text-muted">S{solution.sequenceNumber}</span>
         <span className="truncate flex-1">{solution.title}</span>
         {solution.prUrl && (
           <a
@@ -33,14 +33,14 @@ export default function SolutionCard({ solution }: { solution: SolutionDto }) {
             target="_blank"
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="text-[10px] text-accent-blue hover:underline"
+            className="text-[11px] text-accent-blue hover:underline"
           >
             PR #{solution.prNumber}
           </a>
         )}
       </button>
       {expanded && (
-        <div className="border-t border-[var(--border-default)] px-3 py-2 text-[11px] text-secondary space-y-1">
+        <div className="border-t border-[var(--border-default)] px-3 py-2 text-xs text-secondary space-y-1">
           {solution.description && <div>{solution.description}</div>}
           {solution.dependencyIds.length > 0 && (
             <div className="text-muted">Depends on {solution.dependencyIds.length} upstream solution(s)</div>

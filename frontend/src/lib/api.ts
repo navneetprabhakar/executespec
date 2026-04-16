@@ -119,6 +119,20 @@ export interface RunSummary {
   isRetry?: boolean;
   /** RunId of the original run this was retried from. Null for original runs. */
   sourceRunId?: string | null;
+  /** Which harness produced this run: "v1" (default) or "v2". */
+  harnessVersion?: string | null;
+  /** v2.5.8 — total USD spent on LLM calls for this run. Null until terminal. */
+  actualCostUsd?: number | null;
+  /**
+   * v2.5.10 — explicit reason for the terminal status so the UI can explain
+   * "PARTIAL because X" instead of rendering a silent badge. Values:
+   *   CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS |
+   *   FINAL_BUILD_FAILED | TESTS_FAILED:<n>_OF_<m> |
+   *   REVIEWER_UNRESOLVED | REVIEWER_FAILED |
+   *   ALL_TASKS_FAILED | LEGACY_UNKNOWN
+   * Null on in-flight runs and on pre-v2.5.10 terminal runs that were never backfilled.
+   */
+  statusReason?: string | null;
 }
 
 export interface TaskSummary {
@@ -410,6 +424,8 @@ export const createRun = (body: {
   selectedRepoIds?: string[];
   /** Pilot R7 — Figma URL passed through to planner + scoring. */
   figmaUrl?: string;
+  /** v2.5.2 (Phase 4.3) — when true, planner emits test tasks first. */
+  tddMode?: boolean;
 }) =>
   req<{ runId: string }>('/runs', { method: 'POST', body: JSON.stringify(body) });
 
@@ -1147,6 +1163,8 @@ export interface ProjectDto {
   branchNamingPattern?: string | null;
   targetBranch?: string | null;
   defaultReviewers?: string | null;
+  /** v2.5.7 — default GitHub org/owner for repos created under this project. */
+  githubOwner?: string | null;
 }
 
 export interface ProjectMemberDto {
@@ -1162,14 +1180,18 @@ export const getProjects = () => req<ProjectDto[]>('/projects');
 
 export const getProject = (id: string) => req<ProjectDto>(`/projects/${id}`);
 
-export const createProject = (body: { name: string; description?: string; aiProvider?: string }) =>
+export const createProject = (body: { name: string; description?: string; aiProvider?: string; githubOwner?: string }) =>
   req<ProjectDto>('/projects', { method: 'POST', body: JSON.stringify(body) });
 
-export const updateProjectSettings = (id: string, body: { aiProvider: string }) =>
+export const updateProjectSettings = (id: string, body: { aiProvider?: string; githubOwner?: string }) =>
   req<ProjectDto>(`/projects/${id}/settings`, { method: 'PATCH', body: JSON.stringify(body) });
 
 export const archiveProject = (id: string) =>
   req<ProjectDto>(`/projects/${id}/archive`, { method: 'PUT' });
+
+/** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
+export const fetchPrReviewComments = (projectId: string, prNumber: number, repoFullName: string) =>
+  req<{ comments: string }>(`/projects/${projectId}/prs/${prNumber}/reviews?repo=${encodeURIComponent(repoFullName)}`);
 
 export const getProjectMembers = (projectId: string) =>
   req<ProjectMemberDto[]>(`/projects/${projectId}/members`);
@@ -1282,6 +1304,11 @@ export interface FeatureFlagDto {
 }
 
 export const adminListFeatureFlags = () => req<FeatureFlagDto[]>('/admin/feature-flags');
+
+/** v2.5.8 — public feature-flag map for UI gating. Keys whitelisted to
+ *  integrations.*, billing.*, pipeline.*, project.*, execution.view.*. */
+export const getPublicFeatureFlags = () =>
+  req<Record<string, boolean>>('/admin/feature-flags/public');
 export const adminUpdateFeatureFlag = (key: string, value: string) =>
   req<FeatureFlagDto>(`/admin/feature-flags/${encodeURIComponent(key)}`, {
     method: 'PUT',
@@ -1406,6 +1433,14 @@ export interface ValidationReportData {
   securityScore?: number | null;
   performanceScore?: number | null;
   designComplianceScore?: number | null;
+  /** v2.5.10 (V106) — verified signals from the pipeline itself.
+   *  finalBuildPassed + tests + verdict are the inputs to verifiedScore, which
+   *  anchors the 6 dimensions above when scoring.v2-verified flag is on. */
+  finalBuildPassed?: boolean | null;
+  testsPassed?: number | null;
+  testsTotal?: number | null;
+  reviewerVerdict?: 'CLEAN' | 'FIXED_ISSUES' | 'UNRESOLVED_ISSUES' | 'REVIEW_FAILED' | null;
+  verifiedScore?: number | null;
 }
 
 export interface SharedReportData {
@@ -1788,6 +1823,126 @@ export const syncRun = (runId: string, branch?: string) =>
   req<{ status: string; reposSynced: number; details: string[] }>(
     `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
     { method: 'POST' });
+
+// v2.5.2 — Spec templates (Phase 4.2 / UX-2.3).
+export interface SpecTemplate {
+  id: string;
+  ownerType: 'PROJECT' | 'ORG';
+  ownerId: string;
+  name: string;
+  description: string | null;
+  requirementTemplate: string;
+  createdAt: string;
+}
+export const listSpecTemplates = (projectId: string) =>
+  req<SpecTemplate[]>(`/projects/${projectId}/templates`);
+export const createProjectSpecTemplate = (
+  projectId: string,
+  body: { name: string; description?: string; requirementTemplate: string },
+) =>
+  req<SpecTemplate>(`/projects/${projectId}/templates`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+export const createOrgSpecTemplate = (
+  orgId: string,
+  body: { name: string; description?: string; requirementTemplate: string },
+) =>
+  req<SpecTemplate>(`/orgs/${orgId}/templates`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+export const deleteSpecTemplate = (projectId: string, templateId: string) =>
+  req<void>(`/projects/${projectId}/templates/${templateId}`, { method: 'DELETE' });
+
+// v2.5.5 (UX-4.2) — architecture diff source-file correlation.
+// The text diff of architecture.md stays client-side (LCS); this call
+// returns per-repo added/modified/removed/renamed files between the two
+// versions by hitting GitHub's compare API against the SHAs captured at
+// generate-time on each ProjectArchitectureDoc row.
+export interface ArchChangedFile {
+  filename: string;
+  status: string;        // added | modified | removed | renamed
+  additions: number;
+  deletions: number;
+}
+export interface ArchDiffReport {
+  fromVersion: number;
+  toVersion: number;
+  perRepo: { repoFullName: string; files: ArchChangedFile[] }[];
+  totalFiles: number;
+}
+export const getArchitectureDiff = (projectId: string, from: number, to: number) =>
+  req<ArchDiffReport>(
+    `/projects/${projectId}/architecture/diff?from=${from}&to=${to}`);
+
+// v2.5.2 — Tech Debt rollup for Project Overview. All DB-derived, no LLM.
+export interface TechDebtReport {
+  issuesByCategory: Record<string, number>;
+  issuesBySeverity: Record<string, number>;
+  topFiles: { filePath: string; issueCount: number }[];
+  scoreTrend: { dimension: string; score: number; at: string }[];
+  averageAccuracyScore: number;
+  totalRunsAnalyzed: number;
+}
+export const getTechDebt = (projectId: string, sinceDays?: number) =>
+  req<TechDebtReport>(
+    `/projects/${projectId}/tech-debt${sinceDays ? `?since=${sinceDays}` : ''}`);
+
+// v2.5.2 — heuristic pre-submit Launch estimate (no LLM call).
+export interface LaunchEstimate {
+  estimatedTasksLow: number;
+  estimatedTasksHigh: number;
+  estimatedCostLow: number;
+  estimatedCostHigh: number;
+  basis: string;
+}
+export const estimateRun = (projectId: string, requirement: string) =>
+  req<LaunchEstimate>(
+    `/projects/${projectId}/estimate?requirement=${encodeURIComponent(requirement)}`);
+
+// v2.5.2 — "Continue building" banner after a PR merge. Absent (null body)
+// means no banner; entry lives 10 min in Redis post-merge.
+export interface PostMergeBar {
+  repoFullName: string;
+  prNumber: number;
+  mergedAt: string | null;
+}
+export const getPostMergeBar = (projectId: string) =>
+  req<PostMergeBar[]>(`/projects/${projectId}/post-merge-bar`);
+export const dismissPostMergeBar = (projectId: string) =>
+  req<void>(`/projects/${projectId}/post-merge-bar`, { method: 'DELETE' });
+
+// v2.5.2 — per-repo workspace health for the Project Overview tab.
+export interface RepoHealth {
+  repoId: string;
+  repoName: string;
+  defaultBranch: string;
+  lastCodeMapSha: string | null;
+  currentOriginSha: string | null;
+  isStale: boolean;
+  webhookInstalled: boolean;
+  openPrCount: number;
+  lastAnalysedAt: string | null;
+}
+export interface WorkspaceHealthReport {
+  repos: RepoHealth[];
+  lastRefreshedAt: string;
+}
+export const getWorkspaceHealth = (projectId: string) =>
+  req<WorkspaceHealthReport>(`/projects/${projectId}/workspace-health`);
+
+// v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
+export const installRepoWebhook = (repoId: string) =>
+  req<{ installed: boolean; reason?: string }>(
+    `/repos/${repoId}/webhook`, { method: 'POST' });
+
+// v2.5.2 — reset workspace to the exact commit SHAs captured at run start.
+// Returns { reposSynced: 0, details: ["no snapshot — run predates v2.5.2"] }
+// for runs clone before the snapshot rollout.
+export const syncRunToOriginal = (runId: string) =>
+  req<{ status: string; reposSynced: number; details: string[] }>(
+    `/runs/${runId}/sync/original`, { method: 'POST' });
 
 export const getProjectSummary = (projectId: string) =>
   req<{ content: string }>(`/projects/${projectId}/summary`);

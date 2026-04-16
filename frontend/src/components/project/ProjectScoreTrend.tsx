@@ -6,7 +6,7 @@ import type { ScoreEntry } from '@/types/project';
 export default function ProjectScoreTrend({ scores }: { scores: ScoreEntry[] }) {
   if (!scores || scores.length === 0) {
     return (
-      <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-[11px] text-muted">
+      <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-xs text-muted">
         No scoring data yet — complete a run with a validation report.
       </div>
     );
@@ -22,7 +22,7 @@ export default function ProjectScoreTrend({ scores }: { scores: ScoreEntry[] }) 
 
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 h-72">
-      <h3 className="text-[10px] uppercase tracking-wide text-muted mb-2">Score trend</h3>
+      <h3 className="text-[11px] uppercase tracking-wide text-muted mb-2">Score trend</h3>
       <ResponsiveContainer width="100%" height="88%">
         <LineChart data={data} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" />

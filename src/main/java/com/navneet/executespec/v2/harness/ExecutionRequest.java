@@ -24,7 +24,14 @@ public record ExecutionRequest(
         ExecutionContext runContext,
         Integer maxIterationsPerTask,
         Boolean enableSmokeTests,
-        String designBlock) {
+        String designBlock,
+        /**
+         * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for
+         * runs that aren't project-scoped (e.g. legacy/test harnesses).
+         * When set, each worker's system prompt gets a small {@code REFERENCE DOCS}
+         * block retrieved from {@code RetrievalService} keyed on the task description.
+         */
+        String projectId) {
 
     public ExecutionRequest {
         if (plan == null) throw new IllegalArgumentException("plan required");

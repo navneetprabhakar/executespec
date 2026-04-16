@@ -61,6 +61,9 @@ public class BillingService {
 
     // Email service for welcome/upgrade emails
     private final MailService mailService;
+    /** v2.5.8 — LLM $ spent aggregation for BillingStatusResponse.spentUsd. */
+    private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
+    private final com.navneet.executespec.execution.repository.ExecutionRunRepository execRunRepo;
 
     // Multi-gateway router (Stripe + Razorpay)
     private final PaymentGatewayRouter gatewayRouter;
@@ -429,7 +432,26 @@ public class BillingService {
                 })
                 .collect(Collectors.toList());
 
-        return new BillingStatusResponse(subInfo, planResponse, adjustedUsage, bonusRunsInfo);
+        // v2.5.8 — compute real $ spent this billing period so the Billing page
+        // can surface actual LLM cost instead of just the run-count quota.
+        // Period start defaults to the beginning of the current subscription
+        // window, or 30 days ago if no subscription is active.
+        java.time.Instant periodStart = sub != null && sub.getCurrentPeriodEnd() != null
+                ? sub.getCurrentPeriodEnd().minus(30, java.time.temporal.ChronoUnit.DAYS)
+                : java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
+        double pipelineSpent = 0.0;
+        double execSpent = 0.0;
+        try {
+            Double p = pipelineRunRepo.sumActualCostByUserAndSince(userId, periodStart);
+            pipelineSpent = p == null ? 0.0 : p;
+        } catch (Exception ignore) {}
+        try {
+            Double e = execRunRepo.sumTotalCostByUserAndSince(userId, periodStart);
+            execSpent = e == null ? 0.0 : e;
+        } catch (Exception ignore) {}
+        double spentUsd = pipelineSpent + execSpent;
+
+        return new BillingStatusResponse(subInfo, planResponse, adjustedUsage, bonusRunsInfo, spentUsd);
     }
 
     // ─────────────────────────────────────────────────────────────

@@ -91,9 +91,12 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     google:
-      planning: gemini-2.5-flash
-      workhorse: gemini-2.5-flash
-      lightweight: gemini-2.5-flash
+      # v2.5.9 Bug #3 — gemini-2.5-flash emits Python-style tool calls
+      # ("print(default_api.submitPlan(...))") causing MALFORMED_FUNCTION_CALL.
+      # gemini-3-flash-preview is the newer tool-call-reliable model.
+      planning: gemini-3-flash-preview
+      workhorse: gemini-3-flash-preview
+      lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4-mini
@@ -187,14 +190,14 @@ model-matrix:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-2.5-flash }
+      - { provider: google, model: gemini-3-flash-preview }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-2.5-flash }
+      - { provider: google, model: gemini-3-flash-preview }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
-      - { provider: google, model: gemini-2.5-flash }
+      - { provider: google, model: gemini-3-flash-preview }
       - { provider: openai, model: gpt-5.4 }
 
   # ── FREE tier model lock ──────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ export default function ExecutionMonitor({ executionId }: { executionId: string 
   return (
     <div className="space-y-3">
       <div>
-        <div className="flex items-center justify-between text-[11px] text-muted mb-1">
+        <div className="flex items-center justify-between text-xs text-muted mb-1">
           <span>Progress</span>
           <span className="font-mono tabular-nums">{done}/{solutions.length} · {pct}%</span>
         </div>
@@ -30,7 +30,7 @@ export default function ExecutionMonitor({ executionId }: { executionId: string 
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-xs">
         <button onClick={toggleLogs} className="text-muted hover:text-primary">
           {showLogs ? 'Hide' : 'Show'} log stream
         </button>
@@ -54,7 +54,7 @@ export default function ExecutionMonitor({ executionId }: { executionId: string 
           Abort
         </button>
       </div>
-      {resumeStatus && <div className="text-[10px] text-muted">{resumeStatus}</div>}
+      {resumeStatus && <div className="text-[11px] text-muted">{resumeStatus}</div>}
 
       <div className="space-y-1.5">
         {solutions.map((s) => (

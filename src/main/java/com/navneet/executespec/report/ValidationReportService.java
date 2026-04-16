@@ -3,6 +3,7 @@ package com.navneet.executespec.report;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.ReportInput;
@@ -14,7 +15,9 @@ import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -39,6 +42,11 @@ public class ValidationReportService {
     private final MeterRegistry meterRegistry;
     private final StateStore stateStore;
     private final ReviewScoringService reviewScoringService;
+    private final FeatureFlagService featureFlagService;
+
+    /** v2.5.10 — when enabled, ReviewScoringService anchors on verifiedScore (build + tests + verdict)
+     *  instead of the LLM accuracy score, and the 5 verified columns feed the primary UI badges. */
+    private static final String FLAG_VERIFIED_SCORE = "scoring.v2-verified";
 
     /**
      * Main entry point — called after ReviewerAgent completes, before MergeGate.
@@ -93,12 +101,34 @@ public class ValidationReportService {
                 }
             }
 
-            // 3b. Pilot R6 — six-dimension score derived deterministically from
-            // accuracy + review issues. figmaUrl will flow in once Phase 5 adds
-            // the column on PipelineRun; until then designCompliance stays null.
+            // 3b. v2.5.10 — verified signals (build outcome, test counts, reviewer verdict).
+            // These replace the LLM-only anchor in ReviewScoringService when the
+            // scoring.v2-verified flag is on, and always persist alongside the
+            // legacy columns so the UI can show both and toggling the flag on
+            // later is instant.
+            Boolean finalBuildPassed = input.compileResult() != null
+                    ? input.compileResult().passed() : null;
+            TestExecutionSummary ts = input.testSummary();
+            int testsPassedCount = ts != null ? ts.getPassed() : 0;
+            int testsTotalCount  = ts != null ? ts.getTotalTests() : 0;
+            String reviewerVerdict = mapVerdictToV2Name(
+                    input.review() != null ? input.review().getVerdict() : null);
+            int unfixedCritical = countUnfixedCritical(input);
+            int verifiedScore = computeVerifiedScore(
+                    finalBuildPassed, testsPassedCount, testsTotalCount,
+                    reviewerVerdict, unfixedCritical);
+
+            boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
+
+            // 3c. Pilot R6 — six-dimension score derived deterministically from
+            // the anchor + review issues. Under the verified flag, the anchor
+            // is verifiedScore; otherwise it's the LLM-generated accuracy score
+            // (legacy behaviour, preserved for rollback).
             String figmaUrl = input.run() != null ? input.run().getFigmaUrl() : null;
             ReviewScoringService.Scores scores = reviewScoringService.score(
-                    input.run(), input.review(), accuracyReport, figmaUrl);
+                    input.run(), input.review(), accuracyReport,
+                    verifiedScoreFlag ? Integer.valueOf(verifiedScore) : null,
+                    figmaUrl);
 
             // 4. Build and persist entity
             var report = ValidationReport.builder()
@@ -124,6 +154,11 @@ public class ValidationReportService {
                 .securityScore(scores.security())
                 .performanceScore(scores.performance())
                 .designComplianceScore(scores.designCompliance())
+                .finalBuildPassed(finalBuildPassed)
+                .testsPassed(ts != null ? testsPassedCount : null)
+                .testsTotal(ts != null ? testsTotalCount : null)
+                .reviewerVerdict(reviewerVerdict)
+                .verifiedScore(verifiedScore)
                 .previewUrl(input.previewUrl())
                 .status("COMPLETE")
                 .build();
@@ -414,6 +449,11 @@ public class ValidationReportService {
             entity.getSecurityScore(),
             entity.getPerformanceScore(),
             entity.getDesignComplianceScore(),
+            entity.getFinalBuildPassed(),
+            entity.getTestsPassed(),
+            entity.getTestsTotal(),
+            entity.getReviewerVerdict(),
+            entity.getVerifiedScore(),
             entity.getPreviewUrl()
         );
     }
@@ -551,6 +591,69 @@ public class ValidationReportService {
         }
 
         return sb.toString();
+    }
+
+    // ── v2.5.10 verified score helpers ─────────────────────────────────────────
+
+    /**
+     * Deterministic score derived from the signals that actually exist at report
+     * time. Unlike the LLM accuracy score this cannot hallucinate — every input
+     * is a hard fact observed by the pipeline.
+     *
+     * Formula:
+     *   base          = 40
+     *   buildBonus    = finalBuildPassed == TRUE ? 20 : 0   (null treated as not-passed)
+     *   testBonus     = testsTotal>0 ? round(20 * testsPassed/testsTotal) : 10   (neutral when no tests)
+     *   verdictBonus  = CLEAN=20, FIXED_ISSUES=15, UNRESOLVED_ISSUES=5, REVIEW_FAILED=0, null=10
+     *   penalty       = unfixedCriticalCount * 5
+     *   score         = clamp(0, 100, base + buildBonus + testBonus + verdictBonus - penalty)
+     */
+    int computeVerifiedScore(Boolean finalBuildPassed, int testsPassed, int testsTotal,
+                             String reviewerVerdictName, int unfixedCriticalCount) {
+        int base = 40;
+        int buildBonus = Boolean.TRUE.equals(finalBuildPassed) ? 20 : 0;
+        int testBonus = (testsTotal > 0)
+                ? (int) Math.round(20.0 * testsPassed / testsTotal)
+                : 10;
+        int verdictBonus;
+        if (reviewerVerdictName == null) {
+            verdictBonus = 10;
+        } else {
+            verdictBonus = switch (reviewerVerdictName) {
+                case "CLEAN" -> 20;
+                case "FIXED_ISSUES" -> 15;
+                case "UNRESOLVED_ISSUES" -> 5;
+                case "REVIEW_FAILED" -> 0;
+                default -> 10;
+            };
+        }
+        int penalty = Math.max(0, unfixedCriticalCount) * 5;
+        int raw = base + buildBonus + testBonus + verdictBonus - penalty;
+        return Math.max(0, Math.min(100, raw));
+    }
+
+    /**
+     * Maps the V1-compat {@link ReviewVerdict} stored on {@link ReviewReportV2}
+     * back to the V2 {@code ReviewerResult.Overall} enum name. Persisted as-is
+     * in validation_report.reviewer_verdict so the UI and downstream jobs can
+     * discriminate CLEAN vs FIXED_ISSUES (both collapse to APPROVED in V1).
+     */
+    static String mapVerdictToV2Name(ReviewVerdict v) {
+        if (v == null) return null;
+        return switch (v) {
+            case APPROVED -> "CLEAN";
+            case APPROVED_WITH_NOTES -> "FIXED_ISSUES";
+            case NEEDS_FIXES -> "UNRESOLVED_ISSUES";
+            case REJECTED -> "REVIEW_FAILED";
+        };
+    }
+
+    private int countUnfixedCritical(ReportInput input) {
+        if (input.review() == null || input.review().getIssues() == null) return 0;
+        return (int) input.review().getIssues().stream()
+                .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+                .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())
+                .count();
     }
 
     private String truncate(String s, int maxLen) {

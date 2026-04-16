@@ -45,30 +45,30 @@ export default function SolutionSection({ executionId, solution }: Props) {
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)]">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left text-[12px]"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm"
       >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <span className={cn('text-[10px] px-1.5 py-0.5 rounded border', color)}>{solution.status}</span>
-        <span className="font-mono text-[10px] text-muted">S{solution.sequenceNumber}</span>
+        <span className={cn('text-[11px] px-1.5 py-0.5 rounded border', color)}>{solution.status}</span>
+        <span className="font-mono text-[11px] text-muted">S{solution.sequenceNumber}</span>
         <span className="truncate flex-1">{solution.title}</span>
-        <span className="text-[10px] font-mono text-muted">~{totalTokens ?? 0} tok</span>
+        <span className="text-[11px] font-mono text-muted">~{totalTokens ?? 0} tok</span>
         {runs && runs.length > 0 && (
-          <span className="text-[10px] text-muted">{runs.length} run{runs.length > 1 ? 's' : ''}</span>
+          <span className="text-[11px] text-muted">{runs.length} run{runs.length > 1 ? 's' : ''}</span>
         )}
         {solution.prUrl && (
           <a href={solution.prUrl} target="_blank" rel="noreferrer"
              onClick={(e) => e.stopPropagation()}
-             className="text-[10px] text-accent-blue hover:underline flex items-center gap-0.5">
+             className="text-[11px] text-accent-blue hover:underline flex items-center gap-0.5">
             PR #{solution.prNumber}<ExternalLink className="h-2.5 w-2.5" />
           </a>
         )}
         {solution.jiraTicketId && (
-          <span className="text-[10px] text-muted font-mono">{solution.jiraTicketId}</span>
+          <span className="text-[11px] text-muted font-mono">{solution.jiraTicketId}</span>
         )}
       </button>
 
       {expanded && (
-        <div className="border-t border-[var(--border-default)] px-3 py-2 space-y-2 text-[11px]">
+        <div className="border-t border-[var(--border-default)] px-3 py-2 space-y-2 text-xs">
           {solution.description && <div className="text-secondary">{solution.description}</div>}
           {solution.failureReason && (
             <div className="text-accent-red">
@@ -81,7 +81,7 @@ export default function SolutionSection({ executionId, solution }: Props) {
           )}
 
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-muted mb-1">Runs</div>
+            <div className="text-[11px] uppercase tracking-wide text-muted mb-1">Runs</div>
             {runs == null ? (
               <div className="text-muted">Loading runs…</div>
             ) : runs.length === 0 ? (
@@ -92,7 +92,7 @@ export default function SolutionSection({ executionId, solution }: Props) {
                   <div key={r.id}
                     className="flex items-center gap-2 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1">
                     <span className="font-mono text-muted">#{r.attemptNumber}</span>
-                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded border',
+                    <span className={cn('text-[11px] px-1.5 py-0.5 rounded border',
                         r.terminalStatus === 'COMPLETE' ? 'text-emerald-400 border-emerald-500/40'
                         : r.terminalStatus === 'PARTIAL' ? 'text-yellow-400 border-yellow-500/40'
                         : r.terminalStatus ? 'text-accent-red border-red-500/40'

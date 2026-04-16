@@ -95,7 +95,11 @@ export function describeRunStatus(
       if (failed > 0 && total > 0) return `Failed — ${failed}/${total} tasks errored`;
       return 'Run failed';
     case 'PARTIAL':
-      if (retryable > 0) return `${completed}/${total} tasks done — ${retryable} need manual retry`;
+      // v2.5.7 UX-fix: pluralisation + fallback when task list is missing so
+      // sidebar doesn't show "0/0 tasks completed" on a PARTIAL run whose
+      // RunSummary doesn't include the tasks array.
+      if (total === 0) return 'Some tasks need manual retry';
+      if (retryable > 0) return `${completed}/${total} tasks done — ${retryable} ${retryable === 1 ? 'needs' : 'need'} manual retry`;
       return `${completed}/${total} tasks completed`;
     case 'PAUSED':
       if (total > 0) return `Paused — ${completed}/${total} tasks done`;

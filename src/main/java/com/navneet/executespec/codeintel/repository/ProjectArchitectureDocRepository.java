@@ -12,4 +12,6 @@ public interface ProjectArchitectureDocRepository extends JpaRepository<ProjectA
     List<ProjectArchitectureDoc> findByProjectIdOrderByVersionDesc(String projectId);
 
     Optional<ProjectArchitectureDoc> findFirstByProjectIdOrderByVersionDesc(String projectId);
+
+    Optional<ProjectArchitectureDoc> findByProjectIdAndVersion(String projectId, Integer version);
 }

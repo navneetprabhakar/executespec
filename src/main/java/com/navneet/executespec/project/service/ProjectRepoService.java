@@ -255,6 +255,15 @@ public class ProjectRepoService {
                     "Created repo but could not parse clone URL: " + cloneUrl);
         }
 
+        // v2.5.2 — auto-provision the PR webhook on new repos so the
+        // merge-cascade pipeline fires without a manual setup step.
+        boolean webhookOk = false;
+        try {
+            webhookOk = gitHub.installWebhook(fullName, pat);
+        } catch (Exception e) {
+            log.warn("installWebhook threw for {}: {}", fullName, e.getMessage());
+        }
+
         ProjectRepo entity = ProjectRepo.builder()
                 .id(UUID.randomUUID())
                 .scope(project.getOrgId() != null ? ProjectRepo.Scope.ORG : ProjectRepo.Scope.USER)
@@ -265,6 +274,7 @@ public class ProjectRepoService {
                 .defaultBranch("main")
                 .detectedStack(null)      // fresh repo — no stack detected yet
                 .lastSyncedSha(null)
+                .webhookInstalled(webhookOk)
                 .build();
         repoRepo.save(entity);
 
@@ -274,8 +284,26 @@ public class ProjectRepoService {
                 .repoId(entity.getId())
                 .linkedBy(callerUserId)
                 .build());
-        log.info("Created+linked new repo {} ({}) for project {}", entity.getId(), fullName, projectId);
+        log.info("Created+linked new repo {} ({}) for project {} [webhook={}]",
+                entity.getId(), fullName, projectId, webhookOk);
         return entity;
+    }
+
+    /**
+     * v2.5.2 — manually install the PR webhook on a repo the user linked (rather
+     * than created). Requires the caller's PAT to have admin:repo_hook on the
+     * target repo. Idempotent: GitHub's "already exists" path is treated as success.
+     */
+    @Transactional
+    public boolean installWebhook(UUID repoId, String pat, String callerUserId, String callerOrgId) {
+        ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+        boolean ok = gitHub.installWebhook(repo.getGithubRepoFullName(), pat);
+        if (ok) {
+            repo.setWebhookInstalled(true);
+            repo.setUpdatedAt(Instant.now());
+            repoRepo.save(repo);
+        }
+        return ok;
     }
 
     private static String extractFullNameFromCloneUrl(String cloneUrl) {

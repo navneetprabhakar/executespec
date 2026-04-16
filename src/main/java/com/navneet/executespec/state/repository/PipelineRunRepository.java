@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,21 +19,25 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     // ── Atomic token counter updates (avoids read-modify-write race) ─────────
 
     @Modifying
+    @Transactional
     @Query("UPDATE PipelineRun r SET r.totalInputTokens = r.totalInputTokens + :inp, r.totalOutputTokens = r.totalOutputTokens + :out WHERE r.runId = :runId")
     void addTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
     /** Atomic status update that only touches status + currentGate — avoids overwriting concurrent field changes. */
     @Modifying
+    @Transactional
     @Query("UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL WHERE r.runId = :runId")
     void updateStatusAndClearGate(@Param("runId") String runId, @Param("status") String status);
 
     /** Atomic execution mode update — avoids read-modify-write race with clearGateSync/markApproved. */
     @Modifying
+    @Transactional
     @Query("UPDATE PipelineRun r SET r.approvedExecutionMode = :mode WHERE r.runId = :runId")
     void updateApprovedExecutionMode(@Param("runId") String runId, @Param("mode") String mode);
 
     /** Atomic currentGate clear — avoids full entity save that could overwrite concurrent field changes. */
     @Modifying
+    @Transactional
     @Query("UPDATE PipelineRun r SET r.currentGate = NULL WHERE r.runId = :runId")
     void clearCurrentGate(@Param("runId") String runId);
 
@@ -76,6 +81,18 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
 
     @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.startedAt >= :since")
     Long sumOutputTokensByStartedAtAfter(@Param("since") Instant since);
+
+    /** v2.5.8 — per-user LLM $ spent in a billing period (used by Billing page). */
+    @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r " +
+            "WHERE r.createdByUserId = :userId AND r.startedAt >= :since")
+    Double sumActualCostByUserAndSince(@Param("userId") String userId,
+                                        @Param("since") Instant since);
+
+    /** v2.5.8 — per-org LLM $ spent in a billing period (admin / FinOps dashboards). */
+    @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r " +
+            "WHERE r.orgId = :orgId AND r.startedAt >= :since")
+    Double sumActualCostByOrgAndSince(@Param("orgId") String orgId,
+                                       @Param("since") Instant since);
 
     // ── Date-filtered org-scoped metrics ────────────────────────────────────────
 

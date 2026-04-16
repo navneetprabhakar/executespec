@@ -619,8 +619,22 @@ export default function IntegrationsPage() {
   const [openGuides, setOpenGuides] = useState<Record<string, boolean>>({});
   const [configuring, setConfiguring] = useState<string | null>(null);
   const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
+  // v2.5.8 — fetch public feature flags so Configure CTAs are gated when the
+  // platform has turned off an integration. Without this, users clicking
+  // Configure on Jira (with integrations.jira.enabled=false) hit silent 403s.
+  const [publicFlags, setPublicFlags] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    api.getPublicFeatureFlags().then(setPublicFlags).catch(() => setPublicFlags({}));
+  }, []);
 
   const isAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
+
+  /** v2.5.8 — check if an integration is enabled at the platform feature-flag level.
+   *  Returns true by default (absence of a flag means "not gated"). */
+  const integrationFlagEnabled = (key: string): boolean => {
+    const flagKey = `integrations.${key.toLowerCase()}.enabled`;
+    return publicFlags[flagKey] !== false;
+  };
 
   // Tier gate — show locked message if user doesn't have integration permissions
   if (permissions && !permissions.canManageIntegrations) {
@@ -754,13 +768,27 @@ export default function IntegrationsPage() {
                       {configured ? 'Enabled' : 'Disabled'}
                     </span>
                     {int.configurable && ((int as any).userLevel || (isAdmin && user?.orgId)) && (
-                      <button
-                        onClick={() => setConfiguring(isExpanded ? null : int.key)}
-                        className="flex items-center gap-1 text-xs text-secondary hover:text-accent-blue transition-colors px-2 py-1 rounded-sm border border-[var(--border-default)] hover:border-accent-blue/30"
-                      >
-                        <Settings2 className="h-3 w-3" />
-                        {isExpanded ? 'Close' : configured ? 'Edit' : 'Configure'}
-                      </button>
+                      (() => {
+                        const flagOn = integrationFlagEnabled(int.key);
+                        const title = flagOn
+                          ? undefined
+                          : 'Disabled by platform operator — contact support to enable';
+                        return (
+                          <button
+                            onClick={() => flagOn && setConfiguring(isExpanded ? null : int.key)}
+                            disabled={!flagOn}
+                            title={title}
+                            className={`flex items-center gap-1 text-xs transition-colors px-2 py-1 rounded-sm border ${
+                              flagOn
+                                ? 'text-secondary hover:text-accent-blue border-[var(--border-default)] hover:border-accent-blue/30'
+                                : 'text-muted border-[var(--border-default)] opacity-40 cursor-not-allowed'
+                            }`}
+                          >
+                            <Settings2 className="h-3 w-3" />
+                            {!flagOn ? 'Unavailable' : (isExpanded ? 'Close' : configured ? 'Edit' : 'Configure')}
+                          </button>
+                        );
+                      })()
                     )}
                   </div>
                 </div>
