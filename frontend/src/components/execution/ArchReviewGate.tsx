@@ -14,51 +14,51 @@ export default function ArchReviewGate({ executionId }: { executionId: string })
 
   return (
     <div className="space-y-3">
-      <h3 className="text-[12px] font-medium text-primary">Unified architecture — review before planning</h3>
+      <h3 className="text-sm font-medium text-primary">Unified architecture — review before planning</h3>
       <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 max-h-[400px] overflow-y-auto">
         <MarkdownContent content={doc} />
       </div>
-      {!approved ? (
-        <>
-          <textarea
-            value={annotations}
-            onChange={(e) => setAnnotations(e.target.value)}
-            rows={3}
-            placeholder="Optional: add corrections or highlights the planner should respect"
-            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px] font-mono"
-          />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async () => { await approveArch(executionId, annotations); setApproved(true); }}
-              className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-[12px]"
-            >
-              Approve & continue
-            </button>
-            <button
-              disabled={cancelling}
-              onClick={async () => {
-                if (!confirm('Cancel this execution? Progress will be discarded.')) return;
-                setCancelling(true);
-                try {
-                  await abort(executionId);
-                  const pid = executionRun?.projectId;
-                  if (pid) navigate(`/projects/${pid}/dashboard`);
-                } finally { setCancelling(false); }
-              }}
-              className="rounded-sm border border-[var(--border-default)] text-muted hover:text-accent-red px-3 py-1.5 text-[12px] disabled:opacity-50"
-            >
-              {cancelling ? 'Cancelling…' : 'Cancel'}
-            </button>
-          </div>
-        </>
-      ) : (
+      <textarea
+        value={annotations}
+        onChange={(e) => setAnnotations(e.target.value)}
+        rows={3}
+        disabled={approved}
+        placeholder="Optional: add corrections or highlights the planner should respect"
+        className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm font-mono disabled:opacity-60"
+      />
+      <div className="flex items-center gap-2">
         <button
-          onClick={() => generatePlan(executionId)}
-          className="rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue px-3 py-1.5 text-[12px]"
+          disabled={approved}
+          onClick={async () => {
+            setApproved(true);
+            try {
+              await approveArch(executionId, annotations);
+              await generatePlan(executionId);
+            } catch (e) {
+              setApproved(false);
+              throw e;
+            }
+          }}
+          className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-sm disabled:opacity-60"
         >
-          Generate execution plan
+          {approved ? 'Generating plan…' : 'Approve & continue'}
         </button>
-      )}
+        <button
+          disabled={cancelling || approved}
+          onClick={async () => {
+            if (!confirm('Cancel this execution? Progress will be discarded.')) return;
+            setCancelling(true);
+            try {
+              await abort(executionId);
+              const pid = executionRun?.projectId;
+              if (pid) navigate(`/projects/${pid}/dashboard`);
+            } finally { setCancelling(false); }
+          }}
+          className="rounded-sm border border-[var(--border-default)] text-muted hover:text-accent-red px-3 py-1.5 text-sm disabled:opacity-50"
+        >
+          {cancelling ? 'Cancelling…' : 'Cancel'}
+        </button>
+      </div>
     </div>
   );
 }

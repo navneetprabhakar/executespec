@@ -25,7 +25,20 @@ public class PipelineRun {
     private String userRequest;         // original natural language request
 
     private String status;              // PLANNING | AWAITING_APPROVAL | WORKING |
-                                        // REVIEWING | AWAITING_MERGE | COMPLETE | FAILED
+                                        // REVIEWING | AWAITING_MERGE | COMPLETE | FAILED | PARTIAL
+
+    /**
+     * v2.5.10 (V107) — explicit reason for the terminal status so the UI can
+     * show "PARTIAL because tests failed" vs "PARTIAL because final build
+     * failed" instead of the silent badge today. Populated by
+     * {@code V2RunOrchestrator} when the {@code scoring.v2-verified} flag is
+     * on; V108 backfills historical rows. Values:
+     * CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS | FINAL_BUILD_FAILED |
+     * TESTS_FAILED:&lt;n&gt;_OF_&lt;m&gt; | REVIEWER_UNRESOLVED | REVIEWER_FAILED |
+     * ALL_TASKS_FAILED | LEGACY_UNKNOWN.
+     */
+    @Column(name = "status_reason", length = 80)
+    private String statusReason;
 
     /**
      * Which pipeline produced this run. "v1" = V1 PipelineHarness; "v2" = V2RunOrchestrator.

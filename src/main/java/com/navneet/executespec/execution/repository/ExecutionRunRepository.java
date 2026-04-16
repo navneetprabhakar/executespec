@@ -52,4 +52,40 @@ public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, Stri
             "WHERE e.status NOT IN ('COMPLETE', 'FAILED', 'CANCELLED', 'ABORTED') " +
             "AND e.updatedAt < :cutoff")
     List<ExecutionRun> findStaleNonTerminal(@Param("cutoff") Instant cutoff);
+
+    /**
+     * v2.5.7 — count non-terminal executions for a project. Used to gate
+     * {@code POST /api/projects/{id}/executions} so a project can only have
+     * one active Launch at a time (avoids concurrent multi-repo conflicts).
+     */
+    @Query("SELECT COUNT(e) FROM ExecutionRun e WHERE e.projectId = :projectId " +
+            "AND e.deletedAt IS NULL " +
+            "AND e.status NOT IN ('COMPLETE', 'FAILED', 'CANCELLED', 'ABORTED')")
+    long countActiveByProjectId(@Param("projectId") String projectId);
+
+    /**
+     * v2.5.7 — returns the full active ExecutionRun rows so the controller can
+     * craft a specific 409 message naming the blocking run and its actual status.
+     */
+    @Query("SELECT e FROM ExecutionRun e WHERE e.projectId = :projectId " +
+            "AND e.deletedAt IS NULL " +
+            "AND e.status NOT IN ('COMPLETE', 'FAILED', 'CANCELLED', 'ABORTED') " +
+            "ORDER BY e.createdAt DESC")
+    List<ExecutionRun> findActiveByProjectId(@Param("projectId") String projectId);
+
+    /** v2.5.8 — per-user $ spent on Launches in a billing period. */
+    @Query("SELECT COALESCE(SUM(e.totalCostUsd), 0.0) FROM ExecutionRun e " +
+            "WHERE e.createdBy = :userId AND e.createdAt >= :since AND e.deletedAt IS NULL")
+    Double sumTotalCostByUserAndSince(@Param("userId") String userId,
+                                       @Param("since") Instant since);
+
+    /** v2.5.8 — per-project $ spent on Launches (Project dashboard / FinOps). */
+    @Query("SELECT COALESCE(SUM(e.totalCostUsd), 0.0) FROM ExecutionRun e " +
+            "WHERE e.projectId = :projectId AND e.deletedAt IS NULL")
+    Double sumTotalCostByProject(@Param("projectId") String projectId);
+
+    /** v2.5.8 — backfill helper: executions whose totals are zero but have completed solutions. */
+    @Query("SELECT e FROM ExecutionRun e WHERE (e.totalActualTokens = 0 OR e.totalActualTokens IS NULL) " +
+            "AND e.status IN ('COMPLETE', 'PARTIAL') AND e.deletedAt IS NULL")
+    List<ExecutionRun> findCompletedWithZeroTotals();
 }

@@ -45,12 +45,12 @@ export default function WorkspaceHealthPanel({ projectId }: { projectId: string 
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[12px] font-medium text-primary">Workspace health</h3>
+        <h3 className="text-sm font-medium text-primary">Workspace health</h3>
         <div className="flex items-center gap-2">
           <button
             onClick={load}
             disabled={loading}
-            className="text-[10px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
+            className="text-[11px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
           >
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
@@ -58,44 +58,52 @@ export default function WorkspaceHealthPanel({ projectId }: { projectId: string 
             onClick={doAnalyseAll}
             disabled={analysing}
             title="Regenerate codemaps + architecture from current origin HEAD for every linked repo"
-            className="text-[10px] px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+            className="text-[11px] px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
           >
             {analysing ? 'Analysing…' : 'Analyse all'}
           </button>
         </div>
       </div>
 
-      {error && <div className="text-[11px] text-accent-red">{error}</div>}
+      {error && <div className="text-xs text-accent-red">{error}</div>}
 
       {!error && report && report.repos.length === 0 && (
-        <div className="text-[11px] text-muted">No repos linked yet.</div>
+        <div className="text-xs text-muted">No repos linked yet.</div>
       )}
 
       {!error && report && report.repos.length > 0 && (
         <div className="space-y-1">
           {report.repos.map((r) => {
             const sha7 = (s: string | null) => (s ? s.slice(0, 7) : '—');
-            const freshness = r.isStale
-              ? { label: 'stale codemap', cls: 'bg-accent-red/10 text-accent-red' }
-              : { label: 'up to date', cls: 'bg-emerald-500/10 text-emerald-400' };
+            // v2.5.7 UX-fix: distinguish "never analysed" (setup state, amber)
+            // from "stale" (analysed before but drifted, red). Previously both
+            // showed "stale codemap" in red which alarmed users on brand-new repos.
+            const freshness = r.lastCodeMapSha == null
+              ? { label: 'not yet analysed', cls: 'bg-accent-amber/10 text-accent-amber' }
+              : r.isStale
+                ? { label: 'stale codemap', cls: 'bg-accent-red/10 text-accent-red' }
+                : { label: 'up to date', cls: 'bg-emerald-500/10 text-emerald-400' };
+            const freshnessDetail = r.lastCodeMapSha == null
+              ? `current: ${sha7(r.currentOriginSha)}`
+              : `${sha7(r.lastCodeMapSha)} → ${sha7(r.currentOriginSha)}`;
             return (
-              <div key={r.repoId} className="flex items-center justify-between gap-2 text-[11px] py-1 border-b border-[var(--border-default)] last:border-b-0">
+              <div key={r.repoId} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-[var(--border-default)] last:border-b-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-mono truncate text-primary">{r.repoName}</span>
-                  <span className="text-[10px] text-muted">{r.defaultBranch}</span>
+                  <span className="text-[11px] text-muted">{r.defaultBranch}</span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${freshness.cls}`}>
-                    {freshness.label} · {sha7(r.lastCodeMapSha)} → {sha7(r.currentOriginSha)}
+                    {freshness.label} · {freshnessDetail}
                   </span>
                   <span
                     className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${
                       r.webhookInstalled
                         ? 'bg-emerald-500/10 text-emerald-400'
-                        : 'bg-accent-amber/10 text-accent-amber'
+                        : 'bg-[var(--gray-400)]/50 text-muted'
                     }`}
                   >
-                    {r.webhookInstalled ? 'webhook ✓' : 'webhook missing'}
+                    {r.webhookInstalled ? 'webhook ✓' : 'set up webhook'}
                   </span>
                   {r.openPrCount > 0 && (
                     <span className="inline-flex items-center rounded-sm bg-accent-blue/10 text-accent-blue px-1.5 py-0.5 text-[9px]">

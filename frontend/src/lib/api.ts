@@ -119,6 +119,20 @@ export interface RunSummary {
   isRetry?: boolean;
   /** RunId of the original run this was retried from. Null for original runs. */
   sourceRunId?: string | null;
+  /** Which harness produced this run: "v1" (default) or "v2". */
+  harnessVersion?: string | null;
+  /** v2.5.8 — total USD spent on LLM calls for this run. Null until terminal. */
+  actualCostUsd?: number | null;
+  /**
+   * v2.5.10 — explicit reason for the terminal status so the UI can explain
+   * "PARTIAL because X" instead of rendering a silent badge. Values:
+   *   CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS |
+   *   FINAL_BUILD_FAILED | TESTS_FAILED:<n>_OF_<m> |
+   *   REVIEWER_UNRESOLVED | REVIEWER_FAILED |
+   *   ALL_TASKS_FAILED | LEGACY_UNKNOWN
+   * Null on in-flight runs and on pre-v2.5.10 terminal runs that were never backfilled.
+   */
+  statusReason?: string | null;
 }
 
 export interface TaskSummary {
@@ -1149,6 +1163,8 @@ export interface ProjectDto {
   branchNamingPattern?: string | null;
   targetBranch?: string | null;
   defaultReviewers?: string | null;
+  /** v2.5.7 — default GitHub org/owner for repos created under this project. */
+  githubOwner?: string | null;
 }
 
 export interface ProjectMemberDto {
@@ -1164,14 +1180,18 @@ export const getProjects = () => req<ProjectDto[]>('/projects');
 
 export const getProject = (id: string) => req<ProjectDto>(`/projects/${id}`);
 
-export const createProject = (body: { name: string; description?: string; aiProvider?: string }) =>
+export const createProject = (body: { name: string; description?: string; aiProvider?: string; githubOwner?: string }) =>
   req<ProjectDto>('/projects', { method: 'POST', body: JSON.stringify(body) });
 
-export const updateProjectSettings = (id: string, body: { aiProvider: string }) =>
+export const updateProjectSettings = (id: string, body: { aiProvider?: string; githubOwner?: string }) =>
   req<ProjectDto>(`/projects/${id}/settings`, { method: 'PATCH', body: JSON.stringify(body) });
 
 export const archiveProject = (id: string) =>
   req<ProjectDto>(`/projects/${id}/archive`, { method: 'PUT' });
+
+/** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
+export const fetchPrReviewComments = (projectId: string, prNumber: number, repoFullName: string) =>
+  req<{ comments: string }>(`/projects/${projectId}/prs/${prNumber}/reviews?repo=${encodeURIComponent(repoFullName)}`);
 
 export const getProjectMembers = (projectId: string) =>
   req<ProjectMemberDto[]>(`/projects/${projectId}/members`);
@@ -1284,6 +1304,11 @@ export interface FeatureFlagDto {
 }
 
 export const adminListFeatureFlags = () => req<FeatureFlagDto[]>('/admin/feature-flags');
+
+/** v2.5.8 — public feature-flag map for UI gating. Keys whitelisted to
+ *  integrations.*, billing.*, pipeline.*, project.*, execution.view.*. */
+export const getPublicFeatureFlags = () =>
+  req<Record<string, boolean>>('/admin/feature-flags/public');
 export const adminUpdateFeatureFlag = (key: string, value: string) =>
   req<FeatureFlagDto>(`/admin/feature-flags/${encodeURIComponent(key)}`, {
     method: 'PUT',
@@ -1408,6 +1433,14 @@ export interface ValidationReportData {
   securityScore?: number | null;
   performanceScore?: number | null;
   designComplianceScore?: number | null;
+  /** v2.5.10 (V106) — verified signals from the pipeline itself.
+   *  finalBuildPassed + tests + verdict are the inputs to verifiedScore, which
+   *  anchors the 6 dimensions above when scoring.v2-verified flag is on. */
+  finalBuildPassed?: boolean | null;
+  testsPassed?: number | null;
+  testsTotal?: number | null;
+  reviewerVerdict?: 'CLEAN' | 'FIXED_ISSUES' | 'UNRESOLVED_ISSUES' | 'REVIEW_FAILED' | null;
+  verifiedScore?: number | null;
 }
 
 export interface SharedReportData {

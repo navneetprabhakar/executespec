@@ -88,16 +88,35 @@ public class ExecutionPlannerService {
                     .replace("{{PROJECT_MEMORY}}",
                             memoryProvider.buildPlannerContext(run.getProjectId()));
 
-            ResolvedModel resolved = modelResolver.resolve("PlannerAgentV2", LlmProvider.OPENAI);
+            // v2.5.9 Bug #1a fix — honour the user's selected provider instead of
+            // hardcoding OPENAI. Falls back to ANTHROPIC only when the run has no
+            // provider set (shouldn't happen after v2.5.1 backfill but kept as a
+            // belt-and-suspenders default).
+            LlmProvider requested;
+            try {
+                requested = run.getAiProvider() != null
+                        ? LlmProvider.valueOf(run.getAiProvider().toUpperCase())
+                        : LlmProvider.ANTHROPIC;
+            } catch (IllegalArgumentException ex) {
+                log.warn("ExecutionPlannerService run={} has invalid aiProvider='{}' — defaulting to ANTHROPIC",
+                        executionRunId, run.getAiProvider());
+                requested = LlmProvider.ANTHROPIC;
+            }
+            ResolvedModel resolved = modelResolver.resolve("PlannerAgentV2", requested);
+            log.info("ExecutionPlannerService run={} provider={} model={}",
+                    executionRunId, resolved.providerName(), resolved.getModel());
             Prompt prompt = new Prompt(List.of(
                     new SystemMessage(filled + "\n\nRespond with a JSON object: "
                             + "{\"solutions\":[...], \"dependencyEdges\":[{\"from\":1,\"to\":2}]}"
                             + ". No prose, no code fences."),
                     new UserMessage("Emit the plan now.")));
+            // v2.5.9 Bug #1b fix — NO_FALLBACK so a provider failure surfaces to the
+            // user instead of silently switching providers. Users must retry with a
+            // different provider explicitly.
             ChatResponse resp = llmRouter.callWithFallback(
                     resolved.providerName(), resolved.getModel(), prompt,
                     "exec-plan-" + executionRunId, "execution-planner",
-                    LlmRouter.FallbackMode.IMMEDIATE, 0, false);
+                    LlmRouter.FallbackMode.NO_FALLBACK, 0, false);
             String body = resp.getResult().getOutput().getText();
             ExecutionPlan plan = parsePlan(body);
             persistPlan(run, plan);
@@ -209,18 +228,35 @@ public class ExecutionPlannerService {
                     .repoId(repoUuid)
                     .targetFiles(safeJson(spec.targetFiles()))
                     .build();
-            sol.setRepoMappings(List.of(repoMap));
+            sol.setRepoMappings(new java.util.HashSet<>(java.util.List.of(repoMap)));
+            // Re-save so the cascade actually persists the ExecutionSolutionRepo row.
+            // Without this second save, `solution.repoMappings` exists in-memory only
+            // and the downstream V2 clone sees repoId=null.
+            sol = solutionRepo.save(sol);
             bySeq.put(spec.sequenceNumber(), sol);
         }
 
+        // v2.5.9 Bug #2 fix — LLMs routinely return duplicate dependency edges
+        // (e.g. same {from, to} listed twice when multiple solutions share an
+        // ancestor). The in-memory HashSet drops the dupe, but each save(to)
+        // triggers a Hibernate flush that INSERTs duplicate rows into
+        // execution_solution_dependency, violating the composite PK and
+        // aborting the entire planning step. Dedupe upfront, then save ONCE
+        // per affected solution.
+        java.util.Set<String> seenEdges = new java.util.HashSet<>();
+        java.util.Set<ExecutionSolution> dirty = new java.util.HashSet<>();
         for (DependencyEdge edge : plan.dependencyEdges()) {
+            String key = edge.from() + "->" + edge.to();
+            if (!seenEdges.add(key)) continue;  // skip duplicate edge
             ExecutionSolution to = bySeq.get(edge.to());
             ExecutionSolution from = bySeq.get(edge.from());
             if (to == null || from == null) continue;
             if (to.getDependencies() == null) to.setDependencies(new java.util.HashSet<>());
             to.getDependencies().add(from);
-            solutionRepo.save(to);
+            dirty.add(to);
         }
+        // Batch the saves — one save per affected solution, not per-edge.
+        for (ExecutionSolution s : dirty) solutionRepo.save(s);
     }
 
     private void emit(String executionRunId, String type, String payload) {

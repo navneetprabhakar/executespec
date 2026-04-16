@@ -47,6 +47,11 @@ public class ExecutionRun {
     @Column(name = "ai_provider", length = 20)
     private String aiProvider;
 
+    /** Per-Launch branch override. Null = fall back to each repo's default_branch.
+     *  When set, every selected repo is cloned with {@code git clone -b <branch>}. */
+    @Column(name = "branch", length = 255)
+    private String branch;
+
     @Column(nullable = false, length = 30)
     private String status;
 
@@ -84,6 +89,18 @@ public class ExecutionRun {
 
     @Column(name = "deleted_at")
     private Instant deletedAt;
+
+    /** v2.5.7 — continue-on-PR: links back to the execution that created the original PR. */
+    @Column(name = "source_execution_id")
+    private String sourceExecutionId;
+
+    /** v2.5.7 — the PR number being addressed (e.g. 2). Null for fresh executions. */
+    @Column(name = "continue_pr_number")
+    private Integer continuePrNumber;
+
+    /** v2.5.7 — repo full name of the PR being addressed (e.g. "owner/repo"). */
+    @Column(name = "continue_pr_repo")
+    private String continuePrRepo;
 
     @OneToMany(mappedBy = "executionRun", fetch = FetchType.LAZY)
     @OrderBy("sequenceNumber ASC")

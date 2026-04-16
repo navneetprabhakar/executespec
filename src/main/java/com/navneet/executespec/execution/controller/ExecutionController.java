@@ -67,6 +67,8 @@ public class ExecutionController {
     private final SolutionExecutionService solutionExecService;
     private final SseBroadcaster broadcaster;
     private final JwtUtil jwtUtil;
+    private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
+    private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepo;
 
     // ── Create / list / get ────────────────────────────────────────────────
 
@@ -77,6 +79,28 @@ public class ExecutionController {
             @AuthenticationPrincipal AppUserDetails principal) {
         AppUser user = requireFeatureEnabled(principal);
         Project project = requireProjectAccess(projectId, user);
+        var activeRuns = execRunRepo.findActiveByProjectId(projectId);
+        if (!activeRuns.isEmpty()) {
+            ExecutionRun active = activeRuns.get(0);
+            String reason;
+            String status = active.getStatus() == null ? "" : active.getStatus().toUpperCase();
+            switch (status) {
+                case "PAUSED" ->
+                        reason = "Previous execution is paused awaiting a user decision on a failed solution. " +
+                                 "Resolve it (retry / skip / fix manually) or abort it to start a new one.";
+                case "AWAITING_APPROVAL", "ARCH_REVIEW" ->
+                        reason = "Previous execution is waiting for your approval (" + status + "). " +
+                                 "Approve it or abort it to start a new one.";
+                case "EXECUTING", "PLANNING", "ANALYSING", "SETUP" ->
+                        reason = "Previous execution is still running (status=" + status + "). " +
+                                 "Wait for it to finish or abort it to start a new one.";
+                default ->
+                        reason = "Previous execution has not finished or been cancelled (status=" + status + "). " +
+                                 "Finish it or abort it to start a new one.";
+            }
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    reason + " [execution id: " + active.getId() + "]");
+        }
         ExecutionRun run = orchestrator.createExecution(project, user, req);
         return ResponseEntity.status(HttpStatus.CREATED).body(ExecutionRunDto.from(run, null));
     }
@@ -223,6 +247,22 @@ public class ExecutionController {
         AppUser user = requireFeatureEnabled(principal);
         ExecutionRun run = requireRunAccess(id, user);
         return ResponseEntity.ok(orchestrator.buildReport(run));
+    }
+
+    // ── PR review comments ──────────────────────────────────────────────────
+
+    @GetMapping("/api/projects/{projectId}/prs/{prNumber}/reviews")
+    public ResponseEntity<Map<String, String>> prReviewComments(
+            @PathVariable String projectId,
+            @PathVariable int prNumber,
+            @RequestParam String repo,
+            @AuthenticationPrincipal AppUserDetails principal) {
+        AppUser user = requireFeatureEnabled(principal);
+        requireProjectAccess(projectId, user);
+        String pat = appUserRepo.findById(user.getId())
+                .map(u -> u.getGithubPat()).orElse(null);
+        String comments = gitHubRepoService.fetchPrReviewComments(repo, prNumber, pat);
+        return ResponseEntity.ok(Map.of("comments", comments));
     }
 
     // ── SSE ────────────────────────────────────────────────────────────────

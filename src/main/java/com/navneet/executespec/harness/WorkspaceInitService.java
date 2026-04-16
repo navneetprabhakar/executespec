@@ -264,8 +264,15 @@ public class WorkspaceInitService {
             String authUrl = (pat != null && !pat.isBlank())
                     ? httpsUrl.replace("https://", "https://oauth2:" + pat + "@")
                     : httpsUrl;
-            log.info("Cloning {} into {} for run {}", r.fullName(), target, runId);
-            runGitStrict(reposRoot, "git", "clone", authUrl, target.toString());
+            String cloneBranch = (r.branch() == null || r.branch().isBlank()) ? null : r.branch();
+            if (cloneBranch != null) {
+                log.info("Cloning {} (branch={}) into {} for run {}",
+                        r.fullName(), cloneBranch, target, runId);
+                runGitStrict(reposRoot, "git", "clone", "-b", cloneBranch, authUrl, target.toString());
+            } else {
+                log.info("Cloning {} into {} for run {}", r.fullName(), target, runId);
+                runGitStrict(reposRoot, "git", "clone", authUrl, target.toString());
+            }
             persistCloneSnapshot(runId, r, target);
         }
     }

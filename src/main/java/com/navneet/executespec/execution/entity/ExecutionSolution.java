@@ -6,7 +6,6 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -105,7 +104,7 @@ public class ExecutionSolution {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    @ManyToMany(fetch = FetchType.LAZY)
+    @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "execution_solution_dependency",
             joinColumns = @JoinColumn(name = "solution_id"),
@@ -113,8 +112,13 @@ public class ExecutionSolution {
     @Builder.Default
     private Set<ExecutionSolution> dependencies = new HashSet<>();
 
-    @OneToMany(mappedBy = "solution", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<ExecutionSolutionRepo> repoMappings;
+    // EAGER + Set so Hibernate doesn't hit MultipleBagFetchException when
+    // combined with other List-typed eager collections. Set is safe here
+    // because a solution maps to at most a handful of repos and we never
+    // rely on the original list order (reads use .get(0) as a first-match).
+    @OneToMany(mappedBy = "solution", fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private Set<ExecutionSolutionRepo> repoMappings = new HashSet<>();
 
     @PrePersist
     void prePersist() {

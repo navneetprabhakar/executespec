@@ -1,0 +1,51 @@
+Build a URL shortener service.
+
+REQUIRED BACKEND ENDPOINTS (all 6 runs):
+
+1. POST /api/shorten
+   - Request body: {"url": "https://example.com/long/path"}
+   - Response 200: {"slug": "abc1234", "shortUrl": "http://<host>/abc1234"}
+   - Response 400 if url is missing, empty, or not a valid http(s) URL
+   - Response 429 if rate limit exceeded
+
+2. GET /{slug}
+   - 302 redirect to the stored original URL
+   - 404 if the slug does not exist or its TTL has expired
+
+3. GET /api/{slug}/stats
+   - Response 200: {"hits": <int>, "createdAt": "<ISO>", "expiresAt": "<ISO>"}
+   - Response 404 if slug not found
+
+4. GET /api/health
+   - Response 200: {"status": "ok", "uptime": <seconds>}
+
+HARD REQUIREMENTS:
+
+R1. Slug format: exactly 7 characters, drawn from [a-zA-Z0-9]. Verify by regex in tests.
+R2. URL validation: reject anything that isn't an http:// or https:// URL parsable by the language's URL library. 400 with {"error": "..."}.
+R3. Rate limiting: 10 POST /api/shorten requests per minute per client IP. On breach: 429.
+R4. In-memory store with TTL = 7 days. Expired entries MUST 404 on redirect and stats endpoints (no zombies).
+R5. Unit tests covering the service/shortener layer (creation, uniqueness, TTL expiry).
+R6. Integration tests covering each endpoint (happy path + one error path each).
+R7. Logging on every endpoint: info for success, warn for validation failures.
+R8. Health endpoint always works even under high load.
+
+PROJECT-MODE ADDITIONS (Runs 4, 5, 6 only — the frontend repo hostel-fe-v3):
+
+F1. Add a "Shortener" nav link in the existing navbar.
+F2. A shortener page with:
+    - Input box for URL + "Shorten" button
+    - On success: result card showing the short URL + copy-to-clipboard button
+    - Loading and error states visible to the user
+F3. A stats lookup section on the same page:
+    - Input for a slug + "Lookup" button
+    - On success: shows {hits, createdAt, expiresAt} in a readable card
+F4. All calls use fetch() against the BE endpoints; no hardcoded host — use relative path.
+F5. Basic CSS styling consistent with the rest of the app.
+
+NON-REQUIREMENTS (explicitly out of scope, should NOT be added):
+- Auth / login
+- Custom-slug support
+- Admin dashboard
+- Database persistence (in-memory ONLY)
+- Analytics beyond hit count

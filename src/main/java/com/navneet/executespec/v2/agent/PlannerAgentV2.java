@@ -109,7 +109,8 @@ public class PlannerAgentV2 {
                 .replace("{{PROJECT_MEMORY}}", renderProjectMemoryBlock(req.projectMemory()))
                 .replace("{{PROJECT_BRIEF}}", req.projectBrief() == null ? "" : req.projectBrief())
                 .replace("{{REFERENCE_DOCS}}", req.referenceDocs() == null ? "" : req.referenceDocs())
-                .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()));
+                .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()))
+                .replace("{{PR_REVIEW_COMMENTS}}", renderPrReviewBlock(req.prReviewComments()));
 
         List<Message> messages = List.of(
                 new SystemMessage(systemPrompt),
@@ -141,9 +142,21 @@ public class PlannerAgentV2 {
         }
         if (planCall == null) {
             String textPreview = resp.getResult().getOutput().getText();
+            String finishReason = String.valueOf(resp.getResult().getMetadata().getFinishReason());
+            // v2.5.9 Bug #3 — Gemini 2.5-flash occasionally emits Python-style
+            // pseudo-code like `print(default_api.submitPlan(planTitle="...",
+            // planSummary="..."))` and returns MALFORMED_FUNCTION_CALL. Try to
+            // salvage by pulling the JSON-ish args out of the text.
+            String salvaged = salvagePlanFromText(textPreview);
+            if (salvaged != null) {
+                log.warn("Planner LLM did not emit a structured tool call (finish={}); salvaged text-form args",
+                        finishReason);
+                PlanV2 plan = parsePlanFromArgs(salvaged, req.classification());
+                warnIfConstraintsUnderpropagated(plan, req.spec());
+                return plan;
+            }
             throw new IllegalStateException(
-                    "Planner LLM did not call submitPlan. Finish reason: "
-                            + resp.getResult().getMetadata().getFinishReason()
+                    "Planner LLM did not call submitPlan. Finish reason: " + finishReason
                             + "; text preview: " + (textPreview == null ? "" : truncate(textPreview, 200)));
         }
         PlanV2 plan = parsePlanFromArgs(planCall.arguments(), req.classification());
@@ -386,6 +399,20 @@ public class PlannerAgentV2 {
      * v2.5.2 (Phase 4.3) — when TDD mode is on, prepend an instruction block
      * telling the planner to lead with test tasks. Empty string when off.
      */
+    private String renderPrReviewBlock(String prReviewComments) {
+        if (prReviewComments == null || prReviewComments.isBlank()) return "";
+        return """
+                # PR Review Comments — Address These
+
+                A previous iteration of this work was submitted as a pull request and
+                received review feedback. Your primary objective is to address ALL of the
+                review comments below. Read each comment carefully, understand the file and
+                line it refers to, and make the requested changes. Use `readFile` and
+                `editFile` (not `writeFile`) to modify existing code.
+
+                """ + prReviewComments;
+    }
+
     private String renderTddBlock(boolean tddMode) {
         if (!tddMode) return "";
         return """
@@ -434,6 +461,60 @@ public class PlannerAgentV2 {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    /**
+     * v2.5.9 Bug #3 — Salvage a submitPlan invocation from text when the model
+     * emits it as pseudo-code instead of a structured tool call. Observed with
+     * Gemini 2.5-flash returning responses like
+     * {@code print(default_api.submitPlan(planTitle="...", planSummary="...", tasks=[...]))}.
+     *
+     * <p>Returns JSON args string (as {@code submitPlan} expects) or null if the
+     * text doesn't contain a recoverable call.
+     */
+    private String salvagePlanFromText(String text) {
+        if (text == null || text.isBlank()) return null;
+        // Look for a submitPlan invocation anywhere in the text
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("submitPlan\\s*\\(([\\s\\S]*)\\)\\s*$",
+                        java.util.regex.Pattern.MULTILINE)
+                .matcher(text);
+        if (!m.find()) return null;
+        String args = m.group(1).trim();
+        // Convert Python kwarg syntax (name=value) to JSON object. Very rough.
+        // Only the common case: `planTitle="...", planSummary="...", tasks=[...]`
+        StringBuilder json = new StringBuilder("{");
+        // Split on top-level commas (naive — assumes args are well-formed)
+        int depth = 0; int start = 0;
+        java.util.List<String> pairs = new java.util.ArrayList<>();
+        for (int i = 0; i < args.length(); i++) {
+            char c = args.charAt(i);
+            if (c == '(' || c == '[' || c == '{') depth++;
+            else if (c == ')' || c == ']' || c == '}') depth--;
+            else if (c == ',' && depth == 0) {
+                pairs.add(args.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        if (start < args.length()) pairs.add(args.substring(start).trim());
+        for (int i = 0; i < pairs.size(); i++) {
+            String pair = pairs.get(i);
+            int eq = pair.indexOf('=');
+            if (eq < 0) continue;
+            String key = pair.substring(0, eq).trim();
+            String val = pair.substring(eq + 1).trim();
+            // Transform Python literals to JSON: True/False/None → true/false/null
+            val = val.replaceAll("\\bTrue\\b", "true")
+                    .replaceAll("\\bFalse\\b", "false")
+                    .replaceAll("\\bNone\\b", "null");
+            if (i > 0) json.append(",");
+            json.append("\"").append(key).append("\":").append(val);
+        }
+        json.append("}");
+        String candidate = json.toString();
+        // Basic sanity check — must contain the top-level keys the planner needs.
+        if (!candidate.contains("tasks")) return null;
+        return candidate;
     }
 
     private static String truncate(String s, int max) {

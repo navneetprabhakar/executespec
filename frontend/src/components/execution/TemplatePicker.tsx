@@ -75,17 +75,17 @@ export default function TemplatePicker({ projectId, currentRequirement, onPick }
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="text-[10px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
+        className="text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
       >
         Templates ▾
       </button>
       {open && (
         <div className="absolute right-0 mt-1 w-80 z-20 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] shadow-md p-2 space-y-2">
-          {error && <div className="text-[10px] text-accent-red">{error}</div>}
+          {error && <div className="text-[11px] text-accent-red">{error}</div>}
 
           <Section title={`Project templates (${projectItems.length})`}>
             {projectItems.length === 0
-              ? <div className="text-[10px] text-muted">None yet.</div>
+              ? <div className="text-[11px] text-muted">None yet.</div>
               : projectItems.map((t) => (
                   <TemplateRow key={t.id} t={t} onPick={(text) => { onPick(text); setOpen(false); }}
                                onDelete={() => remove(t.id)} />
@@ -94,7 +94,7 @@ export default function TemplatePicker({ projectId, currentRequirement, onPick }
 
           <Section title={`Org templates (${orgItems.length})`}>
             {orgItems.length === 0
-              ? <div className="text-[10px] text-muted">None yet.</div>
+              ? <div className="text-[11px] text-muted">None yet.</div>
               : orgItems.map((t) => (
                   <TemplateRow key={t.id} t={t} onPick={(text) => { onPick(text); setOpen(false); }}
                                onDelete={() => remove(t.id)} />
@@ -109,17 +109,17 @@ export default function TemplatePicker({ projectId, currentRequirement, onPick }
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Template name"
-                  className="w-full text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2 py-1"
+                  className="w-full text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2 py-1"
                 />
                 <div className="text-[9px] text-muted">
                   Saves the current requirement text as a project template.
                 </div>
                 <div className="flex gap-1 justify-end">
-                  <button onClick={() => setCreating(false)} className="text-[10px] text-muted hover:text-primary">
+                  <button onClick={() => setCreating(false)} className="text-[11px] text-muted hover:text-primary">
                     Cancel
                   </button>
                   <button onClick={saveCurrent}
-                          className="text-[10px] px-2 py-0.5 rounded-sm bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20">
+                          className="text-[11px] px-2 py-0.5 rounded-sm bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20">
                     Save
                   </button>
                 </div>
@@ -129,7 +129,7 @@ export default function TemplatePicker({ projectId, currentRequirement, onPick }
                 onClick={() => setCreating(true)}
                 disabled={!currentRequirement.trim()}
                 title={currentRequirement.trim() ? 'Save the current requirement as a project template' : 'Type a requirement first'}
-                className="text-[10px] text-muted hover:text-primary disabled:opacity-50"
+                className="text-[11px] text-muted hover:text-primary disabled:opacity-50"
               >
                 + Save current as template
               </button>
@@ -154,7 +154,7 @@ function TemplateRow({
   t, onPick, onDelete,
 }: { t: SpecTemplate; onPick: (text: string) => void; onDelete: () => void }) {
   return (
-    <div className="flex items-center justify-between gap-2 text-[11px] px-1 py-0.5 hover:bg-[var(--gray-200)] rounded-sm">
+    <div className="flex items-center justify-between gap-2 text-xs px-1 py-0.5 hover:bg-[var(--gray-200)] rounded-sm">
       <button onClick={() => onPick(t.requirementTemplate)}
               className="flex-1 text-left truncate text-primary hover:text-accent-blue"
               title={t.description ?? t.requirementTemplate}>
@@ -162,7 +162,7 @@ function TemplateRow({
       </button>
       <button onClick={onDelete}
               title="Delete template"
-              className="text-muted hover:text-accent-red text-[10px]">
+              className="text-muted hover:text-accent-red text-[11px]">
         ×
       </button>
     </div>

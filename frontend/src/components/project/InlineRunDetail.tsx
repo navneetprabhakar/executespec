@@ -91,13 +91,13 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
   };
 
   return (
-    <div className="space-y-3 text-[11px]">
+    <div className="space-y-3 text-xs">
       {/* Request + stats */}
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            <div className="text-[10px] uppercase tracking-wide text-muted">Request</div>
-            <p className="text-[11px] text-primary whitespace-pre-wrap">{run.userRequest}</p>
+            <div className="text-[11px] uppercase tracking-wide text-muted">Request</div>
+            <p className="text-xs text-primary whitespace-pre-wrap">{run.userRequest}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {terminal && !alreadyPushed && (
@@ -105,21 +105,21 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
                 onClick={doPush}
                 disabled={pushing}
                 title="Push this run's workspace to GitHub and open a PR"
-                className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
               >
                 {pushing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
                 {pushing ? 'Pushing…' : 'Push & open PR'}
               </button>
             )}
             {terminal && (
-              <div className="inline-flex items-center gap-1 text-[10px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-1 py-0.5">
+              <div className="inline-flex items-center gap-1 text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-1 py-0.5">
                 <GitBranch className="h-3 w-3 text-muted" />
                 <input
                   type="text"
                   placeholder="branch"
                   value={syncBranch}
                   onChange={(e) => setSyncBranch(e.target.value)}
-                  className="w-20 bg-transparent text-[10px] font-mono text-primary placeholder-muted focus:outline-none"
+                  className="w-20 bg-transparent text-[11px] font-mono text-primary placeholder-muted focus:outline-none"
                   title="Branch to sync this run's workspace from. Empty = each repo's default."
                 />
                 <button
@@ -137,7 +137,7 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
                 onClick={doResetToOriginal}
                 disabled={resettingOriginal}
                 title="Reset workspace to the exact commit SHAs this run cloned at start (v2.5.2+)"
-                className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-muted hover:text-primary disabled:opacity-50"
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-muted hover:text-primary disabled:opacity-50"
               >
                 {resettingOriginal ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Reset to run state'}
               </button>
@@ -147,7 +147,7 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
                 onClick={doRefresh}
                 disabled={refreshing}
                 title="Refresh run detail"
-                className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
               >
                 <RefreshCw className={cn('h-3 w-3', refreshing && 'animate-spin')} />
                 Refresh
@@ -163,11 +163,11 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
           {run.aiProvider && <Stat label="Provider" value={run.aiProvider} />}
         </div>
         {syncStatus && (
-          <div className="text-[10px] text-muted">{syncStatus}</div>
+          <div className="text-[11px] text-muted">{syncStatus}</div>
         )}
         {pushStatus && (
           <div className={cn(
-            'text-[10px]',
+            'text-[11px]',
             pushStatus.startsWith('Push failed') ? 'text-accent-red' : 'text-emerald-400',
           )}>
             {pushStatus}
@@ -190,7 +190,7 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
       {/* Tasks */}
       {tasks.length > 0 && (
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted mb-1">Tasks</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted mb-1">Tasks</div>
           <div className="space-y-1">
             {tasks.map((t) => (
               <div
@@ -198,18 +198,18 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
                 className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1.5"
               >
                 <div className="flex items-center gap-2">
-                  <span className={cn('font-mono text-[10px]', STATUS_COLOR[t.status] ?? 'text-muted')}>
+                  <span className={cn('font-mono text-[11px]', STATUS_COLOR[t.status] ?? 'text-muted')}>
                     {t.status}
                   </span>
                   <span className="truncate text-secondary">{t.title}</span>
                   {t.durationMs != null && (
-                    <span className="ml-auto text-[10px] text-muted font-mono">
+                    <span className="ml-auto text-[11px] text-muted font-mono">
                       {Math.round(t.durationMs / 1000)}s
                     </span>
                   )}
                 </div>
                 {t.failureReason && (
-                  <div className="text-[10px] text-accent-red mt-0.5 line-clamp-2">
+                  <div className="text-[11px] text-accent-red mt-0.5 line-clamp-2">
                     {t.failureReason}
                   </div>
                 )}
@@ -250,18 +250,18 @@ function CodePanel({ run }: { run: RunDetail }) {
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)]">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] text-secondary hover:text-primary"
+        className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-secondary hover:text-primary"
       >
         <span className="flex items-center gap-1.5">
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           Code
           {files != null && <span className="text-muted">({files.length} files)</span>}
         </span>
-        {!terminal && <span className="text-[10px] text-muted">run still in progress</span>}
+        {!terminal && <span className="text-[11px] text-muted">run still in progress</span>}
       </button>
       {open && (
         <div className="border-t border-[var(--border-default)] h-[500px] overflow-hidden">
-          {error && <div className="p-3 text-[11px] text-accent-red">{error}</div>}
+          {error && <div className="p-3 text-xs text-accent-red">{error}</div>}
           {!error && (
             <CodeTab
               runId={run.runId}
@@ -280,7 +280,7 @@ function CodePanel({ run }: { run: RunDetail }) {
 
 function Stat({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
   return (
-    <span className="text-[11px]">
+    <span className="text-xs">
       <span className="text-muted">{label}:</span>{' '}
       <span className={cn('font-mono tabular-nums', valueClass ?? 'text-primary')}>{value}</span>
     </span>

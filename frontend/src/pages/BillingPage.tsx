@@ -182,9 +182,53 @@ export default function BillingPage() {
           )}
         </div>
 
+        {/* v2.5.8 — LLM spend budget indicator. Soft ceilings derived from plan tier.
+            Shows amber at 80%, red at 100% to nudge users before surprise invoice. */}
+        {(() => {
+          const spent = status?.spentUsd ?? 0;
+          const tier = status?.plan?.tier ?? 'FREE';
+          const softCap = tier === 'ENTERPRISE' ? 1000
+            : tier === 'MAX' ? 500
+            : tier === 'PRO' ? 100
+            : 10;
+          const pct = (spent / softCap) * 100;
+          if (spent < softCap * 0.5) return null;  // only show when meaningful
+          const color = pct >= 100 ? 'accent-red'
+            : pct >= 80 ? 'accent-amber'
+            : 'accent-blue';
+          return (
+            <div className={`rounded-sm border p-4 mb-4 border-${color}/30 bg-${color}/10 flex items-start gap-3`}>
+              <span className={`text-${color} text-lg mt-0.5`}>
+                {pct >= 100 ? '⚠' : pct >= 80 ? '!' : 'ℹ'}
+              </span>
+              <div className="flex-1">
+                <p className={`text-sm font-medium text-${color}`}>
+                  LLM spend this period: ${spent.toFixed(2)} of ~${softCap} soft budget ({Math.round(pct)}%)
+                </p>
+                <p className="text-xs text-muted mt-1">
+                  {pct >= 100
+                    ? 'You are over the suggested monthly budget for this tier. Consider upgrading or reducing run frequency.'
+                    : 'You are approaching the suggested monthly budget for this tier.'}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Usage */}
         <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
-          <h2 className="text-base font-semibold text-primary mb-4">Usage This Month</h2>
+          <div className="flex items-baseline justify-between mb-4">
+            <h2 className="text-base font-semibold text-primary">Usage This Month</h2>
+            {/* v2.5.8 — LLM $ spent this period. Sums pipeline_run + execution_run cost. */}
+            {typeof status?.spentUsd === 'number' && (
+              <span className="text-sm text-secondary">
+                <span className="text-muted">LLM spend: </span>
+                <span className="font-mono font-semibold text-accent-amber">
+                  ${status.spentUsd.toFixed(2)}
+                </span>
+              </span>
+            )}
+          </div>
           <div className="space-y-4">
             {usage.map((u) => {
               const isRuns = u.metric === 'RUNS';

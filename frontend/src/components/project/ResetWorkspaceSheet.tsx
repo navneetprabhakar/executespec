@@ -59,22 +59,22 @@ export default function ResetWorkspaceSheet({ projectId, onClose, onDone }: Prop
           <button onClick={onClose} className="text-muted hover:text-primary text-[14px] leading-none">×</button>
         </div>
 
-        <p className="text-[11px] text-muted">
+        <p className="text-xs text-muted">
           This will pull the latest origin HEAD for every linked repo and
           regenerate codemaps + architecture. Next Launch will plan against
           that fresh state.
         </p>
 
-        {error && <div className="text-[11px] text-accent-red">{error}</div>}
+        {error && <div className="text-xs text-accent-red">{error}</div>}
 
         <div className="border border-[var(--border-default)] rounded-sm">
-          <div className="text-[10px] uppercase tracking-wide text-muted px-2 py-1 border-b border-[var(--border-default)]">
+          <div className="text-[11px] uppercase tracking-wide text-muted px-2 py-1 border-b border-[var(--border-default)]">
             Repos ({repos?.length ?? 0})
           </div>
           {!repos ? (
-            <div className="text-[11px] text-muted p-2">Loading…</div>
+            <div className="text-xs text-muted p-2">Loading…</div>
           ) : repos.length === 0 ? (
-            <div className="text-[11px] text-muted p-2">No repos linked.</div>
+            <div className="text-xs text-muted p-2">No repos linked.</div>
           ) : (
             <div className="divide-y divide-[var(--border-default)]">
               {repos.map((r) => {
@@ -82,10 +82,10 @@ export default function ResetWorkspaceSheet({ projectId, onClose, onDone }: Prop
                 const cur7 = r.currentOriginSha ? r.currentOriginSha.slice(0, 7) : '?';
                 const upToDate = !r.isStale;
                 return (
-                  <div key={r.repoId} className="flex items-center gap-2 text-[11px] px-2 py-1.5">
+                  <div key={r.repoId} className="flex items-center gap-2 text-xs px-2 py-1.5">
                     <span className="font-mono truncate flex-1">{r.repoName}</span>
-                    <span className="text-[10px] text-muted">{r.defaultBranch}</span>
-                    <span className={`text-[10px] font-mono ${upToDate ? 'text-muted' : 'text-accent-amber'}`}>
+                    <span className="text-[11px] text-muted">{r.defaultBranch}</span>
+                    <span className={`text-[11px] font-mono ${upToDate ? 'text-muted' : 'text-accent-amber'}`}>
                       {old7} → {cur7}
                     </span>
                     <span className={`text-[9px] ${upToDate ? 'text-muted' : 'text-accent-amber'}`}>
@@ -99,7 +99,7 @@ export default function ResetWorkspaceSheet({ projectId, onClose, onDone }: Prop
         </div>
 
         {done && (
-          <div className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-400">
+          <div className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-400">
             ✓ Workspace refreshed — codemaps & architecture regenerated.
           </div>
         )}
@@ -108,7 +108,7 @@ export default function ResetWorkspaceSheet({ projectId, onClose, onDone }: Prop
           <button
             onClick={onClose}
             disabled={busy}
-            className="text-[11px] text-muted px-2 py-1 hover:text-primary disabled:opacity-50"
+            className="text-xs text-muted px-2 py-1 hover:text-primary disabled:opacity-50"
           >
             {done ? 'Close' : 'Cancel'}
           </button>
@@ -116,7 +116,7 @@ export default function ResetWorkspaceSheet({ projectId, onClose, onDone }: Prop
             <button
               onClick={confirm}
               disabled={busy}
-              className="text-[11px] rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue px-3 py-1 disabled:opacity-50 hover:bg-accent-blue/20"
+              className="text-xs rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue px-3 py-1 disabled:opacity-50 hover:bg-accent-blue/20"
             >
               {busy ? 'Refreshing…' : 'Reset workspace'}
             </button>

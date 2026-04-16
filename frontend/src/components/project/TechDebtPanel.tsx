@@ -40,12 +40,12 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
   }, [projectId, since]);
 
   if (error) {
-    return <div className="text-[11px] text-accent-red">{error}</div>;
+    return <div className="text-xs text-accent-red">{error}</div>;
   }
   if (!report) return null;
   if (report.totalRunsAnalyzed === 0) {
     return (
-      <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-[11px] text-muted">
+      <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-xs text-muted">
         No validation reports yet — tech-debt signals will appear once runs start completing.
       </div>
     );
@@ -56,11 +56,11 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-[12px] font-medium text-primary">Tech debt</h3>
+        <h3 className="text-sm font-medium text-primary">Tech debt</h3>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setSince(undefined)}
-            className={`text-[10px] px-2 py-0.5 rounded-sm border ${
+            className={`text-[11px] px-2 py-0.5 rounded-sm border ${
               since === undefined
                 ? 'bg-accent-blue/10 border-accent-blue/40 text-accent-blue'
                 : 'border-[var(--border-default)] text-muted hover:text-primary'
@@ -70,7 +70,7 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
           </button>
           <button
             onClick={() => setSince(30)}
-            className={`text-[10px] px-2 py-0.5 rounded-sm border ${
+            className={`text-[11px] px-2 py-0.5 rounded-sm border ${
               since === 30
                 ? 'bg-accent-blue/10 border-accent-blue/40 text-accent-blue'
                 : 'border-[var(--border-default)] text-muted hover:text-primary'
@@ -81,9 +81,9 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <div className="space-y-3 text-[11px]">
+      <div className="space-y-3 text-xs">
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
+          <div className="text-[11px] uppercase tracking-wide text-muted mb-1">
             By category · {totalIssues} total
           </div>
           {(() => {
@@ -115,13 +115,13 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
           })()}
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted mb-1">By severity</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted mb-1">By severity</div>
           <div className="flex flex-wrap gap-1.5">
             {Object.entries(report.issuesBySeverity)
               .sort((a, b) => b[1] - a[1])
               .map(([sev, count]) => (
                 <span key={sev}
-                      className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px]"
+                      className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px]"
                       style={{ backgroundColor: `${sevColor(sev)}22`, color: sevColor(sev) }}>
                   <span className="font-mono">{sev}</span>
                   <span className="text-secondary">{count}</span>
@@ -136,8 +136,8 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
 
       {report.topFiles.length > 0 && (
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted mb-1">Top file hotspots</div>
-          <div className="space-y-0.5 text-[11px]">
+          <div className="text-[11px] uppercase tracking-wide text-muted mb-1">Top file hotspots</div>
+          <div className="space-y-0.5 text-xs">
             {report.topFiles.map((f) => (
               <div key={f.filePath} className="flex items-center justify-between text-muted">
                 <span className="font-mono truncate">{f.filePath}</span>
@@ -148,7 +148,7 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
         </div>
       )}
 
-      <div className="text-[10px] text-muted pt-1 border-t border-[var(--border-default)]">
+      <div className="text-[11px] text-muted pt-1 border-t border-[var(--border-default)]">
         {report.totalRunsAnalyzed} run{report.totalRunsAnalyzed === 1 ? '' : 's'} analysed
         {report.averageAccuracyScore > 0 && (
           <> · avg accuracy {report.averageAccuracyScore.toFixed(1)}</>

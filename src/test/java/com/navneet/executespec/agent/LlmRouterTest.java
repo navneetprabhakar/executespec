@@ -31,6 +31,7 @@ class LlmRouterTest {
     @Mock private com.navneet.executespec.router.ModelRegistry modelRegistry;
     @Mock private com.navneet.executespec.router.RunProviderPinStore pinStore;
     @Mock private com.navneet.executespec.router.ModelPerformanceTracker modelPerfTracker;
+    @Mock private com.navneet.executespec.sse.SseBroadcaster sseBroadcaster;
     @Mock private AnthropicChatModel anthropicChatModel;
     @Mock private ChatResponse chatResponse;
     @Mock private org.springframework.ai.chat.model.Generation generation;
@@ -53,7 +54,7 @@ class LlmRouterTest {
         when(generation.getOutput()).thenReturn(assistantMessage);
         when(assistantMessage.getText()).thenReturn("test response");
 
-        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties, meterRegistry, providerHealthTracker, modelRegistry, pinStore, modelPerfTracker);
+        router = new LlmRouter(ctx, inboxService, runKeyStore, agentProperties, meterRegistry, providerHealthTracker, modelRegistry, pinStore, modelPerfTracker, sseBroadcaster);
     }
 
     @Nested

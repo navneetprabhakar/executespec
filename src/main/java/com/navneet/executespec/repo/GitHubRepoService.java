@@ -577,7 +577,7 @@ public class GitHubRepoService {
                     .build();
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 201) {
+            if (response.statusCode() == 201 || response.statusCode() == 200) {
                 // Extract html_url from response
                 String responseBody = response.body();
                 int idx = responseBody.indexOf("\"html_url\":");
@@ -588,6 +588,15 @@ public class GitHubRepoService {
                     log.info("[GitHubRepoService] Created PR: {}", prUrl);
                     return prUrl;
                 }
+            }
+            // 422 with "A pull request already exists" is normal for continue-on-PR
+            // flows — the push already updated the branch, and GitHub auto-updates
+            // the existing PR. Return null gracefully (caller should not treat as error).
+            if (response.statusCode() == 422 && response.body() != null
+                    && response.body().contains("already exists")) {
+                log.info("[GitHubRepoService] PR already exists for {}/{} head={} — follow-up push updated it",
+                        ownerRepo[0], ownerRepo[1], head);
+                return null;
             }
             log.warn("[GitHubRepoService] Failed to create PR for {}/{}: status {} — {}",
                     ownerRepo[0], ownerRepo[1], response.statusCode(), response.body());
@@ -667,6 +676,91 @@ public class GitHubRepoService {
         } catch (Exception e) {
             log.warn("[GitHubRepoService] requestReviewers error: {}", e.getMessage());
         }
+    }
+
+    // ── PR review comments ──────────────────────────────────────────────────────
+
+    private static final int PR_COMMENTS_MAX_CHARS = 4000;
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
+    /**
+     * Fetches PR review comments (inline code comments + top-level review bodies)
+     * and formats them as markdown suitable for prompt injection.
+     *
+     * @return formatted comments, or empty string on failure (non-fatal)
+     */
+    public String fetchPrReviewComments(String repoFullName, int prNumber, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return "";
+        if (repoFullName == null || repoFullName.isBlank()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+
+            // 1. Top-level review bodies (approve/request-changes/comment)
+            String reviewsUrl = "https://api.github.com/repos/" + repoFullName
+                    + "/pulls/" + prNumber + "/reviews";
+            HttpResponse<String> reviewsResp = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create(reviewsUrl))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+            if (reviewsResp.statusCode() == 200) {
+                JsonNode reviews = JSON_MAPPER.readTree(reviewsResp.body());
+                for (JsonNode r : reviews) {
+                    String body = textOrEmpty(r, "body");
+                    String state = textOrEmpty(r, "state");
+                    String user = r.has("user") && r.get("user").has("login")
+                            ? r.get("user").get("login").asText() : "unknown";
+                    if (body.isBlank()) continue;
+                    sb.append("### Review by @").append(user)
+                      .append(" (").append(state).append(")\n")
+                      .append(body).append("\n\n");
+                    if (sb.length() > PR_COMMENTS_MAX_CHARS) break;
+                }
+            }
+
+            // 2. Inline code comments (file + line + body)
+            String commentsUrl = "https://api.github.com/repos/" + repoFullName
+                    + "/pulls/" + prNumber + "/comments";
+            HttpResponse<String> commentsResp = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create(commentsUrl))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+            if (commentsResp.statusCode() == 200) {
+                JsonNode comments = JSON_MAPPER.readTree(commentsResp.body());
+                for (JsonNode c : comments) {
+                    String body = textOrEmpty(c, "body");
+                    String path = textOrEmpty(c, "path");
+                    int line = c.has("line") && !c.get("line").isNull() ? c.get("line").asInt() : 0;
+                    String user = c.has("user") && c.get("user").has("login")
+                            ? c.get("user").get("login").asText() : "unknown";
+                    if (body.isBlank()) continue;
+                    sb.append("- **").append(path);
+                    if (line > 0) sb.append(":").append(line);
+                    sb.append("** (@").append(user).append("): ").append(body).append("\n");
+                    if (sb.length() > PR_COMMENTS_MAX_CHARS) break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] fetchPrReviewComments {}/{} failed: {}",
+                    repoFullName, prNumber, e.getMessage());
+            return "";
+        }
+
+        String result = sb.toString();
+        if (result.length() > PR_COMMENTS_MAX_CHARS) {
+            result = result.substring(0, PR_COMMENTS_MAX_CHARS) + "\n...(truncated)";
+        }
+        return result;
+    }
+
+    private static String textOrEmpty(JsonNode node, String field) {
+        return node.has(field) && !node.get(field).isNull() ? node.get(field).asText() : "";
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

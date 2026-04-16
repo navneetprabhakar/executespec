@@ -9,19 +9,19 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function ProjectPrList({ prs }: { prs: PrSummary[] }) {
   if (!prs || prs.length === 0) {
-    return <div className="text-[11px] text-muted">No pull requests yet.</div>;
+    return <div className="text-xs text-muted">No pull requests yet.</div>;
   }
   const merged = prs.filter((p) => p.status === 'MERGED').length;
   const total = prs.length;
   return (
     <div className="space-y-1.5">
-      <div className="text-[10px] text-muted font-mono tabular-nums">
+      <div className="text-[11px] text-muted font-mono tabular-nums">
         {merged}/{total} merged · {Math.round((merged / total) * 100)}%
       </div>
       <ul className="space-y-1">
         {prs.map((pr) => (
           <li key={`${pr.repoFullName}-${pr.prNumber}`}
-            className="flex items-center gap-2 text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] hover:bg-[var(--gray-200)] px-2 py-1 transition-colors">
+            className="flex items-center gap-2 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] hover:bg-[var(--gray-200)] px-2 py-1 transition-colors">
             <span className={`text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded border ${STATUS_COLOR[pr.status] ?? 'text-muted border-[var(--border-default)]'}`}>
               {pr.status}
             </span>

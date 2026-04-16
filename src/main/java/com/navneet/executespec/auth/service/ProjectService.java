@@ -48,6 +48,7 @@ public class ProjectService {
                 .name(req.name())
                 .description(req.description())
                 .aiProvider(provider)
+                .githubOwner(req.githubOwner())
                 .status("ACTIVE")
                 .createdBy(createdBy)
                 .build();
@@ -177,6 +178,7 @@ public class ProjectService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
 
         String oldProvider = project.getAiProvider() != null ? project.getAiProvider().name() : "ANTHROPIC";
+        String oldGithubOwner = project.getGithubOwner();
 
         if (req.aiProvider() != null) {
             try {
@@ -188,6 +190,10 @@ public class ProjectService {
             }
         }
 
+        if (req.githubOwner() != null) {
+            project.setGithubOwner(req.githubOwner().isBlank() ? null : req.githubOwner().trim());
+        }
+
         project.setUpdatedAt(Instant.now());
         ProjectDto result = ProjectDto.from(projectRepo.save(project));
 
@@ -195,11 +201,14 @@ public class ProjectService {
                 .eventType("PROJECT_SETTINGS_UPDATED")
                 .entityType("PROJECT").entityId(projectId)
                 .orgId(project.getOrgId()).actorId(actorId)
-                .oldValue("{\"aiProvider\":\"" + oldProvider + "\"}")
-                .newValue("{\"aiProvider\":\"" + project.getAiProvider().name() + "\"}")
+                .oldValue("{\"aiProvider\":\"" + oldProvider
+                        + "\",\"githubOwner\":\"" + (oldGithubOwner != null ? oldGithubOwner : "") + "\"}")
+                .newValue("{\"aiProvider\":\"" + project.getAiProvider().name()
+                        + "\",\"githubOwner\":\"" + (project.getGithubOwner() != null ? project.getGithubOwner() : "") + "\"}")
                 .build());
 
-        log.info("Project settings updated: {} — aiProvider: {} → {}", projectId, oldProvider, project.getAiProvider());
+        log.info("Project settings updated: {} — aiProvider: {} → {}, githubOwner: {} → {}",
+                projectId, oldProvider, project.getAiProvider(), oldGithubOwner, project.getGithubOwner());
         return result;
     }
 

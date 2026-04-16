@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Rocket, Info } from 'lucide-react';
 import { useExecutionStore } from '@/stores/useExecutionStore';
 import { useExecutionSse } from '@/hooks/useExecutionSse';
@@ -29,8 +29,11 @@ const NEXT_ACTION: Record<ExecutionRunStatus, { label: string; hint: string }> =
 export default function ExecutionViewPage() {
   const { projectId, executionId } = useParams<{ projectId: string; executionId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { executionRun, fetchExecution, reset, triggerAnalysis } = useExecutionStore();
   const [project, setProject] = useState<ProjectDto | null>(null);
+  // v2.5.7 — "Address review" flow passes continueOnPr via navigation state.
+  const continueOnPr = (location.state as any)?.continueOnPr ?? undefined;
 
   useExecutionSse(executionId ?? null);
 
@@ -97,10 +100,17 @@ export default function ExecutionViewPage() {
         {inSetup ? (
           <ExecutionSetup
             projectId={projectId}
+            continueOnPr={continueOnPr}
             onSubmitted={async (id) => {
+              // Kick the backend phases off.
+              try {
+                await triggerAnalysis(id);
+              } catch { /* backend 4xx already surfaced via toast */ }
+              // v2.5.7 UX-fix: redirect to the execution detail page so the
+              // user sees the Launch progressing through Analysing / Arch /
+              // Planning. Previously we landed on the project dashboard
+              // which did not auto-refresh, making the Launch appear lost.
               navigate(`/projects/${projectId}/executions/${id}`);
-              await fetchExecution(id);
-              await triggerAnalysis(id);
             }}
           />
         ) : (

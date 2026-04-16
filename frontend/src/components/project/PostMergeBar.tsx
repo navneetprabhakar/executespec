@@ -43,7 +43,7 @@ export default function PostMergeBar({ projectId }: { projectId: string }) {
       {visible.map((bar, i) => (
         <div
           key={`${bar.repoFullName}-${bar.prNumber}`}
-          className="flex items-center justify-between gap-3 rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] text-emerald-400"
+          className="flex items-center justify-between gap-3 rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-400"
         >
           <div className="min-w-0 truncate">
             ✓ PR #{bar.prNumber} merged on{' '}
@@ -54,7 +54,7 @@ export default function PostMergeBar({ projectId }: { projectId: string }) {
             {i === 0 && (
               <button
                 onClick={startNext}
-                className="text-[10px] font-medium px-2 py-0.5 rounded-sm bg-emerald-500/20 hover:bg-emerald-500/30"
+                className="text-[11px] font-medium px-2 py-0.5 rounded-sm bg-emerald-500/20 hover:bg-emerald-500/30"
               >
                 Start next requirement →
               </button>
@@ -67,7 +67,7 @@ export default function PostMergeBar({ projectId }: { projectId: string }) {
       ))}
       {extras.length > 0 && (
         <div
-          className="inline-flex items-center rounded-sm bg-emerald-500/10 text-emerald-400 px-2 py-0.5 text-[10px]"
+          className="inline-flex items-center rounded-sm bg-emerald-500/10 text-emerald-400 px-2 py-0.5 text-[11px]"
           title={extras.map((e) => `${e.repoFullName}#${e.prNumber}`).join('\n')}
         >
           + {extras.length} more merged

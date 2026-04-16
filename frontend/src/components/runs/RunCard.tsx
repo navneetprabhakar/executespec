@@ -133,6 +133,15 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
                 <span>{fmtTokens(run.totalInputTokens + run.totalOutputTokens)} tok</span>
               </>
             )}
+            {/* v2.5.8 — render $ spent next to tokens so developers see real cost */}
+            {typeof run.actualCostUsd === 'number' && run.actualCostUsd > 0 && (
+              <>
+                <span>·</span>
+                <span className="text-accent-amber">
+                  ${run.actualCostUsd < 0.01 ? '<0.01' : run.actualCostUsd.toFixed(2)}
+                </span>
+              </>
+            )}
             {run.repoUrl && (
               <>
                 <span>·</span>

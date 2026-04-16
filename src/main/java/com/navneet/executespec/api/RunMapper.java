@@ -60,7 +60,9 @@ public class RunMapper {
             r.getAiProvider(),
             r.getSourceRunId() != null,
             r.getSourceRunId(),
-            r.getHarnessVersion()
+            r.getHarnessVersion(),
+            r.getActualCostUsd(),
+            r.getStatusReason()
         );
     }
 
@@ -153,6 +155,7 @@ public class RunMapper {
             .repoUrl(r.getRepoUrl())
             .repoMode(r.getRepoMode())
             .failureReason(r.getFailureReason())
+            .statusReason(r.getStatusReason())
             .planJson(r.getPlanJson())
             .reviewJson(r.getReviewJson())
             .tasks(tasks.stream()

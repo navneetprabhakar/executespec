@@ -54,7 +54,7 @@ export default function ExecutionStepper({
   const elapsed = useElapsed(activeSince);
 
   return (
-    <div className="flex items-center gap-1 text-[11px] text-muted flex-wrap">
+    <div className="flex items-center gap-1 text-xs text-muted flex-wrap">
       {visible.map((step, i) => {
         const isCurrent = i === currentIdx;
         const isDone = i < currentIdx;
@@ -65,7 +65,7 @@ export default function ExecutionStepper({
           <div key={step.key} className="flex items-center gap-1" title={step.description}>
             <span
               className={cn(
-                'inline-flex items-center justify-center w-5 h-5 rounded-full border text-[10px] font-mono',
+                'inline-flex items-center justify-center w-5 h-5 rounded-full border text-[11px] font-mono',
                 isCurrent
                   ? (status === 'PAUSED'
                       ? 'bg-accent-amber text-white border-accent-amber'

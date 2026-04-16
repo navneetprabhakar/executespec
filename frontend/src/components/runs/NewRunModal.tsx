@@ -284,7 +284,8 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
 
         {/* ── Compose mode ─────────────────────────────────────────────────── */}
         {mode === 'compose' && (
-          <div className="p-6 space-y-4 overflow-y-auto min-h-0">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
             <textarea
               autoFocus
               value={goal}
@@ -538,7 +539,12 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                 </span>
               </div>
             )}
-
+          </div>
+          {/* v2.5.7 UX-fix: sticky footer so the Launch button stays visible
+              even when the GitHub repository section or other expandable blocks
+              push content below the viewport. Previously the button scrolled
+              off-screen and users couldn't find it. */}
+          <div className="flex-shrink-0 border-t border-[var(--border-default)] bg-[var(--gray-200)] px-6 py-3">
             <button
               onClick={handleSubmit}
               disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
@@ -556,6 +562,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               )}
               {launching ? 'Launching...' : 'Launch Run'}
             </button>
+          </div>
           </div>
         )}
 
