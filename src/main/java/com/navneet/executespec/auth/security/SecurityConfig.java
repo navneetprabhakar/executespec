@@ -132,6 +132,10 @@ public class SecurityConfig {
                         // Static frontend assets (SPA)
                         .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        // v2.5.8 — public read-only feature-flag endpoint: any
+                        // authenticated user can call it so the frontend can
+                        // gate integration Configure CTAs on flag state.
+                        .requestMatchers(HttpMethod.GET, "/api/admin/feature-flags/public").authenticated()
                         // Admin endpoints — SUPER_ADMIN only
                         .requestMatchers("/api/admin/**").hasRole("SUPER_ADMIN")
                         // V2 Phase 0 native-tools test endpoint (no auth — temporary, removed once LlmRouterV2 lands)

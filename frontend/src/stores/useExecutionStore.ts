@@ -17,6 +17,12 @@ interface ExecutionState {
   solutionLogs: Record<string, string[]>;
   showLogs: boolean;
 
+  /** v2.5.2 (Phase 2.3) — live cancel-cleanup state. Empty when no cancel
+   *  has been triggered. {@link compensationDoneSummary} is set when the
+   *  EXEC_COMPENSATION_DONE event arrives. */
+  compensations: CompensationStep[];
+  compensationDoneSummary: { total: number; completed: number; failed: number } | null;
+
   createExecution: (projectId: string, req: CreateExecutionRequest) => Promise<string>;
   fetchExecution: (id: string) => Promise<void>;
   triggerAnalysis: (id: string) => Promise<void>;
@@ -36,6 +42,19 @@ interface ExecutionState {
   toggleLogs: () => void;
   seedAnalysisProgress: (repos: { repoId: string; repoName: string }[]) => void;
   reset: () => void;
+
+  /** v2.5.2 (Phase 2.3) — append/update a compensation step from SSE. */
+  applyCompensationUpdate: (step: CompensationStep) => void;
+  setCompensationDone: (summary: { total: number; completed: number; failed: number }) => void;
+  clearCompensations: () => void;
+}
+
+export interface CompensationStep {
+  type: string;
+  repo: string;
+  prNumber?: number;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED';
+  message?: string;
 }
 
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
@@ -46,6 +65,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   expandedSolutionId: null,
   solutionLogs: {},
   showLogs: false,
+  compensations: [],
+  compensationDoneSummary: null,
 
   createExecution: async (projectId, reqBody) => {
     set({ loading: true, error: null });
@@ -135,5 +156,18 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       expandedSolutionId: null,
       solutionLogs: {},
       showLogs: false,
+      compensations: [],
+      compensationDoneSummary: null,
     }),
+
+  applyCompensationUpdate: (step) => {
+    const cur = get().compensations;
+    // Match by (type, repo, prNumber) — same step transitions through statuses.
+    const idx = cur.findIndex((s) =>
+      s.type === step.type && s.repo === step.repo && s.prNumber === step.prNumber);
+    const next = idx === -1 ? [...cur, step] : cur.map((s, i) => (i === idx ? step : s));
+    set({ compensations: next });
+  },
+  setCompensationDone: (summary) => set({ compensationDoneSummary: summary }),
+  clearCompensations: () => set({ compensations: [], compensationDoneSummary: null }),
 }));

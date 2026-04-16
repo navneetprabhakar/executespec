@@ -30,22 +30,105 @@ public class BuildCommandResolver {
 
     public BuildCommand resolve(Path workspaceRoot, String plannerDeclaredCommand) {
         if (plannerDeclaredCommand != null && !plannerDeclaredCommand.isBlank()) {
+            String cmd = normalizePython(plannerDeclaredCommand.trim());
+            // Planner commands often assume the workspace IS the project (single-repo
+            // runs). For multi-repo Launches the real project sits under repos/<name>/ —
+            // if the workspace root has no recognisable marker but repos/ does, wrap
+            // the planner command with `cd` so it executes in the right directory.
+            String wrapped = wrapForReposSubdirIfNeeded(workspaceRoot, cmd);
             return BuildCommand.builder()
-                    .command(normalizePython(plannerDeclaredCommand.trim()))
+                    .command(wrapped)
                     .timeoutSeconds(180)
                     .sourceDescription("planner-declared")
                     .build();
         }
-        return inferFromFramework(workspaceRoot)
-                .orElseGet(() -> {
-                    log.warn("BuildCommandResolver: no framework markers detected in {}, " +
-                            "falling back to no-op 'true' (smoke test will always pass)", workspaceRoot);
-                    return BuildCommand.builder()
-                            .command("true")
-                            .timeoutSeconds(5)
-                            .sourceDescription("fallback:no-op")
-                            .build();
-                });
+        // 1) Root markers (single-repo + V1-style runs)
+        Optional<BuildCommand> root = inferFromFramework(workspaceRoot);
+        if (root.isPresent()) return root.get();
+
+        // 2) Multi-repo convention: workspace/<runId>/repos/<name>/. Pick the first
+        //    subdir that has recognisable markers. If multiple repos build under
+        //    different stacks, chain them with &&.
+        Path reposDir = workspaceRoot.resolve("repos");
+        if (Files.isDirectory(reposDir)) {
+            java.util.List<String> parts = new java.util.ArrayList<>();
+            String source = null;
+            try (var stream = Files.list(reposDir)) {
+                for (Path repo : stream.filter(Files::isDirectory).toList()) {
+                    Optional<BuildCommand> cmd = inferFromFramework(repo);
+                    if (cmd.isEmpty()) continue;
+                    // cd into the repo and run its native build.
+                    parts.add("(cd " + repo.getFileName() + " && " + cmd.get().command() + ")");
+                    if (source == null) source = cmd.get().sourceDescription() + "@repos/" + repo.getFileName();
+                }
+            } catch (java.io.IOException e) {
+                log.warn("BuildCommandResolver: repos/ scan failed in {}: {}", workspaceRoot, e.getMessage());
+            }
+            if (!parts.isEmpty()) {
+                // The combined command runs from reposDir so the `cd <name>` segments work.
+                String combined = "cd repos && " + String.join(" && ", parts);
+                return BuildCommand.builder()
+                        .command(combined)
+                        .timeoutSeconds(300)
+                        .sourceDescription(source)
+                        .build();
+            }
+        }
+
+        log.warn("BuildCommandResolver: no framework markers detected in {} or any repos/ subdir, " +
+                "falling back to no-op 'true' (smoke test will always pass)", workspaceRoot);
+        return BuildCommand.builder()
+                .command("true")
+                .timeoutSeconds(5)
+                .sourceDescription("fallback:no-op")
+                .build();
+    }
+
+    /**
+     * Planner build commands (e.g. {@code "mvn -q -DskipTests compile"}) assume the
+     * workspace root IS the project. For multi-repo Launches that's false — the
+     * project lives at {@code repos/<name>/}. When the workspace root has no
+     * markers but a single {@code repos/*} subdir does, wrap the planner command
+     * with a {@code cd} so it runs in the right directory.
+     *
+     * <p>When multiple repos exist, prepend per-repo {@code cd} segments chained
+     * with {@code &&} so each runs its build. For zero repos under {@code repos/}
+     * the command is returned unchanged.
+     */
+    private String wrapForReposSubdirIfNeeded(Path workspaceRoot, String plannerCmd) {
+        // Workspace root already looks like a project — planner command will work as-is.
+        if (hasAnyMarker(workspaceRoot)) return plannerCmd;
+        Path reposDir = workspaceRoot.resolve("repos");
+        if (!Files.isDirectory(reposDir)) return plannerCmd;
+        try (var stream = Files.list(reposDir)) {
+            java.util.List<Path> buildableRepos = stream
+                    .filter(Files::isDirectory)
+                    .filter(this::hasAnyMarker)
+                    .toList();
+            if (buildableRepos.isEmpty()) return plannerCmd;
+            if (buildableRepos.size() == 1) {
+                return "cd repos/" + buildableRepos.get(0).getFileName() + " && " + plannerCmd;
+            }
+            // Multiple repos — run the planner command in each; the harness reports
+            // non-zero exit if any fails.
+            java.util.List<String> parts = new java.util.ArrayList<>();
+            for (Path repo : buildableRepos) {
+                parts.add("(cd " + repo.getFileName() + " && " + plannerCmd + ")");
+            }
+            return "cd repos && " + String.join(" && ", parts);
+        } catch (java.io.IOException e) {
+            log.warn("wrapForReposSubdirIfNeeded: scan failed in {}: {}", workspaceRoot, e.getMessage());
+            return plannerCmd;
+        }
+    }
+
+    private boolean hasAnyMarker(Path dir) {
+        return exists(dir, "pom.xml")
+                || exists(dir, "build.gradle") || exists(dir, "build.gradle.kts")
+                || exists(dir, "Cargo.toml")
+                || exists(dir, "go.mod")
+                || exists(dir, "package.json")
+                || exists(dir, "pyproject.toml") || exists(dir, "setup.py") || exists(dir, "requirements.txt");
     }
 
     private Optional<BuildCommand> inferFromFramework(Path workspaceRoot) {

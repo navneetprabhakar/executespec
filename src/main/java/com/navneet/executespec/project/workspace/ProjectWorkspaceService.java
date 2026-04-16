@@ -133,6 +133,41 @@ public class ProjectWorkspaceService {
         }
     }
 
+    /**
+     * Mirror a single file to disk without committing (fast path used by the
+     * async DB→disk warmer). Skips the git commit step in {@link #writeAndCommit}
+     * so warming a large project doesn't generate dozens of filler commits.
+     *
+     * <p>Safe to call on any node: writes are per-file atomic via tmp-rename.
+     * The project-scoped Redis lock is still acquired so we don't race with a
+     * concurrent {@code writeAndCommit}.
+     */
+    public void writeRawFile(String projectId, String relativePath, String content) {
+        initIfMissing(projectId);
+        String lockKey = "project:ws-lock:" + projectId;
+        String token = Long.toHexString(System.nanoTime());
+        Boolean acquired = redis.opsForValue().setIfAbsent(lockKey, token, LOCK_TTL);
+        if (Boolean.FALSE.equals(acquired)) {
+            // Don't block the warmer — another writer is active, skip this mirror pass.
+            log.debug("writeRawFile: lock busy for project {} path {} — skipping", projectId, relativePath);
+            return;
+        }
+        try {
+            Path target = resolve(projectId, relativePath);
+            Files.createDirectories(target.getParent());
+            Path tmp = target.resolveSibling(target.getFileName() + ".tmp-" + token);
+            Files.writeString(tmp, content == null ? "" : content);
+            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            log.warn("writeRawFile failed for project {} path {}: {}", projectId, relativePath, e.getMessage());
+        } finally {
+            String current = redis.opsForValue().get(lockKey);
+            if (token.equals(current)) {
+                redis.delete(lockKey);
+            }
+        }
+    }
+
     /** Remove the project workspace entirely. Used on project deletion. */
     public void delete(String projectId) {
         Path root = rootFor(projectId);

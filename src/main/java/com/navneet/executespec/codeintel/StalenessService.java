@@ -2,8 +2,6 @@ package com.navneet.executespec.codeintel;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
@@ -12,6 +10,7 @@ import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -22,23 +21,27 @@ import java.util.Map;
 /**
  * Pilot v3.0 (deferral #4) — compares the SHAs captured when each repo's
  * codemap was generated against the current HEAD of each repo's default branch.
- * Result is cached for 5 minutes so dashboard polls don't hammer GitHub.
+ *
+ * Cache lives in Redis so every MIG instance sees the same staleness picture.
+ * A Caffeine cache (the pre-v2.5.2 implementation) kept drift after a MIG scale-out:
+ * invalidation on VM1 was invisible to VM2, so a freshly regenerated architecture
+ * could still show as STALE from another node. Key {@code project:stale:<id>} holds
+ * the serialized {@link StalenessReport}; absence = recompute. TTL 5 min.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class StalenessService {
 
+    static final String KEY_PREFIX = "project:stale:";
+    static final Duration TTL = Duration.ofMinutes(5);
+
     private final ProjectArchitectureService archService;
     private final ProjectRepoLinkRepository linkRepo;
     private final ProjectRepoRepository repoRepo;
     private final GitHubRepoService gitHub;
     private final ObjectMapper objectMapper;
-
-    private final Cache<String, StalenessReport> cache = Caffeine.newBuilder()
-            .expireAfterWrite(Duration.ofMinutes(5))
-            .maximumSize(1_000)
-            .build();
+    private final StringRedisTemplate redis;
 
     public record RepoStaleness(
             String repoFullName,
@@ -53,12 +56,30 @@ public class StalenessService {
             List<RepoStaleness> repos) {}
 
     public StalenessReport report(String projectId) {
-        return cache.get(projectId, this::compute);
+        String key = KEY_PREFIX + projectId;
+        try {
+            String cached = redis.opsForValue().get(key);
+            if (cached != null) {
+                return objectMapper.readValue(cached, StalenessReport.class);
+            }
+        } catch (Exception e) {
+            // Treat deserialisation failures as a cache miss — recompute and overwrite.
+            log.warn("Staleness cache read failed for project {}: {}", projectId, e.getMessage());
+        }
+        StalenessReport fresh = compute(projectId);
+        try {
+            redis.opsForValue().set(key, objectMapper.writeValueAsString(fresh), TTL);
+        } catch (Exception e) {
+            log.warn("Staleness cache write failed for project {}: {}", projectId, e.getMessage());
+        }
+        return fresh;
     }
 
-    /** Force a refresh — call after generate() so the dashboard sees fresh SHAs immediately. */
+    /** Force a refresh — call after generate() so every MIG node sees fresh SHAs
+     *  on the next read. Deleting the key (not writing a tombstone) lets the next
+     *  caller recompute on demand. */
     public void invalidate(String projectId) {
-        cache.invalidate(projectId);
+        redis.delete(KEY_PREFIX + projectId);
     }
 
     private StalenessReport compute(String projectId) {

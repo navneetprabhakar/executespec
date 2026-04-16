@@ -167,6 +167,23 @@ export interface CreateExecutionRequest {
   confluenceUrl?: string;
   figmaUrl?: string;
   aiProvider?: string;
+  /** Optional branch override. Null/empty = clone each repo on its default branch. */
+  branch?: string;
+  /** v2.5.7 — continue-on-PR: ID of the execution that created the original PR. */
+  sourceExecutionId?: string;
+  /** v2.5.7 — continue-on-PR: repo full name (e.g. "owner/repo"). */
+  continuePrRepoFullName?: string;
+  /** v2.5.7 — continue-on-PR: PR number to address. */
+  continuePrNumber?: number;
+}
+
+/** v2.5.7 — pre-fill config for the "Address review" flow. */
+export interface ContinueOnPrConfig {
+  sourceExecutionId: string;
+  prNumber: number;
+  repoFullName: string;
+  headBranch: string;
+  reviewComments: string;
 }
 
 export interface ArchApprovalRequest {

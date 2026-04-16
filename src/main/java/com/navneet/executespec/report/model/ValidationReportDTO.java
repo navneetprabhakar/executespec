@@ -35,6 +35,13 @@ public record ValidationReportDTO(
     Integer securityScore,
     Integer performanceScore,
     Integer designComplianceScore,
+    // v2.5.10 (V106) — verified signals. Populated on new runs once the
+    // scoring.v2-verified flag is on; null on historical rows.
+    Boolean finalBuildPassed,
+    Integer testsPassed,
+    Integer testsTotal,
+    String reviewerVerdict,   // CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED
+    Integer verifiedScore,    // 0-100 deterministic score; primary UI badge
     // Preview URL at time of report generation (nullable — batch runs and expired previews won't have this)
     String previewUrl
 ) {}

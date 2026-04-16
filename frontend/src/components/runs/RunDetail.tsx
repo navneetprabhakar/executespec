@@ -287,7 +287,7 @@ export default function RunDetail() {
                     <p className="text-xs font-mono font-medium text-[var(--text-primary)] line-clamp-1">
                       {activeRun.runTitle ?? activeRun.userRequest?.slice(0, 60) ?? 'Run'}
                     </p>
-                    <StatusBadge status={activeRun.status} />
+                    <StatusBadge status={activeRun.status} statusReason={activeRun.statusReason} />
                   </div>
                 </div>
                 <button onClick={() => setActiveRunId(null)} className="text-muted hover:text-secondary flex-shrink-0 ml-2 p-1.5 -m-1">
@@ -323,15 +323,20 @@ export default function RunDetail() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-mono text-xs text-secondary">{activeRun.runId.slice(0, 16)}</p>
-                  <StatusBadge status={activeRun.status} />
-                  {/* Final-build chip — disambiguates PARTIAL-but-delivered runs. */}
-                  {finalBuildPassed(activeRun) && activeRun.status === 'PARTIAL' && (
+                  {/* v2.5.8 — when the reviewer's final build passes on a PARTIAL run,
+                      show one unified "Complete · with warnings" chip (amber) instead of
+                      the previous orange-PARTIAL + green-BUILD chip combo that visually
+                      contradicted itself. The tooltip still explains the smoke-test nuance. */}
+                  {finalBuildPassed(activeRun) && activeRun.status === 'PARTIAL' ? (
                     <span
-                      className="text-[10px] uppercase tracking-wide bg-green-500/10 text-green-500 px-1.5 py-0.5 rounded"
-                      title="Reviewer's final build passed — intermediate PARTIAL chips were from per-task smoke tests, not the delivered code"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide uppercase text-accent-amber"
+                      title="Final build passed — intermediate smoke-test warnings did not block delivery"
                     >
-                      ✓ final build passed
+                      <GlowDot status="COMPLETE" size="sm" />
+                      Complete · with warnings
                     </span>
+                  ) : (
+                    <StatusBadge status={activeRun.status} statusReason={activeRun.statusReason} />
                   )}
                 </div>
                 <p className="text-xs text-muted mt-0.5 line-clamp-1">

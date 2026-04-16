@@ -99,6 +99,12 @@ public class SequentialExecutorV2 {
     private final SseBroadcaster broadcaster;
     private final AgentTaskRepository taskRepo;
     private final ModelResolver modelResolver;
+    private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
+
+    /** Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the
+     *  planner's budget (k=3, 1500) so per-task cost stays bounded across many tasks. */
+    private static final int WORKER_RAG_K = 2;
+    private static final int WORKER_RAG_TOKEN_CAP = 800;
 
     public ExecutionResult execute(ExecutionRequest req) {
         long runStart = System.currentTimeMillis();
@@ -133,7 +139,8 @@ public class SequentialExecutorV2 {
         ExecutionContext taskCtx = new ExecutionContext(
                 req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
 
-        String systemPrompt = composeSystemPrompt(task, req.designBlock());
+        String refDocs = fetchReferenceDocs(req.projectId(), task);
+        String systemPrompt = composeSystemPrompt(task, req.designBlock(), refDocs);
         String userPrompt = composeUserPrompt(task, null);
 
         log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -142,7 +149,7 @@ public class SequentialExecutorV2 {
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "WORKING"));
         broadcaster.emit(runId, RunEvent.log(runId, task.id(),
                 "Starting task: " + task.title()));
-        TierConfig cfg = tierConfigFor(task.complexity(), req.provider(), req.model());
+        TierConfig cfg = tierConfigFor(task.complexity(), req.provider(), req.model(), req.projectId() != null);
         WorkerResult primary = worker.run(WorkerTaskRequest.builder()
                 .provider(cfg.provider)
                 .model(cfg.model)
@@ -299,6 +306,31 @@ public class SequentialExecutorV2 {
                     .build();
         }
 
+        // If the primary + retry worker wrote zero files, the task did not change
+        // the codebase — a smoke failure here is almost always environmental
+        // (wrong directory, missing toolchain, flaky network). Downgrading to
+        // COMPLETE avoids poisoning the run's overall status on a tautological
+        // verify-only task. The smoke output is still preserved on the outcome
+        // so the reviewer / report can surface it if relevant.
+        int totalFileWrites = countFileWrites(primary.toolCallLog()) + countFileWrites(retry.toolCallLog());
+        if (totalFileWrites == 0) {
+            log.warn("Executor task={} smoke failed after retry but worker wrote 0 files — " +
+                    "demoting to COMPLETE (verify-only task, smoke failure is environmental)", task.id());
+            persistTaskStatus(runId, task.id(), "COMPLETE");
+            broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+            return TaskOutcome.builder()
+                    .taskId(task.id()).taskTitle(task.title())
+                    .status(TaskOutcome.Status.SUCCESS)
+                    .workerOutcome(primary)
+                    .retryAttempted(true).retryWorkerOutcome(retry)
+                    .smokeTestPassed(false)
+                    .smokeTestExitCode(retrySmoke.exitCode())
+                    .smokeTestOutput(retrySmoke.output())
+                    .totalLatencyMs(System.currentTimeMillis() - taskStart)
+                    .toolCallsDispatched(totalToolCalls)
+                    .build();
+        }
+
         log.warn("Executor task={} smoke still fails after retry; COMPLETED_WITH_WARNING", task.id());
         persistTaskStatus(runId, task.id(), "PARTIAL");
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
@@ -338,15 +370,24 @@ public class SequentialExecutorV2 {
      */
     private record TierConfig(String provider, String model, int maxIter, int maxTokens) {}
 
-    private TierConfig tierConfigFor(PlannedTaskV2.Complexity complexity, String runProvider, String runModel) {
+    private TierConfig tierConfigFor(PlannedTaskV2.Complexity complexity, String runProvider, String runModel,
+                                      boolean projectRun) {
         AgentTier tier;
         int maxIter;
         int maxTokens;
         switch (complexity == null ? PlannedTaskV2.Complexity.MEDIUM : complexity) {
-            case LOW  -> { tier = AgentTier.LIGHTWEIGHT; maxIter = 12; maxTokens = 4096; }
-            case HIGH -> { tier = AgentTier.PLANNING;    maxIter = 35; maxTokens = 16384; }
-            default   -> { tier = AgentTier.WORKHORSE;   maxIter = 22; maxTokens = 8192; }
+            // Caps bumped (was 12/22/35) — multi-repo Launches need several
+            // readFile/searchFiles calls before the first write, and existing-repo
+            // tasks hit the old LOW=12 ceiling regularly even for a health-check
+            // endpoint (see run 4838839a).
+            case LOW  -> { tier = AgentTier.LIGHTWEIGHT; maxIter = 20; maxTokens = 4096; }
+            case HIGH -> { tier = AgentTier.PLANNING;    maxIter = 45; maxTokens = 16384; }
+            default   -> { tier = AgentTier.WORKHORSE;   maxIter = 30; maxTokens = 8192; }
         }
+        // Project runs (Launches on an existing cloned codebase) need more
+        // iterations: the worker has to readFile / searchFiles the real repo
+        // before it can write, so 2× the fresh-scratch cap is the default.
+        if (projectRun) maxIter *= 2;
         try {
             LlmProvider p = LlmProvider.valueOf(mapToV1Provider(runProvider));
             ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
@@ -387,7 +428,7 @@ public class SequentialExecutorV2 {
 
     // ─── prompt composition ─────────────────────────────────────────────────
 
-    private String composeSystemPrompt(PlannedTaskV2 task, String designBlock) {
+    private String composeSystemPrompt(PlannedTaskV2 task, String designBlock, String refDocs) {
         StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
         if (!task.hardConstraints().isEmpty()) {
             sb.append("\n\nHARD CONSTRAINTS for this task (MUST follow):\n");
@@ -402,7 +443,37 @@ public class SequentialExecutorV2 {
         if (designBlock != null && !designBlock.isBlank()) {
             sb.append("\n\n").append(designBlock);
         }
+        if (refDocs != null && !refDocs.isBlank()) {
+            // Worker-time RAG (v2.5.2): relevant snippets from uploaded project docs.
+            // Planner already injects its own {{REFERENCE_DOCS}} block during plan
+            // synthesis; this is a narrower, task-scoped retrieval that keeps
+            // detail constraints (field names, API contracts, limits) in front of
+            // the worker while it writes code.
+            sb.append("\n\n--- REFERENCE DOCS (task-relevant excerpts) ---\n")
+              .append(refDocs)
+              .append("\n--- END REFERENCE DOCS ---\n");
+        }
         return sb.toString();
+    }
+
+    /**
+     * Task-scoped RAG retrieval. Uses the task description as the query; empty
+     * string on any failure (retrieval errors never fail the run). Returns the
+     * raw markdown from {@code RetrievalService} ready for prompt inclusion.
+     */
+    private String fetchReferenceDocs(String projectId, PlannedTaskV2 task) {
+        if (projectId == null || projectId.isBlank()) return "";
+        String query = task.description() == null || task.description().isBlank()
+                ? task.title() : task.description();
+        if (query == null || query.isBlank()) return "";
+        try {
+            String docs = retrievalService.retrieve(projectId, query, WORKER_RAG_K, WORKER_RAG_TOKEN_CAP);
+            return docs == null ? "" : docs;
+        } catch (Exception e) {
+            log.debug("fetchReferenceDocs failed for project={} task={}: {}",
+                    projectId, task.id(), e.getMessage());
+            return "";
+        }
     }
 
     private String composeUserPrompt(PlannedTaskV2 task, String previousBuildError) {
@@ -474,6 +545,29 @@ public class SequentialExecutorV2 {
         if (fail > 0) overall = ExecutionResult.Overall.FAILED;
         else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
         else overall = ExecutionResult.Overall.ALL_SUCCESS;
+
+        // v2.5.10 — separate "final task status" from "any intermediate warning"
+        // so V2RunOrchestrator can distinguish CLEAN_COMPLETION from
+        // CLEAN_WITH_INTERMEDIATE_WARNINGS when the final task is clean but
+        // an earlier task flickered.
+        TaskOutcome lastNonSkipped = null;
+        for (int i = outcomes.size() - 1; i >= 0; i--) {
+            if (outcomes.get(i).status() != TaskOutcome.Status.SKIPPED) {
+                lastNonSkipped = outcomes.get(i);
+                break;
+            }
+        }
+        boolean anyIntermediateWarning = false;
+        if (lastNonSkipped != null) {
+            for (TaskOutcome o : outcomes) {
+                if (o == lastNonSkipped) continue;
+                if (o.status() == TaskOutcome.Status.COMPLETED_WITH_WARNING) {
+                    anyIntermediateWarning = true;
+                    break;
+                }
+            }
+        }
+
         return ExecutionResult.builder()
                 .overall(overall)
                 .tasksExecuted(outcomes.size() - skip)
@@ -483,6 +577,8 @@ public class SequentialExecutorV2 {
                 .tasksSkipped(skip)
                 .perTask(outcomes)
                 .totalLatencyMs(totalLatency)
+                .finalTaskStatus(lastNonSkipped != null ? lastNonSkipped.status() : null)
+                .anyIntermediateWarning(anyIntermediateWarning)
                 .build();
     }
 

@@ -29,15 +29,15 @@ export default function DependencyGraph({ solutions, edges }: Props) {
     <div className="flex gap-2 overflow-x-auto pb-2">
       {layers.map((layer, li) => (
         <div key={li} className="flex flex-col gap-1.5 min-w-[160px]">
-          <div className="text-[10px] uppercase tracking-wide text-muted">Layer {li + 1}</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted">Layer {li + 1}</div>
           {layer.map((s) => (
             <div
               key={s.sequenceNumber}
-              className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[11px]"
+              className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-xs"
             >
-              <div className="font-mono text-[10px] text-muted">S{s.sequenceNumber} · {s.complexity}</div>
+              <div className="font-mono text-[11px] text-muted">S{s.sequenceNumber} · {s.complexity}</div>
               <div className="truncate">{s.title}</div>
-              {s.repoName && <div className="text-[10px] text-muted truncate">{s.repoName}</div>}
+              {s.repoName && <div className="text-[11px] text-muted truncate">{s.repoName}</div>}
             </div>
           ))}
         </div>

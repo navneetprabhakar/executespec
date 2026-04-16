@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import type { OrgDto } from '@/lib/api';
 import * as api from '@/lib/api';
+import { fetchBillingStatus, type BillingStatus } from '@/lib/billing-api';
 
 // ── Generic expand/collapse card ──────────────────────────────────────────────
 
@@ -163,12 +164,21 @@ export default function SettingsPage() {
   const permissions = useTierPermissions();
   const [health, setHealth] = useState<api.MetricsResponse | null>(null);
   const [org, setOrg] = useState<OrgDto | null>(null);
+  // v2.5.8 — fetch live billing status so the plan badge matches the Billing page.
+  // Previously this card was rendered from JWT user.tier, which drifts from the
+  // actual subscription plan (admin promotions change tier without updating the
+  // subscription row, leaving Settings and Billing contradicting each other).
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
 
   useEffect(() => {
     if (permissions?.canViewMetrics) {
       api.getMetrics().then(setHealth).catch(() => {});
     }
   }, [permissions?.canViewMetrics]);
+
+  useEffect(() => {
+    fetchBillingStatus().then(setBilling).catch(() => setBilling(null));
+  }, []);
 
   // Load org data for ORG_ADMIN users so we can show org-level key status
   const isOrgAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
@@ -269,27 +279,38 @@ export default function SettingsPage() {
       {/* ── Current Plan & Upgrade ───────────────────────────────────────── */}
       <GlassPanel className="px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
-            ${user?.tier === 'ENTERPRISE' ? 'bg-accent-amber/20 text-accent-amber' :
-              user?.tier === 'MAX' ? 'bg-emerald-500/20 text-emerald-400' :
-              user?.tier === 'PRO' ? 'bg-accent-blue/20 text-accent-blue' :
-              'bg-[var(--gray-400)] text-secondary'}`}>
-            {user?.tier === 'ENTERPRISE' ? 'E' : user?.tier === 'MAX' ? 'M' : user?.tier === 'PRO' ? 'P' : 'F'}
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-primary">
-              {user?.tier === 'ENTERPRISE' ? 'Enterprise' : user?.tier === 'MAX' ? 'Max' : user?.tier === 'PRO' ? 'Pro' : 'Free'} Plan
-            </p>
-            <p className="text-xs text-muted">
-              {user?.tier === 'ENTERPRISE'
-                ? 'Unlimited runs, priority support, dedicated infrastructure'
-                : user?.tier === 'MAX'
-                ? 'Unlimited runs, own API keys, 3 concurrent runs'
-                : user?.tier === 'PRO'
-                ? '10 runs/month, 2 concurrent runs, managed keys'
-                : '5 runs/month, 1 concurrent run, basic features'}
-            </p>
-          </div>
+          {(() => {
+            // v2.5.8 — billing is the source of truth; fall back to JWT tier when
+            // the billing call hasn't returned yet (or the user has no subscription).
+            const planTier = billing?.plan?.tier ?? user?.tier ?? 'FREE';
+            const planName = billing?.plan?.name
+              ?? (planTier === 'ENTERPRISE' ? 'Enterprise Plan'
+                  : planTier === 'MAX' ? 'Max Plan'
+                  : planTier === 'PRO' ? 'Pro Plan'
+                  : 'Free Plan');
+            const badge = planTier === 'ENTERPRISE' ? { cls: 'bg-accent-amber/20 text-accent-amber', letter: 'E' }
+              : planTier === 'MAX' ? { cls: 'bg-emerald-500/20 text-emerald-400', letter: 'M' }
+              : planTier === 'PRO' ? { cls: 'bg-accent-blue/20 text-accent-blue', letter: 'P' }
+              : { cls: 'bg-[var(--gray-400)] text-secondary', letter: 'F' };
+            const subtitle = planTier === 'ENTERPRISE'
+              ? 'Unlimited runs, priority support, dedicated infrastructure'
+              : planTier === 'MAX'
+              ? 'Unlimited runs, own API keys, 3 concurrent runs'
+              : planTier === 'PRO'
+              ? '10 runs/month, 2 concurrent runs, managed keys'
+              : '5 runs/month, 1 concurrent run, basic features';
+            return (
+              <>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${badge.cls}`}>
+                  {badge.letter}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-primary">{planName}</p>
+                  <p className="text-xs text-muted">{subtitle}</p>
+                </div>
+              </>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button

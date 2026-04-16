@@ -39,24 +39,24 @@ export default function ProjectsListPage() {
           <div className="flex items-center gap-2">
             <FolderGit2 className="h-4 w-4 text-accent-blue flex-shrink-0" />
             <h1 className="text-[14px] font-medium text-primary">Projects</h1>
-            <span className="text-[10px] font-mono uppercase tracking-wider text-accent-blue border border-accent-blue/40 bg-accent-blue/10 px-1.5 py-0.5 rounded">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-accent-blue border border-accent-blue/40 bg-accent-blue/10 px-1.5 py-0.5 rounded">
               Enterprise · Max
             </span>
           </div>
-          <p className="text-[11px] text-muted mt-1">
+          <p className="text-xs text-muted mt-1">
             Multi-repo workspaces with launches, pull requests, and memory.
           </p>
         </div>
         <Link
           to="/org/projects"
-          className="text-[11px] text-muted hover:text-secondary border border-[var(--border-default)] rounded-sm px-2 py-1"
+          className="text-xs text-muted hover:text-secondary border border-[var(--border-default)] rounded-sm px-2 py-1"
         >
           Manage
         </Link>
       </div>
 
       {error && (
-        <div className="text-[11px] text-accent-red border border-red-500/40 bg-red-500/10 rounded-sm px-2.5 py-1.5">
+        <div className="text-xs text-accent-red border border-red-500/40 bg-red-500/10 rounded-sm px-2.5 py-1.5">
           {error}
         </div>
       )}
@@ -72,7 +72,7 @@ export default function ProjectsListPage() {
       ) : projects.length === 0 ? (
         <div className="text-center py-12 space-y-2">
           <Sparkles className="h-5 w-5 text-muted mx-auto" />
-          <div className="text-[12px] text-muted">
+          <div className="text-sm text-muted">
             No projects yet. Head to{' '}
             <Link to="/org/projects" className="text-accent-blue hover:underline">
               Org → Projects
@@ -100,19 +100,19 @@ export default function ProjectsListPage() {
                   <ChevronRight className="h-3 w-3 text-muted ml-auto opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                 </div>
                 {p.description && (
-                  <p className="text-[11px] text-secondary line-clamp-2 leading-snug">
+                  <p className="text-xs text-secondary line-clamp-2 leading-snug">
                     {p.description}
                   </p>
                 )}
                 <div className="flex items-center gap-1.5 mt-auto">
                   <span className={cn(
-                    'text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border',
+                    'text-[11px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border',
                     badge,
                   )}>
                     {p.status ?? 'ACTIVE'}
                   </span>
                   {p.aiProvider && (
-                    <span className="text-[10px] font-mono text-muted">{p.aiProvider}</span>
+                    <span className="text-[11px] font-mono text-muted">{p.aiProvider}</span>
                   )}
                 </div>
               </Link>

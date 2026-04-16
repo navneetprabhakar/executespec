@@ -63,6 +63,7 @@ public class SolutionExecutionService {
     private final PipelineRunRepository pipelineRunRepo;
     private final AppUserRepository appUserRepo;
     private final SseBroadcaster broadcaster;
+    private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
 
     public void executeSolution(ExecutionSolution solution, ExecutionRun run) {
         // Entry-point marker: either first attempt or retry.
@@ -97,8 +98,9 @@ public class SolutionExecutionService {
             return;
         }
 
-        // Poll V2 terminal status.
-        String terminal = pollUntilTerminal(pipelineRunId);
+        // Poll V2 terminal status. Passing the ExecutionRun id lets the loop
+        // short-circuit on abort (otherwise it sleeps for up to 2h).
+        String terminal = pollUntilTerminal(pipelineRunId, run.getId());
         if (terminal == null) {
             recordAttemptTerminal(attempt, "TIMEOUT", null);
             handleFailure(run, solution, "RUNNING", "V2 run timed out after 2h");
@@ -120,9 +122,27 @@ public class SolutionExecutionService {
                 : solution.getDescription();
         if (!handover.isBlank()) fullRequest = fullRequest + "\n\n" + handover;
 
+        // Continue-on-PR: inject review comments into the worker's request so the
+        // planner/worker knows what to fix.
+        if (run.getContinuePrNumber() != null && run.getContinuePrRepo() != null) {
+            try {
+                String pat = appUserRepo.findById(run.getCreatedBy())
+                        .map(u -> u.getGithubPat()).orElse(null);
+                String comments = gitHubRepoService.fetchPrReviewComments(
+                        run.getContinuePrRepo(), run.getContinuePrNumber(), pat);
+                if (comments != null && !comments.isBlank()) {
+                    fullRequest = fullRequest + "\n\n--- PR REVIEW COMMENTS (address these) ---\n"
+                            + comments + "\n--- END PR REVIEW COMMENTS ---\n";
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch PR review comments for exec {}: {}",
+                        run.getId(), e.getMessage());
+            }
+        }
+
         ExecutionSolutionRepo mapping = solution.getRepoMappings() == null
                 || solution.getRepoMappings().isEmpty()
-                ? null : solution.getRepoMappings().get(0);
+                ? null : solution.getRepoMappings().iterator().next();
         UUID repoId = mapping == null ? null : mapping.getRepoId();
         String repoUrl = null;
         if (repoId != null) {
@@ -141,13 +161,15 @@ public class SolutionExecutionService {
                 fullRequest, "EXECUTION_VIEW", repoUrl, repoUrl != null ? "EXISTING" : "NEW",
                 githubPat, null, true, true, null, run.getAiProvider(),
                 run.getCreatedBy(), run.getOrgId(), run.getProjectId(), "PRODUCTION",
-                repoId == null ? List.of() : List.of(repoId), null);
+                repoId == null ? List.of() : List.of(repoId), null, false,
+                run.getBranch());
         return pipelineRun.getRunId();
     }
 
     /** Blocks (on a virtual thread) until the V2 run reaches a terminal status,
-     *  or returns {@code null} on timeout. */
-    private String pollUntilTerminal(String pipelineRunId) {
+     *  or returns {@code null} on timeout. Short-circuits with CANCELLED when
+     *  the parent ExecutionRun is aborted by the user. */
+    private String pollUntilTerminal(String pipelineRunId, String executionRunId) {
         long deadline = System.currentTimeMillis() + POLL_TIMEOUT_MS;
         while (System.currentTimeMillis() < deadline) {
             try {
@@ -155,6 +177,19 @@ public class SolutionExecutionService {
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 return null;
+            }
+            // Bail out if the user hit Abort — the ExecutionRun status flips
+            // to ABORTED which V2RunOrchestrator.cancel already signalled, but
+            // we stop waiting here so the solution records CANCELLED promptly.
+            if (executionRunId != null) {
+                String execStatus = runRepo.findById(executionRunId)
+                        .map(ExecutionRun::getStatus).orElse(null);
+                if (execStatus != null) {
+                    String up = execStatus.toUpperCase();
+                    if ("ABORTED".equals(up) || "CANCELLED".equals(up)) {
+                        return "CANCELLED";
+                    }
+                }
             }
             PipelineRun run = pipelineRunRepo.findById(pipelineRunId).orElse(null);
             if (run == null) continue;
@@ -185,6 +220,11 @@ public class SolutionExecutionService {
             });
         }
         solutionRepo.save(solution);
+
+        // v2.5.7 UX-fix: bubble solution-level tokens + cost up to the ExecutionRun
+        // so dashboards and run cards show accurate aggregates. Without this, the
+        // ExecutionRun totals stay at 0 even when solutions burned millions of tokens.
+        accumulateExecutionRunTotals(run, solution);
 
         // Write handover contracts to every direct dependent solution.
         List<ExecutionSolution> dependents = solutionRepo
@@ -227,17 +267,35 @@ public class SolutionExecutionService {
 
     public void handleFailure(ExecutionRun run, ExecutionSolution solution,
                               String phase, String reason) {
+        // Re-read the run so a concurrent abort (ABORTED/CANCELLED) isn't
+        // overwritten with PAUSED. Without this, aborting a running solution
+        // flips the ExecutionRun back to PAUSED because handleFailure fires
+        // AFTER abortExecution's setStatus("ABORTED").
+        ExecutionRun fresh = runRepo.findById(run.getId()).orElse(run);
+        String currentStatus = fresh.getStatus() == null ? "" : fresh.getStatus().toUpperCase();
+        boolean alreadyTerminal = "ABORTED".equals(currentStatus)
+                || "CANCELLED".equals(currentStatus)
+                || "COMPLETE".equals(currentStatus)
+                || "FAILED".equals(currentStatus);
+
         solution.setStatus("FAILED");
         solution.setFailurePhase(phase);
         solution.setFailureReason(reason);
         solution.setCompletedAt(Instant.now());
         solutionRepo.save(solution);
 
+        if (alreadyTerminal) {
+            log.info("handleFailure skipping PAUSED flip — exec {} already {}",
+                    run.getId(), currentStatus);
+            emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_FAILED, solution.getId());
+            return;
+        }
+
         jiraSync.updateTicket(run, solution,
                 "Solution failed (" + phase + "): " + reason, "Blocked");
 
-        run.setStatus("PAUSED");
-        runRepo.save(run);
+        fresh.setStatus("PAUSED");
+        runRepo.save(fresh);
         emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_FAILED, solution.getId());
         emit(run.getId(), ExecutionEventTypes.EXEC_PAUSED_FOR_DECISION, solution.getId());
     }
@@ -326,6 +384,37 @@ public class SolutionExecutionService {
             });
         }
         solutionRunRepo.save(attempt);
+    }
+
+    /**
+     * v2.5.7 UX-fix — aggregate a completing solution's tokens + cost into the
+     * parent ExecutionRun's totals. Re-reads the run row to avoid stomping on
+     * concurrent solution completions (parallel layers). Runs in its own tiny
+     * transaction so the totals are visible even if the caller crashes later.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    protected void accumulateExecutionRunTotals(ExecutionRun run, ExecutionSolution solution) {
+        try {
+            long solutionTokens = solution.getActualTokens() == null ? 0L : solution.getActualTokens();
+            java.math.BigDecimal solutionCost = solution.getCostUsd() == null
+                    ? java.math.BigDecimal.ZERO : solution.getCostUsd();
+            if (solutionTokens == 0L && solutionCost.signum() == 0) return;
+
+            ExecutionRun fresh = runRepo.findById(run.getId()).orElse(null);
+            if (fresh == null) return;
+            long prevTokens = fresh.getTotalActualTokens() == null ? 0L : fresh.getTotalActualTokens();
+            java.math.BigDecimal prevCost = fresh.getTotalCostUsd() == null
+                    ? java.math.BigDecimal.ZERO : fresh.getTotalCostUsd();
+            fresh.setTotalActualTokens(prevTokens + solutionTokens);
+            fresh.setTotalCostUsd(prevCost.add(solutionCost));
+            runRepo.save(fresh);
+            log.info("ExecutionRun {} totals bumped: tokens +{} → {}, cost +{} → {}",
+                    run.getId(), solutionTokens, fresh.getTotalActualTokens(),
+                    solutionCost, fresh.getTotalCostUsd());
+        } catch (Exception e) {
+            log.warn("Failed to accumulate totals for exec {} solution {}: {}",
+                    run.getId(), solution.getId(), e.getMessage());
+        }
     }
 
     private String shortMsg(Throwable e) {

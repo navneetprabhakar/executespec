@@ -38,6 +38,21 @@ public class PostMergeCascadeService {
     private final PipelineRunRepository pipelineRunRepo;
     private final ProjectRepoLinkRepository linkRepo;
     private final ProjectRepoRepository repoRepo;
+    private final org.springframework.data.redis.core.StringRedisTemplate redis;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    /**
+     * Transient marker so the project dashboard can render a "Continue building
+     * on the merged code" banner when the user next lands there. Polled by
+     * {@code GET /api/projects/{id}/post-merge-bar}; lives 10 min.
+     */
+    public record PostMergeBar(
+            String repoFullName, Integer prNumber, String mergedAt) {}
+
+    static final String POST_MERGE_KEY_PREFIX = "project:post-merge:";
+    static final java.time.Duration POST_MERGE_TTL = java.time.Duration.ofMinutes(10);
+    /** Max banners kept in the Redis list before older entries are trimmed away. */
+    static final int POST_MERGE_MAX_BANNERS = 3;
 
     public void onMerged(PullRequestRecord record) {
         if (record == null) return;
@@ -62,6 +77,57 @@ public class PostMergeCascadeService {
             notifyOwner(record, projectId);
         } catch (Exception e) {
             log.warn("PostMergeCascade: notification failed for {}: {}", projectId, e.getMessage());
+        }
+        try {
+            writePostMergeBar(record, projectId);
+        } catch (Exception e) {
+            log.warn("PostMergeCascade: bar write failed for {}: {}", projectId, e.getMessage());
+        }
+    }
+
+    /**
+     * Push a PostMergeBar entry onto the Redis list so the dashboard can render
+     * a "Continue building" banner next time the user lands on it. The list is
+     * capped at {@value #POST_MERGE_MAX_BANNERS} — rapid-fire merges get
+     * stacked up to that limit; older entries are trimmed. TTL refreshed on
+     * every push so the window slides with activity.
+     */
+    private void writePostMergeBar(PullRequestRecord record, String projectId) throws Exception {
+        String key = POST_MERGE_KEY_PREFIX + projectId;
+        String mergedAt = record.getMergedAt() == null ? null : record.getMergedAt().toString();
+        PostMergeBar bar = new PostMergeBar(record.getRepoFullName(), record.getPrNumber(), mergedAt);
+        String payload = objectMapper.writeValueAsString(bar);
+        redis.opsForList().leftPush(key, payload);
+        redis.opsForList().trim(key, 0, POST_MERGE_MAX_BANNERS - 1);
+        redis.expire(key, POST_MERGE_TTL);
+    }
+
+    /** Read all live banner entries, newest first. Returns an empty list when
+     *  no marker is active. The TTL handles cleanup; we intentionally do NOT
+     *  consume on read so reloads within the window keep showing the banner. */
+    public List<PostMergeBar> readPostMergeBars(String projectId) {
+        try {
+            List<String> cached = redis.opsForList()
+                    .range(POST_MERGE_KEY_PREFIX + projectId, 0, -1);
+            if (cached == null || cached.isEmpty()) return List.of();
+            List<PostMergeBar> out = new java.util.ArrayList<>(cached.size());
+            for (String s : cached) {
+                try { out.add(objectMapper.readValue(s, PostMergeBar.class)); }
+                catch (Exception ignore) {}
+            }
+            return out;
+        } catch (Exception e) {
+            log.debug("readPostMergeBars failed for {}: {}", projectId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Dismiss every banner for a project — called when the user clicks the X. */
+    public void dismissPostMergeBars(String projectId) {
+        try {
+            redis.delete(POST_MERGE_KEY_PREFIX + projectId);
+        } catch (Exception e) {
+            log.debug("dismissPostMergeBars failed for {}: {}", projectId, e.getMessage());
         }
     }
 

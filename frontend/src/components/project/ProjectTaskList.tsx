@@ -47,13 +47,13 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
   };
 
   if (!tasks || tasks.length === 0) {
-    return <div className="text-[11px] text-muted">No runs yet.</div>;
+    return <div className="text-xs text-muted">No runs yet.</div>;
   }
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
-      <table className="w-full text-[11px]">
+      <table className="w-full text-xs">
         <thead className="bg-[var(--gray-200)]">
-          <tr className="text-[10px] font-medium text-muted">
+          <tr className="text-[11px] font-medium text-muted">
             <th className="w-6" />
             <th className="text-left px-2.5 py-1.5">Run</th>
             <th className="text-left px-2.5 py-1.5">Status</th>
@@ -90,8 +90,8 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
                 {expanded && (
                   <tr className="border-t border-[var(--border-default)] bg-[var(--gray-200)]">
                     <td colSpan={5} className="px-3 py-3">
-                      {detail === 'loading' && <span className="text-[11px] text-muted">Loading run…</span>}
-                      {detail === 'error' && <span className="text-[11px] text-accent-red">Failed to load run.</span>}
+                      {detail === 'loading' && <span className="text-xs text-muted">Loading run…</span>}
+                      {detail === 'error' && <span className="text-xs text-accent-red">Failed to load run.</span>}
                       {detail && detail !== 'loading' && detail !== 'error' && (
                         <InlineRunDetail run={detail} onRefresh={() => loadRun(t.runId)} />
                       )}

@@ -73,14 +73,14 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
     : undefined;
 
   return (
-    <div className="space-y-3 text-[11px]">
+    <div className="space-y-3 text-xs">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="text-[13px] font-medium text-primary">Architecture document</h2>
           {staleness?.stale && (
             <span
-              className="text-[10px] uppercase tracking-wide bg-accent-amber/10 text-accent-amber px-1.5 py-0.5 rounded-sm"
+              className="text-[11px] uppercase tracking-wide bg-accent-amber/10 text-accent-amber px-1.5 py-0.5 rounded-sm"
               title={staleness.repos
                 .filter((r) => r.stale)
                 .map((r) => r.repoFullName)
@@ -91,7 +91,7 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
           )}
           {versions.length > 0 && (
             <select
-              className="text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-0.5 focus:outline-none focus:border-accent-blue"
+              className="text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-0.5 focus:outline-none focus:border-accent-blue"
               value={selectedVersion ?? ''}
               onChange={(e) => setSelectedVersion(Number(e.target.value))}
             >
@@ -106,7 +106,7 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
         {shown && previous && (
           <button
             onClick={() => setDiffOpen((o) => !o)}
-            className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40"
+            className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40"
             title={`Compare v${shown.version} against v${previous.version}`}
           >
             {diffOpen ? 'Hide diff' : `Diff vs v${previous.version}`}
@@ -117,14 +117,14 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
           placeholder="branch (default)"
           value={branchOverride}
           onChange={(e) => setBranchOverride(e.target.value)}
-          className="w-32 text-[10px] font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-1.5 py-0.5 focus:outline-none focus:border-accent-blue"
+          className="w-32 text-[11px] font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-1.5 py-0.5 focus:outline-none focus:border-accent-blue"
           title="Optional branch override (applies to all linked repos). Leave empty for each repo's default."
         />
         <button
           onClick={generate}
           disabled={busy}
           className={cn(
-            'inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-sm border transition-colors',
+            'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border transition-colors',
             busy
               ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
               : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
@@ -136,18 +136,22 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
         </button>
       </div>
 
-      {error && <div className="text-[11px] text-accent-red">{error}</div>}
-      {loading && <div className="text-[11px] text-muted">Loading…</div>}
+      {error && <div className="text-xs text-accent-red">{error}</div>}
+      {loading && <div className="text-xs text-muted">Loading…</div>}
 
       {!loading && !shown && (
-        <div className="text-[11px] text-muted border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)]">
+        <div className="text-xs text-muted border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)]">
           No architecture document yet. Link some repos under the Repos tab and click Generate.
         </div>
       )}
 
       {shown && diffOpen && previous && (
-        <ArchDiffBlock oldText={previous.content} newText={shown.content}
-                      oldV={previous.version} newV={shown.version} />
+        <>
+          <ArchDiffBlock oldText={previous.content} newText={shown.content}
+                        oldV={previous.version} newV={shown.version} />
+          <ArchSourceChanges projectId={projectId}
+                            fromVersion={previous.version} toVersion={shown.version} />
+        </>
       )}
 
       {shown && !diffOpen && (
@@ -155,9 +159,9 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
           {/* Doc body */}
           <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 prose prose-sm prose-invert max-w-none
                           prose-headings:text-primary prose-headings:font-medium
-                          prose-h1:text-[13px] prose-h2:text-[12px] prose-h3:text-[12px]
-                          prose-p:text-secondary prose-p:text-[11px]
-                          prose-li:text-secondary prose-li:text-[11px]
+                          prose-h1:text-[13px] prose-h2:text-sm prose-h3:text-sm
+                          prose-p:text-secondary prose-p:text-xs
+                          prose-li:text-secondary prose-li:text-xs
                           prose-strong:text-primary
                           prose-code:text-accent-blue prose-code:bg-[var(--gray-200)] prose-code:px-1 prose-code:rounded-sm prose-code:before:content-none prose-code:after:content-none
                           prose-a:text-accent-blue prose-a:no-underline hover:prose-a:underline
@@ -168,11 +172,11 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
           {/* Annotations */}
           <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[11px] font-medium text-primary">Annotations</h3>
+              <h3 className="text-xs font-medium text-primary">Annotations</h3>
               {!editingAnnotation && (
                 <button
                   onClick={() => setEditingAnnotation(true)}
-                  className="text-[10px] text-accent-blue hover:underline"
+                  className="text-[11px] text-accent-blue hover:underline"
                 >
                   edit
                 </button>
@@ -185,7 +189,7 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
                   onChange={(e) => setAnnotationDraft(e.target.value)}
                   rows={5}
                   placeholder="Cross-cutting context the planner should know about (e.g. 'auth handled by external Keycloak')."
-                  className="w-full text-[11px] font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted px-2 py-1.5 focus:outline-none focus:border-accent-blue resize-y"
+                  className="w-full text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted px-2 py-1.5 focus:outline-none focus:border-accent-blue resize-y"
                 />
                 <div className="flex justify-end gap-2">
                   <button
@@ -193,25 +197,25 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
                       setEditingAnnotation(false);
                       setAnnotationDraft(shown.userAnnotations ?? '');
                     }}
-                    className="text-[11px] px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
+                    className="text-xs px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={saveAnnotation}
                     disabled={busy}
-                    className="text-[11px] px-2.5 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+                    className="text-xs px-2.5 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
                   >
                     Save
                   </button>
                 </div>
               </div>
             ) : shown.userAnnotations ? (
-              <pre className="text-[11px] whitespace-pre-wrap font-mono text-secondary">
+              <pre className="text-xs whitespace-pre-wrap font-mono text-secondary">
                 {shown.userAnnotations}
               </pre>
             ) : (
-              <p className="text-[11px] text-muted">No annotations yet.</p>
+              <p className="text-xs text-muted">No annotations yet.</p>
             )}
           </div>
         </>
@@ -228,12 +232,12 @@ function ArchDiffBlock({ oldText, newText, oldV, newV }:
   const dels = rows.filter((r) => r.kind === 'del').length;
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
-      <div className="px-3 py-1.5 bg-[var(--gray-200)] border-b border-[var(--border-default)] text-[10px] font-mono flex items-center gap-3">
+      <div className="px-3 py-1.5 bg-[var(--gray-200)] border-b border-[var(--border-default)] text-[11px] font-mono flex items-center gap-3">
         <span className="text-secondary">v{oldV} → v{newV}</span>
         <span className="text-emerald-400">+{adds}</span>
         <span className="text-accent-red">-{dels}</span>
       </div>
-      <pre className="text-[11px] font-mono leading-relaxed overflow-x-auto m-0">
+      <pre className="text-xs font-mono leading-relaxed overflow-x-auto m-0">
         {rows.map((r, i) => (
           <div
             key={i}
@@ -274,4 +278,98 @@ function diffLines(a: string[], b: string[]): DiffRow[] {
   while (i < n) out.push({ kind: 'del', text: a[i++] });
   while (j < m) out.push({ kind: 'add', text: b[j++] });
   return out;
+}
+
+/**
+ * v2.5.5 (UX-4.2) — source-file changes section that sits below the text diff.
+ * Hits the diff endpoint which calls GitHub's compare API against each repo's
+ * SHAs captured at the two architecture-doc versions. Empty/silent when the
+ * call fails (private repo without PAT, SHA missing, etc.) so it never breaks
+ * the primary text-diff view.
+ */
+function ArchSourceChanges({ projectId, fromVersion, toVersion }:
+    { projectId: string; fromVersion: number; toVersion: number }) {
+  const [report, setReport] = useState<import('@/lib/api').ArchDiffReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    api.getArchitectureDiff(projectId, fromVersion, toVersion)
+      .then((r) => { if (alive) setReport(r); })
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [projectId, fromVersion, toVersion]);
+
+  if (loading) {
+    return (
+      <div className="text-xs text-muted rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2">
+        Loading source file changes…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="text-[11px] text-muted rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2">
+        Source changes unavailable ({error}).
+      </div>
+    );
+  }
+  if (!report || report.totalFiles === 0) {
+    return (
+      <div className="text-[11px] text-muted rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2">
+        No source file changes between v{fromVersion} and v{toVersion}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2 space-y-2">
+      <div className="text-[11px] uppercase tracking-wide text-muted">
+        Source file changes · {report.totalFiles} file{report.totalFiles === 1 ? '' : 's'}
+      </div>
+      {report.perRepo.map((rp) => {
+        const added = rp.files.filter((f) => f.status === 'added');
+        const modified = rp.files.filter((f) => f.status === 'modified');
+        const removed = rp.files.filter((f) => f.status === 'removed');
+        const renamed = rp.files.filter((f) => f.status === 'renamed');
+        return (
+          <div key={rp.repoFullName} className="space-y-1">
+            <div className="text-xs font-mono text-primary">{rp.repoFullName}</div>
+            <FileGroup label="Added" files={added} tone="text-emerald-400" />
+            <FileGroup label="Modified" files={modified} tone="text-accent-amber" />
+            <FileGroup label="Removed" files={removed} tone="text-accent-red" />
+            <FileGroup label="Renamed" files={renamed} tone="text-accent-blue" />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FileGroup({ label, files, tone }:
+    { label: string; files: { filename: string; additions: number; deletions: number }[]; tone: string }) {
+  if (files.length === 0) return null;
+  return (
+    <div>
+      <div className={`text-[11px] ${tone}`}>{label} ({files.length})</div>
+      <ul className="pl-2 space-y-0.5">
+        {files.map((f) => (
+          <li key={f.filename} className="text-[11px] font-mono text-muted flex items-center gap-2">
+            <span className="truncate flex-1">{f.filename}</span>
+            {(f.additions > 0 || f.deletions > 0) && (
+              <span className="shrink-0">
+                <span className="text-emerald-400">+{f.additions}</span>
+                {' '}
+                <span className="text-accent-red">-{f.deletions}</span>
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }

@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useExecutionStore } from '@/stores/useExecutionStore';
 import { executionApi } from '@/lib/execution-api';
-import { getProject } from '@/lib/api';
-import type { NewRepoSpec, Scaffold } from '@/types/execution';
+import { getProject, estimateRun, type LaunchEstimate } from '@/lib/api';
+import TemplatePicker from './TemplatePicker';
+import StalenessWarning from './StalenessWarning';
+import type { NewRepoSpec, Scaffold, ContinueOnPrConfig } from '@/types/execution';
 
 const PROVIDERS = [
   { key: '',          label: 'Use project default' },
@@ -16,11 +18,13 @@ const PROVIDERS = [
 interface Props {
   projectId: string;
   onSubmitted: (executionId: string) => void;
+  /** v2.5.7 — pre-fill for the "Address review" flow. */
+  continueOnPr?: ContinueOnPrConfig;
 }
 
 const DEFAULT_TECH = 'node-backend';
 
-export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
+export default function ExecutionSetup({ projectId, onSubmitted, continueOnPr }: Props) {
   const { repos, fetchRepos } = useProjectStore();
   const { createExecution, loading, error } = useExecutionStore();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -28,12 +32,42 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
   const [jiraEnabled, setJiraEnabled] = useState(false);
   const [confluenceUrl, setConfluenceUrl] = useState('');
   const [figmaUrl, setFigmaUrl] = useState('');
+  const [branch, setBranch] = useState('');
   const [providerOverride, setProviderOverride] = useState('');
   const [projectDefaultProvider, setProjectDefaultProvider] = useState<string | null>(null);
+  const [projectGithubOwner, setProjectGithubOwner] = useState<string>('');
   const [newRepos, setNewRepos] = useState<NewRepoSpec[]>([]);
   const [scaffolds, setScaffolds] = useState<Scaffold[]>([]);
   const [ownerChecks, setOwnerChecks] = useState<Record<number, string>>({});
   const [showConfirm, setShowConfirm] = useState(false);
+  const [estimate, setEstimate] = useState<LaunchEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
+
+  // Pre-fill from continue-on-PR config (Address Review flow).
+  useEffect(() => {
+    if (!continueOnPr) return;
+    setRequirement(`Address PR review comments for #${continueOnPr.prNumber}:\n\n${continueOnPr.reviewComments}`);
+    setBranch(continueOnPr.headBranch);
+    // Auto-select the repo that owns the PR.
+    const match = repos.find((r) => r.repo?.githubRepoFullName === continueOnPr.repoFullName);
+    if (match) setSelected(new Set([match.repoId]));
+  }, [continueOnPr, repos]);
+
+  // Debounced heuristic estimate — no LLM call; reads DB project history only.
+  useEffect(() => {
+    if (requirement.trim().length < 50) {
+      setEstimate(null);
+      setEstimating(false);
+      return;
+    }
+    setEstimating(true);
+    const handle = setTimeout(() => {
+      estimateRun(projectId, requirement.trim())
+        .then((r) => { setEstimate(r); setEstimating(false); })
+        .catch(() => { setEstimate(null); setEstimating(false); });
+    }, 1500);
+    return () => clearTimeout(handle);
+  }, [projectId, requirement]);
 
   useEffect(() => { fetchRepos(projectId); }, [projectId, fetchRepos]);
   useEffect(() => {
@@ -41,7 +75,10 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
   }, []);
   useEffect(() => {
     getProject(projectId)
-        .then((p) => setProjectDefaultProvider(p.aiProvider ?? null))
+        .then((p) => {
+          setProjectDefaultProvider(p.aiProvider ?? null);
+          setProjectGithubOwner(p.githubOwner ?? '');
+        })
         .catch(() => setProjectDefaultProvider(null));
   }, [projectId]);
 
@@ -54,7 +91,7 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
   const addNewRepo = () => {
     setNewRepos([...newRepos, {
       name: '', description: '', techHint: DEFAULT_TECH,
-      githubOwner: '', visibility: 'private',
+      githubOwner: projectGithubOwner, visibility: 'private',
     }]);
   };
   const patchNewRepo = (i: number, patch: Partial<NewRepoSpec>) => {
@@ -108,6 +145,12 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
       confluenceUrl: confluenceUrl.trim() || undefined,
       figmaUrl: figmaUrl.trim() || undefined,
       aiProvider: providerOverride || undefined,
+      branch: branch.trim() || undefined,
+      ...(continueOnPr ? {
+        sourceExecutionId: continueOnPr.sourceExecutionId,
+        continuePrRepoFullName: continueOnPr.repoFullName,
+        continuePrNumber: continueOnPr.prNumber,
+      } : {}),
     });
     onSubmitted(id);
   };
@@ -116,10 +159,10 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
     <div className="space-y-4">
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[12px] font-medium text-primary">Select existing repos</h3>
+          <h3 className="text-sm font-medium text-primary">Select existing repos</h3>
           <Link
             to={`/projects/${projectId}/dashboard`}
-            className="text-[11px] text-accent-blue hover:underline"
+            className="text-xs text-accent-blue hover:underline"
           >
             + Link repo
           </Link>
@@ -132,35 +175,40 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
             const name = r.repo?.githubRepoFullName ?? r.githubRepoFullName ?? r.repoName ?? rid;
             const scope = r.repo?.scope;
             return (
-              <label key={rid} className="flex items-center gap-2 text-[12px]">
+              <label key={rid} className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={selected.has(rid)} onChange={() => toggle(rid)} />
                 <span className="font-mono">{name}</span>
                 {scope && (
-                  <span className="text-[10px] uppercase tracking-wide text-muted">{scope}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-muted">{scope}</span>
                 )}
               </label>
             );
           })}
           {(!repos || repos.length === 0) && (
-            <div className="text-[11px] text-muted">
+            <div className="text-xs text-muted">
               No repos linked to this project yet. Use "+ Link repo" above (opens the Repos tab)
               or "+ Create new repo" below to scaffold a fresh one.
             </div>
           )}
         </div>
+        {selected.size > 0 && (
+          <div className="mt-2">
+            <StalenessWarning projectId={projectId} selectedRepoIds={Array.from(selected)} />
+          </div>
+        )}
       </div>
 
       <div>
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-[12px] font-medium text-primary">Create new repos</h3>
+          <h3 className="text-sm font-medium text-primary">Create new repos</h3>
           <button
             onClick={addNewRepo}
-            className="text-[11px] text-accent-blue hover:underline"
+            className="text-xs text-accent-blue hover:underline"
           >+ Create new repo</button>
         </div>
         <div className="space-y-2">
           {newRepos.map((spec, i) => (
-            <div key={i} className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2.5 text-[11px] space-y-1.5">
+            <div key={i} className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-2.5 text-xs space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-muted">New #{i + 1}</span>
                 <button className="ml-auto text-accent-red hover:underline"
@@ -206,8 +254,8 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
                   className="flex-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 font-mono"
                 />
                 <span className={ownerChecks[i]?.startsWith('✓')
-                    ? 'text-emerald-400 text-[10px]'
-                    : 'text-accent-red text-[10px]'}>
+                    ? 'text-emerald-400 text-[11px]'
+                    : 'text-accent-red text-[11px]'}>
                   {ownerChecks[i] ?? ''}
                 </span>
               </div>
@@ -217,88 +265,126 @@ export default function ExecutionSetup({ projectId, onSubmitted }: Props) {
       </div>
 
       <div>
-        <h3 className="text-[12px] font-medium text-primary mb-2">Requirement</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-primary">Requirement</h3>
+          <TemplatePicker
+            projectId={projectId}
+            currentRequirement={requirement}
+            onPick={(text) => setRequirement(text)}
+          />
+        </div>
         <textarea
           value={requirement}
           onChange={(e) => setRequirement(e.target.value)}
           rows={8}
-          className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px] font-mono"
+          className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm font-mono"
           placeholder="Describe the cross-repo change in plain English…"
         />
+        {estimating && !estimate && (
+          <div className="mt-1 inline-flex items-center gap-2 text-[11px] text-muted bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-2 py-0.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted animate-pulse" />
+            <span className="font-mono">estimating…</span>
+          </div>
+        )}
+        {estimate && !estimating && (
+          <div className="mt-1 inline-flex items-center gap-2 text-[11px] text-muted bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-2 py-0.5">
+            <span>~{estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh} tasks</span>
+            <span>·</span>
+            <span>~${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}</span>
+            <span
+              className="text-[9px]"
+              title="Heuristic from historical run data. Actual cost depends on plan complexity."
+            >
+              ({estimate.basis})
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        <label className="text-[11px] text-secondary space-y-1">
+        <label className="text-xs text-secondary space-y-1">
           <span>Confluence spec URL <span className="text-muted">(optional)</span></span>
           <input
             type="url"
             value={confluenceUrl}
             onChange={(e) => setConfluenceUrl(e.target.value)}
             placeholder="https://your-org.atlassian.net/wiki/…"
-            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px] font-mono"
+            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm font-mono"
           />
         </label>
-        <label className="text-[11px] text-secondary space-y-1">
+        <label className="text-xs text-secondary space-y-1">
           <span>Figma design URL <span className="text-muted">(optional)</span></span>
           <input
             type="url"
             value={figmaUrl}
             onChange={(e) => setFigmaUrl(e.target.value)}
             placeholder="https://www.figma.com/file/…"
-            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px] font-mono"
+            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm font-mono"
           />
         </label>
       </div>
 
-      <label className="text-[11px] text-secondary space-y-1 block max-w-xs">
-        <span>AI provider</span>
-        <select
-          value={providerOverride}
-          onChange={(e) => setProviderOverride(e.target.value)}
-          className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-[12px]"
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.key === '' && projectDefaultProvider
-                  ? `Use project default (${projectDefaultProvider})`
-                  : p.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl">
+        <label className="text-xs text-secondary space-y-1 block">
+          <span>AI provider</span>
+          <select
+            value={providerOverride}
+            onChange={(e) => setProviderOverride(e.target.value)}
+            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm"
+          >
+            {PROVIDERS.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.key === '' && projectDefaultProvider
+                    ? `Use project default (${projectDefaultProvider})`
+                    : p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-secondary space-y-1 block">
+          <span>Branch <span className="text-muted">(optional — default: repo's main/default)</span></span>
+          <input
+            type="text"
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            placeholder="main"
+            className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm font-mono"
+          />
+        </label>
+      </div>
 
-      <label className="flex items-center gap-2 text-[12px]">
+      <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={jiraEnabled} onChange={(e) => setJiraEnabled(e.target.checked)} />
         <span>Sync this execution with JIRA (requires org-level JIRA integration + project key)</span>
       </label>
 
-      <div className="text-[11px] text-muted">{modePreview}</div>
-      {error && <div className="text-[11px] text-accent-red">{error}</div>}
+      <div className="text-xs text-muted">{modePreview}</div>
+      {error && <div className="text-xs text-accent-red">{error}</div>}
 
       <button
         disabled={!canSubmit}
         onClick={submit}
-        className="rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue px-3 py-1.5 text-[12px] disabled:opacity-40"
+        className="rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue px-3 py-1.5 text-sm disabled:opacity-40"
       >
         Launch
       </button>
 
       {showConfirm && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
-          <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md p-4 w-full max-w-lg space-y-3 text-[12px]">
+          <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md p-4 w-full max-w-lg space-y-3 text-sm">
             <h3 className="text-[13px] font-medium text-primary">Confirm Launch</h3>
             <div>{modePreview}</div>
             {newRepos.length > 0 && (
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted">Will create on GitHub:</div>
-                <ul className="list-disc ml-5 text-[11px] font-mono">
+                <div className="text-xs uppercase tracking-wide text-muted">Will create on GitHub:</div>
+                <ul className="list-disc ml-5 text-xs font-mono">
                   {newRepos.map((r, i) => (
                     <li key={i}>{r.githubOwner}/{r.name} · {r.visibility} · {r.techHint}</li>
                   ))}
                 </ul>
               </div>
             )}
-            <div className="text-[11px] text-muted">
+            <div className="text-xs text-muted">
               Estimated cost will be computed by the planner after decomposition.
               You can still abort before execution.
             </div>

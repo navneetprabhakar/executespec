@@ -68,11 +68,21 @@ public class ReviewScoringService {
             Integer performance,
             Integer designCompliance) {}
 
-    public Scores score(PipelineRun run, ReviewReportV2 review, AccuracyReport accuracy, String figmaUrl) {
+    /**
+     * v2.5.10 overload: when {@code verifiedScore} is non-null, the 6
+     * dimensions anchor on it (a deterministic build+tests+verdict signal)
+     * instead of the LLM-generated {@code accuracy.specAdherenceScore}.
+     * Caller (ValidationReportService) gates the decision on the
+     * {@code scoring.v2-verified} feature flag.
+     */
+    public Scores score(PipelineRun run, ReviewReportV2 review, AccuracyReport accuracy,
+                        Integer verifiedScore, String figmaUrl) {
         List<ReviewIssue> issues = (review != null && review.getIssues() != null)
                 ? review.getIssues() : List.of();
 
-        int anchor = resolveAnchor(accuracy, issues);
+        int anchor = (verifiedScore != null)
+                ? clamp(verifiedScore)
+                : resolveAnchor(accuracy, issues);
 
         int codeIssuePenalty = 0;
         int secIssuePenalty = 0;
