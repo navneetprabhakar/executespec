@@ -24,22 +24,22 @@ export default function AssessmentPanel({ raw }: Props) {
   if (!assessment) return null;
 
   return (
-    <div className="border rounded-lg bg-white shadow-sm p-4 space-y-3 mb-3">
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2.5 mb-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Feature assessment</h3>
+        <h3 className="text-[12px] font-medium text-primary">Feature assessment</h3>
         <ComplexityChip complexity={assessment.complexity} />
       </div>
 
       {assessment.summary && (
-        <p className="text-sm text-gray-700">{assessment.summary}</p>
+        <p className="text-[11px] text-secondary">{assessment.summary}</p>
       )}
 
       {assessment.repoFullNames && assessment.repoFullNames.length > 0 && (
         <div>
-          <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Repos in scope</h4>
+          <h4 className="text-[10px] font-medium text-muted uppercase mb-1">Repos in scope</h4>
           <div className="flex flex-wrap gap-1">
             {assessment.repoFullNames.map((r) => (
-              <span key={r} className="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded">{r}</span>
+              <span key={r} className="text-[10px] font-mono bg-[var(--gray-200)] text-secondary px-1.5 py-0.5 rounded-sm">{r}</span>
             ))}
           </div>
         </div>
@@ -58,12 +58,12 @@ export default function AssessmentPanel({ raw }: Props) {
 
 function ComplexityChip({ complexity }: { complexity: string }) {
   const colors: Record<string, string> = {
-    S: 'bg-green-100 text-green-700',
-    M: 'bg-yellow-100 text-yellow-700',
-    L: 'bg-red-100 text-red-700',
+    S: 'bg-emerald-500/10 text-emerald-400',
+    M: 'bg-accent-amber/10 text-accent-amber',
+    L: 'bg-accent-red/10 text-accent-red',
   };
   return (
-    <span className={`text-xs px-2 py-0.5 rounded ${colors[complexity] ?? 'bg-gray-100 text-gray-700'}`}>
+    <span className={`text-[10px] px-1.5 py-0.5 rounded-sm ${colors[complexity] ?? 'bg-[var(--gray-200)] text-muted'}`}>
       Complexity {complexity}
     </span>
   );
@@ -72,10 +72,10 @@ function ComplexityChip({ complexity }: { complexity: string }) {
 function Section({ title, items, accent }: { title: string; items: string[]; accent?: 'amber' }) {
   return (
     <div>
-      <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">{title}</h4>
-      <ul className="space-y-0.5 text-sm">
+      <h4 className="text-[10px] font-medium text-muted uppercase mb-1">{title}</h4>
+      <ul className="space-y-0.5 text-[11px]">
         {items.map((it, i) => (
-          <li key={i} className={accent === 'amber' ? 'text-amber-700' : 'text-gray-700'}>
+          <li key={i} className={accent === 'amber' ? 'text-accent-amber' : 'text-secondary'}>
             • {it}
           </li>
         ))}

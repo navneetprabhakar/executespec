@@ -1,9 +1,14 @@
 package com.navneet.executespec.project.pr;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.repo.GitHubRepoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -19,6 +24,8 @@ import java.util.List;
 public class PullRequestController {
 
     private final PullRequestRecordService service;
+    private final GitHubRepoService gitHub;
+    private final PrRefreshService refreshService;
 
     public record PrSummary(
             String repoFullName,
@@ -48,5 +55,33 @@ public class PullRequestController {
                 .map(PrSummary::from)
                 .toList();
         return ResponseEntity.ok(out);
+    }
+
+    /**
+     * Inline PR snapshot (title + body + diff preview) for the project dashboard
+     * to render expanded PR cards without making the user leave for GitHub.
+     * Uses the caller's stored GitHub PAT.
+     */
+    /**
+     * Refresh every non-terminal PR opened by this project against GitHub.
+     * Used by the dashboard "Refresh" button when webhooks aren't wired up.
+     * Triggers the post-merge cascade (codemap regen + notification) for any
+     * OPEN → MERGED transition.
+     */
+    @PostMapping("/api/projects/{projectId}/prs/refresh")
+    public ResponseEntity<PrRefreshService.RefreshResult> refreshProjectPrs(@PathVariable String projectId) {
+        return ResponseEntity.ok(refreshService.refreshProject(projectId));
+    }
+
+    @GetMapping("/api/prs/snapshot")
+    public ResponseEntity<GitHubRepoService.PullRequestSnapshot> snapshot(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestParam("repo") String repoFullName,
+            @RequestParam("number") int prNumber,
+            @RequestParam(value = "maxChars", defaultValue = "4000") int maxChars) {
+        String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+        var snap = gitHub.getPullRequestSnapshot(repoFullName, prNumber, pat, maxChars);
+        if (snap == null) return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(snap);
     }
 }

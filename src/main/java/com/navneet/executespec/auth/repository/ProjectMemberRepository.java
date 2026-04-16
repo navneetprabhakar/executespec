@@ -22,4 +22,6 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, St
 
     @Query("SELECT pm.projectId FROM ProjectMember pm WHERE pm.userId = :userId")
     List<String> findProjectIdsByUserId(@Param("userId") String userId);
+
+    int countByProjectIdAndProjectRole(String projectId, String projectRole);
 }

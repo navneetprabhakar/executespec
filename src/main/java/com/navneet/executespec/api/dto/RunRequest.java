@@ -53,5 +53,12 @@ public record RunRequest(
     List<UUID> selectedRepoIds,
     /** Pilot R7 — optional Figma URL, drives design-compliance scoring. */
     @Size(max = 500, message = "Figma URL must not exceed 500 characters")
-    String figmaUrl
+    String figmaUrl,
+    /**
+     * v2.5.2 (Phase 4.3) — when true, the planner is instructed to declare
+     * test-writing tasks as a leading group with implementation tasks declaring
+     * dependsOn the test tasks. Same plan structure, just different ordering.
+     * Higher accuracy on logic-heavy specs at the cost of more tokens.
+     */
+    Boolean tddMode
 ) {}

@@ -140,6 +140,11 @@ public class Org {
     @Column(name = "jira_api_token")
     private String jiraApiToken;
 
+    /** Default JIRA project key (e.g. "ENG") used by Execution View when a run
+     *  has {@code jira_enabled}. Null = skip JIRA sync even when creds exist. */
+    @Column(name = "jira_project_key")
+    private String jiraProjectKey;
+
     // ── Org-level Confluence credentials ─────────────────────────────────────
 
     @Column(name = "confluence_base_url")

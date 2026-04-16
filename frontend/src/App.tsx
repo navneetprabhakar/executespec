@@ -27,6 +27,8 @@ import OrgProjectsPage from '@/pages/org/OrgProjectsPage';
 
 // Project pages (pilot v3.0)
 import ProjectDashboardPage from '@/pages/project/ProjectDashboardPage';
+import ProjectsListPage from '@/pages/project/ProjectsListPage';
+import ExecutionViewPage from '@/pages/execution/ExecutionViewPage';
 
 // Admin pages
 import AdminPage from '@/pages/admin/AdminPage';
@@ -101,7 +103,10 @@ export default function App() {
           {/* Org pages */}
           <Route path="org/settings" element={<OrgSettingsPage />} />
           <Route path="org/projects" element={<OrgProjectsPage />} />
+          <Route path="projects" element={<ProjectsListPage />} />
           <Route path="projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
+          <Route path="projects/:projectId/executions/new" element={<ExecutionViewPage />} />
+          <Route path="projects/:projectId/executions/:executionId" element={<ExecutionViewPage />} />
 
           {/* Admin */}
           <Route path="admin" element={<AdminPage />} />

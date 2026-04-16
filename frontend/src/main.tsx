@@ -11,9 +11,6 @@ import { initTelemetry } from '@/lib/telemetry';
 // Initialize OTel before rendering — instruments all subsequent fetch() calls
 initTelemetry();
 
-// Disable right-click context menu across entire UI
-document.addEventListener('contextmenu', (e) => e.preventDefault());
-
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

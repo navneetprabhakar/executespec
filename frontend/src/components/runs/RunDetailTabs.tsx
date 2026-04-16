@@ -498,8 +498,22 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
   // STUCK occurs during the WORKING phase — map it there for pipeline step display
   const displayStatus = run.status === 'STUCK' ? 'WORKING' : run.status;
-  const stepIndex = PIPELINE_STEPS.indexOf(displayStatus);
   const totalTokens = (run.totalInputTokens || 0) + (run.totalOutputTokens || 0);
+
+  // v2.5.8 — V2 runs have a simpler phase sequence than V1. The hardcoded
+  // PIPELINE_STEPS (V1: QUEUED → PLANNING → AWAITING_APPROVAL → WORKING →
+  // COMPILING → COMPLETE) always leaves V2 runs looking half-done because V2
+  // skips AWAITING_APPROVAL (in PROTOTYPE mode) and never emits COMPILING.
+  // Render a V2-appropriate 4-step list when we detect a V2 run.
+  const isV2 = run.harnessVersion === 'v2';
+  const effectiveSteps = isV2
+    ? ['QUEUED', 'PLANNING', 'WORKING', 'REVIEWING', 'COMPLETE']
+    : PIPELINE_STEPS;
+  // V2 terminal statuses map onto the last step for display purposes.
+  const v2DisplayStatus = isV2 && ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(displayStatus)
+    ? 'COMPLETE'
+    : displayStatus;
+  const stepIndex = effectiveSteps.indexOf(isV2 ? v2DisplayStatus : displayStatus);
 
   // Compute run duration
   const startMs = run.startedAt ? new Date(run.startedAt).getTime() : 0;
@@ -522,15 +536,15 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         </div>
       )}
 
-      {/* Pipeline timeline */}
+      {/* Pipeline timeline — V1 and V2 have different phase sequences */}
       <div className="space-y-0">
-        {PIPELINE_STEPS.map((step, i) => {
+        {effectiveSteps.map((step, i) => {
           const isDone = i < stepIndex;
-          const isActive = step === displayStatus;
+          const isActive = step === (isV2 ? v2DisplayStatus : displayStatus);
           return (
             <div key={step} className="flex items-start gap-3 relative">
               {/* Connector line */}
-              {i < PIPELINE_STEPS.length - 1 && (
+              {i < effectiveSteps.length - 1 && (
                 <div className={cn(
                   'absolute left-[11px] top-6 w-0.5 h-5 -bottom-1',
                   isDone ? 'bg-accent-green/40' : 'bg-[var(--gray-200)]'
@@ -1643,7 +1657,7 @@ function IDEFileViewer({
 
 // ── Code tab ──────────────────────────────────────────────────────────────────
 
-function CodeTab({
+export function CodeTab({
   runId,
   files,
   filesLoading,

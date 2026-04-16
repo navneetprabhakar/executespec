@@ -1,8 +1,8 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 4.3
-> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 + bug sweep 2026-04-14
-> **App Version**: v2.1.1
+> **Version**: 4.6
+> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15
+> **App Version**: v2.5.0
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
 
 > **⚠️ V2-only as of 2026-04-13.** The V1 harness (`PipelineHarness`, `WorkerAgent`,
@@ -1160,4 +1160,18 @@ Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GC
 
 ---
 
-*This architecture document is maintained alongside the codebase. Last updated: 2026-04-09.*
+*This architecture document is maintained alongside the codebase. Last updated: 2026-04-15.*
+
+## v2.5.0 — Project workspace + RAG (addendum)
+
+- **Per-project workspace** at `workspace/projects/<projectId>/` owned by `ProjectWorkspaceService` (`project/workspace/`). Contains `codemaps/<repo-short-name>.md`, `architecture.md`, `summary.md`, `docs/<filename>`, plus a `.git/` history. Atomic writes via os-level rename + Redis-backed per-project lock (`project:ws-lock:<id>`).
+- **Disk vs DB** — DB stays authoritative (Cloud Run / GCE disk is ephemeral). `ProjectArchitectureService.generate()` writes to both; `ReadFileTool`'s `project:` prefix falls back to DB blobs when the disk cache is missing (`readFromDbFallback`).
+- **Project brief** — `ProjectBriefService.summarise()` makes one LIGHTWEIGHT-tier LLM call per `generate()` to produce 2-4 sentences; `buildBrief()` returns an ~800-token block (summary + arch headings) injected as `{{PROJECT_BRIEF}}` in the planner system prompt.
+- **Pre-execution refresh** — `V2RunOrchestrator` calls `StalenessService.report()` before planning; if any linked repo is stale, `ProjectArchitectureService.generate()` runs synchronously so the planner sees current codemaps. Post-success: staleness cache invalidated.
+- **RAG pipeline** (`project/rag/`) — `DocumentExtractor` (Tika `AutoDetectParser`) → `ChunkingService` (500-token windows, 50-token overlap, code-fence aware) → `EmbeddingService` (Spring AI OpenAI text-embedding-3-small, batch 100) → `ChunkStore` (JDBC `INSERT ... ?::vector` against `project_document_chunk`). `ProjectDocumentService` runs the index loop async (`@Async`).
+- **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `PlannerAgentV2` as `{{REFERENCE_DOCS}}` and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
+- **Architecture diff** — frontend renders an LCS line diff of `architecture.md` vN vs vN-1.
+- **Auto-push** — `project.runs.auto-push` flipped ON via V96/V97. Every successful project-scoped V2 run runs `pushToGitHubIfConfigured()` automatically.
+- **Memory budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8K → 12K. Vector spill-over for snapshots > 12K is on the backlog (see `docs/plans/project-codemap-rag-backlog.md`).
+- **Schema** — V95 (`pgvector` + `project_document` + `project_document_chunk` with `vector(1536)` + ivfflat cosine), V96 + V97 (auto-push flag).
+- **New dependency** — Apache Tika 2.9.2 (`tika-core` + `tika-parsers-standard-package`).

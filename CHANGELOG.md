@@ -5,6 +5,234 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.5.1] — 2026-04-15
+
+Hardening pass after v2.5.0 E2E. One systemic fix (OSIV) replaces a round of whack-a-mole lazy-init patches; several small fixes + UX additions keep the Launch / post-merge loop unblocked.
+
+### Added
+
+- **PR refresh + post-merge cascade** — `POST /api/projects/{id}/prs/refresh` polls GitHub for every non-terminal PR opened by the project, flips status on `merged` true. Any OPEN → MERGED transition fires `PostMergeCascadeService`: invalidates `StalenessService`, regenerates architecture + codemaps, emits a notification. `ProjectPrRollup` gains a Refresh button + last-result chip.
+- **Branch override on `/analyse`** — `POST /api/projects/{id}/analyse?branch=<name>` applies one branch to every linked repo's codemap regen. Empty falls back to each repo's default. Architecture tab has a new branch input next to Regenerate.
+- **Run sync from a branch** — `POST /api/runs/{id}/sync?branch=<name>` hard-resets the workspace (single-repo or every `repos/<name>/` subdir) to `origin/<branch>`. Branch omitted → per-repo default via `git symbolic-ref origin/HEAD`. Gated on terminal status. `InlineRunDetail` adds a compact branch + Sync button.
+- **Architecture diff UI** — "Diff vs v{N-1}" button on the Architecture tab renders a GitHub-style LCS line diff of `architecture.md`.
+- **Launch Cancel + Resume** — `ExecutionViewPage` header shows a persistent Cancel button on every non-terminal step; `ExecutionMonitor` adds Resume next to Abort, which calls `POST /api/executions/{id}/resume` to re-trigger `executeApprovedPlan` on the existing run. Removes the need to redo Setup / Analysis / Arch review / Plan when execution hangs.
+
+### Fixed
+
+- **Lazy-init across the execution + project controllers** — `spring.jpa.open-in-view` was explicitly set to `false`, so every DTO mapper that walked a lazy collection (`ExecutionSolution.dependencies`, `ExecutionRun` proxy, etc.) threw `LazyInitializationException`. Flipped to `true` (the Spring default). Kills four distinct crashes (getExecution, approvePlan, decide, resume) in one shot. `findWithDependenciesByExecutionRun_Id…` eager-fetch kept as belt + braces.
+- **`/analyse` used the system GitHub PAT** (env `GITHUB_PAT`), not the caller's user PAT. Private repos returned 404 → empty file tree → every codemap was the same 69-byte "Files: 0" placeholder. `ProjectArchitectureController` now threads `AppUserDetails.githubPat` through `ProjectArchitectureService.generate(projectId, branch, pat)`.
+- **Launch arch compile used the system PAT too** — `ExecutionOrchestrator.triggerAnalysis` now loads the creator's PAT via `AppUserRepository`.
+- **Launch dispatch silently ran on OpenAI** — `SolutionExecutionService.submitSolutionRun` passed null for both `modelName` and `aiProvider`, so `V2RunOrchestrator.normalizeProvider` defaulted to `openai + gpt-5.4-mini`. Now passes `ExecutionRun.aiProvider` (the project's choice).
+- **Planner repo mappings were always null** — the LLM returns a repo name or short-name in the `repoId` field, not a UUID. `UUID.fromString` threw → `repoId=null` → no clone fired → worker wrote into scratch dirs → retry storm (maxRetries=3 per solution). `ExecutionPlannerService.persistPlan` now falls back to a case-insensitive match against `ProjectRepo.githubRepoFullName` / short-name when the UUID parse fails.
+- **`listRepoFiles` / `readRepoFile` hardcoded `main`** — repos with a non-`main` default branch returned an empty tree. Both endpoints now accept a `branch` parameter; `CodeMapGenerator` threads `ProjectRepo.defaultBranch`.
+- **ExecutionSetup showed repo UUIDs** — the store returns `ProjectRepoLink` wrappers but the component read `r.githubRepoFullName` directly. Reads `r.repo.githubRepoFullName` with a flat-shape fallback + shows the scope chip.
+- **`ProjectWorkspaceService.java` was untracked in git** — the `.gitignore` `workspace/` rule was unanchored and matched the Java package. `.gitignore` now anchors to the repo root (`/workspace/`) and the file is in the index.
+- **`EmbeddingService` "No EmbeddingModel bean"** — Spring AI 1.1.4 only auto-registers the model when a chat-side property triggers it; unreliable. Rewrote as a direct REST call against `/v1/embeddings` using the same `spring.ai.openai.api-key` everything else uses.
+
+### Schema
+
+- **V96** `auto_push_default_on.sql` — upsert `project.runs.auto-push = true` on `PLATFORM` scope.
+- **V97** `auto_push_fix_scope.sql` — corrects V96's invalid `GLOBAL` scope to `PLATFORM` (the enum is `PLATFORM | ORG`).
+- **V98** `execution_relax_id_lengths.sql` — widens every VARCHAR(36) id + fk across `execution_run` / `execution_solution` / `execution_solution_run` / `execution_solution_repo` / `execution_context_handover` to VARCHAR(64). Drops + recreates the three `tenant_isolation` RLS policies that reference the altered columns. Admin user IDs exceed 36 chars; same class as V94 (`project_chat_message`).
+
+### Ops
+
+- `spring.jpa.open-in-view: true` added with an explaining comment.
+- `V2RunOrchestrator` now injects `StalenessService` + `ProjectArchitectureService` + `ProjectBriefService` + `RetrievalService`; pre-execution staleness refresh + post-success invalidate moved to explicit calls.
+
+---
+
+## [2.5.0] — 2026-04-15
+
+Per-project workspace, codemap + architecture as physical markdown, RAG over user-uploaded docs, auto-push on, and a GitHub-style architecture diff. Backlog: vector spill (snapshot > 12K), OCR / rerank / semantic chunking.
+
+### Added
+
+- **`ProjectWorkspaceService`** owns `workspace/projects/<projectId>/` (codemaps/, architecture.md, summary.md, docs/, .git). Atomic writes via os-level rename + Redis-backed per-project lock. Path-traversal guards.
+- **`ProjectArchitectureService`** now persists each codemap + architecture.md + summary.md to disk on every `generate()`. DB blobs remain authoritative — disk is a local cache.
+- **`ProjectBriefService`** — LIGHTWEIGHT-tier LLM call summarises the architecture doc into 2–4 sentences; `buildBrief()` returns an ~800-token block injected into the planner system prompt as `{{PROJECT_BRIEF}}`.
+- **`POST /api/projects/{id}/analyse`** — preferred entry for codemap + architecture + summary regeneration; alias of the legacy `/architecture/generate`.
+- **`GET /api/projects/{id}/summary`** — returns `summary.md` for the Overview tab.
+- **Pre-execution lazy refresh** — `V2RunOrchestrator` checks `StalenessService` before planning; regenerates codemaps for any stale repo so the planner always sees the latest layout. Post-success: invalidates the staleness cache.
+- **`readFile project:` prefix** — V2 worker tool resolves `project:architecture.md`, `project:codemaps/<repo>.md`, `project:summary.md` from the project workspace. DB-authoritative fallback when disk cache is missing (VM-churn safe).
+- **RAG pipeline** — Tika `DocumentExtractor` + 500-token / 50-token-overlap `ChunkingService` (code-fence aware) + Spring AI OpenAI `EmbeddingService` (text-embedding-3-small, batch 100, retry-once) + JDBC `ChunkStore` over `pgvector`.
+- **`ProjectDocumentService`** + **`/api/projects/{id}/documents`** — upload / list / delete with async indexing (UPLOADED → EXTRACTING → EMBEDDING → READY/FAILED). 10 MB cap.
+- **`RetrievalService`** — always-on `retrieve(projectId, query, k=3, cap=1500 tokens)` returns a compact `## REFERENCE DOCS` markdown block. Wired into `PlannerAgentV2` (`{{REFERENCE_DOCS}}`) and `ProjectChatService` (uses last user turn as query).
+- **Architecture diff UI** — `Diff vs v{N-1}` button on the Architecture tab renders an LCS line-diff GitHub-style.
+- **Auto-push flag flipped ON** — V96 + V97 set `project.runs.auto-push = true` on the `PLATFORM` scope; every successful project-scoped V2 run opens PRs automatically.
+- **Memory token budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8 000 → 12 000 (vector spill-over deferred to backlog).
+
+### Frontend
+
+- **Project Overview tab** gains a Project Summary panel + Analyse button (regenerates codemaps + architecture.md + summary.md).
+- **Project Docs tab** — drag-and-drop upload, per-doc status with polling, delete.
+- **Architecture tab** — Diff button + LCS line-diff renderer.
+- **Font parity** — `text-[12]` body rows on Project components normalised to `text-[11]` to match Run/Pro view density (`InlineRunDetail`, `ArchitectureViewer`, `ProjectMemoryPanel`, `ProjectLaunchesList`, `ProjectPrRollup`, `ProjectDocumentsPanel`, dashboard executions list, summary panel).
+
+### Schema
+
+- **V95** `pgvector_project_documents.sql`: `CREATE EXTENSION vector` + `project_document` (status enum, sha256, deleted_at, project_id+path UNIQUE) + `project_document_chunk` (vector(1536), ivfflat cosine index).
+- **V96** `auto_push_default_on.sql`: upsert `project.runs.auto-push = true`.
+- **V97** `auto_push_fix_scope.sql`: corrects V96's `scope='GLOBAL'` (not in enum) to `'PLATFORM'`.
+
+### Dependencies
+
+- Apache Tika 2.9.2 (`tika-core` + `tika-parsers-standard-package`) for PDF / DOCX / HTML extraction.
+
+### Backlog (deferred)
+
+- Memory snapshot vector spill once a project crosses the 12 K snapshot ceiling.
+- OCR for scanned PDFs, rerank pass over top-K, semantic (heading-aware) chunking.
+
+See [docs/plans/project-codemap-rag-backlog.md](docs/plans/project-codemap-rag-backlog.md) for the full design notes.
+
+---
+
+## [2.4.0] — 2026-04-14
+
+Project-level rollup, Launch entry-point inside the project, multi-run solutions, and new-repo creation as part of a Launch. Premium feature: ENTERPRISE + MAX tiers (the latter joins the Execution View tier gate).
+
+### Added
+
+- **MAX tier joins the Execution View gate** — `tier_config.execution_view_enabled` now true for both ENTERPRISE and MAX. Premium positioning.
+- **Multi-run solutions** — new `execution_solution_run` table captures every V2 dispatch (initial + retries + manual fixes) under a solution. The solution's `pipelineRunId` becomes the "latest" pointer; full history lives in the join. SolutionExecutionService writes a row per attempt with terminal status + token usage.
+- **New-repo creation as part of a Launch** — `CreateExecutionRequest.newRepos` accepts a `NewRepoSpec` array (`name`, `description`, `techHint`, `githubOwner`, `visibility`). `ExecutionOrchestrator.createExecution` calls `ProjectRepoService.createAndLinkNewRepo` per spec — creates the GitHub repo, registers a `ProjectRepo`, links to the project — then unions the new IDs into the Launch. Failures abort the Launch synchronously.
+- **Scaffold taxonomy** — `GET /api/scaffolds` returns the dropdown options that match `prompts/scaffolds/*.md`.
+- **Pre-flight GitHub access check** — `POST /api/projects/{id}/launches/validate-repo-access` validates the user's PAT against the target owner before the Launch commits.
+- **Project-level aggregation endpoints**:
+  - `GET /api/projects/{id}/launches` — paginated list of executions for the project.
+  - `GET /api/projects/{id}/prs` — cross-launch PR rollup grouped by launch.
+  - `GET /api/projects/{id}/overview` — active/completed/failed launch counts, total tokens + cost, PR counts.
+- **Solution runs endpoint** — `GET /api/executions/{id}/solutions/{solutionId}/runs` returns the per-attempt history for a solution.
+
+### Frontend
+
+- **`ExecutionSetup` (Launch flow) refresh:**
+  - "Create new repo" sub-form with tech-hint dropdown (fed from `/api/scaffolds`), private-by-default visibility, and on-blur GitHub-owner validation against the pre-flight endpoint.
+  - Live "Mode preview" line that tells the user what they're about to do (`1 existing + 1 new → 2-solution execution`).
+  - Dry-run confirmation modal listing repos to be created and the planned shape before commit.
+  - JIRA toggle + multi-existing-repo selection retained.
+- **`SolutionSection` replaces the flat `SolutionCard`** — collapsible per-solution panel with header rollup (status, tokens, PR, JIRA) and an expanded body listing all `ExecutionSolutionRun` attempts with deep-links into the existing `RunDetailPage` so the full per-run UX is preserved without duplication.
+- **`ProjectDashboardPage` gains Launches + Pull Requests tabs** — `ProjectLaunchesList` shows all launches with status, solution progress, and JIRA badge; `ProjectPrRollup` groups PRs by launch with merged/open status badges.
+- **Launch entry point** — "New Execution" → "Launch" rename in the dashboard header (kept on the existing button rather than restructuring sidebar in this round).
+
+### Schema
+
+- **V90** `project_shell_launch.sql`:
+  - Sets `tier_config.execution_view_enabled = TRUE` for ENTERPRISE and MAX.
+  - Creates `execution_solution_run` (PK, solution FK, pipeline_run_id, attempt_number unique per solution, terminal_status, token + cost columns, RLS via parent run org).
+
+### Known deferrals
+
+- Full sidebar restructure (orthogonal "Projects" navigation mode that flips the entire shell) — folded into existing `ProjectDashboardPage` tabs in this round; dedicated `ProjectShell` deferred to v2.4.x.
+- Project Settings tab with "Create new repo outside Launch" — backend method `createAndLinkNewRepo` exists and is reused by Launch; standalone Settings UI deferred.
+- Standalone runs view filtered by project — runs page already supports `?projectId=` filter; project tab pointing to it not yet wired.
+
+### Operational notes
+
+- `execution.view.enabled` feature flag still **off** by default. Flip per ENTERPRISE/MAX rollout.
+- Org admins must populate `Org.jira_project_key` (V89) before JIRA sync engages — already documented in v2.3.0.
+
+---
+
+## [2.3.0] — 2026-04-14
+
+Execution View — a project-level workbench that decomposes a cross-repo requirement into ordered solutions, drives each solution through a V2 pipeline run, and bundles the results into per-repo pull requests. ENTERPRISE-only, gated by the `execution.view.enabled` feature flag.
+
+### Added
+
+- **Backend package `execution/`:**
+  - Entities + JPA repos: `ExecutionRun`, `ExecutionSolution`, `ExecutionSolutionRepo`, `ExecutionContextHandover`, plus the `execution_solution_dependency` DAG edge table.
+  - `SolutionDependencyResolver` — topological layering + blocked-downstream detection; pure logic.
+  - `FileConflictDetector` — cross-references predicted target files across solutions.
+  - `ExecutionOrchestrator` — drives setup → ANALYSING → ARCH_REVIEW → PLANNING → EXECUTING → COMPLETE/ABORTED; delegates arch analysis to `ProjectArchitectureService`.
+  - `ExecutionPlannerService` — LLM-backed decomposition via `execution_planner.txt`; persists plan + individual solutions with dependency edges.
+  - `SolutionExecutionService` — bridges a single solution to `V2RunOrchestrator.submitRun(...)` (skipApproval, skipGate); tracks tags via `ExecutionBranchService`.
+  - `ExecutionBranchService` — `exec/<runId>` branch + per-solution start/end markers; opens final per-repo PRs through `GitHubRepoService` + `PullRequestRecordService`.
+  - `CrossRepoContextService` — layer 1 interface-contract handover persisted to `execution_context_handover`; layers 2/3 (diff codemap + test anchors) wired but deferred.
+  - `IncrementalCodeMapService` — wraps `CodeMapGenerator` for post-solution codemap refresh.
+  - `ExecutionController` — 10 REST endpoints + `/sse-token` + `/events` SSE; feature-flag + tier-gated; org-scoped via `AppUser.orgId` vs `Project.orgId`.
+  - `ExecutionEventTypes` — SCREAMING_SNAKE_CASE SSE constants (`EXEC_*`).
+- **Backend plumbing:**
+  - Migration V89 — `execution_run` + `execution_solution` + `execution_solution_dependency` + `execution_solution_repo` + `execution_context_handover`, indexes, V67-style RLS policies.
+  - Feature flag `execution.view.enabled` (default `false`).
+  - `tier_config.execution_view_enabled` boolean column (ENTERPRISE seed = TRUE).
+  - `TierConfig.executionViewEnabled` field wired through the entity.
+- **Prompts:** `prompts/execution_planner.txt` (the decomposition prompt; embeds `{{PROJECT_MEMORY}}` from v2.2.0).
+- **Frontend:**
+  - Types: `frontend/src/types/execution.ts`.
+  - API client: `frontend/src/lib/execution-api.ts`.
+  - Zustand store: `frontend/src/stores/useExecutionStore.ts`.
+  - SSE hook: `frontend/src/hooks/useExecutionSse.ts`.
+  - Page: `frontend/src/pages/execution/ExecutionViewPage.tsx`.
+  - Components (in `components/execution/`): `ExecutionStepper`, `ExecutionSetup`, `ExecutionAnalysis`, `ArchReviewGate`, `ExecutionPlanReview`, `DependencyGraph`, `ConflictWarning`, `ExecutionMonitor`, `SolutionCard`, `SolutionLogStream`, `FailureDecisionModal`, `ExecutionComplete`, `ExecutionReportPanel`.
+  - Routes: `/projects/:projectId/executions/new`, `/projects/:projectId/executions/:executionId`.
+  - Entry point: "New Execution" button on `ProjectDashboardPage` (dashboard-level, tier-gated server-side).
+
+### Migrations
+
+- **V89** `execution_view.sql`.
+
+### Production-grade additions
+
+- **V2 completion polling** — `SolutionExecutionService` now blocks a virtual thread polling `PipelineRunRepository` every 10s (2h cap) and maps V2 terminal status to the solution lifecycle:
+  - V2 `COMPLETE` → solution `DONE`, actual tokens + cost copied from the V2 run, handover contracts written, JIRA transitioned to `Done`.
+  - V2 `PARTIAL` → retry up to `max_retries`, with a JIRA comment per retry; final failure transitions to `Blocked`.
+  - V2 `FAILED` / `CANCELLED` / timeout → solution `FAILED`, run `PAUSED`, JIRA transitioned to `Blocked`, `EXEC_PAUSED_FOR_DECISION` emitted.
+- **JIRA sync (enterprise-level integration)** — new `ExecutionJiraSync` service uses the org's existing JIRA credentials (`Org.jira_base_url` / `email` / `api_token`) plus a new `Org.jira_project_key` column. Toggle per run via `ExecutionRun.jiraEnabled` (UI checkbox on `ExecutionSetup`). Lifecycle:
+  - Solution start (first attempt only) → create JIRA ticket, persist `solution.jira_ticket_id`.
+  - Retry / manual decision → comment on ticket.
+  - Solution done / skipped → comment + transition to `Done`.
+  - Solution failed → comment + transition to `Blocked`.
+  - JIRA sync is best-effort: all failures are logged + swallowed, never fail the run.
+- **Enriched final PR body** — per-repo PR now bundles a markdown summary table (status / tokens / PR / JIRA per solution), a call-out for any failed solutions with phase + reason, and overall stats. Replaces the old one-liner-per-solution body.
+
+### Schema additions (V89)
+
+- `execution_run.jira_enabled BOOLEAN NOT NULL DEFAULT FALSE`.
+- `org.jira_project_key VARCHAR(64)` — enterprise-level default project key used by Execution View JIRA sync.
+
+### Known deferrals
+
+- True per-solution workspace handoff (sharing the execution branch between V2 runs) is not yet plumbed — each solution still creates a fresh V2 workspace and relies on the handover contract text for context. Shared workspace is a follow-up.
+- `CrossRepoContextService` layers 2 (diff codemap) and 3 (test anchors) exist as stubs; layer 1 (interface contracts) is live.
+- Git tag / revert operations (rollback of a failed solution's commit range) — tag names are still tracked in `execution_solution.git_tag_start/end` as metadata, but actual `git tag` / `git revert` execution is deferred.
+
+### Operational notes
+
+- Feature flag `execution.view.enabled` is **off** by default. Flip it on for ENTERPRISE canary tenants once a project has its first arch doc generated.
+- Tier gating is enforced server-side via `TierConfig.executionViewEnabled` + `AppUser.orgId → Org.tier` lookup.
+- SSE channel key is `exec:{executionRunId}` to avoid collisions with per-run events. Scoped SSE tokens carry `scope=sse, runId=exec:{id}` and are validated by `JwtUtil.validateSseToken`.
+
+---
+
+## [2.2.0] — 2026-04-14
+
+Project Memory — a compressed per-run ledger + periodic compacted snapshot injected into `PlannerAgentV2` so subsequent runs in the same project can build on prior patterns, decisions, and debt instead of starting stateless.
+
+### Added
+
+- **`project_run_ledger`** (V88) — append-only, one row per completed project-scoped run. Stores a caveman-English digest (~60 tokens) of goal / changes / decisions / debt produced by `RunLedgerAgent` at LIGHTWEIGHT tier.
+- **`project_memory_snapshot`** (V88) — versioned, rewritten every 10 runs by `MemoryCompactionService` so token cost stays bounded as projects grow past 50 runs.
+- **`RunLedgerAgent`** — post-complete hook in `V2RunOrchestrator`; idempotent by `runId`, non-fatal on failure. Triggers compaction at `runNumber ≥ 20 && runNumber % 10 == 0`.
+- **`MemoryCompactionService`** — re-squashes older entries into the snapshot; marks compacted entries via `compacted_into` FK to preserve provenance.
+- **`ProjectMemoryProvider`** — builds the planner context block (snapshot + last 10 uncompacted entries). Reported `MemoryStats` feed the dashboard.
+- **Planner injection** — `PlannerRequestV2.projectMemory` wired into `{{PROJECT_MEMORY}}` marker in `prompts/v2/planner.md`. Empty for first-run projects.
+- **API** — `GET /api/projects/{id}/memory`, `GET /api/projects/{id}/memory/ledger` via `ProjectMemoryController`.
+- **Frontend** — Memory tab added to `ProjectDashboardPage`; `ProjectMemoryPanel` renders token-budget bar, stats tiles, compacted history, and recent-run entries.
+- **Config** — `RunLedgerAgent: LIGHTWEIGHT` added to the model matrix in `application.yml`.
+
+### Migrations
+
+- **V88** `project_memory.sql` — `project_run_ledger` + `project_memory_snapshot` with RLS policies matching V67.
+
+### Notes
+
+- Memory generation is a silent background concern — no SSE events, no user-visible failure modes. If the LLM call fails or the project has no id, the run terminates normally.
+- Scaling: 1–10 runs → raw entries (~1k tokens); 10–50 → snapshot + last 10 (~4k); 50–200 → re-squashed snapshot (~6k); RAG deferred to post-pilot.
+
+---
+
 ## [2.1.1] — 2026-04-14
 
 Pilot v3.0 — project workspace layer on top of V2 — plus a bug sweep surfaced

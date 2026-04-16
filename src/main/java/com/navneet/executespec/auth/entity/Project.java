@@ -65,4 +65,9 @@ public class Project {
     @Column(name = "default_reviewers", columnDefinition = "jsonb")
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String defaultReviewers;
+
+    /** v2.5.7 — default GitHub org/owner for repos created under this project.
+     *  Pre-fills the githubOwner field in Launch new-repo specs. */
+    @Column(name = "github_owner")
+    private String githubOwner;
 }

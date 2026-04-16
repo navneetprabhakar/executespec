@@ -665,6 +665,55 @@ public class GitTool {
         }
     }
 
+    /**
+     * v2.5.7 — incremental push to an existing remote branch. Unlike
+     * {@link #commitAndPushSubdir} this method does NOT force-push and does NOT
+     * create a new branch. The workspace must already be on the target branch
+     * (cloned with {@code git clone -b <branch>}). Returns "CLEAN" if there's
+     * nothing to commit.
+     */
+    public ToolResult pushToExistingBranch(String runId, String subPath, String remoteUrl,
+                                           String pat, String branchName, String commitMessage) {
+        try {
+            String repoDir = Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
+
+            // Check for changes
+            ProcessBuilder status = new ProcessBuilder("git", "-C", repoDir, "status", "--porcelain");
+            status.redirectErrorStream(true);
+            Process ps = status.start();
+            String statusOut = new String(ps.getInputStream().readAllBytes());
+            int statusExit = ps.waitFor();
+            if (statusExit != 0) return ToolResult.err("status failed: " + statusOut);
+            if (statusOut.isBlank()) return ToolResult.ok("CLEAN");
+
+            runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
+            runQuietly(repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
+            runQuietly(repoDir, "git", "-C", repoDir, "config", "user.name", "ExecuteSpec Agent");
+
+            ProcessBuilder commit = new ProcessBuilder("git", "-C", repoDir,
+                    "commit", "-m", commitMessage);
+            commit.redirectErrorStream(true);
+            Process pc = commit.start();
+            String commitOut = new String(pc.getInputStream().readAllBytes());
+            int commitExit = pc.waitFor();
+            if (commitExit != 0) return ToolResult.err("commit failed: " + commitOut);
+
+            // Push WITHOUT --force (fast-forward only → safe for existing PR branches)
+            String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
+            ProcessBuilder push = new ProcessBuilder("git", "-C", repoDir,
+                    "push", authUrl, branchName);
+            push.redirectErrorStream(true);
+            Process pp = push.start();
+            String pushOut = new String(pp.getInputStream().readAllBytes());
+            int pushExit = pp.waitFor();
+            if (pushExit != 0) return ToolResult.err("push failed: " + pushOut);
+            return ToolResult.ok(branchName);
+        } catch (Exception e) {
+            log.warn("[GitTool] pushToExistingBranch failed: {}", e.getMessage());
+            return ToolResult.err("push to existing branch failed: " + e.getMessage());
+        }
+    }
+
     private static void runQuietly(String dir, String... cmd) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(new java.io.File(dir));
         pb.redirectErrorStream(true);

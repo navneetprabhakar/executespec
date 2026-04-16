@@ -48,6 +48,7 @@ public class PlannerAgentV2 {
     private final LlmRouterV2 router;
     private final ObjectMapper objectMapper;
     private final V2Metrics metrics;
+    private final RunTitleSummarizer titleSummarizer;
 
     public PlanV2 plan(PlannerRequestV2 req) {
         long start = System.currentTimeMillis();
@@ -63,15 +64,28 @@ public class PlannerAgentV2 {
     // ─── SINGLE_SHOT fast path ──────────────────────────────────────────────
 
     private PlanV2 synthesizeSingleShotPlan(PlannerRequestV2 req) {
-        log.info("PlannerAgentV2 SINGLE_SHOT synthesize (no LLM call): spec={}chars", req.spec().length());
+        log.info("PlannerAgentV2 SINGLE_SHOT synthesize (LIGHTWEIGHT title call only): spec={}chars", req.spec().length());
+        // LIGHTWEIGHT-tier title summarizer; falls back to deterministic cleanTitle.
+        com.navneet.executespec.router.LlmProvider provider = resolveProviderForTitle(req.provider());
+        String runId = req.context() != null ? req.context().runId() : null;
+        String summarized = titleSummarizer.summarize(req.spec(), provider, runId);
+        String title = (summarized != null && !summarized.isBlank())
+                ? summarized
+                : cleanTitle(req.spec(), 70);
+        String description = req.spec()
+                + "\n\nAlso include unit tests for any new public function, endpoint, "
+                + "or module this task adds. If a test framework already exists in the "
+                + "workspace (Jest/Vitest, pytest, Go *_test.go, JUnit), extend it; "
+                + "otherwise scaffold a minimal test file with at least one happy-path "
+                + "test + one error case.";
         PlannedTaskV2 task = PlannedTaskV2.builder()
                 .id("T1")
-                .title(truncate(req.spec(), 80))
-                .description(req.spec())
+                .title(title)
+                .description(description)
                 .complexity(PlannedTaskV2.Complexity.LOW)
                 .build();
         return PlanV2.builder()
-                .planTitle("Single-shot: " + truncate(req.spec(), 60))
+                .planTitle(title)
                 .planSummary(req.spec())
                 .projectType("unknown")
                 .smokeTestStrategy(PlanV2.SmokeTestStrategy.BUILD)
@@ -91,7 +105,12 @@ public class PlannerAgentV2 {
                         req.classification().maxTasks() == Integer.MAX_VALUE
                                 ? "unlimited" : String.valueOf(req.classification().maxTasks()))
                 .replace("{{WORKSPACE_SUMMARY}}",
-                        req.workspaceSummary() == null ? "(no summary)" : req.workspaceSummary());
+                        req.workspaceSummary() == null ? "(no summary)" : req.workspaceSummary())
+                .replace("{{PROJECT_MEMORY}}", renderProjectMemoryBlock(req.projectMemory()))
+                .replace("{{PROJECT_BRIEF}}", req.projectBrief() == null ? "" : req.projectBrief())
+                .replace("{{REFERENCE_DOCS}}", req.referenceDocs() == null ? "" : req.referenceDocs())
+                .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()))
+                .replace("{{PR_REVIEW_COMMENTS}}", renderPrReviewBlock(req.prReviewComments()));
 
         List<Message> messages = List.of(
                 new SystemMessage(systemPrompt),
@@ -123,9 +142,21 @@ public class PlannerAgentV2 {
         }
         if (planCall == null) {
             String textPreview = resp.getResult().getOutput().getText();
+            String finishReason = String.valueOf(resp.getResult().getMetadata().getFinishReason());
+            // v2.5.9 Bug #3 — Gemini 2.5-flash occasionally emits Python-style
+            // pseudo-code like `print(default_api.submitPlan(planTitle="...",
+            // planSummary="..."))` and returns MALFORMED_FUNCTION_CALL. Try to
+            // salvage by pulling the JSON-ish args out of the text.
+            String salvaged = salvagePlanFromText(textPreview);
+            if (salvaged != null) {
+                log.warn("Planner LLM did not emit a structured tool call (finish={}); salvaged text-form args",
+                        finishReason);
+                PlanV2 plan = parsePlanFromArgs(salvaged, req.classification());
+                warnIfConstraintsUnderpropagated(plan, req.spec());
+                return plan;
+            }
             throw new IllegalStateException(
-                    "Planner LLM did not call submitPlan. Finish reason: "
-                            + resp.getResult().getMetadata().getFinishReason()
+                    "Planner LLM did not call submitPlan. Finish reason: " + finishReason
                             + "; text preview: " + (textPreview == null ? "" : truncate(textPreview, 200)));
         }
         PlanV2 plan = parsePlanFromArgs(planCall.arguments(), req.classification());
@@ -364,6 +395,57 @@ public class PlannerAgentV2 {
 
     // ─── helpers ─────────────────────────────────────────────────────────────
 
+    /**
+     * v2.5.2 (Phase 4.3) — when TDD mode is on, prepend an instruction block
+     * telling the planner to lead with test tasks. Empty string when off.
+     */
+    private String renderPrReviewBlock(String prReviewComments) {
+        if (prReviewComments == null || prReviewComments.isBlank()) return "";
+        return """
+                # PR Review Comments — Address These
+
+                A previous iteration of this work was submitted as a pull request and
+                received review feedback. Your primary objective is to address ALL of the
+                review comments below. Read each comment carefully, understand the file and
+                line it refers to, and make the requested changes. Use `readFile` and
+                `editFile` (not `writeFile`) to modify existing code.
+
+                """ + prReviewComments;
+    }
+
+    private String renderTddBlock(boolean tddMode) {
+        if (!tddMode) return "";
+        return """
+                # TDD MODE — tests first
+
+                Generate test tasks BEFORE implementation tasks. Specifically:
+                - The first task group must be one or more tasks that write FAILING
+                  tests for the feature being built (one test task per logical
+                  unit — service / endpoint / component).
+                - Every subsequent implementation task must declare `dependsOn`
+                  the relevant test task ids so the executor runs tests first.
+                - Tests must be committed files (not inline strings); the worker
+                  uses writeFile to create them.
+                - This is slower but materially higher accuracy on logic-heavy
+                  specs. Do NOT skip this directive when TDD mode is on.
+                """;
+    }
+
+    private String renderProjectMemoryBlock(String projectMemory) {
+        if (projectMemory == null || projectMemory.isBlank()) return "";
+        return """
+                # Project Memory
+
+                This run is part of an ongoing project. Below is accumulated context from
+                previous runs — architecture decisions, patterns, and known debt. USE THIS to:
+                - avoid re-implementing existing features
+                - follow established patterns and conventions
+                - build on existing code, not alongside it
+                - address known debt when relevant
+
+                """ + projectMemory;
+    }
+
     private String loadPrompt() {
         try {
             return new ClassPathResource("prompts/v2/planner.md").getContentAsString(StandardCharsets.UTF_8);
@@ -372,8 +454,98 @@ public class PlannerAgentV2 {
         }
     }
 
+    private static com.navneet.executespec.router.LlmProvider resolveProviderForTitle(String providerName) {
+        if (providerName == null || providerName.isBlank()) return null;
+        try {
+            return com.navneet.executespec.router.LlmProvider.valueOf(providerName.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * v2.5.9 Bug #3 — Salvage a submitPlan invocation from text when the model
+     * emits it as pseudo-code instead of a structured tool call. Observed with
+     * Gemini 2.5-flash returning responses like
+     * {@code print(default_api.submitPlan(planTitle="...", planSummary="...", tasks=[...]))}.
+     *
+     * <p>Returns JSON args string (as {@code submitPlan} expects) or null if the
+     * text doesn't contain a recoverable call.
+     */
+    private String salvagePlanFromText(String text) {
+        if (text == null || text.isBlank()) return null;
+        // Look for a submitPlan invocation anywhere in the text
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("submitPlan\\s*\\(([\\s\\S]*)\\)\\s*$",
+                        java.util.regex.Pattern.MULTILINE)
+                .matcher(text);
+        if (!m.find()) return null;
+        String args = m.group(1).trim();
+        // Convert Python kwarg syntax (name=value) to JSON object. Very rough.
+        // Only the common case: `planTitle="...", planSummary="...", tasks=[...]`
+        StringBuilder json = new StringBuilder("{");
+        // Split on top-level commas (naive — assumes args are well-formed)
+        int depth = 0; int start = 0;
+        java.util.List<String> pairs = new java.util.ArrayList<>();
+        for (int i = 0; i < args.length(); i++) {
+            char c = args.charAt(i);
+            if (c == '(' || c == '[' || c == '{') depth++;
+            else if (c == ')' || c == ']' || c == '}') depth--;
+            else if (c == ',' && depth == 0) {
+                pairs.add(args.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        if (start < args.length()) pairs.add(args.substring(start).trim());
+        for (int i = 0; i < pairs.size(); i++) {
+            String pair = pairs.get(i);
+            int eq = pair.indexOf('=');
+            if (eq < 0) continue;
+            String key = pair.substring(0, eq).trim();
+            String val = pair.substring(eq + 1).trim();
+            // Transform Python literals to JSON: True/False/None → true/false/null
+            val = val.replaceAll("\\bTrue\\b", "true")
+                    .replaceAll("\\bFalse\\b", "false")
+                    .replaceAll("\\bNone\\b", "null");
+            if (i > 0) json.append(",");
+            json.append("\"").append(key).append("\":").append(val);
+        }
+        json.append("}");
+        String candidate = json.toString();
+        // Basic sanity check — must contain the top-level keys the planner needs.
+        if (!candidate.contains("tasks")) return null;
+        return candidate;
+    }
+
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...";
+    }
+
+    /**
+     * Produces a concise, title-cased run name from a free-form spec. Used by
+     * the SINGLE_SHOT path so project-view tables show readable titles instead
+     * of raw "Single-shot: ..." echoes.
+     */
+    private static String cleanTitle(String spec, int max) {
+        if (spec == null || spec.isBlank()) return "Untitled run";
+        String s = spec.trim().replaceAll("\\s+", " ");
+        // First sentence / first line (whichever is shorter) — avoids pulling in
+        // bullet lists or multi-paragraph rambles.
+        int dot = s.indexOf('.');
+        int nl  = s.indexOf('\n');
+        int cut = -1;
+        if (dot > 0) cut = dot;
+        if (nl > 0 && (cut < 0 || nl < cut)) cut = nl;
+        if (cut > 0) s = s.substring(0, cut).trim();
+        // Capitalise first letter so "add /x endpoint" → "Add /x endpoint".
+        if (!s.isEmpty() && Character.isLowerCase(s.charAt(0))) {
+            s = Character.toUpperCase(s.charAt(0)) + s.substring(1);
+        }
+        // Trim trailing punctuation.
+        while (!s.isEmpty() && ",;:.".indexOf(s.charAt(s.length() - 1)) >= 0) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return s.length() <= max ? s : s.substring(0, max - 1).trim() + "…";
     }
 }

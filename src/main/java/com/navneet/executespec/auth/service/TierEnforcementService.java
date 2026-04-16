@@ -20,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 
@@ -424,6 +424,20 @@ public class TierEnforcementService {
     }
 
     /**
+     * v2.5.6 — exposed for {@link MonthlyRunCounterResetJob} so the cron path
+     * can reuse the same predicate as the lazy-submit path. Returns true when
+     * the user's counter should be zeroed.
+     */
+    boolean shouldResetUserCounterForJob(AppUser user) {
+        return shouldResetUsage(user.getId(), user.getRunCountResetAt());
+    }
+
+    /** v2.5.6 — cron counterpart of {@link #maybeResetOrgCounter}. */
+    boolean shouldResetOrgCounterForJob(Org org) {
+        return shouldResetOrgUsage(org, org.getRunCountResetAt());
+    }
+
+    /**
      * Billing-cycle-aware usage reset for individual users.
      * If user has an active subscription, resets when current billing period starts.
      * Falls back to calendar-month reset for FREE users (no subscription).
@@ -457,11 +471,19 @@ public class TierEnforcementService {
         return periodStart.isAfter(lastReset);
     }
 
-    /** Fallback for FREE users: reset on calendar month boundary. */
+    /**
+     * v2.5.6 — billing zone for the calendar-month boundary check. Our contract
+     * resets quotas at 00:00 IST on the 1st of each month, so the month index
+     * comparison must happen in Asia/Kolkata — not UTC (which fires at 05:30 IST
+     * on the 1st, a ~5.5h off-by-one that showed on month-boundary days).
+     */
+    static final ZoneId BILLING_ZONE = ZoneId.of("Asia/Kolkata");
+
+    /** Calendar-month boundary check for non-subscribed users, evaluated in IST. */
     private boolean isNewCalendarMonth(Instant lastReset) {
         if (lastReset == null) return true;
-        ZonedDateTime resetTime = lastReset.atZone(ZoneOffset.UTC);
-        ZonedDateTime now = Instant.now().atZone(ZoneOffset.UTC);
+        ZonedDateTime resetTime = lastReset.atZone(BILLING_ZONE);
+        ZonedDateTime now = Instant.now().atZone(BILLING_ZONE);
         return now.getYear() > resetTime.getYear() ||
                now.getMonthValue() > resetTime.getMonthValue();
     }

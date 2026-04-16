@@ -48,6 +48,7 @@ public class ProjectService {
                 .name(req.name())
                 .description(req.description())
                 .aiProvider(provider)
+                .githubOwner(req.githubOwner())
                 .status("ACTIVE")
                 .createdBy(createdBy)
                 .build();
@@ -116,6 +117,7 @@ public class ProjectService {
 
     @Transactional
     public void addMember(String projectId, String userId, String role, String actorId) {
+        requireProjectAdmin(projectId, actorId);
         if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
             String effectiveRole = role != null ? role : "PROJECT_DEVELOPER";
             projectMemberRepo.save(ProjectMember.builder()
@@ -137,9 +139,19 @@ public class ProjectService {
 
     @Transactional
     public void removeMember(String projectId, String userId, String actorId) {
-        if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found in project");
+        requireProjectAdmin(projectId, actorId);
+        ProjectMember target = projectMemberRepo.findByProjectIdAndUserId(projectId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Member not found in project"));
+
+        // Last-admin guard — prevent locking the project out of management.
+        if ("PROJECT_ADMIN".equals(target.getProjectRole())) {
+            int adminCount = projectMemberRepo.countByProjectIdAndProjectRole(projectId, "PROJECT_ADMIN");
+            if (adminCount <= 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Cannot remove the only project admin — add another admin first.");
+            }
         }
+
         projectMemberRepo.deleteByProjectIdAndUserId(projectId, userId);
 
         Project project = projectRepo.findById(projectId).orElse(null);
@@ -151,12 +163,22 @@ public class ProjectService {
                 .build());
     }
 
+    /** Throws 403 unless the actor is a PROJECT_ADMIN on this project. */
+    private void requireProjectAdmin(String projectId, String actorId) {
+        ProjectMember m = projectMemberRepo.findByProjectIdAndUserId(projectId, actorId).orElse(null);
+        if (m == null || !"PROJECT_ADMIN".equals(m.getProjectRole())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only project admins can add or remove project members.");
+        }
+    }
+
     @Transactional
     public ProjectDto updateSettings(String projectId, UpdateProjectSettingsRequest req, String actorId) {
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
 
         String oldProvider = project.getAiProvider() != null ? project.getAiProvider().name() : "ANTHROPIC";
+        String oldGithubOwner = project.getGithubOwner();
 
         if (req.aiProvider() != null) {
             try {
@@ -168,6 +190,10 @@ public class ProjectService {
             }
         }
 
+        if (req.githubOwner() != null) {
+            project.setGithubOwner(req.githubOwner().isBlank() ? null : req.githubOwner().trim());
+        }
+
         project.setUpdatedAt(Instant.now());
         ProjectDto result = ProjectDto.from(projectRepo.save(project));
 
@@ -175,11 +201,14 @@ public class ProjectService {
                 .eventType("PROJECT_SETTINGS_UPDATED")
                 .entityType("PROJECT").entityId(projectId)
                 .orgId(project.getOrgId()).actorId(actorId)
-                .oldValue("{\"aiProvider\":\"" + oldProvider + "\"}")
-                .newValue("{\"aiProvider\":\"" + project.getAiProvider().name() + "\"}")
+                .oldValue("{\"aiProvider\":\"" + oldProvider
+                        + "\",\"githubOwner\":\"" + (oldGithubOwner != null ? oldGithubOwner : "") + "\"}")
+                .newValue("{\"aiProvider\":\"" + project.getAiProvider().name()
+                        + "\",\"githubOwner\":\"" + (project.getGithubOwner() != null ? project.getGithubOwner() : "") + "\"}")
                 .build());
 
-        log.info("Project settings updated: {} — aiProvider: {} → {}", projectId, oldProvider, project.getAiProvider());
+        log.info("Project settings updated: {} — aiProvider: {} → {}, githubOwner: {} → {}",
+                projectId, oldProvider, project.getAiProvider(), oldGithubOwner, project.getGithubOwner());
         return result;
     }
 

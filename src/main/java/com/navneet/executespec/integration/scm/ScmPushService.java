@@ -81,7 +81,7 @@ public class ScmPushService {
             pushToBitbucket(run);
             return;
         }
-        pushToGitHubIfConfigured(run);
+        pushToGitHubIfConfigured(run, user);
     }
 
     private void pushToBitbucket(PipelineRun run) {
@@ -120,14 +120,12 @@ public class ScmPushService {
         }
     }
 
-    private void pushToGitHubIfConfigured(PipelineRun run) {
+    private void pushToGitHubIfConfigured(PipelineRun run, AppUser user) {
         // Pilot v3.0 — multi-repo runs: push each cloned subdirectory as its own
         // branch + PR. Falls through to the single-repo path if no project repos
         // were selected.
         if (StringUtils.hasText(run.getSelectedRepoIds())) {
-            String pat = (run.getGithubPat() != null && !run.getGithubPat().isBlank())
-                    ? run.getGithubPat()
-                    : (props.getGithub() != null ? props.getGithub().getPat() : null);
+            String pat = resolvePat(run, user);
             if (pat == null || pat.isBlank()) {
                 log.warn("Multi-repo push requires a PAT — skipping for run {}", run.getRunId());
                 return;
@@ -141,9 +139,7 @@ public class ScmPushService {
 
         if ((repoMode == null || "NONE".equals(repoMode)) && repoUrl == null) return;
 
-        String pat = (run.getGithubPat() != null && !run.getGithubPat().isBlank())
-                ? run.getGithubPat()
-                : (props.getGithub() != null ? props.getGithub().getPat() : null);
+        String pat = resolvePat(run, user);
         String owner = (run.getGithubOwner() != null && !run.getGithubOwner().isBlank())
                 ? run.getGithubOwner()
                 : (props.getGithub() != null ? props.getGithub().getDefaultOwner() : null);
@@ -226,6 +222,23 @@ public class ScmPushService {
                 log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
             }
         }
+    }
+
+    /**
+     * PAT precedence: explicit on-run value → run creator's stored PAT (re-read
+     * fresh in case the user added it after submission) → platform fallback.
+     * Without the user lookup, runs submitted before the user pasted their PAT
+     * silently fail to push and no PR is opened.
+     */
+    private String resolvePat(PipelineRun run, AppUser user) {
+        if (run.getGithubPat() != null && !run.getGithubPat().isBlank()) return run.getGithubPat();
+        if (user == null && run.getCreatedByUserId() != null) {
+            user = appUserRepository.findById(run.getCreatedByUserId()).orElse(null);
+        }
+        if (user != null && user.getGithubPat() != null && !user.getGithubPat().isBlank()) {
+            return user.getGithubPat();
+        }
+        return props.getGithub() != null ? props.getGithub().getPat() : null;
     }
 
     /**

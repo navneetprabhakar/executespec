@@ -36,6 +36,8 @@ public class RunDetail {
     String repoUrl;
     String repoMode;
     String failureReason;
+    /** v2.5.10 — explicit terminal-status reason. See RunSummary.statusReason. */
+    String statusReason;
     String planJson;
     String reviewJson;
     List<TaskSummary> tasks;

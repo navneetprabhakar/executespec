@@ -1,7 +1,13 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-14 (v2.1.1 — pilot v3.0)
+> Last updated: 2026-04-15 (v2.5.0 — project workspace + codemap/architecture markdown + RAG + auto-push)
+>
+> v2.5.x docs:
+> - [`docs/project-user-journeys.md`](project-user-journeys.md) — end-to-end user journeys + workflow map for the project workbench (Setup → Launch → PR merge → continue building, docs upload, chat, etc.).
+> - [`docs/plans/project-codemap-arch-rag-plan.md`](plans/project-codemap-arch-rag-plan.md) — feature design (workspace layout, RAG invariants, phasing).
+> - [`docs/plans/project-codemap-arch-rag-execution.md`](plans/project-codemap-arch-rag-execution.md) — concrete per-phase implementation order.
+> - [`docs/plans/project-codemap-rag-backlog.md`](plans/project-codemap-rag-backlog.md) — deferred items (vector spill, OCR / rerank / semantic chunking) + the DB-vs-disk decision rationale.
 >
 > New pilot-v3.0 docs to know about:
 > - [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md) — full recap of

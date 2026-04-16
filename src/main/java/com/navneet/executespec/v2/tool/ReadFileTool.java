@@ -1,6 +1,16 @@
 package com.navneet.executespec.v2.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.codeintel.ProjectArchitectureService;
+import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
+import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
+import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
+import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -19,10 +29,18 @@ import java.util.List;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class ReadFileTool implements Tool {
 
     /** Truncation cap applied to full-file reads. Range reads are not truncated. */
     static final int MAX_RESULT_CHARS = 5_000;
+
+    private final ProjectWorkspaceService projectWorkspace;
+    private final PipelineRunRepository pipelineRunRepo;
+    private final ProjectArchitectureService projectArchService;
+    private final ProjectCodeMapRepository codeMapRepo;
+    private final ProjectRepoLinkRepository repoLinkRepo;
+    private final ProjectRepoRepository repoRepo;
 
     @Override
     public String name() {
@@ -75,6 +93,38 @@ public class ReadFileTool implements Tool {
             return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS,
                     "startLine (" + start + ") > endLine (" + end + ")");
         }
+        // project: prefix — read from the per-project workspace instead of the run workspace.
+        if (path.startsWith("project:")) {
+            String rel = path.substring("project:".length());
+            String projectId = pipelineRunRepo.findById(ctx.runId())
+                    .map(r -> r.getProjectId())
+                    .orElse(null);
+            if (projectId == null || projectId.isBlank()) {
+                return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS,
+                        "project workspace not available for this run");
+            }
+            try {
+                String content = projectWorkspace.readFile(projectId, rel).orElse(null);
+                if (content == null) {
+                    // Disk cache miss — fall back to DB (VM churn safe).
+                    content = readFromDbFallback(projectId, rel);
+                }
+                if (content == null) {
+                    return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "file not found: " + path);
+                }
+                if (content.length() > MAX_RESULT_CHARS) {
+                    int tail = Math.min(1_500, MAX_RESULT_CHARS / 4);
+                    int head = MAX_RESULT_CHARS - tail;
+                    int omitted = content.length() - MAX_RESULT_CHARS;
+                    content = content.substring(0, head)
+                            + "\n...[" + omitted + " chars omitted]...\n"
+                            + content.substring(content.length() - tail);
+                }
+                return ToolResult.ok(content);
+            } catch (IllegalArgumentException iae) {
+                return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, iae.getMessage());
+            }
+        }
         try {
             Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
             if (!Files.exists(resolved)) {
@@ -112,5 +162,37 @@ public class ReadFileTool implements Tool {
             log.warn("readFile IO error path={}", path, ioe);
             return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
         }
+    }
+
+    /**
+     * DB-authoritative fallback for project: reads. The disk cache may be
+     * missing after a VM rotation or fresh deploy, but architecture docs +
+     * codemaps are always persisted to Postgres — so reads survive disk loss.
+     */
+    private String readFromDbFallback(String projectId, String rel) {
+        if (rel == null) return null;
+        if (rel.equals("architecture.md")) {
+            return projectArchService.latest(projectId)
+                    .map(ProjectArchitectureDoc::getContent)
+                    .orElse(null);
+        }
+        if (rel.startsWith("codemaps/") && rel.endsWith(".md")) {
+            String shortName = rel.substring("codemaps/".length(), rel.length() - ".md".length());
+            for (var link : repoLinkRepo.findByProjectId(projectId)) {
+                ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
+                if (repo == null) continue;
+                String full = repo.getGithubRepoFullName();
+                String candidate = full.contains("/") ? full.substring(full.indexOf('/') + 1) : full;
+                candidate = candidate.replaceAll("[^A-Za-z0-9._-]", "-");
+                if (candidate.equals(shortName)) {
+                    return codeMapRepo
+                            .findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId())
+                            .map(ProjectCodeMap::getContent)
+                            .orElse(null);
+                }
+            }
+        }
+        // summary.md has no DB-backing row — regenerate via /analyse if missing on disk.
+        return null;
     }
 }

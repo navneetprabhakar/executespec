@@ -81,6 +81,23 @@ public class AdminAnalyticsController {
         return ResponseEntity.ok(analyticsService.getBillingOverview(entityType, entityId));
     }
 
+    /**
+     * v2.5.8 — cost breakdown for FinOps dashboards.
+     * GET /api/admin/analytics/cost-breakdown?orgId={}&period=30
+     *
+     * <p>Returns per-user and per-project $ spent across pipeline_run + execution_run
+     * for the given period. Critical for engineering-manager spend attribution;
+     * previously there was no endpoint that summed cost by user or by project.
+     */
+    @GetMapping("/cost-breakdown")
+    public ResponseEntity<java.util.Map<String, Object>> costBreakdown(
+            @RequestParam String orgId,
+            @RequestParam(defaultValue = "30") int period,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        assertAnalyticsAccess("ORG", orgId, userDetails, true);
+        return ResponseEntity.ok(analyticsService.getCostBreakdown(orgId, period));
+    }
+
     // ── RBAC ────────────────────────────────────────────────────────────────────
 
     /**
