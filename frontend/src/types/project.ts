@@ -19,6 +19,8 @@ export interface ProjectRepo {
   lastSyncedSha: string | null;
   /** Raw JSON string of {@link StackInfo}; null when not yet detected. */
   detectedStack: string | null;
+  /** v2.5.2 — PR webhook installation state. */
+  webhookInstalled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,6 +72,8 @@ export interface ProjectDashboardDTO {
   completedRuns: number;
   failedRuns: number;
   avgScore: number;
+  totalTokens: number;
+  totalCostUsd: number;
   recentTasks: TaskSummary[];
   recentPrs: PrSummary[];
   architectureDocStatus: 'NONE' | 'GENERATED' | 'STALE';

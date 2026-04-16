@@ -224,6 +224,98 @@ public class ProjectRepoService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Create a brand-new GitHub repo and link it to the project in one shot.
+     * Used by the Launch flow when a user describes a new microservice.
+     * Always creates ORG-scoped repos — new-repo-at-Launch is an enterprise path.
+     */
+    @Transactional
+    public ProjectRepo createAndLinkNewRepo(
+            String projectId,
+            String name,
+            String description,
+            String githubOwner,
+            String visibility,
+            String pat,
+            String callerUserId,
+            String callerOrgId) {
+        Project project = requireProjectAccess(projectId, callerUserId, callerOrgId);
+
+        String cloneUrl = gitHub.createRepo(
+                description, name, "public".equals(visibility) ? "public" : "private",
+                pat, githubOwner);
+        if (cloneUrl == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "GitHub repo creation failed — check PAT + owner access");
+        }
+        // cloneUrl = https://github.com/{owner}/{name}.git (possibly with suffix)
+        String fullName = extractFullNameFromCloneUrl(cloneUrl);
+        if (fullName == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Created repo but could not parse clone URL: " + cloneUrl);
+        }
+
+        // v2.5.2 — auto-provision the PR webhook on new repos so the
+        // merge-cascade pipeline fires without a manual setup step.
+        boolean webhookOk = false;
+        try {
+            webhookOk = gitHub.installWebhook(fullName, pat);
+        } catch (Exception e) {
+            log.warn("installWebhook threw for {}: {}", fullName, e.getMessage());
+        }
+
+        ProjectRepo entity = ProjectRepo.builder()
+                .id(UUID.randomUUID())
+                .scope(project.getOrgId() != null ? ProjectRepo.Scope.ORG : ProjectRepo.Scope.USER)
+                .ownerOrgId(project.getOrgId())
+                .ownerUserId(project.getOrgId() != null ? null : callerUserId)
+                .githubRepoFullName(fullName)
+                .githubOwner(extractOwner(fullName))
+                .defaultBranch("main")
+                .detectedStack(null)      // fresh repo — no stack detected yet
+                .lastSyncedSha(null)
+                .webhookInstalled(webhookOk)
+                .build();
+        repoRepo.save(entity);
+
+        linkRepo.save(ProjectRepoLink.builder()
+                .id(UUID.randomUUID())
+                .projectId(projectId)
+                .repoId(entity.getId())
+                .linkedBy(callerUserId)
+                .build());
+        log.info("Created+linked new repo {} ({}) for project {} [webhook={}]",
+                entity.getId(), fullName, projectId, webhookOk);
+        return entity;
+    }
+
+    /**
+     * v2.5.2 — manually install the PR webhook on a repo the user linked (rather
+     * than created). Requires the caller's PAT to have admin:repo_hook on the
+     * target repo. Idempotent: GitHub's "already exists" path is treated as success.
+     */
+    @Transactional
+    public boolean installWebhook(UUID repoId, String pat, String callerUserId, String callerOrgId) {
+        ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+        boolean ok = gitHub.installWebhook(repo.getGithubRepoFullName(), pat);
+        if (ok) {
+            repo.setWebhookInstalled(true);
+            repo.setUpdatedAt(Instant.now());
+            repoRepo.save(repo);
+        }
+        return ok;
+    }
+
+    private static String extractFullNameFromCloneUrl(String cloneUrl) {
+        if (cloneUrl == null) return null;
+        // Expect https://github.com/<owner>/<repo>(.git)?
+        int host = cloneUrl.indexOf("github.com/");
+        if (host < 0) return null;
+        String tail = cloneUrl.substring(host + "github.com/".length());
+        if (tail.endsWith(".git")) tail = tail.substring(0, tail.length() - 4);
+        return tail.contains("/") ? tail : null;
+    }
+
     /* ──────────────────────────────── helpers ──────────────────────────────── */
 
     private ProjectRepo loadRepoForRead(UUID repoId, String callerUserId, String callerOrgId) {

@@ -26,7 +26,15 @@ public record ExecutionResult(
         int tasksFailed,
         int tasksSkipped,
         List<TaskOutcome> perTask,
-        long totalLatencyMs) {
+        long totalLatencyMs,
+        /** v2.5.10 — status of the last non-skipped task. Used by V2RunOrchestrator
+         *  to separate "final task was clean" from "final task warned" when
+         *  deriving the run-level status_reason. Nullable for empty plans. */
+        TaskOutcome.Status finalTaskStatus,
+        /** v2.5.10 — true when ANY task *other than the last non-skipped one* had
+         *  COMPLETED_WITH_WARNING. Lets V2RunOrchestrator tag a clean final as
+         *  CLEAN_WITH_INTERMEDIATE_WARNINGS vs CLEAN_COMPLETION. */
+        boolean anyIntermediateWarning) {
 
     public enum Overall {
         /** Every task finished SUCCESS or SUCCESS_AFTER_RETRY — clean run. */

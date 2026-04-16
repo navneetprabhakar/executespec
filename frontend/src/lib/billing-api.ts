@@ -61,6 +61,8 @@ export interface BillingStatus {
   plan: BillingPlan | null;
   usage: UsageInfo[];
   bonusRuns: BonusRunsInfo | null;
+  /** v2.5.8 — total USD spent on LLM calls during current billing period. */
+  spentUsd?: number | null;
 }
 
 export interface TopupPackage {

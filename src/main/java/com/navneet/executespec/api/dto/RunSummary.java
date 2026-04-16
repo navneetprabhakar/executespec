@@ -44,5 +44,13 @@ public record RunSummary(
     /** RunId of the original run this was retried from. Null for original runs. */
     String sourceRunId,
     /** Which harness produced this run: "v1" (default) or "v2". */
-    String harnessVersion
+    String harnessVersion,
+    /** v2.5.8 — total USD spent on LLM calls for this run. Null before terminal. */
+    Double actualCostUsd,
+    /** v2.5.10 — explicit reason for the terminal status (CLEAN_COMPLETION,
+     *  CLEAN_WITH_INTERMEDIATE_WARNINGS, FINAL_BUILD_FAILED, TESTS_FAILED:N_OF_M,
+     *  REVIEWER_UNRESOLVED, REVIEWER_FAILED, ALL_TASKS_FAILED, LEGACY_UNKNOWN).
+     *  Null on in-flight runs and on pre-v2.5.10 terminal runs that were never
+     *  backfilled. Populated by V2RunOrchestrator when scoring.v2-verified is on. */
+    String statusReason
 ) {}

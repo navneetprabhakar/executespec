@@ -48,6 +48,26 @@ public class SuperAdminController {
     private final com.navneet.executespec.report.UsageReportService usageReportService;
     private final PromptVersioningService promptVersioningService;
     private final PromptAuditService promptAuditService;
+    private final com.navneet.executespec.execution.service.AdminReconciliationService adminReconciliationService;
+
+    // ── Execution reconcile ───────────────────────────────────────────────────
+
+    /**
+     * One-off cleanup for orphaned {@code ExecutionRun} rows stuck in non-terminal
+     * status (pre-v2.5.1 bug). See
+     * {@link com.navneet.executespec.execution.service.AdminReconciliationService}.
+     *
+     * Body (optional): {@code {"staleMinutes": 30}}. Defaults to 30.
+     */
+    @PostMapping("/executions/reconcile")
+    public ResponseEntity<com.navneet.executespec.execution.service.AdminReconciliationService.ReconcileReport>
+            reconcileExecutions(@RequestBody(required = false) Map<String, Object> body) {
+        long staleMinutes = 30;
+        if (body != null && body.get("staleMinutes") instanceof Number n) {
+            staleMinutes = Math.max(1, n.longValue());
+        }
+        return ResponseEntity.ok(adminReconciliationService.reconcileOrphans(staleMinutes));
+    }
 
     // ── Prompt Versioning ─────────────────────────────────────────────────────
 

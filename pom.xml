@@ -14,7 +14,7 @@
 
   <groupId>com.navneet</groupId>
   <artifactId>executespec</artifactId>
-  <version>2.1.1</version>
+  <version>2.5.1</version>
   <packaging>jar</packaging>
   <name>executespec</name>
   <description>Multi-Agent Coding System — Core Loop</description>
@@ -88,6 +88,18 @@
       <groupId>org.eclipse.jgit</groupId>
       <artifactId>org.eclipse.jgit</artifactId>
       <version>6.9.0.202403050737-r</version>
+    </dependency>
+
+    <!-- Tika — RAG document text extraction (PDF, DOCX, plain text, etc.) -->
+    <dependency>
+      <groupId>org.apache.tika</groupId>
+      <artifactId>tika-core</artifactId>
+      <version>2.9.2</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.tika</groupId>
+      <artifactId>tika-parsers-standard-package</artifactId>
+      <version>2.9.2</version>
     </dependency>
 
     <!-- Jackson -->

@@ -19,6 +19,8 @@ public class ProjectArchitectureController {
 
     private final ProjectArchitectureService service;
     private final StalenessService stalenessService;
+    private final com.navneet.executespec.project.workspace.ProjectWorkspaceService workspace;
+    private final ArchitectureDiffService diffService;
 
     public record ArchDocDto(
             UUID id,
@@ -39,10 +41,33 @@ public class ProjectArchitectureController {
     }
 
     @PostMapping("/api/projects/{projectId}/architecture/generate")
-    public ResponseEntity<ArchDocDto> generate(@PathVariable String projectId) {
-        ProjectArchitectureDoc doc = service.generate(projectId);
+    public ResponseEntity<ArchDocDto> generate(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.navneet.executespec.auth.security.AppUserDetails userDetails,
+            @PathVariable String projectId) {
+        String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+        ProjectArchitectureDoc doc = service.generate(projectId, null, pat);
         stalenessService.invalidate(projectId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
+    }
+
+    /** Alias + preferred entry: regenerates codemaps + architecture + summary on disk. */
+    @PostMapping("/api/projects/{projectId}/analyse")
+    public ResponseEntity<ArchDocDto> analyse(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.navneet.executespec.auth.security.AppUserDetails userDetails,
+            @PathVariable String projectId,
+            @org.springframework.web.bind.annotation.RequestParam(value = "branch", required = false) String branch) {
+        String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+        ProjectArchitectureDoc doc = service.generate(projectId, branch, pat);
+        stalenessService.invalidate(projectId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
+    }
+
+    @GetMapping("/api/projects/{projectId}/summary")
+    public ResponseEntity<Map<String, String>> summary(@PathVariable String projectId) {
+        String content = workspace.readFile(projectId, "summary.md").orElse("");
+        return ResponseEntity.ok(Map.of("content", content));
     }
 
     @GetMapping("/api/projects/{projectId}/architecture/staleness")
@@ -61,6 +86,22 @@ public class ProjectArchitectureController {
     public ResponseEntity<List<ArchDocDto>> versions(@PathVariable String projectId) {
         List<ArchDocDto> out = service.versions(projectId).stream().map(ArchDocDto::from).toList();
         return ResponseEntity.ok(out);
+    }
+
+    /**
+     * v2.5.5 (UX-4.2) — source file changes between two architecture versions.
+     * Uses GitHub's compare API against each repo's SHAs captured at generate-time.
+     * The text diff of {@code architecture.md} remains client-side (LCS).
+     */
+    @GetMapping("/api/projects/{projectId}/architecture/diff")
+    public ResponseEntity<ArchitectureDiffService.DiffReport> diff(
+            @PathVariable String projectId,
+            @RequestParam("from") int from,
+            @RequestParam("to") int to,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        String userId = userDetails == null ? null : userDetails.getUser().getId();
+        return ResponseEntity.ok(diffService.diff(projectId, from, to, userId));
     }
 
     @PutMapping("/api/projects/{projectId}/architecture/annotate")

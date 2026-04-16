@@ -4,6 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -30,6 +33,16 @@ public class GitHubRepoService {
 
     @Value("${agent.github.default-owner:owner}")
     private String defaultOwner;
+
+    /** Callback URL that GitHub will POST to — should match the handler route
+     *  in {@code GitHubWebhookController}. Optional: null disables auto-provisioning. */
+    @Value("${github.webhook.callback-url:}")
+    private String webhookCallbackUrl;
+
+    /** HMAC shared secret for webhook signature verification (same value the
+     *  handler reads via {@code github.webhook.secret}). */
+    @Value("${github.webhook.secret:}")
+    private String webhookSecret;
 
     private static final String[] ADJECTIVES = {
         "swift", "bright", "calm", "bold", "keen", "neat", "warm", "cool", "fair", "vast",
@@ -114,6 +127,153 @@ public class GitHubRepoService {
     }
 
     /**
+     * v2.5.2 (Phase 2.3) — close a PR via PATCH. Idempotent: a PR already
+     * closed/merged returns {@code true}. Best-effort on network/auth failure.
+     *
+     * @param repoFullName  e.g. "owner/repo"
+     * @param prNumber      pull-request number (not the API URL id)
+     * @param overridePat   caller's PAT (must have repo:write)
+     * @return true on 200 or 422 (already closed); false otherwise
+     */
+    public boolean closePullRequest(String repoFullName, int prNumber, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return false;
+        if (repoFullName == null || !repoFullName.contains("/")) return false;
+
+        String body = "{\"state\":\"closed\"}";
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() == 200) {
+                log.info("[GitHubRepoService] Closed PR {}#{}", repoFullName, prNumber);
+                return true;
+            }
+            // 422 = state transition rejected (already closed/merged) — treat as success.
+            if (res.statusCode() == 422) {
+                log.info("[GitHubRepoService] PR {}#{} already in terminal state", repoFullName, prNumber);
+                return true;
+            }
+            log.warn("[GitHubRepoService] closePullRequest {}#{} returned {}: {}",
+                    repoFullName, prNumber, res.statusCode(), res.body());
+            return false;
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] closePullRequest {}#{} failed: {}",
+                    repoFullName, prNumber, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Install a {@code pull_request} webhook on the given repo so the
+     * {@link com.navneet.executespec.project.pr.GitHubWebhookController} receives
+     * merge events. Best-effort: logs a warning and returns {@code false} on any
+     * failure (no PAT, no callback URL, network error, 422 duplicate, 404 missing
+     * admin) so the caller can continue linking the repo either way.
+     *
+     * <p>Requires {@code github.webhook.callback-url} + {@code github.webhook.secret}
+     * to be configured; otherwise this short-circuits to {@code false}.
+     *
+     * @param repoFullName  e.g. "owner/repo"
+     * @param overridePat   caller's PAT (must have {@code admin:repo_hook})
+     * @return              {@code true} on 201 Created, else {@code false}
+     */
+    /**
+     * v2.5.5 (UX-4.2) — list files changed between two commits via GitHub's
+     * compare API. Returns one {@link ChangedFile} per file (added / modified /
+     * removed / renamed) or empty on failure. No pagination — the compare
+     * endpoint caps at 300 files per response which is plenty for an arch
+     * diff. Uses the caller's PAT for private-repo access.
+     */
+    public List<ChangedFile> compareCommits(String repoFullName, String baseSha, String headSha, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (repoFullName == null || baseSha == null || headSha == null) return List.of();
+        if (baseSha.equals(headSha)) return List.of();
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest.Builder b = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName
+                            + "/compare/" + baseSha + "..." + headSha))
+                    .header("Accept", "application/vnd.github+json")
+                    .GET();
+            if (effectivePat != null && !effectivePat.isBlank()) {
+                b.header("Authorization", "Bearer " + effectivePat);
+            }
+            HttpResponse<String> res = client.send(b.build(), HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() != 200) {
+                log.warn("[GitHubRepoService] compareCommits {}/{}...{} returned {}",
+                        repoFullName, baseSha, headSha, res.statusCode());
+                return List.of();
+            }
+            JsonNode root = new ObjectMapper().readTree(res.body());
+            JsonNode files = root.path("files");
+            if (!files.isArray()) return List.of();
+            List<ChangedFile> out = new ArrayList<>(files.size());
+            for (JsonNode f : files) {
+                out.add(new ChangedFile(
+                        f.path("filename").asText(""),
+                        f.path("status").asText("modified"),
+                        f.path("additions").asInt(0),
+                        f.path("deletions").asInt(0)));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] compareCommits {}: {}", repoFullName, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** GitHub compare API file entry — status is one of added/modified/removed/renamed. */
+    public record ChangedFile(String filename, String status, int additions, int deletions) {}
+
+    public boolean installWebhook(String repoFullName, String overridePat) {
+        if (webhookCallbackUrl == null || webhookCallbackUrl.isBlank()
+                || webhookSecret == null || webhookSecret.isBlank()) {
+            log.debug("[GitHubRepoService] Webhook auto-provision disabled — callback/secret not set");
+            return false;
+        }
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return false;
+        if (repoFullName == null || !repoFullName.contains("/")) return false;
+
+        String body = """
+                {"name":"web","active":true,"events":["pull_request"],"config":{"url":"%s","content_type":"json","secret":"%s","insecure_ssl":"0"}}"""
+                .formatted(webhookCallbackUrl, webhookSecret.replace("\"", "\\\""));
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/hooks"))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() == 201) {
+                log.info("[GitHubRepoService] Installed PR webhook on {}", repoFullName);
+                return true;
+            }
+            // 422 = duplicate hook (already installed) — treat as success so the repo flag flips.
+            if (res.statusCode() == 422 && res.body() != null && res.body().contains("already exists")) {
+                log.info("[GitHubRepoService] PR webhook already exists on {} — treating as installed", repoFullName);
+                return true;
+            }
+            log.warn("[GitHubRepoService] Webhook install on {} returned {}: {}",
+                    repoFullName, res.statusCode(), res.body());
+            return false;
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] Webhook install on {} failed: {}", repoFullName, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Updates the description of an existing GitHub repo.
      *
      * @param repoUrl     HTTPS clone URL (e.g. https://github.com/owner/repo.git)
@@ -161,17 +321,23 @@ public class GitHubRepoService {
      * @return sorted list of relative file paths, or empty list on failure
      */
     public List<String> listRepoFiles(String repoUrl, String overridePat) {
+        return listRepoFiles(repoUrl, null, overridePat);
+    }
+
+    /** Variant that respects a non-default branch (avoids the hardcoded {@code main}). */
+    public List<String> listRepoFiles(String repoUrl, String branch, String overridePat) {
         String effectivePat = resolve(overridePat, pat);
         if (effectivePat == null || effectivePat.isBlank()) return List.of();
 
         String[] ownerRepo = extractOwnerRepo(repoUrl);
         if (ownerRepo == null) return List.of();
 
+        String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
         try {
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
-                            + "/git/trees/main?recursive=1"))
+                            + "/git/trees/" + effectiveBranch + "?recursive=1"))
                     .header("Authorization", "Bearer " + effectivePat)
                     .header("Accept", "application/vnd.github+json")
                     .GET()
@@ -200,17 +366,22 @@ public class GitHubRepoService {
      * @return file content as string, or error message on failure
      */
     public String readRepoFile(String repoUrl, String relativePath, String overridePat) {
+        return readRepoFile(repoUrl, relativePath, null, overridePat);
+    }
+
+    public String readRepoFile(String repoUrl, String relativePath, String branch, String overridePat) {
         String effectivePat = resolve(overridePat, pat);
         if (effectivePat == null || effectivePat.isBlank()) return "// No GitHub PAT configured";
 
         String[] ownerRepo = extractOwnerRepo(repoUrl);
         if (ownerRepo == null) return "// Invalid repo URL";
 
+        String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
         try {
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
-                            + "/contents/" + relativePath + "?ref=main"))
+                            + "/contents/" + relativePath + "?ref=" + effectiveBranch))
                     .header("Authorization", "Bearer " + effectivePat)
                     .header("Accept", "application/vnd.github+json")
                     .GET()
@@ -406,7 +577,7 @@ public class GitHubRepoService {
                     .build();
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 201) {
+            if (response.statusCode() == 201 || response.statusCode() == 200) {
                 // Extract html_url from response
                 String responseBody = response.body();
                 int idx = responseBody.indexOf("\"html_url\":");
@@ -417,6 +588,15 @@ public class GitHubRepoService {
                     log.info("[GitHubRepoService] Created PR: {}", prUrl);
                     return prUrl;
                 }
+            }
+            // 422 with "A pull request already exists" is normal for continue-on-PR
+            // flows — the push already updated the branch, and GitHub auto-updates
+            // the existing PR. Return null gracefully (caller should not treat as error).
+            if (response.statusCode() == 422 && response.body() != null
+                    && response.body().contains("already exists")) {
+                log.info("[GitHubRepoService] PR already exists for {}/{} head={} — follow-up push updated it",
+                        ownerRepo[0], ownerRepo[1], head);
+                return null;
             }
             log.warn("[GitHubRepoService] Failed to create PR for {}/{}: status {} — {}",
                     ownerRepo[0], ownerRepo[1], response.statusCode(), response.body());
@@ -496,6 +676,91 @@ public class GitHubRepoService {
         } catch (Exception e) {
             log.warn("[GitHubRepoService] requestReviewers error: {}", e.getMessage());
         }
+    }
+
+    // ── PR review comments ──────────────────────────────────────────────────────
+
+    private static final int PR_COMMENTS_MAX_CHARS = 4000;
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
+    /**
+     * Fetches PR review comments (inline code comments + top-level review bodies)
+     * and formats them as markdown suitable for prompt injection.
+     *
+     * @return formatted comments, or empty string on failure (non-fatal)
+     */
+    public String fetchPrReviewComments(String repoFullName, int prNumber, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return "";
+        if (repoFullName == null || repoFullName.isBlank()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+
+            // 1. Top-level review bodies (approve/request-changes/comment)
+            String reviewsUrl = "https://api.github.com/repos/" + repoFullName
+                    + "/pulls/" + prNumber + "/reviews";
+            HttpResponse<String> reviewsResp = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create(reviewsUrl))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+            if (reviewsResp.statusCode() == 200) {
+                JsonNode reviews = JSON_MAPPER.readTree(reviewsResp.body());
+                for (JsonNode r : reviews) {
+                    String body = textOrEmpty(r, "body");
+                    String state = textOrEmpty(r, "state");
+                    String user = r.has("user") && r.get("user").has("login")
+                            ? r.get("user").get("login").asText() : "unknown";
+                    if (body.isBlank()) continue;
+                    sb.append("### Review by @").append(user)
+                      .append(" (").append(state).append(")\n")
+                      .append(body).append("\n\n");
+                    if (sb.length() > PR_COMMENTS_MAX_CHARS) break;
+                }
+            }
+
+            // 2. Inline code comments (file + line + body)
+            String commentsUrl = "https://api.github.com/repos/" + repoFullName
+                    + "/pulls/" + prNumber + "/comments";
+            HttpResponse<String> commentsResp = client.send(HttpRequest.newBuilder()
+                    .uri(URI.create(commentsUrl))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+            if (commentsResp.statusCode() == 200) {
+                JsonNode comments = JSON_MAPPER.readTree(commentsResp.body());
+                for (JsonNode c : comments) {
+                    String body = textOrEmpty(c, "body");
+                    String path = textOrEmpty(c, "path");
+                    int line = c.has("line") && !c.get("line").isNull() ? c.get("line").asInt() : 0;
+                    String user = c.has("user") && c.get("user").has("login")
+                            ? c.get("user").get("login").asText() : "unknown";
+                    if (body.isBlank()) continue;
+                    sb.append("- **").append(path);
+                    if (line > 0) sb.append(":").append(line);
+                    sb.append("** (@").append(user).append("): ").append(body).append("\n");
+                    if (sb.length() > PR_COMMENTS_MAX_CHARS) break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] fetchPrReviewComments {}/{} failed: {}",
+                    repoFullName, prNumber, e.getMessage());
+            return "";
+        }
+
+        String result = sb.toString();
+        if (result.length() > PR_COMMENTS_MAX_CHARS) {
+            result = result.substring(0, PR_COMMENTS_MAX_CHARS) + "\n...(truncated)";
+        }
+        return result;
+    }
+
+    private static String textOrEmpty(JsonNode node, String field) {
+        return node.has(field) && !node.get(field).isNull() ? node.get(field).asText() : "";
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -602,6 +867,133 @@ public class GitHubRepoService {
         }
         paths.sort(String::compareTo);
         return paths;
+    }
+
+    /** Lightweight DTO for {@link #listOwnerRepos(String, String)}. */
+    public record RemoteRepo(String fullName, String defaultBranch, boolean isPrivate) {}
+
+    /** Snapshot of a PR for dashboard rendering (title, body, stats, truncated diff). */
+    public record PullRequestSnapshot(
+            String title, String body, String state, boolean merged,
+            int additions, int deletions, int changedFiles,
+            String headBranch, String baseBranch,
+            String diffPreview) {}
+
+    /**
+     * Fetches a PR + its diff (truncated) for inline dashboard rendering.
+     * Returns {@code null} on any failure — caller should degrade to link-only.
+     */
+    public PullRequestSnapshot getPullRequestSnapshot(String repoFullName, int prNumber,
+                                                       String overridePat, int diffMaxChars) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return null;
+        if (repoFullName == null || repoFullName.isBlank()) return null;
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+
+            // PR metadata (JSON)
+            HttpRequest metaReq = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET().build();
+            HttpResponse<String> metaResp = client.send(metaReq, HttpResponse.BodyHandlers.ofString());
+            if (metaResp.statusCode() != 200) {
+                log.warn("[GitHubRepoService] PR snapshot {} #{} meta status={}",
+                        repoFullName, prNumber, metaResp.statusCode());
+                return null;
+            }
+            com.fasterxml.jackson.databind.ObjectMapper mapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode meta = mapper.readTree(metaResp.body());
+
+            // PR diff (text)
+            HttpRequest diffReq = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github.v3.diff")
+                    .GET().build();
+            HttpResponse<String> diffResp = client.send(diffReq, HttpResponse.BodyHandlers.ofString());
+            String diff = diffResp.statusCode() == 200 ? diffResp.body() : "";
+            String truncated = diff;
+            if (diffMaxChars > 0 && diff.length() > diffMaxChars) {
+                truncated = diff.substring(0, diffMaxChars)
+                        + "\n\n… (truncated, " + (diff.length() - diffMaxChars) + " more chars)";
+            }
+
+            return new PullRequestSnapshot(
+                    meta.path("title").asText(""),
+                    meta.path("body").asText(""),
+                    meta.path("state").asText("open"),
+                    meta.path("merged").asBoolean(false),
+                    meta.path("additions").asInt(0),
+                    meta.path("deletions").asInt(0),
+                    meta.path("changed_files").asInt(0),
+                    meta.path("head").path("ref").asText(""),
+                    meta.path("base").path("ref").asText(""),
+                    truncated);
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] PR snapshot error {} #{}: {}", repoFullName, prNumber, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Lists repos visible to the supplied PAT. Pulls up to 200 results across two
+     * pages of {@code /user/repos} (covers private + collaborator + org-member repos
+     * the token can see). If {@code ownerFilter} is non-blank, results are filtered
+     * to that owner only — useful when the PAT can see many orgs but the user only
+     * wants to register repos from one of them.
+     */
+    public List<RemoteRepo> listOwnerRepos(String ownerFilter, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return List.of();
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        List<RemoteRepo> out = new ArrayList<>();
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            for (int page = 1; page <= 2; page++) {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create("https://api.github.com/user/repos"
+                                + "?affiliation=owner,collaborator,organization_member"
+                                + "&per_page=100&page=" + page))
+                        .header("Authorization", "Bearer " + effectivePat)
+                        .header("Accept", "application/vnd.github+json")
+                        .GET()
+                        .build();
+                HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) {
+                    log.warn("[GitHubRepoService] /user/repos page {} returned {}: {}",
+                            page, resp.statusCode(), truncate(resp.body(), 200));
+                    break;
+                }
+                com.fasterxml.jackson.databind.JsonNode arr = mapper.readTree(resp.body());
+                if (!arr.isArray() || arr.isEmpty()) break;
+                for (com.fasterxml.jackson.databind.JsonNode node : arr) {
+                    String full = node.path("full_name").asText(null);
+                    if (full == null) continue;
+                    if (ownerFilter != null && !ownerFilter.isBlank()
+                            && !full.toLowerCase().startsWith(ownerFilter.toLowerCase() + "/")) {
+                        continue;
+                    }
+                    out.add(new RemoteRepo(
+                            full,
+                            node.path("default_branch").asText("main"),
+                            node.path("private").asBoolean(false)));
+                }
+                if (arr.size() < 100) break;   // last page
+            }
+        } catch (Exception e) {
+            log.warn("[GitHubRepoService] listOwnerRepos failed: {}", e.getMessage());
+        }
+        out.sort((a, b) -> a.fullName().compareToIgnoreCase(b.fullName()));
+        return out;
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 
     /**

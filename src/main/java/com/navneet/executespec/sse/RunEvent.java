@@ -57,6 +57,17 @@ public record RunEvent(
         return new RunEvent("COMPLETE", runId, null, status, Instant.now());
     }
 
+    /**
+     * v2.5.10 — complete event that carries an explicit statusReason so the UI
+     * can decorate PARTIAL / COMPLETE badges with a tooltip (e.g. "PARTIAL
+     * because FINAL_BUILD_FAILED"). Payload format: "{status}|{reason}". When
+     * reason is null, payload is "{status}" (identical to the 2-arg overload).
+     */
+    public static RunEvent complete(String runId, String status, String reason) {
+        String payload = (reason == null || reason.isBlank()) ? status : status + "|" + reason;
+        return new RunEvent("COMPLETE", runId, null, payload, Instant.now());
+    }
+
     // ── Context clarification events ──────────────────────────────────────────
 
     public static RunEvent clarificationNeeded(String runId, String prompt) {

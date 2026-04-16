@@ -4,6 +4,7 @@ import GlowDot from '@/components/shared/GlowDot';
 import { fmtTokens, fmtMs, cn } from '@/lib/utils';
 import { useRunStore } from '@/stores/useRunStore';
 import type { TaskSummary } from '@/lib/api';
+import RepoChip, { extractRepoShortName } from './RepoChip';
 
 interface TaskCardProps {
   task: TaskSummary;
@@ -71,6 +72,7 @@ export default function TaskCard({ task, runId, runStatus, subtasks }: TaskCardP
           <p className={cn('text-primary truncate', isSubtask ? 'text-xs' : 'text-sm')}>{task.title}</p>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-muted font-mono">{task.taskId.slice(0, 8)}</span>
+            <RepoChip name={extractRepoShortName(task.title, task.objective, task.completionNotes)} />
             {task.branchName && !isSubtask && (
               <span className="text-xs text-muted font-mono">{task.branchName}</span>
             )}

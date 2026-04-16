@@ -11,4 +11,7 @@ public interface PullRequestRecordRepository extends JpaRepository<PullRequestRe
     List<PullRequestRecord> findByRunIdOrderByCreatedAtAsc(String runId);
 
     Optional<PullRequestRecord> findByRepoFullNameAndPrNumber(String repoFullName, Integer prNumber);
+
+    /** v2.5.2 — open-PR count for a given repo full name. */
+    long countByRepoFullNameAndStatus(String repoFullName, PullRequestRecord.Status status);
 }

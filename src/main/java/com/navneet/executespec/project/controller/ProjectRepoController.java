@@ -6,6 +6,8 @@ import com.navneet.executespec.project.dto.ProjectRepoDto;
 import com.navneet.executespec.project.dto.ProjectRepoLinkDto;
 import com.navneet.executespec.project.dto.UpdateRelationshipsRequest;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.GitHubRepoService.RemoteRepo;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -25,6 +27,22 @@ import java.util.UUID;
 public class ProjectRepoController {
 
     private final ProjectRepoService service;
+    private final GitHubRepoService gitHub;
+
+    /**
+     * Lists every repo the caller's GitHub PAT can see (owned + collaborator +
+     * org-member). Optionally filtered by {@code owner}. Returns lightweight
+     * snapshots so the AddRepoModal "Pick existing" tab can show the real GitHub
+     * catalogue, not just repos already registered in our DB.
+     */
+    @GetMapping("/api/repos/github")
+    public ResponseEntity<List<RemoteRepo>> listGitHubRepos(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestParam(value = "owner", required = false) String owner) {
+        var u = userDetails.getUser();
+        String effectiveOwner = (owner != null && !owner.isBlank()) ? owner : u.getGithubOwner();
+        return ResponseEntity.ok(gitHub.listOwnerRepos(effectiveOwner, u.getGithubPat()));
+    }
 
     /* ── Lifecycle ── */
 
@@ -59,6 +77,23 @@ public class ProjectRepoController {
                 userDetails.getUser().getId(),
                 userDetails.getUser().getOrgId(),
                 isOrgAdmin(userDetails)));
+    }
+
+    /**
+     * v2.5.2 — install the PR webhook on this repo using the caller's PAT.
+     * Returns {@code {installed: true}} on success or {@code {installed: false, reason}}
+     * when install failed (no PAT admin, network, etc.).
+     */
+    @PostMapping("/api/repos/{repoId}/webhook")
+    public ResponseEntity<java.util.Map<String, Object>> installRepoWebhook(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @PathVariable UUID repoId) {
+        var u = userDetails.getUser();
+        boolean ok = service.installWebhook(repoId, u.getGithubPat(), u.getId(), u.getOrgId());
+        return ResponseEntity.ok(ok
+                ? java.util.Map.of("installed", true)
+                : java.util.Map.of("installed", false,
+                        "reason", "GitHub API rejected webhook install — check PAT has admin:repo_hook"));
     }
 
     @DeleteMapping("/api/repos/{repoId}")

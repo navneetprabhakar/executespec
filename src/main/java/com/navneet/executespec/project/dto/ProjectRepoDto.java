@@ -15,6 +15,7 @@ public record ProjectRepoDto(
         String defaultBranch,
         String lastSyncedSha,
         String detectedStack,
+        boolean webhookInstalled,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -29,6 +30,7 @@ public record ProjectRepoDto(
                 r.getDefaultBranch(),
                 r.getLastSyncedSha(),
                 r.getDetectedStack(),
+                r.isWebhookInstalled(),
                 r.getCreatedAt(),
                 r.getUpdatedAt()
         );

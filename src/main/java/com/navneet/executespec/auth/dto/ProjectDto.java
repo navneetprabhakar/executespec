@@ -14,7 +14,8 @@ public record ProjectDto(
         Instant createdAt,
         String branchNamingPattern,
         String targetBranch,
-        String defaultReviewers
+        String defaultReviewers,
+        String githubOwner
 ) {
     public static ProjectDto from(Project p) {
         return new ProjectDto(p.getId(), p.getOrgId(), p.getName(), p.getDescription(),
@@ -22,6 +23,7 @@ public record ProjectDto(
                 p.getCreatedAt(),
                 p.getBranchNamingPattern(),
                 p.getTargetBranch(),
-                p.getDefaultReviewers());
+                p.getDefaultReviewers(),
+                p.getGithubOwner());
     }
 }
