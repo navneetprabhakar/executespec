@@ -4,17 +4,7 @@ import type { TaskSummary } from '@/types/project';
 import { cn } from '@/lib/utils';
 import { getRun, type RunDetail } from '@/lib/api';
 import InlineRunDetail from './InlineRunDetail';
-
-const STATUS_COLOR: Record<string, string> = {
-  COMPLETE:   'text-emerald-400',
-  PARTIAL:    'text-accent-amber',
-  FAILED:     'text-accent-red',
-  CANCELLED:  'text-accent-red',
-  RUNNING:    'text-accent-blue',
-  PLANNING:   'text-accent-blue',
-  WORKING:    'text-accent-blue',
-  REVIEWING:  'text-accent-blue',
-};
+import StatusBadge from '@/components/shared/StatusBadge';
 
 function scoreColor(score: number | null | undefined): string {
   if (score == null) return 'text-muted';
@@ -63,7 +53,6 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
         </thead>
         <tbody>
           {tasks.map((t) => {
-            const statusColor = STATUS_COLOR[t.status] ?? 'text-muted';
             const expanded = expandedRunId === t.runId;
             const detail = runCache[t.runId];
             return (
@@ -79,7 +68,9 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
                   <td className="px-2.5 py-1.5 truncate max-w-md text-accent-blue">
                     {t.name || t.runId.slice(0, 8)}
                   </td>
-                  <td className={cn('px-2.5 py-1.5 font-mono', statusColor)}>{t.status}</td>
+                  <td className="px-2.5 py-1.5">
+                    <StatusBadge status={t.status} />
+                  </td>
                   <td className={cn('px-2.5 py-1.5 text-right font-mono tabular-nums', scoreColor(t.score))}>
                     {t.score != null ? `${t.score}` : '—'}
                   </td>

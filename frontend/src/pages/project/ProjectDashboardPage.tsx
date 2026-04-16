@@ -63,8 +63,8 @@ export default function ProjectDashboardPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runCache, setRunCache] = useState<Record<string, RunDetail | 'loading' | 'error'>>({});
   const {
-    dashboard, scoreTrend, loading, error,
-    fetchDashboard, fetchScoreTrend, reset,
+    dashboard, scoreTrend, repos, loading, error,
+    fetchDashboard, fetchScoreTrend, fetchRepos, reset,
   } = useProjectStore();
 
   useEffect(() => {
@@ -75,6 +75,7 @@ export default function ProjectDashboardPage() {
         .catch(() => { setProject(null); setProjectLookup('missing'); });
     fetchDashboard(projectId);
     fetchScoreTrend(projectId);
+    fetchRepos(projectId);
     return () => {
       reset();
       setProject(null);
@@ -203,7 +204,7 @@ export default function ProjectDashboardPage() {
               </span>
             )}
           </div>
-          <NewExecutionButton projectId={projectId} />
+          <NewExecutionButton projectId={projectId} repoCount={repos?.length ?? 0} />
         </header>
         {project?.description && (
           <p className="text-xs text-muted">{project.description}</p>
@@ -501,13 +502,23 @@ function formatK(n: number): string {
   return String(n);
 }
 
-function NewExecutionButton({ projectId }: { projectId: string }) {
+function NewExecutionButton({ projectId, repoCount }: { projectId: string; repoCount: number }) {
   const navigate = useNavigate();
+  const disabled = repoCount === 0;
+  const title = disabled
+    ? 'Link at least one repository to launch.'
+    : 'Start a cross-repo Launch (ENTERPRISE / MAX)';
   return (
     <button
-      onClick={() => navigate(`/projects/${projectId}/executions/new`)}
-      className="flex items-center gap-1.5 text-xs font-medium rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-colors px-2.5 py-1"
-      title="Start a cross-repo Launch (ENTERPRISE / MAX)"
+      onClick={() => !disabled && navigate(`/projects/${projectId}/executions/new`)}
+      disabled={disabled}
+      className={
+        'flex items-center gap-1.5 text-xs font-medium rounded-sm border px-2.5 py-1 transition-colors ' +
+        (disabled
+          ? 'border-[var(--border-default)] bg-[var(--gray-100)] text-muted cursor-not-allowed opacity-60'
+          : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20')
+      }
+      title={title}
     >
       <Rocket className="h-3 w-3" />
       Launch

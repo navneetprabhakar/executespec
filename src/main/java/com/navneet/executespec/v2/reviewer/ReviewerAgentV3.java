@@ -9,6 +9,8 @@ import com.navneet.executespec.v2.observability.V2Metrics;
 import com.navneet.executespec.v2.tool.BuildProjectTool;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import com.navneet.executespec.v2.tool.ToolResult;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
@@ -16,6 +18,11 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * V2 post-execution code reviewer.
@@ -49,10 +56,39 @@ public class ReviewerAgentV3 {
      *  passes are fundamentally inspection + targeted edits, not generation. */
     public static final int DEFAULT_MAX_ITER_PER_PASS = 30;
 
+    /** Wall-clock cap on the general pass — long enough for thorough review,
+     *  short enough that a stuck LLM does not freeze the whole run.
+     *  See v2.5.10 eval Bug C: a Gemini reviewer hung indefinitely with all
+     *  worker tasks complete, blocking terminate + score persistence. */
+    public static final long GENERAL_PASS_TIMEOUT_SECONDS = 90;
+
+    /** Wall-clock cap on the wiring pass — narrower scope than general. */
+    public static final long WIRING_PASS_TIMEOUT_SECONDS = 60;
+
     private final WorkerAgentV2 worker;
     private final BuildProjectTool buildProjectTool;
     private final ObjectMapper objectMapper;
     private final V2Metrics metrics;
+
+    /** Per-call executor for the timeout wrapper. Cached pool so successive
+     *  reviews reuse threads; daemon threads so JVM shutdown is not blocked. */
+    private ExecutorService passExecutor;
+
+    @PostConstruct
+    void initExecutor() {
+        passExecutor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "reviewer-pass");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    @PreDestroy
+    void shutdownExecutor() {
+        if (passExecutor != null) {
+            passExecutor.shutdownNow();
+        }
+    }
 
     public ReviewerResult review(ReviewerRequestV2 req) {
         ReviewerResult result = reviewImpl(req);
@@ -75,8 +111,9 @@ public class ReviewerAgentV3 {
         // state. Only a hard ERROR outcome (LLM failure, tool dispatch crash)
         // warrants REVIEW_FAILED. ITERATION_LIMIT_EXCEEDED and STOPPED_WITHOUT_COMPLETE
         // fall through to the final build, whose exit code dictates the verdict.
-        WorkerResult general = runPass(req, maxIter,
-                "reviewer-general", loadPrompt("prompts/v2/reviewer-general.md"));
+        WorkerResult general = runPassWithTimeout(req, maxIter,
+                "reviewer-general", loadPrompt("prompts/v2/reviewer-general.md"),
+                GENERAL_PASS_TIMEOUT_SECONDS);
         if (general.outcome() == WorkerResult.Outcome.ERROR) {
             log.warn("ReviewerAgentV3 general pass errored: {}", general.outcome());
             return ReviewerResult.builder()
@@ -93,8 +130,9 @@ public class ReviewerAgentV3 {
         // ── Wiring pass ──────────────────────────────────────────────────────
         WorkerResult wiring = null;
         if (!req.skipWiringPass()) {
-            wiring = runPass(req, maxIter,
-                    "reviewer-wiring", loadPrompt("prompts/v2/reviewer-wiring.md"));
+            wiring = runPassWithTimeout(req, maxIter,
+                    "reviewer-wiring", loadPrompt("prompts/v2/reviewer-wiring.md"),
+                    WIRING_PASS_TIMEOUT_SECONDS);
             if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
                 log.warn("ReviewerAgentV3 wiring pass errored: {}", wiring.outcome());
                 return ReviewerResult.builder()
@@ -165,6 +203,49 @@ public class ReviewerAgentV3 {
                 .temperature(0.0)
                 .maxTokensPerCall(8192)
                 .build());
+    }
+
+    /**
+     * Runs a review pass on the worker pool with a wall-clock timeout. On
+     * timeout the underlying future is cancelled (interrupting the worker
+     * thread); we return a synthetic {@link WorkerResult} with outcome
+     * {@code ERROR} so {@link #determineOverall} treats it as REVIEW_FAILED
+     * and {@link com.navneet.executespec.v2.integration.V2RunOrchestrator#resolveTerminalStatus}
+     * falls through to the build + execution signals.
+     */
+    private WorkerResult runPassWithTimeout(ReviewerRequestV2 req, int maxIter,
+                                             String taskIdSuffix, String systemPrompt,
+                                             long timeoutSeconds) {
+        Future<WorkerResult> future = passExecutor.submit(
+                () -> runPass(req, maxIter, taskIdSuffix, systemPrompt));
+        try {
+            return future.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException te) {
+            future.cancel(true);
+            log.warn("ReviewerAgentV3 pass {} TIMED OUT after {}s — treating as ERROR; "
+                    + "final build verdict will determine run status",
+                    taskIdSuffix, timeoutSeconds);
+            return WorkerResult.builder()
+                    .outcome(WorkerResult.Outcome.ERROR)
+                    .completionSummary("review pass timeout after " + timeoutSeconds + "s")
+                    .iterations(maxIter)
+                    .build();
+        } catch (InterruptedException ie) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            return WorkerResult.builder()
+                    .outcome(WorkerResult.Outcome.ERROR)
+                    .completionSummary("review pass interrupted")
+                    .iterations(0)
+                    .build();
+        } catch (Exception e) {
+            log.error("ReviewerAgentV3 pass {} unexpected failure", taskIdSuffix, e);
+            return WorkerResult.builder()
+                    .outcome(WorkerResult.Outcome.ERROR)
+                    .completionSummary("review pass crashed: " + e.getClass().getSimpleName())
+                    .iterations(0)
+                    .build();
+        }
     }
 
     private ReviewerResult.Overall determineOverall(WorkerResult general, WorkerResult wiring,
