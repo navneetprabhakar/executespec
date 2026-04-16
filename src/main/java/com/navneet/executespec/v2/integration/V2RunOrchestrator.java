@@ -687,6 +687,17 @@ public class V2RunOrchestrator {
             } catch (Exception e) {
                 log.warn("V2RunOrchestrator run={} failed to serialize plan JSON", runId, e);
             }
+            // v2.5.11 (Validation v3 / Pillar 1) — persist the enumerated
+            // requirement graph alongside the plan JSON so the reviewer (Pillar
+            // 2) and the UI (Pillar 5) can render per-requirement evidence.
+            // Null when plan.requirements is empty (legacy / flag off).
+            try {
+                if (plan.requirements() != null && !plan.requirements().isEmpty()) {
+                    r.setPlanRequirementsJson(objectMapper.writeValueAsString(plan.requirements()));
+                }
+            } catch (Exception e) {
+                log.warn("V2RunOrchestrator run={} failed to serialize plan_requirements_json", runId, e);
+            }
             runRepo.save(r);
         });
     }
@@ -706,6 +717,18 @@ public class V2RunOrchestrator {
                 row.setTaskJson(objectMapper.writeValueAsString(task));
             } catch (Exception e) {
                 log.warn("V2RunOrchestrator run={} failed to serialize task {}", runId, taskId, e);
+            }
+            // v2.5.11 (Validation v3 / Pillar 1) — persist per-task requirement
+            // coverage so downstream consumers (reviewer evidence, UI table)
+            // can trace implementation back to spec requirements.
+            try {
+                if (task.meetsRequirements() != null && !task.meetsRequirements().isEmpty()) {
+                    row.setMeetsRequirementsJson(
+                            objectMapper.writeValueAsString(task.meetsRequirements()));
+                }
+            } catch (Exception e) {
+                log.warn("V2RunOrchestrator run={} failed to serialize meets_requirements for {}",
+                        runId, taskId, e);
             }
             taskRepo.save(row);
         }

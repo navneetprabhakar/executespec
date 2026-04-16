@@ -49,6 +49,11 @@ public class PlannerAgentV2 {
     private final ObjectMapper objectMapper;
     private final V2Metrics metrics;
     private final RunTitleSummarizer titleSummarizer;
+    /** v2.5.11 — gates strict v3 planner behaviour (requirement enumeration + validation). */
+    private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+
+    /** v2.5.11 — feature flag name gating the whole validation v3 rollout. */
+    private static final String FLAG_V3_STRICT = "validation.v3-strict";
 
     public PlanV2 plan(PlannerRequestV2 req) {
         long start = System.currentTimeMillis();
@@ -78,11 +83,21 @@ public class PlannerAgentV2 {
                 + "workspace (Jest/Vitest, pytest, Go *_test.go, JUnit), extend it; "
                 + "otherwise scaffold a minimal test file with at least one happy-path "
                 + "test + one error case.";
+        // v2.5.11 (Validation v3 / Pillar 1) — synthesize a single requirement
+        // so SINGLE_SHOT plans have the same coverage contract as LLM-driven ones.
+        // Requirement text = first line / 120 chars of the spec.
+        String r1Text = req.spec();
+        int nl = r1Text.indexOf('\n');
+        if (nl > 0) r1Text = r1Text.substring(0, nl);
+        if (r1Text.length() > 120) r1Text = r1Text.substring(0, 120) + "...";
+        RequirementSpec r1 = new RequirementSpec("R1", r1Text.trim(),
+                RequirementSpec.RequirementKind.FUNCTIONAL);
         PlannedTaskV2 task = PlannedTaskV2.builder()
                 .id("T1")
                 .title(title)
                 .description(description)
                 .complexity(PlannedTaskV2.Complexity.LOW)
+                .meetsRequirements(List.of("R1"))
                 .build();
         return PlanV2.builder()
                 .planTitle(title)
@@ -92,12 +107,46 @@ public class PlannerAgentV2 {
                 .runtimeSurface(PlanV2.RuntimeSurface.HTTP)
                 .classification(Classification.SINGLE_SHOT)
                 .tasks(List.of(task))
+                .requirements(List.of(r1))
                 .build();
     }
 
     // ─── LLM-driven planner ─────────────────────────────────────────────────
 
     private PlanV2 plannerViaLlm(PlannerRequestV2 req) {
+        // First attempt
+        PlanV2 plan = plannerViaLlmOnce(req, null);
+
+        // v2.5.11 (Validation v3 / Pillar 1) — strict validation + one retry.
+        // Only enforced when the flag is on so legacy runs keep their current
+        // behaviour. Flag off = log-only constraint underpropagation warning.
+        if (featureFlagService != null && featureFlagService.isEnabled(FLAG_V3_STRICT)) {
+            List<String> violations = validatePlan(plan);
+            if (!violations.isEmpty()) {
+                String feedback = "Your previous plan had these requirement-graph violations:\n  - "
+                        + String.join("\n  - ", violations)
+                        + "\n\nRe-emit the plan with every spec requirement enumerated and every "
+                        + "task's meetsRequirements referencing real requirement IDs. "
+                        + "Every requirement must be cited by at least one task.";
+                log.warn("Planner plan invalid on first try ({} violations) — retrying. First violation: {}",
+                        violations.size(), violations.get(0));
+                PlanV2 retryPlan = plannerViaLlmOnce(req, feedback);
+                List<String> retryViolations = validatePlan(retryPlan);
+                if (!retryViolations.isEmpty()) {
+                    throw new IllegalStateException(
+                            "PLAN_COVERAGE_INVALID: planner produced an invalid requirement graph "
+                                    + "even after one retry. Violations: "
+                                    + String.join("; ", retryViolations));
+                }
+                plan = retryPlan;
+            }
+        }
+        return plan;
+    }
+
+    /** One LLM round-trip + parse. Feedback (optional) is injected as an
+     *  additional user message when retrying after a validation failure. */
+    private PlanV2 plannerViaLlmOnce(PlannerRequestV2 req, String feedback) {
         String systemPrompt = loadPrompt()
                 .replace("{{SPEC}}", req.spec())
                 .replace("{{CLASSIFICATION}}", req.classification().name())
@@ -112,9 +161,12 @@ public class PlannerAgentV2 {
                 .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()))
                 .replace("{{PR_REVIEW_COMMENTS}}", renderPrReviewBlock(req.prReviewComments()));
 
+        String userMsg = (feedback == null || feedback.isBlank())
+                ? "Produce the plan now."
+                : feedback + "\n\nProduce the corrected plan now.";
         List<Message> messages = List.of(
                 new SystemMessage(systemPrompt),
-                new UserMessage("Produce the plan now."));
+                new UserMessage(userMsg));
 
         ToolCallback submitPlan = buildSubmitPlanCallback();
         ChatResponse resp = router.call(LlmRequestV2.builder()
@@ -173,6 +225,84 @@ public class PlannerAgentV2 {
      * <p>Not a hard validation — weaker models (Gemini 2.5-flash observed) underpropagate
      * intermittently. Auto-backfill is a candidate for Phase 4.x if this warning fires often.
      */
+    /**
+     * v2.5.11 (Validation v3 / Pillar 1) — validate the plan's requirement graph
+     * against the hard contract:
+     * <ol>
+     *   <li>At least one requirement is declared (empty list = planner skipped step 1).</li>
+     *   <li>Requirement IDs are unique and non-blank.</li>
+     *   <li>Every {@code task.meetsRequirements} entry references a real requirement ID.</li>
+     *   <li>Every requirement ID is cited by at least one task.</li>
+     *   <li>If runtime surface is HTTP / CLI / LIBRARY and classification is not
+     *       SINGLE_SHOT, at least one task or requirement must be test-oriented.</li>
+     * </ol>
+     *
+     * Returns a list of violation strings — empty when the plan is clean.
+     * Called from {@link #plannerViaLlm(PlannerRequestV2)} when the
+     * {@code validation.v3-strict} flag is on.
+     */
+    List<String> validatePlan(PlanV2 plan) {
+        List<String> out = new ArrayList<>();
+        List<RequirementSpec> reqs = plan.requirements();
+        if (reqs == null || reqs.isEmpty()) {
+            out.add("No requirements enumerated (top-level 'requirements' array is empty).");
+            // Without requirements we can't evaluate the rest of the rules.
+            return out;
+        }
+
+        // Rule 2: unique non-blank IDs
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        java.util.Set<String> duplicates = new java.util.LinkedHashSet<>();
+        for (RequirementSpec r : reqs) {
+            if (r.id() == null || r.id().isBlank()) {
+                out.add("Requirement has blank id (text=" + truncate(r.text(), 60) + ").");
+                continue;
+            }
+            if (!ids.add(r.id())) duplicates.add(r.id());
+        }
+        if (!duplicates.isEmpty()) {
+            out.add("Duplicate requirement ids: " + duplicates);
+        }
+
+        // Rule 3 + 4: coverage
+        java.util.Set<String> covered = new java.util.HashSet<>();
+        java.util.Set<String> unknownRefs = new java.util.LinkedHashSet<>();
+        for (PlannedTaskV2 t : plan.tasks()) {
+            if (t.meetsRequirements() == null) continue;
+            for (String refId : t.meetsRequirements()) {
+                if (!ids.contains(refId)) unknownRefs.add(refId);
+                else covered.add(refId);
+            }
+        }
+        if (!unknownRefs.isEmpty()) {
+            out.add("Task meetsRequirements references unknown ids: " + unknownRefs);
+        }
+        java.util.Set<String> uncovered = new java.util.LinkedHashSet<>(ids);
+        uncovered.removeAll(covered);
+        if (!uncovered.isEmpty()) {
+            out.add("Requirements not covered by any task: " + uncovered);
+        }
+
+        // Rule 5: test requirement / test task for testable surfaces
+        PlanV2.RuntimeSurface surface = plan.runtimeSurface();
+        boolean testableSurface = surface == PlanV2.RuntimeSurface.HTTP
+                || surface == PlanV2.RuntimeSurface.CLI
+                || surface == PlanV2.RuntimeSurface.LIBRARY;
+        boolean isSingleShot = plan.classification() == Classification.SINGLE_SHOT;
+        if (testableSurface && !isSingleShot) {
+            boolean hasTestRequirement = reqs.stream()
+                    .anyMatch(r -> r.kind() == RequirementSpec.RequirementKind.TEST);
+            boolean hasTestTask = plan.tasks().stream().anyMatch(t ->
+                    (t.title() != null && t.title().toLowerCase().contains("test"))
+                            || (t.description() != null && t.description().toLowerCase().contains("test")));
+            if (!hasTestRequirement && !hasTestTask) {
+                out.add("No test task or TEST-kind requirement on a testable surface ("
+                        + surface + ") — strict v3 requires at least one.");
+            }
+        }
+        return out;
+    }
+
     private void warnIfConstraintsUnderpropagated(PlanV2 plan, String spec) {
         if (plan.tasks().isEmpty()) return;
         String specLower = spec.toLowerCase();
@@ -254,6 +384,11 @@ public class PlannerAgentV2 {
             log.warn("Unknown runtimeSurface '{}', falling back to HTTP", surfaceStr);
         }
 
+        // v2.5.11 (Validation v3 / Pillar 1) — parse the enumerated requirements
+        // list. Empty list on legacy-shaped plans (no "requirements" key) or when
+        // the feature flag is off and the prompt didn't ask for them.
+        List<RequirementSpec> requirements = parseRequirements(root.path("requirements"));
+
         return PlanV2.builder()
                 .planTitle(root.path("planTitle").asText(null))
                 .planSummary(root.path("planSummary").asText(null))
@@ -264,7 +399,29 @@ public class PlannerAgentV2 {
                 .runtimeSurface(runtimeSurface)
                 .tasks(tasks)
                 .classification(classification)
+                .requirements(requirements)
                 .build();
+    }
+
+    /** v2.5.11 — parse the planner's requirement array. Robust to missing fields
+     *  and unknown kinds. Drops entries with blank id/text. */
+    private List<RequirementSpec> parseRequirements(JsonNode arr) {
+        if (arr == null || !arr.isArray()) return List.of();
+        List<RequirementSpec> out = new ArrayList<>();
+        for (JsonNode n : arr) {
+            String id = n.path("id").asText("").trim();
+            String text = n.path("text").asText("").trim();
+            if (id.isEmpty() || text.isEmpty()) continue;
+            RequirementSpec.RequirementKind kind;
+            try {
+                String kStr = n.path("kind").asText("FUNCTIONAL").trim().toUpperCase();
+                kind = RequirementSpec.RequirementKind.valueOf(kStr);
+            } catch (IllegalArgumentException e) {
+                kind = RequirementSpec.RequirementKind.FUNCTIONAL;
+            }
+            out.add(new RequirementSpec(id, text, kind));
+        }
+        return out;
     }
 
     /**
@@ -316,6 +473,7 @@ public class PlannerAgentV2 {
                 .touchesFiles(stringList(t.path("touchesFiles")))
                 .dependsOn(stringList(t.path("dependsOn")))
                 .hardConstraints(stringList(t.path("hardConstraints")))
+                .meetsRequirements(stringList(t.path("meetsRequirements")))
                 .build();
     }
 
@@ -358,6 +516,19 @@ public class PlannerAgentV2 {
                               "type": "string",
                               "description": "How the code runs: HTTP (web server), CLI (console program), LIBRARY (importable package, no entry point), STATIC_WEB (frontend only). Default HTTP."
                             },
+                            "requirements": {
+                              "type": "array",
+                              "description": "v2.5.11 — enumerate EVERY requirement from the spec. Each requirement will be cited by at least one task's meetsRequirements and later verified with evidence by the reviewer.",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {"type": "string", "description": "Short ID like R1, R2, R3"},
+                                  "text": {"type": "string", "description": "One-sentence requirement statement"},
+                                  "kind": {"type": "string", "description": "FUNCTIONAL | NON_FUNCTIONAL | TEST | CONSTRAINT"}
+                                },
+                                "required": ["id", "text"]
+                              }
+                            },
                             "tasks": {
                               "type": "array",
                               "items": {
@@ -369,7 +540,12 @@ public class PlannerAgentV2 {
                                   "complexity": {"type": "string", "description": "LOW | MEDIUM | HIGH"},
                                   "touchesFiles": {"type": "array", "items": {"type": "string"}},
                                   "dependsOn": {"type": "array", "items": {"type": "string"}},
-                                  "hardConstraints": {"type": "array", "items": {"type": "string"}}
+                                  "hardConstraints": {"type": "array", "items": {"type": "string"}},
+                                  "meetsRequirements": {
+                                    "type": "array",
+                                    "description": "v2.5.11 — requirement IDs (from the top-level requirements array) this task implements. Every requirement must be cited by at least one task.",
+                                    "items": {"type": "string"}
+                                  }
                                 },
                                 "required": ["id", "title", "description"]
                               }

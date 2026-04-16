@@ -33,7 +33,12 @@ public record PlanV2(
         SmokeTestStrategy smokeTestStrategy,
         RuntimeSurface runtimeSurface,
         List<PlannedTaskV2> tasks,
-        Classification classification) {
+        Classification classification,
+        /** v2.5.11 (Validation v3 / Pillar 1) — spec requirements the planner enumerated.
+         *  Each task cites which of these IDs it implements via
+         *  {@link PlannedTaskV2#meetsRequirements()}. Empty list on legacy runs and
+         *  when {@code validation.v3-strict} is off. */
+        List<RequirementSpec> requirements) {
 
     public PlanV2 {
         if (planTitle == null || planTitle.isBlank()) planTitle = "(untitled plan)";
@@ -42,6 +47,7 @@ public record PlanV2(
         if (runtimeSurface == null) runtimeSurface = RuntimeSurface.HTTP;
         if (tasks == null) tasks = List.of();
         if (classification == null) classification = Classification.MEDIUM;
+        if (requirements == null) requirements = List.of();
     }
 
     public enum SmokeTestStrategy {
