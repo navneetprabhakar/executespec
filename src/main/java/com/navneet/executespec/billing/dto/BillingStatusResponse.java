@@ -8,7 +8,10 @@ public record BillingStatusResponse(
         SubscriptionInfo subscription,
         PlanResponse plan,
         List<UsageInfo> usage,
-        BonusRunsInfo bonusRuns
+        BonusRunsInfo bonusRuns,
+        /** v2.5.8 — Total USD spent on LLM calls during the current billing
+         *  period (pipeline_run + execution_run). Null if billing not initialised. */
+        Double spentUsd
 ) {
     public record SubscriptionInfo(
             UUID id,

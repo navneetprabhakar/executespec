@@ -38,6 +38,8 @@ public class ProjectDashboardController {
     private final com.navneet.executespec.project.pr.PostMergeCascadeService postMergeCascadeService;
     private final com.navneet.executespec.project.estimation.EstimationService estimationService;
     private final com.navneet.executespec.project.techdebt.TechDebtService techDebtService;
+    /** v2.5.8 — Launch runs accumulate tokens + cost here; dashboard now reads both. */
+    private final com.navneet.executespec.execution.repository.ExecutionRunRepository execRunRepo;
 
     public record TaskSummary(
             String taskId, String runId, String name, String status,
@@ -79,16 +81,33 @@ public class ProjectDashboardController {
                 projectId, PageRequest.of(0, 10));
 
         // Project-wide token + cost totals (across all runs, not just recent).
+        // v2.5.8 — now aggregates from BOTH PipelineRun (standalone runs) and
+        // ExecutionRun (Launches). Before this fix, Launches ran and consumed
+        // tokens but the project dashboard rendered "—" because it only
+        // summed PipelineRun. The ExecutionRun totals are themselves maintained
+        // by SolutionExecutionService.accumulateExecutionRunTotals on each
+        // solution completion (v2.5.7 fix).
         List<PipelineRun> allRuns = runRepo.findByProjectIdOrderByStartedAtDesc(
                 projectId, PageRequest.of(0, 2000));
-        long totalTokens = allRuns.stream()
+        long pipelineTokens = allRuns.stream()
                 .mapToLong(r -> (r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens())
                               + (r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens()))
                 .sum();
-        double totalCost = allRuns.stream()
+        double pipelineCost = allRuns.stream()
                 .filter(r -> r.getActualCostUsd() != null)
                 .mapToDouble(PipelineRun::getActualCostUsd)
                 .sum();
+        var execRuns = execRunRepo.findByProjectIdAndDeletedAtIsNullOrderByCreatedAtDesc(
+                projectId, PageRequest.of(0, 2000)).getContent();
+        long execTokens = execRuns.stream()
+                .mapToLong(e -> e.getTotalActualTokens() == null ? 0L : e.getTotalActualTokens())
+                .sum();
+        double execCost = execRuns.stream()
+                .filter(e -> e.getTotalCostUsd() != null)
+                .mapToDouble(e -> e.getTotalCostUsd().doubleValue())
+                .sum();
+        long totalTokens = pipelineTokens + execTokens;
+        double totalCost = pipelineCost + execCost;
 
         List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
         double avgScore = reports.stream()

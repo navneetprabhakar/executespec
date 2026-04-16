@@ -104,4 +104,6 @@ The plan schema:
 
 {{TDD_MODE_BLOCK}}
 
+{{PR_REVIEW_COMMENTS}}
+
 Now call `submitPlan` with your plan.

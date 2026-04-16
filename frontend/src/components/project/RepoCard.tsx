@@ -56,9 +56,9 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] truncate text-primary">{repo.githubRepoFullName}</span>
+            <span className="font-mono text-xs truncate text-primary">{repo.githubRepoFullName}</span>
             <span
-              className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] ${
+              className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[11px] ${
                 repo.scope === 'ORG'
                   ? 'bg-accent-blue/10 text-accent-blue'
                   : 'bg-accent-amber/10 text-accent-amber'
@@ -67,7 +67,7 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
               {repo.scope}
             </span>
           </div>
-          <div className="mt-1 flex items-center gap-2 text-[10px] text-muted">
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
             <StackBadge stack={stack} />
             <span>branch: {repo.defaultBranch}</span>
             {repo.lastSyncedSha && (
@@ -77,20 +77,20 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
               className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${
                 repo.webhookInstalled
                   ? 'bg-emerald-500/10 text-emerald-400'
-                  : 'bg-accent-amber/10 text-accent-amber'
+                  : 'bg-[var(--gray-400)]/50 text-muted'
               }`}
               title={repo.webhookInstalled
                 ? 'Webhook installed — PR merges trigger post-merge cascade'
-                : 'Webhook not installed — merges will not auto-refresh architecture/memory'}
+                : 'Optional — install to auto-refresh architecture/memory on PR merge'}
             >
-              {repo.webhookInstalled ? 'webhook ✓' : 'webhook missing'}
+              {repo.webhookInstalled ? 'webhook ✓' : 'webhook: not set up'}
             </span>
           </div>
         </div>
         <div className="flex gap-1.5 shrink-0">
           <button
             onClick={() => onSync(repo.id)}
-            className="text-[10px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
+            className="text-[11px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
           >
             Sync
           </button>
@@ -99,14 +99,14 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
               onClick={doInstallHook}
               disabled={installingHook}
               title="Install a pull_request webhook using your GitHub PAT (requires admin:repo_hook)"
-              className="text-[10px] px-2 py-0.5 rounded-sm border border-accent-amber/40 text-accent-amber hover:bg-accent-amber/10 disabled:opacity-50"
+              className="text-[11px] px-2 py-0.5 rounded-sm border border-accent-amber/40 text-accent-amber hover:bg-accent-amber/10 disabled:opacity-50"
             >
               {installingHook ? 'Installing…' : 'Install webhook'}
             </button>
           )}
           <button
             onClick={() => onUnlink(repo.id)}
-            className="text-[10px] px-2 py-0.5 rounded-sm border border-accent-red/40 text-accent-red hover:bg-accent-red/10"
+            className="text-[11px] px-2 py-0.5 rounded-sm border border-accent-red/40 text-accent-red hover:bg-accent-red/10"
           >
             Unlink
           </button>
@@ -126,19 +126,19 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
         ) : (
           <div className="flex flex-wrap items-center gap-1.5">
             {relationships.length === 0 && (
-              <span className="text-[10px] text-muted">no relationships</span>
+              <span className="text-[11px] text-muted">no relationships</span>
             )}
             {relationships.map((r) => (
               <span
                 key={r}
-                className="inline-flex items-center rounded-sm bg-[var(--gray-200)] px-1.5 py-0.5 text-[10px] text-secondary"
+                className="inline-flex items-center rounded-sm bg-[var(--gray-200)] px-1.5 py-0.5 text-[11px] text-secondary"
               >
                 {r}
               </span>
             ))}
             <button
               onClick={() => setEditing(true)}
-              className="text-[10px] text-accent-blue hover:underline"
+              className="text-[11px] text-accent-blue hover:underline"
             >
               edit
             </button>

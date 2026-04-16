@@ -11,9 +11,9 @@ export default function ExecutionReportPanel({ executionId }: { executionId: str
       .catch(() => setMarkdown('# Report unavailable'));
   }, [executionId]);
 
-  if (!markdown) return <div className="text-[11px] text-muted">Loading report…</div>;
+  if (!markdown) return <div className="text-xs text-muted">Loading report…</div>;
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-[12px]">
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-sm">
       <MarkdownContent content={markdown} />
     </div>
   );

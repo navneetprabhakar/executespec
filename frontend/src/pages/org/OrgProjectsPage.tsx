@@ -157,6 +157,7 @@ function ProjectCard({
   onViewRuns: (id: string) => void;
   onUpdateProject: (updated: api.ProjectDto) => void;
 }) {
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState<api.ProjectMemberDto[]>([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
@@ -240,14 +241,27 @@ function ProjectCard({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0 ml-4">
           {!isArchived && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onViewRuns(project.id); }}
-              className="flex items-center gap-1 text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-white/20 rounded-sm px-3 py-1.5 transition-colors"
-              title="Filter runs to this project"
-            >
-              <Eye className="h-3.5 w-3.5" />
-              View Runs
-            </button>
+            <>
+              {/* v2.5.7 UX-fix: prominent "Open" CTA so users have a clear path
+                  into the project dashboard without hunting through the
+                  expanded card body. */}
+              <button
+                onClick={(e) => { e.stopPropagation(); navigate(`/projects/${project.id}/dashboard`); }}
+                className="flex items-center gap-1 text-xs font-medium text-accent-blue hover:text-primary border border-accent-blue/40 hover:border-accent-blue bg-accent-blue/10 hover:bg-accent-blue/20 rounded-sm px-3 py-1.5 transition-colors"
+                title="Open project dashboard"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                Open
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onViewRuns(project.id); }}
+                className="flex items-center gap-1 text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-white/20 rounded-sm px-3 py-1.5 transition-colors"
+                title="Filter runs to this project"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                View Runs
+              </button>
+            </>
           )}
           {expanded
             ? <ChevronUp className="h-4 w-4 text-muted" />
@@ -387,6 +401,10 @@ export default function OrgProjectsPage() {
       setDesc('');
       setProvider('ANTHROPIC');
       setShowCreate(false);
+      // v2.5.7 UX-fix: jump straight into the new project's dashboard so the
+      // next steps (link repos, analyse, launch) are obvious. Previously users
+      // landed back on the list with no clear next action.
+      navigate(`/projects/${p.id}/dashboard`);
     } catch (err: any) {
       setCreateError(err.message ?? 'Failed to create project');
     } finally {

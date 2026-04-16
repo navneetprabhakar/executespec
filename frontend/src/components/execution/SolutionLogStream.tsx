@@ -14,8 +14,8 @@ export default function SolutionLogStream() {
   if (!activeSolution) return null;
 
   return (
-    <div className="mt-3 rounded-sm border border-[var(--border-default)] bg-gray-950 font-mono text-[11px] text-emerald-300">
-      <div className="px-2 py-1 border-b border-[var(--border-default)] text-[10px] text-muted">
+    <div className="mt-3 rounded-sm border border-[var(--border-default)] bg-gray-950 font-mono text-xs text-emerald-300">
+      <div className="px-2 py-1 border-b border-[var(--border-default)] text-[11px] text-muted">
         S{activeSolution.sequenceNumber} · {activeSolution.title}
       </div>
       <div ref={scrollRef} className="max-h-60 overflow-y-auto px-2 py-1 whitespace-pre-wrap">

@@ -322,4 +322,88 @@ public class AnalyticsService {
             inv.getInvoiceDate() != null ? inv.getInvoiceDate().atStartOfDay().toInstant(java.time.ZoneOffset.UTC) : inv.getCreatedAt()
         );
     }
+
+    // ── Cost Breakdown (v2.5.8) ───────────────────────────────────────────────
+    //
+    // FinOps support for engineering managers. Returns per-user and per-project
+    // spend across pipeline_run + execution_run so teams can attribute LLM spend
+    // to the right cost centers.
+
+    /**
+     * v2.5.8 — returns a nested map:
+     * <pre>
+     * {
+     *   "byUser": [ {userId, name, email, totalCostUsd, runCount}, ... ],
+     *   "byProject": [ {projectId, name, totalCostUsd, runCount}, ... ],
+     *   "totalCostUsd": <sum>
+     * }
+     * </pre>
+     */
+    public java.util.Map<String, Object> getCostBreakdown(String orgId, int periodDays) {
+        Instant since = Instant.now().minus(periodDays, java.time.temporal.ChronoUnit.DAYS);
+
+        // Per-user spend (pipeline_run + execution_run cost)
+        String userSql = "SELECT u.id, u.first_name, u.last_name, u.email, "
+                + "COALESCE(SUM(p.actual_cost_usd), 0.0) + "
+                + "COALESCE((SELECT SUM(e.total_cost_usd) FROM execution_run e "
+                + "          WHERE e.created_by = u.id AND e.deleted_at IS NULL "
+                + "          AND e.created_at >= ?), 0.0) AS total_cost, "
+                + "COUNT(p.run_id) AS run_count "
+                + "FROM app_user u "
+                + "LEFT JOIN pipeline_run p ON p.created_by_user_id = u.id AND p.started_at >= ? "
+                + "WHERE u.org_id = ? "
+                + "GROUP BY u.id, u.first_name, u.last_name, u.email "
+                + "ORDER BY total_cost DESC";
+        List<java.util.Map<String, Object>> byUser = jdbc.query(userSql,
+                (rs, i) -> {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("userId", rs.getString("id"));
+                    String fn = rs.getString("first_name");
+                    String ln = rs.getString("last_name");
+                    row.put("name", (fn == null ? "" : fn) + " " + (ln == null ? "" : ln));
+                    row.put("email", rs.getString("email"));
+                    row.put("totalCostUsd", rs.getDouble("total_cost"));
+                    row.put("runCount", rs.getLong("run_count"));
+                    return row;
+                },
+                java.sql.Timestamp.from(since),
+                java.sql.Timestamp.from(since),
+                orgId);
+
+        // Per-project spend
+        String projectSql = "SELECT pr.id, pr.name, "
+                + "COALESCE(SUM(p.actual_cost_usd), 0.0) + "
+                + "COALESCE((SELECT SUM(e.total_cost_usd) FROM execution_run e "
+                + "          WHERE e.project_id = pr.id AND e.deleted_at IS NULL "
+                + "          AND e.created_at >= ?), 0.0) AS total_cost, "
+                + "COUNT(p.run_id) AS run_count "
+                + "FROM project pr "
+                + "LEFT JOIN pipeline_run p ON p.project_id = pr.id AND p.started_at >= ? "
+                + "WHERE pr.org_id = ? "
+                + "GROUP BY pr.id, pr.name "
+                + "ORDER BY total_cost DESC";
+        List<java.util.Map<String, Object>> byProject = jdbc.query(projectSql,
+                (rs, i) -> {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("projectId", rs.getString("id"));
+                    row.put("name", rs.getString("name"));
+                    row.put("totalCostUsd", rs.getDouble("total_cost"));
+                    row.put("runCount", rs.getLong("run_count"));
+                    return row;
+                },
+                java.sql.Timestamp.from(since),
+                java.sql.Timestamp.from(since),
+                orgId);
+
+        double total = byUser.stream()
+                .mapToDouble(r -> ((Number) r.get("totalCostUsd")).doubleValue())
+                .sum();
+
+        return java.util.Map.of(
+                "byUser", byUser,
+                "byProject", byProject,
+                "totalCostUsd", total,
+                "periodDays", periodDays
+        );
+    }
 }

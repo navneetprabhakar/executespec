@@ -5,6 +5,7 @@ import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.agent.model.WorkerReport;
+import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.UiStyleResolver;
@@ -137,6 +138,11 @@ public class V2RunOrchestrator {
     private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
     private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
+    /** v2.5.8 — publishes PipelineEvent.RunCompleted/RunFailed so in-app
+     *  notifications, quota refund, and workspace GCS upload listeners fire for
+     *  V2 runs. Previously only V1 PipelineHarness published these events,
+     *  causing V2 users to silently miss completion notifications. */
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     /** Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure
      *  is tracked per-harness and canary rollout tuning is independent. */
@@ -195,14 +201,29 @@ public class V2RunOrchestrator {
                 projectId, executionMode, selectedRepoIds, figmaUrl, false);
     }
 
-    /** v2.5.2 (Phase 4.3) — adds {@code tddMode}: when true the planner emits
-     *  test tasks first with implementation tasks declaring dependsOn them. */
+    /** v2.5.7 — back-compat overload. Forwards to the full signature with
+     *  {@code branchOverride=null} so every selected repo is cloned on its
+     *  own default branch (previous behaviour). */
     public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
                                   String githubPat, String githubOwner, boolean skipApproval,
                                   boolean autoMerge, String modelName, String aiProvider,
                                   String createdByUserId, String orgId, String projectId,
                                   String executionMode, List<UUID> selectedRepoIds, String figmaUrl,
                                   boolean tddMode) {
+        return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
+                skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId,
+                projectId, executionMode, selectedRepoIds, figmaUrl, tddMode, null);
+    }
+
+    /** v2.5.7 — full signature with {@code branchOverride}. When non-null, every
+     *  selected repo is cloned with {@code git clone -b <branchOverride>}
+     *  instead of the repo's default branch. */
+    public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
+                                  String githubPat, String githubOwner, boolean skipApproval,
+                                  boolean autoMerge, String modelName, String aiProvider,
+                                  String createdByUserId, String orgId, String projectId,
+                                  String executionMode, List<UUID> selectedRepoIds, String figmaUrl,
+                                  boolean tddMode, String branchOverride) {
         String runId = UUID.randomUUID().toString();
         String provider = normalizeProvider(aiProvider, projectId, runId);
         String model = modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
@@ -249,11 +270,14 @@ public class V2RunOrchestrator {
         final List<UUID> selectedRepoIdsFinal = selectedRepoIds != null ? selectedRepoIds : List.of();
         final String githubPatFinal = githubPat;
         final boolean tddModeFinal = tddMode;
+        final String branchOverrideFinal =
+                (branchOverride == null || branchOverride.isBlank()) ? null : branchOverride.trim();
         Future<?> future = pool.submit(() -> {
             try {
                 runPipeline(runIdFinal, providerFinal, modelFinal, userRequest,
                         skipApprovalFinal, executionModeFinal,
-                        projectIdFinal, selectedRepoIdsFinal, githubPatFinal, tddModeFinal);
+                        projectIdFinal, selectedRepoIdsFinal, githubPatFinal, tddModeFinal,
+                        branchOverrideFinal);
             } finally {
                 activeRuns.remove(runIdFinal);
             }
@@ -281,6 +305,14 @@ public class V2RunOrchestrator {
                               boolean skipApproval, String executionMode,
                               String projectId, List<UUID> selectedRepoIds, String githubPat,
                               boolean tddMode) {
+        runPipeline(runId, provider, model, userRequest, skipApproval, executionMode,
+                projectId, selectedRepoIds, githubPat, tddMode, null);
+    }
+
+    private void runPipeline(String runId, String provider, String model, String userRequest,
+                              boolean skipApproval, String executionMode,
+                              String projectId, List<UUID> selectedRepoIds, String githubPat,
+                              boolean tddMode, String branchOverride) {
         Instant startedAt = Instant.now();
         Path workspace = null;
         String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -307,7 +339,7 @@ public class V2RunOrchestrator {
                                     r.getGithubRepoFullName(),
                                     "https://github.com/" + r.getGithubRepoFullName(),
                                     r.getId(),
-                                    r.getDefaultBranch()))
+                                    branchOverride != null ? branchOverride : r.getDefaultBranch()))
                             .toList();
                     workspaceInit.cloneMultipleRepos(runId, toClone, githubPat);
                     log.info("V2 run={} cloned {} project repos", runId, toClone.size());
@@ -419,6 +451,7 @@ public class V2RunOrchestrator {
                         .projectBrief(projectBrief)
                         .referenceDocs(referenceDocs)
                         .tddMode(tddMode)
+                        .prReviewComments(null)
                         .build());
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
@@ -581,31 +614,56 @@ public class V2RunOrchestrator {
             }
 
             // ── 7. Terminal status mapping ─────────────────────────────────
-            String finalStatus = mapOverallToV1Status(execResult.overall());
-            terminate(runId, finalStatus,
+            // v2.5.10 — when scoring.v2-verified is on, decide status + reason
+            // from reviewer verdict + final build + execution signals. Legacy
+            // one-line map preserved behind the flag for fast rollback.
+            StatusAndReason sr = featureFlagService.isEnabled("scoring.v2-verified")
+                    ? resolveTerminalStatus(execResult, reviewResult)
+                    : new StatusAndReason(mapOverallToV1Status(execResult.overall()), null);
+            String finalStatus = sr.status();
+            String finalReason = sr.reason();
+            terminate(runId, finalStatus, finalReason,
                     "overall=" + execResult.overall()
-                            + (reviewResult != null ? "; review=" + reviewResult.overall() : ""),
+                            + (reviewResult != null ? "; review=" + reviewResult.overall() : "")
+                            + (finalReason != null ? "; reason=" + finalReason : ""),
                     startedAt);
-            log.info("V2RunOrchestrator run={} {} exec={} review={}",
+            log.info("V2RunOrchestrator run={} {} exec={} review={} reason={}",
                     runId, finalStatus, execResult.overall(),
-                    reviewResult == null ? "n/a" : reviewResult.overall());
+                    reviewResult == null ? "n/a" : reviewResult.overall(),
+                    finalReason);
 
-            // ── 7b. Auto-push project runs on success ──────────────────────
-            // Project-scoped runs that reach COMPLETE/PARTIAL get pushed to GitHub
-            // automatically (gated by `project.runs.auto-push` feature flag). Manual
-            // "Push & open PR" still works for non-project runs and as a re-push.
-            if (projectId != null
-                    && ("COMPLETE".equals(finalStatus) || "PARTIAL".equals(finalStatus))
-                    && featureFlagService.isEnabled("project.runs.auto-push")) {
-                try {
-                    PipelineRun fresh = runRepo.findById(runId).orElse(null);
-                    if (fresh != null) {
-                        scmPushService.push(fresh);
-                        log.info("V2 run={} auto-pushed to SCM", runId);
+            // ── 7b. Auto-push every successful run ─────────────────────────
+            // Any run that reaches COMPLETE/PARTIAL and targets an EXISTING repo
+            // gets pushed to GitHub automatically. Previously only project-scoped
+            // runs auto-pushed; standalone /api/runs runs required the user to
+            // click "Push & open PR" — a footgun when the run looks complete in
+            // the UI but no PR exists. Manual "Push & open PR" still works as a
+            // re-push. Feature flag `project.runs.auto-push` still gates the
+            // project-scoped path for back-compat; standalone runs are always on.
+            if ("COMPLETE".equals(finalStatus) || "PARTIAL".equals(finalStatus)) {
+                boolean shouldPush;
+                if (projectId != null) {
+                    shouldPush = featureFlagService.isEnabled("project.runs.auto-push");
+                } else {
+                    // Standalone run: push whenever the run targeted an EXISTING repo.
+                    PipelineRun r = runRepo.findById(runId).orElse(null);
+                    shouldPush = r != null
+                            && "EXISTING".equalsIgnoreCase(r.getRepoMode())
+                            && r.getRepoUrl() != null
+                            && !r.getRepoUrl().isBlank();
+                }
+                if (shouldPush) {
+                    try {
+                        PipelineRun fresh = runRepo.findById(runId).orElse(null);
+                        if (fresh != null) {
+                            scmPushService.push(fresh);
+                            log.info("V2 run={} auto-pushed to SCM (projectScoped={})",
+                                    runId, projectId != null);
+                        }
+                    } catch (Exception pushEx) {
+                        log.warn("V2 run={} auto-push failed (manual push still works): {}",
+                                runId, pushEx.getMessage());
                     }
-                } catch (Exception pushEx) {
-                    log.warn("V2 run={} auto-push failed (manual push still works): {}",
-                            runId, pushEx.getMessage());
                 }
             }
         } catch (Exception unexpected) {
@@ -869,8 +927,26 @@ public class V2RunOrchestrator {
         broadcaster.emit(runId, RunEvent.runStatus(runId, newStatus));
     }
 
+    /** Legacy 4-arg entry point — failure paths without a specific reason flow here. */
     private void terminate(String runId, String finalStatus, String note, Instant startedAt) {
+        terminate(runId, finalStatus, null, note, startedAt);
+    }
+
+    /**
+     * v2.5.10 — 5-arg overload that also persists {@code status_reason} on the run
+     * and threads it to the SSE complete event so the UI can show
+     * "PARTIAL because FINAL_BUILD_FAILED" instead of a silent badge.
+     */
+    private void terminate(String runId, String finalStatus, String statusReason,
+                           String note, Instant startedAt) {
         V2RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
+        // v2.5.8 — provider attribution log: makes it easy to grep logs and confirm
+        // which provider actually served a run. Critical for cross-provider evaluation
+        // audits (no silent fallback under strict mode).
+        log.info("V2 run terminate runId={} status={} provider={} tokens(in/out)={}/{} cost=${}",
+                runId, finalStatus,
+                runRepo.findById(runId).map(r -> r.getAiProvider()).orElse("?"),
+                cost.inputTokens(), cost.outputTokens(), String.format("%.4f", cost.costUsd()));
         runRepo.findById(runId).ifPresent(r -> {
             // Preserve CANCELLED if the user cancelled mid-flight. The pipeline thread
             // may call terminate(...) after cancel() has already written CANCELLED;
@@ -882,6 +958,13 @@ public class V2RunOrchestrator {
             r.setCompletedAt(Instant.now());
             if ("FAILED".equals(finalStatus) && r.getFailureReason() == null) {
                 r.setFailureReason(note);
+            }
+            // v2.5.10 — persist status_reason so /api/runs/{id} surfaces it and the
+            // UI's status badge + tooltip can explain "PARTIAL because X".
+            // Only write if non-null: legacy callers still reach here without a
+            // reason and we don't want to clobber a previously-set value.
+            if (statusReason != null) {
+                r.setStatusReason(statusReason);
             }
             // Only overwrite actualCostUsd with a positive tracker reading; an empty
             // snapshot (e.g. tracker evicted across a deploy boundary) must not
@@ -906,7 +989,7 @@ public class V2RunOrchestrator {
         });
         broadcaster.emit(runId, RunEvent.runStatus(runId, finalStatus));
         broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
-        broadcaster.emit(runId, RunEvent.complete(runId, finalStatus));
+        broadcaster.emit(runId, RunEvent.complete(runId, finalStatus, statusReason));
         broadcaster.complete(runId);
         // V2 run-level metrics are emitted by V2RunService only. This orchestrator is a
         // parallel entry path — record run.outcome + run.latency here too so V1-endpoint-
@@ -914,6 +997,23 @@ public class V2RunOrchestrator {
         metrics.recordRunOutcome(finalStatus);
         metrics.recordRunLatency(finalStatus,
                 java.time.Duration.between(startedAt, Instant.now()));
+        // v2.5.8 — fire Spring ApplicationEvent so RunCompletionNotifier (in-app
+        // notification), RunQuotaRefundListener (refund on failure), and
+        // WorkspaceGcsUploadListener (archive workspace) all get notified.
+        // V1 PipelineHarness already publishes this; V2 previously did not,
+        // so notifications silently never fired for any V2 run.
+        try {
+            if ("COMPLETE".equalsIgnoreCase(finalStatus)
+                    || "PARTIAL".equalsIgnoreCase(finalStatus)) {
+                eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+            } else if ("FAILED".equalsIgnoreCase(finalStatus)
+                    || "CANCELLED".equalsIgnoreCase(finalStatus)) {
+                eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId,
+                        note == null ? finalStatus : note));
+            }
+        } catch (Exception eventEx) {
+            log.warn("V2 run={} event publish failed (non-fatal): {}", runId, eventEx.getMessage());
+        }
     }
 
     // ─── README generation ──────────────────────────────────────────────────
@@ -1340,6 +1440,55 @@ public class V2RunOrchestrator {
         };
     }
 
+    /** v2.5.10 — pair of run-level terminal status + explicit reason string. */
+    record StatusAndReason(String status, String reason) {}
+
+    /**
+     * v2.5.10 — decide run-level status from the authoritative signals
+     * available at terminate time: reviewer verdict, final build result,
+     * and execution summary (including final-task vs intermediate-warning
+     * separation from {@link ExecutionResult#anyIntermediateWarning()}).
+     *
+     * Tests run ASYNC after terminate (see {@code generateValidationReport}
+     * → {@code testGenOrchestrator.runTestGenPipeline}), so test counts are
+     * NOT a gating signal here. They're captured on ValidationReport via
+     * {@code retryValidation} after tests complete and feed verifiedScore.
+     */
+    static StatusAndReason resolveTerminalStatus(ExecutionResult exec,
+                                                 com.navneet.executespec.v2.reviewer.ReviewerResult review) {
+        if (exec.overall() == ExecutionResult.Overall.ABORTED) {
+            return new StatusAndReason("FAILED", "EXECUTION_ABORTED");
+        }
+        com.navneet.executespec.v2.reviewer.ReviewerResult.Overall verdict =
+                review != null ? review.overall() : null;
+        boolean buildPassed = review != null && Boolean.TRUE.equals(review.finalBuildPassed());
+        boolean anyWarn = exec.anyIntermediateWarning();
+        boolean anyTaskSucceeded = exec.tasksSuccessful() > 0;
+
+        if (buildPassed && verdict != null
+                && (verdict == com.navneet.executespec.v2.reviewer.ReviewerResult.Overall.CLEAN
+                    || verdict == com.navneet.executespec.v2.reviewer.ReviewerResult.Overall.FIXED_ISSUES)) {
+            return new StatusAndReason("COMPLETE",
+                    anyWarn ? "CLEAN_WITH_INTERMEDIATE_WARNINGS" : "CLEAN_COMPLETION");
+        }
+        if (review != null && !buildPassed) {
+            return new StatusAndReason("PARTIAL", "FINAL_BUILD_FAILED");
+        }
+        if (verdict == com.navneet.executespec.v2.reviewer.ReviewerResult.Overall.UNRESOLVED_ISSUES) {
+            return new StatusAndReason("PARTIAL", "REVIEWER_UNRESOLVED");
+        }
+        if (verdict == com.navneet.executespec.v2.reviewer.ReviewerResult.Overall.REVIEW_FAILED) {
+            return new StatusAndReason("PARTIAL", "REVIEWER_FAILED");
+        }
+        if (!anyTaskSucceeded && exec.tasksFailed() > 0) {
+            return new StatusAndReason("FAILED", "ALL_TASKS_FAILED");
+        }
+        // Defensive fallback — the reviewer didn't run (review == null) or
+        // produced an unexpected verdict. Fall back to the legacy map but
+        // tag the reason so the UI can show it.
+        return new StatusAndReason(mapOverallToV1Status(exec.overall()), "LEGACY_UNKNOWN");
+    }
+
     private static String mapTaskStatusToV1(TaskOutcome.Status status) {
         return switch (status) {
             case SUCCESS, SUCCESS_AFTER_RETRY -> "COMPLETE";
@@ -1362,9 +1511,20 @@ public class V2RunOrchestrator {
      * rows pre-dating V92 hit level 2; the V99 backfill closes that gap for new rows.
      */
     private String normalizeProvider(String aiProvider, String projectId, String runId) {
+        // v2.5.8 — strict-provider mode: when the system property
+        // executespec.strict-provider=true, we refuse to fall back silently.
+        // Used by the cross-provider evaluation harness so Gemini runs never
+        // accidentally land on OpenAI due to a null flag.
+        boolean strict = "true".equalsIgnoreCase(System.getProperty("executespec.strict-provider", "false"));
         if (aiProvider != null && !aiProvider.isBlank()) {
             String lower = aiProvider.toLowerCase();
-            return "google".equals(lower) ? "gemini" : lower;
+            String resolved = "google".equals(lower) ? "gemini" : lower;
+            log.info("normalizeProvider[strict={}] runId={} -> provider={} (explicit)", strict, runId, resolved);
+            return resolved;
+        }
+        if (strict) {
+            throw new IllegalStateException(
+                    "strict-provider mode: runId=" + runId + " has null aiProvider — refusing to fall back");
         }
         if (projectId != null) {
             String projectProvider = projectRepository.findById(projectId)
@@ -1383,9 +1543,12 @@ public class V2RunOrchestrator {
     }
 
     private static String defaultModelFor(String provider) {
+        // v2.5.9 Bug #3 — switched gemini default from 2.5-flash to 3-flash-preview
+        // because 2.5-flash emits Python-style tool calls
+        // (print(default_api.submitPlan(...))) causing MALFORMED_FUNCTION_CALL.
         return switch (provider) {
             case "anthropic" -> "claude-haiku-4-5-20251001";
-            case "gemini" -> "gemini-2.5-flash";
+            case "gemini" -> "gemini-3-flash-preview";
             case "openai" -> "gpt-5.4-mini";
             default -> "claude-haiku-4-5-20251001";
         };

@@ -18,6 +18,7 @@ import ProjectDocumentsPanel from '@/components/project/ProjectDocumentsPanel';
 import InlineRunDetail from '@/components/project/InlineRunDetail';
 import { cn } from '@/lib/utils';
 import type { TaskSummary } from '@/types/project';
+import type { ContinueOnPrConfig } from '@/types/execution';
 import type { RunDetail } from '@/lib/api';
 
 type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'docs' | 'memory' | 'chat' | 'team';
@@ -55,6 +56,7 @@ function scoreColor(score: number | null | undefined): string {
 
 export default function ProjectDashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<TabKey>('overview');
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [projectLookup, setProjectLookup] = useState<'pending' | 'found' | 'missing'>('pending');
@@ -113,19 +115,21 @@ export default function ProjectDashboardPage() {
     if (!projectId) return null;
     switch (tab) {
       case 'overview':
-        return <OverviewContent projectId={projectId} dashboard={dashboard} scoreTrend={scoreTrend} />;
+        return <OverviewContent projectId={projectId} dashboard={dashboard} scoreTrend={scoreTrend} project={project} onProjectUpdate={setProject} />;
       case 'launches':
         return <ProjectLaunchesList projectId={projectId} />;
       case 'prs':
-        return <ProjectPrRollup projectId={projectId} />;
+        return <ProjectPrRollup projectId={projectId} onAddressReview={(config) => {
+          navigate(`/projects/${projectId}/executions/new`, { state: { continueOnPr: config } });
+        }} />;
       case 'tasks':
         return selectedDetail === 'loading'
-          ? <div className="text-[11px] text-muted p-3">Loading run…</div>
+          ? <div className="text-xs text-muted p-3">Loading run…</div>
           : selectedDetail === 'error'
-          ? <div className="text-[11px] text-accent-red p-3">Failed to load run.</div>
+          ? <div className="text-xs text-accent-red p-3">Failed to load run.</div>
           : selectedDetail
           ? <InlineRunDetail run={selectedDetail} onRefresh={() => selectedRunId ? loadRun(selectedRunId) : Promise.resolve()} />
-          : <div className="text-[11px] text-muted p-3">Select a run on the left.</div>;
+          : <div className="text-xs text-muted p-3">Select a run on the left.</div>;
       case 'repos':
         return <ProjectRepoManager projectId={projectId} />;
       case 'architecture':
@@ -138,7 +142,7 @@ export default function ProjectDashboardPage() {
         return <ProjectChatPanel projectId={projectId} />;
       case 'team':
         return (
-          <div className="text-[11px] text-muted p-3">
+          <div className="text-xs text-muted p-3">
             Team management is available via the existing Project members page.
           </div>
         );
@@ -148,7 +152,7 @@ export default function ProjectDashboardPage() {
   if (!projectId) {
     return (
       <div className="h-full overflow-y-auto">
-        <div className="mx-auto max-w-5xl p-4 text-[12px] text-muted">No project selected.</div>
+        <div className="mx-auto max-w-5xl p-4 text-sm text-muted">No project selected.</div>
       </div>
     );
   }
@@ -157,10 +161,10 @@ export default function ProjectDashboardPage() {
       <div className="h-full overflow-y-auto">
         <div className="mx-auto max-w-5xl p-4 space-y-3">
           <h1 className="text-[14px] font-medium text-primary">Project not found</h1>
-          <p className="text-[11px] text-muted">
+          <p className="text-xs text-muted">
             <span className="font-mono">{projectId}</span> is not a valid project.
           </p>
-          <Link to="/projects" className="text-[11px] text-accent-blue hover:underline">
+          <Link to="/projects" className="text-xs text-accent-blue hover:underline">
             ← Back to projects
           </Link>
         </div>
@@ -172,7 +176,7 @@ export default function ProjectDashboardPage() {
     <div className="h-full flex flex-col">
       {/* Top chrome: back link + header + metrics + tabs */}
       <div className="border-b border-[var(--border-default)] px-4 pt-3 pb-2 space-y-2.5 flex-shrink-0">
-        <Link to="/projects" className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-accent-blue transition-colors">
+        <Link to="/projects" className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent-blue transition-colors">
           <ArrowLeft className="h-3 w-3" />
           Projects
         </Link>
@@ -186,22 +190,27 @@ export default function ProjectDashboardPage() {
               {project?.name ?? 'Project'}
             </h1>
             {project?.status && (
-              <span className="text-[10px] font-mono uppercase tracking-wide text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
+              <span className="text-[11px] font-mono uppercase tracking-wide text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
                 {project.status}
               </span>
             )}
             {project?.aiProvider && (
-              <span className="text-[10px] font-mono text-muted">{project.aiProvider}</span>
+              <span className="text-[11px] font-mono text-muted">{project.aiProvider}</span>
+            )}
+            {project?.githubOwner && (
+              <span className="text-[11px] font-mono text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
+                {project.githubOwner}
+              </span>
             )}
           </div>
           <NewExecutionButton projectId={projectId} />
         </header>
         {project?.description && (
-          <p className="text-[11px] text-muted">{project.description}</p>
+          <p className="text-xs text-muted">{project.description}</p>
         )}
 
-        {loading && <div className="text-[11px] text-muted">Loading…</div>}
-        {error && <div className="text-[11px] text-accent-red">{error}</div>}
+        {loading && <div className="text-xs text-muted">Loading…</div>}
+        {error && <div className="text-xs text-accent-red">{error}</div>}
 
         {/* Metric tiles: +tokens +cost */}
         <section className="grid grid-cols-3 md:grid-cols-6 gap-2">
@@ -229,7 +238,7 @@ export default function ProjectDashboardPage() {
               key={t.key}
               onClick={() => setTab(t.key)}
               className={cn(
-                'px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
+                'px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
                 tab === t.key
                   ? 'border-accent-blue text-primary'
                   : 'border-transparent text-muted hover:text-secondary',
@@ -264,26 +273,75 @@ export default function ProjectDashboardPage() {
 }
 
 function OverviewContent({
-  projectId, dashboard, scoreTrend,
-}: { projectId?: string; dashboard: any; scoreTrend: any }) {
+  projectId, dashboard, scoreTrend, project, onProjectUpdate,
+}: { projectId?: string; dashboard: any; scoreTrend: any; project: api.ProjectDto | null; onProjectUpdate: (p: api.ProjectDto) => void }) {
   const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
   return (
     <div className="space-y-4 max-w-3xl">
+      {projectId && project && <ProjectSettingsPanel projectId={projectId} project={project} onUpdate={onProjectUpdate} />}
       {projectId && <ProjectSummaryPanel projectId={projectId} />}
       {projectId && <WorkspaceHealthPanel projectId={projectId} />}
       {projectId && <TechDebtPanel projectId={projectId} />}
       <div className="space-y-2">
-        <h3 className="text-[11px] font-medium text-secondary">Recent submissions</h3>
+        <h3 className="text-xs font-medium text-secondary">Recent submissions</h3>
         <ExecutionsPanel tasks={tasks} />
       </div>
       <div className="space-y-2">
-        <h3 className="text-[11px] font-medium text-secondary">Recent pull requests</h3>
+        <h3 className="text-xs font-medium text-secondary">Recent pull requests</h3>
         <ProjectPrList prs={dashboard?.recentPrs ?? []} />
       </div>
       <div>
-        <h3 className="text-[11px] font-medium text-secondary mb-2">Score trend</h3>
+        <h3 className="text-xs font-medium text-secondary mb-2">Score trend</h3>
         <ProjectScoreTrend scores={scoreTrend} />
       </div>
+    </div>
+  );
+}
+
+function ProjectSettingsPanel({
+  projectId, project, onUpdate,
+}: { projectId: string; project: api.ProjectDto; onUpdate: (p: api.ProjectDto) => void }) {
+  const [owner, setOwner] = useState(project.githubOwner ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const dirty = owner.trim() !== (project.githubOwner ?? '').trim();
+
+  const save = async () => {
+    if (!dirty) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateProjectSettings(projectId, { githubOwner: owner.trim() || undefined });
+      onUpdate(updated);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
+      <h3 className="text-xs font-medium text-secondary">Project settings</h3>
+      <div className="flex items-center gap-2">
+        <label className="text-[11px] text-muted whitespace-nowrap">GitHub Owner</label>
+        <input
+          type="text"
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+          placeholder="e.g. my-org"
+          className="flex-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--bg-primary)] text-primary placeholder:text-muted/50 focus:outline-none focus:border-accent-blue"
+        />
+        {dirty && (
+          <button
+            onClick={save}
+            disabled={saving}
+            className="text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        )}
+      </div>
+      <p className="text-[10px] text-muted">
+        Default GitHub org/owner for new repos created during a Launch. Overridable per-repo.
+      </p>
     </div>
   );
 }
@@ -315,22 +373,22 @@ function ProjectSummaryPanel({ projectId }: { projectId: string }) {
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-[11px] font-medium text-secondary">Project summary</h3>
+        <h3 className="text-xs font-medium text-secondary">Project summary</h3>
         <button
           onClick={analyse}
           disabled={busy}
-          className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
           title="Regenerate codemaps + architecture + summary"
         >
           {busy ? 'Analysing…' : 'Analyse'}
         </button>
       </div>
       {loading ? (
-        <div className="text-[11px] text-muted">Loading…</div>
+        <div className="text-xs text-muted">Loading…</div>
       ) : content ? (
-        <p className="text-[11px] leading-relaxed text-secondary whitespace-pre-wrap">{content}</p>
+        <p className="text-xs leading-relaxed text-secondary whitespace-pre-wrap">{content}</p>
       ) : (
-        <p className="text-[11px] text-muted">No summary yet — click Analyse to generate one.</p>
+        <p className="text-xs text-muted">No summary yet — click Analyse to generate one.</p>
       )}
     </div>
   );
@@ -338,7 +396,7 @@ function ProjectSummaryPanel({ projectId }: { projectId: string }) {
 
 function ExecutionsPanel({ tasks }: { tasks: TaskSummary[] }) {
   if (tasks.length === 0) {
-    return <div className="text-[11px] text-muted">Nothing submitted yet. Click "Launch" to kick off a cross-repo execution.</div>;
+    return <div className="text-xs text-muted">Nothing submitted yet. Click "Launch" to kick off a cross-repo execution.</div>;
   }
   return (
     <ul className="space-y-1">
@@ -350,13 +408,13 @@ function ExecutionsPanel({ tasks }: { tasks: TaskSummary[] }) {
             className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2"
           >
             <div className="flex items-center gap-2">
-              <span className={cn('text-[10px] font-mono tabular-nums', statusColor)}>{t.status}</span>
-              <span className="text-[11px] text-primary truncate flex-1">{t.name || t.runId.slice(0, 8)}</span>
-              <span className={cn('text-[11px] font-mono tabular-nums', scoreColor(t.score))}>
+              <span className={cn('text-[11px] font-mono tabular-nums', statusColor)}>{t.status}</span>
+              <span className="text-xs text-primary truncate flex-1">{t.name || t.runId.slice(0, 8)}</span>
+              <span className={cn('text-xs font-mono tabular-nums', scoreColor(t.score))}>
                 {t.score != null ? `${t.score}/100` : '—'}
               </span>
             </div>
-            <div className="text-[10px] text-muted font-mono mt-0.5">
+            <div className="text-[11px] text-muted font-mono mt-0.5">
               {t.runId.slice(0, 8)} · {t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}
             </div>
           </li>
@@ -374,11 +432,11 @@ function RunsSidebar({
   onSelect: (runId: string) => void;
 }) {
   if (tasks.length === 0) {
-    return <div className="text-[11px] text-muted p-3">No runs yet.</div>;
+    return <div className="text-xs text-muted p-3">No runs yet.</div>;
   }
   return (
     <div>
-      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-muted border-b border-[var(--border-default)]">
+      <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-muted border-b border-[var(--border-default)]">
         Runs ({tasks.length})
       </div>
       <ul>
@@ -398,17 +456,17 @@ function RunsSidebar({
                 <span className={cn('text-[9px] font-mono tabular-nums', statusColor)}>
                   {t.status}
                 </span>
-                <span className={cn('text-[10px] font-mono tabular-nums', scoreColor(t.score))}>
+                <span className={cn('text-[11px] font-mono tabular-nums', scoreColor(t.score))}>
                   {t.score != null ? t.score : '—'}
                 </span>
               </div>
               <div className={cn(
-                'text-[12px] truncate mt-0.5',
+                'text-sm truncate mt-0.5',
                 selected ? 'text-primary' : 'text-secondary',
               )}>
                 {t.name || t.runId.slice(0, 8)}
               </div>
-              <div className="text-[10px] text-muted font-mono mt-0.5">
+              <div className="text-[11px] text-muted font-mono mt-0.5">
                 {t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}
               </div>
             </li>
@@ -422,7 +480,7 @@ function RunsSidebar({
 function MetricTile({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2.5 py-2">
-      <div className="text-[10px] font-medium text-secondary uppercase tracking-wide">{label}</div>
+      <div className="text-[11px] font-medium text-secondary uppercase tracking-wide">{label}</div>
       <div className={cn('text-lg font-semibold tabular-nums mt-0.5', accent ?? 'text-primary')}>
         {value}
       </div>
@@ -448,7 +506,7 @@ function NewExecutionButton({ projectId }: { projectId: string }) {
   return (
     <button
       onClick={() => navigate(`/projects/${projectId}/executions/new`)}
-      className="flex items-center gap-1.5 text-[11px] font-medium rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-colors px-2.5 py-1"
+      className="flex items-center gap-1.5 text-xs font-medium rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-colors px-2.5 py-1"
       title="Start a cross-repo Launch (ENTERPRISE / MAX)"
     >
       <Rocket className="h-3 w-3" />

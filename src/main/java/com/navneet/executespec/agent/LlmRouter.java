@@ -97,6 +97,10 @@ public class LlmRouter {
     private final ModelRegistry modelRegistry;
     private final RunProviderPinStore pinStore;
     private final com.navneet.executespec.router.ModelPerformanceTracker modelPerfTracker;
+    /** v2.5.9 Bug #4 — emit RUN_PROVIDER_SWITCHED SSE so the UI can show a banner
+     *  when a fallback fires. Previously this was only logged and sent to an
+     *  internal agent inbox — never surfaced to the user. */
+    private final com.navneet.executespec.sse.SseBroadcaster sseBroadcaster;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -200,6 +204,21 @@ public class LlmRouter {
                         fromProvider, provider, agentId, iteration);
                     inboxService.sendProviderFallback(runId, agentId, fromProvider, provider,
                         lastError != null ? lastError.getMessage() : "unknown error");
+                    // v2.5.9 Bug #4 — user-visible SSE so the UI can surface a
+                    // "⚠ Provider switched" banner. Payload uses pipe-separated
+                    // {from}|{to}|{reason} so the frontend can parse + render
+                    // without adding a new event shape.
+                    try {
+                        String reason = lastError != null ? lastError.getMessage() : "unknown";
+                        String payload = fromProvider + "|" + provider + "|"
+                                + (reason == null ? "" : reason.replace("|", "/"));
+                        sseBroadcaster.emit(runId,
+                            new com.navneet.executespec.sse.RunEvent(
+                                "RUN_PROVIDER_SWITCHED",
+                                runId, payload, null, Instant.now()));
+                    } catch (Exception sseEx) {
+                        log.debug("[LlmRouter] SSE emit RUN_PROVIDER_SWITCHED failed: {}", sseEx.getMessage());
+                    }
                 }
 
                 try {

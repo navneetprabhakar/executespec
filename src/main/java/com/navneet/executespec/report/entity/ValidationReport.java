@@ -96,6 +96,33 @@ public class ValidationReport {
     /** Weighted when the run provides a {@code figmaUrl}. Null otherwise. */
     @Column(name = "design_compliance_score") private Integer designComplianceScore;
 
+    // ── v2.5.10 (V106): verified signals for trustworthy scoring ──────────────────────────────
+
+    /** True when ReviewerResult.finalBuildPassed at report time. Null for rows written before V106. */
+    @Column(name = "final_build_passed")
+    private Boolean finalBuildPassed;
+
+    /** Count of TestResult rows with status=PASS for this run at report time. */
+    @Column(name = "tests_passed")
+    private Integer testsPassed;
+
+    /** Count of all TestResult rows for this run at report time. 0 when test generation never ran. */
+    @Column(name = "tests_total")
+    private Integer testsTotal;
+
+    /** ReviewerResult.Overall enum name: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. */
+    @Column(name = "reviewer_verdict", length = 32)
+    private String reviewerVerdict;
+
+    /**
+     * 0-100 deterministic score derived from final_build_passed + tests_passed/tests_total
+     * + reviewer_verdict - unfixed_critical_penalty. Primary display when the
+     * {@code scoring.v2-verified} feature flag is on; accuracy_score remains
+     * available as secondary "estimated requirement coverage".
+     */
+    @Column(name = "verified_score")
+    private Integer verifiedScore;
+
     // ──────────────────────────────────────────────────────────────────────────────────────────
 
     /** Preview URL captured at report generation time. Null if preview expired or was never started. */

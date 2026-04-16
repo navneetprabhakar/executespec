@@ -104,19 +104,17 @@ public class AccuracyAssessmentService {
 
             RULES:
             - Base your score on the SPECIFICATION, not on what is "good enough"
-            - A requirement is IMPLEMENTED if ANY of these is true:
-                * It appears in the KEY SOURCE FILES content, OR
-                * The FILE TREE contains a file whose name/path clearly maps to it (e.g. `fib.py` for a Fibonacci
-                  spec, `BookController.java` for a Book endpoint, `V1__schema.sql` for a schema migration), OR
-                * The code compiled successfully AND the file tree shows the expected structural files for that
-                  feature — compile success is strong positive evidence that the declared components exist
-            - A requirement is MISSING only if:
-                * No file in the tree plausibly covers it, AND
-                * The KEY SOURCE FILES you can see actively contradict its presence
-              Absence of a file in the KEY SOURCE FILES snippet is NOT by itself proof of missing — the snippet
-              is capped at 6 files and may have skipped over the relevant one. Use the FULL FILE TREE as the
-              primary signal for presence/absence.
-            - A requirement is PARTIAL if an issue flags it as incomplete (e.g., endpoint exists but validation missing)
+            - EVIDENCE-FIRST: a requirement is IMPLEMENTED only when you can point to a specific location
+              in the KEY SOURCE FILES content that demonstrates the behaviour. Append the citation
+              inline to each implementedRequirements string, e.g. "Slug length is 7 chars [src/services/shortener.ts:22-35]".
+              A file name alone (without content you can read) is NOT sufficient — it's a hint, not proof.
+            - A requirement is MISSING if:
+                * No KEY SOURCE FILE content supports it, OR
+                * The content you can read actively contradicts its presence (stubs, throw-not-implemented, etc.)
+              If the 6-file KEY SOURCE FILES snippet didn't include the relevant file, mark the requirement
+              as PARTIAL with a note like "likely in unread file X, cannot confirm" rather than implemented.
+            - A requirement is PARTIAL if an issue flags it as incomplete (e.g., endpoint exists but validation missing),
+              or if evidence is indirect (structural hints only, no behaviour in KEY SOURCE FILES).
             - For endpointCoverage: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check
               KEY SOURCE FILES content for the route handler — not just file names
             - README and documentation gaps count at most 5 points total toward specAdherenceScore

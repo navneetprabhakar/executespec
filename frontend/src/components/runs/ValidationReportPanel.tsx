@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Share2, Check, Shield, AlertTriangle, FileCo
 import { getValidationReport, shareValidationReport, downloadValidationReportPdf, type ValidationReportData, type ReportIssue } from '@/lib/api';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import ScoreCard from './ScoreCard';
+import SignalBreakdown from './SignalBreakdown';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
@@ -59,12 +60,20 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
     summaryParts.push('Clean run, all checks passed');
   }
 
+  // v2.5.10 — verifiedScore (deterministic, from build+tests+verdict) is the
+  // PRIMARY badge when present. accuracyScore (LLM-estimated) drops to a
+  // secondary "Est." role. On pre-v2.5.10 reports verifiedScore is null so
+  // we fall back to accuracyScore (legacy behaviour).
+  const primaryScore = typeof report.verifiedScore === 'number'
+      ? report.verifiedScore
+      : (typeof report.accuracyScore === 'number' ? report.accuracyScore : null);
+  const primaryScoreLabel = typeof report.verifiedScore === 'number' ? 'Verified' : 'Accuracy';
   const score = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
   const grade = report.accuracyGrade || null;
-  const scoreColor = score == null
+  const scoreColor = primaryScore == null
     ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
-    : score >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
-    : score >= 75 ? 'text-accent-amber border-amber-500/30 bg-amber-500/10'
+    : primaryScore >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+    : primaryScore >= 75 ? 'text-accent-amber border-amber-500/30 bg-amber-500/10'
     : 'text-accent-red border-red-500/30 bg-red-500/10';
 
   const handleShare = async () => {
@@ -113,9 +122,22 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
         <span className={cn('text-[10px] px-1.5 py-0.5 rounded border', resultCfg.color)}>
           {resultCfg.label}
         </span>
-        {score != null && (
-          <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded border tabular-nums', scoreColor)}>
-            {score}/100{grade ? ` · ${grade}` : ''}
+        {primaryScore != null && (
+          <span
+            className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded border tabular-nums', scoreColor)}
+            title={primaryScoreLabel === 'Verified'
+              ? 'Deterministic score from build + tests + reviewer verdict (v2.5.10)'
+              : 'LLM-estimated spec coverage from file tree + source snippets'}
+          >
+            {primaryScoreLabel === 'Verified' ? 'V' : 'A'} {primaryScore}/100
+          </span>
+        )}
+        {primaryScoreLabel === 'Verified' && score != null && score !== primaryScore && (
+          <span
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded border tabular-nums text-muted border-[var(--border-default)] bg-[var(--gray-200)]"
+            title="LLM-estimated requirement coverage (secondary, may hallucinate from file tree)"
+          >
+            Est. {score}{grade ? ` · ${grade}` : ''}
           </span>
         )}
         {report.generatedAfterImprovements && (
@@ -142,6 +164,19 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
             {copied ? 'Copied' : 'Share'}
           </button>
         </div>
+      </div>
+
+      {/* v2.5.10 — signal breakdown chip: always-visible, below the header, so
+          users can see the 5 hard signals at a glance without expanding. */}
+      <div className="px-4 pb-2 -mt-1">
+        <SignalBreakdown
+          finalBuildPassed={report.finalBuildPassed}
+          testsPassed={report.testsPassed}
+          testsTotal={report.testsTotal}
+          reviewerVerdict={report.reviewerVerdict}
+          verifiedScore={report.verifiedScore}
+          accuracyScore={report.accuracyScore}
+        />
       </div>
 
       {/* Expanded content */}

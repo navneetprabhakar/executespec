@@ -167,7 +167,7 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
                   <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:150ms]" />
                   <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:300ms]" />
                 </div>
-                <span className="text-[10px] text-muted">Thinking…</span>
+                <span className="text-[11px] text-muted">Thinking…</span>
               </div>
             </div>
           </div>
@@ -221,7 +221,7 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
           <button
             onClick={() => setLaunchOpen(true)}
             disabled={sending || messages.length === 0}
-            className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+            className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
             title="Distil this chat into an execution and launch it"
           >
             <Rocket className="h-3.5 w-3.5" />
@@ -336,7 +336,7 @@ function LaunchFromChatModal({
         </div>
 
         {compiling && (
-          <div className="flex items-center gap-2 text-[11px] text-muted">
+          <div className="flex items-center gap-2 text-xs text-muted">
             <Loader2 className="h-3 w-3 animate-spin" />
             Compiling chat into a spec…
           </div>
@@ -345,26 +345,26 @@ function LaunchFromChatModal({
         {!compiling && (
           <>
             <div>
-              <label className="block text-[10px] uppercase tracking-wide text-muted mb-1">
+              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
                 Execution spec (editable)
               </label>
               <textarea
                 value={spec}
                 onChange={(e) => setSpec(e.target.value)}
                 rows={7}
-                className="w-full text-[12px] font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-1.5 focus:outline-none focus:border-accent-blue resize-y"
+                className="w-full text-sm font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-1.5 focus:outline-none focus:border-accent-blue resize-y"
               />
             </div>
 
             <div>
-              <label className="block text-[10px] uppercase tracking-wide text-muted mb-1">
+              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
                 Repos ({selected.size} of {repos.length} selected)
               </label>
               <div className="space-y-1 max-h-40 overflow-y-auto">
                 {repos.map((l) => (
                   <label
                     key={l.repo.id}
-                    className="flex items-center gap-2 text-[11px] font-mono text-secondary px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] cursor-pointer hover:border-accent-blue/40"
+                    className="flex items-center gap-2 text-xs font-mono text-secondary px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] cursor-pointer hover:border-accent-blue/40"
                   >
                     <input
                       type="checkbox"
@@ -376,26 +376,26 @@ function LaunchFromChatModal({
                   </label>
                 ))}
                 {repos.length === 0 && (
-                  <div className="text-[11px] text-muted">No repos linked to this project.</div>
+                  <div className="text-xs text-muted">No repos linked to this project.</div>
                 )}
               </div>
             </div>
           </>
         )}
 
-        {err && <div className="text-[11px] text-accent-red">{err}</div>}
+        {err && <div className="text-xs text-accent-red">{err}</div>}
 
         <div className="flex justify-end gap-2 pt-1">
           <button
             onClick={onClose}
-            className="text-[11px] px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
+            className="text-xs px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
           >
             Cancel
           </button>
           <button
             onClick={submit}
             disabled={submitting || compiling || !spec.trim() || selected.size === 0}
-            className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting
               ? <><Loader2 className="h-3 w-3 animate-spin" /> Launching…</>
