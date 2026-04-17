@@ -17,6 +17,7 @@ import ProjectChatPanel from '@/components/project/ProjectChatPanel';
 import ProjectDocumentsPanel from '@/components/project/ProjectDocumentsPanel';
 import InlineRunDetail from '@/components/project/InlineRunDetail';
 import StatusBadge from '@/components/shared/StatusBadge';
+import EmptyState from '@/components/shared/EmptyState';
 import { cn } from '@/lib/utils';
 import type { TaskSummary } from '@/types/project';
 import type { ContinueOnPrConfig } from '@/types/execution';
@@ -393,7 +394,14 @@ function ProjectSummaryPanel({ projectId }: { projectId: string }) {
 
 function ExecutionsPanel({ tasks }: { tasks: TaskSummary[] }) {
   if (tasks.length === 0) {
-    return <div className="text-xs text-muted">Nothing submitted yet. Click "Launch" to kick off a cross-repo execution.</div>;
+    return (
+      <EmptyState
+        compact
+        icon={Rocket}
+        title="Nothing submitted yet"
+        description='Click "Launch" above to kick off your first cross-repo execution.'
+      />
+    );
   }
   return (
     <ul className="space-y-1">

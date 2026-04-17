@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, ListTodo } from 'lucide-react';
 import type { TaskSummary } from '@/types/project';
 import { cn } from '@/lib/utils';
 import { getRun, type RunDetail } from '@/lib/api';
 import InlineRunDetail from './InlineRunDetail';
 import StatusBadge from '@/components/shared/StatusBadge';
+import EmptyState from '@/components/shared/EmptyState';
 
 function scoreColor(score: number | null | undefined): string {
+  // v2.5.12 — token-aligned with ValidationReport / SignalBreakdown.
   if (score == null) return 'text-muted';
-  if (score >= 90) return 'text-emerald-400';
-  if (score >= 75) return 'text-accent-amber';
-  return 'text-accent-red';
+  if (score >= 90) return 'text-status-success';
+  if (score >= 75) return 'text-status-waiting';
+  return 'text-status-error';
 }
 
 export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
@@ -37,7 +39,14 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
   };
 
   if (!tasks || tasks.length === 0) {
-    return <div className="text-xs text-muted">No runs yet.</div>;
+    return (
+      <EmptyState
+        compact
+        icon={ListTodo}
+        title="No runs yet"
+        description="Submit a Launch from this project to see runs here."
+      />
+    );
   }
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">

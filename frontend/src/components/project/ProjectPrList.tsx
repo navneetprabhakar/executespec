@@ -1,15 +1,24 @@
 import type { PrSummary } from '@/types/project';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, GitPullRequest } from 'lucide-react';
+import EmptyState from '@/components/shared/EmptyState';
 
+// v2.5.12 — token-aligned (was raw emerald-/red- Tailwind hex).
 const STATUS_COLOR: Record<string, string> = {
   OPEN:   'text-accent-blue border-accent-blue/40 bg-accent-blue/10',
-  MERGED: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
-  CLOSED: 'text-accent-red border-red-500/40 bg-red-500/10',
+  MERGED: 'text-status-success border-status-success/40 bg-status-success/10',
+  CLOSED: 'text-status-error border-status-error/40 bg-status-error/10',
 };
 
 export default function ProjectPrList({ prs }: { prs: PrSummary[] }) {
   if (!prs || prs.length === 0) {
-    return <div className="text-xs text-muted">No pull requests yet.</div>;
+    return (
+      <EmptyState
+        compact
+        icon={GitPullRequest}
+        title="No pull requests yet"
+        description="PRs will appear here once a Launch finishes."
+      />
+    );
   }
   const merged = prs.filter((p) => p.status === 'MERGED').length;
   const total = prs.length;

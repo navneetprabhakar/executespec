@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Rocket } from 'lucide-react';
 import { executionApi } from '@/lib/execution-api';
 import type { ExecutionRunDto } from '@/types/execution';
 import StatusBadge from '@/components/shared/StatusBadge';
+import EmptyState from '@/components/shared/EmptyState';
 
 export default function ProjectLaunchesList({ projectId }: { projectId: string }) {
   const [launches, setLaunches] = useState<ExecutionRunDto[] | null>(null);
@@ -14,10 +16,17 @@ export default function ProjectLaunchesList({ projectId }: { projectId: string }
         .catch((e: any) => setError(e?.message ?? 'Failed to load launches'));
   }, [projectId]);
 
-  if (error) return <div className="text-xs text-accent-red">{error}</div>;
+  if (error) return <div className="text-xs text-status-error">{error}</div>;
   if (launches == null) return <div className="text-xs text-muted">Loading launches…</div>;
   if (launches.length === 0) {
-    return <div className="text-xs text-muted">No launches yet. Click "Launch" to start a cross-repo run.</div>;
+    return (
+      <EmptyState
+        compact
+        icon={Rocket}
+        title="No launches yet"
+        description="Click Launch above to start a cross-repo run."
+      />
+    );
   }
 
   return (
