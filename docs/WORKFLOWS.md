@@ -11,6 +11,25 @@
 > [`docs/user-journeys.md`](user-journeys.md) and [`CLAUDE.md`](../CLAUDE.md)
 > for the canonical V2 flow.
 >
+> **v2.5.10 — status transitions with reason.** Terminal status is now decided
+> by `V2RunOrchestrator.resolveTerminalStatus()` which returns a
+> `{status, reason}` pair. PARTIAL always carries a reason
+> (`CLEAN_WITH_INTERMEDIATE_WARNINGS` / `FINAL_BUILD_FAILED` /
+> `TESTS_FAILED:N_OF_M` / `REVIEWER_UNRESOLVED` / `REVIEWER_FAILED` /
+> `ALL_TASKS_FAILED` / `LEGACY_UNKNOWN`) persisted to `pipeline_run.status_reason`
+> and broadcast on the `COMPLETE` SSE event (`{status}|{reason}`). UI tooltip
+> on the StatusBadge renders human copy per reason. Gated behind
+> `scoring.v2-verified` feature flag.
+>
+> **v2.5.11 — planner requirement graph (Pillar 1 of Validation v3).**
+> Planning step extracts every spec requirement into `PlanV2.requirements`
+> (`{id, text, kind}` where `kind ∈ {FUNCTIONAL, NON_FUNCTIONAL, TEST, CONSTRAINT}`).
+> Each task cites covered IDs via `meetsRequirements`. `PlannerAgentV2.validatePlan`
+> enforces full coverage; on violation the planner retries once with the
+> violation list as feedback, then fails the run with `PLAN_COVERAGE_INVALID`.
+> Gated behind `validation.v3-strict` feature flag (default OFF in prod). See
+> [`.claude/plans/immutable-painting-platypus.md`](../.claude/plans/immutable-painting-platypus.md) for the full 5-pillar plan.
+>
 > **Pilot v3.0 amend (commit `6bbfde9b`).** Project-scoped runs add two
 > non-blocking steps to the flow:
 >

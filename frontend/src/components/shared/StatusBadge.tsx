@@ -14,12 +14,18 @@ interface StatusBadgeProps {
 const DISPLAY_NAMES: Record<string, string> = {
   COMPLETE: 'Ready',
   WORKING: 'Building',
+  EXECUTING: 'Building',
   PLANNING: 'Planning',
-  COMPILING: 'Compiling',
   REVIEWING: 'Reviewing',
   FAILED: 'Error',
   CANCELLED: 'Canceled',
   PARTIAL: 'Partial',
+  // Project Launch (ExecutionRun) statuses — friendly copy
+  SETUP: 'Setting up',
+  ANALYSING: 'Reading code',
+  ARCH_REVIEW: 'Architecture review',
+  AWAITING_APPROVAL: 'Plan ready',
+  // Batch path (planned V2 batch implementation)
   QUEUED_BATCH: 'Batch Queued',
   IN_PROGRESS_BATCH: 'Batch Running',
   BATCH_COMPLETE: 'Batch Done',

@@ -1,5 +1,9 @@
 package com.navneet.executespec.project.pr;
 
+import com.navneet.executespec.notification.InAppNotificationService;
+import com.navneet.executespec.notification.NotificationRepository;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +20,10 @@ import java.util.UUID;
 public class PullRequestRecordService {
 
     private final PullRequestRecordRepository repo;
+    // v2.5.12 — needed for PR-merged in-app notifications.
+    private final InAppNotificationService notificationService;
+    private final NotificationRepository notificationRepository;
+    private final PipelineRunRepository pipelineRunRepo;
 
     @Transactional
     public PullRequestRecord recordCreated(
@@ -51,6 +59,11 @@ public class PullRequestRecordService {
     /**
      * Flip a stored PR to CLOSED or MERGED in response to a GitHub webhook.
      * No-op when no matching record exists (PR was not created by ExecuteSpec).
+     *
+     * <p>v2.5.12 — also creates an in-app notification for the run owner when
+     * the PR is merged. Closes the deep-dive-audit gap where PR-merged events
+     * silently happened on GitHub but the user only learned about them by
+     * refreshing the project dashboard.
      */
     @Transactional
     public void applyWebhookUpdate(
@@ -64,6 +77,7 @@ public class PullRequestRecordService {
             return;
         }
         PullRequestRecord r = found.get();
+        boolean wasNotMerged = r.getStatus() != PullRequestRecord.Status.MERGED;
         if (merged) {
             r.setStatus(PullRequestRecord.Status.MERGED);
             r.setMergedAt(timestamp != null ? timestamp : Instant.now());
@@ -74,6 +88,35 @@ public class PullRequestRecordService {
         r.setUpdatedAt(Instant.now());
         repo.save(r);
         log.info("PR {}#{} updated via webhook -> {}", repoFullName, prNumber, r.getStatus());
+
+        // v2.5.12 — fire a notification for the run owner on the merged transition.
+        if (merged && wasNotMerged && r.getRunId() != null) {
+            try {
+                notifyMerged(r);
+            } catch (Exception e) {
+                // Non-fatal: notification failure must not undo the PR state update.
+                log.warn("Failed to create PR_MERGED notification for run {} PR {}#{}: {}",
+                        r.getRunId(), repoFullName, prNumber, e.getMessage());
+            }
+        }
+    }
+
+    private void notifyMerged(PullRequestRecord r) {
+        // Look up the run owner from the PipelineRun row. PullRequestRecord
+        // doesn't carry userId so this is a single SELECT keyed on runId.
+        PipelineRun run = pipelineRunRepo.findById(r.getRunId()).orElse(null);
+        if (run == null || run.getCreatedByUserId() == null) return;
+        String type = "PR_MERGED";
+        String link = "/runs/" + r.getRunId();
+        // Dedup: at most one PR_MERGED notification per (run, repo, prNumber).
+        String dedupTitle = "PR merged: " + r.getRepoFullName() + " #" + r.getPrNumber();
+        if (notificationRepository.existsByLinkAndType(link, type)) {
+            // Loose dedup; if the user already got a PR_MERGED for this run it's fine.
+            log.debug("Skipping duplicate PR_MERGED notification for run {}", r.getRunId());
+            return;
+        }
+        String body = "Your pull request was merged. View the run for the full code + report.";
+        notificationService.create(run.getCreatedByUserId(), type, dedupTitle, body, link);
     }
 
     public List<PullRequestRecord> listForRun(String runId) {

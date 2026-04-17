@@ -223,7 +223,7 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
       <CodePanel run={run} />
 
       {/* Validation report — reuses the full panel used in the Runs tab */}
-      <ValidationReportPanel runId={run.runId} status={run.status} />
+      <ValidationReportPanel runId={run.runId} status={run.status} statusReason={run.statusReason ?? null} />
     </div>
   );
 }

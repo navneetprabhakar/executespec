@@ -168,7 +168,17 @@ public class ExecutionController {
     public ResponseEntity<Void> approvePlan(
             @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
         AppUser user = requireFeatureEnabled(principal);
-        requireRunAccess(id, user);
+        ExecutionRun run = requireRunAccess(id, user);
+        // v2.5.12 — reject plan-approve before the plan is generated. Observed
+        // live on 2026-04-17: first approve 20 s after /plan returned 202 but
+        // did NOT set planApprovedAt (concurrent planner save clobbered it).
+        // Second approve 2 min later succeeded. Fix: reject the early approve
+        // with 409 so the client knows to poll until the plan is ready.
+        if (run.getExecutionPlan() == null || run.getExecutionPlan().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Plan is not ready yet. Wait for the planner to finish "
+                            + "(poll GET /api/executions/" + id + " until executionPlan is present).");
+        }
         orchestrator.approvePlanAndExecute(id);
         return ResponseEntity.accepted().build();
     }

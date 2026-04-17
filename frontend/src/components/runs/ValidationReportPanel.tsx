@@ -11,18 +11,86 @@ import { cn } from '@/lib/utils';
 interface ValidationReportPanelProps {
   runId: string;
   status: string;
+  /** v2.5.10 — pipeline_run.status_reason. Surfaces the honest PARTIAL/COMPLETE
+   *  narrative (e.g. "CLEAN_WITH_INTERMEDIATE_WARNINGS", "TESTS_FAILED:2_OF_7").
+   *  Passed in from the parent which reads RunSummary. */
+  statusReason?: string | null;
 }
 
-const SEVERITY_CONFIG: Record<string, { color: string; label: string }> = {
-  WOULD_BREAK_BUILD: { color: 'bg-red-500/20 text-accent-red border-red-500/30', label: 'Build breaker' },
-  WOULD_CAUSE_BUG: { color: 'bg-orange-500/20 text-accent-amber border-orange-500/30', label: 'Bug risk' },
-  WOULD_FAIL_REVIEW: { color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30', label: 'Review issue' },
-  WOULD_FAIL_LINT: { color: 'bg-[var(--gray-200)] text-secondary border-[var(--border-default)]', label: 'Lint issue' },
+/**
+ * Severity → design-system tokens. Build breakers block builds (error);
+ * bug risks land in production (partial/orange); review issues are soft
+ * (waiting/amber); lint is purely advisory (muted). Matches StatusBadge
+ * colour semantics so Validation reads like every other status surface.
+ */
+const SEVERITY_CONFIG: Record<string, { cls: string; label: string; iconCls: string }> = {
+  WOULD_BREAK_BUILD: {
+    cls: 'bg-status-error/10 text-status-error border-status-error/30',
+    iconCls: 'text-status-error',
+    label: 'Build breaker',
+  },
+  WOULD_CAUSE_BUG: {
+    cls: 'bg-status-partial/10 text-status-partial border-status-partial/30',
+    iconCls: 'text-status-partial',
+    label: 'Bug risk',
+  },
+  WOULD_FAIL_REVIEW: {
+    cls: 'bg-status-waiting/10 text-status-waiting border-status-waiting/30',
+    iconCls: 'text-status-waiting',
+    label: 'Review issue',
+  },
+  WOULD_FAIL_LINT: {
+    cls: 'bg-[var(--gray-200)] text-muted border-[var(--border-default)]',
+    iconCls: 'text-muted',
+    label: 'Lint issue',
+  },
 };
+
+const RESULT_CONFIG: Record<string, { cls: string; label: string; shieldCls: string }> = {
+  PASSED:            { cls: 'bg-status-success/10 text-status-success border-status-success/30', shieldCls: 'text-status-success', label: 'Passed' },
+  PASSED_WITH_FIXES: { cls: 'bg-status-success/10 text-status-success border-status-success/30', shieldCls: 'text-status-success', label: 'Passed with fixes' },
+  NEEDS_ATTENTION:   { cls: 'bg-status-waiting/10 text-status-waiting border-status-waiting/30', shieldCls: 'text-status-waiting', label: 'Needs attention' },
+  FAILED:            { cls: 'bg-status-error/10 text-status-error border-status-error/30',       shieldCls: 'text-status-error',   label: 'Failed' },
+};
+
+/**
+ * v2.5.10 — human copy for `pipeline_run.status_reason`. Kept in sync with
+ * StatusBadge's tooltip dictionary. Shown inline on the expanded report so
+ * users don't have to hover the run-header badge to learn why a PARTIAL is
+ * a PARTIAL.
+ */
+const STATUS_REASON_COPY: Record<string, string> = {
+  CLEAN_COMPLETION:                 'Clean completion — every check passed.',
+  CLEAN_WITH_INTERMEDIATE_WARNINGS: 'Clean result. An intermediate step warned but the final state is clean.',
+  FINAL_BUILD_FAILED:               'The final build did not pass. Code may not run without changes.',
+  REVIEWER_UNRESOLVED:              'The reviewer flagged issues that were not fully resolved.',
+  REVIEWER_FAILED:                  'The reviewer agent errored out. Run status derived from the final build.',
+  ALL_TASKS_FAILED:                 'No worker task completed successfully.',
+  LEGACY_UNKNOWN:                   'Pre-v2.5.10 run — detailed signals are unavailable.',
+};
+
+function statusReasonCopy(raw?: string | null): string | null {
+  if (!raw) return null;
+  if (raw.startsWith('TESTS_FAILED:')) {
+    const m = raw.match(/TESTS_FAILED:(\d+)_OF_(\d+)/);
+    if (m) return `${m[1]} of ${m[2]} test cases failed.`;
+    return 'Some test cases failed.';
+  }
+  return STATUS_REASON_COPY[raw] ?? null;
+}
 
 const FETCH_STATUSES = new Set(['COMPLETE', 'PARTIAL', 'FAILED']);
 
-export default function ValidationReportPanel({ runId, status }: ValidationReportPanelProps) {
+/**
+ * Human label for a checksPassed enum. Backend emits SCREAMING_SNAKE; the UI
+ * wants "Prompt defense", not "PROMPT DEFENSE".
+ */
+function prettyCheckName(raw: string): string {
+  const spaced = raw.replace(/_/g, ' ').toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+export default function ValidationReportPanel({ runId, status, statusReason }: ValidationReportPanelProps) {
   const [report, setReport] = useState<ValidationReportData | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -40,41 +108,35 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
 
   if (!report) return null;
 
-  const RESULT_CONFIG: Record<string, { color: string; label: string }> = {
-    PASSED: { color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'Passed' },
-    PASSED_WITH_FIXES: { color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'Passed with fixes' },
-    NEEDS_ATTENTION: { color: 'bg-amber-500/20 text-accent-amber border-amber-500/30', label: 'Needs attention' },
-    FAILED: { color: 'bg-red-500/20 text-accent-red border-red-500/30', label: 'Failed' },
-  };
-
   const resultCfg = RESULT_CONFIG[report.pipelineResult] ?? RESULT_CONFIG.PASSED;
+
+  // v2.5.10 — verifiedScore (deterministic build+tests+verdict) is primary.
+  // accuracyScore (LLM self-estimate) demoted to secondary "Est." chip.
+  const primaryScore = typeof report.verifiedScore === 'number'
+      ? report.verifiedScore
+      : (typeof report.accuracyScore === 'number' ? report.accuracyScore : null);
+  const primaryLabel = typeof report.verifiedScore === 'number' ? 'Verified' : 'Accuracy';
+  const accuracyScore = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
+  const grade = report.accuracyGrade || null;
+
+  const primaryScoreCls = primaryScore == null
+    ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
+    : primaryScore >= 90 ? 'text-status-success border-status-success/30 bg-status-success/10'
+    : primaryScore >= 75 ? 'text-status-waiting border-status-waiting/30 bg-status-waiting/10'
+    : 'text-status-error border-status-error/30 bg-status-error/10';
 
   const summaryParts: string[] = [];
   summaryParts.push(`${report.filesGenerated} file${report.filesGenerated !== 1 ? 's' : ''}`);
   if (report.languages.length > 0) summaryParts.push(report.languages.join(', '));
-  if (report.pipelineResult === 'NEEDS_ATTENTION') {
-    summaryParts.push(`${report.issuesCaught} unresolved issue${report.issuesCaught !== 1 ? 's' : ''}`);
+  if (report.pipelineResult === 'NEEDS_ATTENTION' || report.pipelineResult === 'FAILED') {
+    summaryParts.push(`${report.issuesCaught} unresolved`);
   } else if (report.issuesCaught > 0) {
-    summaryParts.push(`${report.issuesCaught} issue${report.issuesCaught !== 1 ? 's' : ''} caught & fixed`);
+    summaryParts.push(`${report.issuesCaught} fixed`);
   } else {
-    summaryParts.push('Clean run, all checks passed');
+    summaryParts.push('Clean run');
   }
 
-  // v2.5.10 — verifiedScore (deterministic, from build+tests+verdict) is the
-  // PRIMARY badge when present. accuracyScore (LLM-estimated) drops to a
-  // secondary "Est." role. On pre-v2.5.10 reports verifiedScore is null so
-  // we fall back to accuracyScore (legacy behaviour).
-  const primaryScore = typeof report.verifiedScore === 'number'
-      ? report.verifiedScore
-      : (typeof report.accuracyScore === 'number' ? report.accuracyScore : null);
-  const primaryScoreLabel = typeof report.verifiedScore === 'number' ? 'Verified' : 'Accuracy';
-  const score = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
-  const grade = report.accuracyGrade || null;
-  const scoreColor = primaryScore == null
-    ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
-    : primaryScore >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
-    : primaryScore >= 75 ? 'text-accent-amber border-amber-500/30 bg-amber-500/10'
-    : 'text-accent-red border-red-500/30 bg-red-500/10';
+  const reasonCopy = statusReasonCopy(statusReason);
 
   const handleShare = async () => {
     setSharing(true);
@@ -105,7 +167,7 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
 
   return (
     <div className="mx-4 mb-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
-      {/* Collapsed header */}
+      {/* ── Header: icon + title + primary score + result chip ─────────── */}
       <div
         role="button"
         tabIndex={0}
@@ -117,40 +179,35 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
           ? <ChevronDown className="h-4 w-4 text-secondary flex-shrink-0" />
           : <ChevronRight className="h-4 w-4 text-secondary flex-shrink-0" />
         }
-        <Shield className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+        <Shield className={cn('h-3.5 w-3.5 flex-shrink-0', resultCfg.shieldCls)} />
         <span className="text-xs font-medium text-primary">Validation Report</span>
-        <span className={cn('text-[10px] px-1.5 py-0.5 rounded border', resultCfg.color)}>
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-sm border font-medium', resultCfg.cls)}>
           {resultCfg.label}
         </span>
         {primaryScore != null && (
           <span
-            className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded border tabular-nums', scoreColor)}
-            title={primaryScoreLabel === 'Verified'
-              ? 'Deterministic score from build + tests + reviewer verdict (v2.5.10)'
-              : 'LLM-estimated spec coverage from file tree + source snippets'}
+            className={cn('text-xs font-mono px-2 py-0.5 rounded-sm border tabular-nums font-medium', primaryScoreCls)}
+            title={primaryLabel === 'Verified'
+              ? 'Deterministic score: build + tests + reviewer verdict (v2.5.10)'
+              : 'LLM-estimated spec coverage (legacy pre-V106)'}
           >
-            {primaryScoreLabel === 'Verified' ? 'V' : 'A'} {primaryScore}/100
-          </span>
-        )}
-        {primaryScoreLabel === 'Verified' && score != null && score !== primaryScore && (
-          <span
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded border tabular-nums text-muted border-[var(--border-default)] bg-[var(--gray-200)]"
-            title="LLM-estimated requirement coverage (secondary, may hallucinate from file tree)"
-          >
-            Est. {score}{grade ? ` · ${grade}` : ''}
+            <span className="opacity-70 mr-1">{primaryLabel === 'Verified' ? 'Ver' : 'Acc'}</span>
+            {primaryScore}<span className="opacity-60">/100</span>
           </span>
         )}
         {report.generatedAfterImprovements && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded border bg-accent-blue/20 text-accent-blue border-accent-blue/30">
+          <span className="text-[10px] px-1.5 py-0.5 rounded-sm border bg-accent-blue/10 text-accent-blue border-accent-blue/30">
             Re-validated
           </span>
         )}
-        <span className="text-[11px] text-muted ml-1 truncate">{summaryParts.join(' · ')}</span>
+        <span className="text-xs text-muted ml-1 truncate hidden md:inline">
+          {summaryParts.join(' · ')}
+        </span>
         <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
           <button
             onClick={handleDownloadPdf}
             disabled={downloading}
-            className="flex items-center gap-1 text-[11px] text-muted hover:text-accent-green transition-colors px-1.5 py-0.5 rounded border border-[var(--border-default)]"
+            className="flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)]"
           >
             <Download className="h-3 w-3" />
             {downloading ? '...' : 'PDF'}
@@ -158,7 +215,7 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
           <button
             onClick={handleShare}
             disabled={sharing}
-            className="flex items-center gap-1 text-[11px] text-muted hover:text-accent-green transition-colors px-1.5 py-0.5 rounded border border-[var(--border-default)]"
+            className="flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)]"
           >
             {copied ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
             {copied ? 'Copied' : 'Share'}
@@ -166,8 +223,16 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
         </div>
       </div>
 
-      {/* v2.5.10 — signal breakdown chip: always-visible, below the header, so
-          users can see the 5 hard signals at a glance without expanding. */}
+      {/* ── Narrative line for status_reason — v2.5.10 honest-PARTIAL copy ── */}
+      {reasonCopy && (
+        <div className="px-4 pb-2 -mt-1">
+          <p className="text-xs text-secondary leading-relaxed">
+            {reasonCopy}
+          </p>
+        </div>
+      )}
+
+      {/* ── Signal breakdown chip: always visible ─────────────────────── */}
       <div className="px-4 pb-2 -mt-1">
         <SignalBreakdown
           finalBuildPassed={report.finalBuildPassed}
@@ -179,42 +244,52 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
         />
       </div>
 
-      {/* Expanded content */}
+      {/* ── Expanded content ──────────────────────────────────────────── */}
       {expanded && (
-        <div className="border-t border-[var(--border-default)] max-h-[600px] overflow-y-auto">
-          <div className="px-4 py-3 space-y-3 text-[12px] leading-relaxed">
-            {/* Accuracy + counters grid */}
-            {(score != null || report.issuesCaught > 0) && (
+        <div className="border-t border-[var(--border-default)] max-h-[600px] overflow-y-auto bg-[var(--gray-100)]">
+          <div className="px-4 py-3 space-y-3 text-xs leading-relaxed">
+
+            {/* Issue counter grid — single-dimension semantic */}
+            {(accuracyScore != null || report.issuesCaught > 0) && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {score != null && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', scoreColor)}>
+                {accuracyScore != null && primaryLabel === 'Verified' && (
+                  <div className={cn('rounded-sm border px-2 py-1.5', 'border-[var(--border-default)] bg-[var(--gray-200)] text-muted')}>
+                    <div className="text-[10px] uppercase tracking-wide text-muted">LLM estimate</div>
+                    <div className="text-sm font-mono font-semibold tabular-nums text-secondary">
+                      {accuracyScore}<span className="text-[10px] text-muted">/100</span>
+                      {grade && <span className="ml-1 text-[11px] text-muted">· {grade}</span>}
+                    </div>
+                  </div>
+                )}
+                {accuracyScore != null && primaryLabel !== 'Verified' && (
+                  <div className={cn('rounded-sm border px-2 py-1.5', primaryScoreCls)}>
                     <div className="text-[10px] uppercase tracking-wide opacity-70">Accuracy</div>
                     <div className="text-sm font-mono font-semibold tabular-nums">
-                      {score}<span className="text-[10px] opacity-60">/100</span>
+                      {accuracyScore}<span className="text-[10px] opacity-60">/100</span>
                       {grade && <span className="ml-1 text-[11px]">· {grade}</span>}
                     </div>
                   </div>
                 )}
                 {report.buildBreakers > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_BREAK_BUILD.color)}>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_BREAK_BUILD.cls)}>
                     <div className="text-[10px] uppercase tracking-wide opacity-70">Build breakers</div>
                     <div className="text-sm font-mono tabular-nums">{report.buildBreakers}</div>
                   </div>
                 )}
                 {report.productionBugs > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_CAUSE_BUG.color)}>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_CAUSE_BUG.cls)}>
                     <div className="text-[10px] uppercase tracking-wide opacity-70">Bug risks</div>
                     <div className="text-sm font-mono tabular-nums">{report.productionBugs}</div>
                   </div>
                 )}
                 {report.reviewFailures > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.color)}>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.cls)}>
                     <div className="text-[10px] uppercase tracking-wide opacity-70">Review</div>
                     <div className="text-sm font-mono tabular-nums">{report.reviewFailures}</div>
                   </div>
                 )}
                 {report.lintFailures > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_LINT.color)}>
+                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_LINT.cls)}>
                     <div className="text-[10px] uppercase tracking-wide opacity-70">Lint</div>
                     <div className="text-sm font-mono tabular-nums">{report.lintFailures}</div>
                   </div>
@@ -222,10 +297,10 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
               </div>
             )}
 
-            {/* Pilot R6 — six-dimension score card */}
+            {/* Six-dimension score card (Pilot R6) */}
             <ScoreCard report={report} />
 
-            {/* Markdown report */}
+            {/* Reviewer markdown narrative */}
             {report.reportMarkdown && (
               <MarkdownContent content={report.reportMarkdown} />
             )}
@@ -233,17 +308,17 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
             {/* All individual issues */}
             {report.issues && report.issues.length > 0 && (
               <div className="space-y-1.5 pt-2 border-t border-[var(--border-default)]">
-                <h4 className="text-[10px] font-semibold uppercase tracking-wide text-secondary">
+                <h4 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary">
                   All issues ({report.issues.length})
                 </h4>
                 <div className="space-y-1">
                   {report.issues.map((issue: ReportIssue, i: number) => {
                     const cfg = SEVERITY_CONFIG[issue.severity] ?? SEVERITY_CONFIG.WOULD_FAIL_REVIEW;
                     return (
-                      <div key={i} className="flex items-start gap-2 text-[11px] rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] px-2.5 py-1.5">
-                        <AlertTriangle className={cn('h-3 w-3 mt-0.5 flex-shrink-0', cfg.color.split(' ')[1])} />
+                      <div key={i} className="flex items-start gap-2 text-xs rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] px-2.5 py-1.5">
+                        <AlertTriangle className={cn('h-3 w-3 mt-0.5 flex-shrink-0', cfg.iconCls)} />
                         <div className="min-w-0 flex-1 leading-snug">
-                          <span className="text-secondary">{issue.description}</span>
+                          <span className="text-primary">{issue.description}</span>
                           {issue.filePath && (
                             <span className="flex items-center gap-1 mt-0.5 text-muted font-mono text-[10px]">
                               <FileCode2 className="h-2.5 w-2.5" />
@@ -251,10 +326,10 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
                             </span>
                           )}
                           {issue.fix && (
-                            <span className="block mt-0.5 text-emerald-400/70">Fix: {issue.fix}</span>
+                            <span className="block mt-0.5 text-status-success/80">Fix: {issue.fix}</span>
                           )}
                         </div>
-                        <span className={cn('text-[9px] px-1.5 py-0.5 rounded border whitespace-nowrap flex-shrink-0', cfg.color)}>
+                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-sm border whitespace-nowrap flex-shrink-0', cfg.cls)}>
                           {cfg.label}
                         </span>
                       </div>
@@ -266,13 +341,18 @@ export default function ValidationReportPanel({ runId, status }: ValidationRepor
 
             {/* Checks passed */}
             {report.checksPassed.length > 0 && (
-              <div className="flex flex-wrap gap-x-3 gap-y-1 pt-2 border-t border-[var(--border-default)]">
-                {report.checksPassed.map(check => (
-                  <span key={check} className="flex items-center gap-1 text-[11px] text-emerald-400/80">
-                    <Check className="h-3 w-3" />
-                    {check.replace(/_/g, ' ')}
-                  </span>
-                ))}
+              <div className="pt-2 border-t border-[var(--border-default)]">
+                <h4 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary mb-1.5">
+                  Checks passed ({report.checksPassed.length})
+                </h4>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {report.checksPassed.map(check => (
+                    <span key={check} className="flex items-center gap-1 text-[11px] text-status-success/80">
+                      <Check className="h-3 w-3" />
+                      {prettyCheckName(check)}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>

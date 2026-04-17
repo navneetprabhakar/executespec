@@ -36,7 +36,13 @@ public record PlannedTaskV2(
         Complexity complexity,
         List<String> touchesFiles,
         List<String> dependsOn,
-        List<String> hardConstraints) {
+        List<String> hardConstraints,
+        /** v2.5.11 (Validation v3 / Pillar 1) — requirement IDs from
+         *  {@link PlanV2#requirements()} that this task is expected to implement.
+         *  Post-parse validation guarantees every declared requirement is covered by
+         *  at least one task and every entry here references a real requirement.
+         *  Empty on legacy plans and when the v3 flag is off. */
+        List<String> meetsRequirements) {
 
     public PlannedTaskV2 {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("id required");
@@ -46,6 +52,7 @@ public record PlannedTaskV2(
         if (touchesFiles == null) touchesFiles = List.of();
         if (dependsOn == null) dependsOn = List.of();
         if (hardConstraints == null) hardConstraints = List.of();
+        if (meetsRequirements == null) meetsRequirements = List.of();
     }
 
     public enum Complexity { LOW, MEDIUM, HIGH }

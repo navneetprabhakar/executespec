@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Lock, RefreshCw } from 'lucide-react';
+import { Lock, RefreshCw } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { ProjectRepo, RepoScope } from '@/types/project';
 import type { GitHubRemoteRepo } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import ResponsiveModal from '@/components/shared/ResponsiveModal';
+import Button from '@/components/shared/Button';
 
 interface Props {
   projectId: string;
@@ -100,8 +102,6 @@ export default function AddRepoModal({
     setError(null);
     setLinkingFullName(r.fullName);
     try {
-      // Reuse an existing registration if present, otherwise register at USER scope
-      // (default — least privilege; ORG scope must be done explicitly via Create new).
       const existing = available.find(
         (a) => a.githubRepoFullName.toLowerCase() === r.fullName.toLowerCase(),
       );
@@ -122,7 +122,6 @@ export default function AddRepoModal({
     }
   };
 
-  // Merge view: registered repos + remote GitHub repos, excluding already-linked
   type PickRow =
     | { kind: 'registered'; repo: ProjectRepo }
     | { kind: 'remote'; repo: GitHubRemoteRepo };
@@ -160,192 +159,164 @@ export default function AddRepoModal({
   }, [available, remote, alreadyLinkedRepoIds, linkedFullNames, filter]);
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] w-full max-w-lg p-4 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-medium text-primary">Add repository</h2>
-          <button onClick={onClose} className="text-muted hover:text-primary">
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+    <ResponsiveModal open={true} onClose={onClose} title="Add repository" maxWidth="max-w-lg">
+      <nav className="flex gap-4 border-b border-[var(--border-default)] mb-3 text-xs">
+        <button
+          onClick={() => setTab('pick')}
+          className={cn(
+            'pb-1.5 border-b-2 transition-colors',
+            tab === 'pick' ? 'border-accent-blue text-accent-blue' : 'border-transparent text-muted hover:text-secondary',
+          )}
+        >
+          Pick existing
+        </button>
+        <button
+          onClick={() => setTab('create')}
+          className={cn(
+            'pb-1.5 border-b-2 transition-colors',
+            tab === 'create' ? 'border-accent-blue text-accent-blue' : 'border-transparent text-muted hover:text-secondary',
+          )}
+        >
+          Create new
+        </button>
+      </nav>
 
-        <nav className="flex gap-4 border-b border-[var(--border-default)] mb-3 text-xs">
-          <button
-            onClick={() => setTab('pick')}
-            className={cn(
-              'pb-1.5 border-b-2 transition-colors',
-              tab === 'pick' ? 'border-accent-blue text-accent-blue' : 'border-transparent text-muted hover:text-secondary',
+      {error && <div className="mb-2 text-xs text-accent-red">{error}</div>}
+
+      {tab === 'pick' && (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter…"
+              className="flex-1 px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
+            />
+            <input
+              type="text"
+              value={ownerOverride}
+              onChange={(e) => setOwnerOverride(e.target.value)}
+              placeholder="owner / org"
+              className="w-28 px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
+              title="Override the owner used for the GitHub query (defaults to your saved owner)"
+            />
+            <Button
+              variant="tertiary"
+              size="sm"
+              onClick={refreshRemote}
+              disabled={refreshingRemote}
+              title="Re-fetch repos from GitHub using your saved PAT"
+            >
+              <RefreshCw className={cn('h-3 w-3', refreshingRemote && 'animate-spin')} />
+              Refresh
+            </Button>
+          </div>
+          <div className="max-h-80 overflow-y-auto space-y-1.5">
+            {loading && <div className="text-xs text-muted">Loading…</div>}
+            {!loading && rows.length === 0 && (
+              <div className="text-xs text-muted">
+                No repos visible. Set a GitHub PAT + owner under Settings → GitHub, then Refresh. Or switch to "Create new" to register a repo by name.
+              </div>
             )}
-          >
-            Pick existing
-          </button>
-          <button
-            onClick={() => setTab('create')}
-            className={cn(
-              'pb-1.5 border-b-2 transition-colors',
-              tab === 'create' ? 'border-accent-blue text-accent-blue' : 'border-transparent text-muted hover:text-secondary',
-            )}
-          >
-            Create new
-          </button>
-        </nav>
-
-        {error && <div className="mb-2 text-xs text-accent-red">{error}</div>}
-
-        {tab === 'pick' && (
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter…"
-                className="flex-1 px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
-              />
-              <input
-                type="text"
-                value={ownerOverride}
-                onChange={(e) => setOwnerOverride(e.target.value)}
-                placeholder="owner / org"
-                className="w-28 px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
-                title="Override the owner used for the GitHub query (defaults to your saved owner)"
-              />
-              <button
-                onClick={refreshRemote}
-                disabled={refreshingRemote}
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
-                title="Re-fetch repos from GitHub using your saved PAT"
-              >
-                <RefreshCw className={cn('h-3 w-3', refreshingRemote && 'animate-spin')} />
-                Refresh
-              </button>
-            </div>
-            <div className="max-h-80 overflow-y-auto space-y-1.5">
-              {loading && <div className="text-xs text-muted">Loading…</div>}
-              {!loading && rows.length === 0 && (
-                <div className="text-xs text-muted">
-                  No repos visible. Set a GitHub PAT + owner under Settings → GitHub, then Refresh. Or switch to "Create new" to register a repo by name.
-                </div>
-              )}
-              {rows.map((row) => {
-                const name = row.kind === 'registered' ? row.repo.githubRepoFullName : row.repo.fullName;
-                const isPrivate = row.kind === 'remote' ? row.repo.isPrivate : false;
-                const branch = row.kind === 'registered' ? row.repo.defaultBranch : row.repo.defaultBranch;
-                const busy = linkingFullName === name;
-                return (
-                  <div
-                    key={`${row.kind}:${name}`}
-                    className="flex items-center justify-between rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2.5 py-1.5"
-                  >
-                    <div className="min-w-0 flex items-center gap-2">
-                      <div className="min-w-0">
-                        <div className="font-mono text-xs truncate text-primary flex items-center gap-1">
-                          {name}
-                          {isPrivate && <Lock className="h-2.5 w-2.5 text-muted" />}
-                        </div>
-                        <div className="text-[11px] text-muted">
-                          {row.kind === 'registered'
-                            ? `registered · ${row.repo.scope} · branch: ${branch}`
-                            : `from GitHub · branch: ${branch}`}
-                        </div>
+            {rows.map((row) => {
+              const name = row.kind === 'registered' ? row.repo.githubRepoFullName : row.repo.fullName;
+              const isPrivate = row.kind === 'remote' ? row.repo.isPrivate : false;
+              const branch = row.kind === 'registered' ? row.repo.defaultBranch : row.repo.defaultBranch;
+              const busy = linkingFullName === name;
+              return (
+                <div
+                  key={`${row.kind}:${name}`}
+                  className="flex items-center justify-between rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2.5 py-1.5"
+                >
+                  <div className="min-w-0 flex items-center gap-2">
+                    <div className="min-w-0">
+                      <div className="font-mono text-xs truncate text-primary flex items-center gap-1">
+                        {name}
+                        {isPrivate && <Lock className="h-2.5 w-2.5 text-muted" />}
+                      </div>
+                      <div className="text-[11px] text-muted">
+                        {row.kind === 'registered'
+                          ? `registered · ${row.repo.scope} · branch: ${branch}`
+                          : `from GitHub · branch: ${branch}`}
                       </div>
                     </div>
-                    <button
-                      onClick={() =>
-                        row.kind === 'registered' ? link(row.repo.id) : linkRemote(row.repo)
-                      }
-                      disabled={busy}
-                      className="text-xs px-2 py-0.5 border border-accent-blue text-accent-blue rounded-sm hover:bg-accent-blue/10 disabled:opacity-50"
-                    >
-                      {busy ? '…' : 'Link'}
-                    </button>
                   </div>
-                );
-              })}
-            </div>
+                  <Button
+                    variant="tertiary"
+                    size="sm"
+                    onClick={() =>
+                      row.kind === 'registered' ? link(row.repo.id) : linkRemote(row.repo)
+                    }
+                    disabled={busy}
+                  >
+                    {busy ? '…' : 'Link'}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
-        )}
+        </div>
+      )}
 
-        {tab === 'create' && (
-          <div className="space-y-2.5">
-            <div>
-              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">Scope</label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setScope('USER')}
-                  className={cn(
-                    'flex-1 px-2.5 py-1.5 text-xs rounded-sm border transition-colors',
-                    scope === 'USER'
-                      ? 'border-accent-amber text-accent-amber bg-accent-amber/10'
-                      : 'border-[var(--border-default)] text-muted hover:text-secondary',
-                  )}
-                >
-                  User (private)
-                </button>
-                <button
-                  type="button"
-                  disabled={!isOrgAdmin}
-                  onClick={() => setScope('ORG')}
-                  className={cn(
-                    'flex-1 px-2.5 py-1.5 text-xs rounded-sm border transition-colors',
-                    scope === 'ORG'
-                      ? 'border-accent-blue text-accent-blue bg-accent-blue/10'
-                      : 'border-[var(--border-default)] text-muted hover:text-secondary',
-                    !isOrgAdmin && 'opacity-50 cursor-not-allowed',
-                  )}
-                  title={isOrgAdmin ? '' : 'Only ORG_ADMIN can create org-scoped repos'}
-                >
-                  Organization (shared)
-                </button>
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
-                GitHub repo (owner/name)
-              </label>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="acme/api-server"
-                className="w-full px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
-                Default branch
-              </label>
-              <input
-                type="text"
-                value={defaultBranch}
-                onChange={(e) => setDefaultBranch(e.target.value)}
-                className="w-full px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary focus:outline-none focus:border-accent-blue"
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                onClick={onClose}
-                className="text-xs px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
+      {tab === 'create' && (
+        <div className="space-y-2.5">
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">Scope</label>
+            <div className="flex gap-2">
+              <Button
+                variant={scope === 'USER' ? 'primary' : 'tertiary'}
+                size="sm"
+                fullWidth
+                onClick={() => setScope('USER')}
               >
-                Cancel
-              </button>
-              <button
-                onClick={create}
-                className="text-xs px-2.5 py-1 rounded-sm border border-accent-blue text-accent-blue hover:bg-accent-blue/10"
+                User (private)
+              </Button>
+              <Button
+                variant={scope === 'ORG' ? 'primary' : 'tertiary'}
+                size="sm"
+                fullWidth
+                disabled={!isOrgAdmin}
+                onClick={() => setScope('ORG')}
+                title={isOrgAdmin ? '' : 'Only ORG_ADMIN can create org-scoped repos'}
               >
-                Create &amp; link
-              </button>
+                Organization (shared)
+              </Button>
             </div>
           </div>
-        )}
-      </div>
-    </div>
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
+              GitHub repo (owner/name)
+            </label>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="acme/api-server"
+              className="w-full px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
+              Default branch
+            </label>
+            <input
+              type="text"
+              value={defaultBranch}
+              onChange={(e) => setDefaultBranch(e.target.value)}
+              className="w-full px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={create}>
+              Create &amp; link
+            </Button>
+          </div>
+        </div>
+      )}
+    </ResponsiveModal>
   );
 }

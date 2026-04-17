@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpRight, Check, X } from 'lucide-react';
+import { ArrowUpRight, Check } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn } from '@/lib/utils';
+import ResponsiveModal from '@/components/shared/ResponsiveModal';
+import Button from '@/components/shared/Button';
 
 type Tier = 'FREE' | 'PRO' | 'ENTERPRISE';
 
@@ -41,106 +42,73 @@ export default function UpgradeModal({ isOpen, onClose, featureName, requiredTie
   const currentTier = (useAuthStore((s) => s.user?.tier) ?? 'FREE') as Tier;
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)' }}
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.15 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] overflow-hidden"
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)]">
-              <div>
-                <h2 className="text-base font-semibold text-primary">Upgrade Your Plan</h2>
-                {featureName && (
-                  <p className="text-xs text-muted mt-0.5">
-                    <span className="text-accent-amber font-medium">{featureName}</span> requires{' '}
-                    {requiredTier ?? 'PRO'} or higher
-                  </p>
+    <ResponsiveModal open={isOpen} onClose={onClose} title="Upgrade Your Plan" maxWidth="max-w-2xl">
+      {featureName && (
+        <p className="text-xs text-muted mb-4">
+          <span className="text-accent-amber font-medium">{featureName}</span> requires{' '}
+          {requiredTier ?? 'PRO'} or higher
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {TIERS.map((tier) => {
+          const isCurrent = tier.id === currentTier;
+          const isRequired = tier.id === requiredTier;
+          const isUpgrade = TIER_RANK[tier.id] > TIER_RANK[currentTier];
+
+          return (
+            <div
+              key={tier.id}
+              className={cn(
+                'rounded-sm border p-4 flex flex-col',
+                isRequired
+                  ? 'border-accent-blue/50 bg-accent-blue/[0.05]'
+                  : 'border-[var(--border-default)]',
+                isCurrent && 'ring-1 ring-accent-green/30',
+              )}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-primary">{tier.name}</h3>
+                {isCurrent && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-green/15 text-accent-green font-medium">
+                    Current
+                  </span>
                 )}
               </div>
-              <button onClick={onClose} className="p-2 -m-1 text-muted hover:text-secondary">
-                <X className="h-4 w-4" />
-              </button>
+              <p className="text-lg font-bold text-primary mb-3">{tier.price}</p>
+              <ul className="space-y-1.5 flex-1">
+                {tier.features.map((f) => (
+                  <li key={f} className="flex items-start gap-1.5 text-xs text-secondary">
+                    <Check className="h-3 w-3 text-accent-green mt-0.5 flex-shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              {isUpgrade && (
+                <Button
+                  onClick={() => {
+                    navigate('/plans');
+                    onClose();
+                  }}
+                  size="sm"
+                  variant={isRequired ? 'primary' : 'tertiary'}
+                  fullWidth
+                  className="mt-4"
+                >
+                  Upgrade Now
+                  <ArrowUpRight className="h-3 w-3" />
+                </Button>
+              )}
             </div>
+          );
+        })}
+      </div>
 
-            {/* Tier comparison */}
-            <div className="p-6 grid grid-cols-3 gap-4">
-              {TIERS.map((tier) => {
-                const isCurrent = tier.id === currentTier;
-                const isRequired = tier.id === requiredTier;
-                const isUpgrade = TIER_RANK[tier.id] > TIER_RANK[currentTier];
-
-                return (
-                  <div
-                    key={tier.id}
-                    className={cn(
-                      'rounded-sm border p-4 flex flex-col',
-                      isRequired
-                        ? 'border-accent-blue/50 bg-accent-blue/[0.05]'
-                        : 'border-[var(--border-default)]',
-                      isCurrent && 'ring-1 ring-accent-green/30',
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-semibold text-primary">{tier.name}</h3>
-                      {isCurrent && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-green/15 text-accent-green font-medium">
-                          Current
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-lg font-bold text-primary mb-3">{tier.price}</p>
-                    <ul className="space-y-1.5 flex-1">
-                      {tier.features.map((f) => (
-                        <li key={f} className="flex items-start gap-1.5 text-xs text-secondary">
-                          <Check className="h-3 w-3 text-accent-green mt-0.5 flex-shrink-0" />
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
-                    {isUpgrade && (
-                      <button
-                        onClick={() => {
-                          navigate('/plans');
-                          onClose();
-                        }}
-                        className={cn(
-                          'mt-4 w-full py-2 rounded-sm text-xs font-medium flex items-center justify-center gap-1.5 transition-colors',
-                          isRequired
-                            ? 'bg-accent-blue text-primary hover:bg-accent-blue/80'
-                            : 'border border-[var(--border-default)] text-secondary hover:text-primary hover:border-[var(--border-default)]',
-                        )}
-                      >
-                        Upgrade Now
-                        <ArrowUpRight className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-3 border-t border-[var(--border-default)] flex justify-end">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-xs text-secondary hover:text-primary transition-colors"
-              >
-                Maybe Later
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
+      <div className="mt-4 pt-3 border-t border-[var(--border-default)] flex justify-end">
+        <Button onClick={onClose} variant="ghost" size="sm">
+          Maybe Later
+        </Button>
+      </div>
+    </ResponsiveModal>
   );
 }

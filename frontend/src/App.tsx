@@ -104,6 +104,11 @@ export default function App() {
           <Route path="org/settings" element={<OrgSettingsPage />} />
           <Route path="org/projects" element={<OrgProjectsPage />} />
           <Route path="projects" element={<ProjectsListPage />} />
+          {/* v2.5.12 — fallback so /projects/:id (without /dashboard) resolves.
+              The API side lists projects at /api/projects/{id}/dashboard; users
+              were hitting /projects/{id} and seeing a blank page because the
+              route fell through. */}
+          <Route path="projects/:projectId" element={<Navigate to="dashboard" replace />} />
           <Route path="projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
           <Route path="projects/:projectId/executions/new" element={<ExecutionViewPage />} />
           <Route path="projects/:projectId/executions/:executionId" element={<ExecutionViewPage />} />

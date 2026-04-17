@@ -34,15 +34,11 @@ interface RunStore {
   cancelRun: (id: string) => Promise<void>;
   archiveRun: (id: string) => Promise<void>;
   approveRun: (id: string, approved: boolean, creditsConfirmed?: number, executionMode?: string) => Promise<void>;
-  clarifyRun: (id: string, response: string) => Promise<void>;
-  mergeRun: (id: string, merge: boolean) => Promise<void>;
   retryTask: (runId: string, taskId: string) => Promise<void>;
-  retryRun: (runId: string) => Promise<string>;
-  reopenMergeGate: (runId: string) => Promise<void>;
-  implementSuggestions: (runId: string) => Promise<void>;
-  reworkRun: (runId: string) => Promise<void>;
+  // v2.5.12 — V1-only actions removed (clarify, merge, retry, reopenMergeGate,
+  // implementSuggestions, rework, editAndRestart). Backend returns 410 Gone.
+  // pause/resume kept pending V2 full-replay (harness-v2-remaining-work Gap 2).
   pauseRun: (id: string) => Promise<void>;
-  editAndRestartRun: (runId: string, newGoal: string) => Promise<string>;
   resumeRun: (runId: string) => Promise<void>;
   patchRunStatus: (runId: string, status: string) => void;
 }
@@ -150,16 +146,6 @@ export const useRunStore = create<RunStore>((set, get) => ({
     if (approved) refreshUsageBadge();
   },
 
-  clarifyRun: async (id, response) => {
-    await api.clarifyRun(id, response);
-    await get().fetchRun(id);
-  },
-
-  mergeRun: async (id, merge) => {
-    await api.mergeRun(id, merge);
-    await get().fetchRun(id);
-  },
-
   retryTask: async (runId, taskId) => {
     set((s) => ({
       activeRun: s.activeRun ? {
@@ -172,41 +158,10 @@ export const useRunStore = create<RunStore>((set, get) => ({
     await get().fetchRun(runId);
   },
 
-  retryRun: async (runId) => {
-    const newRun = await api.retryRun(runId);
-    set({ page: 0 });
-    await get().fetchRuns();
-    get().setActiveRunId(newRun.runId);
-    return newRun.runId;
-  },
-
-  reopenMergeGate: async (runId) => {
-    await api.reopenMergeGate(runId);
-    await get().fetchRun(runId);
-  },
-
-  implementSuggestions: async (runId) => {
-    await api.implementSuggestions(runId);
-    await get().fetchRun(runId);
-  },
-
-  reworkRun: async (runId) => {
-    await api.reworkRun(runId);
-    await get().fetchRun(runId);
-  },
-
   pauseRun: async (id) => {
     await api.pauseRun(id);
     await get().fetchRuns();
     if (get().activeRunId === id) await get().fetchRun(id);
-  },
-
-  editAndRestartRun: async (runId, newGoal) => {
-    const newRun = await api.editAndRestartRun(runId, newGoal);
-    set({ page: 0 });
-    await get().fetchRuns();
-    get().setActiveRunId(newRun.runId);
-    return newRun.runId;
   },
 
   resumeRun: async (runId) => {
