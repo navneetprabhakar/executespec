@@ -90,6 +90,15 @@ public class ExecutionRun {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    /** v2.5.12 (Bug #3 design alt) — JPA optimistic lock. Concurrent writers
+     *  (async planner save vs. user /plan/approve) race each other via
+     *  Hibernate; the loser throws ObjectOptimisticLockingFailureException
+     *  which the controller translates to 409 Conflict. */
+    @Version
+    @Column(name = "version", nullable = false)
+    @Builder.Default
+    private Long version = 0L;
+
     /** v2.5.7 — continue-on-PR: links back to the execution that created the original PR. */
     @Column(name = "source_execution_id")
     private String sourceExecutionId;

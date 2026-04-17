@@ -1,9 +1,28 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 4.6
-> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15
-> **App Version**: v2.5.0
+> **Version**: 4.7
+> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; **Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16**
+> **App Version**: v2.5.11
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
+
+## 0. 2026-04-16 refresh — Validation v3 (in progress)
+
+This architecture document describes the V2 pipeline as it ships on `dev` today. A 5-pillar rewrite of the validation layer is in progress — Pillar 1 (planner requirement graph) is open as PR #21. The full plan lives at [`.claude/plans/immutable-painting-platypus.md`](../.claude/plans/immutable-painting-platypus.md). Tracked behind the feature flag `validation.v3-strict` (default OFF in prod).
+
+**Pillar 1 — planner requirement graph (v2.5.11, open)**
+
+The planner emits a structured requirement graph alongside the task list:
+
+- `PlanV2.requirements: List<RequirementSpec>` — enumerated from the spec. `RequirementSpec = {id, text, kind}` where `kind ∈ {FUNCTIONAL, NON_FUNCTIONAL, TEST, CONSTRAINT}`.
+- `PlannedTaskV2.meetsRequirements: List<String>` — requirement IDs this task covers.
+- `PlannerAgentV2.validatePlan(plan)` enforces: (1) non-empty requirements, (2) unique IDs, (3) valid cross-references, (4) every requirement covered by ≥1 task, (5) testable surfaces have a test task. On violation: one retry with feedback; second failure → run ends `PLAN_COVERAGE_INVALID`.
+- Persisted to `pipeline_run.plan_requirements_json` + `agent_task.meets_requirements_json` (V109).
+- Consumed downstream by Pillars 2 (evidence-based reviewer), 3 (sync test gate), 4 (test coverage), 5 (strict scoring formula).
+
+**Already landed from the same effort:**
+
+- **v2.5.10 — verified score + honest PARTIAL** (merged to `dev`): `ValidationReportService.computeVerifiedScore()` derives a score deterministically from `finalBuildPassed + round(20×testsPassed/testsTotal) + verdictBonus − 5×unfixedCritical` (cap 100, base 40). The 6 dimensions in `ReviewScoringService` anchor on `verifiedScore` when the flag is on, not the LLM `accuracyScore`. `V2RunOrchestrator.resolveTerminalStatus()` returns a `StatusAndReason` pair (status + one of CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN). `RunEvent.complete(runId, status, reason)` threads the reason to the UI. Migrations V106/V107/V108. Flag `scoring.v2-verified`.
+- **v2.5.9 — cross-provider evaluation hardening** (merged to `dev`): 5 bug fixes surfaced by a 6-run cross-provider eval. `ExecutionPlannerService` now honours `run.aiProvider` (was hardcoded OPENAI) and uses `FallbackMode.NO_FALLBACK` under strict mode. `execution_solution_dependency` edge dedup + batch save. Gemini default → `gemini-3-flash-preview`. `LlmRouter` emits `RUN_PROVIDER_SWITCHED` SSE on fallback. System property `-Dexecutespec.strict-provider=true` gates strict mode in `V2RunOrchestrator.normalizeProvider`. Known remaining: Bug #1c (`ModelResolver.selectAdaptiveProvider` still bypasses strict-provider at the router level).
 
 > **⚠️ V2-only as of 2026-04-13.** The V1 harness (`PipelineHarness`, `WorkerAgent`,
 > `CompilerAgent`, `ReviewerAgentV2`, `batch/*`, `SubtaskDecomposer`, progressive

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FolderGit2 } from 'lucide-react';
 import * as api from '@/lib/api';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import RepoCard from './RepoCard';
 import AddRepoModal from './AddRepoModal';
 import ResetWorkspaceSheet from './ResetWorkspaceSheet';
+import EmptyState from '@/components/shared/EmptyState';
 
 export default function ProjectRepoManager({ projectId }: { projectId: string }) {
   const { repos, fetchRepos, error } = useProjectStore();
@@ -82,9 +84,11 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
       {error && <div className="text-sm text-red-600">{error}</div>}
 
       {repos.length === 0 && (
-        <div className="text-sm text-gray-500 border-2 border-dashed rounded-lg p-6 text-center">
-          No repositories linked yet. Click "Add repository" to get started.
-        </div>
+        <EmptyState
+          icon={FolderGit2}
+          title="No repositories linked yet"
+          description='Click "Add repository" above to link an existing repo or create a new one.'
+        />
       )}
 
       <div className="space-y-3">

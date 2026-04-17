@@ -1,26 +1,18 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, ListTodo } from 'lucide-react';
 import type { TaskSummary } from '@/types/project';
 import { cn } from '@/lib/utils';
 import { getRun, type RunDetail } from '@/lib/api';
 import InlineRunDetail from './InlineRunDetail';
-
-const STATUS_COLOR: Record<string, string> = {
-  COMPLETE:   'text-emerald-400',
-  PARTIAL:    'text-accent-amber',
-  FAILED:     'text-accent-red',
-  CANCELLED:  'text-accent-red',
-  RUNNING:    'text-accent-blue',
-  PLANNING:   'text-accent-blue',
-  WORKING:    'text-accent-blue',
-  REVIEWING:  'text-accent-blue',
-};
+import StatusBadge from '@/components/shared/StatusBadge';
+import EmptyState from '@/components/shared/EmptyState';
 
 function scoreColor(score: number | null | undefined): string {
+  // v2.5.12 — token-aligned with ValidationReport / SignalBreakdown.
   if (score == null) return 'text-muted';
-  if (score >= 90) return 'text-emerald-400';
-  if (score >= 75) return 'text-accent-amber';
-  return 'text-accent-red';
+  if (score >= 90) return 'text-status-success';
+  if (score >= 75) return 'text-status-waiting';
+  return 'text-status-error';
 }
 
 export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
@@ -47,7 +39,14 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
   };
 
   if (!tasks || tasks.length === 0) {
-    return <div className="text-xs text-muted">No runs yet.</div>;
+    return (
+      <EmptyState
+        compact
+        icon={ListTodo}
+        title="No runs yet"
+        description="Submit a Launch from this project to see runs here."
+      />
+    );
   }
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
@@ -63,7 +62,6 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
         </thead>
         <tbody>
           {tasks.map((t) => {
-            const statusColor = STATUS_COLOR[t.status] ?? 'text-muted';
             const expanded = expandedRunId === t.runId;
             const detail = runCache[t.runId];
             return (
@@ -79,7 +77,9 @@ export default function ProjectTaskList({ tasks }: { tasks: TaskSummary[] }) {
                   <td className="px-2.5 py-1.5 truncate max-w-md text-accent-blue">
                     {t.name || t.runId.slice(0, 8)}
                   </td>
-                  <td className={cn('px-2.5 py-1.5 font-mono', statusColor)}>{t.status}</td>
+                  <td className="px-2.5 py-1.5">
+                    <StatusBadge status={t.status} />
+                  </td>
                   <td className={cn('px-2.5 py-1.5 text-right font-mono tabular-nums', scoreColor(t.score))}>
                     {t.score != null ? `${t.score}` : '—'}
                   </td>

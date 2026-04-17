@@ -191,7 +191,11 @@ public class SequentialExecutorV2 {
             }
             log.warn("Executor task={} WORKER_FAILED outcome={} iters={} (no file writes)",
                     task.id(), primary.outcome(), primary.iterations());
-            persistTaskStatus(runId, task.id(), "FAILED");
+            // v2.5.12 — populate a concrete failureReason for every terminal
+            // worker outcome so RunMapper doesn't have to fall back to
+            // "unknown — see worker logs". This closes Bug D from the eval.
+            persistTaskStatus(runId, task.id(), "FAILED",
+                    describeWorkerFailure(primary));
             broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
             return TaskOutcome.builder()
                     .taskId(task.id()).taskTitle(task.title())
@@ -410,6 +414,17 @@ public class SequentialExecutorV2 {
 
     @org.springframework.transaction.annotation.Transactional
     public void persistTaskStatus(String runId, String taskIdShort, String status) {
+        persistTaskStatus(runId, taskIdShort, status, null);
+    }
+
+    /**
+     * v2.5.12 — overload that stores an optional failure reason on the task
+     * row. The reason lands in {@code lastLlmFailure} (already read as a
+     * fallback by {@code RunMapper.extractFailureReason}) so the UI shows a
+     * concrete message instead of "unknown — see worker logs".
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public void persistTaskStatus(String runId, String taskIdShort, String status, String failureReason) {
         String key = runId.substring(0, 8) + "_" + taskIdShort;
         try {
             var existing = taskRepo.findById(key);
@@ -419,11 +434,42 @@ public class SequentialExecutorV2 {
             }
             var t = existing.get();
             t.setStatus(status);
+            if (failureReason != null && !failureReason.isBlank()) {
+                t.setLastLlmFailure(failureReason);
+            }
             taskRepo.saveAndFlush(t);
-            log.info("persistTaskStatus: {} -> {}", key, status);
+            log.info("persistTaskStatus: {} -> {}{}", key, status,
+                    failureReason != null ? " (reason: " + failureReason + ")" : "");
         } catch (Exception e) {
             log.warn("persistTaskStatus: {} -> {} failed: {}", key, status, e.getMessage(), e);
         }
+    }
+
+    /**
+     * v2.5.12 — maps a non-COMPLETED worker outcome to a human-readable failure
+     * reason. Keeps the message short enough to render inline on the run
+     * detail page while preserving the most diagnostic snippet (finalAssistantText
+     * for STOPPED_WITHOUT_COMPLETE, the iteration count for ITERATION_LIMIT_EXCEEDED).
+     */
+    private static String describeWorkerFailure(WorkerResult r) {
+        if (r == null || r.outcome() == null) return "Worker outcome unknown";
+        String tail = r.finalAssistantText();
+        if (tail != null && tail.length() > 240) tail = tail.substring(0, 240) + "…";
+        return switch (r.outcome()) {
+            case STOPPED_WITHOUT_COMPLETE ->
+                    "Worker stopped without calling completeTask after "
+                            + r.iterations() + " iterations"
+                            + (tail != null && !tail.isBlank() ? ". Final: " + tail : "");
+            case ITERATION_LIMIT_EXCEEDED ->
+                    "Iteration cap exceeded (" + r.iterations() + " iters, "
+                            + r.toolCallsDispatched() + " tool calls). Worker did not call completeTask.";
+            case ERROR ->
+                    "Worker threw unrecoverable exception"
+                            + (tail != null && !tail.isBlank() ? ": " + tail : "");
+            case BUDGET_EXCEEDED ->
+                    "Run hit its hard cost cap; worker stopped cleanly mid-task.";
+            default -> "Worker outcome=" + r.outcome();
+        };
     }
 
     // ─── prompt composition ─────────────────────────────────────────────────

@@ -290,6 +290,15 @@ public class RunMapper {
         }
         // Fallback: lastLlmFailure (set by blockTask / recovery)
         String last = t.getLastLlmFailure();
-        return (last != null && !last.isBlank()) ? last : null;
+        if (last != null && !last.isBlank()) return last;
+        // Final safety net: never return an empty string for FAILED tasks.
+        // Empty string is worse than null because the UI's null-check may treat
+        // it as "set" and skip the placeholder. Eval Bug D (2026-04-16): S2
+        // Anthropic T3 surfaced as `failureReason: ""` and the harness retried
+        // silently. Anchor to "unknown" so the UI always shows something.
+        if ("FAILED".equals(t.getStatus())) {
+            return "unknown — see worker logs for run " + t.getRunId();
+        }
+        return null;
     }
 }

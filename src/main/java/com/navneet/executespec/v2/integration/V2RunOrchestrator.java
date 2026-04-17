@@ -114,6 +114,7 @@ public class V2RunOrchestrator {
     private final ObjectMapper objectMapper;
     private final AgentProperties agentProps;
     private final V2RunCostTracker costTracker;
+    private final com.navneet.executespec.v2.cost.RunTokenAttributor tokenAttributor;
     private final RunCostLogRepository runCostLogRepo;
     private final WorkspaceInitService workspaceInit;
     private final SseBroadcaster broadcaster;
@@ -157,6 +158,27 @@ public class V2RunOrchestrator {
             return t;
         }
     });
+
+    /**
+     * v2.5.12 — graceful shutdown. Without this, SIGTERM on the JVM abandons
+     * in-flight runs mid-planning/execution after credits were already charged
+     * at plan approval. 30 s grace window matches Kubernetes default
+     * `terminationGracePeriodSeconds`.
+     */
+    @jakarta.annotation.PreDestroy
+    public void shutdownPool() {
+        log.info("V2RunOrchestrator shutting down pool — active runs: {}", activeRuns.size());
+        pool.shutdown();
+        try {
+            if (!pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.warn("V2RunOrchestrator pool did not terminate in 30s; forcing shutdownNow");
+                pool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            pool.shutdownNow();
+        }
+    }
 
     /**
      * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with
@@ -473,8 +495,9 @@ public class V2RunOrchestrator {
             String designBlock = buildDesignBlock(userRequest, plan);
             // Phase 1: attribute tokens used so far to the planner.
             V2RunCostTracker.Snapshot afterPlan = costTracker.snapshot(runId);
-            persistPhaseTokens(runId, "planner", afterPlan.inputTokens(),
-                    afterPlan.outputTokens(), upperProvider, model);
+            tokenAttributor.attributePhase(runId,
+                    com.navneet.executespec.v2.cost.RunTokenAttributor.Phase.PLANNER,
+                    afterPlan.inputTokens(), afterPlan.outputTokens(), upperProvider, model);
 
             // ── 1b. Plan approval gate (PRODUCTION only) ────────────────────
             // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass
@@ -493,6 +516,8 @@ public class V2RunOrchestrator {
                         .orElse(0.0);
                 broadcaster.emit(runId, RunEvent.gateOpenedWithCredits(runId, "PLAN_APPROVAL",
                         credits, estimatedCost));
+                eventPublisher.publishEvent(
+                        new PipelineEvent.GateOpened(runId, "PLAN_APPROVAL", credits));
                 boolean approved;
                 try {
                     approved = gateStore.awaitPlanGate(runId);
@@ -534,7 +559,7 @@ public class V2RunOrchestrator {
             V2RunCostTracker.Snapshot afterExec = costTracker.snapshot(runId);
             int workerIn  = afterExec.inputTokens()  - afterPlan.inputTokens();
             int workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
-            distributeWorkerTokens(runId, execResult, workerIn, workerOut, upperProvider, model);
+            tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
 
             // ── 3. Review ───────────────────────────────────────────────────
             updateStatus(runId, "REVIEWING");
@@ -553,8 +578,9 @@ public class V2RunOrchestrator {
                 V2RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
                 int reviewerIn  = afterReview.inputTokens()  - afterExec.inputTokens();
                 int reviewerOut = afterReview.outputTokens() - afterExec.outputTokens();
-                persistPhaseTokens(runId, "reviewer", reviewerIn, reviewerOut,
-                        upperProvider, model);
+                tokenAttributor.attributePhase(runId,
+                        com.navneet.executespec.v2.cost.RunTokenAttributor.Phase.REVIEWER,
+                        reviewerIn, reviewerOut, upperProvider, model);
             } catch (Exception e) {
                 log.warn("V2RunOrchestrator run={} reviewer failed — recording partial review", runId, e);
                 // Review failure is non-fatal; the execution already succeeded or partially
@@ -687,6 +713,17 @@ public class V2RunOrchestrator {
             } catch (Exception e) {
                 log.warn("V2RunOrchestrator run={} failed to serialize plan JSON", runId, e);
             }
+            // v2.5.11 (Validation v3 / Pillar 1) — persist the enumerated
+            // requirement graph alongside the plan JSON so the reviewer (Pillar
+            // 2) and the UI (Pillar 5) can render per-requirement evidence.
+            // Null when plan.requirements is empty (legacy / flag off).
+            try {
+                if (plan.requirements() != null && !plan.requirements().isEmpty()) {
+                    r.setPlanRequirementsJson(objectMapper.writeValueAsString(plan.requirements()));
+                }
+            } catch (Exception e) {
+                log.warn("V2RunOrchestrator run={} failed to serialize plan_requirements_json", runId, e);
+            }
             runRepo.save(r);
         });
     }
@@ -706,6 +743,18 @@ public class V2RunOrchestrator {
                 row.setTaskJson(objectMapper.writeValueAsString(task));
             } catch (Exception e) {
                 log.warn("V2RunOrchestrator run={} failed to serialize task {}", runId, taskId, e);
+            }
+            // v2.5.11 (Validation v3 / Pillar 1) — persist per-task requirement
+            // coverage so downstream consumers (reviewer evidence, UI table)
+            // can trace implementation back to spec requirements.
+            try {
+                if (task.meetsRequirements() != null && !task.meetsRequirements().isEmpty()) {
+                    row.setMeetsRequirementsJson(
+                            objectMapper.writeValueAsString(task.meetsRequirements()));
+                }
+            } catch (Exception e) {
+                log.warn("V2RunOrchestrator run={} failed to serialize meets_requirements for {}",
+                        runId, taskId, e);
             }
             taskRepo.save(row);
         }
@@ -1282,100 +1331,6 @@ public class V2RunOrchestrator {
         } catch (Exception e) {
             log.warn("buildDesignBlock failed: {}", e.getMessage());
             return "";
-        }
-    }
-
-    // ─── phase token attribution (for UI cost breakdown) ────────────────────
-
-    /**
-     * Writes the per-phase token + provider + model columns on {@link PipelineRun}
-     * that V1's {@code RunMapper.buildAgentTokens()} reads to render the
-     * "Token Usage by Model" panel. V2 attributes tokens by diffing
-     * {@link V2RunCostTracker} snapshots between pipeline phases.
-     *
-     * <p>Supported phases: {@code planner} and {@code reviewer}. The compiler
-     * phase doesn't exist in V2 (smoke tests replace {@code CompilerAgent}).
-     */
-    private void persistPhaseTokens(String runId, String phase, int inTok, int outTok,
-                                     String providerUpper, String model) {
-        runRepo.findById(runId).ifPresent(r -> {
-            switch (phase) {
-                case "planner" -> {
-                    r.setPlannerInputTokens(inTok);
-                    r.setPlannerOutputTokens(outTok);
-                    r.setPlannerProvider(providerUpper);
-                    r.setPlannerActualModel(model);
-                }
-                case "reviewer" -> {
-                    r.setReviewerInputTokens(inTok);
-                    r.setReviewerOutputTokens(outTok);
-                    r.setReviewerProvider(providerUpper);
-                    r.setReviewerActualModel(model);
-                }
-                default -> { /* no-op */ }
-            }
-            runRepo.save(r);
-        });
-        // Also increment the run totals atomically so the "Run Stats" panel
-        // reflects cumulative token usage even if the in-memory tracker
-        // snapshot is later lost (deploy restart, accumulator eviction, etc.).
-        if (inTok > 0 || outTok > 0) {
-            try { runRepo.addTokens(runId, inTok, outTok); }
-            catch (Exception e) { log.warn("persistPhaseTokens addTokens failed run={}: {}", runId, e.getMessage()); }
-        }
-    }
-
-    /**
-     * Spreads worker-phase tokens (executor aggregate) across the run's
-     * {@link AgentTask} rows so the per-task token columns — which the UI reads
-     * when rendering task-level breakdowns — are populated.
-     *
-     * <p>Per-task tokens come from {@link V2RunCostTracker#snapshotTask}, which
-     * is populated by {@link com.navneet.executespec.v2.agent.LlmRouterV2} on
-     * every dispatch using the task-scoped {@code ExecutionContext}. Falls back
-     * to an equal split for any task whose snapshot is empty (e.g. the worker
-     * errored before issuing an LLM call).
-     */
-    private void distributeWorkerTokens(String runId, ExecutionResult execResult,
-                                         int totalIn, int totalOut,
-                                         String providerUpper, String model) {
-        int n = execResult.perTask().size();
-        if (n == 0) return;
-        // Increment run totals once with the aggregate worker-phase tokens —
-        // this is the source of truth for run-level counters.
-        if (totalIn > 0 || totalOut > 0) {
-            try { runRepo.addTokens(runId, totalIn, totalOut); }
-            catch (Exception e) { log.warn("distributeWorkerTokens addTokens failed run={}: {}", runId, e.getMessage()); }
-        }
-        // Sum per-task snapshots. Anything unaccounted for (gap between
-        // tracker total and worker-phase delta — e.g. tool-only retries that
-        // never hit the LLM) is divided equally as a fallback so the per-task
-        // columns still reconcile to the run total.
-        String idPrefix = runId.substring(0, 8) + "_";
-        int sumIn = 0, sumOut = 0;
-        java.util.Map<String, int[]> realPerTask = new java.util.HashMap<>();
-        for (var outcome : execResult.perTask()) {
-            V2RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
-            realPerTask.put(outcome.taskId(), new int[]{ s.inputTokens(), s.outputTokens() });
-            sumIn  += s.inputTokens();
-            sumOut += s.outputTokens();
-        }
-        int residualIn  = Math.max(0, totalIn  - sumIn);
-        int residualOut = Math.max(0, totalOut - sumOut);
-        int residualPerTaskIn  = residualIn  / n;
-        int residualPerTaskOut = residualOut / n;
-        for (var outcome : execResult.perTask()) {
-            String taskRowId = idPrefix + outcome.taskId();
-            int[] real = realPerTask.get(outcome.taskId());
-            int finalIn  = real[0] + residualPerTaskIn;
-            int finalOut = real[1] + residualPerTaskOut;
-            taskRepo.findById(taskRowId).ifPresent(t -> {
-                t.setInputTokens(finalIn);
-                t.setOutputTokens(finalOut);
-                t.setProvider(providerUpper);
-                t.setModel(model);
-                taskRepo.save(t);
-            });
         }
     }
 

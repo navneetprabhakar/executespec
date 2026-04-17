@@ -27,17 +27,21 @@ interface SignalBreakdownProps {
 
 type Tone = 'green' | 'amber' | 'red' | 'muted';
 
+// v2.5.12 — token-aligned. Previously used raw `emerald/amber/red/zinc`
+// Tailwind classes that sidestepped the design system. Now anchored on the
+// platform status-* + gray-* CSS variables so colour is consistent with
+// every other status surface.
 const TONES: Record<Tone, string> = {
-  green: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10',
-  amber: 'text-amber-400 border-amber-500/30 bg-amber-500/10',
-  red: 'text-red-400 border-red-500/30 bg-red-500/10',
-  muted: 'text-zinc-400 border-zinc-600/40 bg-zinc-800/40',
+  green: 'text-status-success border-status-success/30 bg-status-success/10',
+  amber: 'text-status-waiting border-status-waiting/30 bg-status-waiting/10',
+  red:   'text-status-error   border-status-error/30   bg-status-error/10',
+  muted: 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]',
 };
 
 function Segment({ tone, label, title }: { tone: Tone; label: string; title?: string }) {
   return (
     <span
-      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${TONES[tone]}`}
+      className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${TONES[tone]}`}
       title={title}
     >
       {label}

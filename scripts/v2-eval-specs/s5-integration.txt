@@ -1,0 +1,35 @@
+Build a sign-up form that POSTs to /api/users and shows the new user's email + a 'Welcome' heading on success.
+
+Context:
+- This is a multi-repo Project launch. Two repos are linked to this project: a Node backend (*-be) and a React frontend (*-fe).
+- The planner MUST emit at least one task per repo.
+- Each repo must build cleanly on its own and a live preview must come up.
+
+Backend (Node + Express) requirements:
+- POST /api/users — body { email, password } — returns 201 { id, email }
+- Email validation: RFC 5322 simplified; reject blanks / duplicates with 409 { error: "email_taken" }
+- Password: min 8 chars, must contain at least one letter and one digit; 400 { error: "weak_password" } otherwise
+- Unknown fields => 400 { error: "unknown_field", field: "<name>" }
+- In-memory store (no DB required)
+- Enable CORS for http://localhost:5173 only (the Vite dev origin)
+- Listen on PORT env var or 8080
+- `npm run build` must succeed (or `npm start` if no build step)
+
+Frontend (React + Vite) requirements:
+- Single page `/` renders a form with email + password inputs and a Submit button
+- On submit: POST to VITE_API_BASE_URL/api/users (defaults to http://localhost:8080)
+- On 201: hide the form and render `<h1>Welcome</h1>` + `<p>{email}</p>`
+- On 400/409: render the server-provided error message under the field
+- Loading state: Submit button shows a spinner and is disabled while in-flight
+- `npm run build` must succeed and produce a dist/ folder
+
+End-to-end acceptance (tests/e2e.spec.ts, Playwright):
+- Happy-path sign-up succeeds; heading and email are rendered
+- Duplicate email shows the 409 error message
+- Weak password shows the 400 error message
+- Network failure shows a generic error (graceful degradation)
+
+Pass bar:
+- Functional >= 80%, Contract 100% (both endpoints + form post)
+- Both repos build green
+- Preview comes up; Playwright passes (or is documented as wired but not executed here)
