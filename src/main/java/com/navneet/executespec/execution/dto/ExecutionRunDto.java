@@ -51,6 +51,10 @@ public record ExecutionRunDto(
             String failurePhase,
             String failureReason,
             int retryCount,
+            int maxRetries,
+            // v2.5.12 — V111 failure-signature dedup columns (see SolutionExecutionService.onV2Partial).
+            String lastFailureSignature,
+            int consecutiveFailureCount,
             String complexity,
             Long estimatedTokens,
             Long actualTokens,
@@ -75,7 +79,8 @@ public record ExecutionRunDto(
                     : s.getRepoMappings().stream().map(RepoMappingDto::from).toList();
             return new SolutionDto(
                     s.getId(), s.getSequenceNumber(), s.getTitle(), s.getDescription(), s.getStatus(),
-                    s.getFailurePhase(), s.getFailureReason(), s.getRetryCount(), s.getComplexity(),
+                    s.getFailurePhase(), s.getFailureReason(), s.getRetryCount(), s.getMaxRetries(),
+                    s.getLastFailureSignature(), s.getConsecutiveFailureCount(), s.getComplexity(),
                     s.getEstimatedTokens(), s.getActualTokens(), s.getCostUsd(),
                     s.getPipelineRunId(), s.getPrNumber(), s.getPrUrl(), s.getPrStatus(),
                     s.getJiraTicketId(), s.isJiraEnabled(),
