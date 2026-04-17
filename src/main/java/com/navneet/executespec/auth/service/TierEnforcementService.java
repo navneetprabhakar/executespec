@@ -11,9 +11,11 @@ import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.billing.service.RunTopupService;
+import com.navneet.executespec.harness.event.QuotaEvent;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +45,10 @@ public class TierEnforcementService {
     private final TierConfigRepository tierConfigRepo;
     private final RunTopupService runTopupService;
     private final BillingSubscriptionRepository subscriptionRepo;
+    private final ApplicationEventPublisher eventPublisher;
+
+    /** Quota utilisation at which we emit a one-shot warning notification. */
+    private static final double QUOTA_WARNING_THRESHOLD = 0.80;
 
     /** Safe fallback limits if tier_config rows are missing. */
     private static final int FALLBACK_FREE = 3;   // lifetime limit
@@ -75,24 +81,28 @@ public class TierEnforcementService {
             assertOrgQuota(org);
             // Increment within the same TX (lock held)
             maybeResetOrgCounter(org);
-            org.setMonthlyRunCount(org.getMonthlyRunCount() + 1);
+            int orgBefore = org.getMonthlyRunCount();
+            org.setMonthlyRunCount(orgBefore + 1);
             orgRepo.save(org);
             int limit = effectiveOrgLimit(org);
             if (limit >= 0 && org.getMonthlyRunCount() > limit) {
                 runTopupService.consumeBonusRunForOrg(org.getId());
             }
+            maybeFireQuotaWarning(userId, org.getId(), orgBefore, org.getMonthlyRunCount(), limit);
             return;
         }
 
         assertUserQuota(user);
         // Increment within the same TX (lock held)
         maybeResetUserCounter(user);
-        user.setPersonalRunCount(user.getPersonalRunCount() + 1);
+        int personalBefore = user.getPersonalRunCount();
+        user.setPersonalRunCount(personalBefore + 1);
         userRepo.save(user);
         int limit = getMonthlyLimit(user.getTier());
         if (limit >= 0 && user.getPersonalRunCount() > limit) {
             runTopupService.consumeBonusRun(userId);
         }
+        maybeFireQuotaWarning(userId, null, personalBefore, user.getPersonalRunCount(), limit);
     }
 
     /**
@@ -112,7 +122,8 @@ public class TierEnforcementService {
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Org not found"));
             assertOrgQuota(org);
             maybeResetOrgCounter(org);
-            org.setMonthlyRunCount(org.getMonthlyRunCount() + credits);
+            int orgBefore = org.getMonthlyRunCount();
+            org.setMonthlyRunCount(orgBefore + credits);
             orgRepo.save(org);
             int limit = effectiveOrgLimit(org);
             if (limit >= 0 && org.getMonthlyRunCount() > limit) {
@@ -121,12 +132,14 @@ public class TierEnforcementService {
                     catch (Exception e) { break; }
                 }
             }
+            maybeFireQuotaWarning(userId, org.getId(), orgBefore, org.getMonthlyRunCount(), limit);
             return;
         }
 
         assertUserQuota(user);
         maybeResetUserCounter(user);
-        user.setPersonalRunCount(user.getPersonalRunCount() + credits);
+        int personalBefore = user.getPersonalRunCount();
+        user.setPersonalRunCount(personalBefore + credits);
         userRepo.save(user);
         int limit = getMonthlyLimit(user.getTier());
         if (limit >= 0 && user.getPersonalRunCount() > limit) {
@@ -134,6 +147,27 @@ public class TierEnforcementService {
                 try { runTopupService.consumeBonusRun(userId); }
                 catch (Exception e) { break; }
             }
+        }
+        maybeFireQuotaWarning(userId, null, personalBefore, user.getPersonalRunCount(), limit);
+    }
+
+    /**
+     * Emit a one-shot {@link QuotaEvent.QuotaWarning} when a counter crosses
+     * {@link #QUOTA_WARNING_THRESHOLD}. Safe to call with unlimited limits (-1) —
+     * no-ops. Runs in the caller's transaction; publish is best-effort and swallows
+     * exceptions so it never impacts the increment path.
+     */
+    private void maybeFireQuotaWarning(String userId, String orgId, int before, int after, int limit) {
+        if (limit <= 0) return; // unlimited or invalid
+        double threshold = limit * QUOTA_WARNING_THRESHOLD;
+        if (before >= threshold || after < threshold) return;
+        try {
+            int percent = (int) Math.floor(100.0 * after / limit);
+            eventPublisher.publishEvent(new QuotaEvent.QuotaWarning(
+                    userId, orgId, "RUNS", after, limit, percent));
+        } catch (Exception e) {
+            log.warn("Failed to publish QuotaWarning for user={} org={}: {}",
+                    userId, orgId, e.getMessage());
         }
     }
 
