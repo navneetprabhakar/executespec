@@ -72,8 +72,12 @@ public class ProjectArchitectureController {
     }
 
     @GetMapping("/api/projects/{projectId}/architecture/staleness")
-    public ResponseEntity<StalenessService.StalenessReport> staleness(@PathVariable String projectId) {
-        return ResponseEntity.ok(stalenessService.report(projectId));
+    public ResponseEntity<StalenessService.StalenessReport> staleness(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+        return ResponseEntity.ok(stalenessService.report(projectId, pat));
     }
 
     @GetMapping("/api/projects/{projectId}/architecture")
