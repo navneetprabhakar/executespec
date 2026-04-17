@@ -1,0 +1,110 @@
+package com.navneet.executespec.v2.cost;
+
+import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.v2.harness.ExecutionResult;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+/**
+ * Owns per-phase + per-task token attribution for V2 runs.
+ *
+ * <p>Extracted from {@link com.navneet.executespec.v2.integration.V2RunOrchestrator}
+ * as the first step of the strangler-pattern refactor documented in
+ * {@code docs/plans/v2-orchestrator-refactor.md}. The orchestrator previously
+ * held this logic as private methods ({@code persistPhaseTokens} +
+ * {@code distributeWorkerTokens}) alongside pipeline control flow. Moving it
+ * here shrinks V2RunOrchestrator and establishes a bounded context for cost
+ * accounting that future additions (test-gen tokens, validation-report tokens)
+ * can grow into.
+ *
+ * <p>Semantics are preserved bit-for-bit from the inlined versions — this is
+ * pure code movement, not a behaviour change.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class RunTokenAttributor {
+
+    private final PipelineRunRepository runRepo;
+    private final AgentTaskRepository taskRepo;
+    private final V2RunCostTracker costTracker;
+
+    public enum Phase { PLANNER, REVIEWER }
+
+    /**
+     * Attribute tokens consumed in a single pipeline phase (PLANNER / REVIEWER).
+     * Persists per-phase columns on the run AND increments the run totals so
+     * the "Run Stats" panel reflects cumulative usage even if the in-memory
+     * tracker is later evicted (deploy restart, accumulator eviction).
+     */
+    public void attributePhase(String runId, Phase phase, int inTok, int outTok,
+                                String providerUpper, String model) {
+        runRepo.findById(runId).ifPresent(r -> {
+            switch (phase) {
+                case PLANNER -> {
+                    r.setPlannerInputTokens(inTok);
+                    r.setPlannerOutputTokens(outTok);
+                    r.setPlannerProvider(providerUpper);
+                    r.setPlannerActualModel(model);
+                }
+                case REVIEWER -> {
+                    r.setReviewerInputTokens(inTok);
+                    r.setReviewerOutputTokens(outTok);
+                    r.setReviewerProvider(providerUpper);
+                    r.setReviewerActualModel(model);
+                }
+            }
+            runRepo.save(r);
+        });
+        if (inTok > 0 || outTok > 0) {
+            try { runRepo.addTokens(runId, inTok, outTok); }
+            catch (Exception e) { log.warn("attributePhase addTokens failed run={}: {}", runId, e.getMessage()); }
+        }
+    }
+
+    /**
+     * Distribute worker-phase tokens (executor aggregate) across per-task rows
+     * so the task-level token columns are populated. Real per-task snapshots
+     * come from {@link V2RunCostTracker#snapshotTask}; any residual (tool-only
+     * retries that never hit the LLM) is divided equally so per-task columns
+     * still reconcile to the run total.
+     */
+    public void attributeWorker(String runId, ExecutionResult execResult,
+                                 int totalIn, int totalOut,
+                                 String providerUpper, String model) {
+        int n = execResult.perTask().size();
+        if (n == 0) return;
+        if (totalIn > 0 || totalOut > 0) {
+            try { runRepo.addTokens(runId, totalIn, totalOut); }
+            catch (Exception e) { log.warn("attributeWorker addTokens failed run={}: {}", runId, e.getMessage()); }
+        }
+        String idPrefix = runId.substring(0, 8) + "_";
+        int sumIn = 0, sumOut = 0;
+        java.util.Map<String, int[]> realPerTask = new java.util.HashMap<>();
+        for (var outcome : execResult.perTask()) {
+            V2RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
+            realPerTask.put(outcome.taskId(), new int[]{ s.inputTokens(), s.outputTokens() });
+            sumIn  += s.inputTokens();
+            sumOut += s.outputTokens();
+        }
+        int residualIn  = Math.max(0, totalIn  - sumIn);
+        int residualOut = Math.max(0, totalOut - sumOut);
+        int residualPerTaskIn  = residualIn  / n;
+        int residualPerTaskOut = residualOut / n;
+        for (var outcome : execResult.perTask()) {
+            String taskRowId = idPrefix + outcome.taskId();
+            int[] real = realPerTask.get(outcome.taskId());
+            int finalIn  = real[0] + residualPerTaskIn;
+            int finalOut = real[1] + residualPerTaskOut;
+            taskRepo.findById(taskRowId).ifPresent(t -> {
+                t.setInputTokens(finalIn);
+                t.setOutputTokens(finalOut);
+                t.setProvider(providerUpper);
+                t.setModel(model);
+                taskRepo.save(t);
+            });
+        }
+    }
+}
