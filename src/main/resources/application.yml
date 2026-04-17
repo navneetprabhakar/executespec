@@ -496,7 +496,7 @@ app:
       issue-type: Task
   jwt:
     secret: executespec-local-dev-secret-key-must-be-at-least-256-bits-long-for-HS256
-    access-token-expiry-minutes: 60
+    access-token-expiry-minutes: 360
     refresh-token-expiry-days: 7
   cors:
     allowed-origins: http://localhost:5173
