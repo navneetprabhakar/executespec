@@ -1932,6 +1932,64 @@ export const syncRunToOriginal = (runId: string) =>
 export const getProjectSummary = (projectId: string) =>
   req<{ content: string }>(`/projects/${projectId}/summary`);
 
+// v2.5.12 — project-level generated docs (EXPLANATION + SETUP)
+export type GeneratedDocType = 'EXPLANATION' | 'SETUP';
+
+export interface GeneratedDocRow {
+  id: string;
+  docType: GeneratedDocType;
+  version: number;
+  content: string;
+  generatedBy: string | null;
+  generatedAt: string;
+  modelUsed: string | null;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export const generateProjectDoc = (projectId: string, docType: GeneratedDocType) =>
+  req<GeneratedDocRow>(
+    `/projects/${projectId}/docs/${docType}/generate`, { method: 'POST' });
+
+/**
+ * Returns null (204) when the doc hasn't been generated yet. Callers should
+ * render a "Generate" CTA in that case. req<T>() returns undefined on 204,
+ * which we normalise to null at the call site.
+ */
+export const getProjectDoc = async (
+  projectId: string, docType: GeneratedDocType,
+): Promise<GeneratedDocRow | null> => {
+  const row = await req<GeneratedDocRow | undefined>(
+    `/projects/${projectId}/docs/${docType}`);
+  return row ?? null;
+};
+
+/**
+ * Triggers a browser download of the doc as .md. Uses raw fetch (not req)
+ * because the endpoint returns text/markdown, not JSON.
+ */
+export const downloadProjectDoc = async (
+  projectId: string, docType: GeneratedDocType,
+): Promise<void> => {
+  const token = localStorage.getItem('access_token');
+  const res = await fetch(`/api/projects/${projectId}/docs/${docType}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const raw = await res.text().catch(() => res.statusText);
+    throw new Error(parseErrorMessage(res.status, raw));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${docType.toLowerCase()}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
 // Project documents (RAG)
 export interface ProjectDocumentRow {
   id: string;

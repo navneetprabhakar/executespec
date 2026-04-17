@@ -524,21 +524,38 @@ export default function RunDetail() {
             </div>
           )}
 
-          {/* Review summary shown on COMPLETE runs */}
+          {/* Review summary shown on COMPLETE runs.
+              v2.5.12 — prefer verifiedScore (deterministic, V106) over
+              accuracyScore (LLM-inferred, known to hallucinate on
+              intentionally-broken specs). Matches ValidationReportPanel's
+              v2.5.10 primary-badge rule so the banner and the panel agree. */}
           {activeRun.status === 'COMPLETE' && review && (
             <div className="mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs flex-shrink-0">
               <div className="flex items-center gap-2 mb-1">
-                {typeof reviewReport?.accuracyScore === 'number' ? (
+                {typeof reviewReport?.verifiedScore === 'number' ? (
+                  <span className={cn(
+                    'font-semibold font-mono tabular-nums',
+                    reviewReport.verifiedScore >= 90 ? 'text-accent-green' :
+                    reviewReport.verifiedScore >= 75 ? 'text-accent-amber' : 'text-accent-red'
+                  )}>
+                    {reviewReport.verifiedScore}/100 verified
+                    {typeof reviewReport.accuracyScore === 'number' && (
+                      <span className="text-muted font-normal ml-1.5">
+                        · Est. {reviewReport.accuracyScore}
+                      </span>
+                    )}
+                  </span>
+                ) : typeof reviewReport?.accuracyScore === 'number' ? (
                   <span className={cn(
                     'font-semibold font-mono tabular-nums',
                     reviewReport.accuracyScore >= 90 ? 'text-accent-green' :
                     reviewReport.accuracyScore >= 75 ? 'text-accent-amber' : 'text-accent-red'
                   )}>
-                    {reviewReport.accuracyScore}/100 accuracy
+                    Est. {reviewReport.accuracyScore}/100
                     {reviewReport.accuracyGrade ? ` · ${reviewReport.accuracyGrade}` : ''}
                   </span>
                 ) : (
-                  <span className="text-muted text-[11px]">Accuracy pending…</span>
+                  <span className="text-muted text-[11px]">Score pending…</span>
                 )}
               </div>
               <p className="text-secondary leading-relaxed">{review.summary}</p>

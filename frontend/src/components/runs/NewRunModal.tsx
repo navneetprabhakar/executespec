@@ -17,6 +17,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import Button from '@/components/shared/Button';
 import Checkbox from '@/components/shared/Checkbox';
 import Radio from '@/components/shared/Radio';
+import EstimateChip from '@/components/runs/EstimateChip';
 
 interface NewRunModalProps {
   onClose: () => void;
@@ -318,6 +319,11 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                 onChange={setSelectedProjectId}
               />
             )}
+
+            {/* Launch-time heuristic estimate — shown only when a project is
+                selected (estimate endpoint is project-scoped). Mirrors the
+                chip in ExecutionSetup so New Run + Launch surfaces agree. */}
+            {selectedProjectId && <EstimateChip projectId={selectedProjectId} requirement={goal} />}
 
             {/* Pilot v3.0 — multi-repo selection from project catalogue */}
             {selectedProjectId && projectRepos.length > 0 && (
