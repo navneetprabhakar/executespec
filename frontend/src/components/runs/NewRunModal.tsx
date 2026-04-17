@@ -14,6 +14,9 @@ import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
 import ProviderModelSelector, { getPersistedSelection } from '@/components/runs/ProviderModelSelector';
 import { useViewMode } from '@/hooks/useViewMode';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import Button from '@/components/shared/Button';
+import Checkbox from '@/components/shared/Checkbox';
+import Radio from '@/components/shared/Radio';
 
 interface NewRunModalProps {
   onClose: () => void;
@@ -323,26 +326,28 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                 <div className="space-y-1 max-h-40 overflow-y-auto border border-[var(--border-default)] rounded-sm p-2">
                   {projectRepos.map((link) => {
                     const checked = selectedRepoIds.includes(link.repoId);
+                    const id = `repo-${link.repoId}`;
                     return (
-                      <label
+                      <Checkbox
                         key={link.repoId}
-                        className="flex items-center gap-2 text-sm cursor-pointer py-0.5"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            setSelectedRepoIds((prev) =>
-                              e.target.checked
-                                ? [...prev, link.repoId]
-                                : prev.filter((id) => id !== link.repoId),
-                            );
-                          }}
-                          className="accent-accent-blue"
-                        />
-                        <span className="font-mono text-xs">{link.repo.githubRepoFullName}</span>
-                        <span className="text-[10px] text-muted">({link.repo.scope})</span>
-                      </label>
+                        id={id}
+                        size="sm"
+                        checked={checked}
+                        onChange={(e) => {
+                          setSelectedRepoIds((prev) =>
+                            e.target.checked
+                              ? [...prev, link.repoId]
+                              : prev.filter((id) => id !== link.repoId),
+                          );
+                        }}
+                        className="py-0.5"
+                        label={
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs">{link.repo.githubRepoFullName}</span>
+                            <span className="text-[10px] text-muted">({link.repo.scope})</span>
+                          </span>
+                        }
+                      />
                     );
                   })}
                 </div>
@@ -371,18 +376,19 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
             </div>
 
             {/* v2.5.2 (Phase 4.3) — TDD Mode toggle */}
-            <label className="flex items-start gap-2 text-xs text-muted cursor-pointer">
-              <input
-                type="checkbox"
-                checked={tddMode}
-                onChange={(e) => setTddMode(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="text-secondary">TDD mode</span> — generate failing tests
-                first, then implementation. Slower but higher accuracy on logic-heavy specs.
-              </span>
-            </label>
+            <Checkbox
+              id="tdd-mode"
+              size="sm"
+              checked={tddMode}
+              onChange={(e) => setTddMode(e.target.checked)}
+              label={
+                <span className="text-xs text-muted">
+                  <span className="text-secondary">TDD mode</span> — generate failing tests
+                  first, then implementation. Slower but higher accuracy on logic-heavy specs.
+                </span>
+              }
+            />
+
 
             {/* Build My Spec button */}
             <button
@@ -481,28 +487,25 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                             { value: 'EXISTING', label: 'Start from existing repo', desc: 'Clone, modify and push back to the same repo' },
                           ] as { value: RepoChoice; label: string; desc: string }[]
                         ).map((opt) => (
-                          <label
+                          <div
                             key={opt.value}
                             className={cn(
-                              'flex items-start gap-2.5 rounded-sm border px-3 py-2.5 cursor-pointer transition-colors',
+                              'rounded-sm border px-3 py-2.5 transition-colors',
                               repoChoice === opt.value
                                 ? 'border-accent-blue/40 bg-accent-blue/[0.06]'
-                                : 'border-[var(--border-default)] hover:border-[var(--border-default)]',
+                                : 'border-[var(--border-default)]',
                             )}
                           >
-                            <input
-                              type="radio"
+                            <Radio
+                              id={`repoChoice-${opt.value}`}
                               name="repoChoice"
                               value={opt.value}
                               checked={repoChoice === opt.value}
                               onChange={() => setRepoChoice(opt.value as RepoChoice)}
-                              className="mt-0.5 accent-accent-blue"
+                              label={opt.label}
+                              description={opt.desc}
                             />
-                            <div>
-                              <p className="text-sm text-primary leading-tight">{opt.label}</p>
-                              <p className="text-xs text-muted mt-0.5">{opt.desc}</p>
-                            </div>
-                          </label>
+                          </div>
                         ))}
                       </div>
 
@@ -550,23 +553,17 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               push content below the viewport. Previously the button scrolled
               off-screen and users couldn't find it. */}
           <div className="flex-shrink-0 border-t border-[var(--border-default)] bg-[var(--gray-200)] px-6 py-3">
-            <button
+            <Button
               onClick={handleSubmit}
+              variant="primary"
+              size="lg"
+              fullWidth
+              loading={launching}
               disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
-              className={cn(
-                'w-full py-2.5 rounded-sm font-medium text-sm text-primary transition-all',
-                'bg-accent-blue hover:bg-accent-blue/80',
-                'disabled:opacity-40 disabled:cursor-not-allowed',
-                'flex items-center justify-center gap-2',
-              )}
             >
-              {launching ? (
-                <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-              ) : (
-                <Rocket className="h-4 w-4" />
-              )}
+              {!launching && <Rocket className="h-4 w-4" />}
               {launching ? 'Launching...' : 'Launch Run'}
-            </button>
+            </Button>
           </div>
           </div>
         )}
