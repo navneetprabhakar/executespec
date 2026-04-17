@@ -34,6 +34,9 @@ public class ProjectRepoService {
     private final ProjectRepository projectRepo;
     private final StackDetector stackDetector;
     private final GitHubRepoService gitHub;
+    /** Lazy to break potential circular wiring on startup. */
+    private final org.springframework.beans.factory.ObjectProvider<
+            com.navneet.executespec.codeintel.ProjectArchitectureService> archServiceProvider;
 
     /* ────────────────────────────── repo lifecycle ─────────────────────────── */
 
@@ -105,22 +108,62 @@ public class ProjectRepoService {
         return stream.map(ProjectRepoDto::from).collect(Collectors.toList());
     }
 
+    /**
+     * v2.5.12 — Sync is now more than a metadata refresh. For every project
+     * this repo is linked to, we also regenerate the per-repo codemap + per-
+     * repo architecture doc (Steps 1 + 2 of the 3-step arch pipeline). Step 3
+     * (combined architecture doc) is deliberately skipped to keep sync
+     * cheap — it re-runs on the next project-level Analyse.
+     *
+     * <p>Metadata updates (detected_stack + last_synced_sha) happen first;
+     * then the per-project regen loop runs best-effort (a failure on one
+     * project logs a warning but does not abort the sync).
+     *
+     * @param overridePat caller's PAT (used for both SHA lookup and codemap
+     *                    fetch against private repos)
+     */
     @Transactional
-    public ProjectRepoDto syncRepo(UUID repoId, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
+    public ProjectRepoDto syncRepo(UUID repoId, String callerUserId, String callerOrgId,
+                                    boolean isOrgAdmin, String overridePat) {
         ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+
+        // 1. Metadata refresh (unchanged semantics).
         String detected = stackDetector.detect(repo.getGithubRepoFullName(), null);
-        if (detected != null) {
-            repo.setDetectedStack(detected);
-        }
+        if (detected != null) repo.setDetectedStack(detected);
         String headSha = gitHub.getBranchHeadSha(
                 "https://github.com/" + repo.getGithubRepoFullName(),
                 repo.getDefaultBranch(),
-                null);
-        if (headSha != null) {
-            repo.setLastSyncedSha(headSha);
-        }
+                overridePat);
+        if (headSha != null) repo.setLastSyncedSha(headSha);
         repo.setUpdatedAt(Instant.now());
-        return ProjectRepoDto.from(repoRepo.save(repo));
+        ProjectRepo saved = repoRepo.save(repo);
+
+        // 2. Per-project regen (Steps 1 + 2). Multi-project repos fan out here.
+        List<ProjectRepoLink> links = linkRepo.findByRepoId(repoId);
+        if (!links.isEmpty()) {
+            com.navneet.executespec.codeintel.ProjectArchitectureService archService =
+                    archServiceProvider.getIfAvailable();
+            if (archService == null) {
+                log.warn("Sync: ProjectArchitectureService unavailable — skipping per-project regen for repoId={}", repoId);
+            } else {
+                for (ProjectRepoLink link : links) {
+                    try {
+                        archService.regenerateForRepo(link.getProjectId(), repoId, overridePat);
+                    } catch (Exception e) {
+                        log.warn("Sync: per-project regen failed project={} repo={}: {}",
+                                link.getProjectId(), repo.getGithubRepoFullName(), e.getMessage());
+                    }
+                }
+            }
+        }
+        return ProjectRepoDto.from(saved);
+    }
+
+    /** Legacy overload — metadata-only sync, kept for any caller that isn't ready
+     *  to pass a PAT. Prefer the 5-arg form above for full behaviour. */
+    @Transactional
+    public ProjectRepoDto syncRepo(UUID repoId, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
+        return syncRepo(repoId, callerUserId, callerOrgId, isOrgAdmin, null);
     }
 
     @Transactional
