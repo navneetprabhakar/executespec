@@ -286,11 +286,19 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
         {mode === 'compose' && (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+            {/* v2.5.12 — supported-stack hint moved above the textarea so users
+                see the constraint before they start typing. Was below, easy to
+                miss after submit. */}
+            <p className="text-xs text-muted">
+              Supported: Java, TypeScript, React, Python, Go, Rust, HTML/CSS.
+              {' '}Best results with concrete specs (endpoints, validation,
+              expected output).
+            </p>
             <textarea
               autoFocus
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
-              placeholder="Describe what you want to build..."
+              placeholder="e.g., Add a /api/health endpoint that returns {status:'ok'} and a server uptime in seconds. Include a unit test."
               rows={isMobile ? 6 : 5}
               className={cn(
                 'w-full font-mono text-sm bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm',
@@ -299,9 +307,6 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                 isMobile && 'min-h-[120px]',
               )}
             />
-            <p className="text-xs text-muted -mt-2">
-              Supported: Java, TypeScript, React, Python, Go, Rust, HTML/CSS
-            </p>
 
             {/* Project selector — visible for org members only */}
             {isOrgMember && (
