@@ -51,12 +51,10 @@ public class ProjectArchitectureService {
      * Regenerate codemaps for every linked repo, then synthesise a fresh
      * architecture doc. Versioned: existing docs are preserved.
      */
-    @Transactional
     public ProjectArchitectureDoc generate(String projectId) {
         return generate(projectId, null, null);
     }
 
-    @Transactional
     public ProjectArchitectureDoc generate(String projectId, String branchOverride) {
         return generate(projectId, branchOverride, null);
     }
@@ -90,8 +88,15 @@ public class ProjectArchitectureService {
      *   architecture.md                   <- combined
      *   summary.md
      * </pre>
+     *
+     * <p><b>Not</b> {@code @Transactional} — this method runs three LLM calls
+     * per repo plus a combined synthesis call, which can easily exceed 60s on
+     * a multi-repo project. A single enclosing transaction would pin a Hikari
+     * connection for that entire duration and trip the leak detector. Instead
+     * each {@code save()} runs in its own (auto-)transaction, keyed by the
+     * latest-version-wins lookup in {@link #ensureCodeMap} /
+     * {@link #ensureRepoArchDoc}.
      */
-    @Transactional
     public ProjectArchitectureDoc generate(String projectId, String branchOverride, String patOverride) {
         List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
         if (links.isEmpty()) {
@@ -325,7 +330,7 @@ public class ProjectArchitectureService {
      *
      * @return the new or reused per-repo architecture doc
      */
-    @Transactional
+    /** Same connection-leak reasoning as {@link #generate} — no outer tx. */
     public RepoArchitectureDoc regenerateForRepo(
             String projectId, UUID repoId, String patOverride) {
         ProjectRepo repo = repoRepo.findById(repoId)
