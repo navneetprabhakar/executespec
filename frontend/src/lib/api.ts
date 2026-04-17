@@ -16,6 +16,7 @@ const STATUS_MESSAGES: Record<number, string> = {
   403: 'You don\'t have permission to perform this action.',
   404: 'The requested resource was not found.',
   409: 'This action conflicts with the current state. Please refresh and try again.',
+  410: 'This feature is not available in the current harness. It may be coming back — reach out if you need it.',
   422: 'The request could not be processed. Please check your input.',
   429: 'Too many requests. Please wait a moment and try again.',
   500: 'Something went wrong on our end. Please try again later.',
@@ -441,11 +442,13 @@ export const getAvailableModels = () =>
 export const approveRun = (id: string, approved: boolean, creditsConfirmed?: number, executionMode?: string) =>
   req<void>(`/runs/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved, creditsConfirmed: creditsConfirmed ?? null, executionMode: executionMode ?? null }) });
 
-export const clarifyRun = (id: string, response: string) =>
-  req<void>(`/runs/${id}/clarify`, { method: 'POST', body: JSON.stringify({ response }) });
-
-export const mergeRun = (id: string, approved: boolean) =>
-  req<void>(`/runs/${id}/merge`, { method: 'POST', body: JSON.stringify({ approved }) });
+// v2.5.12 — V1-only endpoints removed (clarifyRun, mergeRun, retryRun,
+// reopenMergeGate, implementSuggestions, reworkRun, editAndRestartRun).
+// They returned HTTP 410 Gone on V2 runs per frontend/CLAUDE.md; surfacing
+// "410" to users was worse UX than hiding the actions. pauseRun / resumeRun
+// kept because V2 full-replay recovery is on the roadmap
+// (docs/plans/harness-v2-remaining-work.md Gap 2) and they'll light back up
+// when that lands.
 
 export const cancelRun = (id: string) =>
   req<void>(`/runs/${id}`, { method: 'DELETE' });
@@ -453,26 +456,8 @@ export const cancelRun = (id: string) =>
 export const retryTask = (runId: string, taskId: string) =>
   req<void>(`/runs/${runId}/tasks/${taskId}/retry`, { method: 'POST' });
 
-export const retryRun = (runId: string) =>
-  req<RunSummary>(`/runs/${runId}/retry`, { method: 'POST' });
-
-export const reopenMergeGate = (runId: string) =>
-  req<void>(`/runs/${runId}/reopen-merge`, { method: 'POST' });
-
-export const implementSuggestions = (runId: string) =>
-  req<void>(`/runs/${runId}/implement-suggestions`, { method: 'POST' });
-
-export const reworkRun = (runId: string) =>
-  req<void>(`/runs/${runId}/rework`, { method: 'POST' });
-
 export const pauseRun = (runId: string) =>
   req<void>(`/runs/${runId}/pause`, { method: 'POST' });
-
-export const editAndRestartRun = (runId: string, userRequest: string) =>
-  req<RunSummary>(`/runs/${runId}/edit-and-restart`, {
-    method: 'POST',
-    body: JSON.stringify({ userRequest }),
-  });
 
 export const resumeRun = (runId: string) =>
   req<void>(`/runs/${runId}/resume`, { method: 'POST' });
