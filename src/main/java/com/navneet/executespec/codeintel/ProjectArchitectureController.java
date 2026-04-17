@@ -2,6 +2,7 @@ package com.navneet.executespec.codeintel;
 
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
+import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -71,8 +72,12 @@ public class ProjectArchitectureController {
     }
 
     @GetMapping("/api/projects/{projectId}/architecture/staleness")
-    public ResponseEntity<StalenessService.StalenessReport> staleness(@PathVariable String projectId) {
-        return ResponseEntity.ok(stalenessService.report(projectId));
+    public ResponseEntity<StalenessService.StalenessReport> staleness(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+        return ResponseEntity.ok(stalenessService.report(projectId, pat));
     }
 
     @GetMapping("/api/projects/{projectId}/architecture")
@@ -120,5 +125,35 @@ public class ProjectArchitectureController {
                 .map(c -> ResponseEntity.ok(CodeMapDto.from(c)))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "No codemap for repo — regenerate architecture first"));
+    }
+
+    /**
+     * v2.5.12 — per-repo architecture doc (Step 2 of the 3-step pipeline).
+     * Returns 204 when the project has been analysed but this repo was linked
+     * after the last Analyse run.
+     */
+    public record RepoArchDto(
+            UUID id,
+            Integer version,
+            String content,
+            String modelUsed,
+            Integer inputTokens,
+            Integer outputTokens,
+            Instant generatedAt) {
+        static RepoArchDto from(RepoArchitectureDoc d) {
+            return new RepoArchDto(
+                    d.getId(), d.getVersion(), d.getContent(),
+                    d.getModelUsed(), d.getInputTokens(), d.getOutputTokens(),
+                    d.getGeneratedAt());
+        }
+    }
+
+    @GetMapping("/api/projects/{projectId}/repos/{repoId}/architecture")
+    public ResponseEntity<RepoArchDto> repoArchitecture(
+            @PathVariable String projectId,
+            @PathVariable UUID repoId) {
+        return service.latestRepoArch(projectId, repoId)
+                .map(d -> ResponseEntity.ok(RepoArchDto.from(d)))
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 }

@@ -68,6 +68,13 @@ public class ReviewScoringService {
             Integer performance,
             Integer designCompliance) {}
 
+    /** Doc / config files that should NOT count toward source-file denominators
+     *  when deciding whether a run meaningfully changed testable code. */
+    private static final Pattern DOC_OR_CONFIG = Pattern.compile(
+            "(?i)(^|/)(readme|changelog|license|contributing|authors|notice)(\\.(md|txt|rst))?$|" +
+            "(?i)\\.(md|txt|rst|yml|yaml|toml|ini|cfg|conf|properties|env|gitignore|gitattributes|editorconfig|npmrc|prettierrc|dockerignore)$|" +
+            "(?i)(^|/)Dockerfile(\\..+)?$|(?i)(^|/)Makefile$");
+
     /**
      * v2.5.10 overload: when {@code verifiedScore} is non-null, the 6
      * dimensions anchor on it (a deterministic build+tests+verdict signal)
@@ -120,8 +127,8 @@ public class ReviewScoringService {
 
         Scores scores = new Scores(
                 codeQuality, testCoverage, architecture, security, performance, designCompliance);
-        log.info("Scored run={} anchor={} scores={} wsFiles={} testFiles={}",
-                run != null ? run.getRunId() : "?", anchor, scores, ws.sourceFiles, ws.testFiles);
+        log.info("Scored run={} anchor={} scores={} srcChanged={} testChanged={}",
+                run != null ? run.getRunId() : "?", anchor, scores, ws.sourceFilesChanged, ws.testFilesChanged);
         return scores;
     }
 
@@ -151,22 +158,29 @@ public class ReviewScoringService {
     }
 
     /**
-     * Derives a 0-100 coverage score from the workspace test-to-source file
-     * ratio. Cross-checks the LLM's coverage level as a tiebreaker when no
-     * source files were detected (e.g. doc-only changes).
+     * Derives a 0-100 coverage score — but only from files this run actually
+     * touched. Scoring against the whole workspace punished runs that only
+     * changed a README in a large Java codebase (0/500 tests = score 20 even
+     * though the run had no testable code to cover).
+     *
+     * <p>Returns {@code null} when the run modified no source files (pure doc
+     * / config changes) — the UI hides null rows instead of showing a
+     * misleading number.
+     *
+     * <p>v2.5.12 fix for the "Test coverage = 20 by default" bug.
      */
-    private static int deriveTestCoverage(WorkspaceStats ws, AccuracyReport accuracy) {
-        if (ws.sourceFiles <= 0) {
-            // Fall back to LLM-reported level when we can't measure directly.
-            return llmCoverageLevel(accuracy);
+    private static Integer deriveTestCoverage(WorkspaceStats ws, AccuracyReport accuracy) {
+        // No source files in the CHANGED set → doc-only change. Hide the bar.
+        if (ws.sourceFilesChanged <= 0) {
+            return null;
         }
-        double ratio = (double) ws.testFiles / Math.max(1, ws.sourceFiles);
+        double ratio = (double) ws.testFilesChanged / Math.max(1, ws.sourceFilesChanged);
         int scoreFromRatio;
         if (ratio >= 0.50)       scoreFromRatio = 95;
         else if (ratio >= 0.30)  scoreFromRatio = 80;
         else if (ratio >= 0.15)  scoreFromRatio = 60;
         else if (ratio >= 0.05)  scoreFromRatio = 40;
-        else if (ws.testFiles > 0) scoreFromRatio = 25;
+        else if (ws.testFilesChanged > 0) scoreFromRatio = 25;
         else                     scoreFromRatio = 10;
 
         // Pull toward LLM level if it corroborates (reduces noise on tiny diffs).
@@ -185,7 +199,15 @@ public class ReviewScoringService {
         };
     }
 
-    private record WorkspaceStats(int sourceFiles, int testFiles, boolean hasAuthHints) {}
+    /**
+     * Workspace scan results. The *Changed counters cover files this run
+     * actually touched (mtime after run start); auth hints come from any
+     * file in the workspace regardless of modification time.
+     */
+    private record WorkspaceStats(
+            int sourceFilesChanged,
+            int testFilesChanged,
+            boolean hasAuthHints) {}
 
     private WorkspaceStats scanWorkspace(PipelineRun run) {
         if (run == null || run.getRunId() == null) return new WorkspaceStats(0, 0, false);
@@ -197,8 +219,13 @@ public class ReviewScoringService {
         }
         if (!Files.isDirectory(root)) return new WorkspaceStats(0, 0, false);
 
-        int[] source = {0};
-        int[] test = {0};
+        // mtime floor = run start - 10s grace (clock skew / initial clone).
+        long mtimeFloorMs = run.getStartedAt() != null
+                ? run.getStartedAt().toEpochMilli() - 10_000L
+                : 0L;
+
+        int[] sourceChanged = {0};
+        int[] testChanged = {0};
         boolean[] auth = {false};
         int limit = 5000;
 
@@ -212,12 +239,23 @@ public class ReviewScoringService {
                             || rel.contains("/__pycache__/") || rel.contains("/.venv/")) {
                         return;
                     }
-                    if (TEST_FILE.matcher(rel).find()) {
-                        test[0]++;
-                        source[0]++;     // also counts as source so ratio has denominator
-                    } else if (SOURCE_FILE.matcher(rel).find()) {
-                        source[0]++;
+                    // Only count files this run touched. Doc/config files are
+                    // excluded from the "source" denominator so a README-only
+                    // change doesn't count against test coverage.
+                    long mtime = 0L;
+                    try { mtime = Files.getLastModifiedTime(p).toMillis(); }
+                    catch (IOException ignored) {}
+                    boolean changed = mtime >= mtimeFloorMs;
+
+                    if (changed && !DOC_OR_CONFIG.matcher(rel).find()) {
+                        if (TEST_FILE.matcher(rel).find()) {
+                            testChanged[0]++;
+                            sourceChanged[0]++;     // count test as source too so ratio has denominator
+                        } else if (SOURCE_FILE.matcher(rel).find()) {
+                            sourceChanged[0]++;
+                        }
                     }
+
                     if (!auth[0]) {
                         try {
                             String head = readHead(p, 4000);
@@ -228,7 +266,7 @@ public class ReviewScoringService {
         } catch (IOException e) {
             log.debug("Workspace scan failed for run {}: {}", run.getRunId(), e.getMessage());
         }
-        return new WorkspaceStats(source[0], test[0], auth[0]);
+        return new WorkspaceStats(sourceChanged[0], testChanged[0], auth[0]);
     }
 
     private static String readHead(Path p, int max) throws IOException {

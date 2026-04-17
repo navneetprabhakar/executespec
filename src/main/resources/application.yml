@@ -220,6 +220,10 @@ model-matrix:
     RunTitleSummarizer: LIGHTWEIGHT
     ProjectChatCompiler: LIGHTWEIGHT
     ProjectBriefService: LIGHTWEIGHT
+    # v2.5.12 — 3-step architecture pipeline
+    RepoArchitectureGenerator: LIGHTWEIGHT   # per-repo HLD+LLD from codemap
+    ArchitectureDocGenerator: WORKHORSE      # cross-repo synthesis from per-repo docs
+    ProjectDocGeneratorService: WORKHORSE    # EXPLANATION / SETUP docs
     ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT
