@@ -62,6 +62,22 @@ public class PerkyMessenger {
     private final Map<String, ScheduledFuture<?>> active = new ConcurrentHashMap<>();
     private final Random random = new Random();
 
+    /** v2.5.12 — graceful shutdown of the scheduler on SIGTERM. */
+    @jakarta.annotation.PreDestroy
+    public void shutdownScheduler() {
+        active.values().forEach(f -> f.cancel(false));
+        active.clear();
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            scheduler.shutdownNow();
+        }
+    }
+
     public void start(String runId, String phase) {
         stop(runId);
         String[] bank = bankFor(phase);

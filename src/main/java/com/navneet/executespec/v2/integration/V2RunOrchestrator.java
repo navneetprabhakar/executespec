@@ -159,6 +159,27 @@ public class V2RunOrchestrator {
     });
 
     /**
+     * v2.5.12 — graceful shutdown. Without this, SIGTERM on the JVM abandons
+     * in-flight runs mid-planning/execution after credits were already charged
+     * at plan approval. 30 s grace window matches Kubernetes default
+     * `terminationGracePeriodSeconds`.
+     */
+    @jakarta.annotation.PreDestroy
+    public void shutdownPool() {
+        log.info("V2RunOrchestrator shutting down pool — active runs: {}", activeRuns.size());
+        pool.shutdown();
+        try {
+            if (!pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.warn("V2RunOrchestrator pool did not terminate in 30s; forcing shutdownNow");
+                pool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            pool.shutdownNow();
+        }
+    }
+
+    /**
      * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with
      * status {@code PLANNING}; the async pipeline thread continues in the background.
      *
