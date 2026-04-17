@@ -76,7 +76,8 @@ public class ProjectRepoController {
                 repoId,
                 userDetails.getUser().getId(),
                 userDetails.getUser().getOrgId(),
-                isOrgAdmin(userDetails)));
+                isOrgAdmin(userDetails),
+                userDetails.getUser().getGithubPat()));
     }
 
     /**
