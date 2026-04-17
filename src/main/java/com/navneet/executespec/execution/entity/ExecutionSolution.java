@@ -53,6 +53,25 @@ public class ExecutionSolution {
     @Builder.Default
     private int maxRetries = 3;
 
+    /**
+     * v2.5.12 — V107 statusReason from the most recent child V2 PipelineRun
+     * (e.g. {@code FINAL_BUILD_FAILED}, {@code TESTS_FAILED:5_OF_12}).
+     * {@link com.navneet.executespec.execution.service.SolutionExecutionService}
+     * uses this to short-circuit the PARTIAL retry loop when the same signature
+     * repeats across consecutive attempts.
+     */
+    @Column(name = "last_failure_signature", length = 80)
+    private String lastFailureSignature;
+
+    /**
+     * v2.5.12 — number of consecutive retries that produced the same
+     * {@link #lastFailureSignature}. Reset to 1 when the signature changes.
+     * Retry loop aborts when this reaches 2.
+     */
+    @Column(name = "consecutive_failure_count", nullable = false)
+    @Builder.Default
+    private int consecutiveFailureCount = 0;
+
     @Column(length = 10)
     private String complexity;
 

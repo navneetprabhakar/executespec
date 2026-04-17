@@ -243,6 +243,32 @@ public class SolutionExecutionService {
     }
 
     private void onV2Partial(ExecutionRun run, ExecutionSolution solution) {
+        // v2.5.12 — short-circuit the retry loop when the same failure
+        // signature repeats. The V107 statusReason column on the child V2
+        // PipelineRun carries values like FINAL_BUILD_FAILED or
+        // TESTS_FAILED:5_OF_12 — if consecutive retries land on the same
+        // signature, the failure is deterministic and further retries just
+        // burn budget. Different signatures still get the full retry budget.
+        String currentSignature = pipelineRunRepo.findById(solution.getPipelineRunId())
+                .map(PipelineRun::getStatusReason)
+                .orElse(null);
+        if (currentSignature != null
+                && currentSignature.equals(solution.getLastFailureSignature())) {
+            int newStreak = solution.getConsecutiveFailureCount() + 1;
+            solution.setConsecutiveFailureCount(newStreak);
+            if (newStreak >= 2) {
+                // Two consecutive attempts with the same statusReason — stop.
+                solutionRepo.save(solution);
+                handleFailure(run, solution, "VALIDATING",
+                        "Same failure signature '" + currentSignature
+                                + "' on " + newStreak + " consecutive attempts; aborting retries");
+                return;
+            }
+        } else {
+            solution.setLastFailureSignature(currentSignature);
+            solution.setConsecutiveFailureCount(currentSignature != null ? 1 : 0);
+        }
+
         if (solution.getRetryCount() < solution.getMaxRetries()) {
             solution.setRetryCount(solution.getRetryCount() + 1);
             solution.setStatus("QUEUED");
@@ -251,14 +277,17 @@ public class SolutionExecutionService {
             solutionRepo.save(solution);
             jiraSync.updateTicket(run, solution,
                     "V2 returned PARTIAL — retrying (attempt "
-                            + solution.getRetryCount() + "/" + solution.getMaxRetries() + ")",
+                            + solution.getRetryCount() + "/" + solution.getMaxRetries()
+                            + (currentSignature != null ? "; reason=" + currentSignature : "")
+                            + ")",
                     null);
             // Re-enter the pipeline on the same virtual thread.
             executeSolution(solution, run);
             return;
         }
         handleFailure(run, solution, "VALIDATING",
-                "V2 returned PARTIAL after " + solution.getRetryCount() + " retries");
+                "V2 returned PARTIAL after " + solution.getRetryCount() + " retries"
+                        + (currentSignature != null ? " (last reason: " + currentSignature + ")" : ""));
     }
 
     private void onV2Failed(ExecutionRun run, ExecutionSolution solution, String terminal) {
