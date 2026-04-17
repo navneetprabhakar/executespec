@@ -8,6 +8,7 @@ import ArchitectureViewer from '@/components/project/ArchitectureViewer';
 import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
 import WorkspaceHealthPanel from '@/components/project/WorkspaceHealthPanel';
+import GeneratedDocsPanel from '@/components/project/GeneratedDocsPanel';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import TechDebtPanel from '@/components/project/TechDebtPanel';
 import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
@@ -278,6 +279,7 @@ function OverviewContent({
     <div className="space-y-4 max-w-3xl">
       {projectId && project && <ProjectSettingsPanel projectId={projectId} project={project} onUpdate={onProjectUpdate} />}
       {projectId && <ProjectSummaryPanel projectId={projectId} />}
+      {projectId && <GeneratedDocsPanel projectId={projectId} />}
       {projectId && <WorkspaceHealthPanel projectId={projectId} />}
       {projectId && <TechDebtPanel projectId={projectId} />}
       <div className="space-y-2">
