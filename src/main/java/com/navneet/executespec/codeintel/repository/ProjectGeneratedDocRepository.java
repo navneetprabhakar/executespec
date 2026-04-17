@@ -11,7 +11,7 @@ import java.util.UUID;
 public interface ProjectGeneratedDocRepository extends JpaRepository<ProjectGeneratedDoc, UUID> {
 
     Optional<ProjectGeneratedDoc> findFirstByProjectIdAndDocTypeOrderByVersionDesc(
-            UUID projectId, DocType docType);
+            String projectId, DocType docType);
 
-    List<ProjectGeneratedDoc> findByProjectIdOrderByGeneratedAtDesc(UUID projectId);
+    List<ProjectGeneratedDoc> findByProjectIdOrderByGeneratedAtDesc(String projectId);
 }

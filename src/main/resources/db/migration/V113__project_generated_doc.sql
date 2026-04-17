@@ -8,10 +8,12 @@
 -- read path; this table is the index so we know (a) which types have been
 -- generated, (b) when, (c) which version, without walking the filesystem
 -- (Cloud Run workspaces are ephemeral).
+--
+-- NOTE: project.id is VARCHAR(255) (see V4), not UUID — matching types here.
 
 CREATE TABLE IF NOT EXISTS project_generated_doc (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id      UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    project_id      VARCHAR(255) NOT NULL REFERENCES project(id) ON DELETE CASCADE,
     doc_type        VARCHAR(32) NOT NULL,
     content         TEXT NOT NULL,
     version         INTEGER NOT NULL DEFAULT 1,

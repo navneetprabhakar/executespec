@@ -21,8 +21,8 @@ public class ProjectGeneratedDoc {
     @Column(columnDefinition = "uuid")
     private UUID id;
 
-    @Column(name = "project_id", nullable = false, columnDefinition = "uuid")
-    private UUID projectId;
+    @Column(name = "project_id", nullable = false, length = 255)
+    private String projectId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "doc_type", nullable = false, length = 32)
