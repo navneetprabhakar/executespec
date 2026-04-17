@@ -56,6 +56,18 @@ public class StalenessService {
             List<RepoStaleness> repos) {}
 
     public StalenessReport report(String projectId) {
+        return report(projectId, null);
+    }
+
+    /**
+     * v2.5.12 — caller supplies their GitHub PAT so the current-SHA probe can
+     * reach private repos. Without this, {@code getBranchHeadSha} passes null
+     * and the system PAT fallback 404s on every private-org repo, flooding
+     * logs. Cache is still keyed on projectId only (the SHA result is
+     * objective once fetched) — first-authenticated-read wins; subsequent
+     * anonymous probes read from cache until generate() invalidates.
+     */
+    public StalenessReport report(String projectId, String overridePat) {
         String key = KEY_PREFIX + projectId;
         try {
             String cached = redis.opsForValue().get(key);
@@ -63,10 +75,9 @@ public class StalenessService {
                 return objectMapper.readValue(cached, StalenessReport.class);
             }
         } catch (Exception e) {
-            // Treat deserialisation failures as a cache miss — recompute and overwrite.
             log.warn("Staleness cache read failed for project {}: {}", projectId, e.getMessage());
         }
-        StalenessReport fresh = compute(projectId);
+        StalenessReport fresh = compute(projectId, overridePat);
         try {
             redis.opsForValue().set(key, objectMapper.writeValueAsString(fresh), TTL);
         } catch (Exception e) {
@@ -82,7 +93,7 @@ public class StalenessService {
         redis.delete(KEY_PREFIX + projectId);
     }
 
-    private StalenessReport compute(String projectId) {
+    private StalenessReport compute(String projectId, String overridePat) {
         ProjectArchitectureDoc latest = archService.latest(projectId).orElse(null);
         Map<String, String> generatedShas = parseShas(latest);
 
@@ -96,7 +107,7 @@ public class StalenessService {
             String current = gitHub.getBranchHeadSha(
                     "https://github.com/" + repo.getGithubRepoFullName(),
                     repo.getDefaultBranch(),
-                    null);
+                    overridePat);
             boolean stale = current != null && (generated == null || !generated.equals(current));
             if (stale) staleCount++;
             repoReports.add(new RepoStaleness(repo.getGithubRepoFullName(), generated, current, stale));

@@ -70,7 +70,10 @@ public class ProjectDashboardController {
             Integer architectureDocVersion) {}
 
     @GetMapping("/api/projects/{projectId}/dashboard")
-    public ResponseEntity<DashboardDto> dashboard(@PathVariable String projectId) {
+    public ResponseEntity<DashboardDto> dashboard(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
         long completed = runRepo.countByProjectIdAndStatus(projectId, "COMPLETE");
         long failed = runRepo.countByProjectIdAndStatus(projectId, "FAILED");
         long active = ACTIVE_STATUSES.stream()
@@ -141,7 +144,8 @@ public class ProjectDashboardController {
             archStatus = "NONE";
         } else {
             try {
-                archStatus = stalenessService.report(projectId).stale() ? "STALE" : "GENERATED";
+                String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+                archStatus = stalenessService.report(projectId, pat).stale() ? "STALE" : "GENERATED";
             } catch (Exception e) {
                 archStatus = "GENERATED";
             }
