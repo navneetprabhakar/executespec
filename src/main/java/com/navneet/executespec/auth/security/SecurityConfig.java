@@ -140,9 +140,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasRole("SUPER_ADMIN")
                         // V2 Phase 0 native-tools test endpoint (no auth — temporary, removed once LlmRouterV2 lands)
                         .requestMatchers("/api/v2/test/**").permitAll()
-                        // V2 Phase 9 run API — permit during internal canary. Auth/RBAC layering
-                        // happens in Phase 9.x when V2 integrates with V1's Run entity + billing.
-                        .requestMatchers("/api/v2/runs/**").permitAll()
+                        // v2.5.12 — V2 Phase 9 canary retired; V2 is the only harness and is
+                        // accessed via the regular /api/runs surface. The canary permit-all
+                        // is removed; any remaining /api/v2/runs/** traffic must authenticate
+                        // the same as other /api/** routes.
                         // All other API endpoints require authentication
                         .requestMatchers("/api/**").authenticated()
                         // Everything else (SPA routes) — permit
