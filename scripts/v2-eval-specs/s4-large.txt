@@ -1,0 +1,42 @@
+Build a URL-shortener HTTP service with TTL, rate-limiting, and pluggable persistence.
+
+Endpoints:
+- POST /shorten — body { url, ttlSeconds? } — returns 201 { id, shortUrl, url, expiresAt }
+- GET /:id — 302 redirect to original URL; 404 if not found; 410 if expired
+- GET /_stats/:id — returns { id, url, hits, createdAt, expiresAt }; 404 if not found
+- POST /_admin/sweep — deletes expired entries; gated by X-Admin-Token header
+
+Persistence (MUST be pluggable):
+- Ship a `Store` interface: { put, get, delete, list, deleteExpired }
+- In-memory implementation (default)
+- SQLite implementation, selectable via STORE=sqlite env var
+- Test both implementations behave identically under the acceptance harness
+
+Rate limiting:
+- 60 req/min/IP on /shorten (sliding window in-process)
+- Every response carries: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+- Exceeded: 429 { error: "rate_limited", retryAfterMs: <int> } with Retry-After header
+
+TTL + background sweeper:
+- Default TTL 30 days; max 365 days; min 60 s
+- Background task runs every 60s and deletes expired rows — MUST be cancellable on shutdown
+- /_admin/sweep exists for tests to force a sweep synchronously (returns { deleted: N })
+
+Observability:
+- Structured JSON logs per request: { ts, level, traceId, route, method, status, latencyMs }
+- X-Trace-Id header echoed on every response (generated if missing)
+- /healthz returns { status: "ok", store: "memory|sqlite", version: "<semver>" }
+- /metrics returns Prometheus text format with at minimum: requests_total, request_duration_ms bucket, store_size
+
+Security:
+- X-Admin-Token value sourced from ADMIN_TOKEN env var; /_admin routes 401 without it
+- URLs MUST be http(s); reject others with 400 { error: "invalid_url" }
+- No eval / shell-out / template injection; no secrets committed
+
+Testing + docs:
+- Acceptance harness must cover both store implementations, rate-limit boundaries, TTL expiry, sweeper idempotency, log shape
+- >=70% line coverage
+- README: install, run, tests, env vars table, curl examples per endpoint
+
+Pass bar:
+- Functional >= 85%, Contract 100%, Test >= 70%, Performance >= 70% (p95 under 100 rps for 30s), Hygiene >= 60%
