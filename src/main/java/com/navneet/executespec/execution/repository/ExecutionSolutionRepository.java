@@ -22,4 +22,20 @@ public interface ExecutionSolutionRepository extends JpaRepository<ExecutionSolu
      */
     @EntityGraph(attributePaths = {"dependencies"})
     List<ExecutionSolution> findWithDependenciesByExecutionRun_IdOrderBySequenceNumberAsc(String executionRunId);
+
+    /**
+     * v2.5.12 — eager-fetches the {@code repoMappings} list. Needed by
+     * {@link com.navneet.executespec.execution.service.ExecutionOrchestrator#executeApprovedPlan}
+     * which runs on an {@code @Async} thread with no open Hibernate session and
+     * used to throw {@code LazyInitializationException} when walking
+     * {@code solution.getRepoMappings()} after all solutions finished. The
+     * exception killed the final "setStatus(COMPLETE)" step, leaving the
+     * ExecutionRun stuck at EXECUTING forever (observed on launch 9d5fb7d4).
+     *
+     * <p>Kept as a separate query from {@link #findWithDependenciesByExecutionRun_IdOrderBySequenceNumberAsc}
+     * to avoid MultipleBagFetchException on the mixed Set (dependencies) + List
+     * (repoMappings) collections.
+     */
+    @EntityGraph(attributePaths = {"repoMappings"})
+    List<ExecutionSolution> findWithRepoMappingsByExecutionRun_IdOrderBySequenceNumberAsc(String executionRunId);
 }

@@ -209,6 +209,13 @@ public class SolutionExecutionService {
         branchService.tagSolutionEnd(run, solution);
 
         // Copy V2 token usage back to the solution for accurate cost reporting.
+        // v2.5.12 — also copy the PR URL + parsed PR number from the child run
+        // so the Launches detail view (which reads solution.prUrl) surfaces the
+        // PR that ScmPushService already raised. Previously solution.prUrl stayed
+        // null even when a PR was OPEN on GitHub, because SolutionExecutionService
+        // never synced back from the child PipelineRun. Found live on 2026-04-17
+        // running a 2-solution project launch (PRs #6 + #10 on GitHub, null on
+        // both solution rows).
         if (solution.getPipelineRunId() != null) {
             pipelineRunRepo.findById(solution.getPipelineRunId()).ifPresent(pr -> {
                 long tokens = (pr.getTotalInputTokens() == null ? 0 : pr.getTotalInputTokens())
@@ -216,6 +223,16 @@ public class SolutionExecutionService {
                 solution.setActualTokens(tokens);
                 if (pr.getActualCostUsd() != null) {
                     solution.setCostUsd(java.math.BigDecimal.valueOf(pr.getActualCostUsd()));
+                }
+                // Prefer the SCM-agnostic scmPrUrl (v2.5.x); fall back to the
+                // legacy githubPrUrl for runs that predate the SCM split.
+                String prUrl = pr.getScmPrUrl();
+                if (prUrl == null || prUrl.isBlank()) prUrl = pr.getGithubPrUrl();
+                if (prUrl != null && !prUrl.isBlank() && solution.getPrUrl() == null) {
+                    solution.setPrUrl(prUrl);
+                    Integer num = parsePrNumber(prUrl);
+                    if (num != null) solution.setPrNumber(num);
+                    if (solution.getPrStatus() == null) solution.setPrStatus("OPEN");
                 }
             });
         }
@@ -243,6 +260,32 @@ public class SolutionExecutionService {
     }
 
     private void onV2Partial(ExecutionRun run, ExecutionSolution solution) {
+        // v2.5.12 — short-circuit the retry loop when the same failure
+        // signature repeats. The V107 statusReason column on the child V2
+        // PipelineRun carries values like FINAL_BUILD_FAILED or
+        // TESTS_FAILED:5_OF_12 — if consecutive retries land on the same
+        // signature, the failure is deterministic and further retries just
+        // burn budget. Different signatures still get the full retry budget.
+        String currentSignature = pipelineRunRepo.findById(solution.getPipelineRunId())
+                .map(PipelineRun::getStatusReason)
+                .orElse(null);
+        if (currentSignature != null
+                && currentSignature.equals(solution.getLastFailureSignature())) {
+            int newStreak = solution.getConsecutiveFailureCount() + 1;
+            solution.setConsecutiveFailureCount(newStreak);
+            if (newStreak >= 2) {
+                // Two consecutive attempts with the same statusReason — stop.
+                solutionRepo.save(solution);
+                handleFailure(run, solution, "VALIDATING",
+                        "Same failure signature '" + currentSignature
+                                + "' on " + newStreak + " consecutive attempts; aborting retries");
+                return;
+            }
+        } else {
+            solution.setLastFailureSignature(currentSignature);
+            solution.setConsecutiveFailureCount(currentSignature != null ? 1 : 0);
+        }
+
         if (solution.getRetryCount() < solution.getMaxRetries()) {
             solution.setRetryCount(solution.getRetryCount() + 1);
             solution.setStatus("QUEUED");
@@ -251,14 +294,17 @@ public class SolutionExecutionService {
             solutionRepo.save(solution);
             jiraSync.updateTicket(run, solution,
                     "V2 returned PARTIAL — retrying (attempt "
-                            + solution.getRetryCount() + "/" + solution.getMaxRetries() + ")",
+                            + solution.getRetryCount() + "/" + solution.getMaxRetries()
+                            + (currentSignature != null ? "; reason=" + currentSignature : "")
+                            + ")",
                     null);
             // Re-enter the pipeline on the same virtual thread.
             executeSolution(solution, run);
             return;
         }
         handleFailure(run, solution, "VALIDATING",
-                "V2 returned PARTIAL after " + solution.getRetryCount() + " retries");
+                "V2 returned PARTIAL after " + solution.getRetryCount() + " retries"
+                        + (currentSignature != null ? " (last reason: " + currentSignature + ")" : ""));
     }
 
     private void onV2Failed(ExecutionRun run, ExecutionSolution solution, String terminal) {
@@ -420,5 +466,22 @@ public class SolutionExecutionService {
     private String shortMsg(Throwable e) {
         String msg = e == null ? "" : (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
         return msg.length() > 300 ? msg.substring(0, 300) + "…" : msg;
+    }
+
+    /**
+     * v2.5.12 — parse the PR number from a GitHub or Bitbucket PR URL.
+     * Patterns supported:
+     *   https://github.com/org/repo/pull/123
+     *   https://bitbucket.org/org/repo/pull-requests/123
+     * Returns null when the URL doesn't match either shape.
+     */
+    private static Integer parsePrNumber(String prUrl) {
+        if (prUrl == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("/(?:pull|pull-requests)/(\\d+)")
+                .matcher(prUrl);
+        if (!m.find()) return null;
+        try { return Integer.parseInt(m.group(1)); }
+        catch (NumberFormatException e) { return null; }
     }
 }

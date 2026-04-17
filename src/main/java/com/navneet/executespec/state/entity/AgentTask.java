@@ -36,6 +36,16 @@ public class AgentTask {
     @Column(columnDefinition = "TEXT")
     private String completionNotes;       // Worker's success/summary message
 
+    /**
+     * v2.5.11 (Validation v3 / Pillar 1, V109) — JSON array of requirement IDs
+     * (from {@code PipelineRun.planRequirementsJson}) that this task is
+     * expected to implement. Null for legacy rows and runs submitted while
+     * {@code validation.v3-strict} is off. The reviewer cross-checks this
+     * against {@code RequirementEvidence} rows in Pillar 2.
+     */
+    @Column(name = "meets_requirements_json", columnDefinition = "TEXT")
+    private String meetsRequirementsJson;
+
     private String assignedModel;
     private String branchName;          // agent/{runId}/{taskId}
 

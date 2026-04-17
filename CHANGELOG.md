@@ -5,6 +5,80 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [2.5.11] — 2026-04-16
+
+Validation v3 / Pillar 1 — the first of five pillars in a permanent rewrite so well-executed runs consistently score 95+ under a strict validator. This release lands the foundation every later pillar consumes: a requirement graph extracted by the planner, validated before execution, and persisted for end-to-end traceability.
+
+Full 5-pillar plan: [`.claude/plans/immutable-painting-platypus.md`](.claude/plans/immutable-painting-platypus.md). PR #21 open against `dev`.
+
+### Added
+
+- **`RequirementSpec` record** (`v2/agent/RequirementSpec.java`) — `{id, text, kind}` where `kind ∈ {FUNCTIONAL, NON_FUNCTIONAL, TEST, CONSTRAINT}`. Planner emits these alongside the task list.
+- **`PlanV2.requirements` + `PlannedTaskV2.meetsRequirements`** — the requirement graph. Each task cites which requirement IDs it covers. Defaults to empty list on legacy rows.
+- **`PlannerAgentV2.validatePlan(plan)`** — hard contract enforced when flag on:
+  1. Non-empty requirements array.
+  2. Unique, non-blank IDs.
+  3. Every `meetsRequirements` reference resolves to a real ID.
+  4. Every requirement is cited by ≥1 task.
+  5. Testable surfaces (HTTP / CLI / LIBRARY, non-SINGLE_SHOT) have at least one test task or TEST-kind requirement.
+  Violation → one retry with the violation list as LLM feedback. Second failure → run ends `PLAN_COVERAGE_INVALID`.
+- **`planner.md` prompt** — mandatory "Step 1 — enumerate every requirement" section + invariant #9 declaring coverage non-negotiable.
+- **Feature flag `validation.v3-strict`** — default OFF in prod. Seeded in V109. Gates the whole v3 rollout (pillars 2–5 will reuse it).
+- **Persistence** — `V2RunOrchestrator.persistPlan/persistTasks` serialize the graph to `pipeline_run.plan_requirements_json` and `agent_task.meets_requirements_json`.
+- **`PlannerAgentV2ValidationTest`** — 9 unit tests covering clean plan, empty reqs, duplicate IDs, uncovered reqs, unknown refs, missing test task, test-title task accepted, SINGLE_SHOT bypass, STATIC_WEB bypass. All green.
+
+### Schema
+
+- **V109** — `pipeline_run.plan_requirements_json TEXT`, `agent_task.meets_requirements_json TEXT`, seeds `validation.v3-strict` feature flag (default `false`). Additive, nullable, no backfill needed.
+
+---
+
+## [2.5.10] — 2026-04-16
+
+Fixes the "PARTIAL · 97/100" contradiction: LLM-inferred accuracy score was hallucinating from the file tree, and a single flaky intermediate smoke test was poisoning the run's status_reason to PARTIAL even when the final build + reviewer + tests were clean.
+
+### Added
+
+- **Verified score** — `validation_report.verified_score` derived deterministically from `finalBuildPassed` + `testsPassed/testsTotal` + `reviewerVerdict` + `unfixedCriticalCount`. No LLM in the loop for the score itself. Formula: `base=40 + build=20 + round(20×pass/total) + verdict(CLEAN=20/FIXED=15/UNRESOLVED=5/REVIEW_FAILED=0) − 5×unfixedCritical`.
+- **`pipeline_run.status_reason`** — explicit terminal-status reason: `CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS | FINAL_BUILD_FAILED | TESTS_FAILED:N_OF_M | REVIEWER_UNRESOLVED | REVIEWER_FAILED | ALL_TASKS_FAILED | LEGACY_UNKNOWN`. Surfaced via `StatusBadge` tooltip.
+- **`ReviewScoringService.score(..., verifiedScore, figmaUrl)`** — the 6 dimensions now anchor on `verifiedScore` when the flag is on; legacy LLM anchor preserved behind the flag for rollback.
+- **`V2RunOrchestrator.resolveTerminalStatus()`** — 7-branch decision tree derives both status + reason from reviewer verdict + final build + execution signals. Replaces one-line `mapOverallToV1Status`.
+- **`RunEvent.complete(runId, status, reason)`** — SSE overload that threads the reason to the UI.
+- **`SignalBreakdown` chip (frontend)** — `Build ✓ · Tests 73/73 · Reviewer CLEAN · Verified 92 · Est. 97`. Renders under `ValidationReportPanel`.
+- **`StatusBadge` tooltip (frontend)** — native HTML tooltip maps every `status_reason` to human copy. No tooltip library added.
+- **`ValidationReportPanel` score split (frontend)** — primary badge is `verifiedScore`; `accuracyScore` demoted to secondary "Est." with an explanatory tooltip.
+- **Feature flag `scoring.v2-verified`** — gates the new anchor + decision tree. Columns populate regardless so flipping the flag on is instant.
+
+### Changed
+
+- **`AccuracyAssessmentService` prompt** — removed the "file-tree plausibility" rule that enabled hallucination; requires inline `[file:line-range]` citations on every `implementedRequirements` string.
+
+### Schema
+
+- **V106** — adds 5 columns to `validation_report` (`final_build_passed`, `tests_passed`, `tests_total`, `reviewer_verdict`, `verified_score`) + seeds `scoring.v2-verified` flag.
+- **V107** — adds `pipeline_run.status_reason VARCHAR(80)`.
+- **V108** — one-shot backfill: re-labels historical PARTIAL runs using V106 data where available (CLEAN verdict + build pass + tests ok → COMPLETE + CLEAN_WITH_INTERMEDIATE_WARNINGS; build fail → keep PARTIAL + FINAL_BUILD_FAILED; else → LEGACY_UNKNOWN).
+
+---
+
+## [2.5.9] — 2026-04-16
+
+Hardening pass triggered by a 6-run cross-provider evaluation (3 providers × Pro + Project modes). Five bugs root-caused and fixed; one additional finding (Bug #1c) surfaced during verification and is documented in the `Known Tech Debt` section of `CLAUDE.md`.
+
+### Fixed
+
+- **#1a — `ExecutionPlannerService` hardcoded OPENAI.** Launches on Anthropic/Gemini projects were silently planning on OPENAI. Now reads `run.getAiProvider()` with ANTHROPIC fallback only when null.
+- **#1b — `FallbackMode.IMMEDIATE` on the planner's LLM call.** Silent provider fallback on first error. Changed to `NO_FALLBACK` so failures surface under `-Dexecutespec.strict-provider=true`.
+- **#2 — Duplicate-key PK violation on `execution_solution_dependency`.** Planner emitted redundant edges; first insert OK, second aborted the transaction. `ExecutionPlannerService.persistPlan` now dedupes edges before save + batches saves.
+- **#3 — Gemini `MALFORMED_FUNCTION_CALL`.** `gemini-2.5-flash` emitted Python-style tool calls (`print(default_api.submitPlan(...))`). Default Gemini model flipped to `gemini-3-flash-preview` across all tiers. Added `PlannerAgentV2.salvagePlanFromText()` regex fallback that pulls the JSON args out of text blobs when the model goes off-protocol.
+- **#4 — Silent provider fallback at `LlmRouter`.** V1 router's auto-failover chain would switch providers without any user-visible signal. Now emits `RUN_PROVIDER_SWITCHED` SSE event (`from|to|reason`) on every fallback.
+
+### Added
+
+- **System property `-Dexecutespec.strict-provider=true`** — `V2RunOrchestrator.normalizeProvider` honours this flag. When on, an explicit caller-supplied provider is locked in (no fallback under any condition). Logs `normalizeProvider[strict=true] … -> provider=X (explicit)` for audit.
+
+---
+
 ## [2.5.1] — 2026-04-15
 
 Hardening pass after v2.5.0 E2E. One systemic fix (OSIV) replaces a round of whack-a-mole lazy-init patches; several small fixes + UX additions keep the Launch / post-merge loop unblocked.

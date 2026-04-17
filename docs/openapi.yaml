@@ -1659,6 +1659,14 @@ paths:
     get:
       tags: [Validation Report]
       summary: Get validation report
+      description: >
+        v2.5.10 — response includes `verifiedScore` (deterministic from
+        build + tests + reviewer verdict) + `accuracyScore` (LLM-inferred,
+        secondary). When the `scoring.v2-verified` feature flag is on,
+        `verifiedScore` is the primary UI badge; `accuracyScore` is
+        demoted to "Est. requirement coverage". Also exposes the 5
+        underlying signals (`finalBuildPassed`, `testsPassed`, `testsTotal`,
+        `reviewerVerdict`) so the frontend can render the SignalBreakdown chip.
       parameters:
         - $ref: '#/components/parameters/runId'
       responses:
@@ -1668,6 +1676,54 @@ paths:
               schema:
                 type: object
                 nullable: true
+                properties:
+                  id: {type: string}
+                  runId: {type: string, format: uuid}
+                  filesGenerated: {type: integer}
+                  languages:
+                    type: array
+                    items: {type: string}
+                  pipelineResult:
+                    type: string
+                    enum: [PASSED, PASSED_WITH_FIXES, NEEDS_ATTENTION, FAILED]
+                  accuracyScore:
+                    type: integer
+                    nullable: true
+                    description: "LLM-inferred spec-adherence score 0-100. Secondary when verifiedScore is present."
+                  accuracyGrade:
+                    type: string
+                    nullable: true
+                    enum: [A, B, C, D, F]
+                  codeQualityScore: {type: integer, nullable: true}
+                  testCoverageScore: {type: integer, nullable: true}
+                  architectureScore: {type: integer, nullable: true}
+                  securityScore: {type: integer, nullable: true}
+                  performanceScore: {type: integer, nullable: true}
+                  designComplianceScore: {type: integer, nullable: true}
+                  finalBuildPassed:
+                    type: boolean
+                    nullable: true
+                    description: "v2.5.10 (V106) — did ReviewerAgentV3's final build pass? Authoritative build signal."
+                  testsPassed:
+                    type: integer
+                    nullable: true
+                    description: "v2.5.10 (V106) — count of TestResult rows with status=PASS for this run."
+                  testsTotal:
+                    type: integer
+                    nullable: true
+                    description: "v2.5.10 (V106) — count of all TestResult rows for this run."
+                  reviewerVerdict:
+                    type: string
+                    nullable: true
+                    enum: [CLEAN, FIXED_ISSUES, UNRESOLVED_ISSUES, REVIEW_FAILED]
+                    description: "v2.5.10 (V106) — ReviewerResult.Overall enum name at terminal time."
+                  verifiedScore:
+                    type: integer
+                    nullable: true
+                    description: >
+                      v2.5.10 (V106) — 0-100 deterministic score derived from
+                      base(40) + build(20) + round(20*pass/total) + verdict(20/15/5/0)
+                      − 5*unfixedCritical. Primary display when scoring.v2-verified flag is on.
 
   /runs/{runId}/report/share:
     post:
@@ -2856,7 +2912,19 @@ components:
           format: uuid
         status:
           type: string
-          enum: [QUEUED, PLANNING, AWAITING_APPROVAL, AWAITING_CLARIFICATION, WORKING, COMPILING, MERGING, REVIEWING, TESTING, COMPLETE, FAILED, CANCELLED, PAUSED]
+          enum: [QUEUED, PLANNING, AWAITING_APPROVAL, AWAITING_CLARIFICATION, WORKING, COMPILING, MERGING, REVIEWING, TESTING, COMPLETE, PARTIAL, FAILED, CANCELLED, PAUSED]
+        statusReason:
+          type: string
+          nullable: true
+          description: >
+            v2.5.10 — explicit reason for the terminal status so the UI can
+            explain "PARTIAL because X" instead of a silent badge. One of
+            CLEAN_COMPLETION, CLEAN_WITH_INTERMEDIATE_WARNINGS,
+            FINAL_BUILD_FAILED, TESTS_FAILED:N_OF_M, REVIEWER_UNRESOLVED,
+            REVIEWER_FAILED, ALL_TASKS_FAILED, LEGACY_UNKNOWN. Null on
+            in-flight runs and on pre-v2.5.10 terminal runs that were never
+            backfilled. Populated by V2RunOrchestrator when scoring.v2-verified
+            is on.
         userRequest:
           type: string
         createdAt:

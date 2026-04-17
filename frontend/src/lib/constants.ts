@@ -7,15 +7,17 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
   LOCKED:                { dot: 'bg-status-queued',    text: 'text-muted' },
   // Blue — executing
   WORKING:               { dot: 'bg-status-executing', text: 'text-status-executing' },
-  COMPILING:             { dot: 'bg-status-executing', text: 'text-status-executing' },
-  MERGING:               { dot: 'bg-status-executing', text: 'text-status-executing' },
-  // Purple — thinking/review
+  EXECUTING:             { dot: 'bg-status-executing', text: 'text-status-executing' },
+  // Purple — thinking/review (PLANNING family)
   PLANNING:              { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
   REVIEWING:             { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
-  // Amber — waiting
+  // ExecutionRun-only statuses (project Launches) — same family as Planning
+  SETUP:                 { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
+  ANALYSING:             { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
+  ARCH_REVIEW:           { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
+  // Amber — waiting (PipelineRun family)
   AWAITING_APPROVAL:     { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
   AWAITING_CLARIFICATION:{ dot: 'bg-status-waiting',   text: 'text-status-waiting' },
-  AWAITING_MERGE:        { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
   // Green — success
   COMPLETE:              { dot: 'bg-status-success',   text: 'text-status-success' },
   // Orange — partial
@@ -31,17 +33,25 @@ export const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
   BATCH_COMPLETE:        { dot: 'bg-status-success',   text: 'text-status-success' },
 };
 
-export const ACTIVE_STATUSES = new Set(['PLANNING', 'WORKING', 'STUCK', 'COMPILING', 'QUEUED_BATCH', 'IN_PROGRESS_BATCH']);
-export const GATE_STATUSES   = new Set(['AWAITING_APPROVAL', 'AWAITING_MERGE', 'AWAITING_CLARIFICATION']);
+// V1 dead enums removed (COMPILING / MERGING / AWAITING_MERGE — V2 backend never emits them)
+// *_BATCH retained — V2 batch path is on the roadmap (see docs/plans/v2-batch-execution-plan.md)
+export const ACTIVE_STATUSES = new Set([
+  'PLANNING', 'WORKING', 'EXECUTING', 'STUCK',
+  'SETUP', 'ANALYSING', 'REVIEWING',
+  'QUEUED_BATCH', 'IN_PROGRESS_BATCH',
+]);
+export const GATE_STATUSES   = new Set([
+  'AWAITING_APPROVAL', 'AWAITING_CLARIFICATION', 'ARCH_REVIEW',
+]);
 
 export const PIPELINE_STEPS = [
   'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'WORKING',
-  'COMPILING', 'COMPLETE',
+  'REVIEWING', 'COMPLETE',
 ];
 
 export const BATCH_PIPELINE_STEPS = [
   'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'QUEUED_BATCH',
-  'IN_PROGRESS_BATCH', 'BATCH_COMPLETE', 'COMPILING', 'COMPLETE',
+  'IN_PROGRESS_BATCH', 'BATCH_COMPLETE', 'REVIEWING', 'COMPLETE',
 ];
 
 export const NAV_ITEMS: {

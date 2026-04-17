@@ -46,8 +46,17 @@ public class ModelResolver {
         // materially better success rate (≥10 pp improvement with sufficient samples).
         if (healthTracker.isHealthy(userProvider)) {
             String primaryModel = lookupModel(userProvider, tier);
+            // v2.5.12 — strict-provider respect (Bug #1c fix). When
+            // `-Dexecutespec.strict-provider=true` (set globally for eval runs
+            // and by orgs that want predictable provider routing), skip
+            // adaptive routing entirely. Previously this flag only gated the
+            // V2RunOrchestrator fallback chain — adaptive routing inside
+            // ModelResolver was bypassing it, so a run submitted with
+            // aiProvider="OPENAI" could still land on Gemini if OpenAI had a
+            // lower historical success rate. Now honoured here.
+            boolean strict = Boolean.getBoolean("executespec.strict-provider");
             // Adaptive: check if a failover provider has materially better performance
-            LlmProvider adaptiveProvider = selectAdaptiveProvider(
+            LlmProvider adaptiveProvider = strict ? null : selectAdaptiveProvider(
                     userProvider, primaryModel, tier, agentName);
             if (adaptiveProvider != null && adaptiveProvider != userProvider) {
                 String adaptiveModel = lookupModel(adaptiveProvider, tier);

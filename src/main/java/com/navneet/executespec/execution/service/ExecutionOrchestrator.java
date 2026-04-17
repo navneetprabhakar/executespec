@@ -248,8 +248,17 @@ public class ExecutionOrchestrator {
         if (!isContinueOnPr) {
             String githubPat = appUserRepo.findById(run.getCreatedBy())
                     .map(AppUser::getGithubPat).orElse(null);
+            // v2.5.12 — re-query solutions with repoMappings eager-fetched.
+            // `all` came from findWithDependenciesBy... which only fetched the
+            // dependencies Set. Walking s.getRepoMappings() on that list fires
+            // LazyInitializationException ("no Session") because this method
+            // runs on an @Async thread outside open-in-view. The exception
+            // killed the terminal setStatus("COMPLETE") below, leaving runs
+            // stuck at EXECUTING forever (observed on launch 9d5fb7d4).
+            List<ExecutionSolution> solutionsWithRepos = solutionRepo
+                    .findWithRepoMappingsByExecutionRun_IdOrderBySequenceNumberAsc(executionRunId);
             Set<UUID> distinctRepos = new LinkedHashSet<>();
-            for (ExecutionSolution s : all) {
+            for (ExecutionSolution s : solutionsWithRepos) {
                 if (s.getRepoMappings() == null) continue;
                 for (ExecutionSolutionRepo m : s.getRepoMappings()) {
                     if (m.getRepoId() != null) distinctRepos.add(m.getRepoId());

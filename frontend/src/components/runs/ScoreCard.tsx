@@ -2,16 +2,19 @@ import type { ValidationReportData } from '@/lib/api';
 
 type Dim = { label: string; value: number | null | undefined };
 
+// v2.5.12 — token-aligned. Swapped raw `emerald-*` Tailwind hex for the
+// platform `status-success` token so score bars match every other status
+// indicator (StatusBadge, SignalBreakdown, ValidationReport pills).
 function barColor(v: number): string {
-  if (v >= 80) return 'bg-emerald-500';
-  if (v >= 60) return 'bg-accent-amber';
-  return 'bg-accent-red';
+  if (v >= 80) return 'bg-status-success';
+  if (v >= 60) return 'bg-status-waiting';
+  return 'bg-status-error';
 }
 
 function textColor(v: number): string {
-  if (v >= 80) return 'text-emerald-400';
-  if (v >= 60) return 'text-accent-amber';
-  return 'text-accent-red';
+  if (v >= 80) return 'text-status-success';
+  if (v >= 60) return 'text-status-waiting';
+  return 'text-status-error';
 }
 
 function Row({ label, value }: Dim) {
@@ -50,7 +53,7 @@ export default function ScoreCard({ report }: { report: ValidationReportData }) 
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 mb-3 space-y-2.5">
       <div className="flex items-center justify-between">
-        <h3 className="text-[12px] font-medium text-primary">Review score</h3>
+        <h3 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary">Quality dimensions</h3>
         {overall != null && (
           <div className={`text-xl font-semibold ${textColor(overall)}`}>
             {overall}

@@ -19,6 +19,12 @@ User-selected provider architecture with YAML-configured model matrix and Redis-
 ## Provider Selection
 Each project selects its AI provider (ANTHROPIC/GOOGLE/OPENAI). ModelResolver maps `agentTier × provider → model` from YAML config. Failover to next healthy provider if selected provider is down.
 
+### Known tech debt — Bug #1c (v2.5.9 eval finding, not yet fixed)
+`ModelResolver.selectAdaptiveProvider` (invoked inside `resolve()`) silently switches providers based on historical success rate even when the caller — e.g. `V2RunOrchestrator` under `-Dexecutespec.strict-provider=true` — has explicitly locked the provider. Evidence: Proj-OpenAI (74270ac6) logged `provider=anthropic model=claude-sonnet-4-6` despite `project.aiProvider=OPENAI`. Fix deferred — needs either a strict-mode guard inside `ModelResolver.resolve()` OR an opt-out flag per org. Until then, adaptive routing remains authoritative over user-selected provider on the planner/reviewer path.
+
+### Known tech debt — planner/reviewer don't use tier resolution (v2.5.11 finding)
+`PlannerAgentV2.plannerViaLlm` uses `req.model()` (the RUN-level default via `V2RunOrchestrator.defaultModelFor(provider)`) instead of `ModelResolver.resolve("PlannerAgentV2", provider).getModel()`. Consequence: swapping `anthropic: planning:` in the model matrix has no effect — the planner always runs on the Haiku-tier worker default. Same pattern likely holds for `ReviewerAgentV3`. Fix: thread a resolved planner model into `PlannerRequestV2` (similar for reviewer). Tracked for post-Pillar-1.
+
 ## Circuit Breaker (ProviderHealthTracker)
 - **Storage:** Redis (`StringRedisTemplate`). Keys: `provider:health:{name}`, `provider:failures:{name}`
 - **Threshold:** 5 consecutive failures → circuit OPEN
