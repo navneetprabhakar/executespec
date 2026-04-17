@@ -183,12 +183,12 @@ public class ProjectDocGeneratorService {
         int outTok = usage == null ? 0 : safeInt(usage.getCompletionTokens());
 
         int nextVersion = docRepo
-                .findFirstByProjectIdAndDocTypeOrderByVersionDesc(UUID.fromString(projectId), docType)
+                .findFirstByProjectIdAndDocTypeOrderByVersionDesc(projectId, docType)
                 .map(d -> d.getVersion() + 1)
                 .orElse(1);
 
         ProjectGeneratedDoc doc = ProjectGeneratedDoc.builder()
-                .projectId(UUID.fromString(projectId))
+                .projectId(projectId)
                 .docType(docType)
                 .content(content)
                 .version(nextVersion)
@@ -215,7 +215,7 @@ public class ProjectDocGeneratorService {
     /** Latest persisted doc of the given type, or empty if not yet generated. */
     public Optional<ProjectGeneratedDoc> latest(String projectId, DocType docType) {
         return docRepo.findFirstByProjectIdAndDocTypeOrderByVersionDesc(
-                UUID.fromString(projectId), docType);
+                projectId, docType);
     }
 
     /**
