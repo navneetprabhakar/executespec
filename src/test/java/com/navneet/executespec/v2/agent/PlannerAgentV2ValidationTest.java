@@ -29,6 +29,7 @@ class PlannerAgentV2ValidationTest {
                 new ObjectMapper(),
                 mock(com.navneet.executespec.v2.observability.V2Metrics.class),
                 mock(com.navneet.executespec.v2.agent.RunTitleSummarizer.class),
+                mock(com.navneet.executespec.router.ModelResolver.class),
                 mock(FeatureFlagService.class));
     }
 
