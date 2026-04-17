@@ -57,4 +57,15 @@ public sealed interface PipelineEvent {
 
     /** A task has been detected as stuck by the stuck-run monitor. */
     record TaskStuck(String runId, String taskId, String classification) implements PipelineEvent {}
+
+    /**
+     * A user-facing approval/clarification gate has opened and is waiting for input.
+     * Used by the notification pipeline to create an in-app nudge so users who closed
+     * the browser don't miss that their run needs their attention.
+     *
+     * @param runId     the run the gate is attached to
+     * @param gateType  gate discriminator ({@code PLAN_APPROVAL}, {@code CLARIFICATION}, ...)
+     * @param credits   credits that will be charged on approval (0 when N/A)
+     */
+    record GateOpened(String runId, String gateType, int credits) implements PipelineEvent {}
 }

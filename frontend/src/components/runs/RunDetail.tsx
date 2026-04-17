@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, HelpCircle, Send, Loader2, ChevronDown, ChevronUp, Github, Archive, RefreshCw } from 'lucide-react';
+import { ArrowLeft, X, Trash2, AlertTriangle, Download, RotateCcw, Pause, Play, Loader2, ChevronDown, ChevronUp, Github, Archive, RefreshCw } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import GlowDot from '@/components/shared/GlowDot';
 import StatusBadge from '@/components/shared/StatusBadge';
@@ -20,19 +20,14 @@ import { cn, describeRunStatus } from '@/lib/utils';
 import VibeProgressNarrative from './VibeProgressNarrative';
 
 export default function RunDetail() {
-  const { activeRun, activeRunId, setActiveRunId, approveRun, clarifyRun, cancelRun, createRun, pauseRun, editAndRestartRun, resumeRun } = useRunStore();
+  const { activeRun, activeRunId, setActiveRunId, approveRun, cancelRun, createRun, pauseRun, resumeRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
   const { isVibe } = useViewMode();
   const isMobile = useIsMobile();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
   const [pausing, setPausing] = useState(false);
-  const [editingGoal, setEditingGoal] = useState(false);
-  const [newGoal, setNewGoal] = useState('');
-  const [restarting, setRestarting] = useState(false);
   const [resuming, setResuming] = useState(false);
-  const [clarificationInput, setClarificationInput] = useState('');
-  const [clarifying, setClarifying] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState(false);
   const [planFeedback, setPlanFeedback] = useState('');
@@ -237,20 +232,9 @@ export default function RunDetail() {
     }
   };
 
-  const handleEditAndRestart = async () => {
-    if (!activeRun || !newGoal.trim()) return;
-    setRestarting(true);
-    try {
-      const newRunId = await editAndRestartRun(activeRun.runId, newGoal.trim());
-      addToast({ type: 'success', message: `Restarted with new goal: ${newRunId.slice(0, 8)}` });
-      setEditingGoal(false);
-      setNewGoal('');
-    } catch (e: any) {
-      addToast({ type: 'error', message: e.message });
-    } finally {
-      setRestarting(false);
-    }
-  };
+  // v2.5.12 — edit-and-restart was V1-only; removed along with the store
+  // action. The same outcome is achievable via "New Run" with an updated
+  // spec, so this is pure cleanup.
 
   const handleResume = async () => {
     if (!activeRun) return;
@@ -508,40 +492,9 @@ export default function RunDetail() {
               </div>
             </div>
           )}
-          {activeRun.status === 'AWAITING_CLARIFICATION' && (
-            <div className="flex-shrink-0">
-            <ClarificationBanner
-              runId={activeRun.runId}
-              input={clarificationInput}
-              setInput={setClarificationInput}
-              submitting={clarifying}
-              onSubmit={async () => {
-                if (!clarificationInput.trim()) return;
-                setClarifying(true);
-                try {
-                  await clarifyRun(activeRun.runId, clarificationInput.trim());
-                  setClarificationInput('');
-                  addToast({ type: 'success', message: 'Clarification submitted' });
-                } catch (e: any) {
-                  addToast({ type: 'error', message: e.message });
-                } finally {
-                  setClarifying(false);
-                }
-              }}
-              onSkip={async () => {
-                setClarifying(true);
-                try {
-                  await clarifyRun(activeRun.runId, '');
-                  addToast({ type: 'info', message: 'Continuing without clarification' });
-                } catch (e: any) {
-                  addToast({ type: 'error', message: e.message });
-                } finally {
-                  setClarifying(false);
-                }
-              }}
-            />
-            </div>
-          )}
+          {/* v2.5.12 — AWAITING_CLARIFICATION + clarifyRun were V1-only.
+              V2 never emits this status. ClarificationBanner usage removed;
+              the component itself stays for history but is dead code. */}
           {/* Batch progress indicator */}
           {(activeRun.status === 'IN_PROGRESS_BATCH' || activeRun.status === 'QUEUED_BATCH') && (
             <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-blue/20 bg-accent-blue/5 flex-shrink-0">
@@ -611,50 +564,18 @@ export default function RunDetail() {
               <p className="text-xs text-secondary leading-relaxed">
                 <span className="text-muted">Current goal:</span> {activeRun.userRequest}
               </p>
-              {!editingGoal ? (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleResume}
-                    disabled={resuming}
-                    className="flex items-center gap-1.5 rounded-md bg-accent-blue/20 hover:bg-accent-blue/30 border border-accent-blue/30 px-3 py-1.5 text-xs font-medium text-accent-blue transition-colors disabled:opacity-50"
-                  >
-                    <Play className="h-3 w-3" />
-                    {resuming ? 'Resuming…' : 'Resume'}
-                  </button>
-                  <button
-                    onClick={() => { setEditingGoal(true); setNewGoal(activeRun.userRequest ?? ''); }}
-                    className="flex items-center gap-1.5 rounded-md bg-accent-amber/20 hover:bg-accent-amber/30 border border-accent-amber/30 px-3 py-1.5 text-xs font-medium text-accent-amber transition-colors"
-                  >
-                    Edit Goal & Restart
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <textarea
-                    value={newGoal}
-                    onChange={(e) => setNewGoal(e.target.value)}
-                    rows={3}
-                    className="w-full rounded-md bg-[var(--gray-100)] border border-[var(--border-default)] text-xs text-primary p-2 focus:outline-none focus:border-accent-amber/50 resize-none"
-                    placeholder="Enter updated goal..."
-                  />
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleEditAndRestart}
-                      disabled={restarting || !newGoal.trim()}
-                      className="flex items-center gap-1.5 rounded-md bg-accent-amber hover:bg-accent-amber/80 px-3 py-1.5 text-xs font-medium text-primary transition-colors disabled:opacity-50"
-                    >
-                      <Play className="h-3 w-3" />
-                      {restarting ? 'Restarting…' : 'Restart with New Goal'}
-                    </button>
-                    <button
-                      onClick={() => { setEditingGoal(false); setNewGoal(''); }}
-                      className="text-xs text-muted hover:text-secondary transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* v2.5.12 — "Edit Goal & Restart" removed with editAndRestartRun.
+                  Equivalent outcome: start a New Run with the updated spec. */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleResume}
+                  disabled={resuming}
+                  className="flex items-center gap-1.5 rounded-md bg-accent-blue/20 hover:bg-accent-blue/30 border border-accent-blue/30 px-3 py-1.5 text-xs font-medium text-accent-blue transition-colors disabled:opacity-50"
+                >
+                  <Play className="h-3 w-3" />
+                  {resuming ? 'Resuming…' : 'Resume'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -759,7 +680,7 @@ export default function RunDetail() {
           {/* Reports + Tabs — scroll is handled by the outer container so the
               title bar + status icons scroll together as one surface. */}
           <div>
-            <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} />
+            <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} statusReason={activeRun.statusReason ?? null} />
             <RunDetailTabs />
           </div>
           </>
@@ -866,7 +787,7 @@ function finalBuildPassed(run: { reviewJson?: string | null }): boolean {
   }
 }
 
-function MobileCollapsibleReports({ runId, status }: { runId: string; status: string }) {
+function MobileCollapsibleReports({ runId, status, statusReason }: { runId: string; status: string; statusReason?: string | null }) {
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(true);
 
@@ -875,7 +796,7 @@ function MobileCollapsibleReports({ runId, status }: { runId: string; status: st
     return (
       <>
         <TestProgressTracker runId={runId} status={status} />
-        <ValidationReportPanel runId={runId} status={status} />
+        <ValidationReportPanel runId={runId} status={status} statusReason={statusReason} />
         <TestReportPanel runId={runId} status={status} />
       </>
     );
@@ -893,7 +814,7 @@ function MobileCollapsibleReports({ runId, status }: { runId: string; status: st
       {!collapsed && (
         <div className="max-h-[30vh] overflow-y-auto">
           <TestProgressTracker runId={runId} status={status} />
-          <ValidationReportPanel runId={runId} status={status} />
+          <ValidationReportPanel runId={runId} status={status} statusReason={statusReason} />
           <TestReportPanel runId={runId} status={status} />
         </div>
       )}
@@ -912,55 +833,9 @@ interface GateBannerProps {
   setConfirming: (v: string | null) => void;
 }
 
-// ── Clarification Banner ──────────────────────────────────────────────────
-
-interface ClarificationBannerProps {
-  runId: string;
-  input: string;
-  setInput: (v: string) => void;
-  submitting: boolean;
-  onSubmit: () => void;
-  onSkip: () => void;
-}
-
-function ClarificationBanner({ runId, input, setInput, submitting, onSubmit, onSkip }: ClarificationBannerProps) {
-  return (
-    <div className="mx-4 mt-3 p-3 rounded-sm border border-accent-blue/30 bg-accent-blue/5 space-y-2">
-      <div className="flex items-center gap-2">
-        <HelpCircle className="h-4 w-4 text-accent-blue flex-shrink-0" />
-        <p className="text-xs text-accent-blue">
-          Please provide the specific JIRA issue key (e.g., PROJ-123) or Confluence page URL to continue.
-        </p>
-      </div>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && input.trim()) onSubmit(); }}
-          placeholder="e.g., PROJ-123 or https://yourorg.atlassian.net/wiki/..."
-          className="flex-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-1.5 text-xs text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none"
-          disabled={submitting}
-        />
-        <button
-          onClick={onSubmit}
-          disabled={submitting || !input.trim()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
-        >
-          {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-          Submit
-        </button>
-        <button
-          onClick={onSkip}
-          disabled={submitting}
-          className="px-3 py-1.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-secondary text-xs transition-colors disabled:opacity-50"
-        >
-          Skip
-        </button>
-      </div>
-    </div>
-  );
-}
+// v2.5.12 — ClarificationBanner removed with the AWAITING_CLARIFICATION
+// status. V2 never emits that status; the V1 clarify path returned 410
+// Gone. Clean removal.
 
 // ── Gate Banner ───────────────────────────────────────────────────────────
 

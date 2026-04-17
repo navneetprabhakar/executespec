@@ -1,7 +1,6 @@
-import { Download, Eye, RotateCcw } from 'lucide-react';
+import { Download, Eye } from 'lucide-react';
 import type { RunDetail } from '@/lib/api';
 import { downloadWorkspace } from '@/lib/api';
-import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 
 interface Props {
@@ -9,8 +8,6 @@ interface Props {
 }
 
 export default function VibeRunSummary({ run }: Props) {
-  const retryRun = useRunStore((s) => s.retryRun);
-  const setActiveRunId = useRunStore((s) => s.setActiveRunId);
   const setActiveTab = useUiStore((s) => s.setActiveTab);
   const addToast = useUiStore((s) => s.addToast);
 
@@ -26,14 +23,8 @@ export default function VibeRunSummary({ run }: Props) {
     }
   };
 
-  const handleRunAgain = async () => {
-    try {
-      const newRunId = await retryRun(run.runId);
-      setActiveRunId(newRunId);
-    } catch {
-      // toast handled by store
-    }
-  };
+  // v2.5.12 — "Run Again" removed (used V1 retryRun which returned 410).
+  // Vibe users can start a new run via the New Run modal.
 
   return (
     <div className="mt-4 space-y-4">
@@ -62,13 +53,6 @@ export default function VibeRunSummary({ run }: Props) {
         >
           <Eye className="h-4 w-4" />
           View Preview
-        </button>
-        <button
-          onClick={handleRunAgain}
-          className="flex items-center gap-2 px-4 py-2 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-sm text-[var(--text-primary)] hover:bg-[var(--gray-300)] transition-colors"
-        >
-          <RotateCcw className="h-4 w-4" />
-          Run Again
         </button>
       </div>
     </div>

@@ -16,6 +16,8 @@ import ProjectPrRollup from '@/components/project/ProjectPrRollup';
 import ProjectChatPanel from '@/components/project/ProjectChatPanel';
 import ProjectDocumentsPanel from '@/components/project/ProjectDocumentsPanel';
 import InlineRunDetail from '@/components/project/InlineRunDetail';
+import StatusBadge from '@/components/shared/StatusBadge';
+import EmptyState from '@/components/shared/EmptyState';
 import { cn } from '@/lib/utils';
 import type { TaskSummary } from '@/types/project';
 import type { ContinueOnPrConfig } from '@/types/execution';
@@ -36,22 +38,17 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'team', label: 'Team' },
 ];
 
-const STATUS_COLOR: Record<string, string> = {
-  COMPLETE:   'text-emerald-400',
-  PARTIAL:    'text-accent-amber',
-  FAILED:     'text-accent-red',
-  CANCELLED:  'text-accent-red',
-  RUNNING:    'text-accent-blue',
-  PLANNING:   'text-accent-blue',
-  WORKING:    'text-accent-blue',
-  REVIEWING:  'text-accent-blue',
-};
+// v2.5.12 — STATUS_COLOR map removed; status pills now use the shared
+// <StatusBadge /> primitive (frontend/src/components/shared/StatusBadge.tsx)
+// so colour, label, and statusReason tooltip stay consistent with every
+// other status surface (Run detail, ValidationReportPanel, etc.).
 
 function scoreColor(score: number | null | undefined): string {
+  // Token-aligned: status-success / status-waiting / status-error.
   if (score == null) return 'text-muted';
-  if (score >= 90) return 'text-emerald-400';
-  if (score >= 75) return 'text-accent-amber';
-  return 'text-accent-red';
+  if (score >= 90) return 'text-status-success';
+  if (score >= 75) return 'text-status-waiting';
+  return 'text-status-error';
 }
 
 export default function ProjectDashboardPage() {
@@ -63,8 +60,8 @@ export default function ProjectDashboardPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runCache, setRunCache] = useState<Record<string, RunDetail | 'loading' | 'error'>>({});
   const {
-    dashboard, scoreTrend, loading, error,
-    fetchDashboard, fetchScoreTrend, reset,
+    dashboard, scoreTrend, repos, loading, error,
+    fetchDashboard, fetchScoreTrend, fetchRepos, reset,
   } = useProjectStore();
 
   useEffect(() => {
@@ -75,6 +72,7 @@ export default function ProjectDashboardPage() {
         .catch(() => { setProject(null); setProjectLookup('missing'); });
     fetchDashboard(projectId);
     fetchScoreTrend(projectId);
+    fetchRepos(projectId);
     return () => {
       reset();
       setProject(null);
@@ -203,7 +201,7 @@ export default function ProjectDashboardPage() {
               </span>
             )}
           </div>
-          <NewExecutionButton projectId={projectId} />
+          <NewExecutionButton projectId={projectId} repoCount={repos?.length ?? 0} />
         </header>
         {project?.description && (
           <p className="text-xs text-muted">{project.description}</p>
@@ -396,19 +394,25 @@ function ProjectSummaryPanel({ projectId }: { projectId: string }) {
 
 function ExecutionsPanel({ tasks }: { tasks: TaskSummary[] }) {
   if (tasks.length === 0) {
-    return <div className="text-xs text-muted">Nothing submitted yet. Click "Launch" to kick off a cross-repo execution.</div>;
+    return (
+      <EmptyState
+        compact
+        icon={Rocket}
+        title="Nothing submitted yet"
+        description='Click "Launch" above to kick off your first cross-repo execution.'
+      />
+    );
   }
   return (
     <ul className="space-y-1">
       {tasks.slice(0, 8).map((t) => {
-        const statusColor = STATUS_COLOR[t.status] ?? 'text-muted';
         return (
           <li
             key={t.taskId}
             className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2"
           >
             <div className="flex items-center gap-2">
-              <span className={cn('text-[11px] font-mono tabular-nums', statusColor)}>{t.status}</span>
+              <StatusBadge status={t.status} />
               <span className="text-xs text-primary truncate flex-1">{t.name || t.runId.slice(0, 8)}</span>
               <span className={cn('text-xs font-mono tabular-nums', scoreColor(t.score))}>
                 {t.score != null ? `${t.score}/100` : '—'}
@@ -441,7 +445,6 @@ function RunsSidebar({
       </div>
       <ul>
         {tasks.map((t) => {
-          const statusColor = STATUS_COLOR[t.status] ?? 'text-muted';
           const selected = t.runId === selectedRunId;
           return (
             <li
@@ -453,9 +456,7 @@ function RunsSidebar({
               )}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className={cn('text-[9px] font-mono tabular-nums', statusColor)}>
-                  {t.status}
-                </span>
+                <StatusBadge status={t.status} />
                 <span className={cn('text-[11px] font-mono tabular-nums', scoreColor(t.score))}>
                   {t.score != null ? t.score : '—'}
                 </span>
@@ -501,13 +502,23 @@ function formatK(n: number): string {
   return String(n);
 }
 
-function NewExecutionButton({ projectId }: { projectId: string }) {
+function NewExecutionButton({ projectId, repoCount }: { projectId: string; repoCount: number }) {
   const navigate = useNavigate();
+  const disabled = repoCount === 0;
+  const title = disabled
+    ? 'Link at least one repository to launch.'
+    : 'Start a cross-repo Launch (ENTERPRISE / MAX)';
   return (
     <button
-      onClick={() => navigate(`/projects/${projectId}/executions/new`)}
-      className="flex items-center gap-1.5 text-xs font-medium rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-colors px-2.5 py-1"
-      title="Start a cross-repo Launch (ENTERPRISE / MAX)"
+      onClick={() => !disabled && navigate(`/projects/${projectId}/executions/new`)}
+      disabled={disabled}
+      className={
+        'flex items-center gap-1.5 text-xs font-medium rounded-sm border px-2.5 py-1 transition-colors ' +
+        (disabled
+          ? 'border-[var(--border-default)] bg-[var(--gray-100)] text-muted cursor-not-allowed opacity-60'
+          : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20')
+      }
+      title={title}
     >
       <Rocket className="h-3 w-3" />
       Launch

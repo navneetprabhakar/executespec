@@ -262,9 +262,32 @@ The plan approval gate supports:
 | `WORKING` | Tasks are executing | None — watch the live task graph |
 | `REVIEWING` | Reviewer running general + wiring passes | None — wait |
 | `COMPLETE` | Execution + review done; preview starting | Use the preview, check the validation report |
-| `PARTIAL` | Some tasks succeeded; others failed | Review failed tasks; optionally retry |
+| `PARTIAL` | Run ended with issues — hover the badge for the reason | Read the tooltip: FINAL_BUILD_FAILED / TESTS_FAILED / REVIEWER_UNRESOLVED / … |
 | `FAILED` | Run could not be completed | Check the failure reason; retry or adjust spec |
 | `PAUSED` | Run manually paused | Resume when ready |
+
+### 5.1.1 Why is my run PARTIAL? (v2.5.10)
+
+The `PARTIAL` status is now always explained. Hover the badge to see the `statusReason` tooltip:
+
+| Reason | Meaning |
+|--------|---------|
+| `CLEAN_WITH_INTERMEDIATE_WARNINGS` | Final build + tests + reviewer all clean; an intermediate smoke test flickered along the way. Safe to use. (On v2.5.10, these get re-labelled to COMPLETE on flagged runs.) |
+| `FINAL_BUILD_FAILED` | The reviewer's final build did not pass. Code may not run as-is. |
+| `TESTS_FAILED:N_OF_M` | N out of M tests failed. Open the validation report → test breakdown. |
+| `REVIEWER_UNRESOLVED` | Reviewer flagged unresolved issues. Inspect the issues list. |
+| `REVIEWER_FAILED` | Reviewer could not complete its pass. Re-run or inspect logs. |
+| `ALL_TASKS_FAILED` | Every task failed — nothing usable was produced. |
+| `LEGACY_UNKNOWN` | Pre-v2.5.10 run; signals unavailable. |
+
+### 5.1.2 Verified score vs accuracy score (v2.5.10)
+
+On the validation report, you'll see two scores:
+
+- **Verified N/100** (primary, green/amber/red) — deterministic score: `base40 + build20 + round(20×pass/total) + verdict(CLEAN=20/FIXED=15/…) − 5×unfixedCritical`. Cannot hallucinate — every input is a hard fact the pipeline observed.
+- **Est. N/100** (secondary, muted) — LLM's estimate of requirement coverage from the file tree + code snippets. Useful as a sanity signal, but may over-credit (e.g. when the LLM sees a `__tests__/` folder but never runs the tests).
+
+A new `SignalBreakdown` chip — `Build ✓ · Tests 73/73 · Reviewer CLEAN · Verified 92 · Est. 97` — surfaces all 5 signals together under the report panel.
 
 ### 5.1 Task Status
 

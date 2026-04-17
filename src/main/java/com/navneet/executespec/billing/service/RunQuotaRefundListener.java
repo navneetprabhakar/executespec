@@ -11,13 +11,22 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 /**
- * Refunds run quota when a pipeline run fails completely.
+ * Refunds run quota when a pipeline run fails completely OR when the run
+ * terminated as a false-positive PARTIAL (v2.5.12).
  *
- * <p>Failed runs should not count against the user's monthly quota — the system
- * failed to deliver any useful output, so the user shouldn't lose a run slot.
+ * <p>Refund rules:
+ * <ul>
+ *   <li>{@code FAILED} — the system failed to deliver anything, refund.</li>
+ *   <li>{@code PARTIAL} with {@code statusReason=CLEAN_WITH_INTERMEDIATE_WARNINGS}
+ *       — build clean + reviewer clean, the PARTIAL was caused by a flaky
+ *       intermediate smoke test. Refund.</li>
+ *   <li>Everything else ({@code PARTIAL} with build/tests/reviewer issues,
+ *       {@code CANCELLED}) — no refund; the user got partial value.</li>
+ * </ul>
  *
- * <p>PARTIAL runs are NOT refunded because some tasks completed successfully
- * and delivered usable code to the workspace.
+ * <p>Historical behaviour refunded only FAILED. v2.5.10 added
+ * {@code statusReason} (V107) so we can now tell "clean PARTIAL" apart from
+ * genuine partials; that's the signal this listener now consults.
  */
 @Component
 @RequiredArgsConstructor
@@ -33,13 +42,17 @@ public class RunQuotaRefundListener {
     public void onRunFailed(PipelineEvent.RunFailed event) {
         String runId = event.runId();
 
-        // Only refund for genuinely FAILED runs, not PARTIAL
-        // (RunFailed event is published for both FAILED and PARTIAL outcomes)
         PipelineRun run = stateStore.findRun(runId).orElse(null);
         if (run == null) return;
 
-        if (!"FAILED".equals(run.getStatus())) {
-            log.debug("Run {} has status {} (not FAILED) — no quota refund", runId, run.getStatus());
+        boolean isFailed = "FAILED".equals(run.getStatus());
+        // v2.5.12 — refund PARTIAL runs that terminated clean-on-signals.
+        boolean isCleanPartial = "PARTIAL".equals(run.getStatus())
+                && "CLEAN_WITH_INTERMEDIATE_WARNINGS".equals(run.getStatusReason());
+
+        if (!isFailed && !isCleanPartial) {
+            log.debug("Run {} status={} reason={} — no quota refund", runId,
+                    run.getStatus(), run.getStatusReason());
             return;
         }
 
@@ -57,6 +70,8 @@ public class RunQuotaRefundListener {
         tierEnforcementService.decrementRunCount(userId, credits);
         usageTrackingService.decrement(userId, "RUNS", credits);
 
-        log.info("Refunded {} credit(s) for failed run {} (user={})", credits, runId, userId);
+        String kind = isFailed ? "failed" : "clean-partial";
+        log.info("Refunded {} credit(s) for {} run {} (user={}, reason={})",
+                credits, kind, runId, userId, run.getStatusReason());
     }
 }

@@ -63,6 +63,17 @@ public class PipelineRun {
     @Column(columnDefinition = "TEXT")
     private String planJson;            // full TaskPlan JSON from planner
 
+    /**
+     * v2.5.11 (Validation v3 / Pillar 1, V109) — JSON array of
+     * {@code RequirementSpec{id,text,kind}} extracted by the planner. Anchors
+     * the requirement-graph: each {@link AgentTask#getMeetsRequirementsJson()}
+     * references these IDs; the reviewer later emits one
+     * {@code RequirementEvidence} row per ID. Null for legacy rows and when
+     * the {@code validation.v3-strict} flag was off at plan time.
+     */
+    @Column(name = "plan_requirements_json", columnDefinition = "TEXT")
+    private String planRequirementsJson;
+
     @Column(columnDefinition = "TEXT")
     private String reviewJson;          // ReviewReport JSON
 

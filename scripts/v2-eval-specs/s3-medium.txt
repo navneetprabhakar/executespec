@@ -1,0 +1,28 @@
+Build a minimal Express (Node.js) REST API for a to-do list with in-memory storage.
+
+Endpoints:
+- POST /todos — body {title}, returns 201 with the created todo {id, title, completed:false, createdAt}
+- GET /todos — returns all todos, sorted createdAt DESC, id ASC (stable when two share the same millisecond)
+- GET /todos/:id — returns one todo or 404; include ETag header derived from the record
+- PATCH /todos/:id — body {title?, completed?}, returns the updated todo or 404; MUST accept If-Match and return 412 on ETag mismatch
+- DELETE /todos/:id — returns 204 or 404
+
+Strict constraints:
+- Express 4, no external database, no persistence beyond process lifetime
+- Use UUIDs for ids
+- Reject Content-Type != application/json with 415 { error: "unsupported_media_type" }
+- Reject request body > 16 KB with 413 { error: "payload_too_large" }
+- Reject unknown fields on POST and PATCH with 400 { error: "unknown_field", field: "<name>" }
+- Reject blank/missing title on POST with 400 { error: "title_required" }
+- Malformed JSON must return 400 { error: "invalid_json" } (NOT the default Express HTML page)
+- Do NOT enable CORS; cross-origin preflight must return 404 unless the client explicitly wants CORS
+- README MUST include one copy-pasteable curl example for every endpoint
+- `npm test` runs the acceptance harness (if shipped) and exits 0
+- Structured logs on every request: { ts, level, traceId, method, path, status, latencyMs }
+- Listen on port from PORT env var or 3000
+
+Pass bar:
+- Functional >= 90%, Contract 100% (all status codes + error shapes match exactly)
+- Security: no secrets in source, no eval/exec, no SQL (this is in-memory; flagged if present)
+- Observability: traceId on every log line, X-Trace-Id response header
+- README copy-pastes and runs: curl examples must work after npm install && npm start

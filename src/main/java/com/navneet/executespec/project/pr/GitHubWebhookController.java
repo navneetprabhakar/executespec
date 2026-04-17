@@ -52,8 +52,17 @@ public class GitHubWebhookController {
             return ResponseEntity.noContent().build();
         }
 
+        // v2.5.12 — distinguish parse errors (400) from unexpected errors (500).
+        // Previously every exception surfaced as 400, masking real backend bugs
+        // as "bad payload" and inviting GitHub to retry until the bug was fixed.
+        JsonNode root;
         try {
-            JsonNode root = objectMapper.readTree(body);
+            root = objectMapper.readTree(body);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException parseEx) {
+            log.warn("GitHub webhook JSON parse failed: {}", parseEx.getOriginalMessage());
+            return ResponseEntity.badRequest().build();
+        }
+        try {
             String action = textOrNull(root, "action");
             JsonNode pr = root.path("pull_request");
             JsonNode repo = root.path("repository");
@@ -71,8 +80,8 @@ public class GitHubWebhookController {
             prService.applyWebhookUpdate(repoFullName, prNumber, merged, ts);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            log.warn("GitHub webhook processing failed: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().build();
+            log.error("GitHub webhook processing failed unexpectedly: {}", e.getMessage(), e);
+            return ResponseEntity.status(500).build();
         }
     }
 

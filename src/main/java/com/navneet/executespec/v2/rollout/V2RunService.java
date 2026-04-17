@@ -57,6 +57,22 @@ public class V2RunService {
         }
     });
 
+    /** v2.5.12 — graceful shutdown so SIGTERM doesn't abandon in-flight runs. */
+    @jakarta.annotation.PreDestroy
+    public void shutdownPool() {
+        log.info("V2RunService shutting down pool");
+        pool.shutdown();
+        try {
+            if (!pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.warn("V2RunService pool did not terminate in 30s; forcing shutdownNow");
+                pool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            pool.shutdownNow();
+        }
+    }
+
     /** Look up a run by ID (for polling / status API). */
     public java.util.Optional<V2Run> find(String runId) {
         return registry.get(runId);
