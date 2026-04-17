@@ -69,6 +69,10 @@ public class ReviewerAgentV3 {
     private final BuildProjectTool buildProjectTool;
     private final ObjectMapper objectMapper;
     private final V2Metrics metrics;
+    // v2.5.12 — resolve PLANNING-tier model from the matrix (same tier as
+    // planner). Was req.model() (run-level worker default), so YAML matrix
+    // changes for the reviewer had no effect.
+    private final com.navneet.executespec.router.ModelResolver modelResolver;
 
     /** Per-call executor for the timeout wrapper. Cached pool so successive
      *  reviews reuse threads; daemon threads so JVM shutdown is not blocked. */
@@ -192,9 +196,21 @@ public class ReviewerAgentV3 {
                 req.context().runId(),
                 req.context().taskId() + "-" + taskIdSuffix,
                 req.context().workspaceRoot());
+        // v2.5.12 — resolve from the model matrix.
+        com.navneet.executespec.router.LlmProvider reviewerProvider;
+        try {
+            reviewerProvider = com.navneet.executespec.router.LlmProvider
+                    .valueOf(req.provider() == null ? "ANTHROPIC" : req.provider().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            reviewerProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
+        }
+        com.navneet.executespec.router.ResolvedModel resolved =
+                modelResolver.resolve("ReviewerAgentV3", reviewerProvider);
+        String reviewerModel = resolved.getModel();
+        String reviewerProviderName = resolved.getActualProvider().name().toLowerCase();
         return worker.run(WorkerTaskRequest.builder()
-                .provider(req.provider())
-                .model(req.model())
+                .provider(reviewerProviderName)
+                .model(reviewerModel)
                 .systemPrompt(systemPrompt)
                 .userPrompt("Begin your review now. Use the tools to inspect, fix, build, "
                         + "and then call completeTask.")

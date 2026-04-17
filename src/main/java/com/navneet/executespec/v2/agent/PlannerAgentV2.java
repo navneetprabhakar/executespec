@@ -49,6 +49,10 @@ public class PlannerAgentV2 {
     private final ObjectMapper objectMapper;
     private final V2Metrics metrics;
     private final RunTitleSummarizer titleSummarizer;
+    // v2.5.12 — resolve PLANNING-tier model from the matrix instead of using
+    // the run-level worker default (was: req.model()). Closes the CLAUDE.md
+    // "planner model sourced from run model, not tier" tech debt.
+    private final com.navneet.executespec.router.ModelResolver modelResolver;
     /** v2.5.11 — gates strict v3 planner behaviour (requirement enumeration + validation). */
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
@@ -169,9 +173,18 @@ public class PlannerAgentV2 {
                 new UserMessage(userMsg));
 
         ToolCallback submitPlan = buildSubmitPlanCallback();
+        // v2.5.12 — resolve PLANNING-tier model from the matrix per provider.
+        // Was req.model() (the run-level worker default → Haiku for Anthropic),
+        // which made YAML matrix changes for the planner have no effect.
+        com.navneet.executespec.router.LlmProvider plannerProvider =
+                resolveProviderForTitle(req.provider());
+        com.navneet.executespec.router.ResolvedModel resolved =
+                modelResolver.resolve("PlannerAgentV2", plannerProvider);
+        String plannerModel = resolved.getModel();
+        String plannerProviderName = resolved.getActualProvider().name().toLowerCase();
         ChatResponse resp = router.call(LlmRequestV2.builder()
-                .provider(req.provider())
-                .model(req.model())
+                .provider(plannerProviderName)
+                .model(plannerModel)
                 .messages(messages)
                 .context(req.context())
                 .temperature(0.0)
