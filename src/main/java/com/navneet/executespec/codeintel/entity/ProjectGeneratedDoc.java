@@ -35,7 +35,7 @@ public class ProjectGeneratedDoc {
     @Builder.Default
     private Integer version = 1;
 
-    @Column(name = "generated_by", length = 36)
+    @Column(name = "generated_by", length = 255)
     private String generatedBy;
 
     @Column(name = "generated_at", nullable = false)
