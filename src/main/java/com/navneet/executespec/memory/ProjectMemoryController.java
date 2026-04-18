@@ -17,9 +17,14 @@ public class ProjectMemoryController {
     private final ProjectRunLedgerRepository ledgerRepo;
     private final MemoryCompactionService compactionService;
     private final com.navneet.executespec.auth.repository.ProjectRepository projectRepo;
+    private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
     @GetMapping
-    public ResponseEntity<ProjectMemoryResponse> getMemory(@PathVariable String projectId) {
+    public ResponseEntity<ProjectMemoryResponse> getMemory(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String context = memoryProvider.buildPlannerContext(projectId);
         var stats = memoryProvider.getStats(projectId);
         var recent = ledgerRepo
@@ -28,13 +33,21 @@ public class ProjectMemoryController {
     }
 
     @GetMapping("/ledger")
-    public ResponseEntity<List<ProjectRunLedger>> getLedger(@PathVariable String projectId) {
+    public ResponseEntity<List<ProjectRunLedger>> getLedger(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         return ResponseEntity.ok(ledgerRepo.findByProjectIdOrderByRunNumberDesc(projectId));
     }
 
     /** Force-compact all uncompacted ledger entries into a new snapshot. */
     @PostMapping("/compact")
-    public ResponseEntity<java.util.Map<String, Object>> compact(@PathVariable String projectId) {
+    public ResponseEntity<java.util.Map<String, Object>> compact(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String orgId = projectRepo.findById(projectId)
                 .map(com.navneet.executespec.auth.entity.Project::getOrgId)
                 .orElse(null);

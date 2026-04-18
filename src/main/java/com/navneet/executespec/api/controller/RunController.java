@@ -289,7 +289,13 @@ public class RunController {
                     "Approval received but the pipeline was interrupted by a restart. "
                     + "Please submit a new run.");
         }
-        gateStore.setPlanGate(runId, req.approved());
+        // Atomic claim — if another concurrent approve call already resolved the gate,
+        // return 409 Conflict to this caller (adversarial-test-report Finding 4).
+        boolean claimed = gateStore.tryClaimPlanGate(runId, req.approved());
+        if (!claimed) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Plan gate has already been resolved by another caller.");
+        }
         return ResponseEntity.ok().build();
     }
 

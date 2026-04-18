@@ -10,6 +10,8 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
+import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
@@ -29,6 +31,7 @@ public class RunMapper {
     private final AppUserRepository appUserRepository;
     private final TestPlanRepository testPlanRepository;
     private final RunCodeMapRepository runCodeMapRepository;
+    private final ValidationReportRepository validationReportRepository;
     private final ObjectMapper objectMapper;
 
     public RunSummary toSummary(PipelineRun r) {
@@ -139,6 +142,10 @@ public class RunMapper {
         // Codemap stats — single lookup, four nullable fields out
         RunCodeMap codemap = runCodeMapRepository.findByRunId(r.getRunId()).orElse(null);
 
+        // Validation report scoring snapshot — mirrored into RunDetail so UI doesn't
+        // need a second request for the headline verifiedScore / accuracyScore.
+        ValidationReport report = validationReportRepository.findByRunId(r.getRunId()).orElse(null);
+
         return RunDetail.builder()
             .runId(r.getRunId())
             .status(r.getStatus())
@@ -206,6 +213,12 @@ public class RunMapper {
             // V2 runs expose validation state through the validation report itself.
             .validationStatus(null)
             .validationPhase(null)
+            .verifiedScore(report != null ? report.getVerifiedScore() : null)
+            .accuracyScore(report != null ? report.getAccuracyScore() : null)
+            .reviewerVerdict(report != null ? report.getReviewerVerdict() : null)
+            .finalBuildPassed(report != null ? report.getFinalBuildPassed() : null)
+            .testsPassed(report != null ? report.getTestsPassed() : null)
+            .testsTotal(report != null ? report.getTestsTotal() : null)
             .build();
     }
 

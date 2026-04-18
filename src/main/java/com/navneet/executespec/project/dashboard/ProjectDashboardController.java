@@ -40,6 +40,7 @@ public class ProjectDashboardController {
     private final com.navneet.executespec.project.techdebt.TechDebtService techDebtService;
     /** v2.5.8 — Launch runs accumulate tokens + cost here; dashboard now reads both. */
     private final com.navneet.executespec.execution.repository.ExecutionRunRepository execRunRepo;
+    private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
     public record TaskSummary(
             String taskId, String runId, String name, String status,
@@ -74,6 +75,7 @@ public class ProjectDashboardController {
             @PathVariable String projectId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal
                     com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         long completed = runRepo.countByProjectIdAndStatus(projectId, "COMPLETE");
         long failed = runRepo.countByProjectIdAndStatus(projectId, "FAILED");
         long active = ACTIVE_STATUSES.stream()
@@ -168,6 +170,7 @@ public class ProjectDashboardController {
                     @PathVariable String projectId,
                     @org.springframework.security.core.annotation.AuthenticationPrincipal
                             com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String userId = userDetails == null ? null : userDetails.getUser().getId();
         return ResponseEntity.ok(workspaceHealthService.report(projectId, userId));
     }
@@ -178,7 +181,11 @@ public class ProjectDashboardController {
      */
     @GetMapping("/api/projects/{projectId}/post-merge-bar")
     public ResponseEntity<List<com.navneet.executespec.project.pr.PostMergeCascadeService.PostMergeBar>>
-            postMergeBar(@PathVariable String projectId) {
+            postMergeBar(
+                    @PathVariable String projectId,
+                    @org.springframework.security.core.annotation.AuthenticationPrincipal
+                            com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         return ResponseEntity.ok(postMergeCascadeService.readPostMergeBars(projectId));
     }
 
@@ -191,7 +198,10 @@ public class ProjectDashboardController {
             estimate(
                     @PathVariable String projectId,
                     @org.springframework.web.bind.annotation.RequestParam(
-                            value = "requirement", required = false) String requirement) {
+                            value = "requirement", required = false) String requirement,
+                    @org.springframework.security.core.annotation.AuthenticationPrincipal
+                            com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         return ResponseEntity.ok(estimationService.estimate(projectId, requirement));
     }
 
@@ -205,13 +215,20 @@ public class ProjectDashboardController {
             techDebt(
                     @PathVariable String projectId,
                     @org.springframework.web.bind.annotation.RequestParam(
-                            value = "since", required = false) Integer since) {
+                            value = "since", required = false) Integer since,
+                    @org.springframework.security.core.annotation.AuthenticationPrincipal
+                            com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         return ResponseEntity.ok(techDebtService.build(projectId, since));
     }
 
     /** v2.5.2 — dismiss the post-merge banner (user clicked the CTA or X). */
     @org.springframework.web.bind.annotation.DeleteMapping("/api/projects/{projectId}/post-merge-bar")
-    public ResponseEntity<Void> dismissPostMergeBar(@PathVariable String projectId) {
+    public ResponseEntity<Void> dismissPostMergeBar(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         postMergeCascadeService.dismissPostMergeBars(projectId);
         return ResponseEntity.noContent().build();
     }
