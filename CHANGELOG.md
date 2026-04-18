@@ -5,6 +5,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## [Unreleased]
+
+### Added — Security Guardrail Levels (P1–P5)
+
+Runtime-switchable security posture — `LOW | MEDIUM | HIGH`, default `LOW`. Flip via `PUT /api/feature-flags/security.guardrail_level`. See [`docs/plans/guardrail-levels-execution-plan.md`](docs/plans/guardrail-levels-execution-plan.md).
+
+- **`GuardrailLevel` enum** (`security/guardrail/GuardrailLevel.java`) + **`GuardrailLevelResolver`** (`@Service` wrapping `FeatureFlagService`). Fail-open to LOW on any resolver error. V116 seeds the flag.
+- **Diagnostic endpoint:** `GET /api/admin/guardrail` returns `{level, flagKey, atLeastMedium, atLeastHigh, resolvedAt}` (SUPER_ADMIN).
+- **`InputSanitizer` level-aware** — MEDIUM adds an 8 KB payload cap; HIGH tightens the non-printable-character tolerance from 60% → 10%. LOW is byte-for-byte unchanged.
+- **`CodeAbuseScanner.scan(path, content, level)` overload** — MEDIUM+ auto-throws 400 on any flagged pattern; LOW delegates to the existing `ScanResult`-returning method (caller decides warn-vs-block).
+- **`RateLimitPolicy.getLimit(group, tier, level)` overload** — MEDIUM halves `WRITE`/`DEPLOY`/`PREVIEW` capacity; HIGH quarters every group with a floor of 1.
+- **`ShellSandboxPolicy.validate(cmd, workspace, level)` overload** — MEDIUM additionally rejects `eval`/`exec` tokens; HIGH enforces canonical verb allowlists for `npm`/`npx`/`mvn`/`gradle` (no `npm run <arbitrary-string>`).
+- **`FileSandboxPolicy`** (new additive bean) — MEDIUM confines writes to `src/`/`test/`/`public/`/`resources/`/… plus a canonical root-level config allowlist. HIGH further locks down dotfiles except `.env.example`/`.gitignore`/`.gitattributes`/`.dockerignore`. Call-site wiring into the existing file tools is a follow-up (bean + tests ready today).
+
+### Added — V2 Batch Execution (P1 scaffolding)
+
+Plan 5 P1 — `v2/batch/` package stubs behind `harness.v2.batch_enabled=false` (V117 seed). See [`docs/plans/v2-batch-execution-plan.md`](docs/plans/v2-batch-execution-plan.md).
+
+- `V2BatchClient` interface + `V2BatchClientRouter` (EnumMap-backed, Spring-bean-populated).
+- `V2BatchCoordinator` (entry point), `V2BatchPollService` (`@Scheduled(30s)` + ShedLock, no-op body), `V2BatchResumeService` (placeholder).
+- Records: `V2BatchJob`, `V2BatchRequest`, `V2BatchTaskResult`.
+- P0 probe + P2–P5 (provider clients, eval, flag flip) remain open.
+
+### Changed — Frontend Legacy-UI Sweep (Plan 2 Gap 3)
+
+Permanent-410 endpoint surfaces hidden behind `V2_LEGACY_UI` flags in `frontend/src/lib/constants.ts` (all default `false`). Components stay on disk so a future V2 rewrite can restore them per-flag.
+
+- `PricingPage` no longer renders `FeasibilityEstimator`.
+- `RunDetailTabs` drops the Chat tab (vibe + pro views) and hides the per-task inline "Edit" button.
+- `RunDetail` hides the run-level "Edit Plan" button on the plan gate.
+- `TestReportPanel` hides "Apply All Fixes" + per-signature "Fix" buttons.
+
+### Added — Adversarial-test Findings (closed in 2 earlier commits on the same wave)
+
+Closed all 19 findings from [`docs/test-scenarios/adversarial-test-report-2026-04-18.md`](docs/test-scenarios/adversarial-test-report-2026-04-18.md): CRITICAL IDOR cluster, 401 JSON entry point, SPA 404 fallback, concurrent-approve 409 race via `GateStore.tryClaimPlanGate`, unified 4xx body shape, SSRF/XSS/strict-email input validation, request-attribute SecurityContextRepository, webhook install 502, planner-tier model resolution, and notification-title LLM-refusal fallback.
+
+### Tests
+
+- `GuardrailLevelTest`, `InputSanitizerLevelTest`, `RateLimitPolicyLevelTest`, `ShellSandboxPolicyLevelTest`, `FileSandboxPolicyLevelTest` — 40 new assertions.
+- `V2BatchClientRouterTest` — router dispatch, empty-router throw, duplicate-keeps-latest.
+- Full suite: 246/246 pass, BUILD SUCCESS.
+
+---
+
 ## [2.5.11] — 2026-04-16
 
 Validation v3 / Pillar 1 — the first of five pillars in a permanent rewrite so well-executed runs consistently score 95+ under a strict validator. This release lands the foundation every later pillar consumes: a requirement graph extracted by the planner, validated before execution, and persisted for end-to-end traceability.

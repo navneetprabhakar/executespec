@@ -5,6 +5,7 @@ import FeasibilityEstimator from '@/components/pricing/FeasibilityEstimator';
 import { getPricing } from '@/lib/api';
 import type { PricingRow } from '@/lib/api';
 import { Skeleton } from '@/components/shared/SkeletonLoader';
+import { V2_LEGACY_UI } from '@/lib/constants';
 
 export default function PricingPage() {
   const [rows, setRows] = useState<PricingRow[]>([]);
@@ -30,9 +31,11 @@ export default function PricingPage() {
         }
       </GlassPanel>
 
-      <GlassPanel className="p-4">
-        <FeasibilityEstimator />
-      </GlassPanel>
+      {V2_LEGACY_UI.feasibility && (
+        <GlassPanel className="p-4">
+          <FeasibilityEstimator />
+        </GlassPanel>
+      )}
     </div>
   );
 }
