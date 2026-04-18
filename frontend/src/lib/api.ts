@@ -485,7 +485,7 @@ export const updatePricing = (provider: string, model: string, body: Partial<Pri
 // ── Live cost ───────────────────────────────────────────────────────────────
 
 export const getLiveCost = (runId: string) =>
-  req<{ runId: string; costUsd: number }>(`/runs/${runId}/cost`);
+  req<{ runId: string; costUsd: number; inputTokens?: number; outputTokens?: number }>(`/runs/${runId}/cost`);
 
 // v2.5.13 — feasibility() client retired; POST /api/feasibility is permanently
 // 410 Gone on V2. Use the plan-approval cost estimate
