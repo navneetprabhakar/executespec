@@ -158,6 +158,7 @@ public class ShellSandboxPolicy {
             for (Pattern p : MEDIUM_ADDITIONAL_PATTERNS) {
                 if (p.matcher(normalized).find()) {
                     log.warn("SHELL BLOCKED (guardrail={} extra-pattern): {}", effective, trimmed);
+                    if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("shell");
                     return ValidationResult.block("Command matches a guardrail " + effective + " denied pattern");
                 }
             }
@@ -302,6 +303,7 @@ public class ShellSandboxPolicy {
             Set<String> canonical = canonicalVerbsFor(firstToken);
             if (canonical != null && !canonical.contains(tokens[1])) {
                 log.warn("SHELL BLOCKED (guardrail=HIGH strict verb): {} {} in {}", firstToken, tokens[1], originalCommand);
+                if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("shell");
                 return ValidationResult.block(firstToken + " subcommand '" + tokens[1]
                         + "' is not in the HIGH-level canonical verb allowlist");
             }

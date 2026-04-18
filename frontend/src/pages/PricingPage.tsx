@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import PricingTable from '@/components/pricing/PricingTable';
-import FeasibilityEstimator from '@/components/pricing/FeasibilityEstimator';
 import { getPricing } from '@/lib/api';
 import type { PricingRow } from '@/lib/api';
 import { Skeleton } from '@/components/shared/SkeletonLoader';
-import { V2_LEGACY_UI } from '@/lib/constants';
 
 export default function PricingPage() {
   const [rows, setRows] = useState<PricingRow[]>([]);
@@ -30,12 +28,6 @@ export default function PricingPage() {
           : <PricingTable rows={rows} onRefresh={load} />
         }
       </GlassPanel>
-
-      {V2_LEGACY_UI.feasibility && (
-        <GlassPanel className="p-4">
-          <FeasibilityEstimator />
-        </GlassPanel>
-      )}
     </div>
   );
 }

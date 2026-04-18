@@ -85,7 +85,7 @@ export const NAV_ITEMS: {
  * Flip individual flags to {@code true} as V2 re-implements each path.
  */
 export const V2_LEGACY_UI = {
-  feasibility:          false,  // POST /api/feasibility — permanent 410
+  // feasibility dropped 2026-04-18 — component + API client deleted; endpoint stays permanent-410.
   runConversation:      false,  // POST /api/runs/{id}/chat + /iterate + /apply
   editRunPlan:          false,  // POST /api/runs/{id}/edit-plan — deferred
   applyTestFixes:       false,  // POST /api/runs/{id}/apply-test-fixes — deferred (wire with V2 test-gen)

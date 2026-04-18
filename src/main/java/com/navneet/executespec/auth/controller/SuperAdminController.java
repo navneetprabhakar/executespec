@@ -61,13 +61,20 @@ public class SuperAdminController {
     @GetMapping("/guardrail")
     public ResponseEntity<Map<String, Object>> currentGuardrail() {
         com.navneet.executespec.security.guardrail.GuardrailLevel level = guardrailLevelResolver.current();
-        return ResponseEntity.ok(Map.of(
-                "level", level.name(),
-                "flagKey", com.navneet.executespec.security.guardrail.GuardrailLevelResolver.FLAG_KEY,
-                "atLeastMedium", level.atLeastMedium(),
-                "atLeastHigh", level.atLeastHigh(),
-                "resolvedAt", Instant.now().toString()
-        ));
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("level", level.name());
+        body.put("flagKey", com.navneet.executespec.security.guardrail.GuardrailLevelResolver.FLAG_KEY);
+        body.put("atLeastMedium", level.atLeastMedium());
+        body.put("atLeastHigh", level.atLeastHigh());
+        body.put("resolvedAt", Instant.now().toString());
+        // Diagnostic reads can lag live enforcement by up to ~5 s after a PUT on
+        // the flag — FeatureFlagService uses Redis pub/sub invalidation plus a
+        // 60 s scheduled reload. The rate-limit filter reads through on every
+        // request so it picks up flips first; this diagnostic endpoint reads the
+        // same service but may observe a slightly-later pub/sub delivery.
+        // Retest-report N3 (2026-04-18).
+        body.put("note", "may lag live enforcement by up to ~5 s right after a flag flip");
+        return ResponseEntity.ok(body);
     }
 
     // ── Execution reconcile ───────────────────────────────────────────────────
