@@ -250,6 +250,26 @@ public class V2RunOrchestrator {
         String provider = normalizeProvider(aiProvider, projectId, runId);
         String model = modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
 
+        // Resolve per-tier models so RunDetail surfaces what the planner/reviewer
+        // will actually call, not the run-level worker default — adversarial-test
+        // Finding 14. If a user-supplied modelName was provided (rare BYOK path),
+        // honour it for all three roles to preserve the override contract.
+        String plannerDbModel = model;
+        String reviewerDbModel = model;
+        if (modelName == null || modelName.isBlank()) {
+            try {
+                com.navneet.executespec.router.LlmProvider p =
+                        com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());
+                plannerDbModel = modelResolver.resolve(
+                        "PlannerAgentV2", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
+                reviewerDbModel = modelResolver.resolve(
+                        "ReviewerAgentV3", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
+            } catch (Exception ex) {
+                log.debug("Tier-based model resolution failed for run={} provider={}, falling back to run default: {}",
+                        runId, provider, ex.getMessage());
+            }
+        }
+
         PipelineRun run = PipelineRun.builder()
                 .runId(runId)
                 .userRequest(userRequest)
@@ -259,9 +279,9 @@ public class V2RunOrchestrator {
                 .repoUrl(repoUrl)
                 .repoMode(repoMode)
                 .aiProvider(provider.toUpperCase())
-                .plannerModel(model)
+                .plannerModel(plannerDbModel)
                 .workerModel(model)
-                .reviewerModel(model)
+                .reviewerModel(reviewerDbModel)
                 .skipApproval(skipApproval)
                 .autoMerge(autoMerge)
                 .executionMode(executionMode != null ? executionMode : "PRODUCTION")
@@ -517,6 +537,10 @@ public class V2RunOrchestrator {
             if (needsApproval) {
                 perky.stop(runId);
                 updateStatus(runId, "AWAITING_APPROVAL");
+                // Open a PENDING row so the approve-endpoint's atomic claim
+                // (GateStore.tryClaimPlanGate) can detect concurrent approvals and
+                // return 409 to the loser — adversarial-test-report Finding 4.
+                gateStore.openPlanGate(runId);
                 int credits = runRepo.findById(runId)
                         .map(r -> r.getCreditsCharged() == null ? 1 : r.getCreditsCharged())
                         .orElse(1);

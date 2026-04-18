@@ -6,6 +6,7 @@
 > **v2.5.12 docs to know about:**
 > - [`docs/test-scenarios/personas-journeys-and-cases.md`](test-scenarios/personas-journeys-and-cases.md) — 6 personas, 8 user journeys, ~55 test cases organised in 12 blocks, 10-minute smoke pack, persona × feature coverage matrix.
 > - [`docs/test-scenarios/persona-test-analysis-2026-04-18.md`](test-scenarios/persona-test-analysis-2026-04-18.md) — single-session smoke pass against local; covers what passed (3-step arch idempotency, Generate Docs end-to-end, regression markers from v2.5.12), what was deferred (full run lifecycle, OAuth, payments), 10 numbered gaps with severity + fix; system rating **7.4/10** across 11 dimensions.
+> - [`docs/test-scenarios/adversarial-test-report-2026-04-18.md`](test-scenarios/adversarial-test-report-2026-04-18.md) — unbiased adversarial pass (~85 probes) against the same local build; covers auth/RBAC/tier, all 3 LLM providers end-to-end, fuzz/SSRF/XSS/JWT-tampering, webhook signatures. 19 numbered findings including **1 CRITICAL IDOR cluster** across 12 project sub-resource endpoints. System rating **7.2/10** — drops 0.6 vs smoke pass because the IDOR finding wasn't surfaced earlier.
 > - [`docs/test-scenarios/e2e-all-features-test-plan.md`](test-scenarios/e2e-all-features-test-plan.md) — 17-section, ~50-scenario plan covering every user-facing surface (the system-perspective companion to the persona-perspective doc above).
 >
 > **v2.5.x docs:**

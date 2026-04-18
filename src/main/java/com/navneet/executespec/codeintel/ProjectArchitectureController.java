@@ -22,6 +22,7 @@ public class ProjectArchitectureController {
     private final StalenessService stalenessService;
     private final com.navneet.executespec.project.workspace.ProjectWorkspaceService workspace;
     private final ArchitectureDiffService diffService;
+    private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
     public record ArchDocDto(
             UUID id,
@@ -46,6 +47,7 @@ public class ProjectArchitectureController {
             @org.springframework.security.core.annotation.AuthenticationPrincipal
                 com.navneet.executespec.auth.security.AppUserDetails userDetails,
             @PathVariable String projectId) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
         ProjectArchitectureDoc doc = service.generate(projectId, null, pat);
         stalenessService.invalidate(projectId);
@@ -59,6 +61,7 @@ public class ProjectArchitectureController {
                 com.navneet.executespec.auth.security.AppUserDetails userDetails,
             @PathVariable String projectId,
             @org.springframework.web.bind.annotation.RequestParam(value = "branch", required = false) String branch) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
         ProjectArchitectureDoc doc = service.generate(projectId, branch, pat);
         stalenessService.invalidate(projectId);
@@ -66,7 +69,11 @@ public class ProjectArchitectureController {
     }
 
     @GetMapping("/api/projects/{projectId}/summary")
-    public ResponseEntity<Map<String, String>> summary(@PathVariable String projectId) {
+    public ResponseEntity<Map<String, String>> summary(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String content = workspace.readFile(projectId, "summary.md").orElse("");
         return ResponseEntity.ok(Map.of("content", content));
     }
@@ -76,19 +83,28 @@ public class ProjectArchitectureController {
             @PathVariable String projectId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal
                     com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
         return ResponseEntity.ok(stalenessService.report(projectId, pat));
     }
 
     @GetMapping("/api/projects/{projectId}/architecture")
-    public ResponseEntity<ArchDocDto> latest(@PathVariable String projectId) {
+    public ResponseEntity<ArchDocDto> latest(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         return service.latest(projectId)
                 .map(d -> ResponseEntity.ok(ArchDocDto.from(d)))
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @GetMapping("/api/projects/{projectId}/architecture/versions")
-    public ResponseEntity<List<ArchDocDto>> versions(@PathVariable String projectId) {
+    public ResponseEntity<List<ArchDocDto>> versions(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         List<ArchDocDto> out = service.versions(projectId).stream().map(ArchDocDto::from).toList();
         return ResponseEntity.ok(out);
     }
@@ -105,6 +121,7 @@ public class ProjectArchitectureController {
             @RequestParam("to") int to,
             @org.springframework.security.core.annotation.AuthenticationPrincipal
                     com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String userId = userDetails == null ? null : userDetails.getUser().getId();
         return ResponseEntity.ok(diffService.diff(projectId, from, to, userId));
     }
@@ -112,7 +129,10 @@ public class ProjectArchitectureController {
     @PutMapping("/api/projects/{projectId}/architecture/annotate")
     public ResponseEntity<ArchDocDto> annotate(
             @PathVariable String projectId,
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, String> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         String annotation = body.getOrDefault("annotation", "");
         return ResponseEntity.ok(ArchDocDto.from(service.annotate(projectId, annotation)));
     }
@@ -120,7 +140,10 @@ public class ProjectArchitectureController {
     @GetMapping("/api/projects/{projectId}/repos/{repoId}/codemap")
     public ResponseEntity<CodeMapDto> codemap(
             @PathVariable String projectId,
-            @PathVariable UUID repoId) {
+            @PathVariable UUID repoId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         return service.latestCodeMap(projectId, repoId)
                 .map(c -> ResponseEntity.ok(CodeMapDto.from(c)))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -151,7 +174,10 @@ public class ProjectArchitectureController {
     @GetMapping("/api/projects/{projectId}/repos/{repoId}/architecture")
     public ResponseEntity<RepoArchDto> repoArchitecture(
             @PathVariable String projectId,
-            @PathVariable UUID repoId) {
+            @PathVariable UUID repoId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         return service.latestRepoArch(projectId, repoId)
                 .map(d -> ResponseEntity.ok(RepoArchDto.from(d)))
                 .orElseGet(() -> ResponseEntity.noContent().build());
