@@ -146,7 +146,10 @@ public class RateLimitPolicy {
         if (path.contains("/deploy") || path.contains("/push-github")) {
             return "DEPLOY";
         }
-        if ("GET".equalsIgnoreCase(method)) {
+        // HEAD is semantically a GET without the body (RFC 7231) — classify both as READ.
+        // Prior behaviour wrongly sent HEAD to the WRITE bucket (which is ~3× smaller),
+        // causing browser preflight/asset-check patterns to hit tighter caps than plain GETs.
+        if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
             return "READ";
         }
         return "WRITE";

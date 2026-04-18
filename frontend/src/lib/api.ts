@@ -278,23 +278,9 @@ export interface PricingRow {
   updatedAt: string | null;
 }
 
-export interface TaskFeasibility {
-  taskId: string;
-  title: string;
-  complexity: string;
-  minIterations: number;
-  maxIterations: number;
-  estimatedLowUsd: number;
-  estimatedHighUsd: number;
-}
-
-export interface FeasibilityReport {
-  verdict: string;  // "FEASIBLE" | "MARGINAL" | "INFEASIBLE" | "ESTIMATED"
-  budgetUsd: number | null;
-  estimatedLowUsd: number;
-  estimatedHighUsd: number;
-  tasks: TaskFeasibility[];
-}
+// v2.5.13 — TaskFeasibility + FeasibilityReport interfaces retired along with
+// FeasibilityEstimator.tsx. Backend `/api/feasibility` returns 410 Gone on V2
+// and will stay permanently 410 — use the plan-approval estimate instead.
 
 export interface DeploymentSummary {
   id: string;
@@ -501,10 +487,9 @@ export const updatePricing = (provider: string, model: string, body: Partial<Pri
 export const getLiveCost = (runId: string) =>
   req<{ runId: string; costUsd: number }>(`/runs/${runId}/cost`);
 
-// ── Feasibility ──────────────────────────────────────────────────────────────
-
-export const feasibility = (body: { goal: string; provider?: string; model?: string; budgetUsd?: number }) =>
-  req<FeasibilityReport>('/feasibility', { method: 'POST', body: JSON.stringify(body) });
+// v2.5.13 — feasibility() client retired; POST /api/feasibility is permanently
+// 410 Gone on V2. Use the plan-approval cost estimate
+// (RunDetail.costEstimateLow/High) instead.
 
 // ── Deployments ──────────────────────────────────────────────────────────────
 

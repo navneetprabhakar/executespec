@@ -1,6 +1,8 @@
 package com.navneet.executespec.v2.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.tool.FileSandboxPolicy;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +20,10 @@ import java.nio.file.Path;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class WriteFileTool implements Tool {
+
+    private final FileSandboxPolicy fileSandboxPolicy;
 
     @Override
     public String name() {
@@ -64,6 +69,13 @@ public class WriteFileTool implements Tool {
         }
         try {
             Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+            // Guardrail-level file-sandbox gate — no-op at LOW; at MEDIUM/HIGH
+            // rejects writes outside the allowed dir+dotfile set.
+            FileSandboxPolicy.Decision sandbox = fileSandboxPolicy.validateWrite(ctx.workspaceRoot(), resolved);
+            if (!sandbox.allowed()) {
+                log.warn("writeFile blocked by FileSandboxPolicy path={} reason={}", path, sandbox.reason());
+                return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, sandbox.reason());
+            }
             if (Files.exists(resolved)) {
                 return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS,
                         "file already exists: " + path + " — use editFile to modify existing files");

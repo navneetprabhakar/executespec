@@ -13,7 +13,7 @@
 > - [`docs/project-user-journeys.md`](project-user-journeys.md) — end-to-end user journeys + workflow map for the project workbench (Setup → Launch → PR merge → continue building, docs upload, chat, etc.).
 > - [`docs/plans/project-codemap-arch-rag-plan.md`](plans/project-codemap-arch-rag-plan.md) — feature design (workspace layout, RAG invariants, phasing).
 > - [`docs/plans/project-codemap-arch-rag-execution.md`](plans/project-codemap-arch-rag-execution.md) — concrete per-phase implementation order.
-> - [`docs/plans/project-codemap-rag-backlog.md`](plans/project-codemap-rag-backlog.md) — deferred items (vector spill, OCR / rerank / semantic chunking) + the DB-vs-disk decision rationale.
+> - `docs/plans/project-codemap-rag-backlog.md` — **retired 2026-04-18**; Items 0 + 2 shipped; Items 1 + 3 captured in [`docs/plans/open-work-2026-04-18.md`](plans/open-work-2026-04-18.md) §D2 / §D3.
 >
 > **Pilot-v3.0 docs to know about:**
 > - [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md) — full recap of
