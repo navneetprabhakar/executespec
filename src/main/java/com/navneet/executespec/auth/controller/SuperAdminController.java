@@ -49,6 +49,26 @@ public class SuperAdminController {
     private final PromptVersioningService promptVersioningService;
     private final PromptAuditService promptAuditService;
     private final com.navneet.executespec.execution.service.AdminReconciliationService adminReconciliationService;
+    private final com.navneet.executespec.security.guardrail.GuardrailLevelResolver guardrailLevelResolver;
+
+    // ── Guardrail level diagnostic (Plan 1 P1) ────────────────────────────────
+
+    /**
+     * Reports the currently-resolved security posture. Useful during incident
+     * response to confirm a flag flip picked up before escalating. Read-only;
+     * changes happen via {@code PUT /api/admin/feature-flags/security.guardrail_level}.
+     */
+    @GetMapping("/guardrail")
+    public ResponseEntity<Map<String, Object>> currentGuardrail() {
+        com.navneet.executespec.security.guardrail.GuardrailLevel level = guardrailLevelResolver.current();
+        return ResponseEntity.ok(Map.of(
+                "level", level.name(),
+                "flagKey", com.navneet.executespec.security.guardrail.GuardrailLevelResolver.FLAG_KEY,
+                "atLeastMedium", level.atLeastMedium(),
+                "atLeastHigh", level.atLeastHigh(),
+                "resolvedAt", Instant.now().toString()
+        ));
+    }
 
     // ── Execution reconcile ───────────────────────────────────────────────────
 

@@ -17,6 +17,7 @@ import { useViewMode } from '@/hooks/useViewMode';
 import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, retryTask, getValidationReport, type ReviewReport, type ValidationReportData } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
+import { V2_LEGACY_UI } from '@/lib/constants';
 import VibeProgressNarrative from './VibeProgressNarrative';
 
 export default function RunDetail() {
@@ -440,8 +441,8 @@ export default function RunDetail() {
                 rejectLabel="Reject"
               />
               )}
-              {/* Edit Plan feedback area */}
-              <div className="px-4 pb-3">
+              {/* Edit Plan feedback area — hidden while V2 edit-plan endpoint returns 410 Gone */}
+              {V2_LEGACY_UI.editRunPlan && <div className="px-4 pb-3">
                 {!editingPlan ? (
                   <button
                     onClick={() => setEditingPlan(true)}
@@ -489,7 +490,7 @@ export default function RunDetail() {
                     </div>
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
           )}
           {/* v2.5.12 — AWAITING_CLARIFICATION + clarifyRun were V1-only.

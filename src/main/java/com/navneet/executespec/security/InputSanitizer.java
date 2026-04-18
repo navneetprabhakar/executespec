@@ -1,6 +1,10 @@
 package com.navneet.executespec.security;
 
+import com.navneet.executespec.security.guardrail.GuardrailLevel;
+import com.navneet.executespec.security.guardrail.GuardrailLevelResolver;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -14,10 +18,33 @@ import java.util.regex.Pattern;
 /**
  * Scans user-submitted spec content for prompt injection, shell embedding,
  * and abuse patterns before it reaches the LLM pipeline.
+ *
+ * <p>Guardrail-level aware as of Plan 1 P2. {@link GuardrailLevel#LOW} is the
+ * default and matches historical behaviour byte-for-byte; {@link
+ * GuardrailLevel#MEDIUM} adds an 8KB payload cap; {@link GuardrailLevel#HIGH}
+ * further tightens the non-printable-character tolerance from 60% to 10%.
  */
 @Slf4j
 @Component
 public class InputSanitizer {
+
+    /** MEDIUM+: hard cap on request size (characters). */
+    private static final int MEDIUM_PAYLOAD_CAP = 8_000;
+    /** HIGH: tighter non-printable tolerance. */
+    private static final double HIGH_NON_PRINTABLE_RATIO = 0.10;
+
+    /** Resolver is optional to keep the no-args constructor viable for existing callers. */
+    private final GuardrailLevelResolver guardrailLevelResolver;
+
+    @Autowired
+    public InputSanitizer(GuardrailLevelResolver guardrailLevelResolver) {
+        this.guardrailLevelResolver = guardrailLevelResolver;
+    }
+
+    /** Back-compat constructor — assumes LOW level (current behaviour). */
+    public InputSanitizer() {
+        this.guardrailLevelResolver = null;
+    }
 
     // Prompt injection patterns — attempts to override system instructions
     private static final List<Pattern> INJECTION_PATTERNS = List.of(
@@ -70,13 +97,38 @@ public class InputSanitizer {
     private static final int MAX_REPETITIONS = 20;
 
     /**
-     * Scans the user request for malicious content.
-     *
-     * @param userRequest the raw user spec
-     * @throws ResponseStatusException 400 if content violates security policy
+     * Scans the user request for malicious content using the guardrail level
+     * resolved from the {@code security.guardrail_level} feature flag. Equivalent
+     * to {@code scan(userRequest, resolver.current())}.
      */
     public void scan(String userRequest) {
+        GuardrailLevel level = guardrailLevelResolver != null
+                ? guardrailLevelResolver.current()
+                : GuardrailLevel.LOW;
+        scan(userRequest, level);
+    }
+
+    /**
+     * Scans the user request at the specified guardrail level. LOW matches
+     * historical behaviour; MEDIUM adds an 8KB payload cap; HIGH further
+     * tightens non-printable-character tolerance.
+     *
+     * @param userRequest the raw user spec
+     * @param level security posture to apply
+     * @throws ResponseStatusException 400 if content violates security policy
+     */
+    public void scan(String userRequest, GuardrailLevel level) {
         if (userRequest == null || userRequest.isBlank()) return;
+        GuardrailLevel effective = level == null ? GuardrailLevel.LOW : level;
+
+        // MEDIUM+: payload cap (before any expensive scanning).
+        if (effective.atLeastMedium() && userRequest.length() > MEDIUM_PAYLOAD_CAP) {
+            log.warn("INPUT BLOCKED (payload cap at {}): {} chars",
+                    effective, userRequest.length());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Request exceeds the " + MEDIUM_PAYLOAD_CAP
+                            + "-character cap at guardrail level " + effective + ".");
+        }
 
         // Strip zero-width characters before normalization — prevents evasion via invisible chars
         String stripped = ZERO_WIDTH_CHARS.matcher(userRequest).replaceAll("");
@@ -117,11 +169,13 @@ public class InputSanitizer {
             }
         }
 
-        // Character ratio check — high non-printable ratio indicates binary/obfuscation
+        // Character ratio check — high non-printable ratio indicates binary/obfuscation.
+        // HIGH level tightens the tolerance from 60% to 10%.
         long nonPrintable = userRequest.chars()
                 .filter(c -> c < 32 && c != '\n' && c != '\r' && c != '\t')
                 .count();
-        if ((double) nonPrintable / userRequest.length() > MAX_NON_PRINTABLE_RATIO) {
+        double nonPrintableCap = effective.atLeastHigh() ? HIGH_NON_PRINTABLE_RATIO : MAX_NON_PRINTABLE_RATIO;
+        if ((double) nonPrintable / userRequest.length() > nonPrintableCap) {
             log.warn("INPUT BLOCKED (non-printable ratio): {}/{}", nonPrintable, userRequest.length());
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Request contains too many non-printable characters.");

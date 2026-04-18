@@ -85,6 +85,29 @@ public class CodeAbuseScanner {
     }
 
     /**
+     * Level-aware wrapper. At LOW this is a pure passthrough of {@link
+     * #scan(String, String)} (callers decide warn-vs-block, matching historical
+     * behaviour). At MEDIUM or HIGH any flagged scan is converted into a
+     * {@link org.springframework.web.server.ResponseStatusException} (400), so
+     * callers that want level-aware blocking don't have to duplicate the check
+     * at every call-site.
+     *
+     * <p>Plan 1 P2 — see {@code docs/plans/guardrail-levels-execution-plan.md}.
+     */
+    public ScanResult scan(String filePath, String content,
+                           com.navneet.executespec.security.guardrail.GuardrailLevel level) {
+        ScanResult result = scan(filePath, content);
+        if (result.flagged() && level != null && level.atLeastMedium()) {
+            log.warn("CODE ABUSE BLOCKED (guardrail={}): file={} category={} pattern={}",
+                    level, filePath, result.category(), result.detail());
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Generated content matched a " + result.category() + " pattern (guardrail level " + level + ").");
+        }
+        return result;
+    }
+
+    /**
      * Scans file content for malicious patterns.
      *
      * @param filePath the file being written (for logging)
