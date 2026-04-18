@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getTestReport, markTestInvalid, applyTestFixes } from '@/lib/api';
+import { V2_LEGACY_UI } from '@/lib/constants';
 import type { TestReportData, TestResultDetail, FailureSuggestion, RootCauseGroup } from '@/lib/api';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
@@ -97,7 +98,7 @@ export default function TestReportPanel({ runId, status }: Props) {
           <span className="text-xs text-accent-red">({report.failed} failed)</span>
         )}
         <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
-          {report.failed > 0 && hasFixableCauses && (
+          {V2_LEGACY_UI.applyTestFixes && report.failed > 0 && hasFixableCauses && (
             <button
               onClick={() => handleApplyFixes()}
               disabled={!!applyingFixes}
@@ -153,7 +154,7 @@ export default function TestReportPanel({ runId, status }: Props) {
                         <p className="text-xs text-violet-300/80 mt-1">{group.suggestion}</p>
                       )}
                     </div>
-                    {group.hasSuggestion && (
+                    {V2_LEGACY_UI.applyTestFixes && group.hasSuggestion && (
                       <button
                         onClick={() => handleApplyFixes(group.signature)}
                         disabled={!!applyingFixes}
