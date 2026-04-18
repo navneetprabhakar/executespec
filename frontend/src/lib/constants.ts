@@ -74,6 +74,26 @@ export const NAV_ITEMS: {
   { path: '/settings',     label: 'Settings',     icon: 'Settings',       adminOnly: false },
 ];
 
+/**
+ * v2.5.13 — harness-v2-remaining-work Gap 3 frontend sweep.
+ *
+ * Endpoints that the V2 backend explicitly returns {@code 410 Gone} for. The
+ * underlying UI surfaces live on for the moment (so a future V2 redesign can
+ * re-enable them incrementally), but they are hidden today so users don't
+ * click buttons that fail silently.
+ *
+ * Flip individual flags to {@code true} as V2 re-implements each path.
+ */
+export const V2_LEGACY_UI = {
+  feasibility:          false,  // POST /api/feasibility — permanent 410
+  runConversation:      false,  // POST /api/runs/{id}/chat + /iterate + /apply
+  editRunPlan:          false,  // POST /api/runs/{id}/edit-plan — deferred
+  applyTestFixes:       false,  // POST /api/runs/{id}/apply-test-fixes — deferred (wire with V2 test-gen)
+  implementSuggestions: false,  // POST /api/runs/{id}/implement-suggestions — deferred
+  rework:               false,  // POST /api/runs/{id}/rework — deferred
+  mergeApproval:        false,  // POST /api/runs/{id}/merge + /reopen-merge — permanent 410 (V2 auto-merges)
+} as const;
+
 export const ROUTE_PATHS = {
   runs:         '/',
   dashboard:    '/dashboard',
