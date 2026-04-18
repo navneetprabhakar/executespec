@@ -45,7 +45,7 @@ Closed all 19 findings from [`docs/test-scenarios/adversarial-test-report-2026-0
 
 - `GuardrailLevelTest`, `InputSanitizerLevelTest`, `RateLimitPolicyLevelTest`, `ShellSandboxPolicyLevelTest`, `FileSandboxPolicyLevelTest` — 40 new assertions.
 - `V2BatchClientRouterTest` — router dispatch, empty-router throw, duplicate-keeps-latest.
-- Full suite: 246/246 pass, BUILD SUCCESS.
+- Full suite: 257/257 pass, BUILD SUCCESS.
 
 ---
 

@@ -318,4 +318,4 @@ Other tabs:
 - **Resuming a FAILED V2 run** — Abort + create a new run; old one is a read-only artefact.
 - **Cross-project memory / docs retrieval** — scoped to one project only.
 - **Webhook auto-provisioning on new repos** — Launch flow doesn't install a PR webhook; use Refresh in the PRs tab, or configure the webhook manually.
-- **Worker-side `{{REFERENCE_DOCS}}` injection** — retrieval reaches the planner + chat but not per-task worker prompts yet (see [project-codemap-rag-backlog.md](plans/project-codemap-rag-backlog.md#0-worker-prompt-doc-injection-new--discovered-in-v250-e2e)).
+<!-- Worker-side `{{REFERENCE_DOCS}}` injection shipped v2.5.2 via SequentialExecutorV2.fetchReferenceDocs — bullet retired 2026-04-18. -->

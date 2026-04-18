@@ -1,6 +1,8 @@
 package com.navneet.executespec.v2.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.tool.FileSandboxPolicy;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -24,7 +26,10 @@ import java.util.List;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class EditFileTool implements Tool {
+
+    private final FileSandboxPolicy fileSandboxPolicy;
 
     @Override
     public String name() {
@@ -88,6 +93,12 @@ public class EditFileTool implements Tool {
         }
         try {
             Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+            // Guardrail-level file-sandbox gate — no-op at LOW.
+            FileSandboxPolicy.Decision sandbox = fileSandboxPolicy.validateWrite(ctx.workspaceRoot(), resolved);
+            if (!sandbox.allowed()) {
+                log.warn("editFile blocked by FileSandboxPolicy path={} reason={}", path, sandbox.reason());
+                return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, sandbox.reason());
+            }
             if (!Files.exists(resolved)) {
                 return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND,
                         "file not found: " + path + " — use writeFile to create new files");
