@@ -300,7 +300,8 @@ public class PlannerAgentV2 {
         PlanV2.RuntimeSurface surface = plan.runtimeSurface();
         boolean testableSurface = surface == PlanV2.RuntimeSurface.HTTP
                 || surface == PlanV2.RuntimeSurface.CLI
-                || surface == PlanV2.RuntimeSurface.LIBRARY;
+                || surface == PlanV2.RuntimeSurface.LIBRARY
+                || surface == PlanV2.RuntimeSurface.MOBILE_APP;
         boolean isSingleShot = plan.classification() == Classification.SINGLE_SHOT;
         if (testableSurface && !isSingleShot) {
             boolean hasTestRequirement = reqs.stream()
