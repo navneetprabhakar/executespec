@@ -1,15 +1,20 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-15 (v2.5.0 — project workspace + codemap/architecture markdown + RAG + auto-push)
+> Last updated: 2026-04-18 (v2.5.12 — 3-step architecture + Generate Docs + Sync enhancement; v2.5.0: project workspace + RAG; pilot v3.0)
 >
-> v2.5.x docs:
+> **v2.5.12 docs to know about:**
+> - [`docs/test-scenarios/personas-journeys-and-cases.md`](test-scenarios/personas-journeys-and-cases.md) — 6 personas, 8 user journeys, ~55 test cases organised in 12 blocks, 10-minute smoke pack, persona × feature coverage matrix.
+> - [`docs/test-scenarios/persona-test-analysis-2026-04-18.md`](test-scenarios/persona-test-analysis-2026-04-18.md) — single-session smoke pass against local; covers what passed (3-step arch idempotency, Generate Docs end-to-end, regression markers from v2.5.12), what was deferred (full run lifecycle, OAuth, payments), 10 numbered gaps with severity + fix; system rating **7.4/10** across 11 dimensions.
+> - [`docs/test-scenarios/e2e-all-features-test-plan.md`](test-scenarios/e2e-all-features-test-plan.md) — 17-section, ~50-scenario plan covering every user-facing surface (the system-perspective companion to the persona-perspective doc above).
+>
+> **v2.5.x docs:**
 > - [`docs/project-user-journeys.md`](project-user-journeys.md) — end-to-end user journeys + workflow map for the project workbench (Setup → Launch → PR merge → continue building, docs upload, chat, etc.).
 > - [`docs/plans/project-codemap-arch-rag-plan.md`](plans/project-codemap-arch-rag-plan.md) — feature design (workspace layout, RAG invariants, phasing).
 > - [`docs/plans/project-codemap-arch-rag-execution.md`](plans/project-codemap-arch-rag-execution.md) — concrete per-phase implementation order.
 > - [`docs/plans/project-codemap-rag-backlog.md`](plans/project-codemap-rag-backlog.md) — deferred items (vector spill, OCR / rerank / semantic chunking) + the DB-vs-disk decision rationale.
 >
-> New pilot-v3.0 docs to know about:
+> **Pilot-v3.0 docs to know about:**
 > - [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md) — full recap of
 >   the project-workspace / multi-repo / codebase-intel / assessment /
 >   scoring / PR-webhook / codemap-on-clone release.
