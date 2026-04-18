@@ -57,7 +57,7 @@
 - **LLM Router:** V2 uses `LlmRouterV2` with native tool calling; YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
 - **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL, 24h max wait timeout. V2 auto-merges per task — no merge gate.
 - **Auth:** JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles. Force-logout via feature flag epoch-based JWT invalidation. JWT secret validated at startup in prod (`JwtSecretValidator`).
-- **Tiers:** FREE (5 runs/month, 1-credit specs only) → PRO (100/month) → ENTERPRISE (unlimited). Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`.
+- **Tiers:** FREE (5 runs/month, 1-credit specs only) → PRO (10/month managed keys) → MAX (unlimited BYOK) → ENTERPRISE (unlimited). PRO `monthly_run_limit` was reduced 100 → 10 in V62 (billing plan restructure). Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`.
 - **Billing:** Multi-gateway via `PaymentGatewayRouter` (Razorpay + Stripe). Subscriptions, run top-up credits, invoicing with GST, payment audit trail. Cost-proportional credits: charged at plan approval (not submission), refunded on FAILURE. `run_cost_log` table tracks estimated vs actual cost for pricing analytics.
 - **Security:** 8-layer defense-in-depth: request validation, input sanitization (`InputSanitizer` — NFKC normalization, zero-width strip, base64 decode+scan), LLM prompt defense, code abuse scanning (`CodeAbuseScanner` — crypto, reverse shell, PowerShell, DNS exfil, cloud metadata, obfuscation), shell sandbox, file sandbox, process isolation, container hardening (metadata endpoint blocking, env var whitelist). Configurable CSP/HSTS/X-Frame-Options via `SecurityProperties`.
 - **Feature flags:** DB-backed `FeatureFlagService` with Redis pub/sub cache invalidation + 60s scheduled reload. Admin-manageable via `FeatureFlagController`.
@@ -209,7 +209,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 |--------|------|-------------|
 | POST | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker) |
 | DELETE | `/api/runs/{id}/preview/stop` | Stop preview |
-| POST | `/api/runs/{id}/deploy` | Deploy to Cloud Run (permanent) |
+| POST | `/api/deployments` | Deploy to Cloud Run (permanent) — body: `{runId, repoMode, repoUrl?, repoName?}`. Gated on `agent.deployment.enabled=true`; uses `RunAccessGuard.requireRunAccess` for RBAC. |
 | POST | `/api/runs/{id}/push-github` | Push to GitHub (single-repo path; multi-repo branches into `ScmPushService.pushMultiRepo`) |
 
 ### Pilot v3.0 — Project workspace

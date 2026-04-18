@@ -91,9 +91,16 @@ public class ProjectRepoController {
             @PathVariable UUID repoId) {
         var u = userDetails.getUser();
         boolean ok = service.installWebhook(repoId, u.getGithubPat(), u.getId(), u.getOrgId());
-        return ResponseEntity.ok(ok
-                ? java.util.Map.of("installed", true)
-                : java.util.Map.of("installed", false,
+        if (ok) {
+            return ResponseEntity.ok(java.util.Map.of("installed", true));
+        }
+        // Upstream (GitHub API) rejected — typically missing `admin:repo_hook` scope or
+        // the repo is archived. 502 communicates "we talked to upstream and it said no"
+        // so API consumers don't treat this as success. Closes adversarial-test-report
+        // Finding 9.
+        return ResponseEntity.status(org.springframework.http.HttpStatus.BAD_GATEWAY)
+                .body(java.util.Map.of(
+                        "installed", false,
                         "reason", "GitHub API rejected webhook install — check PAT has admin:repo_hook"));
     }
 

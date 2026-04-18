@@ -24,6 +24,7 @@ import java.util.UUID;
 public class ProjectDocGeneratorController {
 
     private final ProjectDocGeneratorService service;
+    private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
     public record GeneratedDocDto(
             UUID id,
@@ -54,6 +55,7 @@ public class ProjectDocGeneratorController {
             @PathVariable String projectId,
             @PathVariable String docType,
             @AuthenticationPrincipal AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         DocType type = parseType(docType);
         String userId = userDetails == null ? null : userDetails.getUser().getId();
         try {
@@ -70,7 +72,9 @@ public class ProjectDocGeneratorController {
     @GetMapping("/api/projects/{projectId}/docs/{docType}")
     public ResponseEntity<GeneratedDocDto> latest(
             @PathVariable String projectId,
-            @PathVariable String docType) {
+            @PathVariable String docType,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         DocType type = parseType(docType);
         return service.latest(projectId, type)
                 .map(d -> ResponseEntity.ok(GeneratedDocDto.from(d)))
@@ -80,7 +84,9 @@ public class ProjectDocGeneratorController {
     @GetMapping("/api/projects/{projectId}/docs/{docType}/download")
     public ResponseEntity<String> download(
             @PathVariable String projectId,
-            @PathVariable String docType) {
+            @PathVariable String docType,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         DocType type = parseType(docType);
         ProjectGeneratedDoc doc = service.latest(projectId, type)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,

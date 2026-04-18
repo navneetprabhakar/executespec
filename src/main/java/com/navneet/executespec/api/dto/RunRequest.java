@@ -1,5 +1,6 @@
 package com.navneet.executespec.api.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -15,14 +16,28 @@ import java.util.UUID;
  * isolation is built-in.
  */
 public record RunRequest(
+    /**
+     * The spec the user wants executed. Accepts the legacy field name
+     * {@code "requirement"} too — docs and several external scripts historically
+     * used that name (adversarial-test-report Finding 17).
+     */
     @NotBlank(message = "User request must not be blank")
     @Size(max = 50_000, message = "User request must not exceed 50,000 characters")
+    @JsonAlias({"requirement", "spec"})
     String userRequest,
     /** "MANUAL" | "GITHUB_NEW" | "GITHUB_EXISTING" */
     @Pattern(regexp = "MANUAL|GITHUB_NEW|GITHUB_EXISTING|REST", message = "Invalid source")
     String source,
-    /** HTTPS URL of an existing repo (optional). */
+    /**
+     * HTTPS URL of an existing repo (optional). Restricted to HTTPS against the
+     * major SCM hosts so the harness can't be tricked into fetching from the
+     * cloud-metadata endpoint, localhost, or a {@code file://} URI. Closes
+     * adversarial-test-report Finding 7.
+     */
     @Size(max = 500, message = "Repo URL must not exceed 500 characters")
+    @Pattern(
+        regexp = "^$|^https://(github\\.com|gitlab\\.com|bitbucket\\.org|[a-zA-Z0-9.-]+\\.githubusercontent\\.com)/.+$",
+        message = "repoUrl must be an HTTPS URL against github.com, gitlab.com, or bitbucket.org")
     String repoUrl,
     /** "NEW" | "EXISTING" (optional). */
     @Pattern(regexp = "NEW|EXISTING", message = "Invalid repoMode")
