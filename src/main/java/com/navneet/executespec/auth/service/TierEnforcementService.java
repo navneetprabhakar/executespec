@@ -389,7 +389,7 @@ public class TierEnforcementService {
         if ("FREE".equals(tier)) {
             if (user.getPersonalRunCount() >= limit) {
                 throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                        "You've used all " + limit + " free runs. Upgrade to Pro for 100 runs/month.");
+                        "You've used all " + limit + " free runs. Upgrade to Pro for 10 runs/month or MAX for unlimited BYOK.");
             }
             return;
         }

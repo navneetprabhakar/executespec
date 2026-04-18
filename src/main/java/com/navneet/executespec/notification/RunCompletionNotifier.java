@@ -45,9 +45,7 @@ public class RunCompletionNotifier {
                 return;
             }
 
-            String title = run.getRunTitle() != null
-                    ? "Run complete: " + truncate(run.getRunTitle(), 80)
-                    : "Run " + event.runId().substring(0, 8) + " completed";
+            String title = "Run complete: " + pickTitle(run);
             String body = run.getRunSummary() != null ? run.getRunSummary() : "Your spec has been executed successfully.";
 
             notificationService.create(run.getCreatedByUserId(), type, title, body, link);
@@ -73,9 +71,7 @@ public class RunCompletionNotifier {
                 return;
             }
 
-            String title = run.getRunTitle() != null
-                    ? "Run failed: " + truncate(run.getRunTitle(), 80)
-                    : "Run " + event.runId().substring(0, 8) + " failed";
+            String title = "Run failed: " + pickTitle(run);
             String body = event.reason() != null ? truncate(event.reason(), 500) : "The run could not be completed.";
 
             notificationService.create(run.getCreatedByUserId(), type, title, body, link);
@@ -104,9 +100,7 @@ public class RunCompletionNotifier {
                 return;
             }
 
-            String runLabel = run.getRunTitle() != null
-                    ? truncate(run.getRunTitle(), 80)
-                    : event.runId().substring(0, 8);
+            String runLabel = pickTitle(run);
             String title;
             String body;
             if ("PLAN_APPROVAL".equals(event.gateType())) {
@@ -172,5 +166,39 @@ public class RunCompletionNotifier {
 
     private static String truncate(String s, int maxLen) {
         return s.length() > maxLen ? s.substring(0, maxLen - 3) + "..." : s;
+    }
+
+    /**
+     * Title for run-lifecycle notifications. Picks the best available text in
+     * order: (1) planner-generated {@code runTitle}, unless it looks like an LLM
+     * refusal; (2) the first N characters of the original user request; (3) a
+     * generic "Run {shortId}" string. Closes adversarial-test-report Finding 12
+     * — run titles like "I need more context. What task would you like..." no
+     * longer leak into the notification bell.
+     */
+    static String pickTitle(PipelineRun run) {
+        String title = run.getRunTitle();
+        if (title != null && !title.isBlank() && !isLlmRefusal(title)) {
+            return truncate(title, 80);
+        }
+        String req = run.getUserRequest();
+        if (req != null && !req.isBlank()) {
+            // Use first line, stripped, capped at 80 chars.
+            String firstLine = req.split("\\R", 2)[0].strip();
+            if (!firstLine.isBlank()) return truncate(firstLine, 80);
+        }
+        return "Run " + (run.getRunId() == null ? "?" : run.getRunId().substring(0, 8));
+    }
+
+    private static boolean isLlmRefusal(String text) {
+        String lower = text.toLowerCase().strip();
+        return lower.startsWith("i need more context")
+                || lower.startsWith("i can't ")
+                || lower.startsWith("i cannot ")
+                || lower.startsWith("i don't have enough")
+                || lower.startsWith("please provide")
+                || lower.startsWith("could you clarify")
+                || lower.startsWith("sorry, ")
+                || lower.contains("what task would you like");
     }
 }

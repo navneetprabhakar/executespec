@@ -19,6 +19,7 @@ import java.util.List;
 public class ProjectScoresController {
 
     private final ValidationReportRepository reportRepo;
+    private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
     public record ScoreEntry(
             String runId,
@@ -45,7 +46,11 @@ public class ProjectScoresController {
     }
 
     @GetMapping("/api/projects/{projectId}/scores")
-    public ResponseEntity<List<ScoreEntry>> scoresForProject(@PathVariable String projectId) {
+    public ResponseEntity<List<ScoreEntry>> scoresForProject(
+            @PathVariable String projectId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                    com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+        projectAccessGuard.assertCanRead(projectId, userDetails);
         List<ScoreEntry> out = reportRepo.findAllByProjectId(projectId).stream()
                 .map(ScoreEntry::from)
                 .toList();
