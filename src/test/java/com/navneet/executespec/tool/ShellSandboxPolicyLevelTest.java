@@ -62,4 +62,60 @@ class ShellSandboxPolicyLevelTest {
         // arbitrary npm run passes when level is null (null→LOW)
         assertThat(policy.validate("npm run anything", "/ws", null).permitted()).isTrue();
     }
+
+    @Test
+    void rnExpoToolchainAllowedAtLowAndMedium() {
+        // The scaffold's declared smoke command must pass unconditionally at
+        // LOW and MEDIUM — these are ordinary build invocations.
+        String smoke = "npx expo export --platform android --output-dir dist && npx tsc --noEmit";
+        assertThat(policy.validate(smoke, "/ws", GuardrailLevel.LOW).permitted()).isTrue();
+        assertThat(policy.validate(smoke, "/ws", GuardrailLevel.MEDIUM).permitted()).isTrue();
+        // Direct (non-npx) invocations of the same tooling also pass.
+        assertThat(policy.validate("expo export --platform android", "/ws", GuardrailLevel.LOW).permitted()).isTrue();
+        assertThat(policy.validate("eas build --platform android --profile production",
+                "/ws", GuardrailLevel.LOW).permitted()).isTrue();
+        assertThat(policy.validate("jest --ci", "/ws", GuardrailLevel.LOW).permitted()).isTrue();
+    }
+
+    @Test
+    void rnSmokeCommandAllowedAtHigh() {
+        // HIGH must also pass the scaffold's smoke command — it was designed to
+        // fit the canonical verb allowlist.
+        String smoke = "npx expo export --platform android --output-dir dist && npx tsc --noEmit";
+        assertThat(policy.validate(smoke, "/ws", GuardrailLevel.HIGH).permitted()).isTrue();
+        assertThat(policy.validate("expo export --platform android", "/ws", GuardrailLevel.HIGH).permitted()).isTrue();
+        assertThat(policy.validate("eas build --platform android --profile production",
+                "/ws", GuardrailLevel.HIGH).permitted()).isTrue();
+    }
+
+    @Test
+    void easUpdateBlockedAtHigh() {
+        // `eas update` is the OTA-push path — deploy-equivalent and therefore
+        // forbidden at HIGH. Must route through /api/deployments instead.
+        var blocked = policy.validate("eas update --branch main", "/ws", GuardrailLevel.HIGH);
+        assertThat(blocked.permitted()).isFalse();
+        assertThat(blocked.reason()).contains("HIGH-level canonical verb allowlist");
+        // LOW still permits it (pre-existing loose policy).
+        assertThat(policy.validate("eas update --branch main", "/ws", GuardrailLevel.LOW).permitted()).isTrue();
+    }
+
+    @Test
+    void expoArbitraryVerbBlockedAtHigh() {
+        // Arbitrary `expo some-unlisted-verb` must be blocked at HIGH so the
+        // allowlist is actually meaningful.
+        var blocked = policy.validate("expo launch-rocket", "/ws", GuardrailLevel.HIGH);
+        assertThat(blocked.permitted()).isFalse();
+        assertThat(blocked.reason()).contains("HIGH-level canonical verb allowlist");
+    }
+
+    @Test
+    void npxArbitraryToolBlockedAtHigh() {
+        // `npx <random-tool>` must be blocked at HIGH since the allowlist doesn't
+        // include it. Even though LOW lets it through.
+        var blocked = policy.validate("npx create-nuxt-app my-project", "/ws", GuardrailLevel.HIGH);
+        assertThat(blocked.permitted()).isFalse();
+        assertThat(blocked.reason()).contains("HIGH-level canonical verb allowlist");
+        // LOW still allows it (ALLOWED_PREFIXES lets npx through, no verb gate below HIGH).
+        assertThat(policy.validate("npx create-nuxt-app my-project", "/ws", GuardrailLevel.LOW).permitted()).isTrue();
+    }
 }
