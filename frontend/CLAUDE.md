@@ -1,6 +1,18 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-16 (v2.5.10 — StatusBadge tooltip + SignalBreakdown chip; v2.5.11 backend scaffolding for Validation v3)
+> Last updated: 2026-04-18 (v2.5.12 — design-system primitives + GeneratedDocsPanel + EstimateChip + per-repo arch endpoint; v2.5.10: StatusBadge tooltip + SignalBreakdown)
+>
+> **v2.5.12 (design primitives + Generate Docs UI + per-repo arch hooks):** new shared primitives in `src/components/shared/`:
+> - `Button.tsx` — `class-variance-authority` (cva) variants (primary/secondary/tertiary/ghost/danger/success) × sizes (sm/md/lg/icon) + loading state with spinner.
+> - `Checkbox.tsx` + `Radio.tsx` — native input wrapper that hides OS defaults and renders consistent dark-theme controls with optional label + description.
+> - `ResponsiveModal.tsx` hardened: focus-trap (Tab/Shift+Tab cycling), Escape to close, body scroll lock, `disableDismiss` + `hideCloseButton` props, role=dialog + aria-modal + aria-label.
+> - `EstimateChip.tsx` — debounced launch-cost estimate chip shared between `ExecutionSetup` (project Launch) and `NewRunModal` (when a project is selected).
+>
+> Migrated to use the new primitives (~9 modals): `GrantRunsModal`, `AdminInviteModal`, `ChangePasswordModal`, `ContactModal`, `UpgradeModal`, `DisclaimerModal`, `AddRepoModal`, `FailureDecisionModal`, `NewRunModal` (radios + checkboxes + Launch button).
+>
+> New panel: `src/components/project/GeneratedDocsPanel.tsx` — two `DocRow` cards (EXPLANATION + SETUP) on Project Overview tab. Generate / Regenerate / inline View (`MarkdownContent` with 400px scroll) / Download `.md`. Driven by new API helpers in `lib/api.ts`: `generateProjectDoc(projectId, type)`, `getProjectDoc(projectId, type)` (returns null on 204), `downloadProjectDoc(projectId, type)` (blob URL → anchor click → `<type>.md`).
+>
+> Honest scoring fixes: `RunDetail.tsx` top banner + `ScoreCard.tsx` header now prefer `verifiedScore` (deterministic V106) over `accuracyScore` (LLM, sometimes hallucinates). LLM `Est. N` shown as a subdued secondary when it disagrees. `ScoreCard` adds an "honest scoring" helper sentence when all non-null dimensions equal the anchor (no review issues = flat bars are arithmetically correct, not a stuck default).
 >
 > **v2.5.10 (verified score + honest PARTIAL):** new `src/components/runs/SignalBreakdown.tsx` — compact horizontal chip `Build ✓ · Tests 73/73 · Reviewer CLEAN · Verified 92 · Est. 97` surfaced below `ValidationReportPanel` (each segment colour-coded). `StatusBadge` (`src/components/shared/StatusBadge.tsx`) gains a native HTML `title` tooltip mapping `statusReason` values to human copy (CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN). `ValidationReportPanel` primary badge now shows `V {verifiedScore}/100` when present (deterministic); `accuracyScore` demoted to `Est. N/100` secondary badge. `DISPLAY_NAMES['PARTIAL']='Partial'` added (was falling through to upper-case). New fields on `lib/api.ts`: `RunSummary.statusReason`, `ValidationReportData.{finalBuildPassed, testsPassed, testsTotal, reviewerVerdict, verifiedScore}`. No tooltip library added.
 >
@@ -23,7 +35,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 
 ### Components (`src/components/`)
 - **`runs/`** — RunDetail, RunDetailTabs (batch badge + per-run PR list), RunCard (batch badge), RunList, RunConversation, NewRunModal (now: project-linked multi-repo select + Figma URL), TaskCard, TaskGraph (subtask grouping), PreviewTab ("Run Tests" button, Beta), LiveLog, ValidationReportPanel (now: ScoreCard at top), TestReportPanel, TestProgressTracker, ProviderModelSelector, TechBadges, FirstRunSuggestions, VibeProgressNarrative, VibeRunSubmit, VibeRunSummary, **AssessmentPanel** (pilot R4 — appears above the plan-approval gate when `RunDetail.assessmentResult` is set), **ScoreCard** (pilot R6 — 6 colored progress bars + overall accuracy)
-- **`project/`** (pilot v3.0 + v2.2.0) — ProjectRepoManager, RepoCard (scope chip), AddRepoModal (Pick existing / Create new), RepoRelationshipEditor, StackBadge, ArchitectureViewer (markdown + version dropdown + amber stale badge driven by `getArchitectureStaleness`), ProjectTaskList, ProjectPrList, ProjectScoreTrend (recharts LineChart, overall + per-dimension), **ProjectMemoryPanel** (v2.2.0 — token-budget bar, compacted-history expandable, recent-run caveman-English entries; driven by `getProjectMemory`)
+- **`project/`** (pilot v3.0 + v2.2.0 + v2.5.12) — ProjectRepoManager, RepoCard (scope chip), AddRepoModal (Pick existing / Create new — migrated to ResponsiveModal v2.5.12), RepoRelationshipEditor, StackBadge, ArchitectureViewer (markdown + version dropdown + amber stale badge driven by `getArchitectureStaleness`), ProjectTaskList, ProjectPrList, ProjectScoreTrend (recharts LineChart, overall + per-dimension), **ProjectMemoryPanel** (v2.2.0), **GeneratedDocsPanel** (v2.5.12 — Generate / Regenerate / View / Download for EXPLANATION + SETUP docs), TechDebtPanel, WorkspaceHealthPanel, PostMergeBar, ResetWorkspaceSheet
 - **`run/`** — FileTree, FileViewer (RunTimeline removed — V2 has no COMPILING/MERGING/AWAITING_MERGE phases)
 - **`layout/`** — AppLayout, Header, Sidebar, CommandPalette, NotificationBell, NotificationPanel
 - **`dashboard/`** — ActivityFeed, AgentCommGraph, DateRangeFilter, MetricCard, ModelComparisonChart, TokenBubbleChart, UserRunsChart
@@ -31,7 +43,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **`deployments/`** — DeployModal, DeployWizardModal, DeploymentCard
 - **`pricing/`** — PricingTable, FeasibilityEstimator
 - **`integrations/`** — IntegrationCard, IntegrationLogo
-- **`shared/`** — AnimatedCounter, EmptyState, GlassPanel, GlowDot, MarkdownContent, SkeletonLoader, StatusBadge, Toast, ViewModeToggle
+- **`shared/`** — AnimatedCounter, EmptyState, GlassPanel, GlowDot, MarkdownContent, SkeletonLoader, StatusBadge, Toast, ViewModeToggle, ResponsiveModal (v2.5.12 hardened), **Button** (v2.5.12 cva primitive), **Checkbox** (v2.5.12), **Radio** (v2.5.12)
 - **`ui/`** — LockedFeature, UpgradeModal
 - **`auth/`** — Auth-related UI components
 

@@ -34,6 +34,7 @@ public class ProjectRepoService {
     private final ProjectRepository projectRepo;
     private final StackDetector stackDetector;
     private final GitHubRepoService gitHub;
+    private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
     /** Lazy to break potential circular wiring on startup. */
     private final org.springframework.beans.factory.ObjectProvider<
             com.navneet.executespec.codeintel.ProjectArchitectureService> archServiceProvider;
@@ -364,9 +365,17 @@ public class ProjectRepoService {
     private ProjectRepo loadRepoForRead(UUID repoId, String callerUserId, String callerOrgId) {
         ProjectRepo repo = repoRepo.findById(repoId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
+        // v2.5.12 (Gap #1) — SUPER_ADMIN sees everything. Same bypass shape used
+        // by TierEnforcementService.assertCanSubmitRun + AdminReconciliationService.
+        // The DB hit is bounded (per-request, single PK lookup) and only triggers
+        // when the user isn't already the owner.
         boolean visible = (repo.getScope() == ProjectRepo.Scope.ORG && repo.getOwnerOrgId().equals(callerOrgId))
                 || (repo.getScope() == ProjectRepo.Scope.USER && repo.getOwnerUserId().equals(callerUserId));
         if (!visible) {
+            boolean isSuperAdmin = callerUserId != null && userRepo.findById(callerUserId)
+                    .map(u -> "SUPER_ADMIN".equals(u.getGlobalRole()))
+                    .orElse(false);
+            if (isSuperAdmin) return repo;
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Repo not visible to caller");
         }
         return repo;
