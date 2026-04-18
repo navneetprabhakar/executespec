@@ -37,6 +37,7 @@ public class SecurityConfig {
     private final OAuthSuccessHandler oAuthSuccessHandler;
     private final SecurityProperties securityProperties;
     private final boolean oauthEnabled;
+    private final JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint;
 
     @Value("${app.cors.allowed-origins:http://localhost:5173}")
     private String allowedOrigins;
@@ -48,12 +49,14 @@ public class SecurityConfig {
             com.navneet.executespec.ratelimit.RateLimitFilter rateLimitFilter,
             @Nullable OAuthSuccessHandler oAuthSuccessHandler,
             SecurityProperties securityProperties,
+            JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint,
             @Value("${spring.security.oauth2.client.registration.google.client-id:none}") String googleClientId,
             @Value("${spring.security.oauth2.client.registration.github.client-id:none}") String githubClientId) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.rateLimitFilter = rateLimitFilter;
         this.oAuthSuccessHandler = oAuthSuccessHandler;
         this.securityProperties = securityProperties;
+        this.jsonAuthenticationEntryPoint = jsonAuthenticationEntryPoint;
 
         boolean hasGoogle = googleClientId != null && !"none".equals(googleClientId) && !googleClientId.isBlank();
         boolean hasGithub = githubClientId != null && !"none".equals(githubClientId) && !githubClientId.isBlank();
@@ -148,6 +151,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         // Everything else (SPA routes) — permit
                         .anyRequest().permitAll())
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(jsonAuthenticationEntryPoint))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(rateLimitFilter, JwtAuthenticationFilter.class);
 

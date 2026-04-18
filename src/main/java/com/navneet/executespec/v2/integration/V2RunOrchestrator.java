@@ -517,6 +517,10 @@ public class V2RunOrchestrator {
             if (needsApproval) {
                 perky.stop(runId);
                 updateStatus(runId, "AWAITING_APPROVAL");
+                // Open a PENDING row so the approve-endpoint's atomic claim
+                // (GateStore.tryClaimPlanGate) can detect concurrent approvals and
+                // return 409 to the loser — adversarial-test-report Finding 4.
+                gateStore.openPlanGate(runId);
                 int credits = runRepo.findById(runId)
                         .map(r -> r.getCreditsCharged() == null ? 1 : r.getCreditsCharged())
                         .orElse(1);
