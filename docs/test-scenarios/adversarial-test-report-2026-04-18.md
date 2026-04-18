@@ -31,6 +31,23 @@ Severity legend: 🔴 ship-blocker · 🟠 important · 🟡 minor · 🟢 polis
 
 ---
 
+## Status
+
+All 19 findings closed in two follow-up commits on
+`feature/security-hardening-2026-04-18`:
+
+1. Commit `ace0ccef` — Findings 1 · 2 · 3 · 4 (CRITICAL + HIGH batch).
+2. Commit (to be added) — Findings 5 · 6 · 7 · 8 · 9 · 10 · 11 · 12 · 13 · 14 · 15 · 17 · 18 · 19.
+3. Finding 16 intentionally left (REST best practice — rate-limit headers are expected).
+4. Finding 20 reclassified as **by-design**: test generation is scoped to
+   `runtimeSurface=HTTP` in `V2RunOrchestrator:637`. LIBRARY/CLI/STATIC_WEB
+   surfaces log but don't produce a `TestExecutionSummary`, so `testsPassed` /
+   `testsTotal` remain null. Expanding the CLI smoke result into a minimal
+   test summary is a follow-up (tracked under "pending CLI test harness" in
+   the v2 runtime-surface plan).
+
+---
+
 ## 1 · Executive summary
 
 | Theme | Count |

@@ -103,6 +103,15 @@ public class SecurityConfig {
                 // STATELESS otherwise (pure JWT)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(
                         oauthEnabled ? SessionCreationPolicy.IF_REQUIRED : SessionCreationPolicy.STATELESS))
+                // Closes adversarial-test-report Finding 8: the default
+                // HttpSessionSecurityContextRepository was writing the authenticated
+                // SecurityContext back to HttpSession after every JWT call, creating
+                // a JSESSIONID even though the auth was stateless. Switching to the
+                // request-scoped repository keeps JWT auth truly stateless. OAuth2's
+                // own HttpSessionOAuth2AuthorizationRequestRepository is untouched,
+                // so the authorization-code flow still works.
+                .securityContext(ctx -> ctx.securityContextRepository(
+                        new org.springframework.security.web.context.RequestAttributeSecurityContextRepository()))
                 .authorizeHttpRequests(auth -> auth
                         // Authenticated auth endpoints (must come before /api/auth/**)
                         .requestMatchers("/api/auth/me", "/api/auth/me/**").authenticated()

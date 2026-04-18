@@ -25,7 +25,7 @@ const TIERS: { id: Tier; name: string; price: string; features: string[] }[] = [
     id: 'PRO',
     name: 'Pro',
     price: '$29/mo',
-    features: ['100 runs/month', '3 concurrent runs', 'Integrations (JIRA, Slack)', 'Priority support', 'Org management'],
+    features: ['10 runs/month', '2 concurrent runs', 'Integrations (JIRA, Slack)', 'Priority support', 'Org management'],
   },
   {
     id: 'ENTERPRISE',

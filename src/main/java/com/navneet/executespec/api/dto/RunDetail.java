@@ -147,6 +147,20 @@ public class RunDetail {
     /** Current phase of background validation (TEST_GEN, REVIEW, RE_VALIDATE, REPORT). */
     String validationPhase;
 
+    // ── Validation report scoring snapshot (v2.5.10 + adversarial-report Finding 13) ──
+    /**
+     * Mirrors the corresponding fields on the {@code ValidationReport} so clients
+     * rendering run detail don't have to issue a second request to
+     * {@code GET /api/runs/{id}/report} just to show the headline score.
+     * Null until the report is written.
+     */
+    Integer verifiedScore;
+    Integer accuracyScore;
+    String reviewerVerdict;
+    Boolean finalBuildPassed;
+    Integer testsPassed;
+    Integer testsTotal;
+
     /** Present if this run was triggered by an external integration. */
     public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
 
