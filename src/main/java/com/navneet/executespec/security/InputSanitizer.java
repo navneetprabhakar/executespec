@@ -125,6 +125,7 @@ public class InputSanitizer {
         if (effective.atLeastMedium() && userRequest.length() > MEDIUM_PAYLOAD_CAP) {
             log.warn("INPUT BLOCKED (payload cap at {}): {} chars",
                     effective, userRequest.length());
+            if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("input");
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Request exceeds the " + MEDIUM_PAYLOAD_CAP
                             + "-character cap at guardrail level " + effective + ".");

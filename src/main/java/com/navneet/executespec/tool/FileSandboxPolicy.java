@@ -97,11 +97,11 @@ public class FileSandboxPolicy {
             rel = workspaceRoot.toAbsolutePath().relativize(target.toAbsolutePath());
         } catch (IllegalArgumentException e) {
             // different roots — containment check at the caller should have stopped this
-            return Decision.block("target outside workspace root");
+            return recordAndBlock("target outside workspace root");
         }
         String relStr = rel.toString().replace('\\', '/');
         if (relStr.isEmpty() || relStr.startsWith("..")) {
-            return Decision.block("target escapes workspace root");
+            return recordAndBlock("target escapes workspace root");
         }
 
         String firstSegment = relStr.contains("/") ? relStr.substring(0, relStr.indexOf('/')) : relStr;
@@ -111,17 +111,22 @@ public class FileSandboxPolicy {
         boolean inAllowedDir = MEDIUM_ALLOWED_DIRS.contains(firstSegment);
         boolean isAllowedRootFile = !relStr.contains("/") && MEDIUM_ALLOWED_ROOT_FILES.contains(fileName);
         if (!inAllowedDir && !isAllowedRootFile) {
-            return Decision.block("guardrail " + effective + ": writes restricted to "
+            return recordAndBlock("guardrail " + effective + ": writes restricted to "
                     + MEDIUM_ALLOWED_DIRS + " or known root-level config files");
         }
 
         // HIGH dotfile lockdown.
         if (effective.atLeastHigh() && fileName.startsWith(".")
                 && !HIGH_ALLOWED_DOTFILES.contains(fileName)) {
-            return Decision.block("guardrail HIGH: dotfile '" + fileName
+            return recordAndBlock("guardrail HIGH: dotfile '" + fileName
                     + "' is not in the allowlist " + HIGH_ALLOWED_DOTFILES);
         }
         return Decision.allow();
+    }
+
+    private Decision recordAndBlock(String reason) {
+        if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("file");
+        return Decision.block(reason);
     }
 
     public record Decision(boolean allowed, String reason) {
