@@ -435,11 +435,20 @@ public class V2RunOrchestrator {
                         : "";
                 if (projectId != null) {
                     try {
-                        var staleness = stalenessService.report(projectId);
+                        // Gap #5 (v2.5.12) — thread the submitting user's PAT through
+                        // staleness + regen so private-org repos don't 404 in the
+                        // background. Falls back to system PAT (null) if the user has
+                        // no PAT configured (public repos work fine that way).
+                        String runOwnerId = runRow == null ? null : runRow.getCreatedByUserId();
+                        String runUserPat = runOwnerId == null ? null
+                                : appUserRepository.findById(runOwnerId)
+                                        .map(com.navneet.executespec.auth.entity.AppUser::getGithubPat)
+                                        .orElse(null);
+                        var staleness = stalenessService.report(projectId, runUserPat);
                         if (staleness != null && staleness.stale()) {
                             log.info("V2 run={} project={} has {} stale codemap(s); regenerating before planner",
                                     runId, projectId, staleness.staleCount());
-                            projectArchitectureService.generate(projectId);
+                            projectArchitectureService.generate(projectId, null, runUserPat);
                             stalenessService.invalidate(projectId);
                         }
                     } catch (Exception e) {
