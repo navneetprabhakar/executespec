@@ -146,6 +146,18 @@ public class BuildCommandResolver {
         if (exists(workspaceRoot, "go.mod")) {
             return Optional.of(build("go build ./...", 180, "inferred:go"));
         }
+        // React Native (Expo, managed workflow) — app.json + package.json at root
+        // is the high-signal marker. Check BEFORE the generic Node branch so RN
+        // projects don't silently fall through to `npm run build` (which either
+        // does nothing or invokes the wrong tooling). Smoke = Metro bundle +
+        // typecheck; platform=android is enough (the bundler catches iOS-side
+        // errors too — the JS is shared and the native module surface is the
+        // same for v1 managed Expo).
+        if (exists(workspaceRoot, "app.json") && exists(workspaceRoot, "package.json")) {
+            return Optional.of(build(
+                    "npx expo export --platform android --output-dir dist && npx tsc --noEmit",
+                    300, "inferred:expo-rn"));
+        }
         if (exists(workspaceRoot, "package.json")) {
             // Prefer "build" script if defined; otherwise tsc as a TypeScript project sanity check.
             return Optional.of(build("npm run build --if-present", 240, "inferred:npm"));
