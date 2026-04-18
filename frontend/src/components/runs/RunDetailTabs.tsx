@@ -24,7 +24,7 @@ import LiveLog from './LiveLog';
 import RunConversation from './RunConversation';
 import TaskGraph from './TaskGraph';
 import PreviewTab from './PreviewTab';
-import { PIPELINE_STEPS } from '@/lib/constants';
+import { PIPELINE_STEPS, V2_LEGACY_UI } from '@/lib/constants';
 import { useSseStore } from '@/stores/useSseStore';
 import { useViewMode } from '@/hooks/useViewMode';
 import { fmtTokens, relativeTime, cn } from '@/lib/utils';
@@ -125,16 +125,21 @@ export default function RunDetailTabs() {
   const chatReady = isTerminal;
   const topLevelPermissions = useTierPermissions();
 
+  // harness-v2-remaining-work Gap 3: Chat tab is hidden while the V2 chat/apply
+  // endpoints return 410 Gone. Re-enable via V2_LEGACY_UI.runConversation once
+  // the V2 ConversationAgent is wired.
+  const chatTab = V2_LEGACY_UI.runConversation ? [{ value: 'chat', label: 'Chat' }] : [];
+
   const VIBE_TABS = [
     { value: 'code', label: 'Code' },
     { value: 'preview', label: 'Preview' },
-    { value: 'chat', label: 'Chat' },
+    ...chatTab,
   ];
 
   const TABS = isVibe ? VIBE_TABS : [
     ...BASE_TABS.filter(t => t.value !== 'log' || topLevelPermissions?.canViewLiveLog !== false),
     { value: 'preview', label: 'Preview' },
-    { value: 'chat', label: 'Chat' },
+    ...chatTab,
   ];
 
   return (
@@ -973,7 +978,7 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
           <p className="text-sm font-medium text-primary leading-snug">{t.title}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {canEdit && !editing && (
+          {V2_LEGACY_UI.editRunPlan && canEdit && !editing && (
             <button
               onClick={() => setEditing(true)}
               className="text-[10px] text-muted hover:text-accent-blue transition-colors"

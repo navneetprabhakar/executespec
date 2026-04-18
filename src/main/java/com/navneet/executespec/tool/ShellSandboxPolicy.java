@@ -1,6 +1,9 @@
 package com.navneet.executespec.tool;
 
+import com.navneet.executespec.security.guardrail.GuardrailLevel;
+import com.navneet.executespec.security.guardrail.GuardrailLevelResolver;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -11,6 +14,32 @@ import java.util.regex.Pattern;
 @Slf4j
 @Component
 public class ShellSandboxPolicy {
+
+    /** MEDIUM-level additional deny patterns. */
+    private static final List<Pattern> MEDIUM_ADDITIONAL_PATTERNS = List.of(
+            Pattern.compile("\\beval\\b"),                 // any `eval` token
+            Pattern.compile("\\bexec\\b")                  // any `exec` token
+    );
+
+    /** HIGH-level strict npm/mvn/gradle verb allowlist. */
+    private static final Set<String> HIGH_STRICT_NPM_VERBS =
+            Set.of("install", "ci", "build", "test", "start", "run-script");
+    private static final Set<String> HIGH_STRICT_MVN_VERBS =
+            Set.of("compile", "test", "package", "verify", "install", "clean", "spring-boot:run");
+    private static final Set<String> HIGH_STRICT_GRADLE_VERBS =
+            Set.of("build", "test", "check", "clean", "assemble");
+
+    private final GuardrailLevelResolver guardrailLevelResolver;
+
+    @Autowired
+    public ShellSandboxPolicy(GuardrailLevelResolver guardrailLevelResolver) {
+        this.guardrailLevelResolver = guardrailLevelResolver;
+    }
+
+    /** Back-compat constructor — assumes LOW. */
+    public ShellSandboxPolicy() {
+        this.guardrailLevelResolver = null;
+    }
 
     // Commands that are NEVER allowed regardless of context
     private static final Set<String> BLOCKED_COMMANDS = Set.of(
@@ -102,12 +131,37 @@ public class ShellSandboxPolicy {
      * @return a ValidationResult indicating whether the command is allowed
      */
     public ValidationResult validate(String command, String workspacePath) {
+        GuardrailLevel level = guardrailLevelResolver != null
+                ? guardrailLevelResolver.current()
+                : GuardrailLevel.LOW;
+        return validate(command, workspacePath, level);
+    }
+
+    /**
+     * Level-aware validation. LOW preserves the historical allowlist/deny
+     * patterns exactly. MEDIUM additionally rejects `eval` and `exec` tokens.
+     * HIGH further tightens {@code npm}, {@code mvn}, and {@code gradle} to
+     * canonical subcommands only (no {@code npm run <arbitrary-string>},
+     * which can execute user-supplied shell).
+     */
+    public ValidationResult validate(String command, String workspacePath, GuardrailLevel level) {
+        GuardrailLevel effective = level == null ? GuardrailLevel.LOW : level;
         if (command == null || command.isBlank()) {
             return ValidationResult.block("Empty command");
         }
 
         String trimmed    = command.trim();
         String normalized = trimmed.toLowerCase();
+
+        // MEDIUM+: additional deny patterns
+        if (effective.atLeastMedium()) {
+            for (Pattern p : MEDIUM_ADDITIONAL_PATTERNS) {
+                if (p.matcher(normalized).find()) {
+                    log.warn("SHELL BLOCKED (guardrail={} extra-pattern): {}", effective, trimmed);
+                    return ValidationResult.block("Command matches a guardrail " + effective + " denied pattern");
+                }
+            }
+        }
 
         // Block subshell/backtick injection — $(...) and `...` can embed arbitrary commands
         if (SUBSHELL_PATTERN.matcher(normalized).find()) {
@@ -153,7 +207,7 @@ public class ShellSandboxPolicy {
             String seg = segment.trim();
             if (seg.isEmpty()) continue;
 
-            ValidationResult segResult = validateSegment(seg, trimmed);
+            ValidationResult segResult = validateSegment(seg, trimmed, effective);
             if (!segResult.permitted()) return segResult;
         }
 
@@ -219,7 +273,7 @@ public class ShellSandboxPolicy {
     /**
      * Validates a single command segment (after splitting on chain operators).
      */
-    private ValidationResult validateSegment(String segment, String originalCommand) {
+    private ValidationResult validateSegment(String segment, String originalCommand, GuardrailLevel level) {
         String[] tokens = segment.split("\\s+");
         String firstToken = tokens[0];
 
@@ -242,7 +296,27 @@ public class ShellSandboxPolicy {
             }
         }
 
+        // HIGH: strict npm / mvn / gradle verbs — no arbitrary `npm run <script>`,
+        // no custom `mvn <plugin>:<goal>` beyond the canonical set. Plan 1 P4.
+        if (level != null && level.atLeastHigh() && tokens.length >= 2) {
+            Set<String> canonical = canonicalVerbsFor(firstToken);
+            if (canonical != null && !canonical.contains(tokens[1])) {
+                log.warn("SHELL BLOCKED (guardrail=HIGH strict verb): {} {} in {}", firstToken, tokens[1], originalCommand);
+                return ValidationResult.block(firstToken + " subcommand '" + tokens[1]
+                        + "' is not in the HIGH-level canonical verb allowlist");
+            }
+        }
+
         return ValidationResult.allow();
+    }
+
+    private static Set<String> canonicalVerbsFor(String firstToken) {
+        return switch (firstToken) {
+            case "npm", "npx" -> HIGH_STRICT_NPM_VERBS;
+            case "mvn" -> HIGH_STRICT_MVN_VERBS;
+            case "gradle" -> HIGH_STRICT_GRADLE_VERBS;
+            default -> null;
+        };
     }
 
     public record ValidationResult(boolean permitted, String reason) {
