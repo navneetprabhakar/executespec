@@ -77,8 +77,13 @@ jobs:
           npm run build
 
       # ── Backend build ─────────────────────────────────────────────────────
-      - name: Build JAR (skip tests)
-        run: mvn package -DskipTests -q
+      # v2.5.12 (Gap #3) — drop -DskipTests so unit tests actually run.
+      # Surefire is configured (pom.xml) to skip the `e2e` + `integration`
+      # groups so only fast non-DB tests execute. The earlier -DskipTests
+      # was hiding the V113 schema mismatch + the PlannerAgentV2ValidationTest
+      # constructor-drift compile error, both of which crashed dev on boot.
+      - name: Build JAR (run unit tests)
+        run: mvn package -q
 
       # ── Authenticate to GCP (Workload Identity Federation — no keys) ─────
       - name: Authenticate to GCP
@@ -281,6 +286,22 @@ jobs:
         run: sleep 30
 
       # ── Health check (separate short SSH session) ────────────────────────
+      # v2.5.12 (Gap #4) — fix the health-check buffer-reuse bug.
+      #
+      # The previous wrapper wrote curl's body to /tmp/health.json. When
+      # the app crashed, the new curl exited 7 (CURLE_COULDNT_CONNECT) and
+      # left the body file UNTOUCHED — so the wrapper happily grepped the
+      # stale body from the previous successful call, found `"status":"UP"`,
+      # and declared the run healthy. That's why the V113 boot-crash on
+      # 2026-04-17 sailed through CI as "success" while the GCE instance
+      # was actually down for an hour.
+      #
+      # New wrapper:
+      #   1. Always rm the body file before curl (no stale read)
+      #   2. Use the HTTP code from `-w '%{http_code}'` to gate (not body)
+      #   3. Hit /actuator/health (canonical Spring Actuator path)
+      #   4. Only consider 200 + JSON body actually containing "status":"UP"
+      #      (or DEGRADED) as success
       - name: Health check
         run: |
           for i in 1 2 3 4 5 6 7 8; do
@@ -289,11 +310,15 @@ jobs:
               --project ${{ env.GCP_PROJECT }} \
               --zone ${{ env.GCE_ZONE }} \
               --tunnel-through-iap \
-              --command="curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/api/health 2>/dev/null; echo \"HTTP_CODE=\$?:\$(cat /tmp/health.json 2>/dev/null)\"" \
+              --command="rm -f /tmp/health.json; HTTP_CODE=\$(curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/actuator/health); CURL_EXIT=\$?; BODY=\$(cat /tmp/health.json 2>/dev/null || echo ''); echo \"http=\$HTTP_CODE exit=\$CURL_EXIT body=\$BODY\"" \
               2>/dev/null) || RESULT="SSH_FAIL"
             echo "  Result: $RESULT"
-            if echo "$RESULT" | grep -qE '"status":"(UP|DEGRADED)"'; then
-              echo "Health OK (app is alive)"
+            # Gate on the actual HTTP code = 200 AND body containing UP/DEGRADED.
+            # `http=200` substring + the JSON status check together prevent the
+            # buffer-reuse false-positive.
+            if echo "$RESULT" | grep -q 'http=200' \
+                && echo "$RESULT" | grep -qE '"status":"(UP|DEGRADED)"'; then
+              echo "Health OK (HTTP 200 + status UP/DEGRADED)"
               exit 0
             fi
             sleep 10
