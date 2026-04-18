@@ -87,7 +87,7 @@ public class HealthCheckDetector {
         return switch (type) {
             case SPRING_BOOT -> "/actuator/health";
             case NODE_BACKEND, PYTHON, GO, RUST, JAVA -> "/health";
-            case NODE_FRONTEND, FULL_STACK, STATIC_HTML -> "/";
+            case NODE_FRONTEND, FULL_STACK, STATIC_HTML, REACT_NATIVE_EXPO -> "/";
         };
     }
 
