@@ -392,8 +392,10 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <!-- e2e and integration tests require live DB + real API keys; run via -Pintegration -->
-          <excludedGroups>e2e,integration</excludedGroups>
+          <!-- e2e + integration + chaos tests require Docker / live DB / real API
+               keys; run via -Pintegration. Default Surefire run = fast unit tests
+               only so CI's `mvn package` is bounded to a couple of minutes. -->
+          <excludedGroups>e2e,integration,chaos</excludedGroups>
         </configuration>
       </plugin>
     </plugins>
