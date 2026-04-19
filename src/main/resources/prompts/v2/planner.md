@@ -79,7 +79,7 @@ The plan schema:
 
 - `planTitle`: short one-line title (≤ 80 chars)
 - `planSummary`: one-paragraph summary of what the plan accomplishes
-- `projectType`: one of `java-spring-boot`, `node-backend`, `node-frontend`, `python`, `go`, `rust`, `cli`, `unknown`. Infer from the spec.
+- `projectType`: one of `java-spring-boot`, `node-backend`, `node-frontend`, `python`, `go`, `rust`, `cli`, `react-native-expo`, `unknown`. Infer from the spec. The `react-native-expo` value is gated behind the `codegen.react_native.enabled` feature flag — if disabled, the run will be rejected with 501 before this plan is accepted.
 - `buildCommand`: explicit shell build command (e.g. `mvn -q -DskipTests compile`, `npm run build`, `cargo build --quiet`). Omit / use null only if you genuinely cannot determine one — the harness will fall back to framework inference.
 
   **Runtime conventions — do NOT violate these:**
@@ -87,10 +87,11 @@ The plan schema:
   - For Node projects, prefer `npm run <script>` over raw `node` invocations when a script exists in package.json.
   - For Java/Maven, prefer `mvn -q -DskipTests compile` over full `mvn install` for smoke tests — faster and still catches type errors.
 - `smokeTestStrategy`: one of `BUILD` (default — build must pass), `PREVIEW_HEALTH` (start a server and hit `/health`), `TEST_SUITE` (run the test suite).
-- `runtimeSurface`: one of `HTTP` (web server — default), `CLI` (console program invoked via args/stdin), `LIBRARY` (importable package, no entry point), `STATIC_WEB` (pure frontend). Infer from the spec:
+- `runtimeSurface`: one of `HTTP` (web server — default), `CLI` (console program invoked via args/stdin), `LIBRARY` (importable package, no entry point), `STATIC_WEB` (pure frontend), `MOBILE_APP` (React Native / Expo — Android + iOS from one codebase). Infer from the spec:
   - "Build a REST API…" / "Express app…" / "Spring Boot…" → `HTTP`
   - "Write a function that…" / "Compute the nth…" / "Script that reads…" / "CLI tool…" → `CLI` if it has a main entry point, `LIBRARY` if the spec asks for a reusable function/module only
   - "Static site" / "Landing page" → `STATIC_WEB`
+  - "Mobile app…" / "Android app…" / "iOS app…" / "React Native…" / "Expo…" → `MOBILE_APP`
 
   **Deliverables by runtime surface (enforced by the harness — propagate to tasks via `hardConstraints` or `touchesFiles` where appropriate):**
   - `HTTP` **backend** projects (`java-spring-boot`, `node-backend`, `python`, `go`, `rust`) MUST include `openapi.yaml` at the repo root describing every endpoint — this is how the preview renders API docs. Add a task for it if the spec doesn't mention it explicitly; the spec file is not optional.
@@ -119,6 +120,8 @@ The plan schema:
 {{REFERENCE_DOCS}}
 
 {{TDD_MODE_BLOCK}}
+
+{{MOBILE_PREFERENCE_BLOCK}}
 
 {{PR_REVIEW_COMMENTS}}
 

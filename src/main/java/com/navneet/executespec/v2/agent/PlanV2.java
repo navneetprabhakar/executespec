@@ -77,7 +77,13 @@ public record PlanV2(
         /** Importable library / package — no standalone entry point. Unit-test surface only. */
         LIBRARY,
         /** Static HTML/JS frontend with no backend. */
-        STATIC_WEB
+        STATIC_WEB,
+        /** React Native / Expo mobile app — Android + iOS from one codebase. Test surface is
+         *  Jest + {@code @testing-library/react-native}; smoke is {@code expo export} + {@code tsc --noEmit}.
+         *  Live preview in v1 is an Expo-Go QR pairing flow delivered to the user's device,
+         *  not an inside-infra render — no preview branch fires. Gated behind
+         *  {@code codegen.react_native.enabled}. */
+        MOBILE_APP
     }
 
     /**

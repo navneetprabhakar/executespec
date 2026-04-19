@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "ExecuteSpec RN Smoke",
+    "slug": "executespec-rn-smoke",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.executespec.smoke"
+    },
+    "android": {
+      "package": "ai.executespec.smoke",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "plugins": []
+  }
+}

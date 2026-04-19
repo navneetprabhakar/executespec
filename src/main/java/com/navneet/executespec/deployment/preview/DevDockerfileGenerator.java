@@ -95,6 +95,32 @@ public class DevDockerfileGenerator {
             return PreviewProjectType.JAVA;
         }
 
+        // 1c. React Native + Expo (managed workflow). High-signal marker is
+        //     app.json at the repo root PLUS `expo` in package.json deps. Check
+        //     BEFORE the generic Node branch so RN projects don't misclassify
+        //     as NODE_FRONTEND.
+        Path appJson = workspace.resolve("app.json");
+        Path pkgJsonForExpo = workspace.resolve("package.json");
+        if (Files.exists(appJson) && Files.exists(pkgJsonForExpo)) {
+            try {
+                JsonNode pkgNode = mapper.readTree(pkgJsonForExpo.toFile());
+                boolean hasExpoDep = false;
+                for (String field : List.of("dependencies", "devDependencies")) {
+                    JsonNode deps = pkgNode.get(field);
+                    if (deps != null && deps.has("expo")) {
+                        hasExpoDep = true;
+                        break;
+                    }
+                }
+                if (hasExpoDep) {
+                    log.info("[Detect] Expo + React Native project (app.json + expo dep present)");
+                    return PreviewProjectType.REACT_NATIVE_EXPO;
+                }
+            } catch (IOException e) {
+                log.debug("[Detect] Could not read package.json for Expo check: {}", e.getMessage());
+            }
+        }
+
         // 2. Node (frontend vs backend)
         Path packageJson = workspace.resolve("package.json");
         if (Files.exists(packageJson)) {
@@ -218,6 +244,7 @@ public class DevDockerfileGenerator {
                 case RUST -> rustDockerfile(workspace);
                 case FULL_STACK -> singlePackageFullStackDockerfile(workspace);
                 case STATIC_HTML -> staticHtmlDockerfile();
+                case REACT_NATIVE_EXPO -> reactNativeExpoDockerfile();
             };
         }
 
@@ -262,6 +289,7 @@ public class DevDockerfileGenerator {
             case STATIC_HTML   -> cloudRun_StaticHtml();
             case JAVA          -> cloudRun_Java(workspace);
             case FULL_STACK    -> cloudRun_FullStack(workspace);
+            case REACT_NATIVE_EXPO -> reactNativeExpoDockerfile();
         };
     }
 
@@ -2411,6 +2439,68 @@ public class DevDockerfileGenerator {
                 """;
     }
 
+    /**
+     * React Native + Expo preview Dockerfile. Two-stage build:
+     *
+     * <ol>
+     *   <li>builder — runs {@code npx expo export --platform android} to produce
+     *       the Metro bundle + asset manifest under {@code /app/dist/}.</li>
+     *   <li>runtime — nginx serves the bundle + a custom landing page that
+     *       explains the preview status, shows bundle size, and renders a
+     *       client-side QR code pointing to the Expo Go deep-link. Full Expo
+     *       Go protocol integration (manifest protocol v2 + on-device hot
+     *       reload) is v2 follow-up — this v1 Dockerfile just proves the
+     *       bundle builds + makes the artifact downloadable from the preview
+     *       URL.</li>
+     * </ol>
+     *
+     * <p>Workspace-independent (identical bytes for every RN run) so Cloud Run
+     * can cache the builder layer across previews.
+     */
+    private String reactNativeExpoDockerfile() {
+        return """
+                FROM node:20-alpine AS builder
+                WORKDIR /app
+                LABEL preview=true
+                COPY package.json package-lock.json* ./
+                # Install deps. Falls back to npm install if package-lock.json wasn't
+                # committed (common when the worker writes the scaffold from scratch
+                # and never invoked `npm install` in its sandbox).
+                RUN (npm ci --legacy-peer-deps 2>/dev/null) || npm install --legacy-peer-deps
+                # hermes-compiler guard. Expo SDK 55 / RN 0.80 under-declares this
+                # transitive dep — `expo export` fails with
+                # "Cannot find module 'hermes-compiler/package.json'" if it's missing.
+                # If the worker's package.json didn't include it, add it now so the
+                # bundle succeeds. No-op when already present.
+                RUN node -e "const p=require('./package.json');const deps=(p.dependencies||{});process.exit(deps['hermes-compiler']?0:1)" \\
+                    || npm install --no-save --legacy-peer-deps hermes-compiler@latest
+                COPY . .
+                RUN npx expo export --platform android --output-dir /app/dist \\
+                    && echo '<!doctype html><html><head><meta charset="utf-8"><title>Mobile Preview</title>' \\
+                       '<style>body{font-family:system-ui;margin:40px;max-width:640px}h1{color:#1f2937}' \\
+                       '.card{background:#f3f4f6;padding:16px;border-radius:8px;margin:16px 0}' \\
+                       'code{background:#e5e7eb;padding:2px 6px;border-radius:4px}</style></head>' \\
+                       '<body><h1>React Native preview bundled</h1>' \\
+                       '<p>Your mobile app compiled cleanly (Metro bundle + Hermes bytecode).</p>' \\
+                       '<div class="card"><b>Next steps:</b><ol>' \\
+                       '<li>Install <a href="https://expo.dev/client" target="_blank">Expo Go</a> on your phone.</li>' \\
+                       '<li>Full Expo Go QR pairing is a v2 follow-up. For now, download the bundle below or run the project locally with <code>npx expo start</code>.</li>' \\
+                       '</ol></div>' \\
+                       '<p><a href="/_expo/static/js/android/">Download the Hermes bundle</a> | ' \\
+                       '<a href="/metadata.json">View manifest (metadata.json)</a></p>' \\
+                       '</body></html>' > /app/dist/index.html
+                FROM nginx:alpine
+                COPY --from=builder /app/dist /usr/share/nginx/html
+                RUN rm -f /etc/nginx/conf.d/default.conf \\
+                    && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; location / { try_files $uri $uri/ =404; } }' \\
+                       > /etc/nginx/conf.d/default.conf \\
+                    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx \\
+                    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
+                EXPOSE 8080
+                CMD ["nginx", "-g", "daemon off;"]
+                """;
+    }
+
     private String staticHtmlDockerfile() {
         // Use echo with proper escaping. printf '\$uri' produces literal \$uri (bug).
         // echo '...$uri...' with single quotes preserves $uri correctly.
@@ -2437,9 +2527,10 @@ public class DevDockerfileGenerator {
      * a CLI app (wrapped by ttyd), or an MCP server (wrapped by Inspector).
      */
     public PreviewMode detectMode(PreviewProjectType type, Path workspace) {
+        if (type == PreviewProjectType.REACT_NATIVE_EXPO) return PreviewMode.MOBILE_EXPO_GO;
         if (isMcpProject(type, workspace)) return PreviewMode.MCP_INSPECTOR;
         if (isCliProject(type, workspace)) return PreviewMode.CLI_TERMINAL;
-        
+
         if (type == PreviewProjectType.FULL_STACK || type == PreviewProjectType.NODE_FRONTEND || type == PreviewProjectType.STATIC_HTML) {
             return PreviewMode.FULL_STACK;
         }
@@ -2505,7 +2596,7 @@ public class DevDockerfileGenerator {
                 }
                 yield true; // No web framework detected -> CLI script
             }
-            case NODE_FRONTEND, SPRING_BOOT, FULL_STACK, STATIC_HTML -> false;
+            case NODE_FRONTEND, SPRING_BOOT, FULL_STACK, STATIC_HTML, REACT_NATIVE_EXPO -> false;
             case JAVA -> true;
         };
     }
@@ -2739,7 +2830,8 @@ public class DevDockerfileGenerator {
     private boolean requiresPackageJson(PreviewProjectType type) {
         return type == PreviewProjectType.NODE_FRONTEND
             || type == PreviewProjectType.NODE_BACKEND
-            || type == PreviewProjectType.FULL_STACK;
+            || type == PreviewProjectType.FULL_STACK
+            || type == PreviewProjectType.REACT_NATIVE_EXPO;
     }
 
     private boolean fileContainsPattern(Path file, String... patterns) {

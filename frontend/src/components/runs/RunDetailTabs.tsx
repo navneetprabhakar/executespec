@@ -425,12 +425,24 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
   const isOrgMember = useAuthStore(selectIsOrgMember);
   const permissions = useTierPermissions();
 
-  // ── Live cost ──────────────────────────────────────────────────────
+  // ── Live cost + tokens ─────────────────────────────────────────────
+  // During V2 runs the stored `total_input_tokens` / `total_output_tokens`
+  // lag actual usage — they're flushed only at phase boundaries. The /cost
+  // endpoint returns the live accumulator snapshot alongside cost so the UI
+  // shows an internally-consistent pair (tokens and cost in lockstep)
+  // instead of "Total 3.4K / Live $3.31".
   const [liveCost, setLiveCost] = useState<number | null>(null);
+  const [liveTokens, setLiveTokens] = useState<{ input: number; output: number } | null>(null);
   useEffect(() => {
     let cancelled = false;
     getLiveCost(run.runId)
-      .then((res) => { if (!cancelled) setLiveCost(res.costUsd); })
+      .then((res) => {
+        if (cancelled) return;
+        setLiveCost(res.costUsd);
+        if (typeof res.inputTokens === 'number' && typeof res.outputTokens === 'number') {
+          setLiveTokens({ input: res.inputTokens, output: res.outputTokens });
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [run.runId, run.status]);
@@ -503,7 +515,12 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
   // STUCK occurs during the WORKING phase — map it there for pipeline step display
   const displayStatus = run.status === 'STUCK' ? 'WORKING' : run.status;
-  const totalTokens = (run.totalInputTokens || 0) + (run.totalOutputTokens || 0);
+  // Prefer live tokens from the /cost snapshot when available (mid-run the
+  // DB totals lag — see liveTokens comment above). Fall back to DB for
+  // legacy runs and terminal states where the snapshot has been finalised.
+  const liveTotal = liveTokens ? liveTokens.input + liveTokens.output : 0;
+  const dbTotal = (run.totalInputTokens || 0) + (run.totalOutputTokens || 0);
+  const totalTokens = Math.max(liveTotal, dbTotal);
 
   // v2.5.8 — V2 runs have a simpler phase sequence than V1. The hardcoded
   // PIPELINE_STEPS (V1: QUEUED → PLANNING → AWAITING_APPROVAL → WORKING →
