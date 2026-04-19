@@ -5,6 +5,7 @@ import {
 } from '@/lib/api';
 import type { LocalPreviewStatus, PreviewAnalysis, ApiDocsProbeResult } from '@/lib/api';
 import ConsolePanel from './ConsolePanel';
+import MobilePreviewPanel from './MobilePreviewPanel';
 import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
 import {
@@ -25,6 +26,7 @@ const TYPE_LABELS: Record<string, string> = {
   DOTNET: '.NET',
   STATIC: 'Static',
   FULLSTACK: 'Full-Stack',
+  REACT_NATIVE_EXPO: 'Mobile · React Native',
   UNKNOWN: 'Unknown',
 };
 
@@ -489,7 +491,9 @@ export default function PreviewTab({ runId }: { runId: string }) {
       {/* ── Main content ── */}
       <div className="flex-1 overflow-hidden">
         {isRunning && status?.url ? (
-          isBackendOnly ? (
+          projectType === 'REACT_NATIVE_EXPO' ? (
+            <MobilePreviewPanel url={status.url} />
+          ) : isBackendOnly ? (
             <BackendPreview runId={runId} url={status.url} openapiSpec={openapiSpec} />
           ) : !warmupReady ? (
             <div className="flex-1 flex items-center justify-center h-full">

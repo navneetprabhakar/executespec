@@ -47,6 +47,33 @@ class DevDockerfileGeneratorTest {
         }
 
         @Test
+        @DisplayName("Detects Expo / React Native from app.json + expo dep")
+        void detectsReactNativeExpo(@TempDir Path ws) throws IOException {
+            // app.json + package.json with expo dep is the high-signal marker.
+            // Must NOT misclassify as NODE_FRONTEND (no react/vite dep in package.json).
+            Files.writeString(ws.resolve("app.json"),
+                    "{\"expo\":{\"name\":\"demo\",\"slug\":\"demo\"}}");
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"mobile","dependencies":{"expo":"~55.0.0","react-native":"0.80.0"}}
+                    """);
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.REACT_NATIVE_EXPO);
+            assertThat(gen.detectMode(PreviewProjectType.REACT_NATIVE_EXPO, ws))
+                    .isEqualTo(PreviewMode.MOBILE_EXPO_GO);
+        }
+
+        @Test
+        @DisplayName("app.json without expo dep falls back to Node detection")
+        void rejectsAppJsonWithoutExpoDep(@TempDir Path ws) throws IOException {
+            // Some non-Expo projects legitimately have app.json — don't misclassify
+            // them as RN. Without `expo` in deps it's just a Node project.
+            Files.writeString(ws.resolve("app.json"), "{\"name\":\"not-expo\"}");
+            Files.writeString(ws.resolve("package.json"), """
+                    {"name":"api","dependencies":{"express":"^4.18"}}
+                    """);
+            assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_BACKEND);
+        }
+
+        @Test
         @DisplayName("Detects Fastify backend from package.json")
         void detectsNodeBackendFastify(@TempDir Path ws) throws IOException {
             Files.writeString(ws.resolve("package.json"), """

@@ -163,6 +163,7 @@ public class PlannerAgentV2 {
                 .replace("{{PROJECT_BRIEF}}", req.projectBrief() == null ? "" : req.projectBrief())
                 .replace("{{REFERENCE_DOCS}}", req.referenceDocs() == null ? "" : req.referenceDocs())
                 .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()))
+                .replace("{{MOBILE_PREFERENCE_BLOCK}}", renderMobilePreferenceBlock())
                 .replace("{{PR_REVIEW_COMMENTS}}", renderPrReviewBlock(req.prReviewComments()));
 
         String userMsg = (feedback == null || feedback.isBlank())
@@ -188,7 +189,12 @@ public class PlannerAgentV2 {
                 .messages(messages)
                 .context(req.context())
                 .temperature(0.0)
-                .maxTokens(4096)
+                // v2.5.13 — bumped 4096 → 8192. Validation v3's required
+                // requirements-graph emission + the new mobile-preference block
+                // can push the planner's tool-call JSON past the 4k ceiling,
+                // which truncates the arguments mid-emission and produces
+                // "empty plan" failures. Haiku/sonnet/gpt all handle 8k cleanly.
+                .maxTokens(8192)
                 .toolsOverride(List.of(submitPlan))
                 .build());
 
@@ -300,7 +306,8 @@ public class PlannerAgentV2 {
         PlanV2.RuntimeSurface surface = plan.runtimeSurface();
         boolean testableSurface = surface == PlanV2.RuntimeSurface.HTTP
                 || surface == PlanV2.RuntimeSurface.CLI
-                || surface == PlanV2.RuntimeSurface.LIBRARY;
+                || surface == PlanV2.RuntimeSurface.LIBRARY
+                || surface == PlanV2.RuntimeSurface.MOBILE_APP;
         boolean isSingleShot = plan.classification() == Classification.SINGLE_SHOT;
         if (testableSurface && !isSingleShot) {
             boolean hasTestRequirement = reqs.stream()
@@ -600,6 +607,47 @@ public class PlannerAgentV2 {
                 `editFile` (not `writeFile`) to modify existing code.
 
                 """ + prReviewComments;
+    }
+
+    /** v2.5.13 — inject a directive biasing the planner toward React Native + Expo
+     *  for mobile specs when the codegen.react_native.enabled flag is ON. The flag
+     *  alone was a passive gate (accept iff planner happens to pick react-native-expo);
+     *  this block makes it an active nudge so the Calorie Tracker / habit-tracker
+     *  style mobile specs actually route there instead of falling to native Gradle
+     *  (which the smoke container has no SDK for → FINAL_BUILD_FAILED). */
+    private String renderMobilePreferenceBlock() {
+        if (featureFlagService == null) return "";
+        try {
+            if (!featureFlagService.isEnabled("codegen.react_native.enabled")) return "";
+        } catch (Exception e) {
+            return "";
+        }
+        return """
+                # Mobile preference — React Native + Expo (ACTIVE)
+
+                The `codegen.react_native.enabled` feature flag is ON. When you infer that
+                the spec is asking for a mobile application (phrases like "Android app",
+                "iOS app", "mobile app", "cross-platform", "native or cross-platform"),
+                you MUST set:
+                - `projectType = "react-native-expo"`
+                - `runtimeSurface = "MOBILE_APP"`
+                - `buildCommand = "npx expo export --platform android --output-dir dist && npx tsc --noEmit"`
+                - `smokeTestStrategy = "BUILD"`
+
+                The ONLY reason to pick native Android (`./gradlew build`) or native iOS is
+                if the spec explicitly requires a feature Expo managed workflow cannot provide
+                (deep OS integration like Health APIs, NFC, custom native modules). Stylistic
+                signals like "Material Design 3", "iOS-style", "native look" are NOT reasons
+                to avoid Expo — it fully supports those through libraries. When in doubt,
+                choose React Native + Expo: one codebase, both platforms, and the smoke
+                container actually has the tooling to build it.
+
+                Tasks must reflect the RN scaffold: package.json + app.json + eas.json +
+                tsconfig.json + babel.config.js + index.ts + App.tsx at workspace root; then
+                per-screen .tsx files; then Jest + @testing-library/react-native tests. Do
+                NOT emit native `android/` or `ios/` directories — managed workflow only.
+
+                """;
     }
 
     private String renderTddBlock(boolean tddMode) {

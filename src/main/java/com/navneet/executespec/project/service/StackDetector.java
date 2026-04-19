@@ -122,10 +122,19 @@ public class StackDetector {
         return null;
     }
 
-    private static String detectNodeFramework(List<String> files) {
+    // Package-private for StackDetectorTest.
+    static String detectNodeFramework(List<String> files) {
+        // Expo's `app.json` at the repo root is a high-signal marker that this is
+        // a managed React Native project (paired with a package.json depending on
+        // `expo`). Check BEFORE the generic "react-native" string match so we get
+        // the more specific label. Next.js / Vite / NestJS retain the existing
+        // `hasFile` semantics (match in any dir) so monorepos still classify them
+        // correctly — only Expo uses the stricter root-only check because
+        // `app.json` is a common filename in non-Expo contexts.
         if (hasFile(files, "next.config.js") || hasFile(files, "next.config.mjs")) return "Next.js";
         if (hasFile(files, "vite.config.ts") || hasFile(files, "vite.config.js")) return "Vite";
         if (hasFile(files, "nest-cli.json")) return "NestJS";
+        if (hasRoot(files, "app.json")) return "Expo (React Native)";
         if (anyContains(files, "react-native")) return "React Native";
         return "Node";
     }

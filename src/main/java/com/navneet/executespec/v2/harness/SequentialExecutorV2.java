@@ -140,7 +140,8 @@ public class SequentialExecutorV2 {
                 req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
 
         String refDocs = fetchReferenceDocs(req.projectId(), task);
-        String systemPrompt = composeSystemPrompt(task, req.designBlock(), refDocs);
+        String systemPrompt = composeSystemPrompt(task, req.designBlock(), refDocs,
+                req.plan() == null ? null : req.plan().projectType());
         String userPrompt = composeUserPrompt(task, null);
 
         log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -363,9 +364,9 @@ public class SequentialExecutorV2 {
      * by the planner's complexity tag.
      *
      * <ul>
-     *   <li>LOW    → LIGHTWEIGHT tier, 12 iters, 4096 max tokens</li>
-     *   <li>MEDIUM → WORKHORSE tier, 22 iters, 8192 max tokens</li>
-     *   <li>HIGH   → PLANNING tier, 35 iters, 16384 max tokens</li>
+     *   <li>LOW    → LIGHTWEIGHT tier, 30 iters, 4096 max tokens</li>
+     *   <li>MEDIUM → WORKHORSE tier, 50 iters, 8192 max tokens</li>
+     *   <li>HIGH   → PLANNING tier, 75 iters, 16384 max tokens</li>
      * </ul>
      *
      * <p>When {@link ModelResolver} / provider conversion fails (e.g. user-supplied
@@ -380,13 +381,19 @@ public class SequentialExecutorV2 {
         int maxIter;
         int maxTokens;
         switch (complexity == null ? PlannedTaskV2.Complexity.MEDIUM : complexity) {
-            // Caps bumped (was 12/22/35) — multi-repo Launches need several
-            // readFile/searchFiles calls before the first write, and existing-repo
-            // tasks hit the old LOW=12 ceiling regularly even for a health-check
-            // endpoint (see run 4838839a).
-            case LOW  -> { tier = AgentTier.LIGHTWEIGHT; maxIter = 20; maxTokens = 4096; }
-            case HIGH -> { tier = AgentTier.PLANNING;    maxIter = 45; maxTokens = 16384; }
-            default   -> { tier = AgentTier.WORKHORSE;   maxIter = 30; maxTokens = 8192; }
+            // Caps bumped again 2026-04-19: 20/30/45 → 30/50/75. Observed on
+            // the RN Calorie Tracker run (0a0201c7) — MEDIUM scaffold task
+            // (7 files + npm install + typecheck) hit 30 iters and finished
+            // PARTIAL even though all files were written. Bigger scaffold-heavy
+            // specs consistently need >30 iters because every readFile /
+            // writeFile is one tool call. 50 covers a clean 7-file scaffold
+            // with 2-3 self-review re-reads; 75 covers HIGH tasks (e.g. T3
+            // "implement 4 screens + service" on the same run) with headroom.
+            // (Previous bump 12/22/35 → 20/30/45 was for multi-repo Launches;
+            //  this second bump is for codegen-dense greenfield scaffolds.)
+            case LOW  -> { tier = AgentTier.LIGHTWEIGHT; maxIter = 30; maxTokens = 4096; }
+            case HIGH -> { tier = AgentTier.PLANNING;    maxIter = 75; maxTokens = 16384; }
+            default   -> { tier = AgentTier.WORKHORSE;   maxIter = 50; maxTokens = 8192; }
         }
         // Project runs (Launches on an existing cloned codebase) need more
         // iterations: the worker has to readFile / searchFiles the real repo
@@ -474,8 +481,23 @@ public class SequentialExecutorV2 {
 
     // ─── prompt composition ─────────────────────────────────────────────────
 
-    private String composeSystemPrompt(PlannedTaskV2 task, String designBlock, String refDocs) {
+    private String composeSystemPrompt(PlannedTaskV2 task, String designBlock, String refDocs,
+                                        String projectType) {
         StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
+        // v2.5.13 — RN/Expo scaffold adherence directive. When the planner declared
+        // react-native-expo, inject the scaffold template verbatim so the worker
+        // stops drifting to Expo SDK 51 (stable-ish but doesn't match our smoke
+        // container expectations) or to `@testing-library/jest-native` (deprecated,
+        // matchers are built into RNTL v12.4+). Run 0a0201c7 shipped SDK 51 +
+        // jest-native + no hermes-compiler dep; all three we baked into the
+        // template as explicit warnings after the rn-smoke spike, but the worker
+        // only sees the planner's paraphrase unless we surface the template here.
+        String scaffoldBlock = loadScaffoldForProjectType(projectType);
+        if (!scaffoldBlock.isBlank()) {
+            sb.append("\n\n--- SCAFFOLD TEMPLATE (MATCH EXACTLY; deviate only with a written reason) ---\n")
+              .append(scaffoldBlock)
+              .append("\n--- END SCAFFOLD TEMPLATE ---\n");
+        }
         if (!task.hardConstraints().isEmpty()) {
             sb.append("\n\nHARD CONSTRAINTS for this task (MUST follow):\n");
             for (String c : task.hardConstraints()) {
@@ -500,6 +522,24 @@ public class SequentialExecutorV2 {
               .append("\n--- END REFERENCE DOCS ---\n");
         }
         return sb.toString();
+    }
+
+    /** Load the scaffold template file matching the given projectType, or "" if
+     *  none applies. Mirrors the loose kebab-case convention used by
+     *  {@link com.navneet.executespec.execution.controller.ScaffoldController} —
+     *  the file at {@code prompts/scaffolds/<key>.md} wins if present. */
+    private String loadScaffoldForProjectType(String projectType) {
+        if (projectType == null || projectType.isBlank()) return "";
+        String key = projectType.trim().toLowerCase().replace('_', '-');
+        try {
+            org.springframework.core.io.Resource r =
+                    new org.springframework.core.io.ClassPathResource("prompts/scaffolds/" + key + ".md");
+            if (!r.exists()) return "";
+            return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.debug("loadScaffoldForProjectType({}) failed: {}", projectType, e.getMessage());
+            return "";
+        }
     }
 
     /**

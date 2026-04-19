@@ -24,10 +24,27 @@ public class ShellSandboxPolicy {
     /** HIGH-level strict npm/mvn/gradle verb allowlist. */
     private static final Set<String> HIGH_STRICT_NPM_VERBS =
             Set.of("install", "ci", "build", "test", "start", "run-script");
+    /** HIGH-level strict npx verb allowlist — superset of npm that adds the
+     *  JS tools the RN / Expo pipeline invokes ({@code expo}, {@code eas},
+     *  {@code tsc}, {@code jest}, {@code create-expo-app}). npx needs its own
+     *  list because it forwards to arbitrary tools, unlike npm where the verb
+     *  is a lifecycle name. */
+    private static final Set<String> HIGH_STRICT_NPX_VERBS =
+            Set.of("install", "ci", "build", "test", "start", "run-script",
+                    "expo", "eas", "tsc", "jest",
+                    "create-expo-app", "create-react-app");
     private static final Set<String> HIGH_STRICT_MVN_VERBS =
             Set.of("compile", "test", "package", "verify", "install", "clean", "spring-boot:run");
     private static final Set<String> HIGH_STRICT_GRADLE_VERBS =
             Set.of("build", "test", "check", "clean", "assemble");
+    /** HIGH-level strict expo verb allowlist (direct {@code expo <verb>} invocation). */
+    private static final Set<String> HIGH_STRICT_EXPO_VERBS =
+            Set.of("export", "prebuild", "install", "doctor", "run", "run:android", "run:ios");
+    /** HIGH-level strict eas verb allowlist. {@code update} (EAS OTA push) is
+     *  deliberately excluded — it's a deploy-equivalent path and must route
+     *  through the managed {@code /api/deployments} endpoint, not shell. */
+    private static final Set<String> HIGH_STRICT_EAS_VERBS =
+            Set.of("build", "submit");
 
     private final GuardrailLevelResolver guardrailLevelResolver;
 
@@ -113,6 +130,7 @@ public class ShellSandboxPolicy {
         "tar", "zip", "unzip", "gzip", "gunzip",
         "python", "python3", "pip", "pip3", "pytest",
         "docker",
+        "expo", "eas", "tsc", "jest",  // React Native / Expo toolchain (for direct invocations; `npx <tool>` also allowed)
         "curl", "wget"  // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload, exfil) are caught by BLOCKED_PATTERNS
     );
 
@@ -314,9 +332,12 @@ public class ShellSandboxPolicy {
 
     private static Set<String> canonicalVerbsFor(String firstToken) {
         return switch (firstToken) {
-            case "npm", "npx" -> HIGH_STRICT_NPM_VERBS;
+            case "npm" -> HIGH_STRICT_NPM_VERBS;
+            case "npx" -> HIGH_STRICT_NPX_VERBS;
             case "mvn" -> HIGH_STRICT_MVN_VERBS;
             case "gradle" -> HIGH_STRICT_GRADLE_VERBS;
+            case "expo" -> HIGH_STRICT_EXPO_VERBS;
+            case "eas" -> HIGH_STRICT_EAS_VERBS;
             default -> null;
         };
     }
