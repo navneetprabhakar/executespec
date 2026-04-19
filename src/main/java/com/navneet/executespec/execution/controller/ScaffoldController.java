@@ -17,14 +17,22 @@ public class ScaffoldController {
     public record Scaffold(String key, String label, String language) {}
 
     private static final List<Scaffold> SCAFFOLDS = List.of(
-            new Scaffold("java-spring-boot",  "Java · Spring Boot",   "java"),
-            new Scaffold("node-backend",      "Node · Express",       "node"),
-            new Scaffold("node-frontend",     "Node · React + Vite",  "node"),
-            new Scaffold("python",            "Python · FastAPI",     "python"),
-            new Scaffold("go",                "Go · Echo",            "go"),
-            new Scaffold("rust",              "Rust · Actix",         "rust"),
-            new Scaffold("fullstack",         "Full-stack · Node+React", "node"),
-            new Scaffold("static-html",       "Static HTML site",     "html"));
+            new Scaffold("java-spring-boot",    "Java · Spring Boot",              "java"),
+            new Scaffold("node-backend",        "Node · Express",                  "node"),
+            new Scaffold("node-frontend",       "Node · React + Vite",             "node"),
+            new Scaffold("python",              "Python · FastAPI",                "python"),
+            new Scaffold("go",                  "Go · Echo",                       "go"),
+            new Scaffold("rust",                "Rust · Actix",                    "rust"),
+            new Scaffold("fullstack",           "Full-stack · Node+React",         "node"),
+            new Scaffold("static-html",         "Static HTML site",                "html"),
+            // v2.5.13 — three mobile options, all backed by the react-native-expo
+            // scaffold template. Distinct techHint keys let the planner see which
+            // platform the user nudged toward; the actual scaffold template file
+            // is loaded via plan.projectType (always "react-native-expo"), not
+            // techHint, so no new template files are needed.
+            new Scaffold("react-native-ios",     "Mobile · iOS (React Native)",     "typescript"),
+            new Scaffold("react-native-android", "Mobile · Android (React Native)", "typescript"),
+            new Scaffold("react-native-expo",    "Mobile · Cross-platform (React Native + Expo)", "typescript"));
 
     @GetMapping("/api/scaffolds")
     public ResponseEntity<List<Scaffold>> list() {
