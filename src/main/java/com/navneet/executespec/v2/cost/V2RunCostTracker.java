@@ -47,13 +47,19 @@ public class V2RunCostTracker {
     // ── rough per-task input/output token estimates by complexity ────────────
     // Used by estimateRun() for pre-plan cost estimation. Calibrated against
     // observed V2 worker invocations (~3-8 iterations × ~1.5k input / ~500 output).
-    private static final int[] TOKENS_LOW    = {  6_000,  1_500 };
-    private static final int[] TOKENS_MEDIUM = { 20_000,  4_000 };
-    private static final int[] TOKENS_HIGH   = { 50_000, 10_000 };
+    // Bands recalibrated 2026-04-19 from real run data. Previous values
+    // (6k/20k/50k input, 1.5k/4k/10k output) underestimated by ~3x on
+    // code-dense tasks — Calorie Tracker MEDIUM task T2 burned 629k in /
+    // 19k out, nowhere near the old 20k/4k band. New bands target the
+    // observed P75 per complexity so the pre-plan estimate lands in a
+    // credible ballpark instead of looking like a bug.
+    private static final int[] TOKENS_LOW    = { 30_000,  4_000 };  // was 6k/1.5k
+    private static final int[] TOKENS_MEDIUM = { 200_000, 15_000 }; // was 20k/4k
+    private static final int[] TOKENS_HIGH   = { 600_000, 40_000 }; // was 50k/10k
 
     // Planner + reviewer fixed overhead (input / output tokens per run).
-    private static final int OVERHEAD_INPUT_TOKENS  = 12_000;
-    private static final int OVERHEAD_OUTPUT_TOKENS = 2_000;
+    private static final int OVERHEAD_INPUT_TOKENS  = 40_000;   // bumped 12k→40k (2026-04-19) after RN run showed
+    private static final int OVERHEAD_OUTPUT_TOKENS = 5_000;    // pre-plan estimate was 42% under actual
 
     // High-end multiplier for the buffered estimate (retries, cache misses, escalations).
     private static final double HIGH_MULTIPLIER = 1.75;

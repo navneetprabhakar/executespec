@@ -202,16 +202,34 @@ public class RunController {
             @AuthenticationPrincipal AppUserDetails userDetails) {
         var run = guard.requireRunAccess(runId, userDetails);
 
-        // Terminal run with stored cost → return immediately
+        // Terminal run with stored cost → return immediately with DB totals.
+        // The stored total_input_tokens / total_output_tokens are authoritative
+        // once the run is done (V2 orchestrator writes them at phase boundaries
+        // and at terminate()).
         if (TERMINAL_STATUSES.contains(run.getStatus()) && run.getActualCostUsd() != null) {
-            return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", run.getActualCostUsd()));
+            return ResponseEntity.ok(java.util.Map.of(
+                    "runId", runId,
+                    "costUsd", run.getActualCostUsd(),
+                    "inputTokens", safeTok(run.getTotalInputTokens()),
+                    "outputTokens", safeTok(run.getTotalOutputTokens())));
         }
 
-        // V2 in-progress: live cost comes from V2RunCostTracker (V1's computeCostForRun
-        // reads agent_task token columns which V2 doesn't populate mid-run).
+        // V2 in-progress: live cost AND live tokens come from V2RunCostTracker.
+        // V2 only flushes DB token columns at phase boundaries (planner done →
+        // worker done → reviewer done), so `total_input_tokens` lags the real
+        // usage mid-run. Reading the in-memory accumulator gives the UI an
+        // honest live view: cost and tokens stay in lockstep instead of showing
+        // "Total tokens 3.4K · Live cost $3.31" (planner-only tokens vs full
+        // cost accumulator).
         if ("v2".equals(run.getHarnessVersion())) {
-            double liveUsd = v2CostTracker.snapshot(runId).costUsd();
-            return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", liveUsd));
+            var snap = v2CostTracker.snapshot(runId);
+            int liveIn  = Math.max(snap.inputTokens(),  safeTok(run.getTotalInputTokens()));
+            int liveOut = Math.max(snap.outputTokens(), safeTok(run.getTotalOutputTokens()));
+            return ResponseEntity.ok(java.util.Map.of(
+                    "runId", runId,
+                    "costUsd", snap.costUsd(),
+                    "inputTokens", liveIn,
+                    "outputTokens", liveOut));
         }
 
         double[] cached = costCache.compute(runId, (k, existing) -> {
@@ -224,8 +242,14 @@ public class RunController {
             double cost = costEstimator.computeCostForRun(runId);
             return new double[]{cost, System.currentTimeMillis()};
         });
-        return ResponseEntity.ok(java.util.Map.of("runId", runId, "costUsd", cached[0]));
+        return ResponseEntity.ok(java.util.Map.of(
+                "runId", runId,
+                "costUsd", cached[0],
+                "inputTokens", safeTok(run.getTotalInputTokens()),
+                "outputTokens", safeTok(run.getTotalOutputTokens())));
     }
+
+    private static int safeTok(Integer v) { return v == null ? 0 : v; }
 
     /** Approve or reject the plan-approval gate. */
     @PostMapping("/{runId}/approve")

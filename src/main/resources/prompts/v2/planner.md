@@ -121,6 +121,8 @@ The plan schema:
 
 {{TDD_MODE_BLOCK}}
 
+{{MOBILE_PREFERENCE_BLOCK}}
+
 {{PR_REVIEW_COMMENTS}}
 
 Now call `submitPlan` with your plan.
