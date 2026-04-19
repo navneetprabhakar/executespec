@@ -2463,7 +2463,17 @@ public class DevDockerfileGenerator {
                 WORKDIR /app
                 LABEL preview=true
                 COPY package.json package-lock.json* ./
-                RUN npm ci --legacy-peer-deps
+                # Install deps. Falls back to npm install if package-lock.json wasn't
+                # committed (common when the worker writes the scaffold from scratch
+                # and never invoked `npm install` in its sandbox).
+                RUN (npm ci --legacy-peer-deps 2>/dev/null) || npm install --legacy-peer-deps
+                # hermes-compiler guard. Expo SDK 55 / RN 0.80 under-declares this
+                # transitive dep — `expo export` fails with
+                # "Cannot find module 'hermes-compiler/package.json'" if it's missing.
+                # If the worker's package.json didn't include it, add it now so the
+                # bundle succeeds. No-op when already present.
+                RUN node -e "const p=require('./package.json');const deps=(p.dependencies||{});process.exit(deps['hermes-compiler']?0:1)" \\
+                    || npm install --no-save --legacy-peer-deps hermes-compiler@latest
                 COPY . .
                 RUN npx expo export --platform android --output-dir /app/dist \\
                     && echo '<!doctype html><html><head><meta charset="utf-8"><title>Mobile Preview</title>' \\

@@ -52,18 +52,31 @@ import java.util.concurrent.TimeoutException;
 @RequiredArgsConstructor
 public class ReviewerAgentV3 {
 
-    /** Default iteration cap per review pass. Smaller than worker's 40 because review
+    /** Default iteration cap per review pass. Was 30 — bumped to 50 on 2026-04-19
+     *  after reviewer REVIEW_FAILED on run 0a0201c7 (RN Calorie Tracker) where the
+     *  wiring pass ran out of budget scanning a 7-file scaffold plus test suite.
+     *  Reviewer does read-heavy work (readFile + searchFiles), so iter cap grows
+     *  roughly with codebase size, not LLM call cost.
+     *  (Historical note: original cap was 40 matching worker, trimmed to 30
+     *  because review is cheaper. Bumping to 50 — still below worker's 50/75.)
+     *  Smaller than worker's HIGH=75 because review
      *  passes are fundamentally inspection + targeted edits, not generation. */
-    public static final int DEFAULT_MAX_ITER_PER_PASS = 30;
+    public static final int DEFAULT_MAX_ITER_PER_PASS = 50;
 
     /** Wall-clock cap on the general pass — long enough for thorough review,
      *  short enough that a stuck LLM does not freeze the whole run.
      *  See v2.5.10 eval Bug C: a Gemini reviewer hung indefinitely with all
      *  worker tasks complete, blocking terminate + score persistence. */
-    public static final long GENERAL_PASS_TIMEOUT_SECONDS = 90;
+    public static final long GENERAL_PASS_TIMEOUT_SECONDS = 600; // was 90 — bumped 2026-04-19
 
     /** Wall-clock cap on the wiring pass — narrower scope than general. */
-    public static final long WIRING_PASS_TIMEOUT_SECONDS = 60;
+    public static final long WIRING_PASS_TIMEOUT_SECONDS = 600; // was 60 — bumped 2026-04-19
+    // Real mobile reviews take 2–4 minutes on sonnet because each pass reads many
+    // files (App.tsx + screens + reducer + tests). 60s was a holdover from when
+    // the wiring pass only did grep-and-nudge; with meaningful reads we need 10m
+    // to finish. Run 988364af: wiring pass was on call#90 at 60s mark and got
+    // chopped mid-stream, returning ERROR → REVIEW_FAILED → skipping the final
+    // build entirely → FINAL_BUILD_FAILED reason cascading to PARTIAL.
 
     private final WorkerAgentV2 worker;
     private final BuildProjectTool buildProjectTool;
