@@ -96,9 +96,9 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Table — desktop view */}
       <div className="rounded-sm border border-surface-700 bg-surface-800">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-700 text-left text-xs text-muted">
@@ -166,6 +166,54 @@ export default function InvoicesPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Mobile cards — table doesn't survive the 375px squeeze (dates split to 3 lines, columns disappear).
+            Cards keep every field visible in a tap-friendly layout. */}
+        <ul className="md:hidden divide-y divide-surface-700">
+          {loading ? (
+            <li className="px-4 py-8 text-center text-muted text-sm">Loading...</li>
+          ) : filtered.length === 0 ? (
+            <li className="px-4 py-8 text-center text-muted text-sm">No invoices found</li>
+          ) : (
+            filtered.map((inv) => (
+              <li key={inv.id} className="px-4 py-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs text-secondary truncate">{inv.invoiceNumber}</p>
+                    <p className="text-[11px] text-muted mt-0.5">{inv.invoiceDate} · {typeLabel(inv.invoiceType)}</p>
+                  </div>
+                  <span className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusColor(inv.status)}`}>
+                    {inv.status}
+                  </span>
+                </div>
+                {inv.description && (
+                  <p className="text-xs text-secondary line-clamp-2">{inv.description}</p>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="font-mono text-sm text-slate-200">{formatPaise(inv.totalAmount)}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleDownload(inv)}
+                      className="flex items-center gap-1 rounded-sm border border-surface-700 px-2.5 py-1 text-xs text-muted hover:bg-surface-700 hover:text-slate-200"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      PDF
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleResend(inv)}
+                        className="flex items-center gap-1 rounded-sm border border-surface-700 px-2.5 py-1 text-xs text-muted hover:bg-surface-700 hover:text-slate-200"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        Resend
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
 
         {/* Pagination */}
         {totalPages > 1 && (

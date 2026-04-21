@@ -86,7 +86,7 @@ export const NAV_ITEMS: {
  */
 export const V2_LEGACY_UI = {
   // feasibility dropped 2026-04-18 — component + API client deleted; endpoint stays permanent-410.
-  runConversation:      false,  // POST /api/runs/{id}/chat + /iterate + /apply
+  runConversation:      true,   // POST/GET /api/runs/{id}/chat wired to V2ChatService (2026-04-19). /iterate + /apply still 410.
   editRunPlan:          false,  // POST /api/runs/{id}/edit-plan — deferred
   applyTestFixes:       false,  // POST /api/runs/{id}/apply-test-fixes — deferred (wire with V2 test-gen)
   implementSuggestions: false,  // POST /api/runs/{id}/implement-suggestions — deferred

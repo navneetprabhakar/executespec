@@ -110,10 +110,10 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 sm:py-12">
-      <div className="text-center mb-10">
-        <h1 className="text-2xl sm:text-3xl font-bold text-primary">Simple, transparent pricing</h1>
-        <p className="mt-3 text-secondary">No credits. No surprises. You know exactly what you're getting.</p>
+    <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 lg:py-12">
+      <div className="text-center mb-6 sm:mb-10">
+        <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-primary">Simple, transparent pricing</h1>
+        <p className="mt-2 sm:mt-3 text-sm sm:text-base text-secondary">No credits. No surprises. You know exactly what you're getting.</p>
       </div>
 
       {/* Currency toggle */}
@@ -146,7 +146,7 @@ export default function PlansPage() {
       )}
 
       {/* Plan cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 max-w-3xl mx-auto">
         {displayPlans.map(plan => (
           <PlanCard
             key={plan.id}

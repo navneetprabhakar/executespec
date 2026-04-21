@@ -115,7 +115,10 @@ public class ReviewScoringService {
         WorkspaceStats ws = scanWorkspace(run);
 
         int codeQuality = clamp(anchor - codeIssuePenalty);
-        int testCoverage = deriveTestCoverage(ws, accuracy);
+        // v2.5.12 honest-scoring: deriveTestCoverage may return null for
+        // doc-only runs (no source files changed). Keep it as Integer so the
+        // report hides the row instead of NPE-ing on auto-unbox.
+        Integer testCoverage = deriveTestCoverage(ws, accuracy);
         int architecture = clamp(anchor - archIssuePenalty);
         int security = clamp(anchor - secIssuePenalty + (ws.hasAuthHints ? 5 : 0));
         int performance = clamp(anchor - perfIssuePenalty);

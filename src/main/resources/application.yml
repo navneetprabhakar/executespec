@@ -88,7 +88,10 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-haiku-4-5-20251001
+      # 2026-04-19 — bumped workhorse from haiku-4.5 to sonnet-4.6 for better
+      # code quality on MEDIUM tasks. Higher $/call but planner classifies most
+      # tasks as LOW (lightweight stays haiku) so net cost rise is modest.
+      workhorse: claude-sonnet-4-6
       lightweight: claude-haiku-4-5-20251001
     google:
       # v2.5.9 Bug #3 — gemini-2.5-flash emits Python-style tool calls
@@ -438,6 +441,21 @@ preview:
     free-max: 1
     pro-max: 3
     enterprise-max: 10
+
+  # ── Preview-engine handoff (external preview service) ──────────────────
+  # When route-via=true AND mode=docker, main app builds + pushes the image
+  # to the registry then hands off to preview-engine's /from-image endpoint.
+  # preview-engine pulls + runs + owns the container for its lifetime.
+  # Legacy docker-compose path stays the default.
+  #
+  # Flip route-via=false (or remove the block) to revert to the legacy path.
+  engine:
+    route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
+    base-url: ${PREVIEW_ENGINE_URL:http://localhost:8090}
+    registry-url: ${PREVIEW_ENGINE_REGISTRY_URL:localhost:5500}
+    api-key: ${PREVIEW_ENGINE_API_KEY:change-me-in-prod}
+    timeout-seconds: 300
+
   vm:
     enabled: false                       # set true to enable VM-based preview deployment
     default-ttl-minutes: 20

@@ -1434,6 +1434,15 @@ export const getValidationReport = async (runId: string): Promise<ValidationRepo
 export const shareValidationReport = (runId: string) =>
   req<{ shareToken: string; shareUrl: string }>(`/runs/${runId}/report/share`, { method: 'POST' });
 
+/**
+ * Kick the background validation-report regeneration for a terminal run.
+ * Useful when the first attempt crashed (NPE / LLM hiccup) and the panel
+ * shows no report. Backend returns 202 — poll `getValidationReport` a few
+ * seconds later to see the fresh row.
+ */
+export const retryValidationReport = (runId: string) =>
+  req<void>(`/runs/${runId}/retry-validation`, { method: 'POST' });
+
 export const getSharedReport = async (shareToken: string): Promise<SharedReportData | null> => {
   try {
     const res = await fetch(`${BASE}/reports/shared/${shareToken}`);

@@ -107,14 +107,24 @@ agent:
     startup-resume-delay-seconds: 30
 
 # ── Preview ───────────────────────────────────────────────────────────────────
+# 2026-04-20 full-cutover from legacy SSH'd shell-script flow (`mode: vm`) to
+# the Spring Boot preview-engine service running on preview-gw. Main-app now
+# talks to preview-engine over HTTPS using X-Preview-Api-Key.
 preview:
-  mode: ${PREVIEW_MODE:vm}
+  mode: ${PREVIEW_MODE:docker}                                      # docker-out-of-docker via preview-engine
   preview-ttl-minutes: 15
   fallback-host: ${PREVIEW_FALLBACK_HOST:https://dev.executespec.ai}
   proxy:
     enabled: ${PREVIEW_PROXY_ENABLED:true}
+  # Route preview handoff through preview-engine. The old vm.enabled path is off.
+  engine:
+    route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
+    base-url:     ${PREVIEW_ENGINE_URL:https://preview-engine.executespec.ai}
+    registry-url: ${PREVIEW_ENGINE_REGISTRY_URL:us-east4-docker.pkg.dev/CHANGE_ME/preview-images}
+    api-key:      ${PREVIEW_ENGINE_API_KEY:}                         # required; deploy-time env var
+    timeout-seconds: 300
   vm:
-    enabled: true
+    enabled: false                                                  # disabled — replaced by preview-engine
 
 # ── App (JWT, CORS, Mail) ────────────────────────────────────────────────────
 app:

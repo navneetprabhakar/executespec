@@ -531,10 +531,10 @@ export default function LiveLog() {
           const fallbackMsg = String(entry.data?.payload ?? entry.data?.message ?? '');
           if (!fallbackMsg) return null;
           return (
-            <div key={entry.id} className="flex gap-2 px-2 py-[1px] text-[11px] opacity-50">
+            <div key={entry.id} className="flex flex-wrap gap-x-2 gap-y-0 px-2 py-[1px] text-[11px] opacity-50">
               <span className="text-[var(--text-muted)] font-mono">{formatTimestamp(entry.timestamp)}</span>
               <span className="text-muted">[{entry.type}]</span>
-              <span className="text-secondary truncate">{fallbackMsg.slice(0, 160)}</span>
+              <span className="text-secondary break-words flex-1 min-w-0">{fallbackMsg.slice(0, 160)}</span>
             </div>
           );
         })}

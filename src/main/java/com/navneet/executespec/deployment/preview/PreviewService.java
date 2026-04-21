@@ -99,6 +99,18 @@ public class PreviewService {
     @Autowired(required = false)
     private PreviewDeploymentService vmPreviewService;
 
+    /**
+     * Optional — when {@code preview.engine.route-via=true}, dispatches the
+     * "build → push → hand off to preview-engine" flow instead of the legacy
+     * docker-compose path. Bean only present when preview-engine classes are
+     * on the classpath (always true in this repo after integration lands).
+     */
+    @Autowired(required = false)
+    private com.navneet.executespec.deployment.preview.engine.PreviewEngineHandoff engineHandoff;
+
+    /** runId → preview-engine preview id, set when we hand off through the engine. */
+    private final ConcurrentHashMap<String, String> enginePreviewIds = new ConcurrentHashMap<>();
+
     /** runId → session */
     private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
 
@@ -317,6 +329,15 @@ public class PreviewService {
         } else if (isCloudRunMode()) {
             Thread.ofVirtual().name("preview-cr-" + shortId)
                     .start(snapshot.wrap(() -> buildAndStartCloudRun(runId, workspace, type, mode, projectName, safeEnvVars)));
+        } else if (engineHandoff != null && props.getEngine().isRouteVia()) {
+            // Route via preview-engine: main app builds + pushes, preview-engine runs.
+            String tierName = user.getTier() == null ? "LOCAL" : String.valueOf(user.getTier());
+            String userId = String.valueOf(user.getId());
+            int ttlSeconds = (int) ttl.getSeconds();
+            Thread.ofVirtual().name("preview-engine-" + shortId)
+                    .start(snapshot.wrap(() -> buildAndStartViaEngine(
+                            runId, workspace, type, mode, projectName, safeEnvVars,
+                            userId, tierName, ttlSeconds)));
         } else {
             Thread.ofVirtual().name("preview-docker-" + shortId)
                     .start(snapshot.wrap(() -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars)));
@@ -343,7 +364,13 @@ public class PreviewService {
         releaseGlobalPreviewSlot(runId);
 
         String mode;
-        if (isVmMode() && vmPreviewService != null && session.composeProjectName() != null) {
+        String enginePreviewId = enginePreviewIds.remove(runId);
+        if (enginePreviewId != null && engineHandoff != null) {
+            // Preview-engine owns the container — ask it to stop.
+            try { engineHandoff.stop(enginePreviewId); }
+            catch (Exception e) { log.warn("preview-engine stop for {} failed: {}", runId, e.getMessage()); }
+            mode = "preview-engine";
+        } else if (isVmMode() && vmPreviewService != null && session.composeProjectName() != null) {
             // VM mode: teardown via SSH on the preview VM
             try {
                 vmPreviewService.teardown(session.composeProjectName());
@@ -737,6 +764,48 @@ public class PreviewService {
             }
         } catch (Exception e) {
             log.warn("Failed to cleanup image {}: {}", imageUri, e.getMessage());
+        }
+    }
+
+    // ── Private: build + push + hand off to preview-engine ──────────────────
+    //
+    // Active only when `preview.engine.route-via=true`. Main app stops being a
+    // runtime owner in this path — it builds + pushes the image; preview-
+    // engine pulls, runs, health-probes, and owns the container.
+    private void buildAndStartViaEngine(String runId, Path workspace, PreviewProjectType type,
+                                        PreviewMode mode, String projectName,
+                                        Map<String, String> envVars,
+                                        String ownerUserId, String ownerTier, int ttlSeconds) {
+        try {
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    PreviewStatus.BUILDING, s.url(), s.hostPort(), null,
+                    s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_BUILDING", runId, null,
+                    "Preview-engine handoff: building & pushing image…", Instant.now()));
+
+            Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+            String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
+            Path dockerfilePath = workspace.resolve("Dockerfile");
+            Files.writeString(dockerfilePath, generatedDockerfile);
+            log.info("[{}] preview-engine handoff starting — workspace={}, type={}", runId, workspace, type);
+
+            var result = engineHandoff.start(
+                    runId, workspace, dockerfilePath, type,
+                    ownerUserId, ownerTier, ttlSeconds, envVars);
+
+            enginePreviewIds.put(runId, result.previewId());
+            updateSession(runId, s -> new PreviewSession(
+                    s.runId(), s.composeProjectName(), s.projectType(), s.previewMode(), s.databaseType(),
+                    PreviewStatus.RUNNING, result.previewUrl(), s.hostPort(), null,
+                    s.startedAt(), s.expiresAt()));
+            broadcaster.emit(runId, new RunEvent("PREVIEW_READY", runId, null,
+                    "Preview ready: " + result.previewUrl(), Instant.now()));
+            log.info("[{}] preview-engine READY — previewId={} url={} (imageRef={}, cacheHit={})",
+                    runId, result.previewId(), result.previewUrl(), result.imageRef(), result.skippedBuild());
+        } catch (Exception e) {
+            log.error("[{}] preview-engine handoff failed: {}", runId, e.getMessage(), e);
+            fail(runId, "preview-engine handoff failed: " + e.getMessage(), 0);
         }
     }
 

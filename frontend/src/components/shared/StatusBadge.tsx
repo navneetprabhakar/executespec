@@ -58,6 +58,8 @@ function explainReason(reason: string | null | undefined): string | null {
       return 'Reviewer flagged unresolved issues. Code compiled but may have bugs.';
     case 'REVIEWER_FAILED':
       return 'Reviewer could not complete its pass.';
+    case 'REVIEWER_INTERRUPTED_CODE_PRESERVED':
+      return 'All tasks finished; the reviewer pass was interrupted by a server restart but the code and workspace are intact. Click Regenerate on the Validation Report to re-run the reviewer + scoring.';
     case 'ALL_TASKS_FAILED':
       return 'Every task failed — nothing usable was produced.';
     case 'EXECUTION_ABORTED':

@@ -762,33 +762,42 @@ export default function IntegrationsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-sm font-medium ${
-                      configured ? 'text-accent-green bg-accent-green/10' : 'text-muted bg-[var(--gray-400)]/10'
-                    }`}>
-                      {configured ? 'Enabled' : 'Disabled'}
-                    </span>
-                    {int.configurable && ((int as any).userLevel || (isAdmin && user?.orgId)) && (
-                      (() => {
-                        const flagOn = integrationFlagEnabled(int.key);
-                        const title = flagOn
-                          ? undefined
-                          : 'Disabled by platform operator — contact support to enable';
+                    {(() => {
+                      const flagOn = integrationFlagEnabled(int.key);
+                      // v2.5.13 — collapse the "Disabled · Unavailable" double-label.
+                      // Show one of three states only: Enabled (configured), Unavailable
+                      // (flag off — no Configure shown), or Disabled (flag on, configurable).
+                      if (configured) {
                         return (
-                          <button
-                            onClick={() => flagOn && setConfiguring(isExpanded ? null : int.key)}
-                            disabled={!flagOn}
-                            title={title}
-                            className={`flex items-center gap-1 text-xs transition-colors px-2 py-1 rounded-sm border ${
-                              flagOn
-                                ? 'text-secondary hover:text-accent-blue border-[var(--border-default)] hover:border-accent-blue/30'
-                                : 'text-muted border-[var(--border-default)] opacity-40 cursor-not-allowed'
-                            }`}
-                          >
-                            <Settings2 className="h-3 w-3" />
-                            {!flagOn ? 'Unavailable' : (isExpanded ? 'Close' : configured ? 'Edit' : 'Configure')}
-                          </button>
+                          <span className="text-xs px-2 py-0.5 rounded-sm font-medium text-accent-green bg-accent-green/10">
+                            Enabled
+                          </span>
                         );
-                      })()
+                      }
+                      if (!flagOn && int.configurable) {
+                        return (
+                          <span
+                            className="text-xs px-2 py-0.5 rounded-sm font-medium text-muted bg-[var(--gray-400)]/10"
+                            title="Disabled by platform operator — contact support to enable"
+                          >
+                            Unavailable
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="text-xs px-2 py-0.5 rounded-sm font-medium text-muted bg-[var(--gray-400)]/10">
+                          Disabled
+                        </span>
+                      );
+                    })()}
+                    {int.configurable && ((int as any).userLevel || (isAdmin && user?.orgId)) && integrationFlagEnabled(int.key) && (
+                      <button
+                        onClick={() => setConfiguring(isExpanded ? null : int.key)}
+                        className="flex items-center gap-1 text-xs transition-colors px-2 py-1 rounded-sm border text-secondary hover:text-accent-blue border-[var(--border-default)] hover:border-accent-blue/30"
+                      >
+                        <Settings2 className="h-3 w-3" />
+                        {isExpanded ? 'Close' : configured ? 'Edit' : 'Configure'}
+                      </button>
                     )}
                   </div>
                 </div>

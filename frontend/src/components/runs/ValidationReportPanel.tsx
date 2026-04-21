@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Share2, Check, Shield, AlertTriangle, FileCode2, Download } from 'lucide-react';
-import { getValidationReport, shareValidationReport, downloadValidationReportPdf, type ValidationReportData, type ReportIssue } from '@/lib/api';
+import { ChevronDown, ChevronRight, Share2, Check, Shield, AlertTriangle, FileCode2, Download, RefreshCw } from 'lucide-react';
+import { getValidationReport, shareValidationReport, downloadValidationReportPdf, retryValidationReport, type ValidationReportData, type ReportIssue } from '@/lib/api';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import ScoreCard from './ScoreCard';
 import SignalBreakdown from './SignalBreakdown';
@@ -65,6 +65,7 @@ const STATUS_REASON_COPY: Record<string, string> = {
   FINAL_BUILD_FAILED:               'The final build did not pass. Code may not run without changes.',
   REVIEWER_UNRESOLVED:              'The reviewer flagged issues that were not fully resolved.',
   REVIEWER_FAILED:                  'The reviewer agent errored out. Run status derived from the final build.',
+  REVIEWER_INTERRUPTED_CODE_PRESERVED: 'All tasks finished, but the reviewer pass was interrupted by a server restart. Code and workspace are intact — click Regenerate to re-run the reviewer + scoring.',
   ALL_TASKS_FAILED:                 'No worker task completed successfully.',
   LEGACY_UNKNOWN:                   'Pre-v2.5.10 run — detailed signals are unavailable.',
 };
@@ -96,6 +97,7 @@ export default function ValidationReportPanel({ runId, status, statusReason }: V
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const addToast = useUiStore(s => s.addToast);
 
   const reportReady = useSseStore((s) => s.entries).some(e => e.type === 'VALIDATION_REPORT_READY');
@@ -106,7 +108,56 @@ export default function ValidationReportPanel({ runId, status, statusReason }: V
     getValidationReport(runId).then(r => { if (r) setReport(r); });
   }, [runId, status, reportReady]);
 
-  if (!report) return null;
+  // Regenerate the validation report. Backend runs async (202) — poll a few
+  // times because there's no dedicated SSE event for retry completion.
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await retryValidationReport(runId);
+      addToast({ type: 'info', message: 'Regenerating validation report…' });
+      // Poll for up to 30s (six 5-s ticks). First successful non-null result wins.
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const fresh = await getValidationReport(runId);
+        if (fresh) {
+          setReport(fresh);
+          addToast({ type: 'success', message: 'Validation report ready' });
+          break;
+        }
+      }
+    } catch (e: any) {
+      addToast({ type: 'error', message: e.message || 'Retry failed' });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  // Terminal run but no report yet → surface a recovery affordance instead of
+  // rendering nothing. Old behaviour silently hid the panel, so users had no
+  // idea the report had crashed server-side.
+  if (!report) {
+    if (!FETCH_STATUSES.has(status)) return null;
+    return (
+      <div className="mx-4 mb-3 rounded-sm border border-status-waiting/30 bg-status-waiting/10 px-4 py-3 flex items-center gap-3">
+        <AlertTriangle className="h-4 w-4 text-status-waiting flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-medium text-primary">Validation report not generated</div>
+          <div className="text-[11px] text-muted mt-0.5">
+            The background report generator crashed or hasn't finished. Click Retry to regenerate from persisted task state.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleRetry}
+          disabled={retrying}
+          className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-sm border border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          <RefreshCw className={cn('h-3 w-3', retrying && 'animate-spin')} />
+          {retrying ? 'Retrying…' : 'Retry'}
+        </button>
+      </div>
+    );
+  }
 
   const resultCfg = RESULT_CONFIG[report.pipelineResult] ?? RESULT_CONFIG.PASSED;
 
@@ -205,6 +256,15 @@ export default function ValidationReportPanel({ runId, status, statusReason }: V
         </span>
         <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
           <button
+            onClick={handleRetry}
+            disabled={retrying}
+            title="Regenerate the validation report from persisted run state. Useful after scoring fixes land."
+            className="flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)] disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className={cn('h-3 w-3', retrying && 'animate-spin')} />
+            {retrying ? '...' : 'Regenerate'}
+          </button>
+          <button
             onClick={handleDownloadPdf}
             disabled={downloading}
             className="flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)]"
@@ -251,7 +311,7 @@ export default function ValidationReportPanel({ runId, status, statusReason }: V
 
             {/* Issue counter grid — single-dimension semantic */}
             {(accuracyScore != null || report.issuesCaught > 0) && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {accuracyScore != null && primaryLabel === 'Verified' && (
                   <div className={cn('rounded-sm border px-2 py-1.5', 'border-[var(--border-default)] bg-[var(--gray-200)] text-muted')}>
                     <div className="text-[10px] uppercase tracking-wide text-muted">LLM estimate</div>

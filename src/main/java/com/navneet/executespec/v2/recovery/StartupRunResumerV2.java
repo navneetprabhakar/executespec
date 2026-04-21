@@ -2,7 +2,9 @@ package com.navneet.executespec.v2.recovery;
 
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,6 +67,7 @@ public class StartupRunResumerV2 {
     private static final Duration STALE_CUTOFF = Duration.ofHours(6);
 
     private final PipelineRunRepository runRepo;
+    private final AgentTaskRepository taskRepo;
     private final SseBroadcaster broadcaster;
 
     @Async
@@ -96,6 +99,7 @@ public class StartupRunResumerV2 {
         int failedInterrupted = 0;
         int failedCapped = 0;
         int failedStale = 0;
+        int salvaged = 0;
         Instant cutoff = Instant.now().minus(STALE_CUTOFF);
         for (PipelineRun run : candidates) {
             String status = run.getStatus();
@@ -104,6 +108,20 @@ public class StartupRunResumerV2 {
                 log.info("StartupRunResumerV2: run={} AWAITING_APPROVAL — left as-is",
                         run.getRunId());
                 awaitingApproval++;
+                continue;
+            }
+
+            // NEW — "salvage" path: if the executor already completed (every
+            // AgentTask is in a terminal status), the generated code is on disk
+            // and the run is effectively done. Only the post-executor phase
+            // (reviewer / validation) was interrupted, which is a strictly
+            // non-destructive loss. Mark the run COMPLETE (with a clear
+            // status_reason) so the user keeps access to the workspace, preview,
+            // chat, and retry-validation — instead of being told to re-run
+            // everything from scratch.
+            if (isExecutorDone(run.getRunId())) {
+                markSalvaged(run, status);
+                salvaged++;
                 continue;
             }
 
@@ -137,8 +155,66 @@ public class StartupRunResumerV2 {
             failedInterrupted++;
         }
         log.warn("StartupRunResumerV2: recovery complete — awaiting-approval={} "
-                        + "interrupted={} cap-exceeded={} stale={}",
-                awaitingApproval, failedInterrupted, failedCapped, failedStale);
+                        + "salvaged={} interrupted={} cap-exceeded={} stale={}",
+                awaitingApproval, salvaged, failedInterrupted, failedCapped, failedStale);
+    }
+
+    /**
+     * True if every {@link AgentTask} for this run is in a terminal status.
+     * "Terminal" = COMPLETE / PARTIAL / FAILED / BLOCKED. PENDING or WORKING
+     * means the executor didn't actually finish → the run isn't salvageable,
+     * it was genuinely interrupted mid-flight.
+     */
+    private boolean isExecutorDone(String runId) {
+        List<AgentTask> tasks = taskRepo.findByRunId(runId);
+        if (tasks.isEmpty()) return false;   // planner never made it — not salvageable
+        for (AgentTask t : tasks) {
+            if (t.getParentTaskId() != null) continue; // subtasks follow parent; ignore
+            String s = t.getStatus();
+            if (s == null) return false;
+            if (!("COMPLETE".equals(s) || "PARTIAL".equals(s)
+                    || "FAILED".equals(s) || "BLOCKED".equals(s))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Mark a run COMPLETE (or PARTIAL if any task warned) when the executor
+     * already finished but a post-executor phase was interrupted. The code is
+     * on disk; the user keeps access; no resume-attempt consumed; validation
+     * report can be (re-)generated via {@code POST /runs/{id}/retry-validation}.
+     */
+    private void markSalvaged(PipelineRun run, String previousStatus) {
+        String runId = run.getRunId();
+        List<AgentTask> tasks = taskRepo.findByRunId(runId);
+        boolean anyNonClean = tasks.stream()
+                .filter(t -> t.getParentTaskId() == null)
+                .anyMatch(t -> "PARTIAL".equals(t.getStatus()) || "FAILED".equals(t.getStatus())
+                        || "BLOCKED".equals(t.getStatus()));
+        String terminalStatus = anyNonClean ? "PARTIAL" : "COMPLETE";
+        String reason = "REVIEWER_INTERRUPTED_CODE_PRESERVED";
+
+        run.setStatus(terminalStatus);
+        run.setStatusReason(reason);
+        if (run.getFailureReason() == null) {
+            run.setFailureReason("Post-executor phase (" + previousStatus
+                    + ") was interrupted by a JVM restart, but all tasks had already finished and "
+                    + "the workspace is intact. Run marked " + terminalStatus
+                    + ". Click Regenerate on the Validation Report to re-run the reviewer + scoring.");
+        }
+        if (run.getCompletedAt() == null) run.setCompletedAt(Instant.now());
+        runRepo.save(run);
+        log.warn("StartupRunResumerV2: run={} prev={} salvaged → {} ({})",
+                runId, previousStatus, terminalStatus, reason);
+        try {
+            broadcaster.emit(runId, RunEvent.runStatus(runId, terminalStatus));
+            broadcaster.complete(runId);
+        } catch (Exception e) {
+            log.debug("StartupRunResumerV2 salvage: SSE emit failed for run={}: {}",
+                    runId, e.getMessage());
+        }
     }
 
     private void markFailed(PipelineRun run, String previousStatus, String reason) {
