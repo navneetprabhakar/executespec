@@ -88,9 +88,12 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-haiku-4-5-20251001
+      # 2026-04-19 — bumped workhorse from haiku-4.5 to sonnet-4.6 for better
+      # code quality on MEDIUM tasks. Higher $/call but planner classifies most
+      # tasks as LOW (lightweight stays haiku) so net cost rise is modest.
+      workhorse: claude-sonnet-4-6
       lightweight: claude-haiku-4-5-20251001
-    google:
+    gemini:
       # v2.5.9 Bug #3 — gemini-2.5-flash emits Python-style tool calls
       # ("print(default_api.submitPlan(...))") causing MALFORMED_FUNCTION_CALL.
       # gemini-3-flash-preview is the newer tool-call-reliable model.
@@ -135,7 +138,7 @@ model-matrix:
         output-per-1m: 5.00
       notes: "LIGHTWEIGHT tier for Anthropic."
     "[gemini-2.5-flash]":
-      provider: google
+      provider: gemini
       chain-tier: UTILITY
       context-limit: 1048576
       max-output-tokens: 65536
@@ -145,7 +148,7 @@ model-matrix:
         output-per-1m: 2.50
       notes: "Gemini 2.5 Flash — legacy, replaced by gemini-3-flash-preview for all tiers."
     "[gemini-3-flash-preview]":
-      provider: google
+      provider: gemini
       chain-tier: CAPABLE
       context-limit: 1048576
       max-output-tokens: 65536
@@ -190,14 +193,14 @@ model-matrix:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-flash-preview }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-flash-preview }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-flash-preview }
       - { provider: openai, model: gpt-5.4 }
 
   # ── FREE tier model lock ──────────────────────────────────────────────────────
@@ -232,7 +235,7 @@ model-matrix:
     anthropic:
       - openai
       - google
-    google:
+    gemini:
       - openai
       - anthropic
     openai:
@@ -438,6 +441,21 @@ preview:
     free-max: 1
     pro-max: 3
     enterprise-max: 10
+
+  # ── Preview-engine handoff (external preview service) ──────────────────
+  # When route-via=true AND mode=docker, main app builds + pushes the image
+  # to the registry then hands off to preview-engine's /from-image endpoint.
+  # preview-engine pulls + runs + owns the container for its lifetime.
+  # Legacy docker-compose path stays the default.
+  #
+  # Flip route-via=false (or remove the block) to revert to the legacy path.
+  engine:
+    route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
+    base-url: ${PREVIEW_ENGINE_URL:http://localhost:8090}
+    registry-url: ${PREVIEW_ENGINE_REGISTRY_URL:localhost:5500}
+    api-key: ${PREVIEW_ENGINE_API_KEY:change-me-in-prod}
+    timeout-seconds: 300
+
   vm:
     enabled: false                       # set true to enable VM-based preview deployment
     default-ttl-minutes: 20
@@ -553,7 +571,11 @@ executespec:
 
 billing:
   terms-version: "2026-03-v1"
-  default-gateway: razorpay
+  # default-gateway: dev default is razorpay so local dev works without Stripe secrets.
+  # In prod (application-prod.yml) we override to 'stripe' for US-first traffic.
+  # Per-request routing still honours BillingEntity.paymentGateway; the default is the
+  # tie-breaker when the entity has no preference + the currency has no map entry.
+  default-gateway: ${BILLING_DEFAULT_GATEWAY:razorpay}
   founder-pricing:
     max-slots: 100
     discount-pct: 30

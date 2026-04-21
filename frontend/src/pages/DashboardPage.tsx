@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
-import MetricCard from '@/components/dashboard/MetricCard';
 import TokenBubbleChart from '@/components/dashboard/TokenBubbleChart';
 import ModelComparisonChart from '@/components/dashboard/ModelComparisonChart';
 import UserRunsChart from '@/components/dashboard/UserRunsChart';
@@ -11,6 +10,7 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useViewMode } from '@/hooks/useViewMode';
 import { fmtTokens } from '@/lib/utils';
+import PageShell, { Section, StatGrid, Stat } from '@/components/shared/PageShell';
 
 export default function DashboardPage() {
   const isAdmin = useAuthStore(selectIsOrgAdmin);
@@ -34,74 +34,67 @@ export default function DashboardPage() {
   // ── Vibe mode: simplified dashboard ─────────────────────────────────────
   if (isVibe) {
     return (
-      <div className="h-full overflow-y-auto p-4 space-y-4">
-        <h2 className="text-lg font-semibold text-primary">Dashboard</h2>
+      <PageShell
+        eyebrow="Overview"
+        title="Your workspace, at a glance."
+        accent="glance"
+        description="Only what matters most. Switch to Pro for the full breakdown."
+        maxWidth="4xl"
+        hero
+      >
+        <StatGrid cols={2}>
+          <Stat label="Total runs"  value={metrics?.totalRuns ?? 0} />
+          <Stat label="Active"      value={metrics?.activeRuns ?? 0} tone="purple" pulse />
+        </StatGrid>
 
-        {/* Key metrics only */}
-        <div className="grid grid-cols-2 gap-3">
-          <MetricCard
-            label="Total Runs"
-            value={metrics?.totalRuns ?? 0}
-          />
-          <MetricCard
-            label="Active Runs"
-            value={metrics?.activeRuns ?? 0}
-            accent="#8B5CF6"
-            pulse
-          />
-        </div>
-
-        {/* Recent activity */}
-        <ActivityFeed runs={runs} />
-      </div>
+        <Section eyebrow="Recent activity" title="Latest runs" card={false}>
+          <ActivityFeed runs={runs} />
+        </Section>
+      </PageShell>
     );
   }
 
   // ── Pro mode: full dashboard ────────────────────────────────────────────
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      {/* Header with date filter */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-primary">Dashboard</h2>
-        <DateRangeFilter />
-      </div>
-
-      {/* Metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricCard
-          label="Total Runs"
-          value={metrics?.totalRuns ?? 0}
+    <PageShell
+      eyebrow="Dashboard"
+      title="Ship velocity, at a glance."
+      accent="glance"
+      description="Run volume, token spend, model mix, and activity across your workspace."
+      actions={<DateRangeFilter />}
+      hero
+    >
+      {/* Primary metrics row */}
+      <StatGrid cols={4}>
+        <Stat label="Total runs"   value={metrics?.totalRuns ?? 0} />
+        <Stat label="Active"       value={metrics?.activeRuns ?? 0} tone="purple" pulse />
+        <Stat
+          label="Total tokens"
+          value={fmtTokens((metrics?.totalInputTokens ?? 0) + (metrics?.totalOutputTokens ?? 0))}
+          tone="brand"
         />
-        <MetricCard
-          label="Active Runs"
-          value={metrics?.activeRuns ?? 0}
-          accent="#8B5CF6"
-          pulse
-        />
-        <MetricCard
-          label="Total Tokens"
-          value={(metrics?.totalInputTokens ?? 0) + (metrics?.totalOutputTokens ?? 0)}
-          format={fmtTokens}
-          accent="#06B6D4"
-        />
-        <MetricCard
-          label="Completed"
-          value={metrics?.completedRuns ?? 0}
-          accent="#10B981"
-        />
-      </div>
+        <Stat label="Completed"    value={metrics?.completedRuns ?? 0} tone="success" />
+      </StatGrid>
 
       {/* Charts row 1 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <TokenBubbleChart metrics={metrics} />
-        <ModelComparisonChart data={modelComparison} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <Section eyebrow="Tokens" title="Token usage over time" card>
+          <TokenBubbleChart metrics={metrics} />
+        </Section>
+        <Section eyebrow="Models" title="Model comparison" card>
+          <ModelComparisonChart data={modelComparison} />
+        </Section>
       </div>
 
-      {/* Charts row 2 + Activity feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <UserRunsChart data={userRunsSummary} />
-        <ActivityFeed runs={runs} />
+      {/* Charts row 2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <Section eyebrow="Users" title="Runs by user" card>
+          <UserRunsChart data={userRunsSummary} />
+        </Section>
+        <Section eyebrow="Activity" title="Recent runs" card>
+          <ActivityFeed runs={runs} />
+        </Section>
       </div>
-    </div>
+    </PageShell>
   );
 }

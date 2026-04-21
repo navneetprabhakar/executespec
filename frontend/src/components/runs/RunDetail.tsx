@@ -324,6 +324,17 @@ export default function RunDetail() {
                     <StatusBadge status={activeRun.status} statusReason={activeRun.statusReason} />
                   )}
                 </div>
+                {/* v2.5.13 mobile fix — run title was missing from the Pro-view header
+                    (only the short ID was shown), making it impossible to know which
+                    spec you were looking at on a small screen. */}
+                {(activeRun.runTitle || activeRun.userRequest) && (
+                  <p
+                    className="text-sm text-primary mt-1 line-clamp-2"
+                    title={activeRun.runTitle ?? activeRun.userRequest ?? undefined}
+                  >
+                    {activeRun.runTitle ?? activeRun.userRequest}
+                  </p>
+                )}
                 <p className="text-xs text-muted mt-0.5 line-clamp-1">
                   {describeRunStatus(activeRun.status, activeRun.tasks, activeRun.failureReason, activeRun.executionMode)}
                 </p>

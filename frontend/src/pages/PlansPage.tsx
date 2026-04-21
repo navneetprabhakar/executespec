@@ -5,6 +5,7 @@ import { PlanCard } from '@/components/billing/PlanCard';
 import { DisclaimerModal } from '@/components/billing/DisclaimerModal';
 import { RazorpayCheckout } from '@/components/billing/RazorpayCheckout';
 import { useAuthStore } from '@/stores/useAuthStore';
+import PageShell from '@/components/shared/PageShell';
 
 export default function PlansPage() {
   const navigate = useNavigate();
@@ -12,7 +13,17 @@ export default function PlansPage() {
 
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showInr, setShowInr] = useState(true);
+  // Default: USD for everyone except detected-IN locales (language or timezone).
+  // Users can still flip the toggle manually.
+  const [showInr, setShowInr] = useState(() => {
+    try {
+      const lang = (navigator.language || '').toLowerCase();
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      return lang.startsWith('en-in') || lang.startsWith('hi') || tz === 'Asia/Kolkata';
+    } catch {
+      return false; // default USD
+    }
+  });
 
   // Checkout flow state
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -110,15 +121,17 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 sm:py-12">
-      <div className="text-center mb-10">
-        <h1 className="text-2xl sm:text-3xl font-bold text-primary">Simple, transparent pricing</h1>
-        <p className="mt-3 text-secondary">No credits. No surprises. You know exactly what you're getting.</p>
-      </div>
-
+    <PageShell
+      maxWidth="5xl"
+      hero
+      eyebrow="Plans"
+      title="Simple, transparent pricing."
+      accent="transparent"
+      description="No credits to translate. No token markups. Every tier shows you what ExecuteSpec really is."
+    >
       {/* Currency toggle */}
-      <div className="flex justify-center mb-10">
-        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-sm p-1">
+      <div className="flex justify-center">
+        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]">
           <button
             onClick={() => setShowInr(true)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
@@ -146,7 +159,7 @@ export default function PlansPage() {
       )}
 
       {/* Plan cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 max-w-3xl mx-auto">
         {displayPlans.map(plan => (
           <PlanCard
             key={plan.id}
@@ -208,6 +221,6 @@ export default function PlansPage() {
           />
         );
       })()}
-    </div>
+    </PageShell>
   );
 }

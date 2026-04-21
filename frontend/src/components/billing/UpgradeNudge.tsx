@@ -21,7 +21,7 @@ export function UpgradeNudge({ isOpen, onClose, currentTier, metric, current, ma
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-[var(--gray-200)]">
-      <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md max-w-md w-full mx-4 p-8 text-center overflow-y-auto" style={{ maxHeight: '95dvh' }}>
+      <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md max-w-md w-full mx-4 p-5 sm:p-8 text-center overflow-y-auto" style={{ maxHeight: '95dvh' }}>
         <div className="text-4xl mb-4">{'\u{1F680}'}</div>
         <h2 className="text-xl font-bold text-primary">
           You've used all your {metricLabel}

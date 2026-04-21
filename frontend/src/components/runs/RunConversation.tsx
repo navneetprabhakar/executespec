@@ -404,7 +404,7 @@ export default function RunConversation({ runId }: Props) {
                   'focus:border-emerald-500/40 focus:bg-[var(--gray-200)] transition-colors'
                 )}
                 rows={3}
-                placeholder={buildSuggestedRequest() || 'Describe the improvement to apply\u2026'}
+                placeholder={buildSuggestedRequest() || 'Describe the improvement to apply…'}
                 value={applyInput}
                 onChange={(e) => setApplyInput(e.target.value)}
               />
@@ -457,7 +457,7 @@ export default function RunConversation({ runId }: Props) {
                   'focus:border-accent-blue/40 focus:bg-[var(--gray-200)] transition-colors'
                 )}
                 rows={3}
-                placeholder={buildSuggestedRequest() || 'Describe what you want to change or add\u2026'}
+                placeholder={buildSuggestedRequest() || 'Describe what you want to change or add…'}
                 value={iterateInput}
                 onChange={(e) => setIterateInput(e.target.value)}
               />
@@ -666,7 +666,7 @@ export default function RunConversation({ runId }: Props) {
             <textarea
               ref={inputRef}
               className="flex-1 bg-transparent text-sm text-primary placeholder-[var(--text-muted)] resize-none focus:outline-none max-h-32 min-h-[24px]"
-              placeholder="Debug issues, ask about code, request improvements\u2026"
+              placeholder="Debug issues, ask about code, request improvements…"
               rows={1}
               value={input}
               onChange={(e) => {

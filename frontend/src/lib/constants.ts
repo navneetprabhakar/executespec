@@ -63,6 +63,10 @@ export const NAV_ITEMS: {
   requiredPermission?: string;
 }[] = [
   { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
+  // v2.5.14 Phase 3.1 — exec summary for Business Owner persona.
+  // Gated behind canViewCostBreakdown (PRO/MAX/ENTERPRISE) — FREE can't see
+  // the spend aggregate because that's a paid-tier analytics feature.
+  { path: '/exec',         label: 'Exec summary', icon: 'TrendingUp',      adminOnly: false, requiredPermission: 'canViewCostBreakdown' },
   { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3',       adminOnly: true  },
   { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign',     adminOnly: false, requiredPermission: 'canViewPricing' },
   { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false, requiredPermission: 'canManageIntegrations' },
@@ -86,7 +90,7 @@ export const NAV_ITEMS: {
  */
 export const V2_LEGACY_UI = {
   // feasibility dropped 2026-04-18 — component + API client deleted; endpoint stays permanent-410.
-  runConversation:      false,  // POST /api/runs/{id}/chat + /iterate + /apply
+  runConversation:      true,   // POST/GET /api/runs/{id}/chat wired to V2ChatService (2026-04-19). /iterate + /apply still 410.
   editRunPlan:          false,  // POST /api/runs/{id}/edit-plan — deferred
   applyTestFixes:       false,  // POST /api/runs/{id}/apply-test-fixes — deferred (wire with V2 test-gen)
   implementSuggestions: false,  // POST /api/runs/{id}/implement-suggestions — deferred

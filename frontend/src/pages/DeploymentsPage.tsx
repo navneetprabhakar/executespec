@@ -7,6 +7,7 @@ import { getDeployments } from '@/lib/api';
 import type { DeploymentSummary } from '@/lib/api';
 import { Skeleton } from '@/components/shared/SkeletonLoader';
 import EmptyState from '@/components/shared/EmptyState';
+import PageShell from '@/components/shared/PageShell';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import RoleGuard from '@/components/auth/RoleGuard';
 
@@ -73,23 +74,21 @@ function DeploymentsPageInner() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-primary flex items-center gap-2">
-            Deployments
-            <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-accent-blue/15 text-accent-blue border border-accent-blue/25">Beta</span>
-          </h1>
-          <p className="text-xs text-muted mt-0.5">Deploy completed runs to your GCP Cloud Run</p>
-        </div>
+    <PageShell
+      eyebrow="Deployments · Beta"
+      title="Ship runs to Cloud Run."
+      accent="Cloud Run"
+      description="Pin your favourite runs as permanent deployments on your own GCP project."
+      hero
+      actions={
         <button
           onClick={() => setShowWizard(true)}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
+          className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-md bg-accent-blue text-primary text-sm font-medium hover:bg-[var(--accent-blue-hover)] transition-colors"
         >
-          <Rocket className="h-4 w-4" /> Deploy Run
+          <Rocket className="h-4 w-4" /> Deploy run
         </button>
-      </div>
-
+      }
+    >
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-36" />)}
@@ -114,7 +113,7 @@ function DeploymentsPageInner() {
       )}
 
       {showWizard && <DeployWizardModal onClose={() => setShowWizard(false)} onRefresh={load} />}
-    </div>
+    </PageShell>
   );
 }
 

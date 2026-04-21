@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "low",
+  "run_id": "95de6176-c37c-4990-93dc-89ceca042557",
+  "status": "FAILED",
+  "harness": "v2",
+  "startedAt": "2026-04-21T12:22:52.290883Z",
+  "completedAt": "2026-04-21T12:22:52.364309Z",
+  "tasks_total": 0,
+  "tasks_done": 0,
+  "tasks_failed": 0,
+  "review": null,
+  "actual_cost": 0.0,
+  "est_low": 0,
+  "est_high": 0,
+  "credits": 1,
+  "total_input": 0,
+  "total_output": 0,
+  "accuracy": null,
+  "report_ok": false
+}

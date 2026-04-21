@@ -4,6 +4,7 @@ import { Gift, Package, ShoppingCart, Clock, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import BillingProfileForm from '@/components/billing/BillingProfileForm';
+import PageShell from '@/components/shared/PageShell';
 import { useUiStore } from '@/stores/useUiStore';
 import {
   fetchBillingStatus,
@@ -124,14 +125,17 @@ export default function BillingPage() {
   const bonusAvailable = bonusRuns?.available ?? 0;
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-
-        {/* Page header */}
-        <h1 className="text-xl font-bold text-primary">Billing</h1>
+    <PageShell
+      eyebrow="Billing"
+      title="Your plan, usage, and invoices."
+      accent="usage"
+      description="Track what you've shipped this cycle and manage subscriptions, add-ons, and invoices."
+      maxWidth="3xl"
+      hero
+    >
 
         {/* Current Plan */}
-        <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
+        <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 sm:p-6">
           <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
             <div>
               <h2 className="text-lg font-semibold text-primary">
@@ -216,7 +220,7 @@ export default function BillingPage() {
         })()}
 
         {/* Usage */}
-        <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
+        <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 sm:p-6">
           <div className="flex items-baseline justify-between mb-4">
             <h2 className="text-base font-semibold text-primary">Usage This Month</h2>
             {/* v2.5.8 — LLM $ spent this period. Sums pipeline_run + execution_run cost. */}
@@ -270,7 +274,7 @@ export default function BillingPage() {
 
         {/* Bonus Runs */}
         {bonusRuns && bonusRuns.topups.length > 0 && (
-          <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
+          <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 sm:p-6">
             <div className="flex items-center gap-2 mb-4">
               <Gift className="h-4 w-4 text-accent-green" />
               <h2 className="text-base font-semibold text-primary">Bonus Runs</h2>
@@ -332,7 +336,7 @@ export default function BillingPage() {
           );
           if (filtered.length === 0) return null;
           return (
-            <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
+            <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 sm:p-6">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <Zap className="h-4 w-4 text-accent-amber" />
@@ -360,7 +364,7 @@ export default function BillingPage() {
               <p className="text-sm text-muted mb-4">
                 Need more runs? Purchase a top-up pack. Purchased runs never expire.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                 {filtered.map((pkg) => (
                   <button
                     key={pkg.id}
@@ -378,7 +382,7 @@ export default function BillingPage() {
                     <div className="mt-3">
                       <span className="text-xl font-bold text-accent-blue">
                         {showInr
-                          ? `\u20B9${(pkg.amountInr / 100).toLocaleString('en-IN')}`
+                          ? `₹${(pkg.amountInr / 100).toLocaleString('en-IN')}`
                           : `$${(pkg.amountUsd / 100).toFixed(2)}`}
                       </span>
                     </div>
@@ -397,7 +401,7 @@ export default function BillingPage() {
 
         {/* Cancel — admin only for org accounts */}
         {isActive && !sub.cancelAtPeriodEnd && (!isOrgUser || isAdmin) && (
-          <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6">
+          <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 sm:p-6">
             <button
               onClick={handleCancel}
               disabled={cancelling}
@@ -410,7 +414,6 @@ export default function BillingPage() {
             </p>
           </div>
         )}
-      </div>
 
       {/* Razorpay Order Checkout overlay */}
       {orderData && (
@@ -428,7 +431,7 @@ export default function BillingPage() {
 
       {/* Billing profile (GST details) — admin only for org accounts */}
       {(!isOrgUser || isAdmin) && <BillingProfileForm />}
-    </div>
+    </PageShell>
   );
 }
 

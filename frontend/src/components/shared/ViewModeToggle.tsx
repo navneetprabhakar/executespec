@@ -16,8 +16,11 @@ export default function ViewModeToggle() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // v2.5.13 — mobile-compact base. Was `px-3` everywhere which made the 3-up
+  // pill overflow a 375px header. `px-2 sm:px-3` keeps the tap target large
+  // enough (≥32px wide at mobile) without eating header budget.
   const base =
-      'px-3 py-1 text-xs font-mono font-medium uppercase tracking-wider transition-colors';
+      'px-2 sm:px-3 py-1 text-[11px] sm:text-xs font-mono font-medium uppercase tracking-wider transition-colors';
   const activeCls = 'bg-[var(--gray-300)] text-primary';
   const idleCls = 'bg-transparent text-muted hover:text-secondary';
 
@@ -34,15 +37,17 @@ export default function ViewModeToggle() {
   };
 
   return (
-    <div className="flex rounded-md border border-[var(--border-default)] overflow-hidden">
+    <div className="flex rounded-md border border-[var(--border-default)] overflow-hidden flex-shrink-0">
       <button
         onClick={() => handle('vibe')}
+        title="Vibe mode"
         className={cn(base, viewMode === 'vibe' ? activeCls : idleCls)}
       >
         Vibe
       </button>
       <button
         onClick={() => handle('pro')}
+        title="Pro mode"
         className={cn(base, viewMode === 'pro' ? activeCls : idleCls)}
       >
         Pro
@@ -59,7 +64,9 @@ export default function ViewModeToggle() {
             !canUseProjectMode && 'opacity-40 cursor-not-allowed',
         )}
       >
-        Project
+        {/* Shorter label at mobile so the 3-up pill fits alongside avatar + bell */}
+        <span className="sm:hidden">Proj</span>
+        <span className="hidden sm:inline">Project</span>
       </button>
     </div>
   );

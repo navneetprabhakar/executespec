@@ -5,6 +5,7 @@ import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
+import PageShell from '@/components/shared/PageShell';
 
 // ── Human-readable labels ────────────────────────────────────────────────
 
@@ -159,19 +160,24 @@ export default function AuditPage() {
   const entries = data?.content ?? [];
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-primary">Audit Trail</h2>
+    <PageShell
+      eyebrow="Audit"
+      eyebrowTone="warm"
+      title="Every change, time-stamped."
+      accent="Every"
+      description="Forensic history of every action across your workspace."
+      hero
+      actions={
         <button
           onClick={fetchLogs}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors disabled:opacity-40 border border-[var(--border-default)]"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh
         </button>
-      </div>
+      }
+    >
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-3">
@@ -241,9 +247,9 @@ export default function AuditPage() {
         </div>
       )}
 
-      {/* Results table */}
+      {/* Results — table on md+, cards on mobile so Actor + Changes never get dropped */}
       <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--border-default)] text-left">
@@ -303,6 +309,55 @@ export default function AuditPage() {
           </table>
         </div>
 
+        {/* Mobile cards — preserves Actor + Changes that the table drops on small screens */}
+        <ul className="md:hidden divide-y divide-[var(--border-default)]">
+          {loading && entries.length === 0 ? (
+            <li className="px-4 py-12 text-center text-muted text-sm">Loading...</li>
+          ) : entries.length === 0 ? (
+            <li className="px-4 py-12 text-center text-muted text-sm">No audit events found</li>
+          ) : (
+            entries.map((entry) => (
+              <li key={entry.id} className="px-4 py-3 space-y-1.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-primary truncate">{humanLabel(entry.eventType)}</p>
+                    <p className="text-[11px] text-muted mt-0.5">{formatTime(entry.createdAt)}</p>
+                  </div>
+                  <span className={cn(
+                    'inline-block px-2 py-0.5 rounded-sm text-[10px] font-semibold uppercase whitespace-nowrap flex-shrink-0',
+                    entityBadgeColor(entry.entityType)
+                  )}>
+                    {entry.entityType}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-muted">
+                  <span className="font-mono" title={entry.entityId}>
+                    {entry.entityId.length > 16 ? entry.entityId.slice(0, 12) + '…' : entry.entityId}
+                  </span>
+                  <span>·</span>
+                  <span className="truncate">
+                    {entry.actorEmail ?? (entry.actorId ? entry.actorId.slice(0, 12) + '…' : 'SYSTEM')}
+                  </span>
+                </div>
+                {(entry.oldValue || entry.newValue) && (
+                  <div className="text-[11px] space-y-0.5 pt-0.5 break-words">
+                    {entry.oldValue && entry.newValue ? (
+                      <>
+                        <div className="text-muted line-through">{renderJsonValue(entry.oldValue)}</div>
+                        <div className="text-accent-green">{renderJsonValue(entry.newValue)}</div>
+                      </>
+                    ) : entry.newValue ? (
+                      <div className="text-accent-green">{renderJsonValue(entry.newValue)}</div>
+                    ) : (
+                      <div className="text-accent-red line-through">{renderJsonValue(entry.oldValue!)}</div>
+                    )}
+                  </div>
+                )}
+              </li>
+            ))
+          )}
+        </ul>
+
         {/* Pagination */}
         {data && data.totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-2.5 border-t border-[var(--border-default)]">
@@ -328,6 +383,6 @@ export default function AuditPage() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import IntegrationLogo from '@/components/integrations/IntegrationLogo';
 import GlassPanel from '@/components/shared/GlassPanel';
+import PageShell from '@/components/shared/PageShell';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
@@ -14,15 +15,32 @@ import type { RunSummary, OrgDto, SlackStatus, SlackChannel, ProjectSlackChannel
 
 // ── Integration metadata ──────────────────────────────────────────────────
 
-const INTEGRATIONS = [
-  { key: 'SLACK',      name: 'Slack',      description: 'Pipeline notifications',  configurable: true  },
-  { key: 'GITHUB',     name: 'GitHub',     description: 'Push code to GitHub',     configurable: false },
-  { key: 'BITBUCKET',  name: 'Bitbucket',  description: 'Push code to Bitbucket',  configurable: true, userLevel: true },
-  { key: 'JIRA',       name: 'Jira',       description: 'Issue-triggered runs',    configurable: true  },
-  { key: 'CONFLUENCE', name: 'Confluence',  description: 'Page-triggered runs',     configurable: true  },
-  { key: 'SERVICENOW', name: 'ServiceNow',  description: 'Incident response runs',  configurable: false },
-  { key: 'PAGERDUTY',  name: 'PagerDuty',   description: 'Alert-triggered runs',    configurable: false },
+// v2.5.14 (Phase 1.7) — categorised groups + honest "Coming soon" copy.
+// Was: one flat list, "Unavailable" for everything not shipped.
+const INTEGRATIONS: {
+  key: string;
+  name: string;
+  description: string;
+  configurable: boolean;
+  userLevel?: boolean;
+  category: 'code' | 'notifications' | 'ticketing' | 'incident';
+  comingSoon?: boolean;
+}[] = [
+  { key: 'GITHUB',     name: 'GitHub',      description: 'Push code to GitHub',       configurable: false, category: 'code' },
+  { key: 'BITBUCKET',  name: 'Bitbucket',   description: 'Push code to Bitbucket',    configurable: true,  userLevel: true, category: 'code' },
+  { key: 'SLACK',      name: 'Slack',       description: 'Pipeline notifications',    configurable: true,  category: 'notifications' },
+  { key: 'JIRA',       name: 'Jira',        description: 'Issue-triggered runs',      configurable: true,  category: 'ticketing' },
+  { key: 'CONFLUENCE', name: 'Confluence',  description: 'Page-triggered runs',       configurable: true,  category: 'ticketing' },
+  { key: 'SERVICENOW', name: 'ServiceNow',  description: 'Incident response runs',    configurable: false, category: 'incident', comingSoon: true },
+  { key: 'PAGERDUTY',  name: 'PagerDuty',   description: 'Alert-triggered runs',      configurable: false, category: 'incident', comingSoon: true },
 ];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  code: 'Source control',
+  notifications: 'Notifications',
+  ticketing: 'Ticketing',
+  incident: 'Incident response',
+};
 
 interface SetupGuide { title: string; url: string; steps: string[]; }
 
@@ -707,23 +725,22 @@ export default function IntegrationsPage() {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-primary">Integrations</h1>
-          <p className="text-xs text-muted mt-0.5">
-            External tools that can trigger agent runs.
-            {isAdmin && ' Click Configure to enable an integration for your organization.'}
-          </p>
-        </div>
+    <PageShell
+      eyebrow="Integrations"
+      title="Connect your stack."
+      accent="stack"
+      description={`External tools that can trigger agent runs.${isAdmin ? ' Click Configure to enable an integration.' : ''}`}
+      hero
+      actions={
         <button
           onClick={() => setShowGuide(!showGuide)}
-          className="flex items-center gap-1.5 text-xs text-secondary hover:text-accent-blue transition-colors px-3 py-1.5 rounded-sm border border-[var(--border-default)] hover:border-accent-blue/30"
+          className="inline-flex items-center gap-1.5 text-xs text-secondary hover:text-accent-blue transition-colors px-3 py-1.5 rounded-md border border-[var(--border-default)] hover:border-accent-blue/30"
         >
           <HelpCircle className="h-3.5 w-3.5" />
           Setup Guide
         </button>
-      </div>
+      }
+    >
 
       {/* No org warning */}
       {!user?.orgId && (
@@ -736,13 +753,21 @@ export default function IntegrationsPage() {
         </GlassPanel>
       )}
 
-      {/* Integration grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {INTEGRATIONS.map((int) => {
-          const configured = isConfigured(int.key);
-          const isExpanded = configuring === int.key;
+      {/* Integration grid — grouped by category for faster scanning */}
+      {(['code', 'notifications', 'ticketing', 'incident'] as const).map((category) => {
+        const items = INTEGRATIONS.filter((i) => i.category === category);
+        if (items.length === 0) return null;
+        return (
+          <section key={category} className="space-y-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+              {CATEGORY_LABELS[category]}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {items.map((int) => {
+                const configured = isConfigured(int.key);
+                const isExpanded = configuring === int.key;
 
-          return (
+                return (
             <div
               key={int.key}
               className={`rounded-sm border transition-all ${
@@ -762,33 +787,51 @@ export default function IntegrationsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-sm font-medium ${
-                      configured ? 'text-accent-green bg-accent-green/10' : 'text-muted bg-[var(--gray-400)]/10'
-                    }`}>
-                      {configured ? 'Enabled' : 'Disabled'}
-                    </span>
-                    {int.configurable && ((int as any).userLevel || (isAdmin && user?.orgId)) && (
-                      (() => {
-                        const flagOn = integrationFlagEnabled(int.key);
-                        const title = flagOn
-                          ? undefined
-                          : 'Disabled by platform operator — contact support to enable';
+                    {(() => {
+                      const flagOn = integrationFlagEnabled(int.key);
+                      // v2.5.14 (Phase 1.7) — clearer three-state status:
+                      // Enabled / Coming soon (non-configurable) / Admin disabled (flag-off) / Ready to configure.
+                      if (configured) {
                         return (
-                          <button
-                            onClick={() => flagOn && setConfiguring(isExpanded ? null : int.key)}
-                            disabled={!flagOn}
-                            title={title}
-                            className={`flex items-center gap-1 text-xs transition-colors px-2 py-1 rounded-sm border ${
-                              flagOn
-                                ? 'text-secondary hover:text-accent-blue border-[var(--border-default)] hover:border-accent-blue/30'
-                                : 'text-muted border-[var(--border-default)] opacity-40 cursor-not-allowed'
-                            }`}
-                          >
-                            <Settings2 className="h-3 w-3" />
-                            {!flagOn ? 'Unavailable' : (isExpanded ? 'Close' : configured ? 'Edit' : 'Configure')}
-                          </button>
+                          <span className="text-xs px-2 py-0.5 rounded-sm font-medium text-accent-green bg-accent-green/10">
+                            Enabled
+                          </span>
                         );
-                      })()
+                      }
+                      if (int.comingSoon || !int.configurable) {
+                        return (
+                          <span
+                            className="text-xs px-2 py-0.5 rounded-sm font-medium text-accent-blue bg-accent-blue/10"
+                            title="Coming soon — join the waitlist from Settings"
+                          >
+                            Coming soon
+                          </span>
+                        );
+                      }
+                      if (!flagOn && int.configurable) {
+                        return (
+                          <span
+                            className="text-xs px-2 py-0.5 rounded-sm font-medium text-muted bg-[var(--gray-400)]/10"
+                            title="Disabled by platform operator — contact support to enable"
+                          >
+                            Admin disabled
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="text-xs px-2 py-0.5 rounded-sm font-medium text-muted bg-[var(--gray-400)]/10">
+                          Ready to configure
+                        </span>
+                      );
+                    })()}
+                    {int.configurable && ((int as any).userLevel || (isAdmin && user?.orgId)) && integrationFlagEnabled(int.key) && (
+                      <button
+                        onClick={() => setConfiguring(isExpanded ? null : int.key)}
+                        className="flex items-center gap-1 text-xs transition-colors px-2 py-1 rounded-sm border text-secondary hover:text-accent-blue border-[var(--border-default)] hover:border-accent-blue/30"
+                      >
+                        <Settings2 className="h-3 w-3" />
+                        {isExpanded ? 'Close' : configured ? 'Edit' : 'Configure'}
+                      </button>
                     )}
                   </div>
                 </div>
@@ -828,8 +871,11 @@ export default function IntegrationsPage() {
               )}
             </div>
           );
-        })}
-      </div>
+              })}
+            </div>
+          </section>
+        );
+      })}
 
       {/* Access Token Setup Guide */}
       {showGuide && (
@@ -905,6 +951,6 @@ export default function IntegrationsPage() {
           </table>
         </GlassPanel>
       )}
-    </div>
+    </PageShell>
   );
 }

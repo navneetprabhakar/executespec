@@ -6,7 +6,11 @@ import type { ArchitectureDoc } from '@/types/project';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { cn } from '@/lib/utils';
 
-export default function ArchitectureViewer({ projectId }: { projectId: string }) {
+export default function ArchitectureViewer({ projectId, repoCount = null }: { projectId: string; repoCount?: number | null }) {
+  // v2.5.14 (Phase 1.5) — Generate button now knows whether repos are linked
+  // so we can disable it with an inline reason instead of letting it fail in
+  // the backend and bubble up a useless "Generation failed" error.
+  const noRepos = repoCount === 0;
   const [doc, setDoc] = useState<ArchitectureDoc | null>(null);
   const [versions, setVersions] = useState<ArchitectureDoc[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -75,8 +79,8 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
   return (
     <div className="space-y-3 text-xs">
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
           <h2 className="text-[13px] font-medium text-primary">Architecture document</h2>
           {staleness?.stale && (
             <span
@@ -120,20 +124,27 @@ export default function ArchitectureViewer({ projectId }: { projectId: string })
           className="w-32 text-[11px] font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-1.5 py-0.5 focus:outline-none focus:border-accent-blue"
           title="Optional branch override (applies to all linked repos). Leave empty for each repo's default."
         />
-        <button
-          onClick={generate}
-          disabled={busy}
-          className={cn(
-            'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border transition-colors',
-            busy
-              ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
-              : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
+        <div className="flex flex-col items-end gap-0.5">
+          <button
+            onClick={generate}
+            disabled={busy || noRepos}
+            title={noRepos ? 'Link at least one repository under the Repos tab first.' : undefined}
+            aria-label={noRepos ? 'Generate architecture (link a repo first)' : 'Generate architecture'}
+            className={cn(
+              'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border transition-colors',
+              (busy || noRepos)
+                ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
+                : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
+            )}
+          >
+            {busy
+              ? <><Loader2 className="h-3 w-3 animate-spin" /> Generating…</>
+              : <><Sparkles className="h-3 w-3" /> {doc ? 'Regenerate' : 'Generate'}</>}
+          </button>
+          {noRepos && (
+            <span className="text-[10px] text-muted italic">Link a repo to enable</span>
           )}
-        >
-          {busy
-            ? <><Loader2 className="h-3 w-3 animate-spin" /> Generating…</>
-            : <><Sparkles className="h-3 w-3" /> {doc ? 'Regenerate' : 'Generate'}</>}
-        </button>
+        </div>
       </div>
 
       {error && <div className="text-xs text-accent-red">{error}</div>}

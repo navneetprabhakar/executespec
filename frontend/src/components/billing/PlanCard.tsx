@@ -25,7 +25,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
   const keyModeLabel = plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Managed Keys';
 
   return (
-    <div className={`relative rounded-md border p-6 flex flex-col ${
+    <div className={`relative rounded-md border p-4 sm:p-6 flex flex-col ${
       isMax ? 'border-emerald-600' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
     } ${isCurrentPlan ? 'ring-2 ring-accent-blue' : ''}`}>
 
