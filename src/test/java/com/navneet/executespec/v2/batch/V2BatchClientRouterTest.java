@@ -43,7 +43,7 @@ class V2BatchClientRouterTest {
         V2BatchClientRouter router = new V2BatchClientRouter(List.of(anthropic, openai));
         assertThat(router.forProvider(LlmProvider.ANTHROPIC)).isSameAs(anthropic);
         assertThat(router.forProvider(LlmProvider.OPENAI)).isSameAs(openai);
-        assertThat(router.hasClient(LlmProvider.GOOGLE)).isFalse();
+        assertThat(router.hasClient(LlmProvider.GEMINI)).isFalse();
     }
 
     @Test
