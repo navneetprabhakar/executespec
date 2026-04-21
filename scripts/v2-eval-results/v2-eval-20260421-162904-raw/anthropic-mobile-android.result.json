@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "mobile-android",
+  "run_id": "5ba2b9ec-3449-4ed0-8965-40af962fa393",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-21T11:26:27.370581Z",
+  "completedAt": "2026-04-21T11:35:40.105281Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"totalLatencyMs\":134952,\"wiringPassSummary\":\"No wiring issues found. Full import-chain audit confirmed every module is correctly registered: src/types/habit.ts → consumed by useHabits.ts and HabitListScreen.tsx; src/hooks/useHabits.ts → consumed by HabitListScreen.tsx; src/components/HabitCard.tsx → consumed by HabitListScreen.tsx; src/screens/HabitListScreen.tsx → registered as a Stack.Screen in AppNavigator.tsx; src/navigation/AppNavigator.tsx → rendered by App.tsx; App.tsx → registered via registerRootComponent in index.ts (the package.json \\\"main\\\" entry point). No barrel files with missing re-exports, no orphaned components, no dead path-alias imports. TypeScript typecheck passes cleanly (exit 0).\",\"generalPassSummary\":\"Found 1 issue, fixed 1. Issue: `useHabits.ts` — `saveHabits()` (an async I/O side effect) was called directly inside `setHabits()` updater functions in both `addHabit` and `incrementStreak`. React requires state updater functions to be pure; in React 18 Strict Mode they are intentionally invoked twice, which would cause `saveHabits` to fire multiple times per mutation and could corrupt persisted state. Fix: removed `saveHabits` calls from the updaters and replaced them with a `useEffect` that watches the `habits` state and persists it after the initial AsyncStorage load has completed (guarded by a `loadedRef` flag to avoid overwriting storage with the initial empty state).\",\"overall\":\"FIXED_ISSUES\",\"finalBuildExitCode\":0,\"finalBuildPassed\":true}",
+  "actual_cost": 1.025803,
+  "est_low": 2.7199999999999998,
+  "est_high": 4.76,
+  "credits": 1,
+  "total_input": 238488,
+  "total_output": 27338,
+  "accuracy": 72,
+  "report_ok": true
+}

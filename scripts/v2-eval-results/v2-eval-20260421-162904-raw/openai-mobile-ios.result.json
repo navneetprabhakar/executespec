@@ -1,0 +1,21 @@
+{
+  "provider": "openai",
+  "band": "mobile-ios",
+  "run_id": "9934067f-10a9-4c61-8349-b9db260e7306",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-21T12:16:13.863741Z",
+  "completedAt": "2026-04-21T12:22:48.981082Z",
+  "tasks_total": 3,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"totalLatencyMs\":72399,\"wiringPassSummary\":\"no wiring issues found\",\"generalPassSummary\":\"Found 1 issues, fixed 1. Issues: wrapped AsyncStorage.getItem in loadHabits with try/catch so storage read failures no longer cause an unhandled runtime error at the IO boundary.\",\"overall\":\"FIXED_ISSUES\",\"finalBuildExitCode\":0,\"finalBuildPassed\":true}",
+  "actual_cost": 0.674197,
+  "est_low": 2.71,
+  "est_high": 4.7425,
+  "credits": 1,
+  "total_input": 390309,
+  "total_output": 14939,
+  "accuracy": 78,
+  "report_ok": true
+}
