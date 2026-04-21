@@ -13,7 +13,17 @@ export default function PlansPage() {
 
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showInr, setShowInr] = useState(true);
+  // Default: USD for everyone except detected-IN locales (language or timezone).
+  // Users can still flip the toggle manually.
+  const [showInr, setShowInr] = useState(() => {
+    try {
+      const lang = (navigator.language || '').toLowerCase();
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      return lang.startsWith('en-in') || lang.startsWith('hi') || tz === 'Asia/Kolkata';
+    } catch {
+      return false; // default USD
+    }
+  });
 
   // Checkout flow state
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);

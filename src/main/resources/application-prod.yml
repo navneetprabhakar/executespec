@@ -137,6 +137,22 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://executespec.ai}
 
 # ── Billing ───────────────────────────────────────────────────────────────────
+# 2026-04-21 — US-first launch. Stripe is the prod default gateway for USD traffic.
+# Razorpay continues to serve INR customers via currency-based routing (see
+# PaymentGatewayRouter + BillingController). If STRIPE_* env vars are not set,
+# set BILLING_STRIPE_ENABLED=false and flip BILLING_DEFAULT_GATEWAY=razorpay.
+billing:
+  default-gateway: ${BILLING_DEFAULT_GATEWAY:stripe}
+  stripe:
+    enabled: ${BILLING_STRIPE_ENABLED:true}
+    secret-key: ${STRIPE_SECRET_KEY:}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    pro-price-id: ${STRIPE_PRO_PRICE_ID:}
+    enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
+  razorpay:
+    enabled: ${BILLING_RAZORPAY_ENABLED:true}
+
 razorpay:
   key-id: ${RAZORPAY_KEY_ID:}
   key-secret: ${RAZORPAY_KEY_SECRET:}
