@@ -821,7 +821,8 @@
         </div>
         <div class="amount"><span class="big"><span class="sym">&dollar;</span><span class="amt" data-usd="20" data-inr="1699">20</span></span><span class="unit">/month</span></div>
         <ul>
-          <li><strong>50 runs</strong> / month</li>
+          <li><strong>20 credits</strong> / month &nbsp;<span style="opacity:.7">($1 = 1 credit; top-ups same rate)</span></li>
+          <li>≈ 20 LOW, 6 HIGH, or 10 Mobile runs (mix)</li>
           <li>All models &middot; provider choice</li>
           <li><strong>2 projects, 2 repos each</strong></li>
           <li>GitHub push + webhooks</li>
@@ -1024,7 +1025,7 @@
           <h4>7. Third-party providers</h4>
           <p>Anthropic, Google, OpenAI process your specs/code according to their own ToS. All three are contracted to not train on customer data.</p>
           <h4>8. Payment</h4>
-          <p>Monthly subscription via Razorpay / Stripe. Cancel any time; access continues until the end of the billing period. Top-up run credits are non-refundable once purchased.</p>
+          <p>Monthly subscription via Stripe (US and global customers) or Razorpay (India). Prices shown in USD by default; INR pricing auto-applies for detected India locales and is manually toggleable. Cancel any time; access continues until the end of the billing period. Top-up run credits are non-refundable once purchased.</p>
           <h4>9. Limitation of liability</h4>
           <p>Code provided "as is". Our total liability caps at the fees you paid in the prior 12 months.</p>
           <h4>10. Governing law</h4>
@@ -1040,7 +1041,7 @@
             <li>Account: email, name.</li>
             <li>Run specs and generated artifacts.</li>
             <li>Usage metrics (counts, durations, feature usage).</li>
-            <li>Payment metadata (no card numbers; processed by Razorpay/Stripe).</li>
+            <li>Payment metadata (no card numbers; processed by Stripe or Razorpay).</li>
           </ul>
           <h4>Providers</h4>
           <p>Specs are sent only to the LLM provider you choose. All three commit to not training on your data.</p>
@@ -1075,7 +1076,8 @@
               <tr><td>Anthropic</td><td>Claude LLM</td><td>USA</td></tr>
               <tr><td>OpenAI</td><td>GPT LLM</td><td>USA</td></tr>
               <tr><td>Google (Vertex AI)</td><td>Gemini LLM</td><td>USA</td></tr>
-              <tr><td>Razorpay / Stripe</td><td>Payments</td><td>India / Global</td></tr>
+              <tr><td>Stripe</td><td>Payments (US + global)</td><td>USA</td></tr>
+              <tr><td>Razorpay</td><td>Payments (India)</td><td>India</td></tr>
             </tbody>
           </table>
           <h4>Compliance</h4>
@@ -1127,6 +1129,20 @@
     });
     document.querySelectorAll('.sym').forEach(function(el) { el.textContent = isINR ? '\u20B9' : '$'; });
   }
+
+  // Auto-detect India visitors so INR doesn't require a manual toggle for them.
+  // USD stays the default for everyone else (primary market is US / global).
+  (function detectCcy() {
+    try {
+      var lang = (navigator.language || '').toLowerCase();
+      var tz = (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+      var isIndia = lang.indexOf('en-in') === 0 || lang.indexOf('hi') === 0 || tz === 'Asia/Kolkata';
+      if (isIndia) {
+        var box = document.getElementById('ccy');
+        if (box && !box.checked) { box.checked = true; toggleCcy(); }
+      }
+    } catch (e) { /* default USD */ }
+  })();
 </script>
 
 </body>

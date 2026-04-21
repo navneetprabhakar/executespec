@@ -1,7 +1,37 @@
 # Tier Re-assessment — Project View & Platform Features
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-04-21 (v3 — real eval + credit model locked)_
 _Decided as part of the UX overhaul on branch `feature/ux-overhaul-v1`._
+
+## Credit model (v3 — locked)
+
+**$1 = 1 credit** is the base unit, same for subscription allocation and top-ups.
+
+Credits per run are flat by complexity band (not per-provider):
+
+| Band | Real cost range (Apr 21 eval, across 3 providers) | Credits charged | User pays | Margin (best / worst provider) |
+|---|---|---|---|---|
+| LOW | $0.087 – $0.134 | **1** | $1.00 | 91% (Anthropic) / 87% (Gemini) |
+| MEDIUM | $0.332 – $0.482 | **1** | $1.00 | 67% (OpenAI) / 52% (Gemini) |
+| HIGH | $1.28 – $2.65 | **4** | $4.00 | 68% (Gemini) / **-32% (Anthropic)** |
+| Mobile (Android/iOS) | $0.67 – $1.23 | **2** | $2.00 | 67% (OpenAI) / 39% (Anthropic mobile-iOS) |
+
+**On the Anthropic HIGH loss: we eat it as CAC.** The $2.65 Anthropic HIGH vs $4 user charge loses $0.65 (-32% margin). We accept this because:
+
+1. The user picked Anthropic on purpose (quality signal — Anthropic HIGH averaged 87 accuracy vs Gemini 85 and OpenAI 78 in the Apr 21 eval). Penalising them for that choice undercuts the "your provider, your choice" positioning.
+2. The blended margin across providers on HIGH is still positive: weighted 40% OpenAI / 35% Gemini / 25% Anthropic → $1.64 blended cost on a $4 charge = 59% margin.
+3. PRO is capped at 20 credits/mo. Worst-case an Anthropic-preferring PRO user burns all 20 credits on HIGH runs — 5 runs × $2.65 = $13.25 cost on $20 plan = 34% margin. Still positive on the plan level.
+
+Credits are shown at plan-approval so the user always sees what a spec will consume, but the count does not vary by provider — complexity band is the only axis.
+
+### Why flat-per-band (Option C) over per-provider (Option B)
+
+We considered "3 credits for Gemini HIGH / 4 for OpenAI / 6 for Anthropic". Rejected because:
+- **Perverse incentive**: user picks the cheapest provider for every run, erasing the quality signal we rely on for the verified score distribution.
+- **UX noise**: plan-approval chip flickers on provider change (already a live field in `NewRunModal`).
+- **Arbitrage**: users would pick Gemini, hit the 10× token regression, see a bad run, blame the platform.
+
+Flat-per-band means the user decision is 100% about spec complexity, not about which LLM gets cheaper this month. We absorb the provider variance as a platform cost.
 
 ## Current (pre-overhaul) state
 
@@ -25,7 +55,9 @@ Every tier now gets **visibility into the Project workspace** (so new users can 
 
 | Feature | FREE | PRO | MAX | ENTERPRISE |
 |---|---|---|---|---|
-| **Monthly runs** | 5 (1-credit caps) | 50 (was 10) | Unlimited fair-use | Unlimited + SLA |
+| **Monthly allocation** | 5 credits (1-credit caps) | **20 credits** ($20/mo) | Unlimited fair-use | Unlimited + SLA |
+| **Effective runs/mo** | 5 LOW-only | 20 LOW / 5 HIGH / 10 Mobile (mix) | Unlimited | Unlimited |
+| **Top-up pricing** | — | $1 = 1 credit (any pack size) | — | Custom |
 | **Managed keys (we pay)** | ✅ | ✅ | — | — |
 | **BYOK** | — | — | ✅ | ✅ |
 | **Spec templates (save/reuse)** | 1 personal | Unlimited personal | Unlimited personal | Unlimited org-wide |

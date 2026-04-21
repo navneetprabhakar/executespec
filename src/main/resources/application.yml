@@ -571,7 +571,11 @@ executespec:
 
 billing:
   terms-version: "2026-03-v1"
-  default-gateway: razorpay
+  # default-gateway: dev default is razorpay so local dev works without Stripe secrets.
+  # In prod (application-prod.yml) we override to 'stripe' for US-first traffic.
+  # Per-request routing still honours BillingEntity.paymentGateway; the default is the
+  # tie-breaker when the entity has no preference + the currency has no map entry.
+  default-gateway: ${BILLING_DEFAULT_GATEWAY:razorpay}
   founder-pricing:
     max-slots: 100
     discount-pct: 30
