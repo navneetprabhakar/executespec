@@ -15,15 +15,32 @@ import type { RunSummary, OrgDto, SlackStatus, SlackChannel, ProjectSlackChannel
 
 // ── Integration metadata ──────────────────────────────────────────────────
 
-const INTEGRATIONS = [
-  { key: 'SLACK',      name: 'Slack',      description: 'Pipeline notifications',  configurable: true  },
-  { key: 'GITHUB',     name: 'GitHub',     description: 'Push code to GitHub',     configurable: false },
-  { key: 'BITBUCKET',  name: 'Bitbucket',  description: 'Push code to Bitbucket',  configurable: true, userLevel: true },
-  { key: 'JIRA',       name: 'Jira',       description: 'Issue-triggered runs',    configurable: true  },
-  { key: 'CONFLUENCE', name: 'Confluence',  description: 'Page-triggered runs',     configurable: true  },
-  { key: 'SERVICENOW', name: 'ServiceNow',  description: 'Incident response runs',  configurable: false },
-  { key: 'PAGERDUTY',  name: 'PagerDuty',   description: 'Alert-triggered runs',    configurable: false },
+// v2.5.14 (Phase 1.7) — categorised groups + honest "Coming soon" copy.
+// Was: one flat list, "Unavailable" for everything not shipped.
+const INTEGRATIONS: {
+  key: string;
+  name: string;
+  description: string;
+  configurable: boolean;
+  userLevel?: boolean;
+  category: 'code' | 'notifications' | 'ticketing' | 'incident';
+  comingSoon?: boolean;
+}[] = [
+  { key: 'GITHUB',     name: 'GitHub',      description: 'Push code to GitHub',       configurable: false, category: 'code' },
+  { key: 'BITBUCKET',  name: 'Bitbucket',   description: 'Push code to Bitbucket',    configurable: true,  userLevel: true, category: 'code' },
+  { key: 'SLACK',      name: 'Slack',       description: 'Pipeline notifications',    configurable: true,  category: 'notifications' },
+  { key: 'JIRA',       name: 'Jira',        description: 'Issue-triggered runs',      configurable: true,  category: 'ticketing' },
+  { key: 'CONFLUENCE', name: 'Confluence',  description: 'Page-triggered runs',       configurable: true,  category: 'ticketing' },
+  { key: 'SERVICENOW', name: 'ServiceNow',  description: 'Incident response runs',    configurable: false, category: 'incident', comingSoon: true },
+  { key: 'PAGERDUTY',  name: 'PagerDuty',   description: 'Alert-triggered runs',      configurable: false, category: 'incident', comingSoon: true },
 ];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  code: 'Source control',
+  notifications: 'Notifications',
+  ticketing: 'Ticketing',
+  incident: 'Incident response',
+};
 
 interface SetupGuide { title: string; url: string; steps: string[]; }
 
@@ -736,13 +753,21 @@ export default function IntegrationsPage() {
         </GlassPanel>
       )}
 
-      {/* Integration grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {INTEGRATIONS.map((int) => {
-          const configured = isConfigured(int.key);
-          const isExpanded = configuring === int.key;
+      {/* Integration grid — grouped by category for faster scanning */}
+      {(['code', 'notifications', 'ticketing', 'incident'] as const).map((category) => {
+        const items = INTEGRATIONS.filter((i) => i.category === category);
+        if (items.length === 0) return null;
+        return (
+          <section key={category} className="space-y-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+              {CATEGORY_LABELS[category]}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {items.map((int) => {
+                const configured = isConfigured(int.key);
+                const isExpanded = configuring === int.key;
 
-          return (
+                return (
             <div
               key={int.key}
               className={`rounded-sm border transition-all ${
@@ -764,13 +789,22 @@ export default function IntegrationsPage() {
                   <div className="flex items-center gap-2">
                     {(() => {
                       const flagOn = integrationFlagEnabled(int.key);
-                      // v2.5.13 — collapse the "Disabled · Unavailable" double-label.
-                      // Show one of three states only: Enabled (configured), Unavailable
-                      // (flag off — no Configure shown), or Disabled (flag on, configurable).
+                      // v2.5.14 (Phase 1.7) — clearer three-state status:
+                      // Enabled / Coming soon (non-configurable) / Admin disabled (flag-off) / Ready to configure.
                       if (configured) {
                         return (
                           <span className="text-xs px-2 py-0.5 rounded-sm font-medium text-accent-green bg-accent-green/10">
                             Enabled
+                          </span>
+                        );
+                      }
+                      if (int.comingSoon || !int.configurable) {
+                        return (
+                          <span
+                            className="text-xs px-2 py-0.5 rounded-sm font-medium text-accent-blue bg-accent-blue/10"
+                            title="Coming soon — join the waitlist from Settings"
+                          >
+                            Coming soon
                           </span>
                         );
                       }
@@ -780,13 +814,13 @@ export default function IntegrationsPage() {
                             className="text-xs px-2 py-0.5 rounded-sm font-medium text-muted bg-[var(--gray-400)]/10"
                             title="Disabled by platform operator — contact support to enable"
                           >
-                            Unavailable
+                            Admin disabled
                           </span>
                         );
                       }
                       return (
                         <span className="text-xs px-2 py-0.5 rounded-sm font-medium text-muted bg-[var(--gray-400)]/10">
-                          Disabled
+                          Ready to configure
                         </span>
                       );
                     })()}
@@ -837,8 +871,11 @@ export default function IntegrationsPage() {
               )}
             </div>
           );
-        })}
-      </div>
+              })}
+            </div>
+          </section>
+        );
+      })}
 
       {/* Access Token Setup Guide */}
       {showGuide && (

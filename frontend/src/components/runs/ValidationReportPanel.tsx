@@ -50,7 +50,7 @@ const RESULT_CONFIG: Record<string, { cls: string; label: string; shieldCls: str
   PASSED:            { cls: 'bg-status-success/10 text-status-success border-status-success/30', shieldCls: 'text-status-success', label: 'Passed' },
   PASSED_WITH_FIXES: { cls: 'bg-status-success/10 text-status-success border-status-success/30', shieldCls: 'text-status-success', label: 'Passed with fixes' },
   NEEDS_ATTENTION:   { cls: 'bg-status-waiting/10 text-status-waiting border-status-waiting/30', shieldCls: 'text-status-waiting', label: 'Needs attention' },
-  FAILED:            { cls: 'bg-status-error/10 text-status-error border-status-error/30',       shieldCls: 'text-status-error',   label: 'Failed' },
+  FAILED:            { cls: 'bg-status-error/10 text-status-error border-status-error/30',       shieldCls: 'text-status-error',   label: 'Has issues' },
 };
 
 /**
@@ -187,7 +187,15 @@ export default function ValidationReportPanel({ runId, status, statusReason }: V
     summaryParts.push('Clean run');
   }
 
-  const reasonCopy = statusReasonCopy(statusReason);
+  // v2.5.14 (Phase 1.2) — suppress "Clean completion" narrative when the
+  // pipeline result itself disagrees. The two signals come from different
+  // sources (status_reason from V2RunOrchestrator, pipelineResult from the
+  // validation report) and historical runs could end up with
+  // CLEAN_COMPLETION + pipelineResult=FAILED. Trust the stricter signal.
+  const suppressReason =
+    (statusReason === 'CLEAN_COMPLETION' || statusReason === 'CLEAN_WITH_INTERMEDIATE_WARNINGS') &&
+    (report.pipelineResult === 'FAILED' || report.pipelineResult === 'NEEDS_ATTENTION');
+  const reasonCopy = suppressReason ? null : statusReasonCopy(statusReason);
 
   const handleShare = async () => {
     setSharing(true);

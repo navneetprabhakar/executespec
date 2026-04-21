@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ChevronDown, ChevronUp, FolderOpen, FolderArchive,
-  Users, Plus, X, Eye, AlertCircle, Cpu, LayoutDashboard,
+  Users, Plus, X, Eye, AlertCircle, Cpu, LayoutDashboard, FolderGit2,
 } from 'lucide-react';
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useRunStore } from '@/stores/useRunStore';
@@ -136,8 +136,12 @@ function AddMemberForm({
 }
 
 // ── Sub-component: project card ────────────────────────────────────────────────
+// v2.5.14 — backend enum renamed GOOGLE → GEMINI in v2.5.13 (see V119 migration).
+// Keep `GOOGLE` in the lookup so legacy project payloads still render gracefully
+// during the upgrade window, but new writes use GEMINI.
 const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: 'Anthropic (Claude)',
+  GEMINI: 'Gemini',
   GOOGLE: 'Gemini',
   OPENAI: 'OpenAI (GPT)',
 };
@@ -334,7 +338,7 @@ function ProjectCard({
                 className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-1.5 text-sm text-primary focus:border-accent-blue focus:outline-none disabled:opacity-50"
               >
                 <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
-                <option value="GOOGLE">Gemini</option>
+                <option value="GEMINI">Gemini</option>
                 <option value="OPENAI">OpenAI (GPT)</option>
               </select>
               <p className="text-xs text-muted mt-1">All pipeline runs in this project will use this provider.</p>
@@ -374,6 +378,13 @@ export default function OrgProjectsPage() {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
+  // v2.5.14 Phase 3.5 — starter templates. Clicking a template pre-fills the
+  // create form with a representative name + description and opens it.
+  const applyTemplate = (t: { name: string; desc: string }) => {
+    setName(t.name);
+    setDesc(t.desc);
+    setShowCreate(true);
+  };
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
@@ -426,40 +437,108 @@ export default function OrgProjectsPage() {
   const active = projects.filter((p) => p.status === 'ACTIVE');
   const archived = projects.filter((p) => p.status === 'ARCHIVED');
 
+  // v2.5.14 — aggregate KPIs for the hero tiles, matching ProjectDashboardPage.
+  const activeCount = projects.filter((p) => p.status === 'ACTIVE').length;
+  const archivedCount = projects.filter((p) => p.status === 'ARCHIVED').length;
+  const providerCounts: Record<string, number> = {};
+  projects.forEach((p) => {
+    const k = (p.aiProvider || 'ANTHROPIC').toUpperCase();
+    providerCounts[k] = (providerCounts[k] || 0) + 1;
+  });
+  const topProvider = Object.entries(providerCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-      {/* Header — stacks on mobile so the title isn't crushed by the action buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-primary">Projects</h1>
-          <p className="text-sm text-muted mt-1">
-            Group runs into projects and control team access.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/projects"
-            title="Project dashboard"
-            className="flex items-center gap-2 px-4 py-2 rounded-sm border border-[var(--border-default)] text-sm text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors"
-          >
-            <LayoutDashboard className="h-4 w-4" />
-            Dashboard
-          </Link>
-          {isAdmin && (
-            <button
-              onClick={() => setShowCreate((v) => !v)}
-              className="flex items-center gap-2 px-4 py-2 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
+    <div className="h-full flex flex-col">
+      {/* v2.5.14 — chrome matches ProjectDashboardPage:
+          back link + icon-chip hero + status/provider chips + KPI tiles. */}
+      <div className="border-b border-[var(--border-default)] px-4 pt-3 pb-3 sm:px-6 space-y-2.5 flex-shrink-0">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent-blue transition-colors"
+        >
+          ← Back to runs
+        </Link>
+
+        <header className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex items-start gap-3">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0">
+              <FolderGit2 className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5">Projects</div>
+              <h1 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">
+                Group runs into projects.
+              </h1>
+              <p className="text-xs text-secondary max-w-2xl mt-1">
+                Project-scope organises runs, repos, and team access.
+                {isAdmin ? ' Use templates below or create from scratch.' : ' Ask your org admin to create a project.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Link
+              to="/projects"
+              title="Project dashboard"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-xs font-medium text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors"
             >
-              <Plus className="h-4 w-4" />
-              New Project
-            </button>
-          )}
-        </div>
+              <LayoutDashboard className="h-3 w-3" />
+              Dashboard
+            </Link>
+            {isAdmin && (
+              <button
+                onClick={() => setShowCreate((v) => !v)}
+                aria-label={showCreate ? 'Close create form' : 'Create new project'}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-accent-blue text-white text-xs font-medium hover:bg-accent-blue-hover transition-colors"
+              >
+                <Plus className="h-3 w-3" />
+                {showCreate ? 'Close' : 'New project'}
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* v2.5.14 — KPI tiles (2 / 3 / 5 cols) matching ProjectDashboardPage. */}
+        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          <OrgMetricTile label="Total"     value={projects.length}             accent="text-primary" />
+          <OrgMetricTile label="Active"    value={activeCount}                 accent="text-accent-blue" />
+          <OrgMetricTile label="Archived"  value={archivedCount}               accent="text-muted" />
+          <OrgMetricTile label="Members"   value={orgMembers.length || '—'}     accent="text-primary" />
+          <OrgMetricTile label="Top provider" value={topProvider.toLowerCase() === 'anthropic' ? 'Anthropic' : topProvider.toLowerCase() === 'openai' ? 'OpenAI' : topProvider.toLowerCase() === 'gemini' ? 'Gemini' : topProvider} accent="text-accent-planner" />
+        </section>
       </div>
 
-      {/* Create form (collapsible) */}
+      {/* Body: scrollable content area — same pattern as ProjectDashboardPage. */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+
+      {/* v2.5.14 Phase 3.5 — starter templates, shown only when the projects
+          list is empty + admin can create. Three representative shapes cover
+          ~90% of new-user spec flows. */}
+      {isAdmin && !loading && projects.length === 0 && !showCreate && (
+        <div className="rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] p-4">
+          <h2 className="text-sm font-semibold text-primary mb-1">Start from a template</h2>
+          <p className="text-xs text-muted mb-3">Three common project shapes. Pick one or create from scratch.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {[
+              { name: 'API + backend service', desc: 'Spring Boot or Node/Express service with REST endpoints, DB migrations, and test coverage.', accent: 'border-accent-blue/30' },
+              { name: 'Frontend web app', desc: 'React/Vite or Next.js app with routing, state, and component tests.', accent: 'border-accent-planner/30' },
+              { name: 'Tech-debt sweep', desc: 'Bring an existing repo in, analyse architecture, and clear flagged issues.', accent: 'border-accent-harness/30' },
+            ].map((t) => (
+              <button
+                key={t.name}
+                onClick={() => applyTemplate(t)}
+                className={`text-left p-3 rounded-sm border ${t.accent} bg-[var(--gray-200)]/50 hover:bg-[var(--gray-200)] transition-colors`}
+              >
+                <p className="text-sm font-medium text-primary">{t.name}</p>
+                <p className="text-[11px] text-muted mt-1 leading-relaxed">{t.desc}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Create form (collapsible) — v2.5.14 uses var(--gray-100) not hard-coded hex. */}
       {isAdmin && showCreate && (
-        <div className="rounded-sm border border-[var(--border-default)] bg-[#0f1117] p-5">
+        <div className="rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] p-5">
           <h2 className="text-base font-semibold text-primary mb-4">Create project</h2>
           <form onSubmit={handleCreate} className="space-y-3">
             <input
@@ -485,7 +564,7 @@ export default function OrgProjectsPage() {
                 className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-sm text-primary focus:border-accent-blue focus:outline-none"
               >
                 <option value="ANTHROPIC">Anthropic (Claude) — Recommended</option>
-                <option value="GOOGLE">Gemini</option>
+                <option value="GEMINI">Gemini</option>
                 <option value="OPENAI">OpenAI (GPT)</option>
               </select>
             </div>
@@ -554,6 +633,23 @@ export default function OrgProjectsPage() {
             />
           )}
         </>
+      )}
+      </div>
+    </div>
+  );
+}
+
+// v2.5.14 — metric tile matching ProjectDashboardPage.MetricTile. Kept local
+// to avoid coupling this page to the project-scoped one.
+function OrgMetricTile({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
+  const isEmpty = value === '—' || value === 0 || value === '0';
+  return (
+    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2.5 py-2">
+      <div className="text-[11px] font-medium text-secondary uppercase tracking-wide">{label}</div>
+      {isEmpty && value === '—' ? (
+        <div className="text-[11px] text-muted italic mt-1.5">No data yet</div>
+      ) : (
+        <div className={cn('text-lg font-semibold tabular-nums mt-0.5', accent ?? 'text-primary')}>{value}</div>
       )}
     </div>
   );

@@ -358,7 +358,8 @@ function groupTasksBySource(tasks: RunDetail['tasks']): { label: string; taskCou
 function displayProvider(provider: string | null | undefined): string {
   if (!provider) return '—';
   switch (provider.toUpperCase()) {
-    case 'GOOGLE': return 'Gemini';
+    case 'GEMINI':
+    case 'GOOGLE': return 'Gemini'; // GOOGLE retained for pre-V119 historical runs
     case 'ANTHROPIC': return 'Anthropic';
     case 'OPENAI': return 'OpenAI';
     default: return provider;
@@ -863,7 +864,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
             ?? run.tasks?.[0]?.provider
             ?? (run.plannerModel?.startsWith('claude') ? 'ANTHROPIC'
               : run.plannerModel?.startsWith('gpt') ? 'OPENAI'
-              : run.plannerModel?.startsWith('gemini') ? 'GOOGLE'
+              : run.plannerModel?.startsWith('gemini') ? 'GEMINI'
               : null)
           )}
         </p>

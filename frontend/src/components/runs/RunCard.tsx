@@ -133,11 +133,13 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
                 <span>{fmtTokens(run.totalInputTokens + run.totalOutputTokens)} tok</span>
               </>
             )}
-            {/* v2.5.8 — render $ spent next to tokens so developers see real cost */}
+            {/* v2.5.14 Phase 2.3 — money is now neutral (was amber which
+                read as "warning"). Still tabular-num aligned.
+                v2.5.8 original: render $ spent next to tokens. */}
             {typeof run.actualCostUsd === 'number' && run.actualCostUsd > 0 && (
               <>
                 <span>·</span>
-                <span className="text-accent-amber">
+                <span className="text-secondary font-medium tabular-nums">
                   ${run.actualCostUsd < 0.01 ? '<0.01' : run.actualCostUsd.toFixed(2)}
                 </span>
               </>

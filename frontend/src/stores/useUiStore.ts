@@ -17,6 +17,7 @@ export interface NewRunConfig {
 }
 
 type ViewMode = 'vibe' | 'pro' | 'project';
+type Theme = 'dark' | 'light';
 
 interface UiStore {
   sidebarExpanded: boolean;
@@ -34,6 +35,8 @@ interface UiStore {
   copilotMaximized: boolean;
   /** Vibe (simplified) or Pro (full pipeline) view mode. */
   viewMode: ViewMode;
+  /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
+  theme: Theme;
 
   setSidebarExpanded: (v: boolean) => void;
   setMobileSidebarOpen: (v: boolean) => void;
@@ -46,11 +49,24 @@ interface UiStore {
   setRunListWidth: (w: number) => void;
   setCopilotMaximized: (v: boolean) => void;
   setViewMode: (mode: ViewMode) => void;
+  setTheme: (t: Theme) => void;
+  toggleTheme: () => void;
 }
 
 let toastSeq = 0;
 
-export const useUiStore = create<UiStore>((set) => ({
+// v2.5.14 Phase 2 — apply saved theme to <html> before React paints so there's
+// no flash of unstyled content. Called synchronously at module import time.
+function initTheme(): Theme {
+  const saved = localStorage.getItem('es:theme') as Theme | null;
+  const theme: Theme = saved === 'light' ? 'light' : 'dark';
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = theme;
+  }
+  return theme;
+}
+
+export const useUiStore = create<UiStore>((set, get) => ({
   sidebarExpanded: false,
   mobileSidebarOpen: false,
   commandPaletteOpen: false,
@@ -60,6 +76,7 @@ export const useUiStore = create<UiStore>((set) => ({
   runListCollapsed: false,
   runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
   copilotMaximized: false,
+  theme: initTheme(),
   viewMode: ((): ViewMode => {
     const saved = localStorage.getItem('es:viewMode') as ViewMode | null;
     // 'project' is a deliberate opt-in — never persist as the default session mode.
@@ -84,6 +101,17 @@ export const useUiStore = create<UiStore>((set) => ({
     // Reset activeTab to the default for the new view mode
     // VIBE view starts on 'code', PRO view starts on 'overview'
     set({ viewMode: mode, activeTab: mode === 'vibe' ? 'code' : 'overview' });
+  },
+  setTheme: (t) => {
+    localStorage.setItem('es:theme', t);
+    if (typeof document !== 'undefined') document.documentElement.dataset.theme = t;
+    set({ theme: t });
+  },
+  toggleTheme: () => {
+    const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('es:theme', next);
+    if (typeof document !== 'undefined') document.documentElement.dataset.theme = next;
+    set({ theme: next });
   },
 
   addToast: (t) => {

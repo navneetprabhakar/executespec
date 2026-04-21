@@ -8,9 +8,13 @@ const LS_PROVIDER = 'es:preferredProvider';
 const LS_MODEL = 'es:preferredModel';
 
 /** Maps provider ID to the user key flag on AppUser */
+// v2.5.14 — backend enum was renamed GOOGLE → GEMINI (V119 migration). Keep
+// GOOGLE aliased to the same key for backwards-compatibility with any
+// already-persisted runs that haven't rolled over yet.
 const PROVIDER_KEY_MAP: Record<string, 'hasAnthropicKey' | 'hasOpenAiKey' | 'hasGeminiKey'> = {
   ANTHROPIC: 'hasAnthropicKey',
   OPENAI: 'hasOpenAiKey',
+  GEMINI: 'hasGeminiKey',
   GOOGLE: 'hasGeminiKey',
 };
 

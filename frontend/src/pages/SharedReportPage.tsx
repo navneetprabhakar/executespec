@@ -5,11 +5,15 @@ import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { Shield, Check, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+// v2.5.14 — severity config aligned with semantic status tokens so shared
+// report matches in-app ValidationReportPanel (both use status-error / status-
+// partial / status-waiting). Previously hard-coded Tailwind colours drifted
+// from the design system after the Phase 2 palette swap.
 const SEVERITY_CONFIG: Record<string, { color: string }> = {
-  WOULD_BREAK_BUILD: { color: 'bg-red-500/20 text-accent-red border-red-500/30' },
-  WOULD_CAUSE_BUG: { color: 'bg-orange-500/20 text-accent-amber border-orange-500/30' },
-  WOULD_FAIL_REVIEW: { color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
-  WOULD_FAIL_LINT: { color: 'bg-[var(--gray-200)] text-secondary border-[var(--border-default)]' },
+  WOULD_BREAK_BUILD:  { color: 'bg-status-error/15   text-status-error   border-status-error/30' },
+  WOULD_CAUSE_BUG:    { color: 'bg-status-partial/15 text-status-partial border-status-partial/30' },
+  WOULD_FAIL_REVIEW:  { color: 'bg-status-waiting/15 text-status-waiting border-status-waiting/30' },
+  WOULD_FAIL_LINT:    { color: 'bg-[var(--gray-200)] text-secondary      border-[var(--border-default)]' },
 };
 
 export default function SharedReportPage() {
@@ -99,7 +103,7 @@ export default function SharedReportPage() {
         {report.checksPassed.length > 0 && (
           <div className="flex flex-wrap gap-3">
             {report.checksPassed.map(check => (
-              <span key={check} className="flex items-center gap-1.5 text-sm text-emerald-400/80">
+              <span key={check} className="flex items-center gap-1.5 text-sm text-status-success/80">
                 <Check className="h-4 w-4" />
                 {check.replace(/_/g, ' ')}
               </span>
