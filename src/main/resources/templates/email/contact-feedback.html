@@ -1,16 +1,32 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
-<head><meta charset="UTF-8"><title>Contact Feedback</title></head>
-<body style="font-family:'SFMono-Regular',ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;background:#000000;color:#ededed;padding:40px">
-  <div style="max-width:480px;margin:0 auto;background:#111111;border:1px solid #252525;border-radius:6px;padding:32px">
-    <h1 style="color:#ededed;margin:0 0 8px">executespec</h1>
-    <h2 style="margin:0 0 24px;font-size:20px">Contact Feedback</h2>
-    <p><strong>From:</strong> <span th:text="${userName}">User</span> &lt;<span th:text="${userEmail}">user@example.com</span>&gt;</p>
-    <p><strong>Subject:</strong> <span th:text="${feedbackSubject}">Subject line</span></p>
-    <hr style="border:1px solid #252525;margin:16px 0"/>
-    <p style="white-space:pre-wrap" th:text="${feedbackBody}">Feedback body goes here.</p>
-    <hr style="border:1px solid #252525;margin:24px 0"/>
-    <p style="color:#a1a1a1;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:underline" href="#">executespec.ai</a></p>
-  </div>
-</body>
-</html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>New contact-form message</title>
+</head>
+<body style="margin:0;padding:0;background:#06060a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#ededed;line-height:1.55;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#06060a;">
+  <tr><td align="center" style="padding:24px 12px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;border-collapse:collapse;background:#0a0a0a;border:1px solid #252525;border-radius:14px;overflow:hidden;">
+      <tr><td style="padding:32px 28px 20px;background:linear-gradient(135deg,rgba(139,92,246,0.20),rgba(0,112,243,0.10) 60%,transparent);border-bottom:1px solid #252525;">
+        <div style="display:inline-flex;align-items:center;gap:10px;margin-bottom:18px;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#ededed;color:#06060a;border-radius:6px;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:12px;">ES</span>
+          <span style="color:#ededed;font-weight:600;font-size:15px;letter-spacing:-0.01em;">ExecuteSpec</span>
+        </div>
+        <div style="display:inline-block;background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.45);border-radius:999px;padding:3px 10px;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;color:#8B5CF6;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">Contact form</div>
+        <h1 style="margin:0;color:#ededed;font-size:24px;line-height:1.18;letter-spacing:-0.025em;font-weight:600;">Fresh message from a user.</h1>
+      </td></tr>
+      <tr><td style="padding:24px 28px 8px;">
+        <p style="margin:0 0 14px;color:#cfcfcf;font-size:14.5px;"><strong>From:</strong> <span th:text="${fromName}" style="color:#ededed;">Name</span> &middot; <span th:text="${fromEmail}" style="color:#808080;">user@example.com</span></p>
+        <p style="margin:0 0 14px;color:#cfcfcf;font-size:14.5px;"><strong>Topic:</strong> <span th:text="${topic}" style="color:#ededed;">General</span></p>
+        <div style="margin:0 0 18px;padding:14px 18px;background:#111;border:1px solid #252525;border-radius:8px;color:#cfcfcf;font-size:14px;white-space:pre-wrap;" th:text="${message}">Message body here.</div>
+<table role="presentation" cellspacing="0" cellpadding="0"><tr><td><a th:href="${adminUrl}" href="#" style="display:inline-block;background:#0070F3;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:500;font-size:14px;letter-spacing:-0.005em;">Reply in admin dashboard</a></td></tr></table>
+      </td></tr>
+      <tr><td style="padding:18px 28px 22px;border-top:1px solid #252525;background:#0a0a0a;color:#666;font-size:11.5px;">
+        &copy; 2026 ExecuteSpec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:none;" href="#">executespec.ai</a>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>

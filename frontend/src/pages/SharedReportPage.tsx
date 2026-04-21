@@ -49,15 +49,20 @@ export default function SharedReportPage() {
   const issueCount = report.issues?.length ?? 0;
 
   return (
-    <div className="min-h-screen bg-[var(--geist-bg)] text-primary">
+    <div className="min-h-screen bg-[var(--geist-bg)] text-primary relative">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 h-[340px]" style={{
+        background: 'radial-gradient(ellipse 70% 50% at 50% 0%, color-mix(in srgb, var(--status-success) 12%, transparent), transparent 60%)'
+      }} />
       {/* Header */}
-      <header className="border-b border-[var(--border-default)] bg-[var(--gray-100)]">
-        <div className="max-w-3xl mx-auto px-6 py-5 flex items-center gap-3">
-          <Shield className="h-6 w-6 text-emerald-400" />
-          <div>
-            <h1 className="text-lg font-semibold">Validation Report</h1>
-            <p className="text-xs text-muted">
-              {report.filesGenerated} file{report.filesGenerated !== 1 ? 's' : ''} · {report.languages.join(', ') || 'N/A'} · {
+      <header className="border-b border-[var(--border-default)]">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-5 flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--status-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-accent-green flex-shrink-0">
+            <Shield className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-green">Validation report \u00b7 Shared</div>
+            <p className="text-sm text-secondary font-mono">
+              {report.filesGenerated} file{report.filesGenerated !== 1 ? 's' : ''} &middot; {report.languages.join(', ') || 'N/A'} &middot; {
                 issueCount > 0
                   ? `${issueCount} issue${issueCount !== 1 ? 's' : ''} caught & fixed`
                   : 'Clean run'

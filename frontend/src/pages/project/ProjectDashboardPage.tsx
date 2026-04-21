@@ -182,30 +182,37 @@ export default function ProjectDashboardPage() {
 
         {projectId && <PostMergeBar projectId={projectId} />}
 
-        <header className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex items-center gap-2">
-            <FolderGit2 className="h-4 w-4 text-accent-blue flex-shrink-0" />
-            <h1 className="text-[14px] font-medium text-primary truncate">
-              {project?.name ?? 'Project'}
-            </h1>
-            {project?.status && (
-              <span className="text-[11px] font-mono uppercase tracking-wide text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
-                {project.status}
-              </span>
-            )}
-            {project?.aiProvider && (
-              <span className="text-[11px] font-mono text-muted">{project.aiProvider}</span>
-            )}
-            {project?.githubOwner && (
-              <span className="text-[11px] font-mono text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
-                {project.githubOwner}
-              </span>
-            )}
+        <header className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex items-start gap-3">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0">
+              <FolderGit2 className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5">Project</div>
+              <h1 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate">
+                {project?.name ?? 'Project'}
+              </h1>
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                {project?.status && (
+                  <span className="text-[10.5px] font-mono uppercase tracking-[0.06em] text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
+                    {project.status}
+                  </span>
+                )}
+                {project?.aiProvider && (
+                  <span className="text-[10.5px] font-mono text-muted">{project.aiProvider}</span>
+                )}
+                {project?.githubOwner && (
+                  <span className="text-[10.5px] font-mono text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
+                    {project.githubOwner}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
           <NewExecutionButton projectId={projectId} repoCount={repos?.length ?? 0} />
         </header>
         {project?.description && (
-          <p className="text-xs text-muted">{project.description}</p>
+          <p className="text-xs text-secondary max-w-2xl">{project.description}</p>
         )}
 
         {loading && <div className="text-xs text-muted">Loading…</div>}

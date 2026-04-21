@@ -5,6 +5,7 @@ import { PlanCard } from '@/components/billing/PlanCard';
 import { DisclaimerModal } from '@/components/billing/DisclaimerModal';
 import { RazorpayCheckout } from '@/components/billing/RazorpayCheckout';
 import { useAuthStore } from '@/stores/useAuthStore';
+import PageShell from '@/components/shared/PageShell';
 
 export default function PlansPage() {
   const navigate = useNavigate();
@@ -110,15 +111,17 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8 lg:py-12">
-      <div className="text-center mb-6 sm:mb-10">
-        <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-primary">Simple, transparent pricing</h1>
-        <p className="mt-2 sm:mt-3 text-sm sm:text-base text-secondary">No credits. No surprises. You know exactly what you're getting.</p>
-      </div>
-
+    <PageShell
+      maxWidth="5xl"
+      hero
+      eyebrow="Plans"
+      title="Simple, transparent pricing."
+      accent="transparent"
+      description="No credits to translate. No token markups. Every tier shows you what ExecuteSpec really is."
+    >
       {/* Currency toggle */}
-      <div className="flex justify-center mb-10">
-        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-sm p-1">
+      <div className="flex justify-center">
+        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]">
           <button
             onClick={() => setShowInr(true)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
@@ -208,6 +211,6 @@ export default function PlansPage() {
           />
         );
       })()}
-    </div>
+    </PageShell>
   );
 }

@@ -5,6 +5,7 @@ import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
+import PageShell from '@/components/shared/PageShell';
 
 // ── Human-readable labels ────────────────────────────────────────────────
 
@@ -159,19 +160,24 @@ export default function AuditPage() {
   const entries = data?.content ?? [];
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-primary">Audit Trail</h2>
+    <PageShell
+      eyebrow="Audit"
+      eyebrowTone="warm"
+      title="Every change, time-stamped."
+      accent="Every"
+      description="Forensic history of every action across your workspace."
+      hero
+      actions={
         <button
           onClick={fetchLogs}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors disabled:opacity-40 border border-[var(--border-default)]"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh
         </button>
-      </div>
+      }
+    >
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-3">
@@ -377,6 +383,6 @@ export default function AuditPage() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -253,7 +253,10 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
         style={isMobile ? undefined : { maxHeight: mode === 'chat' ? 'min(95dvh, 80vh)' : '95dvh' }}
       >
         {/* ── Header ───────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
+        <div
+          className="relative flex items-center justify-between px-6 py-5 border-b border-[var(--border-default)] flex-shrink-0 overflow-hidden"
+          style={{ background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent-blue) 14%, transparent), color-mix(in srgb, var(--accent-harness) 8%, transparent) 60%, transparent)' }}
+        >
           {mode === 'chat' ? (
             <button
               onClick={() => setMode('compose')}
@@ -263,10 +266,12 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               Back to goal
             </button>
           ) : (
-            <h2 className="text-base font-semibold text-primary flex items-center gap-2">
-              <Rocket className="h-4 w-4 text-accent-blue" />
-              Launch New Run
-            </h2>
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-1">New run</div>
+              <h2 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">
+                Write a spec. <span style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: 'italic', fontWeight: 400 }}>Ship</span> it.
+              </h2>
+            </div>
           )}
 
           <div className="flex items-center gap-3">

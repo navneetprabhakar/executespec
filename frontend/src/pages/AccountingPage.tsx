@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Calculator, Download, TrendingUp, IndianRupee } from 'lucide-react';
+import { Download, TrendingUp, IndianRupee } from 'lucide-react';
+import PageShell from '@/components/shared/PageShell';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import {
   getRevenueMetrics, getGstSummary, getTrialBalance, getGstr1ExportUrl,
@@ -52,14 +53,14 @@ export default function AccountingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 sm:px-6 py-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Calculator className="h-6 w-6 text-accent-blue" />
-        <h1 className="text-xl font-semibold text-slate-100">Accounting</h1>
-        <span className="ml-auto text-xs text-muted">FY {fy} &middot; Q{quarter}</span>
-      </div>
-
+    <PageShell
+      eyebrow={`FY ${fy} \u00b7 Q${quarter}`}
+      eyebrowTone="purple"
+      title="Financials at a glance."
+      accent="glance"
+      description="MRR, ARR, revenue, collections, and GST \u2014 all in one quarter view."
+      hero
+    >
       {/* Revenue metric cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard label="MRR" value={metrics?.mrr} />
@@ -166,7 +167,7 @@ export default function AccountingPage() {
           </>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 

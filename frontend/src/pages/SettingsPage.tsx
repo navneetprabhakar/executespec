@@ -5,6 +5,7 @@ import {
   ChevronDown, ChevronRight, Key, Building2, Shield, Loader2, ArrowUpRight,
 } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
+import PageShell from '@/components/shared/PageShell';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import type { OrgDto } from '@/lib/api';
@@ -270,11 +271,13 @@ export default function SettingsPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold text-primary">Settings</h1>
-        <p className="text-xs text-muted mt-0.5">Account configuration and system health</p>
-      </div>
+    <PageShell
+      eyebrow="Settings"
+      title="Configure your workspace."
+      accent="workspace"
+      description="Account, keys, integrations, and system health \u2014 all in one place."
+      hero
+    >
 
       {/* ── Current Plan & Upgrade ───────────────────────────────────────── */}
       <GlassPanel className="px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -483,7 +486,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-    </div>
+    </PageShell>
   );
 }
 
