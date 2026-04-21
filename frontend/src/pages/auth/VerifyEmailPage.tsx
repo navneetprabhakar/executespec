@@ -29,7 +29,7 @@ export default function VerifyEmailPage() {
               <Loader2 className="h-7 w-7 text-accent-blue animate-spin" />
             </div>
             <h2 className="text-2xl font-semibold text-primary mb-2">Verifying your email</h2>
-            <p className="text-sm text-muted">One moment\u2026</p>
+            <p className="text-sm text-muted">One moment…</p>
           </>
         )}
         {status === 'success' && (

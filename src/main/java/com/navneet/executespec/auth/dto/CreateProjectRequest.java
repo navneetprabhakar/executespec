@@ -25,8 +25,8 @@ public record CreateProjectRequest(
                 message = "description must not contain < or > characters")
         String description,
 
-        @Pattern(regexp = "ANTHROPIC|GOOGLE|OPENAI",
-                message = "aiProvider must be one of ANTHROPIC, GOOGLE, OPENAI")
+        @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI",
+                message = "aiProvider must be one of ANTHROPIC, GEMINI, OPENAI")
         String aiProvider,
 
         @Size(max = 120, message = "githubOwner must not exceed 120 characters")

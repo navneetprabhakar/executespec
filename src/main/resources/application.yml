@@ -93,7 +93,7 @@ model-matrix:
       # tasks as LOW (lightweight stays haiku) so net cost rise is modest.
       workhorse: claude-sonnet-4-6
       lightweight: claude-haiku-4-5-20251001
-    google:
+    gemini:
       # v2.5.9 Bug #3 — gemini-2.5-flash emits Python-style tool calls
       # ("print(default_api.submitPlan(...))") causing MALFORMED_FUNCTION_CALL.
       # gemini-3-flash-preview is the newer tool-call-reliable model.
@@ -138,7 +138,7 @@ model-matrix:
         output-per-1m: 5.00
       notes: "LIGHTWEIGHT tier for Anthropic."
     "[gemini-2.5-flash]":
-      provider: google
+      provider: gemini
       chain-tier: UTILITY
       context-limit: 1048576
       max-output-tokens: 65536
@@ -148,7 +148,7 @@ model-matrix:
         output-per-1m: 2.50
       notes: "Gemini 2.5 Flash — legacy, replaced by gemini-3-flash-preview for all tiers."
     "[gemini-3-flash-preview]":
-      provider: google
+      provider: gemini
       chain-tier: CAPABLE
       context-limit: 1048576
       max-output-tokens: 65536
@@ -193,14 +193,14 @@ model-matrix:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-flash-preview }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-flash-preview }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
-      - { provider: google, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-flash-preview }
       - { provider: openai, model: gpt-5.4 }
 
   # ── FREE tier model lock ──────────────────────────────────────────────────────
@@ -235,7 +235,7 @@ model-matrix:
     anthropic:
       - openai
       - google
-    google:
+    gemini:
       - openai
       - anthropic
     openai:

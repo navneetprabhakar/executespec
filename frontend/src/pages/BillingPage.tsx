@@ -382,7 +382,7 @@ export default function BillingPage() {
                     <div className="mt-3">
                       <span className="text-xl font-bold text-accent-blue">
                         {showInr
-                          ? `\u20B9${(pkg.amountInr / 100).toLocaleString('en-IN')}`
+                          ? `₹${(pkg.amountInr / 100).toLocaleString('en-IN')}`
                           : `$${(pkg.amountUsd / 100).toFixed(2)}`}
                       </span>
                     </div>

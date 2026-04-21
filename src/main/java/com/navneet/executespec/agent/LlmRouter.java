@@ -560,7 +560,7 @@ public class LlmRouter {
                 if (finalOpenAiToolChoice != null) builder.toolChoice(finalOpenAiToolChoice);
                 yield new Prompt(prompt.getInstructions(), builder.build());
             }
-            case "google" -> {
+            case "gemini" -> {
                 var builder = GoogleGenAiChatOptions.builder().model(model).temperature(0.0);
                 if (maxTok != null) builder.maxOutputTokens(maxTok);
                 yield new Prompt(prompt.getInstructions(), builder.build());
@@ -616,7 +616,7 @@ public class LlmRouter {
                 }
                 yield bean;
             }
-            case "google" -> {
+            case "gemini" -> {
                 String key = keys.geminiKey();
                 if (key != null) {
                     log.debug("[LlmRouter] Using user/org Gemini key for this call");
@@ -708,11 +708,11 @@ public class LlmRouter {
 
     // ── Provider string → enum mapping ─────────────────────────────────────────
 
-    /** Maps the chain provider string ("anthropic", "google", "openai") to LlmProvider enum. */
+    /** Maps the chain provider string ("anthropic", "gemini", "openai") to LlmProvider enum. */
     
     private static LlmProvider toLlmProvider(String provider) {
         return switch (provider.toLowerCase()) {
-            case "google" -> LlmProvider.GOOGLE;
+            case "gemini" -> LlmProvider.GEMINI;
             case "anthropic" -> LlmProvider.ANTHROPIC;
             case "openai" -> LlmProvider.OPENAI;
             default -> LlmProvider.valueOf(provider.toUpperCase());

@@ -45,7 +45,7 @@ export default function ResetPasswordPage() {
     <AuthShell>
       <div className="mb-6">
         <h2 className="text-2xl font-semibold text-primary">Choose new password</h2>
-        <p className="mt-1 text-sm text-muted">Make it strong \u2014 we'll keep it safe.</p>
+        <p className="mt-1 text-sm text-muted">Make it strong — we'll keep it safe.</p>
       </div>
       <form onSubmit={handleSubmit} className="space-y-3.5">
         <div>
@@ -78,7 +78,7 @@ export default function ResetPasswordPage() {
         )}
         <button type="submit" disabled={loading || !pwdValid || !pwdMatch}
           className="w-full rounded-md bg-accent-blue py-2.5 text-sm font-medium text-primary hover:bg-[var(--accent-blue-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-          {loading ? 'Resetting\u2026' : 'Reset password'}
+          {loading ? 'Resetting…' : 'Reset password'}
         </button>
       </form>
       <p className="mt-5 text-center text-sm text-muted">

@@ -52,8 +52,8 @@ public record RunRequest(
     /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
     @Size(max = 100, message = "Model name must not exceed 100 characters")
     String modelName,
-    /** Optional AI provider override for this run (ANTHROPIC, GOOGLE, OPENAI). Overrides project default. */
-    @Pattern(regexp = "ANTHROPIC|GOOGLE|OPENAI", message = "Invalid AI provider")
+    /** Optional AI provider override for this run. v2.5.13 — enum renamed GOOGLE → GEMINI; legacy GOOGLE still accepted. */
+    @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI", message = "Invalid AI provider")
     String aiProvider,
     /** Optional project ID to associate this run with (org members only). */
     @Size(max = 36, message = "Project ID must not exceed 36 characters")

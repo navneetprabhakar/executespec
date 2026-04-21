@@ -88,7 +88,7 @@ export default function LoginPage() {
               required
               autoComplete="current-password"
               className="w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 pr-10 text-sm text-primary focus:border-accent-blue focus:outline-none transition-colors"
-              placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+              placeholder="••••••••"
             />
             <button
               type="button"
@@ -111,7 +111,7 @@ export default function LoginPage() {
           disabled={loading}
           className="w-full rounded-md bg-accent-blue py-2.5 text-sm font-medium text-primary hover:bg-[var(--accent-blue-hover)] disabled:opacity-50 transition-colors"
         >
-          {loading ? 'Signing in\u2026' : 'Sign in'}
+          {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
 

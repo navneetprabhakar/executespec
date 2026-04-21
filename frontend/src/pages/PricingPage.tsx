@@ -21,7 +21,7 @@ export default function PricingPage() {
       eyebrow="Model pricing"
       title="Transparent, per-1M-token rates."
       accent="Transparent,"
-      description="Live pricing for every model. Click any cost to edit inline \u2014 changes apply immediately to new runs."
+      description="Live pricing for every model. Click any cost to edit inline — changes apply immediately to new runs."
       hero
     >
       <Section eyebrow="Cost matrix" title="Per-model input + output rates" card={false}>

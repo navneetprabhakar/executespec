@@ -47,7 +47,7 @@ export default function ForgotPasswordPage() {
             </div>
             <button type="submit" disabled={loading}
               className="w-full rounded-md bg-accent-blue py-2.5 text-sm font-medium text-primary hover:bg-[var(--accent-blue-hover)] disabled:opacity-50 transition-colors">
-              {loading ? 'Sending\u2026' : 'Send temporary password'}
+              {loading ? 'Sending…' : 'Send temporary password'}
             </button>
           </form>
           <p className="mt-5 text-center text-sm text-muted">

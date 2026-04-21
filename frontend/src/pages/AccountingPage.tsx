@@ -54,11 +54,11 @@ export default function AccountingPage() {
 
   return (
     <PageShell
-      eyebrow={`FY ${fy} \u00b7 Q${quarter}`}
+      eyebrow={`FY ${fy} · Q${quarter}`}
       eyebrowTone="purple"
       title="Financials at a glance."
       accent="glance"
-      description="MRR, ARR, revenue, collections, and GST \u2014 all in one quarter view."
+      description="MRR, ARR, revenue, collections, and GST — all in one quarter view."
       hero
     >
       {/* Revenue metric cards */}
