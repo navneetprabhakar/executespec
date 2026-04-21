@@ -141,7 +141,7 @@ export default function RegisterPage() {
 
         <button type="submit" disabled={loading || !pwdValid || !pwdMatch}
           className="w-full rounded-md bg-accent-blue py-2.5 text-sm font-medium text-primary hover:bg-[var(--accent-blue-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-          {loading ? 'Creating account\u2026' : 'Create free account'}
+          {loading ? 'Creating account…' : 'Create free account'}
         </button>
 
         <p className="text-center text-[11px] text-muted leading-relaxed">

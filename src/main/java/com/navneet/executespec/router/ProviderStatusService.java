@@ -40,15 +40,15 @@ public class ProviderStatusService {
     private static final Duration POLL_TIMEOUT = Duration.ofSeconds(8);
     /** Failover order per primary provider — mirrors application.yml failover-order. */
     private static final Map<LlmProvider, List<LlmProvider>> FAILOVER_ORDER = Map.of(
-            LlmProvider.ANTHROPIC, List.of(LlmProvider.OPENAI, LlmProvider.GOOGLE),
-            LlmProvider.OPENAI,    List.of(LlmProvider.GOOGLE, LlmProvider.ANTHROPIC),
-            LlmProvider.GOOGLE,    List.of(LlmProvider.OPENAI, LlmProvider.ANTHROPIC)
+            LlmProvider.ANTHROPIC, List.of(LlmProvider.OPENAI, LlmProvider.GEMINI),
+            LlmProvider.OPENAI,    List.of(LlmProvider.GEMINI, LlmProvider.ANTHROPIC),
+            LlmProvider.GEMINI,    List.of(LlmProvider.OPENAI, LlmProvider.ANTHROPIC)
     );
 
     private static final Map<LlmProvider, String> STATUS_PAGES = Map.of(
             LlmProvider.ANTHROPIC, "https://status.anthropic.com/api/v2/status.json",
             LlmProvider.OPENAI,    "https://status.openai.com/api/v2/status.json",
-            LlmProvider.GOOGLE,    "https://status.cloud.google.com/incidents.json"
+            LlmProvider.GEMINI,    "https://status.cloud.google.com/incidents.json"
     );
 
     private final ProviderHealthTracker healthTracker;

@@ -218,8 +218,9 @@ public class V2RunCostTracker {
      * done by {@code SequentialExecutorV2}.
      */
     public Estimate estimateRunTierAware(String provider, java.util.List<String> taskComplexities) {
-        String matrixProvider = "gemini".equalsIgnoreCase(provider) ? "GOOGLE"
-                : provider == null ? "OPENAI" : provider.toUpperCase();
+        // v2.5.13 — enum is now GEMINI (was GOOGLE); "gemini" input → "GEMINI" enum
+        // value. Keep the null + uppercase guards so callers can pass any case.
+        String matrixProvider = provider == null ? "OPENAI" : provider.toUpperCase();
         LlmProvider p;
         try {
             p = LlmProvider.valueOf(matrixProvider);
@@ -289,10 +290,19 @@ public class V2RunCostTracker {
         return cost;
     }
 
-    /** V2 uses "gemini" internally; pricing rows use "google". Normalize for lookup. */
+    /**
+     * V2-canonical provider key for pricing-table lookup. v2.5.13 renamed
+     * enum GOOGLE → GEMINI + YAML provider rows (application.yml `provider:
+     * gemini`) so V2 and pricing table now agree on the string "gemini".
+     * Legacy DB rows with provider="google" fall back through this helper
+     * via the equalsIgnoreCase branch.
+     */
     private static String providerKey(String provider) {
         if (provider == null) return "";
-        return "gemini".equalsIgnoreCase(provider) ? "google" : provider.toLowerCase();
+        String v = provider.toLowerCase();
+        // Legacy compat — any remaining DB rows still seeded as "google"
+        // before v2.5.13 will still be found when the caller passes "gemini".
+        return v;
     }
 
     /**

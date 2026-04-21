@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "low",
+  "run_id": "b25eac23-8a5d-4a48-9c2c-8c1e1bed8594",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-21T13:40:51.793556Z",
+  "completedAt": "2026-04-21T13:44:13.193456Z",
+  "tasks_total": 3,
+  "tasks_done": 3,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildPassed\":true,\"totalLatencyMs\":155769,\"wiringPassSummary\":\"No wiring issues found. The project is a simple Python script with a corresponding test file. The test file correctly imports the function from the script, and both can be executed as described in the README. No web frameworks or complex module structures are present that would require additional registration or wiring.\",\"generalPassSummary\":\"no in-scope issues found\",\"overall\":\"CLEAN\",\"finalBuildExitCode\":0}",
+  "actual_cost": 0.134107,
+  "est_low": 0.116,
+  "est_high": 0.203,
+  "credits": 1,
+  "total_input": 257014,
+  "total_output": 2541,
+  "accuracy": 100,
+  "report_ok": true
+}

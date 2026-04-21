@@ -182,7 +182,9 @@ public class PlannerAgentV2 {
         com.navneet.executespec.router.ResolvedModel resolved =
                 modelResolver.resolve("PlannerAgentV2", plannerProvider);
         String plannerModel = resolved.getModel();
-        String plannerProviderName = resolved.getActualProvider().name().toLowerCase();
+        // v2.5.13 — ResolvedModel.providerName() emits the V2-canonical string
+        // ("anthropic" / "openai" / "gemini"), mapping enum GOOGLE → "gemini".
+        String plannerProviderName = resolved.providerName();
         ChatResponse resp = router.call(LlmRequestV2.builder()
                 .provider(plannerProviderName)
                 .model(plannerModel)
@@ -692,13 +694,30 @@ public class PlannerAgentV2 {
     }
 
     private static com.navneet.executespec.router.LlmProvider resolveProviderForTitle(String providerName) {
-        if (providerName == null || providerName.isBlank()) return null;
+        // v2.5.13 bug fix — "GEMINI" (v2 provider alias) must map to the enum
+        // name "GOOGLE". Previously this returned null for any Gemini run that
+        // hit the LLM planner path (non-SINGLE_SHOT), causing the caller's
+        // `provider.name()` to throw an NPE in ModelResolver.lookupModel.
+        // Default to OPENAI for unknown values instead of null so the caller
+        // never dereferences a null provider.
+        if (providerName == null || providerName.isBlank()) {
+            return com.navneet.executespec.router.LlmProvider.OPENAI;
+        }
+        String up = providerName.toUpperCase();
+        if ("GEMINI".equals(up)) {
+            return com.navneet.executespec.router.LlmProvider.GEMINI;
+        }
         try {
-            return com.navneet.executespec.router.LlmProvider.valueOf(providerName.toUpperCase());
+            return com.navneet.executespec.router.LlmProvider.valueOf(up);
         } catch (IllegalArgumentException e) {
-            return null;
+            return com.navneet.executespec.router.LlmProvider.OPENAI;
         }
     }
+
+    // v2.5.13 bug fix (centralised) — the LlmProvider→V2-canonical mapping
+    // now lives on {@code ResolvedModel.providerName()} so every call site
+    // shares one source of truth. Use {@code resolved.providerName()}, never
+    // {@code resolved.getActualProvider().name().toLowerCase()}.
 
     /**
      * v2.5.9 Bug #3 — Salvage a submitPlan invocation from text when the model

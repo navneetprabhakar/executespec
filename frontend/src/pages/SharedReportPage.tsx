@@ -60,7 +60,7 @@ export default function SharedReportPage() {
             <Shield className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-green">Validation report \u00b7 Shared</div>
+            <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-green">Validation report · Shared</div>
             <p className="text-sm text-secondary font-mono">
               {report.filesGenerated} file{report.filesGenerated !== 1 ? 's' : ''} &middot; {report.languages.join(', ') || 'N/A'} &middot; {
                 issueCount > 0

@@ -731,7 +731,7 @@ function AdminPageInner() {
                       <td className="px-4 py-3 text-primary font-medium">{p.name}</td>
                       <td className="px-4 py-3 text-secondary">{p.runCount}</td>
                       <td className="px-4 py-3 text-secondary font-mono text-xs">
-                        {'\u20B9'}{(p.amountInr / 100).toFixed(0)}
+                        {'₹'}{(p.amountInr / 100).toFixed(0)}
                         <span className="text-muted ml-1">({p.amountInr}p)</span>
                       </td>
                       <td className="px-4 py-3 text-secondary font-mono text-xs">

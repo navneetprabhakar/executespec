@@ -77,7 +77,7 @@ export default function PricingManager() {
 
   return (
     <PageShell
-      eyebrow="Admin \u00b7 Pricing"
+      eyebrow="Admin · Pricing"
       title="Model cost matrix."
       accent="cost"
       description="Edit input + output rates per 1M tokens. Changes take effect immediately on new runs."

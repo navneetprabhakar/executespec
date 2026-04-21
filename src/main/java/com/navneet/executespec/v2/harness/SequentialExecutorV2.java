@@ -404,23 +404,17 @@ public class SequentialExecutorV2 {
         // before it can write, so 2× the fresh-scratch cap is the default.
         if (projectRun) maxIter *= 2;
         try {
-            LlmProvider p = LlmProvider.valueOf(mapToV1Provider(runProvider));
+            // v2.5.13 — enum + V2 strings now agree ("gemini"/"anthropic"/"openai")
+            LlmProvider p = runProvider == null
+                    ? LlmProvider.OPENAI
+                    : LlmProvider.valueOf(runProvider.toUpperCase());
             ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
-            String resolvedProvider = resolved.getActualProvider().name().toLowerCase();
-            if ("google".equals(resolvedProvider)) resolvedProvider = "gemini";
-            return new TierConfig(resolvedProvider, resolved.getModel(), maxIter, maxTokens);
+            return new TierConfig(resolved.providerName(), resolved.getModel(), maxIter, maxTokens);
         } catch (Exception e) {
             log.warn("tierConfigFor: resolve failed for provider={} tier={} — using run-level {} / {}",
                     runProvider, tier, runProvider, runModel);
             return new TierConfig(runProvider, runModel, maxIter, maxTokens);
         }
-    }
-
-    /** V2 uses "gemini"; V1 enum uses "GOOGLE". Normalize for the matrix lookup. */
-    private static String mapToV1Provider(String v2Provider) {
-        if (v2Provider == null) return "OPENAI";
-        String upper = v2Provider.toUpperCase();
-        return "GEMINI".equals(upper) ? "GOOGLE" : upper;
     }
 
     @org.springframework.transaction.annotation.Transactional

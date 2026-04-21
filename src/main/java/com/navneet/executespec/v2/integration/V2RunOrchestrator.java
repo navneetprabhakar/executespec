@@ -1773,7 +1773,7 @@ public class V2RunOrchestrator {
     private static LlmProvider providerForAccuracy(String provider) {
         if (provider == null) return LlmProvider.OPENAI;
         String up = provider.toUpperCase();
-        if ("GEMINI".equals(up)) return LlmProvider.GOOGLE;
+        if ("GEMINI".equals(up)) return LlmProvider.GEMINI;
         try { return LlmProvider.valueOf(up); }
         catch (IllegalArgumentException e) { return LlmProvider.OPENAI; }
     }

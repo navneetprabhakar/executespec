@@ -275,7 +275,7 @@ export default function SettingsPage() {
       eyebrow="Settings"
       title="Configure your workspace."
       accent="workspace"
-      description="Account, keys, integrations, and system health \u2014 all in one place."
+      description="Account, keys, integrations, and system health — all in one place."
       hero
     >
 

@@ -43,7 +43,7 @@ export default function AcceptInvitePage() {
             <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--accent-blue)_15%,transparent)] border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)]">
               <Loader2 className="h-7 w-7 text-accent-blue animate-spin" />
             </div>
-            <h2 className="text-2xl font-semibold text-primary mb-2">Accepting invitation\u2026</h2>
+            <h2 className="text-2xl font-semibold text-primary mb-2">Accepting invitation…</h2>
             <p className="text-sm text-muted">This will only take a second.</p>
           </>
         )}
@@ -53,7 +53,7 @@ export default function AcceptInvitePage() {
               <PartyPopper className="h-7 w-7 text-accent-green" />
             </div>
             <h2 className="text-2xl font-semibold text-primary mb-2">Welcome to the team</h2>
-            <p className="text-sm text-muted">Redirecting you to your new workspace\u2026</p>
+            <p className="text-sm text-muted">Redirecting you to your new workspace…</p>
           </>
         )}
         {status === 'needsAuth' && (

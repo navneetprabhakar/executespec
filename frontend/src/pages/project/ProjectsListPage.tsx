@@ -33,7 +33,7 @@ export default function ProjectsListPage() {
 
   return (
     <PageShell
-      eyebrow="Projects \u00b7 Enterprise / Max"
+      eyebrow="Projects · Enterprise / Max"
       eyebrowTone="purple"
       title="Multi-repo workspaces."
       accent="Multi-repo"

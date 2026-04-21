@@ -75,7 +75,7 @@ function DeploymentsPageInner() {
 
   return (
     <PageShell
-      eyebrow="Deployments \u00b7 Beta"
+      eyebrow="Deployments · Beta"
       title="Ship runs to Cloud Run."
       accent="Cloud Run"
       description="Pin your favourite runs as permanent deployments on your own GCP project."

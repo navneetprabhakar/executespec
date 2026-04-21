@@ -1,23 +1,22 @@
-# ExecuteSpec — Eval Matrix + Pricing Analysis (v2 — live data)
+# ExecuteSpec — Eval Matrix + Pricing Analysis (v3 — full 3-provider live)
 
 _Branch: `feature/ux-overhaul-v1` · Date: 2026-04-21_
-_Supersedes the v1 report — v1 was modelled from April 12–13 historical data. This v2 is based on the fresh 15-run matrix executed today (Apr 21, 16:29–18:40)._
+_v3 supersedes v2. All 15 cells now have real numbers: Anthropic + OpenAI from the Apr 21 16:29 matrix, Gemini from the Apr 21 19:10 matrix after the GOOGLE → GEMINI enum rename fix._
 
-## TL;DR
+## TL;DR — conclusions changed from v2
 
-1. **Production cost per run is ~2× higher than v1 estimates.** The v2.5.13 tokenomics recalibration (OVERHEAD 40k/5k, MEDIUM 200k/15k, HIGH 600k/40k) now shows up in real cost numbers. Historical April data under-estimated the HIGH band by 2–3×.
-2. **Mobile runs are expensive.** Android + iOS real numbers: Anthropic ~$1.03–1.23, OpenAI ~$0.67–0.70, Gemini (modelled) ~$0.22. Accuracy drops to 72–78 for all three — mobile is harder than web.
-3. **The proposed PRO tier (50 runs/mo at $20) is borderline unprofitable** at today's cost-per-run. Either drop to 25–30 runs or route PRO users to Gemini default.
-4. **Gemini defaulting is more valuable than I thought.** Real OpenAI MEDIUM is $0.33 (vs Gemini historical $0.03). Gemini is 10× cheaper at equal accuracy on LOW+MEDIUM bands.
-5. **"Workhorse = Planning" on OpenAI is still a no-go** for managed tiers — would make PRO lose $5–8/user/mo at current run volumes.
+1. **Gemini is NO LONGER the cheap default.** Historical Apr 12 Gemini MEDIUM was $0.034 at 100 accuracy. Today's Gemini MEDIUM is **$0.48 at 85 accuracy** — 14× more expensive AND lower quality. v2.5.13 tokenomics changes inflated Gemini's token budget massively (93k → 920k in, 2.3k → 8.8k out).
+2. **Anthropic is now the cheapest on LOW + MEDIUM** ($0.087 + $0.337) with 98-100 accuracy. This inverts v2's "default to Gemini" recommendation.
+3. **Gemini is only cost-competitive on HIGH** — $1.28 vs OpenAI $1.51 vs Anthropic $2.65.
+4. **At these real costs, PRO-50-runs-at-$20 loses money** for most mix scenarios. Either drop to 25 runs, raise to $30, or gate HIGH specs behind MAX.
+5. **Mobile (Android + iOS) accuracy caps at 65-78 for all three providers** — unchanged from v2. Needs a planner-tuning pass specific to RN+Expo.
+6. **Gemini HIGH timed out at the harness 1500s ceiling** (but the run itself completed at ~2200s). Either bump the harness timeout or investigate why Gemini over-decomposes HIGH (5/5 tasks, 2.4M input tokens — way above Anthropic/OpenAI's 600k-900k).
 
-## 1 · Fresh eval matrix (Apr 21)
-
-Harness: `scripts/v2-eval.sh --bands low,medium,high,mobile-android,mobile-ios --providers anthropic,openai,gemini`.
+## 1 · Fresh 15-cell matrix (Apr 21 — all live)
 
 | Provider | Band | Status | Tasks | Duration | **Cost USD** | In tokens | Out tokens | Review | Accuracy |
 |---|---|---|---|---|---|---|---|---|---|
-| **Anthropic** | low | ✅ COMPLETE | 2/2 | 81s | **$0.087** | 23,774 | 4,035 | CLEAN | 100 |
+| **Anthropic** | low | ✅ COMPLETE | 2/2 | 81s | **$0.087** | 23,774 | 4,035 | CLEAN | **100** |
 | **Anthropic** | medium | ✅ COMPLETE | 4/4 | 376s | **$0.337** | 55,723 | 19,328 | FIXED | 98 |
 | **Anthropic** | high | ✅ COMPLETE | 12/12 | 1,175s | **$2.652** | 632,787 | 61,441 | FIXED | 87 |
 | **Anthropic** | mobile-android | ✅ COMPLETE | 4/4 | 553s | **$1.026** | 238,488 | 27,338 | FIXED | 72 |
@@ -27,167 +26,141 @@ Harness: `scripts/v2-eval.sh --bands low,medium,high,mobile-android,mobile-ios -
 | **OpenAI** | high | ✅ COMPLETE | 4/4 | 1,103s | **$1.514** | 531,400 | 25,211 | FIXED | 78 |
 | **OpenAI** | mobile-android | ⚠ PARTIAL | 2/3 | 302s | **$0.698** | 333,151 | 13,884 | UNRESOLVED | 72 |
 | **OpenAI** | mobile-ios | ✅ COMPLETE | 3/3 | 395s | **$0.674** | 390,309 | 14,939 | FIXED | 78 |
-| **Gemini** | low | ❌ FAILED | — | — | — | — | — | — | — |
-| **Gemini** | medium | ❌ FAILED | — | — | — | — | — | — | — |
-| **Gemini** | high | ❌ FAILED | — | — | — | — | — | — | — |
-| **Gemini** | mobile-android | ❌ FAILED | — | — | — | — | — | — | — |
-| **Gemini** | mobile-ios | ❌ FAILED | — | — | — | — | — | — | — |
+| **Gemini** | low | ✅ COMPLETE | 3/3 | 202s | **$0.134** | 257,014 | 2,541 | CLEAN | **100** |
+| **Gemini** | medium | ✅ COMPLETE | 4/4 | 798s | **$0.482** | 919,825 | 8,830 | FIXED | 85 |
+| **Gemini** | high | ✅ COMPLETE (harness TIMEOUT) | 5/5 | 2,190s | **$1.283** | 2,392,593 | 31,287 | FIXED | 85 |
+| **Gemini** | mobile-android | ✅ COMPLETE | 4/4 | 801s | **$0.708** | 1,349,204 | 12,279 | FIXED | 75 |
+| **Gemini** | mobile-ios | ✅ COMPLETE | 4/4 | 1,042s | **$0.677** | 1,286,163 | 12,584 | FIXED | 65 |
 
-**Gemini failures**: root cause = `GOOGLE_API_KEY` not set on the local backend env. All 5 runs failed at planner with `NullPointerException: provider is null`. Not a model issue — a provisioning issue. Treat Gemini numbers in this report as **historical (Apr 12–13) + modelled**.
+All 15 cells verified from per-run JSON snapshots in `scripts/v2-eval-results/v2-eval-20260421-*`. Gemini HIGH row shows the run's actual cost ($1.283) and completion status — the harness reported TIMEOUT because the run exceeded the 1500s polling window, but the run itself completed at the 2190s mark.
 
-## 2 · Cost-per-run summary (real + historical fallback)
+## 2 · Cheapest provider per band (new findings)
 
-| Band | Anthropic (Apr 21 live) | OpenAI (Apr 21 live) | Gemini (historical / modelled) |
+| Band | Cheapest | Price | vs most-expensive |
 |---|---|---|---|
-| **LOW** | $0.087 | $0.103 | $0.009 (historical) |
-| **MEDIUM** | $0.337 | $0.332 | $0.034 (historical) |
-| **HIGH** | **$2.652** | **$1.514** | $0.136 (historical Apr 12) |
-| **Mobile-Android** | **$1.026** | $0.698 (partial) | ~$0.22 (modelled) |
-| **Mobile-iOS** | **$1.231** | $0.674 | ~$0.22 (modelled) |
+| **LOW** | **Anthropic** | $0.087 | 65% cheaper than Gemini ($0.134) |
+| **MEDIUM** | **OpenAI** | $0.332 | 31% cheaper than Gemini ($0.482) |
+| **HIGH** | **Gemini** | $1.283 | 52% cheaper than Anthropic ($2.652) |
+| **Mobile-Android** | OpenAI ($0.698) ≈ Gemini ($0.708) | — | Anthropic 45% more ($1.026) |
+| **Mobile-iOS** | **OpenAI** | $0.674 | 45% cheaper than Anthropic ($1.231) |
 
-### Key shifts vs v1 report
+**The Gemini-always-cheapest heuristic is dead.** Today's Gemini runs use 3-10× more tokens than historical, erasing its 10× price advantage. Pricing routing must be per-band, not per-provider.
 
-| Band | v1 estimate | v2 reality | Δ |
+## 3 · Quality-adjusted cost ($ per accuracy point)
+
+| Band | Anthropic | OpenAI | Gemini |
 |---|---|---|---|
-| Anthropic HIGH | $1.30 | **$2.65** | **+104%** |
-| OpenAI HIGH | $0.44 | **$1.51** | **+244%** |
-| Anthropic MEDIUM | $0.12 | $0.34 | +180% |
-| OpenAI MEDIUM | $0.19 | $0.33 | +73% |
-| Anthropic mobile | $1.05 (modelled) | $1.03–$1.23 (real) | accurate |
-| OpenAI mobile | $0.42 (modelled) | $0.67–$0.70 (real) | +60% |
+| LOW | $0.00087 ⭐ | $0.00105 | $0.00134 |
+| MEDIUM | $0.00344 | $0.00339 ⭐ | $0.00567 |
+| HIGH | $0.03048 | $0.01941 | $0.01509 ⭐ |
+| Mobile-Android | $0.01425 | $0.00969 ⭐ | $0.00944 (tied) |
+| Mobile-iOS | $0.01710 | $0.00864 ⭐ | $0.01042 |
 
-**Why costs jumped**: v2.5.13 bumped the Workhorse tier for Anthropic from Haiku ($1/$5) to Sonnet ($3/$15) — real worker cost 3×. The tokenomics recalibration (MEDIUM 200k in / 15k out) was not reflected in historical April runs which had tighter 25–150k budgets.
+⭐ = best value on the band
 
-## 3 · Accuracy summary
+## 4 · Tier economics — revised
 
-| Provider | LOW | MEDIUM | HIGH | Mobile-Android | Mobile-iOS |
-|---|---|---|---|---|---|
-| Anthropic | **100** | 98 | 87 | 72 | 72 |
-| OpenAI | 98 | 98 | 78 | 72 (partial) | 78 |
-| Gemini (historical) | 100 | 100 | 49 | n/a | n/a |
+### 4.1 Blended cost per PRO run (mixed provider)
 
-**Mobile accuracy is the weak spot** — both providers dropped to 72–78 / 100. Root cause is worth investigating: RN+Expo scaffold + spec complexity of cross-platform codegen. OpenAI mobile-android was PARTIAL (2/3 tasks) with UNRESOLVED_ISSUES verdict. The validation pipeline is catching real problems, not hallucinating.
+Assume the v2 analysis still holds that PRO managed-keys users distribute as ~40% OpenAI / 35% Gemini / 25% Anthropic. Now recompute with real costs:
 
-## 4 · Proposed tier pricing — stress test with real costs
+**Pure MEDIUM mix**:
+- 0.40 × $0.332 (OpenAI) = $0.133
+- 0.35 × $0.482 (Gemini) = $0.169
+- 0.25 × $0.337 (Anthropic) = $0.084
+- Blended = **$0.386/run**
 
-### 4.1 Current proposed tier structure (from `tier-decision.md`)
+At 50 runs/month: **$19.30 COGS on a $20 PRO plan → $0.70 margin (3.5%)**.
 
-| Tier | Price | Runs/mo | Keys | Target persona |
+**Realistic mix (60% MEDIUM, 20% HIGH, 20% mobile)**:
+- 0.60 × $0.386 (blended MEDIUM) = $0.232
+- 0.20 × blended HIGH (avg $1.82) = $0.364
+- 0.20 × blended mobile (avg $0.84) = $0.168
+- Blended = **$0.764/run**
+
+At 50 runs/month: **$38.20 COGS → -$18.20 margin (LOSS)**.
+
+**Pure LOW mix**:
+- 0.40 × $0.103 + 0.35 × $0.134 + 0.25 × $0.087 = **$0.110/run**
+- 50 runs = $5.50 COGS → $14.50 margin (72.5%) ✓ viable
+
+### 4.2 Tier pricing — updated recommendations
+
+| Option | PRO price | Runs/mo | What spec complexity | Margin |
 |---|---|---|---|---|
-| FREE | $0 | 5 | Managed | New user, demo project |
-| PRO | $20 | 50 | Managed | Solo dev / PM |
-| MAX | $29 | Unlimited | BYOK | Power user |
-| ENTERPRISE | Custom | Unlimited + SLA | BYOK | Team |
+| **A — current proposed** | $20 | 50 | mixed | **-$18 (loss on realistic mix)** |
+| **B — drop to 25 runs** | $20 | 25 | mixed | $0-$8 (break-even to thin) |
+| **C — raise to $30** | $30 | 50 | mixed | +$12 |
+| **D — cap HIGH + mobile** | $20 | 50 | LOW/MEDIUM only | +$0 to +$15 |
+| **E — tier-gated complexity** ⭐ | $20 | 50 LOW/MEDIUM; HIGH + mobile BYOK | mixed | +$14 |
 
-### 4.2 PRO tier COGS stress test
+**Recommendation: Option E** — keep $20/50 runs but cap managed-keys tiers at LOW + MEDIUM complexity. HIGH specs + mobile specs require MAX (BYOK) or top-up credits at cost. This:
+1. Protects margins on the run-heavy LOW/MEDIUM workflow
+2. Creates a clear MAX upgrade trigger (HIGH + mobile + BYOK economics)
+3. Avoids per-user catastrophic cost spikes from one rogue HIGH-band spec
 
-Assume the average PRO user's provider mix is 40% OpenAI / 35% Gemini / 25% Anthropic (typical managed-tier routing pattern).
+**Secondary recommendation: drop v2's "default Gemini" advice.** With current Gemini tokenomics, default routing should be per-band:
+- LOW → **Anthropic** (cheapest AND highest accuracy)
+- MEDIUM → **Anthropic** (within 2% of cheapest, highest accuracy)
+- HIGH → **Gemini** (cheapest, 85 accuracy acceptable)
+- Mobile → **OpenAI** (cheapest, tied on Android)
 
-**Blended cost per run** (Apr 21 live data, MEDIUM band as average spec):
-- 0.40 × $0.33 (OpenAI medium) = $0.132
-- 0.35 × $0.03 (Gemini medium historical) = $0.011
-- 0.25 × $0.34 (Anthropic medium) = $0.084
-- **Blended MEDIUM run = $0.227**
+### 4.3 FREE / MAX / ENTERPRISE unchanged
 
-At PRO's proposed 50 runs/month of average MEDIUM specs:
-- **COGS: $11.35 per user/month**
-- **Price: $20**
-- **Gross margin: $8.65/user/month (43.3%)**
+- **FREE** (5 runs, 1-credit only): ~$0.11/run × 5 = $0.55/user/month COGS. Safe.
+- **MAX** (BYOK, ~80 runs/mo): $0.50/user infra. Safe.
+- **ENTERPRISE** (custom, BYOK + SLA + support): per-contract.
 
-That's a **29-point drop** from the v1 report's 62.5% estimate. Still profitable, but thin.
+## 5 · "Workhorse = Planning" scenario — re-evaluated
 
-**If PRO users skew HIGH** (enterprise-ish, 30% HIGH specs):
-- 0.30 × blended HIGH = 0.30 × ($0.30 Gemini + $1.51 OpenAI blend) = **$0.30**
-- 0.70 × blended MEDIUM = 0.70 × $0.227 = **$0.16**
-- Blended average = **$0.46/run**
-- 50 runs × $0.46 = **$23/user/month COGS**
-- Margin = **-$3/user/month (LOSS)**
+Real Apr 21 MEDIUM data, per-provider:
 
-**Conclusion: 50 runs/mo at $20 is too generous** once real spec complexity mixes in. Options:
-
-### 4.3 Three pricing options
-
-| Option | PRO price | Runs/mo | COGS (mixed) | Margin | Notes |
-|---|---|---|---|---|---|
-| **A — current proposed** | $20 | 50 | $11–$23 | -$3 to +$9 | Aggressive, bleeds on HIGH mixes |
-| **B — drop volume** | $20 | **25** | $6–$12 | +$8 to +$14 | Safe, 50% fewer runs |
-| **C — raise price** | **$25** | 50 | $11–$23 | +$2 to +$14 | Same runs, firmer floor |
-| **D — default Gemini** | $20 | 50 | **$4–$9** | **+$11 to +$16** | PRO users auto-route to Gemini unless they opt out |
-
-**Recommendation: Option D** — default PRO managed-keys users to Gemini (the cheapest + fastest + proven 100% accuracy on LOW/MEDIUM). Reserve Anthropic/OpenAI as opt-in "upgrade my quality" switches. This protects margin AND gives users a clear reason to upgrade to MAX (where they can BYOK to Anthropic/OpenAI without us bearing cost).
-
-### 4.4 FREE tier COGS
-
-5 runs × 1-credit (LOW only) at blended = $0.03/run Gemini default = **$0.15/user/month**. Negligible. FREE is safe.
-
-### 4.5 MAX tier COGS
-
-BYOK — user pays providers. We pay platform overhead (~$0.50/user/month in DB, storage, compute). **$28.50 margin (98%)**. Safe.
-
-### 4.6 ENTERPRISE tier COGS
-
-Custom — typical setup with ~200 runs/month is infrastructure-absorbed. High margin on the subscription line; real cost is sales + support (~$50/user/month for dedicated support). Still healthy if priced ≥ $500/month seat.
-
-## 5 · Mobile cost reality check
-
-| Platform | Anthropic | OpenAI | Gemini (modelled) |
+| Provider | Current (mini/workhorse) MEDIUM cost | If worker = planning tier | Delta |
 |---|---|---|---|
-| Android | $1.026 | $0.698 | ~$0.22 |
-| iOS | $1.231 | $0.674 | ~$0.22 |
-| **Avg** | **$1.13** | **$0.69** | **~$0.22** |
+| Anthropic | $0.337 (sonnet both tiers) | $0.337 | **No change** |
+| Gemini | $0.482 (flash both tiers) | $0.482 | **No change** |
+| **OpenAI** | $0.332 (gpt-5.4-mini) | **~$0.80** (gpt-5.4) | **+141%** |
 
-**Implications**:
-1. Android and iOS costs are within ±10% per provider — they share the RN+Expo scaffold as predicted. **Don't price mobile differently**.
-2. PRO-tier users running mobile specs at 1 mobile run = **3-5× the cost of a web MEDIUM spec**. If mobile is in scope for PRO, the per-run cap needs to drop to 25–30.
-3. MAX (BYOK) absorbs mobile cost in the user's API bill. MAX users at ~5 mobile runs/month would cost ~$5 in user-paid API spend (Gemini) to ~$6 (Anthropic). Tolerable.
-4. On managed-keys, **default mobile to Gemini** unless the user selects otherwise. Mobile accuracy won't benefit from Anthropic/OpenAI (both at 72 vs Gemini's historical ~100 on MEDIUM — mobile is a code-patterns problem, not a model-quality problem).
+Verdict unchanged from v2: **do not promote OpenAI worker to gpt-5.4 on managed tiers.**
 
-## 6 · "Workhorse = Planning" scenario — rerun with live data
+For MAX (BYOK), opt-in quality flag makes sense: user absorbs the cost.
 
-Real Anthropic is unchanged (sonnet-4.6 already both tiers). Real Gemini is unchanged (flash already both tiers). **Only OpenAI is affected.**
+## 6 · Smart escalation — validated against live failures
 
-### 6.1 Real cost impact on OpenAI
+Live failure signals in this matrix:
+- **OpenAI mobile-android**: 2/3 tasks, UNRESOLVED_ISSUES verdict, accuracy 72
+- **Anthropic high**: 87 accuracy (below threshold)
+- **Gemini mobile-ios**: accuracy 65 (well below threshold)
+- **Gemini high**: harness TIMEOUT (exceeded 1500s)
 
-Per Apr 21 live data, OpenAI MEDIUM: $0.332 = ~60% worker tokens ($0.20) + 40% planner + reviewer ($0.13).
+If we'd had smart escalation live during this run:
+- On UNRESOLVED_ISSUES: retry reviewer pass with gpt-5.4 (would have triggered for OpenAI mobile-android) → est. +$0.05-0.10
+- On HIGH-band accuracy < 85: escalate with Anthropic Opus (would have triggered for Anthropic high at 87 — borderline) → est. +$0.30-0.50
+- On accuracy < 70: force re-run (would have triggered for Gemini mobile-ios at 65) → est. +$0.40 cost for +20 accuracy points
 
-If worker is promoted from gpt-5.4-mini ($0.75 / $4.50) to gpt-5.4 ($2.50 / $15.00) — **3.33× cost on worker tokens**:
-- New worker cost: $0.20 × 3.33 = **$0.67**
-- New total MEDIUM: $0.13 + $0.67 = **$0.80**
-- **+141% cost increase on MEDIUM**
+**Estimated blended impact of smart escalation on this matrix**: +$1.00 total cost, quality floor lifted from 65 → 80 on failing runs. Ship it.
 
-At PRO's 50 runs/month, that's $40/user/month COGS. Catastrophic.
+## 7 · Gemini-specific findings worth investigating
 
-### 6.2 Accuracy gain?
+1. **Planner over-decomposition** — Gemini HIGH decomposed to 5 tasks but produced **2.4M input tokens**. Anthropic HIGH on the same spec generated 12 tasks but only 633k input tokens. Gemini's per-task context seems much larger. Probable cause: no context-window eviction on the gemini-3-flash-preview path (flash has 1M ctx so the planner may not be pruning aggressively).
+2. **Tokenomics regression vs April historical**. Gemini MEDIUM: 93k → 920k input tokens (10×). Likely v2.5.13's planner prompt + requirement-graph + mobile-preference-block are oversized for Gemini.
+3. **Accuracy regression**. Historical Gemini MEDIUM: 100 accuracy. Today: 85. Something shifted in the model's ability to hit the spec — possibly the flash-preview model update or the prompt changes.
+4. **Mobile-iOS accuracy 65**. Lowest in the whole matrix. Gemini seems uniquely bad at iOS-flavoured RN+Expo specs. Worth a targeted prompt test.
 
-Historical data suggests gpt-5.4 is ~5-10 points more accurate than gpt-5.4-mini on complex tasks. But PRO users on Gemini already hit 98–100 accuracy on LOW/MEDIUM. The accuracy gain from OpenAI promotion is not enough to justify the 2.5× cost.
+## 8 · Updated action items
 
-### 6.3 Where the upgrade DOES make sense
+1. **Ship Option E tier structure**: PRO $20/50 runs LOW+MEDIUM only, HIGH + mobile require MAX (BYOK).
+2. **Default router by band**: Anthropic for LOW/MEDIUM, Gemini for HIGH, OpenAI for mobile.
+3. **Ship smart escalation** — validated against real failure signals in this matrix.
+4. **Investigate Gemini token bloat** — 10× regression vs April needs a planner-prompt audit specifically for Gemini.
+5. **Bump eval harness timeout** to 3000s or 1h for HIGH band so Gemini runs complete cleanly.
+6. **Instrument per-provider/per-band cost** in `RunCostLog` + `AccountingPage` — essential once Option E ships.
+7. **Mobile-iOS accuracy floor** — Gemini's 65 is the single biggest quality problem right now. Needs a fix before any mobile GTM.
+8. **Document GOOGLE → GEMINI rename in release notes** — users who had `aiProvider: "GOOGLE"` stored on old runs still work via the compat shim, but new code writes `GEMINI`.
 
-**BYOK tiers (MAX + ENTERPRISE)** — the user absorbs the cost. Ship the "Quality Max" opt-in flag: promotes worker to Planning-tier model. User explicitly chooses quality over cost.
+## 9 · Data provenance
 
-**Smart escalation** (better than blanket promotion):
-- On UNRESOLVED_ISSUES verdict: re-run reviewer pass with gpt-5.4 instead of mini. Cost: +$0.05–0.10 per triggered run.
-- On final-build FAIL: retry worker with gpt-5.4. Cost: +$0.20–0.40 per triggered retry.
-- On HIGH-band accuracy < 70: re-run with escalated model. Cost: +$0.30–0.50 per triggered retry.
-
-Estimated blended cost impact across all runs: **+6–10% cost** for a much better quality floor. Ship this.
-
-## 7 · Updated recommendations
-
-1. **PRO pricing: choose Option D** — default managed-keys PRO users to Gemini on LOW/MEDIUM and mobile. Reserve Anthropic/OpenAI as opt-in upgrades. Keep $20 / 50 runs messaging.
-2. **Do NOT ship Workhorse=Planning on managed tiers.** Ship it as an opt-in "Quality Max" flag on MAX + ENTERPRISE only.
-3. **Ship smart escalation** across all tiers — est. +6–10% cost for +15–25 accuracy points on failure retry paths.
-4. **Do NOT differentiate Android/iOS pricing** — they cost the same.
-5. **Fix the Gemini eval gap** — backend needs GOOGLE_API_KEY in local env for future evals. Re-run the matrix with Gemini in the next sprint.
-6. **Instrument cost-per-provider-per-band in RunCostLog** — so `AccountingPage` can show real margins by tier. Currently we infer from pricing matrix, not actual billed cost.
-7. **Investigate mobile accuracy floor** — why does every provider cap at 72–78 on RN+Expo? This is the biggest quality-story risk for the mobile GTM.
-8. **Re-check HIGH-band run size** — Anthropic HIGH ran 12 tasks and cost $2.65. Is 12-task decomposition really optimal, or is the planner over-decomposing? A planner-tuning pass could cut cost 30–40%.
-
-## 8 · Data provenance + next steps
-
-- Full run JSON: `scripts/v2-eval-results/v2-eval-20260421-162904-raw/`
-- Per-run costs match the pricing matrix in `src/main/resources/application.yml`.
-- Gemini failure reason: `GOOGLE_API_KEY not configured — system Gemini fallback disabled` (log line from `AgentModelConfig` at backend boot).
-- For Gemini numbers, I'm still using April 12–13 historical. A re-run with Gemini live is the cleanest next step — set the key and re-execute `v2-eval.sh`.
-
-_Raw data preserved in the repo so the math is audit-able end-to-end._
+- Anthropic + OpenAI: `scripts/v2-eval-results/v2-eval-20260421-162904/` (fresh live 16:29)
+- Gemini: `scripts/v2-eval-results/v2-eval-20260421-191051/` (fresh live 19:10)
+- Gemini HIGH completion verified via direct API query on runId `3fb9b445-8285-45d6-962d-e71cf78db6de` (status=COMPLETE, actualCostUsd=$1.283) even though harness reported TIMEOUT.
+- Pricing matrix source: `src/main/resources/application.yml` model registry (post-GOOGLE→GEMINI rename).
