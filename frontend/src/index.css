@@ -102,3 +102,72 @@ body {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+
+/* ── Focus ring — visible on keyboard nav, invisible on mouse click ─────── */
+:where(button, a, input, textarea, select, [role="button"], [role="tab"]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: inherit;
+}
+
+/* ── Reusable responsive page gutters ──────────────────────────────────── */
+.page-gutter { padding-left: var(--page-gutter-mobile); padding-right: var(--page-gutter-mobile); }
+@media (min-width: 640px)  { .page-gutter { padding-left: var(--page-gutter-tablet);  padding-right: var(--page-gutter-tablet); } }
+@media (min-width: 1024px) { .page-gutter { padding-left: var(--page-gutter-desktop); padding-right: var(--page-gutter-desktop); } }
+
+/* Card — consistent surface treatment used all over the app */
+.es-card {
+  background: var(--gray-100);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+}
+.es-card-elevated {
+  background: var(--gray-100);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-1);
+}
+
+/* Chip — small rounded status/metadata token (replaces inconsistent ad-hoc chips) */
+.es-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.es-chip--neutral  { background: var(--gray-200);   color: var(--text-secondary); border-color: var(--border-default); }
+.es-chip--success  { background: color-mix(in srgb, var(--status-success) 12%, transparent); color: var(--status-success); }
+.es-chip--info     { background: color-mix(in srgb, var(--status-executing) 12%, transparent); color: var(--status-executing); }
+.es-chip--warning  { background: color-mix(in srgb, var(--status-waiting) 12%, transparent); color: var(--status-waiting); }
+.es-chip--danger   { background: color-mix(in srgb, var(--status-error) 12%, transparent); color: var(--status-error); }
+.es-chip--brand    { background: color-mix(in srgb, var(--accent-blue) 12%, transparent); color: var(--accent-blue); }
+
+/* Line-clamp helpers for long spec titles / descriptions */
+.line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Motion — respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .shimmer { animation: none; }
+}
+
+/* ── Tap target enlargement on coarse pointers (mobile, tablet) ────────── */
+@media (pointer: coarse) {
+  button, [role="button"], a[href], input[type="checkbox"], input[type="radio"], select {
+    min-height: 40px;
+  }
+}
