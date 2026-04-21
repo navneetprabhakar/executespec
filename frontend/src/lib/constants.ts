@@ -63,6 +63,10 @@ export const NAV_ITEMS: {
   requiredPermission?: string;
 }[] = [
   { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
+  // v2.5.14 Phase 3.1 — exec summary for Business Owner persona.
+  // Gated behind canViewCostBreakdown (PRO/MAX/ENTERPRISE) — FREE can't see
+  // the spend aggregate because that's a paid-tier analytics feature.
+  { path: '/exec',         label: 'Exec summary', icon: 'TrendingUp',      adminOnly: false, requiredPermission: 'canViewCostBreakdown' },
   { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3',       adminOnly: true  },
   { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign',     adminOnly: false, requiredPermission: 'canViewPricing' },
   { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false, requiredPermission: 'canManageIntegrations' },

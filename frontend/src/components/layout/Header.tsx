@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom';
-import { Menu, Search, ArrowUpRight, Plus } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { Menu, Search, ArrowUpRight, Plus, Sun, Moon } from 'lucide-react';
 import { useUiStore } from '@/stores/useUiStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -9,11 +9,50 @@ import UserMenu from '@/components/auth/UserMenu';
 import ViewModeToggle from '@/components/shared/ViewModeToggle';
 import NotificationBell from './NotificationBell';
 
+// v2.5.14 (Phase 1.4) — dynamic breadcrumb. Previous header hard-coded
+// "ExecuteSpec / Runs" even on project + billing + settings pages, which
+// both looked broken and confused users about where they were.
+function breadcrumbFromPath(pathname: string): { primary: string; secondary?: string } {
+  if (pathname.startsWith('/projects/')) return { primary: 'Projects', secondary: 'Dashboard' };
+  if (pathname.startsWith('/org/projects')) return { primary: 'Projects' };
+  if (pathname.startsWith('/billing')) return { primary: 'Billing' };
+  if (pathname.startsWith('/plans') || pathname.startsWith('/pricing')) return { primary: 'Plans' };
+  if (pathname.startsWith('/settings')) return { primary: 'Settings' };
+  if (pathname.startsWith('/integrations')) return { primary: 'Integrations' };
+  if (pathname.startsWith('/deployments')) return { primary: 'Deployments' };
+  if (pathname.startsWith('/invoices')) return { primary: 'Invoices' };
+  if (pathname.startsWith('/accounting')) return { primary: 'Accounting' };
+  if (pathname.startsWith('/audit')) return { primary: 'Audit' };
+  if (pathname.startsWith('/admin')) return { primary: 'Admin' };
+  if (pathname.startsWith('/executions/')) return { primary: 'Launches', secondary: 'Execution' };
+  if (pathname.startsWith('/reports/shared/')) return { primary: 'Shared report' };
+  if (pathname.startsWith('/exec')) return { primary: 'Exec summary' };
+  return { primary: 'Runs' };
+}
+
+function ThemeToggle() {
+  const theme = useUiStore((s) => s.theme);
+  const toggle = useUiStore((s) => s.toggleTheme);
+  const label = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+  return (
+    <button
+      onClick={toggle}
+      aria-label={label}
+      title={label}
+      className="hidden sm:flex items-center justify-center h-8 w-8 rounded-md text-muted hover:text-primary hover:bg-[var(--gray-200)] transition-colors flex-shrink-0"
+    >
+      {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    </button>
+  );
+}
+
 export default function Header() {
   const { setCommandPaletteOpen, mobileSidebarOpen, setMobileSidebarOpen } = useUiStore();
   const runs = useRunStore((s) => s.runs);
   const user = useAuthStore((s) => s.user);
   const activeCount = runs.filter((r) => ACTIVE_STATUSES.has(r.status)).length;
+  const location = useLocation();
+  const crumb = breadcrumbFromPath(location.pathname);
 
   return (
     <header className="flex items-center h-14 px-3 sm:px-4 gap-2 sm:gap-3 bg-[var(--geist-bg)] border-b border-[var(--border-default)] flex-shrink-0 z-10">
@@ -26,11 +65,17 @@ export default function Header() {
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* Breadcrumb — desktop only */}
+      {/* Breadcrumb — desktop only. v2.5.14 dynamic per route. */}
       <div className="hidden lg:flex items-center gap-1.5 text-sm flex-shrink-0">
-        <span className="text-primary font-medium">ExecuteSpec</span>
+        <Link to="/" className="text-primary font-medium hover:text-accent-blue transition-colors">ExecuteSpec</Link>
         <span className="text-muted">/</span>
-        <span className="text-secondary">Runs</span>
+        <span className="text-secondary">{crumb.primary}</span>
+        {crumb.secondary && (
+          <>
+            <span className="text-muted">/</span>
+            <span className="text-muted">{crumb.secondary}</span>
+          </>
+        )}
       </div>
 
       {/* View mode toggle — visible on all breakpoints, uses shorter "Proj" label at mobile */}
@@ -78,6 +123,9 @@ export default function Header() {
           Top-up
         </Link>
       )}
+
+      {/* Theme toggle — v2.5.14 Phase 2 */}
+      <ThemeToggle />
 
       {/* Notifications */}
       <NotificationBell />
